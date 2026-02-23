@@ -18,6 +18,12 @@ require("lazy").setup({
   spec = {
     -- add LazyVim and import its plugins
     { "LazyVim/LazyVim", import = "lazyvim.plugins" },
+    -- 언어 지원
+    { import = "lazyvim.plugins.extras.lang.rust" },
+    { import = "lazyvim.plugins.extras.lang.clangd" }, -- C/C++
+    { import = "lazyvim.plugins.extras.lang.python" },
+    -- 디버깅
+    { import = "lazyvim.plugins.extras.dap.core" }, -- DAP 기본 (필수)
     -- import/override with your plugins
     { import = "plugins" },
   },
