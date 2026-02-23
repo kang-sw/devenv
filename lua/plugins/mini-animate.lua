@@ -1,6 +1,6 @@
 -- lua/plugins/mini-animate.lua
 return {
-  "echasnovski/mini.animate",
+  "nvim-mini/mini.animate",
   opts = function()
     local animate = require("mini.animate")
     return {
