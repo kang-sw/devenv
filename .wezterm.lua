@@ -57,7 +57,7 @@ config.keys = {
 		action = act.ActivateKeyTable({
 			name = "tmux_prefix",
 			one_shot = true,
-			timeout_milliseconds = 2000,
+			timeout_milliseconds = 5000,
 		}),
 	},
 
