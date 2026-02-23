@@ -289,6 +289,12 @@ config.colors = {
 			fg_color = "#555555",
 		},
 	},
+	split = "#2e8b57",
+}
+
+config.inactive_pane_hsb = {
+	saturation = 0.7,
+	brightness = 0.7,
 }
 
 return config
