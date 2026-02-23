@@ -14,6 +14,9 @@ map("i", "<C-e>", "<End>", { desc = "Move to line end" })
 -- Ctrl-C를 Esc처럼 동작하게 매핑 (InsertLeave 이벤트 발생시킴)
 vim.keymap.set("i", "<C-c>", "<Esc>")
 
+-- Hover setup
+vim.keymap.set("n", "gh", function() vim.lsp.buf.hover() end, { desc = "Hover documentation" })
+
 -- 함수 본문만 모두 접기
 local function fold_all_functions()
   local bufnr = vim.api.nvim_get_current_buf()
