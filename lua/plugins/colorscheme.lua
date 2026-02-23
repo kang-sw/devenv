@@ -36,6 +36,40 @@ return {
         pattern = "*",
         callback = function()
           -- ════════════════════════════════════════
+          -- VSCode workbench.colorCustomizations 대응
+          -- ════════════════════════════════════════
+
+          -- editor.background: #131212
+          hl("Normal", { bg = "#131212" })
+          hl("NormalNC", { bg = "#131212" })
+
+          -- editor.lineHighlightBackground: #ffffff11 (투명 흰색 → 근사값)
+          hl("CursorLine", { bg = "#1e1c1c" })
+
+          -- editor.foldBackground: #2a63a01b (반투명 파란색 → 근사값)
+          hl("Folded", { bg = "#1a2535", fg = "#717a69" })
+
+          -- editor.wordHighlightBorder: #6e6e6e
+          -- (illuminate.nvim 또는 LSP reference 하이라이트)
+          hl("LspReferenceText", { bg = "#1e1c1c", sp = "#6e6e6e", underline = true })
+          hl("LspReferenceRead", { bg = "#1e1c1c", sp = "#6e6e6e", underline = true })
+          hl("LspReferenceWrite", { bg = "#1e1c1c", sp = "#6e6e6e", underline = true })
+          -- illuminate.nvim 사용 시
+          hl("IlluminatedWordText", { sp = "#6e6e6e", underline = true })
+          hl("IlluminatedWordRead", { sp = "#6e6e6e", underline = true })
+          hl("IlluminatedWordWrite", { sp = "#6e6e6e", underline = true })
+
+          -- editorInlayHint: bg 투명, fg #5f5b43bb (근사값)
+          hl("LspInlayHint", { bg = "NONE", fg = "#3d3a2c" })
+
+          -- terminal.background: #010101
+          -- (터미널 열릴 때 적용)
+          hl("Terminal", { bg = "#010101" })
+
+          -- terminal.border / 일반 float border: #888888
+          hl("FloatBorder", { fg = "#888888", bg = "#131212" })
+          hl("NormalFloat", { bg = "#131212" })
+          -- ════════════════════════════════════════
           -- TextMate / TreeSitter 대응
           -- ════════════════════════════════════════
 
