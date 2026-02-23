@@ -13,3 +13,61 @@ map("i", "<C-e>", "<End>", { desc = "Move to line end" })
 
 -- Ctrl-C를 Esc처럼 동작하게 매핑 (InsertLeave 이벤트 발생시킴)
 vim.keymap.set("i", "<C-c>", "<Esc>")
+
+-- 함수 본문만 모두 접기
+local function fold_all_functions()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local ft = vim.bo[bufnr].filetype
+
+  -- 언어별 treesitter 노드 타입
+  local node_types = {
+    c = { "function_definition" },
+    rust = { "function_item" },
+    python = { "function_definition" },
+    lua = { "function_declaration", "local_function" },
+    sh = { "function_definition" },
+    bash = { "function_definition" },
+    zsh = { "function_definition" },
+  }
+
+  local types = node_types[ft]
+  if not types then
+    vim.notify("fold_all_functions: '" .. ft .. "' is not supported", vim.log.levels.WARN)
+    return
+  end
+
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr, ft)
+  if not ok or not parser then
+    vim.notify("fold_all_functions: treesitter parser unavailable", vim.log.levels.ERROR)
+    return
+  end
+
+  local root = parser:parse()[1]:root()
+
+  -- foldmethod를 manual로 전환 후 기존 fold 초기화
+  vim.wo.foldmethod = "manual"
+  vim.cmd("normal! zE")
+
+  local type_set = {}
+  for _, t in ipairs(types) do
+    type_set[t] = true
+  end
+
+  local function traverse(node)
+    if type_set[node:type()] then
+      local sr, _, er, _ = node:range()
+      -- 1줄짜리(예: 빈 함수 선언)는 건너뜀
+      if er > sr then
+        vim.cmd(string.format("%d,%dfold", sr + 1, er + 1))
+      end
+    end
+    for child in node:iter_children() do
+      traverse(child)
+    end
+  end
+
+  traverse(root)
+  vim.notify("Functions folded (" .. ft .. ")", vim.log.levels.INFO)
+end
+
+vim.keymap.set("n", "<leader>zf", fold_all_functions, { desc = "Fold all functions" })
