@@ -11,6 +11,10 @@ map("i", "<M-BS>", "<C-w>", { desc = "Delete word backward" })
 map("i", "<C-a>", "<Home>", { desc = "Move to line start" })
 map("i", "<C-e>", "<End>", { desc = "Move to line end" })
 
+-- tmux 스타일 스플릿
+vim.keymap.set('n', '<leader>"', '<cmd>split<CR>',  { desc = 'Horizontal split' })
+vim.keymap.set('n', '<leader>%', '<cmd>vsplit<CR>', { desc = 'Vertical split' })
+
 -- Ctrl-C를 Esc처럼 동작하게 매핑 (InsertLeave 이벤트 발생시킴)
 vim.keymap.set("i", "<C-c>", "<Esc>")
 
