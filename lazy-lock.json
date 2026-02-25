@@ -7,6 +7,7 @@
   "conform.nvim": { "branch": "master", "commit": "e969e302bced7ffb9a0a0323629f31feb0ca35a6" },
   "crates.nvim": { "branch": "main", "commit": "ac9fa498a9edb96dc3056724ff69d5f40b898453" },
   "flash.nvim": { "branch": "main", "commit": "fcea7ff883235d9024dc41e638f164a450c14ca2" },
+  "focus.nvim": { "branch": "master", "commit": "36ebedeebe82ebea250c9d671769194caa033902" },
   "friendly-snippets": { "branch": "main", "commit": "6cd7280adead7f586db6fccbd15d2cac7e2188b9" },
   "gitsigns.nvim": { "branch": "main", "commit": "9f3c6dd7868bcc116e9c1c1929ce063b978fa519" },
   "grug-far.nvim": { "branch": "main", "commit": "275dbedc96e61a6b8d1dfb28ba51586ddd233dcf" },

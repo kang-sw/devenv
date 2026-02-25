@@ -40,8 +40,8 @@ return {
           -- ════════════════════════════════════════
 
           -- editor.background: #131212
-          hl("Normal", { bg = "#131212" })
-          hl("NormalNC", { bg = "#131212" })
+          hl("Normal", { bg = "#060606" })
+          hl("NormalNC", { bg = "#121212" })
 
           -- editor.lineHighlightBackground: #ffffff11 (투명 흰색 → 근사값)
           hl("CursorLine", { bg = "#1e1c1c" })

@@ -7,7 +7,9 @@
 -- Or remove existing autocmds by their group name (which is prefixed with `lazyvim_` for the defaults)
 -- e.g. vim.api.nvim_del_augroup_by_name("lazyvim_wrap_spell")
 
+-- ------------------------------------------------------------
 -- im-select: Insert 모드 진입/이탈 시 입력기 자동 전환
+-- ------------------------------------------------------------
 local last_im = "com.apple.keylayout.ABC"
 local english_im = "com.apple.keylayout.ABC"
 
@@ -41,6 +43,7 @@ vim.api.nvim_create_autocmd("InsertEnter", {
   end,
 })
 
+-- ------------------------------------------------------------
 -- // 주석에서 자동 주석 prefix 제거
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "javascript", "typescript", "javascriptreact", "typescriptreact", "c", "cpp", "rust", "go" },
