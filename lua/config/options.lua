@@ -4,3 +4,4 @@
 
 -- 저장 시 포맷팅 비활성화.
 vim.g.autoformat = false
+vim.opt.smoothscroll = false
