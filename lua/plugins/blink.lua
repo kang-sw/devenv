@@ -13,12 +13,6 @@ return {
       },
       trigger = {
         show_on_insert_on_trigger_character = true,
-        show_delay_ms = 50, -- 기본값이 꽤 길어요
-      },
-    },
-    documentation = {
-      window = {
-        border = "rounded",
       },
     },
     signature = {
@@ -27,7 +21,6 @@ return {
         enabled = true, -- 자동 팝업 끄고 수동으로만
       },
       window = {
-        show_delay_ms = 50,
         border = "rounded",
       },
     },

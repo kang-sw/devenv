@@ -8,8 +8,10 @@ return {
         timing = animate.gen_timing.linear({ duration = 80, unit = "total" }),
       },
       cursor = {
-        timing = animate.gen_timing.linear({ duration = 50, unit = "total" }),
+        -- timing = animate.gen_timing.linear({ duration = 50, unit = "total" }),
+        enabled = false,
       },
     }
   end,
 }
+

@@ -17,6 +17,17 @@ vim.keymap.set("i", "<C-c>", "<Esc>")
 -- Hover setup
 vim.keymap.set("n", "gh", function() vim.lsp.buf.hover() end, { desc = "Hover documentation" })
 
+-- F1 Formatting
+vim.keymap.set('n', '<F1>', '<Nop>', { noremap = true, silent = true })
+vim.keymap.set('i', '<F1>', '<Nop>', { noremap = true, silent = true })
+vim.keymap.set('v', '<F1>', '<Nop>', { noremap = true, silent = true })
+vim.keymap.set('n', '<F1>', function()
+  vim.lsp.buf.format({ async = true })
+end, { noremap = true, silent = true, desc = "Format" })
+
+-- Terminal Escape - Double ESC
+vim.keymap.set("t", "<Esc><Esc>", "<C-\\><C-n>", { desc = "Exit terminal mode" })
+
 -- 함수 본문만 모두 접기
 local function fold_all_functions()
   local bufnr = vim.api.nvim_get_current_buf()
