@@ -3,5 +3,5 @@
 -- Add any additional options here
 
 -- 저장 시 포맷팅 비활성화.
-vim.g.autoformat = false
+vim.g.autoformat = true
 vim.opt.smoothscroll = false
