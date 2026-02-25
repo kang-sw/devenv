@@ -42,6 +42,7 @@ config.tab_bar_at_bottom                          = false
 config.hide_tab_bar_if_only_one_tab               = true
 config.adjust_window_size_when_changing_font_size = false
 config.font_size                                  = 14
+config.native_macos_fullscreen_mode               = true
 -- config.color_scheme = "Adventure"
 
 -- ──────────────────────────────────────────────
@@ -71,6 +72,13 @@ config.keys                                       = {
   { key = "=", mods = "CTRL", action = wezterm.action.DisableDefaultAssignment },
   { key = "-", mods = "CTRL", action = wezterm.action.DisableDefaultAssignment },
   { key = "0", mods = "CTRL", action = wezterm.action.DisableDefaultAssignment },
+
+  -- MacOS 전체 화면 토글
+  {
+    key = 'f',
+    mods = 'CMD|CTRL',
+    action = wezterm.action.ToggleFullScreen,
+  },
 
   -- ════════════════════════════════
   -- 세션 / 윈도우 / 창 관리
@@ -138,7 +146,6 @@ config.keys                                       = {
 -- ──────────────────────────────────────────────
 config.key_tables                                 = {
   tmux_prefix = {
-
     -- ── 탭 (Window) ────────────────────────
     { key = "c", action = act.SpawnTab("CurrentPaneDomain") },
     { key = "w", action = act.ShowTabNavigator },
