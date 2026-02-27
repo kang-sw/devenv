@@ -4,6 +4,9 @@ return {
     explorer = {
       -- 여기서 키 오버라이드
     },
+    terminal = {
+      win = { keys = { term_normal = false } },
+    },
     picker = {
       sources = {
         explorer = {
