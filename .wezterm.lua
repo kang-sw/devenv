@@ -3,9 +3,9 @@
 --  PREFIX: Ctrl-b  (TMUX 기본값과 동일)
 -- ============================================================
 
-local wezterm                                     = require("wezterm")
-local act                                         = wezterm.action
-local config                                      = wezterm.config_builder()
+local wezterm = require("wezterm")
+local act = wezterm.action
+local config = wezterm.config_builder()
 
 -- ──────────────────────────────────────────────
 -- 플랫폼 감지 및 Modifier 추상화
@@ -19,30 +19,30 @@ local config                                      = wezterm.config_builder()
 --   Windows : ALT+b
 --   Linux   : SUPER+b  (또는 아래 주석 참고)
 -- ──────────────────────────────────────────────
-local is_mac                                      = wezterm.target_triple:find("darwin") ~= nil
-local is_windows                                  = wezterm.target_triple:find("windows") ~= nil
+local is_mac = wezterm.target_triple:find("darwin") ~= nil
+local is_windows = wezterm.target_triple:find("windows") ~= nil
 -- linux는 위 둘 다 아닌 경우
 
 -- macOS의 CMD 역할 (줄 이동, 탭 등)
-local SUPER                                       = is_mac and "CMD" or (is_windows and "ALT" or "SUPER")
+local SUPER = is_mac and "CMD" or (is_windows and "ALT" or "SUPER")
 
 -- macOS의 OPT 역할 (단어 이동 등)
-local OPT                                         = is_mac and "OPT" or "ALT"
+local OPT = is_mac and "OPT" or "ALT"
 
 -- PREFIX modifier
-local PREFIX_MOD                                  = SUPER -- Ctrl-b 테이블 진입에 쓸 modifier
+local PREFIX_MOD = SUPER -- Ctrl-b 테이블 진입에 쓸 modifier
 
 -- ──────────────────────────────────────────────
 -- 기본 설정
 -- ──────────────────────────────────────────────
-config.term                                       = "xterm-256color"
-config.enable_tab_bar                             = true
-config.use_fancy_tab_bar                          = false
-config.tab_bar_at_bottom                          = false
-config.hide_tab_bar_if_only_one_tab               = true
+config.term = "xterm-256color"
+config.enable_tab_bar = true
+config.use_fancy_tab_bar = false
+config.tab_bar_at_bottom = false
+config.hide_tab_bar_if_only_one_tab = true
 config.adjust_window_size_when_changing_font_size = false
-config.font_size                                  = 14
-config.native_macos_fullscreen_mode               = true
+config.font_size = 14
+config.native_macos_fullscreen_mode = true
 -- config.color_scheme = "Adventure"
 
 -- ──────────────────────────────────────────────
@@ -51,15 +51,20 @@ config.native_macos_fullscreen_mode               = true
 -- Windows: ALT+b
 -- Linux  : SUPER+b
 -- ──────────────────────────────────────────────
-local PREFIX                                      = { key = "b", mods = PREFIX_MOD, timeout_milliseconds = 5000 }
+local PREFIX = { key = "b", mods = PREFIX_MOD, timeout_milliseconds = 5000 }
 
 -- ──────────────────────────────────────────────
 -- 키바인딩
 -- ──────────────────────────────────────────────
-config.keys                                       = {
+config.keys = {
   -- Ctrl+Tab / Ctrl+Shift+Tab WezTerm 기본 동작 해제
-  { key = "Tab", mods = "CTRL",       action = wezterm.action.SendKey { key = "Tab", mods = "CTRL" } },
-  { key = "Tab", mods = "CTRL|SHIFT", action = wezterm.action.SendKey { key = "Tab", mods = "CTRL|SHIFT" } },
+  { key = "Tab", mods = "CTRL", action = wezterm.action.SendKey({ key = "Tab", mods = "CTRL" }) },
+  { key = "Tab", mods = "CTRL|SHIFT", action = wezterm.action.SendKey({ key = "Tab", mods = "CTRL|SHIFT" }) },
+  {
+    key = "Enter",
+    mods = "OPT",
+    action = wezterm.action.DisableDefaultAssignment,
+  },
 
   -- ── PREFIX 키 자체를 터미널에 전달 (예: CMD+b CMD+b → Ctrl-b 전달) ──
   {
@@ -75,8 +80,8 @@ config.keys                                       = {
 
   -- MacOS 전체 화면 토글
   {
-    key = 'f',
-    mods = 'CMD|CTRL',
+    key = "f",
+    mods = "CMD|CTRL",
     action = wezterm.action.ToggleFullScreen,
   },
 
@@ -144,7 +149,7 @@ config.keys                                       = {
 -- ──────────────────────────────────────────────
 -- TMUX PREFIX 키테이블
 -- ──────────────────────────────────────────────
-config.key_tables                                 = {
+config.key_tables = {
   tmux_prefix = {
     -- ── 탭 (Window) ────────────────────────
     { key = "c", action = act.SpawnTab("CurrentPaneDomain") },
@@ -164,84 +169,92 @@ config.key_tables                                 = {
         end),
       }),
     },
-    { key = "1",          action = act.ActivateTab(0) },
-    { key = "2",          action = act.ActivateTab(1) },
-    { key = "3",          action = act.ActivateTab(2) },
-    { key = "4",          action = act.ActivateTab(3) },
-    { key = "5",          action = act.ActivateTab(4) },
-    { key = "6",          action = act.ActivateTab(5) },
-    { key = "7",          action = act.ActivateTab(6) },
-    { key = "8",          action = act.ActivateTab(7) },
-    { key = "9",          action = act.ActivateTab(8) },
-    { key = "0",          action = act.ActivateTab(9) },
+    { key = "1", action = act.ActivateTab(0) },
+    { key = "2", action = act.ActivateTab(1) },
+    { key = "3", action = act.ActivateTab(2) },
+    { key = "4", action = act.ActivateTab(3) },
+    { key = "5", action = act.ActivateTab(4) },
+    { key = "6", action = act.ActivateTab(5) },
+    { key = "7", action = act.ActivateTab(6) },
+    { key = "8", action = act.ActivateTab(7) },
+    { key = "9", action = act.ActivateTab(8) },
+    { key = "0", action = act.ActivateTab(9) },
 
     -- ── 분할 (Pane) ────────────────────────
-    { key = '"',          action = act.SplitVertical({ domain = "CurrentPaneDomain" }) },
-    { key = "%",          action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }) },
-    { key = "x",          action = act.CloseCurrentPane({ confirm = true }) },
-    { key = "z",          action = act.TogglePaneZoomState },
-    { key = "!",          action = act.SpawnTab("CurrentPaneDomain") },
-    { key = "q",          action = act.PaneSelect({ mode = "SwapWithActive" }) },
-    { key = "o",          action = act.ActivatePaneDirection("Next") },
-    { key = ";",          action = act.ActivatePaneDirection("Prev") },
+    { key = '"', action = act.SplitVertical({ domain = "CurrentPaneDomain" }) },
+    { key = "%", action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }) },
+    { key = "x", action = act.CloseCurrentPane({ confirm = true }) },
+    { key = "z", action = act.TogglePaneZoomState },
+    { key = "!", action = act.SpawnTab("CurrentPaneDomain") },
+    { key = "q", action = act.PaneSelect({ mode = "SwapWithActive" }) },
+    { key = "o", action = act.ActivatePaneDirection("Next") },
+    { key = ";", action = act.ActivatePaneDirection("Prev") },
 
     -- pane 포커스 이동 (vim 방향키)
-    { key = "h",          action = act.ActivatePaneDirection("Left") },
-    { key = "j",          action = act.ActivatePaneDirection("Down") },
-    { key = "k",          action = act.ActivatePaneDirection("Up") },
-    { key = "l",          action = act.ActivatePaneDirection("Right") },
-    { key = "LeftArrow",  action = act.ActivatePaneDirection("Left") },
-    { key = "DownArrow",  action = act.ActivatePaneDirection("Down") },
-    { key = "UpArrow",    action = act.ActivatePaneDirection("Up") },
+    { key = "h", action = act.ActivatePaneDirection("Left") },
+    { key = "j", action = act.ActivatePaneDirection("Down") },
+    { key = "k", action = act.ActivatePaneDirection("Up") },
+    { key = "l", action = act.ActivatePaneDirection("Right") },
+    { key = "LeftArrow", action = act.ActivatePaneDirection("Left") },
+    { key = "DownArrow", action = act.ActivatePaneDirection("Down") },
+    { key = "UpArrow", action = act.ActivatePaneDirection("Up") },
     { key = "RightArrow", action = act.ActivatePaneDirection("Right") },
 
     -- pane 크기 조절
-    { key = "H",          action = act.AdjustPaneSize({ "Left", 5 }) },
-    { key = "J",          action = act.AdjustPaneSize({ "Down", 5 }) },
-    { key = "K",          action = act.AdjustPaneSize({ "Up", 5 }) },
-    { key = "L",          action = act.AdjustPaneSize({ "Right", 5 }) },
+    { key = "H", action = act.AdjustPaneSize({ "Left", 5 }) },
+    { key = "J", action = act.AdjustPaneSize({ "Down", 5 }) },
+    { key = "K", action = act.AdjustPaneSize({ "Up", 5 }) },
+    { key = "L", action = act.AdjustPaneSize({ "Right", 5 }) },
 
     -- ── 복사 모드 ──────────────────────────
-    { key = "[",          action = act.ActivateCopyMode },
-    { key = "]",          action = act.PasteFrom("PrimarySelection") },
-    { key = "=",          action = act.PasteFrom("Clipboard") },
+    { key = "[", action = act.ActivateCopyMode },
+    { key = "]", action = act.PasteFrom("PrimarySelection") },
+    { key = "=", action = act.PasteFrom("Clipboard") },
 
     -- ── 기타 ───────────────────────────────
-    { key = "d",          action = act.DetachDomain("CurrentPaneDomain") },
-    { key = "t",          action = act.ShowDebugOverlay },
-    { key = "?",          action = act.ShowDebugOverlay },
-    { key = "f",          action = act.Search({ CaseSensitiveString = "" }) },
-    { key = "s",          action = act.ShowTabNavigator },
-    { key = "r",          action = act.ReloadConfiguration },
+    { key = "d", action = act.DetachDomain("CurrentPaneDomain") },
+    { key = "t", action = act.ShowDebugOverlay },
+    { key = "?", action = act.ShowDebugOverlay },
+    { key = "f", action = act.Search({ CaseSensitiveString = "" }) },
+    { key = "s", action = act.ShowTabNavigator },
+    { key = "r", action = act.ReloadConfiguration },
 
-    { key = "Escape",     action = act.PopKeyTable },
-    { key = "c",          mods = "CTRL",                                                 action = act.PopKeyTable },
+    { key = "Escape", action = act.PopKeyTable },
+    { key = "c", mods = "CTRL", action = act.PopKeyTable },
   },
 
   -- ── 복사 모드 (TMUX copy-mode-vi) ──────────────
   copy_mode = {
-    { key = "h",          action = act.CopyMode("MoveLeft") },
-    { key = "j",          action = act.CopyMode("MoveDown") },
-    { key = "k",          action = act.CopyMode("MoveUp") },
-    { key = "l",          action = act.CopyMode("MoveRight") },
-    { key = "LeftArrow",  action = act.CopyMode("MoveLeft") },
+    { key = "h", action = act.CopyMode("MoveLeft") },
+    { key = "j", action = act.CopyMode("MoveDown") },
+    { key = "k", action = act.CopyMode("MoveUp") },
+    { key = "l", action = act.CopyMode("MoveRight") },
+    { key = "LeftArrow", action = act.CopyMode("MoveLeft") },
     { key = "RightArrow", action = act.CopyMode("MoveRight") },
-    { key = "UpArrow",    action = act.CopyMode("MoveUp") },
-    { key = "DownArrow",  action = act.CopyMode("MoveDown") },
-    { key = "w",          action = act.CopyMode("MoveForwardWord") },
-    { key = "b",          action = act.CopyMode("MoveBackwardWord") },
-    { key = "e",          action = act.CopyMode("MoveForwardWordEnd") },
-    { key = "0",          action = act.CopyMode("MoveToStartOfLine") },
-    { key = "$",          action = act.CopyMode("MoveToEndOfLineContent") },
-    { key = "G",          action = act.CopyMode("MoveToScrollbackBottom") },
-    { key = "g",          mods = "NONE",                                       action = act.CopyMode("MoveToScrollbackTop") },
-    { key = "u",          mods = "CTRL",                                       action = act.CopyMode("PageUp") },
-    { key = "d",          mods = "CTRL",                                       action = act.CopyMode("PageDown") },
-    { key = "f",          mods = "CTRL",                                       action = act.CopyMode("PageDown") },
-    { key = "b",          mods = "CTRL",                                       action = act.CopyMode("PageUp") },
-    { key = "v",          action = act.CopyMode({ SetSelectionMode = "Cell" }) },
-    { key = "V",          action = act.CopyMode({ SetSelectionMode = "Line" }) },
-    { key = "v",          mods = "CTRL",                                       action = act.CopyMode({ SetSelectionMode = "Block" }) },
+    { key = "UpArrow", action = act.CopyMode("MoveUp") },
+    { key = "DownArrow", action = act.CopyMode("MoveDown") },
+    { key = "w", action = act.CopyMode("MoveForwardWord") },
+    { key = "b", action = act.CopyMode("MoveBackwardWord") },
+    { key = "e", action = act.CopyMode("MoveForwardWordEnd") },
+    { key = "0", action = act.CopyMode("MoveToStartOfLine") },
+    { key = "$", action = act.CopyMode("MoveToEndOfLineContent") },
+    { key = "G", action = act.CopyMode("MoveToScrollbackBottom") },
+    {
+      key = "g",
+      mods = "NONE",
+      action = act.CopyMode("MoveToScrollbackTop"),
+    },
+    { key = "u", mods = "CTRL", action = act.CopyMode("PageUp") },
+    { key = "d", mods = "CTRL", action = act.CopyMode("PageDown") },
+    { key = "f", mods = "CTRL", action = act.CopyMode("PageDown") },
+    { key = "b", mods = "CTRL", action = act.CopyMode("PageUp") },
+    { key = "v", action = act.CopyMode({ SetSelectionMode = "Cell" }) },
+    { key = "V", action = act.CopyMode({ SetSelectionMode = "Line" }) },
+    {
+      key = "v",
+      mods = "CTRL",
+      action = act.CopyMode({ SetSelectionMode = "Block" }),
+    },
     {
       key = "y",
       action = act.Multiple({
@@ -249,7 +262,7 @@ config.key_tables                                 = {
         act.CopyMode("Close"),
       }),
     },
-    { key = "q",      action = act.CopyMode("Close") },
+    { key = "q", action = act.CopyMode("Close") },
     { key = "Escape", action = act.CopyMode("Close") },
   },
 }
