@@ -18,6 +18,19 @@ vim.keymap.set("n", "<leader>%", "<cmd>vsplit<CR>", { desc = "Vertical split" })
 -- Ctrl-C를 Esc처럼 동작하게 매핑 (InsertLeave 이벤트 발생시킴)
 vim.keymap.set("i", "<C-c>", "<Esc>")
 
+-- Jump to type directly
+vim.keymap.set("n", "gy", vim.lsp.buf.type_definition, { desc = "Go to type definition" })
+
+-- 터미널 토글 (Ctrl+`)
+vim.keymap.set("n", "<C-`>", function()
+  Snacks.terminal.toggle()
+end, { desc = "Toggle terminal" })
+
+-- 터미널 모드에서도 닫히도록
+vim.keymap.set("t", "<C-`>", function()
+  Snacks.terminal.toggle()
+end, { desc = "Toggle terminal" })
+
 -- Hover setup
 vim.keymap.set("n", "gh", function()
   vim.lsp.buf.hover()
