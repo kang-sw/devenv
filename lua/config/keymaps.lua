@@ -12,20 +12,22 @@ map("i", "<C-a>", "<Home>", { desc = "Move to line start" })
 map("i", "<C-e>", "<End>", { desc = "Move to line end" })
 
 -- tmux 스타일 스플릿
-vim.keymap.set('n', '<leader>"', '<cmd>split<CR>',  { desc = 'Horizontal split' })
-vim.keymap.set('n', '<leader>%', '<cmd>vsplit<CR>', { desc = 'Vertical split' })
+vim.keymap.set("n", '<leader>"', "<cmd>split<CR>", { desc = "Horizontal split" })
+vim.keymap.set("n", "<leader>%", "<cmd>vsplit<CR>", { desc = "Vertical split" })
 
 -- Ctrl-C를 Esc처럼 동작하게 매핑 (InsertLeave 이벤트 발생시킴)
 vim.keymap.set("i", "<C-c>", "<Esc>")
 
 -- Hover setup
-vim.keymap.set("n", "gh", function() vim.lsp.buf.hover() end, { desc = "Hover documentation" })
+vim.keymap.set("n", "gh", function()
+  vim.lsp.buf.hover()
+end, { desc = "Hover documentation" })
 
 -- F1 Formatting
-vim.keymap.set('n', '<F1>', '<Nop>', { noremap = true, silent = true })
-vim.keymap.set('i', '<F1>', '<Nop>', { noremap = true, silent = true })
-vim.keymap.set('v', '<F1>', '<Nop>', { noremap = true, silent = true })
-vim.keymap.set('n', '<F1>', function()
+vim.keymap.set("n", "<F1>", "<Nop>", { noremap = true, silent = true })
+vim.keymap.set("i", "<F1>", "<Nop>", { noremap = true, silent = true })
+vim.keymap.set("v", "<F1>", "<Nop>", { noremap = true, silent = true })
+vim.keymap.set("n", "<F1>", function()
   vim.lsp.buf.format({ async = true })
 end, { noremap = true, silent = true, desc = "Format" })
 
