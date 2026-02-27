@@ -24,6 +24,8 @@ require("lazy").setup({
     { import = "lazyvim.plugins.extras.lang.python" },
     -- 디버깅
     { import = "lazyvim.plugins.extras.dap.core" }, -- DAP 기본 (필수)
+    -- Claude code
+    { import = "lazyvim.plugins.extras.ai.claudecode" }, -- DAP 기본 (필수)
     -- import/override with your plugins
     { import = "plugins" },
   },
