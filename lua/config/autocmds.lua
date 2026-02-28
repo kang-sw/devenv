@@ -43,6 +43,13 @@ vim.api.nvim_create_autocmd("InsertEnter", {
   end,
 })
 
+vim.api.nvim_create_autocmd("TermLeave", {
+  pattern = "*",
+  callback = function()
+    set_im(english_im)
+  end,
+})
+
 -- ------------------------------------------------------------
 -- // 주석에서 자동 주석 prefix 제거
 vim.api.nvim_create_autocmd("FileType", {

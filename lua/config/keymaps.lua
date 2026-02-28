@@ -31,6 +31,9 @@ vim.keymap.set("t", "<C-`>", function()
   Snacks.terminal.toggle()
 end, { desc = "Toggle terminal" })
 
+-- C-\ 더블 탭으로 터미널 탈출
+vim.keymap.set("t", "<C-\\><C-\\>", "<C-\\><C-n>", { desc = "Exit terminal mode" })
+
 -- Hover setup
 vim.keymap.set("n", "gh", function()
   vim.lsp.buf.hover()
