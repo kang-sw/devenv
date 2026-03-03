@@ -38,31 +38,31 @@ repo_root_format = '[ $before_root_path]($before_repo_root_style)[$repo_root]($r
 [git_branch]
 symbol = ""
 style = "bg:#394260"
-format = '[[ $symbol $branch ](fg:#00bb00 bg:#394260)]($style)'
+format = '[[ $symbol $branch ](fg:#bbbbbb bg:#394260)]($style)'
 
 [git_status]
-style = "bg:#394260"
-format = '[[($all_status$ahead_behind )](fg:#00bb00 bg:#394260)]($style)'
+style = "bg:#394260 bold"
+format = '[[($all_status$ahead_behind)](fg:#ffffff bg:#394260)]($style)'
 
 [nodejs]
 symbol = ""
 style = "bg:#212736"
-format = '[[ $symbol ($version) ](fg:#171f26 bg:#212736)]($style)'
+format = '[[ $symbol ($version) ](fg:#bbbbbb bg:#212736)]($style)'
 
 [rust]
 symbol = ""
 style = "bg:#212736"
-format = '[[ $symbol ($version) ](fg:#171f26 bg:#212736)]($style)'
+format = '[[ $symbol ($version) ](fg:#bbbbbb bg:#212736)]($style)'
 
 [golang]
 symbol = ""
 style = "bg:#212736"
-format = '[[ $symbol ($version) ](fg:#171f26 bg:#212736)]($style)'
+format = '[[ $symbol ($version) ](fg:#bbbbbb bg:#212736)]($style)'
 
 [php]
 symbol = ""
 style = "bg:#212736"
-format = '[[ $symbol ($version) ](fg:#171f26 bg:#212736)]($style)'
+format = '[[ $symbol ($version) ](fg:#bbbbbb bg:#212736)]($style)'
 
 [time]
 disabled = false
