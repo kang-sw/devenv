@@ -3,7 +3,7 @@ return {
   opts = {
     terminal = {
       snacks_win_opts = {
-        width = 110,
+        width = 100,
       },
     },
     diff_opts = {
