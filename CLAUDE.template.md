@@ -3,14 +3,11 @@
 ## Documentation Layout
 
 - All AI-readable documentation lives under `ai-docs/`. Do NOT store docs elsewhere.
-- All `ai-docs/` documents and AI-facing plans must be written in **English**.
+- All `ai-docs/` documents, plans, and plan statements must be written in **English**, regardless of conversation language.
 
 ### Mental Model
 
 - `ai-docs/mental-model.md` is the **project brief**: high-level goals, architecture overview, recent work log, and short/mid-term context.
-  - **Actively update this file** — it is the highest-priority documentation task. Every session should begin and end by reviewing it.
-  - Add recent work history, current status, and near-term plans.
-  - **Prune aggressively**: remove or condense entries that are no longer relevant. Old completed tasks, resolved issues, and obsolete context should be deleted or collapsed into a one-line summary. The file must stay concise and current.
 - `ai-docs/mental-model/` is a directory for **deep technical details**:
   - Per-module or per-subsystem design documents
   - Technical implementation specs and constraints
@@ -18,38 +15,7 @@
   - Workarounds and non-obvious technical choices that future sessions must remember
   - Link to these documents from the root `mental-model.md` where relevant.
 
-## Workflow Rules
-
-### Session Start
-
-1. Read `ai-docs/mental-model.md` to understand current project state.
-2. Check recent git history (`git log`) to catch up on work since the last mental-model update.
-3. Load only the docs relevant to the current task — do not front-load the entire `ai-docs/` tree.
-
-### Approval Protocol
-
-- **Auto-proceed**: Bug fixes, pattern-following additions, test code, boilerplate, refactoring within a single module.
-- **Ask first**: New component additions, architectural changes, cross-module interface changes, anything that alters user-facing behavior.
-- **Always ask**: Deleting existing functionality, changing protocol/schema semantics, modifying persistence or deployment.
-
-### Implementation
-
-- Before writing code, briefly state the plan: affected files, approach, and success criteria. For trivial changes a one-liner suffices. **Plans must be written in English** regardless of conversation language.
-- Read existing code before proposing or making changes.
-- Keep solutions minimal — no extra features, abstractions, or refactors beyond what is explicitly requested.
-- When implementing a new concept or subsystem, **update the relevant `ai-docs/` documentation first**, then write the code to match. Documentation leads implementation.
-- **Update `ai-docs/mental-model.md` at every meaningful checkpoint** — not just at the end. Treat it as a living working-memory document.
-
-## Commit Rules
-
-- Create a commit after every unit of work, including documentation changes.
-- Every commit message must include an `## AI COMMENT` section at the end. This section should contain:
-  - Summary of design decisions made during this work
-  - Key discussion points and rationale
-  - Any context needed to understand the commit's purpose
-  - Information that helps a future AI reconstruct the working context from commit history
-
-## Project Files for Complex Features
+### Project Files
 
 - When implementing a complex feature, create a project file at `ai-docs/projects/YYMMDD-HHMM-<project-name>.md`.
 - Each project file should contain:
@@ -67,6 +33,42 @@
     ### Phase 3: Refactor event pipeline (plan mode)
     ```
 - Use these files to track progress across sessions and maintain continuity.
+
+## Workflow Rules
+
+### Session Start
+
+1. Read `ai-docs/mental-model.md` to understand current project state.
+2. Check recent git history (`git log`) to catch up on work since the last mental-model update.
+3. Load only the docs relevant to the current task — do not front-load the entire `ai-docs/` tree.
+
+### Session End
+
+1. Update `ai-docs/mental-model.md` with work done, current status, and near-term plans.
+2. **Prune aggressively**: remove or condense entries that are no longer relevant. Old completed tasks, resolved issues, and obsolete context should be deleted or collapsed into a one-line summary. The file must stay concise and current.
+3. Commit the mental-model update.
+
+### Approval Protocol
+
+- **Auto-proceed**: Bug fixes, pattern-following additions, test code, boilerplate, refactoring within a single module.
+- **Ask first**: New component additions, architectural changes, cross-module interface changes, anything that alters user-facing behavior.
+- **Always ask**: Deleting existing functionality, changing protocol/schema semantics, modifying persistence or deployment.
+
+### Implementation
+
+- Before writing code, briefly outline the approach: affected files, strategy, and success criteria. For trivial changes a one-liner suffices.
+- Read existing code before proposing or making changes.
+- Keep solutions minimal — no extra features, abstractions, or refactors beyond what is explicitly requested.
+- When implementing a new concept or subsystem, **update the relevant `ai-docs/` documentation first**, then write the code to match. Documentation leads implementation.
+- **Update `ai-docs/mental-model.md` at every meaningful checkpoint** — not just at session end. Treat it as a living working-memory document.
+
+## Commit Rules
+
+- Create a commit after every unit of work, including documentation changes.
+- Every commit message must include an `## AI COMMENT` section at the end:
+  - Design decisions made and alternatives considered
+  - Key discussion points and rationale
+  - Context that helps a future AI reconstruct the working state from commit history
 
 ## Testing Rules
 
