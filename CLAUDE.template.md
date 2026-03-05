@@ -20,10 +20,24 @@
 
 ## Workflow Rules
 
-- Before implementing or designing anything, identify every architectural ambiguity that could affect future direction and **ask the user** rather than guessing.
-  - Exception: decisions that are trivially reversible even after code accumulates may be made autonomously with a note in the response.
+### Session Start
+
+1. Read `ai-docs/mental-model.md` to understand current project state.
+2. Check recent git history (`git log`) to catch up on work since the last mental-model update.
+3. Load only the docs relevant to the current task — do not front-load the entire `ai-docs/` tree.
+
+### Approval Protocol
+
+- **Auto-proceed**: Bug fixes, pattern-following additions, test code, boilerplate, refactoring within a single module.
+- **Ask first**: New component additions, architectural changes, cross-module interface changes, anything that alters user-facing behavior.
+- **Always ask**: Deleting existing functionality, changing protocol/schema semantics, modifying persistence or deployment.
+
+### Implementation
+
+- Before writing code, briefly state the plan: affected files, approach, and success criteria. For trivial changes a one-liner suffices. **Plans must be written in English** regardless of conversation language.
 - Read existing code before proposing or making changes.
 - Keep solutions minimal — no extra features, abstractions, or refactors beyond what is explicitly requested.
+- When implementing a new concept or subsystem, **update the relevant `ai-docs/` documentation first**, then write the code to match. Documentation leads implementation.
 - **Update `ai-docs/mental-model.md` at every meaningful checkpoint** — not just at the end. Treat it as a living working-memory document.
 
 ## Commit Rules
