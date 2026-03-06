@@ -18,6 +18,7 @@
 ### Project Files
 
 - When implementing a complex feature, create a project file at `ai-docs/projects/YYMMDD-HHMM-<project-name>.md`.
+- While work is in progress, append `[wip]` to the filename: `YYMMDD-HHMM-<project-name>[wip].md`. Remove the suffix when the project is complete.
 - Each project file should contain:
   - Implementation spec and design goals
   - Summary of discussions and decisions leading to this work
