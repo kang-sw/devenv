@@ -92,7 +92,11 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    (e.g. `godot --headless --import --quit`, `npm run build`, `tsc --noEmit`),
    run it after editing frontend assets or config to catch parse/type errors.
 4. **Build.** Run a full build so all artifacts are up to date.
-5. **Commit.** Auto-create git commits broken down by logical units.
+5. **Update docs.** After non-trivial tasks:
+   - Update `_index.md` Operational State if project capabilities changed.
+   - Update `# MEMORY` section in this file (what was done, what's next).
+   - Prune aggressively: keep both documents focused on current state.
+6. **Commit.** Auto-create git commits broken down by logical units.
    Commit messages must include an **AI context** section after the change summary.
    Record design decisions, alternatives considered, trade-offs — focus on *why*
    this approach was chosen. Format:
@@ -104,10 +108,6 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    ## AI Context
    - <decision rationale, rejected alternatives, user directives, etc.>
    ```
-6. **Update docs.** After non-trivial tasks:
-   - Update `_index.md` Operational State if project capabilities changed.
-   - Update `# MEMORY` section in this file (what was done, what's next).
-   - Prune aggressively: keep both documents focused on current state.
 
 ### Session Start
 - Read `notes/ai-docs/_index.md` to understand project state and architecture.
