@@ -67,11 +67,6 @@ Structure by priority (top = highest, survives 200-line truncation):
    When tests fail, first diagnose whether the **test assumptions** or the **implementation
    logic** is wrong — don't blindly fix the implementation to match a bad test.
    For user-interactive features (UI, visual output), request manual testing instead.
-5. **Module structure.** Split files at ~300 lines into `<module>/mod.rs` (or equivalent)
-   + submodules. The module entry point = doc comment + pub re-exports only. Reading it
-   alone conveys the module's interface.
-6. **Hot-path allocation.** In performance-sensitive paths, prefer pre-allocated buffers
-   and stack-friendly types. Apply when benefit > complexity cost.
 
 ## Workflow — AI-Driven Implementation
 
@@ -89,10 +84,8 @@ Structure by priority (top = highest, survives 200-line truncation):
    **Plans must be written in English** regardless of conversation language.
 2. **Verify.** Run the project's test command (e.g. `cargo test`, `pytest`, `npm test`).
    Also run any integration test harness available. Must pass before committing.
-3. **Verify assets.** After editing non-code assets (scenes, configs, schemas), run the
-   appropriate validator or importer in headless/dry-run mode to check for parse errors.
-4. **Build.** Run a full build so all artifacts are up to date.
-5. **Commit.** Auto-create git commits broken down by logical units.
+3. **Build.** Run a full build so all artifacts are up to date.
+4. **Commit.** Auto-create git commits broken down by logical units.
    Commit messages must include an **AI context** section after the change summary.
    Record design decisions, alternatives considered, trade-offs — focus on *why*
    this approach was chosen. Format:
@@ -104,7 +97,7 @@ Structure by priority (top = highest, survives 200-line truncation):
    ## AI Context
    - <decision rationale, rejected alternatives, user directives, etc.>
    ```
-6. **Update docs.** After non-trivial tasks:
+5. **Update docs.** After non-trivial tasks:
    - Update `_index.md` Operational State if project capabilities changed.
    - Update `MEMORY.md` recent work context (what was done, what's next).
    - Prune aggressively: keep both documents focused on current state.
