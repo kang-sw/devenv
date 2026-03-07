@@ -44,8 +44,9 @@ This is the primary cross-session context document.
 **Tickets** (`notes/ai-docs/tickets/YYMMDD-<name>.md`) track substantial features.
 In-progress tickets use a `[wip]` suffix: `YYMMDD-<name>[wip].md`.
 Remove the `[wip]` marker when the ticket is complete.
-Phases that require non-trivial design before coding are marked **(plan mode)** — always
-plan and get approval before implementing those phases.
+Phases that require non-trivial design before coding are marked **(plan mode)** — use the
+`EnterPlanMode` tool to switch to plan mode, draft the design, and get approval before
+implementing those phases.
 
 **MEMORY.md** (`~/.claude/projects/.../memory/MEMORY.md`) persists across sessions.
 Stores user-specific preferences only (communication style, workflow habits).
