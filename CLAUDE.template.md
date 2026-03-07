@@ -48,11 +48,9 @@ Phases that require non-trivial design before coding are marked **(plan mode)** 
 plan and get approval before implementing those phases.
 
 **MEMORY.md** (`~/.claude/projects/.../memory/MEMORY.md`) persists across sessions.
-Structure by priority (top = highest, survives 200-line truncation):
-1. Build/workflow memos — things that affect every session
-2. Recent work context (max 3 items) — what was done, what's next
-3. User preferences — communication style, workflow habits
-4. Workspace reference — crate/package names, architecture quick ref
+Stores user-specific preferences only (communication style, workflow habits).
+Project-specific memory (build memos, recent context, workspace ref) lives in the
+`# MEMORY` section at the bottom of this file so it's git-tracked with the project.
 
 ## Coding Guidelines
 
@@ -99,7 +97,7 @@ Structure by priority (top = highest, survives 200-line truncation):
    ```
 5. **Update docs.** After non-trivial tasks:
    - Update `_index.md` Operational State if project capabilities changed.
-   - Update `MEMORY.md` recent work context (what was done, what's next).
+   - Update `#MEMORY` section in this file (what was done, what's next).
    - Prune aggressively: keep both documents focused on current state.
 
 ### Session Start
@@ -110,3 +108,29 @@ Structure by priority (top = highest, survives 200-line truncation):
 - Keep context small. Load only the module docs relevant to the current task.
 - Source code is the ground truth; docs supplement it.
 - When a module doc drifts from source, update the doc (or flag it).
+
+---
+
+# MEMORY
+
+<!-- AI-maintained. Update after each non-trivial session. Prune aggressively. -->
+
+## Build & Workflow
+
+<!-- Commands, flags, known pitfalls that affect every session. -->
+
+- Build: `[command]`
+- Test: `[command]`
+- Integration test: `[command]`
+
+## Recent Work
+
+<!-- Max 3 items. What was done, what's next. -->
+
+-
+
+## Workspace Reference
+
+<!-- Key package/crate names, important paths, architecture quick-ref. -->
+
+-
