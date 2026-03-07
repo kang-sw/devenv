@@ -14,6 +14,9 @@ return {
         "debugpy",
         -- 포매터
         "clang-format",
+        "prettier",
+        "taplo",
+        "xmlformat",
         -- 기타
         "tree-sitter-cli",
       },
