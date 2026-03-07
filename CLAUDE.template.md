@@ -46,6 +46,8 @@ In-progress tickets use a `[wip]` suffix: `YYMMDD-<name>[wip].md`.
 Remove the `[wip]` marker when the ticket is complete.
 Phases that require non-trivial design before coding are marked **(plan mode)** — use the
 `EnterPlanMode` tool, explore + design, get user approval, then `ExitPlanMode` to implement.
+After completing a ticket phase, append a `### Result (<short-hash>)` subsection recording:
+what was implemented, deviations from the plan, and key findings for future phases.
 
 **MEMORY.md** (`~/.claude/projects/.../memory/MEMORY.md`) persists across sessions.
 Stores user-specific preferences only (communication style, workflow habits).
@@ -95,6 +97,7 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 5. **Update docs.** After non-trivial tasks:
    - Update `_index.md` Operational State if project capabilities changed.
    - Update `# MEMORY` section in this file (what was done, what's next).
+   - If completing a ticket phase, append `### Result` to that phase in the ticket doc.
    - Prune aggressively: keep both documents focused on current state.
 6. **Commit.** Auto-create git commits broken down by logical units.
    Commit messages must include an **AI context** section after the change summary.
