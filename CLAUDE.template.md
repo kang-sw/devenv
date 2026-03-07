@@ -45,8 +45,7 @@ This is the primary cross-session context document.
 In-progress tickets use a `[wip]` suffix: `YYMMDD-<name>[wip].md`.
 Remove the `[wip]` marker when the ticket is complete.
 Phases that require non-trivial design before coding are marked **(plan mode)** — use the
-`EnterPlanMode` tool to switch to plan mode, draft the design, and get approval before
-implementing those phases.
+`EnterPlanMode` tool, explore + design, get user approval, then `ExitPlanMode` to implement.
 
 **MEMORY.md** (`~/.claude/projects/.../memory/MEMORY.md`) persists across sessions.
 Stores user-specific preferences only (communication style, workflow habits).
@@ -66,6 +65,12 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    When tests fail, first diagnose whether the **test assumptions** or the **implementation
    logic** is wrong — don't blindly fix the implementation to match a bad test.
    For user-interactive features (UI, visual output), request manual testing instead.
+5. **Module structure.** Split files at ~300 lines into `<module>/mod.rs` + submodules
+   (or language-equivalent: `index.ts`, `__init__.py`, etc.). The entry file should contain
+   doc comments + public re-exports only — reading it alone conveys the module's interface.
+6. **Hot-path performance.** In performance-critical paths, prefer stack allocation,
+   pre-allocated buffers, and borrowed references over heap allocation. Apply only when
+   benefit clearly outweighs complexity cost.
 
 ## Workflow — AI-Driven Implementation
 
@@ -83,8 +88,11 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    **Plans must be written in English** regardless of conversation language.
 2. **Verify.** Run the project's test command (e.g. `cargo test`, `pytest`, `npm test`).
    Also run any integration test harness available. Must pass before committing.
-3. **Build.** Run a full build so all artifacts are up to date.
-4. **Commit.** Auto-create git commits broken down by logical units.
+3. **Verify frontend/engine.** If the project has a frontend or engine build step
+   (e.g. `godot --headless --import --quit`, `npm run build`, `tsc --noEmit`),
+   run it after editing frontend assets or config to catch parse/type errors.
+4. **Build.** Run a full build so all artifacts are up to date.
+5. **Commit.** Auto-create git commits broken down by logical units.
    Commit messages must include an **AI context** section after the change summary.
    Record design decisions, alternatives considered, trade-offs — focus on *why*
    this approach was chosen. Format:
@@ -96,14 +104,25 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    ## AI Context
    - <decision rationale, rejected alternatives, user directives, etc.>
    ```
-5. **Update docs.** After non-trivial tasks:
+6. **Update docs.** After non-trivial tasks:
    - Update `_index.md` Operational State if project capabilities changed.
-   - Update `#MEMORY` section in this file (what was done, what's next).
+   - Update `# MEMORY` section in this file (what was done, what's next).
    - Prune aggressively: keep both documents focused on current state.
 
 ### Session Start
 - Read `notes/ai-docs/_index.md` to understand project state and architecture.
 - Run `git log --oneline -10` to catch up on recent work.
+
+### Dependency API Notes
+- **`notes/ai-docs/deps/<package>[v<ver>].md`** stores verified API facts for libraries
+  whose actual API differs from training knowledge or is too new to be known.
+- **When to read:** Before writing code that uses a package listed in
+  `# MEMORY → Documented Dependencies`. Also check on compile/type errors that look like
+  wrong signatures, missing types, or changed fields — consult `ai-docs/deps/` **before**
+  exploring package source from scratch.
+- **When to write/update:** After discovering API drift (wrong arg count, renamed types,
+  removed methods, etc.) or after learning a previously-unknown package's API, document
+  the verified correct API so future sessions skip re-exploration.
 
 ### Context Window Discipline
 - Keep context small. Load only the module docs relevant to the current task.
@@ -133,5 +152,11 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 ## Workspace Reference
 
 <!-- Key package/crate names, important paths, architecture quick-ref. -->
+
+-
+
+## Documented Dependencies
+
+<!-- Packages with verified API docs in notes/ai-docs/deps/. Read before using. -->
 
 -
