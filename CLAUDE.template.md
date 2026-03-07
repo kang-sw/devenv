@@ -41,8 +41,8 @@ This is the primary cross-session context document.
 **When to update:** After implementing changes that affect operational state or a module's
   public API. Update the specific section/doc, not everything.
 
-**Tickets** (`notes/ai-docs/tickets/YYMMDD-MMDD-<name>.md`) track substantial features.
-In-progress tickets use a `[wip]` suffix: `YYMMDD-MMDD-<name>[wip].md`.
+**Tickets** (`notes/ai-docs/tickets/YYMMDD-<name>.md`) track substantial features.
+In-progress tickets use a `[wip]` suffix: `YYMMDD-<name>[wip].md`.
 Remove the `[wip]` marker when the ticket is complete.
 Phases that require non-trivial design before coding are marked **(plan mode)** — always
 plan and get approval before implementing those phases.
