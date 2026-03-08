@@ -61,8 +61,8 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    entries, and inline code comments written by the AI must be in English — regardless of the
    conversation language. This includes `notes/ai-docs/`, `MEMORY` sections, `### Result`
    entries, and any other machine-maintained artifacts. Human-facing UI strings are exempt.
-1. **Think first.** State assumptions. Verify before guessing. Define success criteria
-   before starting.
+1. **Think first.** State assumptions. Verify before guessing. Define clear success
+   criteria before starting — what must hold true when done.
 2. **Simplicity.** Write the simplest code that works. Implement fully when the spec is
    clear — judge scope by AI effort, not human-hours.
 3. **Surgical changes.** Change only what the task requires. Follow existing style. Every
@@ -90,8 +90,8 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
   modifying persistence schema.
 
 ### Implementation Process
-1. **Plan first.** Before writing code, output the implementation plan (affected files,
-   approach, success criteria). For trivial changes, a one-liner suffices.
+1. **Task list first.** For non-trivial changes, break the work into brief steps
+   via `TaskCreate` — implementation, docs, and commit. Check them off as you progress.
 2. **Verify.** Run the project's test command (e.g. `cargo test`, `pytest`, `npm test`).
    Also run any integration test harness available. Must pass before committing.
 3. **Verify frontend/engine.** If the project has a frontend or engine build step
