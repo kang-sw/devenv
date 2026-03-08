@@ -16,7 +16,7 @@ return {
         "clang-format",
         "prettier",
         "taplo",
-        "xmlformat",
+        -- "xmlformat", -- not work
         -- 기타
         "tree-sitter-cli",
       },

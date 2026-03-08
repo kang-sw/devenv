@@ -18,7 +18,7 @@ return {
       opts.formatters_by_ft.toml = { "taplo" }
 
       -- XML
-      opts.formatters_by_ft.xml = { "xmlformat" }
+      -- opts.formatters_by_ft.xml = { "xmlformat" }
 
       return opts
     end,
