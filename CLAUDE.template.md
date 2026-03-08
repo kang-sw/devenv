@@ -40,6 +40,7 @@ This is the primary cross-session context document.
 **When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
 **When to update:** After implementing changes that affect operational state or a module's
   public API. Update the specific section/doc, not everything.
+**Language:** All files under `notes/ai-docs/` are AI-maintained — write them in English only.
 
 **Tickets** (`notes/ai-docs/tickets/YYMMDD-<name>.md`) track substantial features.
 In-progress tickets use a `[wip]` suffix: `YYMMDD-<name>[wip].md`.
@@ -56,6 +57,10 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 
 ## Coding Guidelines
 
+0. **English only for AI-authored content.** All documents, plans, commit messages, ticket
+   entries, and inline code comments written by the AI must be in English — regardless of the
+   conversation language. This includes `notes/ai-docs/`, `MEMORY` sections, `### Result`
+   entries, and any other machine-maintained artifacts. Human-facing UI strings are exempt.
 1. **Think first.** State assumptions. Verify before guessing. Define success criteria
    before starting.
 2. **Simplicity.** Write the simplest code that works. Implement fully when the spec is
@@ -87,7 +92,6 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 ### Implementation Process
 1. **Plan first.** Before writing code, output the implementation plan (affected files,
    approach, success criteria). For trivial changes, a one-liner suffices.
-   **Plans must be written in English** regardless of conversation language.
 2. **Verify.** Run the project's test command (e.g. `cargo test`, `pytest`, `npm test`).
    Also run any integration test harness available. Must pass before committing.
 3. **Verify frontend/engine.** If the project has a frontend or engine build step
