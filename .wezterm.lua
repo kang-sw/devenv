@@ -23,6 +23,50 @@ local is_mac = wezterm.target_triple:find("darwin") ~= nil
 local is_windows = wezterm.target_triple:find("windows") ~= nil
 -- linux는 위 둘 다 아닌 경우
 
+-- ──────────────────────────────────────────────
+-- im-select 탐색 (모듈 로드 시 1회만 실행)
+-- WezTerm GUI 앱은 shell PATH를 상속하지 않으므로 절대 경로로 탐색
+-- ──────────────────────────────────────────────
+local im_select_cmd = nil -- { path, arg, ... } 형태로 캐싱
+
+do
+  local function file_exists(path)
+    local ok, _, _ = wezterm.run_child_process({ "test", "-f", path })
+    return ok
+  end
+
+  if is_mac then
+    -- Homebrew: Apple Silicon(/opt/homebrew) 또는 Intel(/usr/local)
+    local path = (file_exists("/opt/homebrew/bin/im-select") and "/opt/homebrew/bin/im-select")
+      or (file_exists("/usr/local/bin/im-select") and "/usr/local/bin/im-select")
+    if path then
+      im_select_cmd = { path, "com.apple.keylayout.ABC" }
+    end
+  elseif is_windows then
+    -- PATH에서 im-select.exe 위치 탐색
+    local ok, stdout, _ = wezterm.run_child_process({ "where", "im-select" })
+    if ok and stdout and #stdout > 0 then
+      local path = stdout:match("^([^\r\n]+)")
+      if path then
+        im_select_cmd = { path, "1033" } -- 1033 = English (US) locale
+      end
+    end
+  else
+    -- Linux: fcitx-remote 또는 im-select
+    if file_exists("/usr/bin/fcitx-remote") then
+      im_select_cmd = { "/usr/bin/fcitx-remote", "-c" }
+    elseif file_exists("/usr/local/bin/im-select") then
+      im_select_cmd = { "/usr/local/bin/im-select", "keyboard-us" }
+    end
+  end
+
+  if im_select_cmd then
+    wezterm.log_info("IME switch: " .. table.concat(im_select_cmd, " "))
+  else
+    wezterm.log_warn("im-select not found — IME auto-switch disabled")
+  end
+end
+
 -- macOS의 CMD 역할 (줄 이동, 탭 등)
 local SUPER = is_mac and "CMD" or (is_windows and "ALT" or "SUPER")
 
@@ -75,9 +119,15 @@ config.keys = {
 
   -- ── PREFIX 키 자체를 터미널에 전달 (예: CMD+b CMD+b → Ctrl-b 전달) ──
   {
-    key = PREFIX.key,
-    mods = PREFIX.mods,
-    action = act.SendKey({ key = "b", mods = "CTRL" }),
+    key = "b",
+    mods = "CTRL",
+    action = wezterm.action_callback(function(window, pane)
+      -- 한국어 IME 상태라면 영문으로 전환 후 Ctrl+b 전달
+      if im_select_cmd then
+        wezterm.run_child_process(im_select_cmd)
+      end
+      window:perform_action(act.SendKey({ key = "b", mods = "CTRL" }), pane)
+    end),
   },
 
   -- 기존 바인딩 비활성화
