@@ -44,6 +44,13 @@ config.adjust_window_size_when_changing_font_size = false
 config.font_size = 14
 config.native_macos_fullscreen_mode = true
 -- config.color_scheme = "Adventure"
+config.window_decorations = "RESIZE"
+config.window_padding = {
+  left = 0,
+  right = 0,
+  top = 0,
+  bottom = 0,
+}
 
 -- ──────────────────────────────────────────────
 -- PREFIX 키 설정
