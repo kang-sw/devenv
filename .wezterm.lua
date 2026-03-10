@@ -85,6 +85,19 @@ config.use_fancy_tab_bar = false
 config.tab_bar_at_bottom = false
 config.hide_tab_bar_if_only_one_tab = true
 config.adjust_window_size_when_changing_font_size = false
+config.font = wezterm.font_with_fallback({
+  { family = "JetBrainsMono Nerd Font", weight = "Regular" },
+  "Cascadia Code",
+})
+config.font_rules = {
+  {
+    intensity = "Bold",
+    font = wezterm.font_with_fallback({
+      { family = "JetBrainsMono Nerd Font", weight = "ExtraBold" },
+      { family = "Cascadia Code", weight = "Bold" },
+    }),
+  },
+}
 config.font_size = 14
 config.native_macos_fullscreen_mode = true
 -- config.color_scheme = "Adventure"
@@ -167,8 +180,8 @@ config.keys = {
   },
 
   -- ── 단어 단위 삭제 (Ctrl+Backspace / Ctrl+Delete) ──
-  { key = "Backspace", mods = "CTRL", action = act.SendString("\x1b\x7f") },  -- ESC+DEL → backward-kill-word
-  { key = "Delete",    mods = "CTRL", action = act.SendString("\x1b[3;5~") }, -- Ctrl+Del → kill-word
+  { key = "Backspace", mods = "CTRL", action = act.SendString("\x1b\x7f") }, -- ESC+DEL → backward-kill-word
+  { key = "Delete", mods = "CTRL", action = act.SendString("\x1b[3;5~") }, -- Ctrl+Del → kill-word
 
   -- ── 단어 단위 이동 (OPT/ALT + 좌우) ──────────────
   {
