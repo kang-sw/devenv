@@ -40,11 +40,11 @@ context store.
 
 **When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
 **When to update:** After implementing changes that affect operational state or a module's
-  public API. Update the specific section/doc, not everything.
+public API. Update the specific section/doc, not everything.
 
 **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
-  `### Result` entries, `MEMORY` sections, and inline code comments — must be in English,
-  regardless of conversation language. Human-facing UI strings are exempt.
+`### Result` entries, `MEMORY` sections, and inline code comments — must be in English,
+regardless of conversation language. Human-facing UI strings are exempt.
 
 **Tickets** (`notes/ai-docs/tickets/YYMMDD-<name>.md`) track substantial features.
 In-progress tickets use a `[wip]` suffix: `YYMMDD-<name>[wip].md`.
@@ -77,6 +77,7 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 ## Workflow — AI-Driven Implementation
 
 ### Approval Protocol
+
 - **Auto-proceed**: Bug fixes, pattern-following additions, test code, boilerplate,
   refactoring within a single module.
 - **Ask first**: New component/protocol additions, architectural changes,
@@ -85,6 +86,7 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
   modifying persistence schema.
 
 ### Implementation Process
+
 1. **Clarify & plan.** For non-trivial changes, state assumptions and define success
    criteria before starting. Break the work into brief steps via `TaskCreate` —
    implementation, docs, and commit. Check them off as you progress.
@@ -103,8 +105,9 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    - Prune aggressively: keep both documents focused on current state.
 5. **Commit.** Auto-create git commits broken down by logical units.
    Commit messages must include an **AI context** section after the change summary.
-   Record design decisions, alternatives considered, trade-offs — focus on *why*
+   Record design decisions, alternatives considered, trade-offs — focus on _why_
    this approach was chosen. Format:
+
    ```
    <type>(<scope>): <summary>
 
@@ -115,10 +118,12 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    ```
 
 ### Session Start
+
 - Read `notes/ai-docs/_index.md` to understand project state and architecture.
 - Run `git log --oneline -10` to catch up on recent work.
 
 ### Dependency API Notes
+
 - **`notes/ai-docs/deps/<package>[v<ver>].md`** stores verified API facts for libraries
   whose actual API differs from training knowledge or is too new to be known.
 - **When to read:** Before writing code that uses a package listed in
@@ -130,6 +135,7 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
   the verified correct API so future sessions skip re-exploration.
 
 ### Context Window Discipline
+
 - Keep context small. Load only the module docs relevant to the current task.
 - Source code is the ground truth; docs supplement it.
 - When a module doc drifts from source, update the doc (or flag it).
