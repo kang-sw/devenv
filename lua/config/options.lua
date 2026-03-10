@@ -8,3 +8,6 @@ vim.opt.smoothscroll = false
 
 -- LazyVim이 spell을 켜는 것을 막기
 vim.opt.spelllang = { "en", "cjk" }
+
+vim.opt.relativenumber = false
+vim.opt.number = true
