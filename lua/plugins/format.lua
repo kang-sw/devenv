@@ -1,5 +1,13 @@
 return {
   {
+    "mfussenegger/nvim-lint",
+    opts = {
+      linters_by_ft = {
+        markdown = {}, -- markdownlint 비활성화
+      },
+    },
+  },
+  {
     "stevearc/conform.nvim",
     opts = function(_, opts)
       opts.formatters_by_ft = opts.formatters_by_ft or {}
