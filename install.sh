@@ -219,6 +219,12 @@ zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 
+# ── Word navigation & deletion (Ctrl+Arrow / Ctrl+Backspace / Ctrl+Delete) ──
+bindkey '^[[1;5C' forward-word           # Ctrl+Right
+bindkey '^[[1;5D' backward-word          # Ctrl+Left
+bindkey '^[^?'    backward-kill-word     # Ctrl+Backspace (via WezTerm: ESC+DEL)
+bindkey '^[[3;5~' kill-word              # Ctrl+Delete
+
 # ── fzf ──────────────────────────────────────────────────────────────────────
 export FZF_DEFAULT_OPTS="--height=40% --border -m --bind='ctrl-/:toggle-preview'"
 export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'

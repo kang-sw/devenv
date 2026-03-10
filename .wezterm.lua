@@ -166,6 +166,10 @@ config.keys = {
     }),
   },
 
+  -- ── 단어 단위 삭제 (Ctrl+Backspace / Ctrl+Delete) ──
+  { key = "Backspace", mods = "CTRL", action = act.SendString("\x1b\x7f") },  -- ESC+DEL → backward-kill-word
+  { key = "Delete",    mods = "CTRL", action = act.SendString("\x1b[3;5~") }, -- Ctrl+Del → kill-word
+
   -- ── 단어 단위 이동 (OPT/ALT + 좌우) ──────────────
   {
     key = "LeftArrow",
