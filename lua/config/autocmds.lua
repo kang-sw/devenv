@@ -8,47 +8,49 @@
 -- e.g. vim.api.nvim_del_augroup_by_name("lazyvim_wrap_spell")
 
 -- ------------------------------------------------------------
--- im-select: Insert 모드 진입/이탈 시 입력기 자동 전환
+-- im-select: Insert 모드 진입/이탈 시 입력기 자동 전환 (macOS 전용)
 -- ------------------------------------------------------------
-local last_im = "com.apple.keylayout.ABC"
-local english_im = "com.apple.keylayout.ABC"
+if vim.fn.has("mac") == 1 and vim.fn.executable("im-select") == 1 then
+  local last_im = "com.apple.keylayout.ABC"
+  local english_im = "com.apple.keylayout.ABC"
 
-local function get_im()
-  local handle = io.popen("im-select")
-  local result = handle:read("*a")
-  handle:close()
-  return result:gsub("%s+", "")
-end
+  local function get_im()
+    local handle = io.popen("im-select")
+    local result = handle:read("*a")
+    handle:close()
+    return result:gsub("%s+", "")
+  end
 
-local function set_im(im_id)
-  os.execute("im-select " .. im_id)
-end
+  local function set_im(im_id)
+    os.execute("im-select " .. im_id)
+  end
 
-vim.api.nvim_create_autocmd("InsertLeave", {
-  pattern = "*",
-  callback = function()
-    last_im = get_im()
-    if last_im ~= english_im then
+  vim.api.nvim_create_autocmd("InsertLeave", {
+    pattern = "*",
+    callback = function()
+      last_im = get_im()
+      if last_im ~= english_im then
+        set_im(english_im)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("InsertEnter", {
+    pattern = "*",
+    callback = function()
+      if last_im ~= get_im() then
+        set_im(last_im)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("TermLeave", {
+    pattern = "*",
+    callback = function()
       set_im(english_im)
-    end
-  end,
-})
-
-vim.api.nvim_create_autocmd("InsertEnter", {
-  pattern = "*",
-  callback = function()
-    if last_im ~= get_im() then
-      set_im(last_im)
-    end
-  end,
-})
-
-vim.api.nvim_create_autocmd("TermLeave", {
-  pattern = "*",
-  callback = function()
-    set_im(english_im)
-  end,
-})
+    end,
+  })
+end
 
 -- ------------------------------------------------------------
 -- // 주석에서 자동 주석 prefix 제거
