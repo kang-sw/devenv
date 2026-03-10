@@ -49,9 +49,9 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   fi
   SPLIT_1=""
   SPLIT_2=""
-  if [[ $AHEAD_BEHIND ]]; then SPLIT_1=" | "; fi
+  if [[ $AHEAD_BEHIND ]]; then SPLIT_1="| "; fi
   if [[ $GIT_IND ]]; then SPLIT_2="| "; fi
-  BRANCH="🌿 ${BRANCH_NAME}${SPLIT_1}${AHEAD_BEHIND}${SPLIT_2}${GIT_IND}"
+  BRANCH="🌿 ${BRANCH_NAME} ${SPLIT_1}${AHEAD_BEHIND}${SPLIT_2}${GIT_IND}"
 fi
 
 echo -e "${CYAN}[$MODEL]${RESET} 📁 ${DIR##*/}"
