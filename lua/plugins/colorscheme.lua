@@ -181,6 +181,11 @@ return {
 
           -- property:python → #01a2ff
           hl("@lsp.typemod.property.python", { fg = "#01a2ff" })
+
+          -- render-markdown: heading 배경을 배경보다 약간만 밝게 (시각적 노이즈 감소)
+          for i = 1, 6 do
+            hl("RenderMarkdownH" .. i .. "Bg", { bg = "#111111" })
+          end
         end,
       })
     end,

@@ -11,6 +11,12 @@ map("i", "<M-BS>", "<C-w>", { desc = "Delete word backward" })
 map("i", "<C-a>", "<Home>", { desc = "Move to line start" })
 map("i", "<C-e>", "<End>", { desc = "Move to line end" })
 
+-- vim-tmux-navigator: tmux에서 C-M-hjkl을 보내므로 모든 모드에서 매핑
+vim.keymap.set({ "n", "i", "t" }, "<C-M-h>", "<cmd>TmuxNavigateLeft<cr>", { desc = "Navigate left (vim/tmux)" })
+vim.keymap.set({ "n", "i", "t" }, "<C-M-j>", "<cmd>TmuxNavigateDown<cr>", { desc = "Navigate down (vim/tmux)" })
+vim.keymap.set({ "n", "i", "t" }, "<C-M-k>", "<cmd>TmuxNavigateUp<cr>", { desc = "Navigate up (vim/tmux)" })
+vim.keymap.set({ "n", "i", "t" }, "<C-M-l>", "<cmd>TmuxNavigateRight<cr>", { desc = "Navigate right (vim/tmux)" })
+
 -- tmux 스타일 스플릿
 vim.keymap.set("n", '<leader>"', "<cmd>split<CR>", { desc = "Horizontal split" })
 vim.keymap.set("n", "<leader>%", "<cmd>vsplit<CR>", { desc = "Vertical split" })
