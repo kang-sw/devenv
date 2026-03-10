@@ -34,8 +34,8 @@ Target: **[YYYY-MM milestone description].**
 
 ## Project Knowledge
 
-Project state, architecture, and source layout live in **`notes/ai-docs/_index.md`**.
-All files under `notes/ai-docs/` are AI-maintained; this is the primary cross-session
+Project state, architecture, and source layout live in **`ai-docs/_index.md`**.
+All files under `ai-docs/` are AI-maintained; this is the primary cross-session
 context store.
 
 **When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
@@ -46,13 +46,16 @@ public API. Update the specific section/doc, not everything.
 `### Result` entries, `MEMORY` sections, and inline code comments — must be in English,
 regardless of conversation language. Human-facing UI strings are exempt.
 
-**Tickets** (`notes/ai-docs/tickets/YYMMDD-<name>.md`) track substantial features.
-In-progress tickets use a `[wip]` suffix: `YYMMDD-<name>[wip].md`.
-Remove the `[wip]` marker when the ticket is complete.
-Phases that require non-trivial design before coding are marked **(plan mode)** — use the
-`EnterPlanMode` tool, explore + design, get user approval, then `ExitPlanMode` to implement.
-After completing a ticket phase, append a `### Result (<short-hash>)` subsection recording:
-what was implemented, deviations from the plan, and key findings for future phases.
+**Tickets** (`ai-docs/tickets/<status>/YYMMDD-<name>.md`) track substantial features.
+
+- In-progress tickets use a `[wip]` status: `ai-docs/tickets/wip/YYMMDD-<name>.md`.
+- Once ticket is finished, move ticket to `[done]` status -> `ai-docs/tickets/done/YYMMDD-<name>.md`.
+- Status is a per-project concept.
+  `e.g. tickets/todo, tickets/idea, tickets/stale, tickets/discard, etc`
+- Phases that require non-trivial design before coding are marked **(plan mode)** — use the
+  `EnterPlanMode` tool, explore + design, get user approval, then `ExitPlanMode` to implement.
+- After completing a ticket phase, append a `### Result (<short-hash>)` subsection recording:
+  what was implemented, deviations from the plan, and key findings for future phases.
 
 **MEMORY.md** (`~/.claude/projects/.../memory/MEMORY.md`) persists across sessions.
 Stores user-specific preferences only (communication style, workflow habits).
@@ -119,12 +122,12 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 
 ### Session Start
 
-- Read `notes/ai-docs/_index.md` to understand project state and architecture.
+- Read `ai-docs/_index.md` to understand project state and architecture.
 - Run `git log --oneline -10` to catch up on recent work.
 
 ### Dependency API Notes
 
-- **`notes/ai-docs/deps/<package>[v<ver>].md`** stores verified API facts for libraries
+- **`ai-docs/deps/<package>[v<ver>].md`** stores verified API facts for libraries
   whose actual API differs from training knowledge or is too new to be known.
 - **When to read:** Before writing code that uses a package listed in
   `# MEMORY → Documented Dependencies`. Also check on compile/type errors that look like
@@ -168,6 +171,6 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 
 ## Documented Dependencies
 
-<!-- Packages with verified API docs in notes/ai-docs/deps/. Read before using. -->
+<!-- Packages with verified API docs in ai-docs/deps/. Read before using. -->
 
 -
