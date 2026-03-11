@@ -54,33 +54,35 @@ large enough to warrant it.
 
 ## Step 2: Produce the delta document
 
-- **External dependency** — Before looking at Step 1 results, recall what you believe
-  the API looks like (mentally, not written to file). Then compare your expectations
-  against the actual API from Step 1. The output document records only the delta:
-  corrections (things you got wrong), additions (things you did not know), and
-  removals (API that no longer exists). Omit anything you already know correctly.
-- **Internal dependency** — No prior knowledge exists. Write a complete API summary
-  from the consumer's perspective: key types, functions, common usage patterns, and
-  important constraints. The goal is that a reader can use the library without
-  exploring its source code.
+First, assess: do you have prior knowledge of this dependency's API?
+
+- **Known** — Before looking at Step 1 results, recall what you believe the API looks
+  like (mentally, not written to file). Then compare your expectations against the
+  actual API from Step 1. The output document records only the delta: corrections
+  (things you got wrong), additions (things you did not know), and removals (API that
+  no longer exists). Omit anything you already know correctly.
+- **Unknown** — No prior knowledge exists. Write a complete API summary from the
+  consumer's perspective: key types, functions, common usage patterns, and important
+  constraints. The goal is that a reader can use the library without exploring its
+  source code.
 
 ## Step 3: Write the document
 
 Save to `ai-docs/deps/` using the filename convention from Principles:
-- External: `<name>[v<version>/<model>].md`
-- Internal: `<name>[v<version>].md`
+- Known: `<name>[v<version>/<model>].md`
+- Unknown: `<name>[v<version>].md`
 
 Example filenames:
-- `ai-docs/deps/hecs[v0.11.0/opus-4.6].md` — external, delta for Opus 4.6
-- `ai-docs/deps/libgame[v0.1.0].md` — internal, full API summary
+- `ai-docs/deps/hecs[v0.11.0/opus-4.6].md` — known, delta for Opus 4.6
+- `ai-docs/deps/libgame[v0.1.0].md` — unknown, full API summary
 
 ## Step 4: Update CLAUDE.md
 
 Add or update the entry in `# MEMORY → Documented Dependencies`:
 
 ```
-- <name> [v<version>/<model>]    ← external (delta)
-- <name> [v<version>]            ← internal (full summary)
+- <name> [v<version>/<model>]    ← known (delta)
+- <name> [v<version>]            ← unknown (full summary)
 ```
 
 ## Step 5: Summary
