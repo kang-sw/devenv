@@ -70,6 +70,9 @@ If the project has a build step relevant to your changes, run it too.
 - [ ] Update `ai-docs/_index.md` if project capabilities changed
 - [ ] If this change altered a module's public interface or added/removed a module,
       update the corresponding `ai-docs/mental-model/` document
+- [ ] If you discovered dependency API drift during implementation, document it in
+      `ai-docs/deps/<name>[v<version>/<model>].md` and update `# MEMORY → Documented
+      Dependencies`
 - [ ] Update `# MEMORY` section in `CLAUDE.md` (what was done, what's next)
 - [ ] If completing a ticket phase, append `### Result` to the ticket doc
 - [ ] Prune aggressively — keep docs focused on current state
