@@ -16,19 +16,23 @@ Target: $ARGUMENTS
 
 ## Step 1: Task List (MANDATORY — do this before writing ANY code)
 
+For non-trivial changes, state assumptions and define success criteria before starting.
+
 Create a task list using `TaskCreate`. Break the work into concrete steps:
+
 - Each implementation unit as a separate task
 - Testing task(s)
 - Documentation update task
 - Commit task
 
 Example:
+
 ```
 TaskCreate: "Implement read_task_results tool handler"
 TaskCreate: "Implement edit_task_graph tool handler"
 TaskCreate: "Add tests for new tools"
 TaskCreate: "Run full test suite"
-TaskCreate: "Update _index.md + ticket Result"
+TaskCreate: "Update _index.md + ticket Result + affected mental models"
 TaskCreate: "Commit with AI Context"
 ```
 
@@ -38,25 +42,26 @@ TaskCreate: "Commit with AI Context"
 ## Step 2: Implement
 
 For each task:
+
 1. Set task to `in_progress`
 2. Write code — follow CLAUDE.md Code Standards (simplicity, surgical changes)
-3. Write tests alongside non-trivial logic
+3. Write tests alongside non-trivial pure logic (math, protocol, state machines).
+   When tests fail, first diagnose whether the **test assumptions** or the
+   **implementation logic** is wrong — don't blindly fix the implementation to match
+   a bad test.
+   For user-interactive features (UI, visual output), request manual testing instead.
 4. Set task to `completed`
 
 **Approval protocol:**
+
 - Auto-proceed: bug fixes, pattern-following additions, tests, refactoring
 - Ask first: new components/protocols, architectural changes, cross-module interfaces
 - Always ask: deleting functionality, changing API semantics, schema changes
 
 ## Step 3: Verify
 
-Run the relevant test suite(s). ALL must pass before proceeding.
-
-```bash
-cd backend && poetry run python -m pytest tests/ -v
-cd node_server && poetry run python -m pytest tests/ -v
-cd frontend && npx tsc --noEmit
-```
+Run the project's test suite(s) — check `# MEMORY → Build & Workflow` in
+CLAUDE.md for the correct commands. ALL must pass before proceeding.
 
 If the project has a build step relevant to your changes, run it too.
 
@@ -70,6 +75,7 @@ If the project has a build step relevant to your changes, run it too.
 ## Step 5: Commit
 
 Commit message format:
+
 ```
 <type>(<scope>): <summary>
 
