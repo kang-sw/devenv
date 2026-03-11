@@ -6,7 +6,7 @@ argument-hint: [ticket-path or description]
 
 # Implementation Workflow
 
-Target: Implement $ARGUMENTS
+Steps to implement: $ARGUMENTS
 
 ## Step 0: Understand (MANDATORY — do this before anything else)
 
