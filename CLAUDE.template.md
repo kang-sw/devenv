@@ -77,7 +77,7 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
    and data locality over convenience abstractions. Apply only when benefit clearly
    outweighs complexity cost.
 
-## Workflow — AI-Driven Implementation
+## Workflow
 
 ### Approval Protocol
 
@@ -88,37 +88,20 @@ Project-specific memory (build memos, recent context, workspace ref) lives in th
 - **Always ask**: Deleting existing functionality, changing protocol/API semantics,
   modifying persistence schema.
 
-### Implementation Process
+### Commit Rules
 
-1. **Clarify & plan.** For non-trivial changes, state assumptions and define success
-   criteria before starting. Break the work into brief steps via `TaskCreate` —
-   implementation, docs, and commit. Check them off as you progress.
-2. **Implement & test.** Write and run unit tests alongside non-trivial pure logic (math,
-   protocol, ECS, state machines). When tests fail, first diagnose whether the **test
-   assumptions** or the **implementation logic** is wrong — don't blindly fix the
-   implementation to match a bad test.
-   For user-interactive features (UI, visual output), request manual testing instead.
-3. **Verify.** Run the full test suite and integration test harness. If the project
-   has a build or asset-import step, run it after editing relevant files to catch
-   errors early. All checks must pass before committing.
-4. **Update docs.** After non-trivial tasks:
-   - Update `_index.md` Operational State if project capabilities changed.
-   - Update `# MEMORY` section in this file (what was done, what's next).
-   - If completing a ticket phase, append `### Result` to that phase in the ticket doc.
-   - Prune aggressively: keep both documents focused on current state.
-5. **Commit.** Auto-create git commits broken down by logical units.
-   Commit messages must include an **AI context** section after the change summary.
-   Record design decisions, alternatives considered, trade-offs — focus on _why_
-   this approach was chosen. Format:
+Auto-create git commits broken down by logical units.
+Commit messages must include an **AI context** section recording design decisions,
+alternatives considered, and trade-offs — focus on _why_ this approach was chosen.
 
-   ```
-   <type>(<scope>): <summary>
+```
+<type>(<scope>): <summary>
 
-   <what changed — brief>
+<what changed — brief>
 
-   ## AI Context
-   - <decision rationale, rejected alternatives, user directives, etc.>
-   ```
+## AI Context
+- <decision rationale, rejected alternatives, user directives, etc.>
+```
 
 ### Session Start
 

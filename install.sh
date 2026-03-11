@@ -357,6 +357,14 @@ link "$REPO_DIR/.vscode-neovim.lua" "$HOME/.vscode-neovim.lua"
 link "$REPO_DIR/starship.toml"      "$HOME/.config/starship.toml"
 # NOTE: ~/.config/nvim is this repo itself — no symlink needed
 
+# Claude Code skills — link each skill folder individually
+mkdir -p "$HOME/.claude/skills"
+for skill_dir in "$REPO_DIR/claude-skills"/*/; do
+    [ -d "$skill_dir" ] || continue
+    skill_name="$(basename "$skill_dir")"
+    link "$skill_dir" "$HOME/.claude/skills/$skill_name"
+done
+
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
