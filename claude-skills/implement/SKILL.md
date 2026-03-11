@@ -12,7 +12,10 @@ Steps to implement: $ARGUMENTS
 
 1. Read the ticket/description provided above.
 2. Read `ai-docs/_index.md` for current project state.
-3. Run `git log --oneline -10` to see recent work.
+3. Read relevant `ai-docs/mental-model/` domain document(s) — these contain modification
+   patterns, module contracts, coupling maps, and extension points. Check `overview.md`
+   if unsure which domain applies.
+4. Run `git log --oneline -10` to see recent work.
 
 ## Step 1: Task List (MANDATORY — do this before writing ANY code)
 
@@ -68,8 +71,8 @@ If the project has a build step relevant to your changes, run it too.
 ## Step 4: Update Docs (MANDATORY — do not skip)
 
 - [ ] Update `ai-docs/_index.md` if project capabilities changed
-- [ ] If this change altered a module's public interface or added/removed a module,
-      update the corresponding `ai-docs/mental-model/` document
+- [ ] If this change altered modification patterns, module contracts, coupling, or
+      extension points in a domain, update the relevant `ai-docs/mental-model/` document
 - [ ] If you discovered dependency API drift during implementation, document it in
       `ai-docs/deps/<name>[v<version>/<model>].md` and update `# MEMORY → Documented
       Dependencies`
