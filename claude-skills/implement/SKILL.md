@@ -6,7 +6,7 @@ argument-hint: [ticket-path or description]
 
 # Implementation Workflow
 
-Steps to implement: $ARGUMENTS
+Target: $ARGUMENTS
 
 ## Plan Mode Protocol
 
@@ -19,7 +19,7 @@ cleared and the executor only sees the plan text — not this skill file.
 ~~~markdown
 ## Execution Protocol (follow strictly)
 
-> Source: @claude-skills/implement/SKILL.md — do NOT skip these steps.
+> Source: @.claude/skills/implement/SKILL.md — do NOT skip these steps.
 
 1. **Task tracking**: Before writing any code, create tasks with `TaskCreate` for
    each implementation unit, testing, doc updates, and commit. Track progress with
