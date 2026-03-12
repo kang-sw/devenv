@@ -27,15 +27,15 @@ local function navigate_lr(dir, wincmd, pane_at, window_cmd)
     -- vim 안에서 더 갈 곳 없음 → tmux에 위임
     local at_edge = vim.fn.system("tmux display-message -p '#{" .. pane_at .. "}'"):gsub("%s+", "")
     if at_edge == "1" then
-      vim.fn.system("tmux " .. window_cmd)
+      vim.fn.system(vim.fn.expand("~/.config/nvim/scripts/tmux-cross-window.sh") .. " " .. window_cmd)
     else
       vim.fn.system("tmux select-pane -" .. dir)
     end
   end
 end
 
-vim.keymap.set({ "n", "i", "t" }, "<C-M-h>", navigate_lr("L", "h", "pane_at_left", "previous-window"), { desc = "Navigate left (vim/tmux/window)" })
-vim.keymap.set({ "n", "i", "t" }, "<C-M-l>", navigate_lr("R", "l", "pane_at_right", "next-window"), { desc = "Navigate right (vim/tmux/window)" })
+vim.keymap.set({ "n", "i", "t" }, "<C-M-h>", navigate_lr("L", "h", "pane_at_left", "right"), { desc = "Navigate left (vim/tmux/window)" })
+vim.keymap.set({ "n", "i", "t" }, "<C-M-l>", navigate_lr("R", "l", "pane_at_right", "left"), { desc = "Navigate right (vim/tmux/window)" })
 
 -- tmux 스타일 스플릿
 vim.keymap.set("n", '<leader>"', "<cmd>split<CR>", { desc = "Horizontal split" })
