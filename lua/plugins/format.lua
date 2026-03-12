@@ -1,5 +1,25 @@
 return {
   {
+    "neovim/nvim-lspconfig",
+    opts = {
+      setup = {
+        marksman = function(_, opts)
+          opts.handlers = opts.handlers or {}
+          local orig = vim.lsp.handlers["textDocument/publishDiagnostics"]
+          opts.handlers["textDocument/publishDiagnostics"] = function(err, result, ctx, config)
+            if result and result.diagnostics then
+              result.diagnostics = vim.tbl_filter(function(d)
+                return not (d.message and d.message:find("non%-existent"))
+              end, result.diagnostics)
+            end
+            return orig(err, result, ctx, config)
+          end
+          return false
+        end,
+      },
+    },
+  },
+  {
     "mfussenegger/nvim-lint",
     opts = {
       linters_by_ft = {
