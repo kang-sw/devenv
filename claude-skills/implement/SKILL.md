@@ -29,6 +29,8 @@ When invoked in plan mode, the plan must be self-contained. Embed this block
 5. **Doc updates**:
    - `ai-docs/_index.md` if capabilities changed
    - Mental-model updates: delegate to the **mental-model-updater** agent in background
+   - Dependency API drift: delegate to the **document-dependency** agent in background
+     with usage context. Update `# MEMORY → Documented Dependencies` after completion.
    - `# MEMORY` section in `CLAUDE.md`
    - Append `### Result` to ticket doc if completing a phase
 6. **Commit format**: `<type>(<scope>): <summary>` + body + `## AI Context` block.
@@ -82,8 +84,10 @@ If the project has a relevant build step, run it too.
 - [ ] **Mental model update**: Launch the **mental-model-updater** agent in
       background with the implementation summary and base commit. Continue with
       remaining doc updates; wait for it before Step 5.
-- [ ] Dependency API drift discovered? Document in `ai-docs/deps/` and update
-      `# MEMORY → Documented Dependencies`
+- [ ] **Dependency API drift**: Launch the **document-dependency** agent in
+      background with the dependency name/version, source paths, and project
+      usage grep results. Continue with remaining doc updates. After it
+      completes, update `# MEMORY → Documented Dependencies` in CLAUDE.md.
 - [ ] Update `# MEMORY` section in `CLAUDE.md`
 - [ ] If completing a ticket phase, append `### Result` to the ticket doc
 - [ ] Prune aggressively — keep docs focused on current state
