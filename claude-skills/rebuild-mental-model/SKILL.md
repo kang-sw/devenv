@@ -59,7 +59,6 @@ make changes without re-exploring the entire codebase.
 Each domain document follows this structure:
 
 ```markdown
-<!-- verified: <short-hash> (<YYYY-MM-DD>) -->
 # [Domain Name]
 
 ## Overview
@@ -112,12 +111,10 @@ Omit sections that have nothing meaningful to say. Never pad with obvious conten
 ## Step 0: Determine dirty scope
 
 1. Check whether `ai-docs/mental-model/` already exists.
-   - **Exists →** Read the `<!-- verified: <hash> (<date>) -->` watermark from each
-     domain document. For documents with a watermark, use that commit as the diff base.
-     For documents without one, fall back to
-     `git log -1 --format="%H" -- ai-docs/mental-model/`. Collect changed source files
-     via `git diff --name-only <base> HEAD`. Map changed files to affected domains —
-     a single changed file may dirty multiple domains.
+   - **Exists →** Find the last commit that touched each domain document via
+     `git log -1 --format="%H" -- ai-docs/mental-model/<file>`. Collect changed source
+     files via `git diff --name-only <base> HEAD`. Map changed files to affected
+     domains — a single changed file may dirty multiple domains.
    - **Does not exist →** Full rebuild.
 2. If `$ARGUMENTS` names a specific domain, only rebuild that domain (but still
    check cross-domain coupling — if domain A references patterns from domain B
@@ -159,19 +156,13 @@ Using subagent analyses, create or update documents under `ai-docs/mental-model/
   §[Section] for how this connects").
 - Tag recipes for not-yet-implemented features as **(planned)**.
 
-## Step 3: Verify & watermark (subagent-delegated)
+## Step 3: Verify (subagent-delegated)
 
-After writing/updating documents, dispatch one **verifier subagent** per updated
-domain. The verifier cross-checks the written document against actual source and
-recent git history, then reports corrections.
-
-### Verifier subagent prompt
-
-Read the prompt from `verifier-agent.md` in this skill's directory. Each verifier
-subagent receives that prompt plus:
+After writing/updating documents, dispatch one **mental-model-verifier** agent per
+updated domain. Provide it:
 - The full content of the mental-model document to verify
 - The output of `git log --oneline --stat` for files relevant to this domain
-  (from the previous watermark commit to HEAD, or last 30 commits if no watermark)
+  (last 30 commits or since the document was last updated)
 
 ### Processing verifier output
 
@@ -179,14 +170,6 @@ subagent receives that prompt plus:
 - **[LOW]** items: add if clearly relevant; otherwise collect for Step 5 summary.
 - **[STALE]** items: rewrite the recipe to reflect current implementation, or remove
   if the recipe is now covered by a non-planned pattern.
-
-### Watermark
-
-After corrections are applied, set (or update) the watermark at the top of each
-verified document:
-```html
-<!-- verified: <short-hash> (<YYYY-MM-DD>) -->
-```
 
 ## Step 4: Update overview.md and _index.md
 

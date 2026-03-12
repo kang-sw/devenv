@@ -365,6 +365,9 @@ for skill_dir in "$REPO_DIR/claude-skills"/*/; do
     link "$skill_dir" "$HOME/.claude/skills/$skill_name"
 done
 
+# Claude Code agents
+link "$REPO_DIR/claude-agents" "$HOME/.claude/agents"
+
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
