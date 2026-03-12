@@ -23,6 +23,7 @@ They ARE:
 - **Module contracts**: implicit invariants not enforced by the type system
 - **Coupling maps**: which changes propagate where, and through what mechanism
 - **Extension points**: where the code is designed to grow, and the protocol for extending
+- **Common mistakes**: silent-failure footguns when modifying the domain
 - **Technical debt**: known limitations, fragile areas, silent failure modes
 
 The goal: a new session can load a domain document and immediately know how to
@@ -46,6 +47,10 @@ make changes without re-exploring the entire codebase.
   Domain boundaries are project-specific. Determine them from the source — don't
   force a fixed list. A game project might have `combat.md`, `inventory.md`; a web
   app might have `auth.md`, `billing.md`, `api-gateway.md`.
+- **Right-sized documents.** A domain document that grows past ~200 lines or mixes
+  concerns a developer would rarely need together is a candidate for splitting.
+  Conversely, thin documents that are always read together can be merged. Optimize
+  for the reader's working set.
 - **Incremental by default.** Only rebuild domains affected by changed files, unless
   a full rebuild is explicitly requested.
 
@@ -54,6 +59,7 @@ make changes without re-exploring the entire codebase.
 Each domain document follows this structure:
 
 ```markdown
+<!-- verified: <short-hash> (<YYYY-MM-DD>) -->
 # [Domain Name]
 
 ## Overview
@@ -68,6 +74,10 @@ Concrete recipes for common change scenarios:
 - **Add a new [X]**: file A (do Y) → file B (do Z) → ...
 - **Change [behavior]**: primary logic at [location], ripple effects to [locations]
 Each recipe cites an existing pattern to follow (e.g., "follow how FooHandler is registered").
+
+Mark recipes for features that don't exist yet as **(planned)** — these are
+forward-looking guidance that should be revisited when the feature lands or
+the design changes.
 
 ## Module Contracts
 Implicit invariants and assumptions between modules:
@@ -86,6 +96,11 @@ Where the code is designed to accept new things:
 - [Registry/enum/interface/plugin system]: protocol for adding new entries
 - Constraints: fixed-size arrays, hardcoded limits, sealed types
 
+## Common Mistakes
+Concrete "don't forget" warnings for frequent modification scenarios:
+- "When adding [X], forgetting [Y] → [silent failure / crash / data corruption]"
+Focus on mistakes that fail silently — compiler-caught omissions need no documentation.
+
 ## Technical Debt
 Known limitations and fragile areas:
 - [Issue]: current state, impact, possible improvement
@@ -97,10 +112,12 @@ Omit sections that have nothing meaningful to say. Never pad with obvious conten
 ## Step 0: Determine dirty scope
 
 1. Check whether `ai-docs/mental-model/` already exists.
-   - **Exists →** Find the last-committed date of mental-model documents
-     (`git log -1 --format="%aI" -- ai-docs/mental-model/`). Collect source files
-     changed since that date (`git diff --name-only <commit> HEAD`). Map changed
-     files to affected domains — a single changed file may dirty multiple domains.
+   - **Exists →** Read the `<!-- verified: <hash> (<date>) -->` watermark from each
+     domain document. For documents with a watermark, use that commit as the diff base.
+     For documents without one, fall back to
+     `git log -1 --format="%H" -- ai-docs/mental-model/`. Collect changed source files
+     via `git diff --name-only <base> HEAD`. Map changed files to affected domains —
+     a single changed file may dirty multiple domains.
    - **Does not exist →** Full rebuild.
 2. If `$ARGUMENTS` names a specific domain, only rebuild that domain (but still
    check cross-domain coupling — if domain A references patterns from domain B
@@ -111,7 +128,7 @@ Omit sections that have nothing meaningful to say. Never pad with obvious conten
 
 Dispatch one subagent per dirty domain. Each subagent receives:
 - The list of relevant source files for that domain
-- The analysis directive (NOT "list types and functions" but rather):
+- The analysis directive — focus on operational knowledge, not API listings:
 
 > Analyze this domain for a developer who needs to modify it.
 > For each relevant source file:
@@ -120,6 +137,10 @@ Dispatch one subagent per dirty domain. Each subagent receives:
 > 3. What coupling exists? (changes here → must also change there)
 > 4. Where are the extension points? (registries, enums, plugin interfaces, config)
 > 5. What is fragile? (invariants that break silently, known debt)
+> 6. What common mistakes would a developer make? (forgetting a required step,
+>    changes that fail silently, easy-to-miss propagation sites)
+> 7. Distinguish patterns that exist in the code today from scaffolded/planned features.
+>    Mark planned features clearly.
 > Be concrete: cite file paths, function names, specific types.
 
 Run subagents in parallel. The number and grouping of agents is a judgment call —
@@ -136,8 +157,38 @@ Using subagent analyses, create or update documents under `ai-docs/mental-model/
   in init()" is better than "add entries to the registry."
 - Cross-reference other domain docs when relevant (e.g., "see [other-domain].md
   §[Section] for how this connects").
+- Tag recipes for not-yet-implemented features as **(planned)**.
 
-## Step 3: Update overview.md and _index.md
+## Step 3: Verify & watermark (subagent-delegated)
+
+After writing/updating documents, dispatch one **verifier subagent** per updated
+domain. The verifier cross-checks the written document against actual source and
+recent git history, then reports corrections.
+
+### Verifier subagent prompt
+
+Read the prompt from `verifier-agent.md` in this skill's directory. Each verifier
+subagent receives that prompt plus:
+- The full content of the mental-model document to verify
+- The output of `git log --oneline --stat` for files relevant to this domain
+  (from the previous watermark commit to HEAD, or last 30 commits if no watermark)
+
+### Processing verifier output
+
+- **[HIGH]** corrections: apply directly to the document.
+- **[LOW]** items: add if clearly relevant; otherwise collect for Step 5 summary.
+- **[STALE]** items: rewrite the recipe to reflect current implementation, or remove
+  if the recipe is now covered by a non-planned pattern.
+
+### Watermark
+
+After corrections are applied, set (or update) the watermark at the top of each
+verified document:
+```html
+<!-- verified: <short-hash> (<YYYY-MM-DD>) -->
+```
+
+## Step 4: Update overview.md and _index.md
 
 **overview.md**: Project-wide concerns that don't belong to a single domain:
 - Package/module dependency graph
@@ -146,9 +197,9 @@ Using subagent analyses, create or update documents under `ai-docs/mental-model/
 
 **_index.md**: Update the documentation reference section and operational state if needed.
 
-## Step 4: Summary
+## Step 5: Summary
 
 Print for the user:
 - Dirty scope: which domains were rebuilt and why
 - Documents created / updated / removed
-- Confidence notes: areas where the analysis may be incomplete — flag for manual review
+- Verifier results: corrections applied, low-confidence items and incomplete areas for manual review

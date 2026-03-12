@@ -14,31 +14,8 @@ When this skill is invoked in plan mode (or when asked to create a plan before
 implementing), the plan **MUST be self-contained**. After plan approval, context is
 cleared and the executor only sees the plan text — not this skill file.
 
-**Embed the following block verbatim at the top of every plan you produce:**
-
-~~~markdown
-## Execution Protocol (follow strictly)
-
-> Source: @.claude/skills/implement/SKILL.md — do NOT skip these steps.
-
-1. **Task tracking**: Before writing any code, create tasks with `TaskCreate` for
-   each implementation unit, testing, doc updates, and commit. Track progress with
-   `TaskUpdate` (`in_progress` → `completed`).
-2. **Understand first**: Read `ai-docs/_index.md` and relevant
-   `ai-docs/mental-model/` domain docs before coding.
-3. **Code standards**: Follow CLAUDE.md Code Standards (simplicity, surgical changes).
-4. **Testing**: Run the project test suite after implementation
-   (see CLAUDE.md `# MEMORY → Build & Workflow`). All tests must pass.
-5. **Doc updates (MANDATORY — do not skip)**:
-   - `ai-docs/_index.md` if capabilities changed
-   - `ai-docs/mental-model/` if modification patterns, contracts, or coupling changed
-   - `# MEMORY` section in `CLAUDE.md`
-   - Append `### Result` to ticket doc if completing a phase
-6. **Commit format**: `<type>(<scope>): <summary>` + body + `## AI Context` block.
-   Include doc changes in the commit.
-~~~
-
-Do NOT paraphrase or abbreviate this block — copy it as-is into the plan.
+Read `plan-header.md` in this skill's directory and embed its content **verbatim**
+at the top of the plan. Do NOT paraphrase or abbreviate — copy as-is.
 
 ## Step 0: Understand (MANDATORY — do this before anything else)
 
@@ -67,7 +44,7 @@ TaskCreate: "Implement read_task_results tool handler"
 TaskCreate: "Implement edit_task_graph tool handler"
 TaskCreate: "Add tests for new tools"
 TaskCreate: "Run full test suite"
-TaskCreate: "Update _index.md + ticket Result + affected mental models"
+TaskCreate: "Update docs + delegate mental-model update to subagent"
 TaskCreate: "Commit with AI Context"
 ```
 
@@ -84,7 +61,7 @@ For each task:
    When tests fail, first diagnose whether the **test assumptions** or the
    **implementation logic** is wrong — don't blindly fix the implementation to match
    a bad test.
-   For user-interactive features (UI, visual output), request manual testing instead.
+   For user-interactive features (UI, visual output), flag for manual verification.
 4. Set task to `completed`
 
 **Approval protocol:**
@@ -103,8 +80,10 @@ If the project has a build step relevant to your changes, run it too.
 ## Step 4: Update Docs (MANDATORY — do not skip)
 
 - [ ] Update `ai-docs/_index.md` if project capabilities changed
-- [ ] If this change altered modification patterns, module contracts, coupling, or
-      extension points in a domain, update the relevant `ai-docs/mental-model/` document
+- [ ] **Mental model update (subagent-delegated)**: Spawn a background subagent using
+      the prompt in `mental-model-update-agent.md` (this skill's directory). Provide it
+      the implementation summary and the base commit from before your changes. Continue
+      with the remaining doc updates while it runs. Wait for it to complete before Step 5.
 - [ ] If you discovered dependency API drift during implementation, document it in
       `ai-docs/deps/<name>[v<version>/<model>].md` and update `# MEMORY → Documented
       Dependencies`
