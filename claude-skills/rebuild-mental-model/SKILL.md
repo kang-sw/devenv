@@ -10,53 +10,36 @@ Target: $ARGUMENTS
 
 ## What Mental Model Documents Are
 
-Mental-model documents capture **operational knowledge for modifying the codebase** —
-the kind of understanding a developer builds after working with the code for weeks.
+Mental-model documents capture **operational knowledge for modifying the codebase**.
 
-They are NOT:
-- API references (auto-generated docs, IDE navigation, or source reading handle this)
-- Type/function/class listings
-- Module-tree mirrors
+They are NOT API references or type listings.
 
 They ARE:
 - **Modification patterns**: "to add X, modify files A → B → C in this order"
 - **Module contracts**: implicit invariants not enforced by the type system
-- **Coupling maps**: which changes propagate where, and through what mechanism
-- **Extension points**: where the code is designed to grow, and the protocol for extending
-- **Common mistakes**: silent-failure footguns when modifying the domain
-- **Technical debt**: known limitations, fragile areas, silent failure modes
+- **Coupling maps**: which changes propagate where
+- **Extension points**: where the code is designed to grow
+- **Common mistakes**: silent-failure footguns
+- **Technical debt**: known limitations, fragile areas
 
-The goal: a new session can load a domain document and immediately know how to
-make changes without re-exploring the entire codebase.
+## Constraints
 
-## Principles
-
-- **Do not read source directly.** Delegate all source exploration to subagents.
-  Read source yourself only when a subagent summary is clearly insufficient.
-  This keeps the main context window small.
-- **Domain-oriented documents.** Each document covers a cross-cutting system/concern,
-  not a source module or package. A single document may reference files across multiple
-  packages/crates/modules. The directory is flat (no nesting):
+- **No direct source reading.** Delegate to subagents. Read source yourself only
+  when a subagent summary is clearly insufficient.
+- **Domain-oriented documents.** Each covers a cross-cutting concern, not a source
+  module. The directory is flat:
   ```
   ai-docs/mental-model/
-    overview.md          ← project-wide: package graph, shared patterns, cross-domain concerns
-    <domain-a>.md        ← e.g., auth, networking, data-pipeline, rendering, ...
+    overview.md          ← project-wide: package graph, shared patterns
+    <domain-a>.md
     <domain-b>.md
-    ...
   ```
-  Domain boundaries are project-specific. Determine them from the source — don't
-  force a fixed list. A game project might have `combat.md`, `inventory.md`; a web
-  app might have `auth.md`, `billing.md`, `api-gateway.md`.
-- **Right-sized documents.** A domain document that grows past ~200 lines or mixes
-  concerns a developer would rarely need together is a candidate for splitting.
-  Conversely, thin documents that are always read together can be merged. Optimize
-  for the reader's working set.
-- **Incremental by default.** Only rebuild domains affected by changed files, unless
-  a full rebuild is explicitly requested.
+- **Right-sized.** Split documents past ~200 lines or mixing unrelated concerns.
+  Merge thin documents always read together.
+- **Incremental by default.** Only rebuild affected domains unless full rebuild
+  is requested.
 
 ## Document Format
-
-Each domain document follows this structure:
 
 ```markdown
 # [Domain Name]
@@ -65,124 +48,94 @@ Each domain document follows this structure:
 One paragraph: what this domain covers, where it sits in the system.
 
 ## Relevant Source Files
-Table of key files with one-line role description. Helps the reader
-know where to look for details beyond what's captured here.
+Table of key files with one-line role description.
 
 ## Modification Patterns
-Concrete recipes for common change scenarios:
 - **Add a new [X]**: file A (do Y) → file B (do Z) → ...
 - **Change [behavior]**: primary logic at [location], ripple effects to [locations]
-Each recipe cites an existing pattern to follow (e.g., "follow how FooHandler is registered").
-
-Mark recipes for features that don't exist yet as **(planned)** — these are
-forward-looking guidance that should be revisited when the feature lands or
-the design changes.
+Mark recipes for unimplemented features as **(planned)**.
 
 ## Module Contracts
-Implicit invariants and assumptions between modules:
-- "[A] guarantees [X] to [B]" — enforced by [mechanism] / NOT enforced (convention only)
-- Data flow ordering assumptions
-- Serialization compatibility rules
+- "[A] guarantees [X] to [B]" — enforced by [mechanism] / convention only
 
 ## Coupling
-Which changes propagate where:
 - A ↔ B: bidirectional through [mechanism]
-- C → D: one-way, D is safe to modify independently
-Focus on non-obvious coupling — skip obvious import dependencies.
+Focus on non-obvious coupling.
 
 ## Extension Points
-Where the code is designed to accept new things:
-- [Registry/enum/interface/plugin system]: protocol for adding new entries
-- Constraints: fixed-size arrays, hardcoded limits, sealed types
+- [Registry/enum/interface]: protocol for adding new entries
 
 ## Common Mistakes
-Concrete "don't forget" warnings for frequent modification scenarios:
-- "When adding [X], forgetting [Y] → [silent failure / crash / data corruption]"
-Focus on mistakes that fail silently — compiler-caught omissions need no documentation.
+- "When adding [X], forgetting [Y] → [silent failure]"
+Focus on mistakes that fail silently.
 
 ## Technical Debt
-Known limitations and fragile areas:
 - [Issue]: current state, impact, possible improvement
-- [Fragile invariant]: what breaks if violated, how to avoid
 ```
 
-Omit sections that have nothing meaningful to say. Never pad with obvious content.
+Omit empty sections.
 
 ## Step 0: Determine dirty scope
 
-1. Check whether `ai-docs/mental-model/` already exists.
+1. Check whether `ai-docs/mental-model/` exists.
    - **Exists →** Find the last commit that touched each domain document via
-     `git log -1 --format="%H" -- ai-docs/mental-model/<file>`. Collect changed source
-     files via `git diff --name-only <base> HEAD`. Map changed files to affected
-     domains — a single changed file may dirty multiple domains.
+     `git log -1 --format="%H" -- ai-docs/mental-model/<file>`. Collect changed
+     source files via `git diff --name-only <base> HEAD`. Map changed files to
+     affected domains.
    - **Does not exist →** Full rebuild.
-2. If `$ARGUMENTS` names a specific domain, only rebuild that domain (but still
-   check cross-domain coupling — if domain A references patterns from domain B
-   that changed, flag it).
-3. If `$ARGUMENTS` contains special instructions, carry them forward.
+2. If `$ARGUMENTS` names a specific domain, only rebuild that domain (check
+   cross-domain coupling too).
+3. Carry forward any special instructions from `$ARGUMENTS`.
 
 ## Step 1: Explore source (subagent-delegated)
 
-Dispatch one subagent per dirty domain. Each subagent receives:
-- The list of relevant source files for that domain
-- The analysis directive — focus on operational knowledge, not API listings:
+Dispatch one subagent per dirty domain with:
+- The list of relevant source files
+- This analysis directive:
 
 > Analyze this domain for a developer who needs to modify it.
 > For each relevant source file:
-> 1. What modification patterns exist? (common change scenarios and their file-by-file path)
-> 2. What implicit contracts exist between modules? (ordering, data flow, sync obligations)
-> 3. What coupling exists? (changes here → must also change there)
-> 4. Where are the extension points? (registries, enums, plugin interfaces, config)
-> 5. What is fragile? (invariants that break silently, known debt)
-> 6. What common mistakes would a developer make? (forgetting a required step,
->    changes that fail silently, easy-to-miss propagation sites)
-> 7. Distinguish patterns that exist in the code today from scaffolded/planned features.
->    Mark planned features clearly.
+> 1. Modification patterns (common change scenarios, file-by-file path)
+> 2. Implicit contracts between modules (ordering, data flow, sync)
+> 3. Coupling (changes here → must also change there)
+> 4. Extension points (registries, enums, plugin interfaces, config)
+> 5. Fragile areas (invariants that break silently, known debt)
+> 6. Common mistakes (forgetting required steps, silent failures)
+> 7. Distinguish existing patterns from scaffolded/planned features.
 > Be concrete: cite file paths, function names, specific types.
 
-Run subagents in parallel. The number and grouping of agents is a judgment call —
-optimize for thorough coverage while keeping the main context window small.
+Run subagents in parallel.
 
-## Step 2: Write / update mental-model documents
+## Step 2: Write / update documents
 
-Using subagent analyses, create or update documents under `ai-docs/mental-model/`.
-
+Using subagent analyses, create or update `ai-docs/mental-model/` documents:
 - Follow the document format above.
 - Every claim should be traceable to a specific file/function.
-- If a domain no longer exists, remove its document. When uncertain, flag for the user.
-- Prefer concrete examples over abstract descriptions. "Follow how X is registered
-  in init()" is better than "add entries to the registry."
-- Cross-reference other domain docs when relevant (e.g., "see [other-domain].md
-  §[Section] for how this connects").
-- Tag recipes for not-yet-implemented features as **(planned)**.
+- Remove documents for domains that no longer exist.
+- Prefer concrete examples over abstract descriptions.
+- Cross-reference other domain docs when relevant.
+- Tag unimplemented features as **(planned)**.
 
 ## Step 3: Verify (subagent-delegated)
 
-After writing/updating documents, dispatch one **mental-model-verifier** agent per
-updated domain. Provide it:
-- The full content of the mental-model document to verify
-- The output of `git log --oneline --stat` for files relevant to this domain
-  (last 30 commits or since the document was last updated)
+Dispatch one **mental-model-verifier** agent per updated domain with:
+- The full content of the document to verify
+- `git log --oneline --stat` for relevant files (last 30 commits or since last update)
 
-### Processing verifier output
-
-- **[HIGH]** corrections: apply directly to the document.
-- **[LOW]** items: add if clearly relevant; otherwise collect for Step 5 summary.
-- **[STALE]** items: rewrite the recipe to reflect current implementation, or remove
-  if the recipe is now covered by a non-planned pattern.
+Process verifier output:
+- **[HIGH]**: Apply corrections directly.
+- **[LOW]**: Add if clearly relevant; otherwise collect for summary.
+- **[STALE]**: Rewrite or remove the recipe.
 
 ## Step 4: Update overview.md and _index.md
 
-**overview.md**: Project-wide concerns that don't belong to a single domain:
-- Package/module dependency graph
-- Shared patterns and conventions used across the project
-- Cross-domain modification recipes (e.g., "add a new feature end-to-end")
+**overview.md**: Package graph, shared patterns, cross-domain recipes.
 
-**_index.md**: Update the documentation reference section and operational state if needed.
+**_index.md**: Update documentation references and operational state.
 
 ## Step 5: Summary
 
-Print for the user:
+Report:
 - Dirty scope: which domains were rebuilt and why
 - Documents created / updated / removed
-- Verifier results: corrections applied, low-confidence items and incomplete areas for manual review
+- Verifier results: corrections applied, items for manual review
