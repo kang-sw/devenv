@@ -5,12 +5,19 @@ MODEL=$(echo "$input" | jq -r '.model.display_name')
 DIR=$(echo "$input" | jq -r '.workspace.current_dir')
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
 PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+TOKENS_USED=$(echo "$input" | jq -r '.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)')
+TOKENS_K=$(awk "BEGIN {printf \"%.0f\", $TOKENS_USED / 1000}")
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
+API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
+LINES_ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
+LINES_REMOVED=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
 
 CYAN='\033[36m'
 GREEN='\033[32m'
 YELLOW='\033[33m'
 RED='\033[31m'
+LIGHTBLUE='\033[94m'
+PINK='\033[95m'
 RESET='\033[0m'
 
 # Pick bar color based on context usage
@@ -24,8 +31,21 @@ FILLED=$((PCT / 10))
 EMPTY=$((10 - FILLED))
 BAR=$(printf "%${FILLED}s" | tr ' ' '█')$(printf "%${EMPTY}s" | tr ' ' '░')
 
-MINS=$((DURATION_MS / 60000))
+HRS=$((DURATION_MS / 3600000))
+MINS=$(((DURATION_MS % 3600000) / 60000))
 SECS=$(((DURATION_MS % 60000) / 1000))
+API_HRS=$((API_MS / 3600000))
+API_MINS=$(((API_MS % 3600000) / 60000))
+API_SECS=$(((API_MS % 60000) / 1000))
+
+fmt_time() {
+  local h=$1 m=$2 s=$3
+  if [ "$h" -gt 0 ]; then echo "${h}h ${m}m ${s}s"
+  elif [ "$m" -gt 0 ]; then echo "${m}m ${s}s"
+  else echo "${s}s"; fi
+}
+TIME_FMT=$(fmt_time "$HRS" "$MINS" "$SECS")
+API_TIME_FMT=$(fmt_time "$API_HRS" "$API_MINS" "$API_SECS")
 
 BRANCH=""
 if git rev-parse --git-dir >/dev/null 2>&1; then
@@ -51,7 +71,12 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   SPLIT_2=""
   if [[ $AHEAD_BEHIND ]]; then SPLIT_1="| "; fi
   if [[ $GIT_IND ]]; then SPLIT_2="| "; fi
-  BRANCH="🌿 ${BRANCH_NAME} ${SPLIT_1}${AHEAD_BEHIND}${SPLIT_2}${GIT_IND}"
+  SESSION_DELTA=""
+  [ "$LINES_ADDED" -gt 0 ] 2>/dev/null && SESSION_DELTA="${SESSION_DELTA}${LIGHTBLUE}+${LINES_ADDED}${RESET} "
+  [ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && SESSION_DELTA="${SESSION_DELTA}${PINK}-${LINES_REMOVED}${RESET} "
+  SPLIT_3=""
+  if [[ $SESSION_DELTA ]]; then SPLIT_3="| "; fi
+  BRANCH="🌿 ${BRANCH_NAME} ${SPLIT_1}${AHEAD_BEHIND}${SPLIT_2}${GIT_IND}${SPLIT_3}${SESSION_DELTA}"
 fi
 
 echo -e "${CYAN}[$MODEL]${RESET} 📁 ${DIR##*/}"
@@ -59,4 +84,5 @@ if [[ $BRANCH ]]; then
   echo -e "$BRANCH"
 fi
 COST_FMT=$(printf '$%.2f' "$COST")
-echo -e "${BAR_COLOR}${BAR}${RESET} ${PCT}% | ${YELLOW}${COST_FMT}${RESET} | ⏱️ ${MINS}m ${SECS}s"
+echo -e "${BAR_COLOR}${BAR}${RESET} ${PCT}% (${TOKENS_K}k) | ${YELLOW}${COST_FMT}${RESET}"
+echo -e "⏱️ ${TIME_FMT} | 🤔 ${API_TIME_FMT}"
