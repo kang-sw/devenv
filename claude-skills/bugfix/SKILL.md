@@ -45,8 +45,8 @@ user's description as primary source and trace the described behavior through co
 2. **Reproduce consistently.** Can you trigger it reliably? What are the exact
    conditions? If not reproducible, gather more data — don't guess.
 3. **Check recent changes.** `git log`, `git diff`, new dependencies, config changes.
-4. **Multi-component systems:** Log at each component boundary before proposing
-   fixes. Run once to identify *which layer* fails.
+4. **Multi-component systems:** Add diagnostic logging at each component boundary
+   before proposing fixes. Run once to identify *which layer* fails.
 5. **Trace data flow backward.** Where does the bad value originate? Keep tracing
    up the call chain until you find the source. Fix at source, not at symptom.
 

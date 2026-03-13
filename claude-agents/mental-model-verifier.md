@@ -27,8 +27,8 @@ specifies a particular file, verify only that one.
 1. **File paths**: Every path in "Relevant Source Files" must exist.
 2. **Names**: Spot-check 5–10 function/type/enum names against actual source.
 3. **Counts & indices**: Verify hardcoded numbers against source.
-4. **Commit coverage**: Review git log for significant unrefected changes
-   (new files, renamed types, changed signatures). Inspect diffs 50+ lines.
+4. **Commit coverage**: Review git log for changes not yet reflected in the
+   document (new files, renamed types, changed signatures). Inspect diffs 50+ lines.
 5. **Cross-references**: Verify cited sections in other mental-model docs exist.
 6. **Stale recipes**: Flag patterns referencing removed code, or **(planned)**
    features that have been implemented.

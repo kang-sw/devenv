@@ -73,7 +73,7 @@ changes, or anything in the "Ask first" approval category.
 >
 > **What was implemented:** [summary]
 > **Requirements:** [ticket phase or description]
-> **Git range:** `git diff {base_sha}..HEAD`
+> **Git range:** `git diff <base-sha>..HEAD`
 >
 > Check: correctness, edge cases, error handling, test coverage, adherence
 > to CLAUDE.md Code Standards. Categorize issues as Critical / Important / Minor.

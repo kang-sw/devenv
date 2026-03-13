@@ -4,7 +4,7 @@ description: Design discussion leading to ticket creation or update. Loads menta
 argument-hint: "[topic, ticket path, or question]"
 ---
 
-# Design Discussion
+# Design
 
 Topic: $ARGUMENTS
 
