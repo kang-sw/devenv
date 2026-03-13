@@ -1,8 +1,9 @@
 ---
-name: explore-rust-crate
+name: rust-api-lookup
 description: >
-  Investigate Rust crate APIs using `cargo brief`. Use for compile errors,
-  signature mismatches, or API discovery.
+  Look up exact Rust crate API signatures, trait impls, and type definitions.
+  Faster and more reliable than reading source. Use on compile errors from
+  wrong signatures, missing types, or visibility issues.
 tools: Bash, Read, Grep, Glob
 model: sonnet
 ---
