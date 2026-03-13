@@ -60,14 +60,14 @@ The caller should provide source paths. If not, find them yourself:
 - **Python**: Check site-packages or venv lib directory.
 - **Go**: `go doc <package>` or source in GOPATH/GOMODCACHE.
 
-### 3b. Enumerate crate structure
+### 3b. Enumerate module structure
 
-List all **public modules and key source files**. Use `Glob` and `Grep` to find:
-```
-pub mod ...
-pub struct/trait/enum/fn/type ...
-```
-Build a map of the crate's module tree before diving into details.
+List all **public modules and key source files**.
+- **Rust with `cargo brief` available:** Run `cargo brief <crate> --recursive`
+  for a complete pub API dump. This replaces manual grep for module enumeration.
+- **Otherwise:** Use `Glob` and `Grep` to find `pub mod`, `pub struct`, etc.
+
+Build a map of the module tree before diving into details.
 
 ### 3c. Deep-dive per module (priority order)
 
