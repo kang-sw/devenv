@@ -10,33 +10,9 @@ Target: $ARGUMENTS
 
 ## Plan Mode Protocol
 
-When invoked in plan mode, the plan must be self-contained. Embed this block
-**verbatim** at the top of the plan:
+When invoked in plan mode, embed this line at the top of the plan:
 
----
-
-### Execution Protocol (follow strictly)
-
-> Source: @.claude/skills/implement/SKILL.md
-
-1. **Task tracking**: Create tasks with `TaskCreate` for each implementation
-   unit, testing, doc updates, and commit. Track with `TaskUpdate`.
-2. **Understand first**: Read `ai-docs/_index.md` and relevant
-   `ai-docs/mental-model/` domain docs, relevant tickets before coding.
-3. **Code standards**: Follow CLAUDE.md Code Standards (simplicity, surgical changes).
-4. **Testing**: Run the project test suite after implementation
-   (see CLAUDE.md `# MEMORY → Build & Workflow`). All tests must pass.
-5. **Doc updates**:
-   - `ai-docs/_index.md` if capabilities changed
-   - Mental-model updates: delegate to the **mental-model-updater** agent in background
-   - Dependency API drift: delegate to the **document-dependency** agent in background
-     with usage context. Update `# MEMORY → Documented Dependencies` after completion.
-   - `# MEMORY` section in `CLAUDE.md`
-   - Append `### Result` to ticket doc if completing a phase
-6. **Commit format**: `<type>(<scope>): <summary>` + body + `## AI Context` block.
-   Include doc changes in the commit.
-
----
+> Execute this plan using `/implement`. Load the skill before starting.
 
 ## Step 0: Understand
 
@@ -64,8 +40,11 @@ For each task:
 
 1. Set task to `in_progress`
 2. Write code — follow CLAUDE.md Code Standards
-3. Write tests alongside non-trivial pure logic. When tests fail, diagnose
-   whether the test assumptions or the implementation is wrong.
+   - **Testable pure logic** (calculations, parsing, state transitions):
+     define expected behavior first, write test cases, then implement.
+   - **Integration/FFI code**: implement first, add tests for observable behavior.
+3. When tests fail, diagnose whether the test assumptions or the implementation
+   is wrong.
 4. Set task to `completed`
 
 **Approval protocol:**
@@ -75,8 +54,32 @@ For each task:
 
 ## Step 3: Verify
 
-Run the project's test suite(s). All must pass before proceeding.
-If the project has a relevant build step, run it too.
+Run the project's test suite(s) and build step. If the project has a separate
+integration test (see CLAUDE.md `# MEMORY → Build & Workflow`), run it too.
+**Read the full output.** Claim "pass" only after seeing the actual result —
+never "should pass" or "looks correct." All must pass before proceeding.
+
+## Step 3.5: Code Review (optional)
+
+For large or cross-module changes, dispatch a code-review subagent before
+committing. **Skip for small, single-file changes.**
+
+**When to run:** Changes touching 3+ files, new public APIs, architectural
+changes, or anything in the "Ask first" approval category.
+
+**Dispatch a general-purpose agent with:**
+
+> Review the changes for production readiness.
+>
+> **What was implemented:** [summary]
+> **Requirements:** [ticket phase or description]
+> **Git range:** `git diff {base_sha}..HEAD`
+>
+> Check: correctness, edge cases, error handling, test coverage, adherence
+> to CLAUDE.md Code Standards. Categorize issues as Critical / Important / Minor.
+> Give a clear verdict: ready to commit, or list fixes needed.
+
+Fix Critical and Important issues before proceeding. Minor issues are optional.
 
 ## Step 4: Update Docs
 

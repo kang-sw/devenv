@@ -16,30 +16,9 @@ Target: $ARGUMENTS
 
 ## Plan Mode Protocol
 
-When invoked in plan mode, the plan must be self-contained. Embed this block
-**verbatim** at the top of the plan:
+When invoked in plan mode, embed this line at the top of the plan:
 
----
-
-### Execution Protocol (follow strictly)
-
-> Source: @.claude/skills/bugfix/SKILL.md
-
-1. **Task tracking**: Create tasks with `TaskCreate` for each step (diagnose,
-   fix, verify, docs, commit). Track with `TaskUpdate`.
-2. **Understand first**: Read `ai-docs/_index.md` and relevant
-   `ai-docs/mental-model/` domain docs before coding.
-3. **Clarify**: Ask questions until the root cause is clear.
-4. **Root cause, not symptoms**: Fix the underlying cause.
-5. **Minimal change**: Touch only what is necessary.
-6. **Regression test**: Where automatable, write a test that fails before and
-   passes after the fix. Skip for GUI/interactive bugs.
-7. **Testing**: Run the project test suite (see CLAUDE.md `# MEMORY → Build &
-   Workflow`). All tests must pass.
-8. **User confirms before commit**: Present the diff and wait for approval.
-9. **Commit format**: `fix(<scope>): <summary>` + body + `## AI Context` block.
-
----
+> Execute this plan using `/bugfix`. Load the skill before starting.
 
 ## Step 0: Understand
 
@@ -61,15 +40,23 @@ user's description as primary source and trace the described behavior through co
 
 ### 1b. Trace & Diagnose
 
-- Follow the reproduction path through the code.
-- Use subagents for broad codebase searches.
-- Identify the root cause — not just the crashing line, but *why* it is wrong.
+1. **Read error messages carefully.** Full stack traces, line numbers, error codes.
+   Don't skip past warnings.
+2. **Reproduce consistently.** Can you trigger it reliably? What are the exact
+   conditions? If not reproducible, gather more data — don't guess.
+3. **Check recent changes.** `git log`, `git diff`, new dependencies, config changes.
+4. **Multi-component systems:** Log at each component boundary before proposing
+   fixes. Run once to identify *which layer* fails.
+5. **Trace data flow backward.** Where does the bad value originate? Keep tracing
+   up the call chain until you find the source. Fix at source, not at symptom.
+
+Use subagents for broad codebase searches when needed.
 
 State your diagnosis to the user and get confirmation before proceeding:
 
 > "I believe the root cause is [X] because [Y]. Should I proceed with a fix?"
 
-If the bug reveals a design flaw, recommend `/discuss` or `/implement` instead.
+If the bug reveals a design flaw, recommend `/design` or `/implement` instead.
 
 ## Step 2: Fix
 
@@ -77,11 +64,16 @@ If the bug reveals a design flaw, recommend `/discuss` or `/implement` instead.
 2. If automatable, write a regression test that fails before and passes after.
    Skip for GUI/interactive bugs.
 
+**Escalation rule:** If 3+ fix attempts fail, STOP. The pattern itself may be
+wrong. Suggest `/design` or raise the architectural question directly with the
+user before attempting another fix.
+
 ## Step 3: Verify & Confirm
 
 ### 3a. Automated
 
-Run the full test suite. All must pass.
+Run the full test suite. **Read the actual output.** Claim "pass" only after
+seeing the result — never "should pass" or "probably works."
 
 ### 3b. User Confirmation
 

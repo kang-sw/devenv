@@ -120,6 +120,16 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
   removed methods, etc.) or after learning a previously-unknown package's API, document
   the verified correct API so future sessions skip re-exploration.
 
+### Response Discipline
+
+- **Evidence before claims.** Run verification commands and read output before
+  stating success. Never use "should pass", "probably works", or "looks correct."
+- **No performative agreement.** Don't respond with "Great point!", "You're
+  absolutely right!", or similar. Instead: restate the technical requirement,
+  verify against the codebase, then act (or push back with reasoning).
+- **Actions over words.** "Fixed. [what changed]" or just show the diff.
+  Skip gratitude expressions and filler.
+
 ### Context Window Discipline
 
 - Keep context small. Load only the module docs relevant to the current task.
@@ -138,7 +148,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 - Build: `[command]`
 - Test: `[command]`
-- Integration test: `[command]`
+- Integration test: `[command]` <!-- prerequisites (e.g. sandbox disabled, server running), when to run -->
 
 ## Recent Work
 
