@@ -9,6 +9,7 @@ return {
         "rust-analyzer",
         "clangd",
         "pyright",
+        "tinymist",
         -- 디버거
         "codelldb",
         "debugpy",
@@ -16,6 +17,7 @@ return {
         "clang-format",
         "prettier",
         "taplo",
+        "typstyle",
         -- "xmlformat", -- not work
         -- 기타
         "tree-sitter-cli",
