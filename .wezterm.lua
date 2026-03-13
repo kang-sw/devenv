@@ -86,7 +86,8 @@ config.tab_bar_at_bottom = false
 config.hide_tab_bar_if_only_one_tab = true
 config.adjust_window_size_when_changing_font_size = false
 config.font = wezterm.font_with_fallback({
-  { family = "JetBrainsMono Nerd Font", weight = "Regular" },
+  { family = "JetBrainsMono Nerd Font", weight = 500 },
+  { family = "NanumBarunGothicOTF", weight = 500 },
   "Cascadia Code",
 })
 config.font_rules = {
@@ -94,11 +95,12 @@ config.font_rules = {
     intensity = "Bold",
     font = wezterm.font_with_fallback({
       { family = "JetBrainsMono Nerd Font", weight = "ExtraBold" },
-      { family = "Cascadia Code", weight = "Bold" },
+      { family = "NanumBarunGothicOTF", weight = 900 },
+      { family = "Cascadia Code", weight = "ExtraBold" },
     }),
   },
 }
-config.font_size = 14
+config.font_size = 15
 config.native_macos_fullscreen_mode = true
 -- config.color_scheme = "Adventure"
 config.window_decorations = "RESIZE"
