@@ -22,14 +22,17 @@ Use the **Write** tool to create the watcher script (once per session):
 Write to `/tmp/claude-chat-watcher.sh`:
 ```bash
 #!/bin/bash
-# Usage: bash /tmp/claude-chat-watcher.sh <filepath>
+# Usage: bash /tmp/claude-chat-watcher.sh <filepath> <fence>
+# <fence> = line count the agent has already seen.
+# Waits until the file has more lines than <fence>, then outputs
+# only the new lines and prints the updated fence on the last line.
 filepath="$1"
-ref="/tmp/claude-chat-watcher-ref-$$"
-trap 'rm -f "$ref"' EXIT
-touch -r "$filepath" "$ref"
+fence="${2:-0}"
 while sleep 1; do
-  if [ "$filepath" -nt "$ref" ]; then
-    cat "$filepath"
+  current=$(wc -l < "$filepath")
+  if [ "$current" -gt "$fence" ]; then
+    tail -n +"$((fence + 1))" "$filepath"
+    echo "__FENCE:$current"
     break
   fi
 done
@@ -49,6 +52,7 @@ mkdir -p /tmp/claude-chat-over-session  # dangerouslyDisableSandbox=true
   ```
 - Use the **Write** tool to create `/tmp/claude-chat-over-session/YYMMDD-HHMM.md`
   with the header and your opening message (see Chat File Format below).
+- Set your initial fence to the line count of what you just wrote.
 
 **If the arguments say "join"** (or similar):
 - Find the latest chat file:
@@ -56,18 +60,21 @@ mkdir -p /tmp/claude-chat-over-session  # dangerouslyDisableSandbox=true
   ls -t /tmp/claude-chat-over-session/*.md 2>/dev/null | head -1
   ```
 - Read it to catch up on the conversation so far.
-- Post a join message using the **Write** tool.
+- Set your initial fence to the line count of what you just read.
+- Post a join message (see Writing a Message below).
 
 ### 3. Start watching
 
-Launch the one-shot watcher (see Monitoring below), then tell the user
-you're ready and waiting.
+Launch the one-shot watcher with your current fence (see Monitoring
+below), then tell the user you're ready and waiting.
 
 ## Chat File Format
 
+The chat file is **append-only**. It starts with a header, and each message
+is appended as a new block.
+
 ```markdown
 # Chat: <topic>
-Participants: Alice, Bob, ...
 
 ---
 **[Alice]**
@@ -80,40 +87,72 @@ Opening message here.
 Response here.
 ```
 
-When joining, add your name to the Participants line.
+## Writing a Message — Append via Buffer
 
-## Writing a Message
+Never read and rewrite the full chat file. Instead, use a **buffer file**
+that gets appended:
 
-Use the **Write** tool to overwrite the chat file with the full conversation
-history plus your new message appended. This updates the mtime so other
-agents' watchers fire.
+1. **Write** your message to a buffer file using the Write tool:
+   `/tmp/claude-chat-over-session/YYMMDD-HHMM-YourName.md`
 
-**Important:** Always use the Write tool — never heredocs or `cat >`.
-The Write tool works on `/tmp/` paths without sandbox bypass or permission
-prompts.
+   Buffer content (always include the separator):
+   ```markdown
 
-## Monitoring — One-Shot Watcher
+   ---
+   **[YourName]**
 
-After every message you send, launch the watcher in background. It polls
-for file modification using `test -nt` (a shell built-in — no subshells,
-no permission prompts), prints the content on change, then exits.
+   Your message here.
+   ```
+
+2. **Append** the buffer to the chat file and remove it:
+   ```bash
+   # dangerouslyDisableSandbox=true
+   cat /tmp/claude-chat-over-session/YYMMDD-HHMM-YourName.md >> /tmp/claude-chat-over-session/YYMMDD-HHMM.md && rm /tmp/claude-chat-over-session/YYMMDD-HHMM-YourName.md
+   ```
+
+3. **Update your fence** by adding the number of lines in your message
+   to your current fence value.
+
+This keeps context usage constant — you only hold your new message in
+context, never the full history.
+
+## Monitoring — Fence-Based Watcher
+
+Each agent tracks a **fence** — the line count it has already seen.
+The watcher polls until the file has more lines than the fence, then
+outputs only the new lines.
 
 ```bash
 # run_in_background=true, dangerouslyDisableSandbox=true, timeout=300000
-bash /tmp/claude-chat-watcher.sh /tmp/claude-chat-over-session/YYMMDD-HHMM.md
+bash /tmp/claude-chat-watcher.sh /tmp/claude-chat-over-session/YYMMDD-HHMM.md <fence>
 ```
 
+Replace `<fence>` with your current fence value (a number).
+
+**Why this handles races:** If agent B and C both respond to agent A,
+and you only saw A's message, your fence is still at A's position.
+The next watcher immediately returns both B's and C's messages because
+the line count jumped past your fence. No message is ever lost.
+
+The last line of watcher output is `__FENCE:<n>` — parse this to get
+your updated fence for the next watcher launch.
+
 **Cycle:**
-1. Write your message (using Write tool)
-2. Launch watcher in background (single Bash command above)
-3. Wait for notification (respond to user or do other work)
-4. On notification: read the task output, compose your response
-5. Repeat from step 1
+1. Write your message to buffer (Write tool)
+2. Append buffer to chat file (single Bash command)
+3. Update your fence (add your message's line count)
+4. Launch watcher with your fence in background
+5. Wait for notification
+6. On notification: read the task output — it contains only unseen
+   messages plus `__FENCE:<n>` on the last line
+7. Update your fence from the `__FENCE` value
+8. Repeat from step 1
 
 ## Rules
 
 - **All messages in English.** Regardless of conversation language with the user.
-- **Preserve all previous messages.** When overwriting, include full history.
+- **Append-only.** Never overwrite the chat file. Always append via buffer.
+- **Track your fence.** Always pass your current fence to the watcher.
 - **One message at a time.** Write, then wait for a response.
 - **Identify yourself.** Every message block starts with `**[YourName]**`.
 - **Stay on topic.** Use the original topic as anchor. Note topic shifts explicitly.
@@ -126,10 +165,11 @@ bash /tmp/claude-chat-watcher.sh /tmp/claude-chat-over-session/YYMMDD-HHMM.md
 
 ## Multi-Agent Considerations
 
-- With N agents watching the same file, any write triggers all watchers.
-- After receiving a notification, read the full file to see WHO wrote —
-  it may not be addressed to you. If the latest message is not for you
-  or doesn't need your input, re-launch the watcher and wait.
-- If two agents write simultaneously, one write may be lost. In practice
-  this is rare since humans mediate timing. If it happens, re-read the
-  file and re-post.
+- With N agents watching the same file, any append triggers all watchers
+  whose fence is behind the new line count.
+- After receiving new messages, check WHO wrote. If the latest message
+  is not addressed to you or doesn't need your input, update your fence
+  and re-launch the watcher without responding.
+- If two agents append simultaneously, both writes succeed (append is
+  atomic for small writes). Your fence-based watcher catches both
+  regardless of timing — it compares line counts, not timestamps.
