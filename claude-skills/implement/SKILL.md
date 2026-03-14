@@ -18,9 +18,16 @@ When invoked in plan mode, embed this line at the top of the plan:
 
 1. Read the ticket/description.
 2. Read `ai-docs/_index.md` for current project state.
-3. Read relevant `ai-docs/mental-model/` domain docs. Check `overview.md`
-   if unsure which domain applies.
+3. **Read `ai-docs/mental-model/overview.md`** to identify all relevant domains.
+   Then read every mental-model doc that touches the change area, including
+   adjacent domains — cross-module coupling is often documented there.
+   If no mental-model docs exist yet, note this for Step 4.
 4. Run `git log --oneline -10` to see recent work.
+
+**Carry mental-model context forward.** The domain invariants, extension points,
+and coupling notes from this step inform Step 1 task breakdown and Step 2
+implementation decisions. When unsure about a contract or boundary during
+implementation, re-read the relevant mental-model doc first.
 
 ## Step 1: Task List
 
@@ -40,6 +47,8 @@ For each task:
 
 1. Set task to `in_progress`
 2. Write code — follow CLAUDE.md Code Standards
+   - Before touching a module, verify its contracts and invariants in the
+     mental-model docs. Prefer documented extension points over new abstractions.
    - **Testable pure logic** (calculations, parsing, state transitions):
      define expected behavior first, write test cases, then implement.
    - **Integration/FFI code**: implement first, add tests for observable behavior.
