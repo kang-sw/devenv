@@ -2,7 +2,7 @@
 name: chat-over-session
 description: >
   Multi-agent chat across Claude Code sessions. Agents discuss topics via a
-  shared file. Use: /chat-over-session you are "Name". discuss X with others.
+  shared file.
 argument-hint: 'you are "AgentName". <topic or "join the discussion">'
 ---
 
