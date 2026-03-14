@@ -17,9 +17,10 @@ Then determine whether to **create** or **join** a chat.
 
 ### 1. Ensure chat directory and watcher script exist
 
-Use the **Write** tool to create the watcher script (once per session):
+First check if script file exists in path `/tmp/claude-chat-watcher.sh`, read and
+use the **Write** tool to create the watcher script (once per session) if file 
+does not exist or the content mismatches with following code snippet:
 
-Write to `/tmp/claude-chat-watcher.sh`:
 ```bash
 #!/bin/bash
 # Usage: bash /tmp/claude-chat-watcher.sh <filepath> <fence>
