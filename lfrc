@@ -1,0 +1,10 @@
+cmd open ${{
+    case "$(file --mime-type -b "$f")" in
+        text/*|application/json|application/javascript|application/xml|application/toml|application/x-yaml|inode/x-empty)
+            $EDITOR "$f"
+            ;;
+        *)
+            open "$f"
+            ;;
+    esac
+}}

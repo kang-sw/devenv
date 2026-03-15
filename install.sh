@@ -154,6 +154,7 @@ brew_install eza
 brew_install zoxide
 brew_install delta
 brew_install starship
+brew_install lf
 
 # Nerd Font (macOS cask only; on Linux/WSL install on the host terminal side)
 if [[ "$PLATFORM" == "macos" ]]; then
@@ -355,6 +356,7 @@ link "$REPO_DIR/.tmux.conf"         "$HOME/.tmux.conf"
 link "$REPO_DIR/.wezterm.lua"       "$HOME/.wezterm.lua"
 link "$REPO_DIR/.vscode-neovim.lua" "$HOME/.vscode-neovim.lua"
 link "$REPO_DIR/starship.toml"      "$HOME/.config/starship.toml"
+link "$REPO_DIR/lfrc"               "$HOME/.config/lf/lfrc"
 # NOTE: ~/.config/nvim is this repo itself — no symlink needed
 
 # Claude Code skills — link each skill folder individually
