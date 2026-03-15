@@ -47,13 +47,14 @@ public API. Update the specific section/doc, not everything.
 regardless of conversation language. Human-facing UI strings are exempt.
 
 **Tickets** (`ai-docs/tickets/<status>/YYMMDD-<name>.md`) track substantial features.
+`YYMMDD` is the **creation date**; it never changes when the ticket moves between statuses.
 
-- In-progress tickets use a `[wip]` status: `ai-docs/tickets/wip/YYMMDD-<name>.md`.
-- Once ticket is finished, move ticket to `[done]` status -> `ai-docs/tickets/done/YYMMDD-<name>.md`.
-- Status is a per-project concept.
-  `e.g. tickets/todo, tickets/idea, tickets/stale, tickets/discard, etc`
-- Phases that require non-trivial design before coding are marked **(plan mode)** — use the
-  `EnterPlanMode` tool, explore + design, get user approval, then `ExitPlanMode` to implement.
+- Frontmatter requires `title` and `status`. Add `started: YYYY-MM-DD` on move to
+  `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
+- Status is directory-based: `wip/`, `done/`, plus project-specific ones
+  (`todo/`, `idea/`, `stale/`, `discard/`, etc.).
+- Phases requiring non-trivial design before coding are marked **(plan mode)** — use
+  `EnterPlanMode`, explore + design, get user approval, then `ExitPlanMode` to implement.
 - After completing a ticket phase, append a `### Result (<short-hash>)` subsection recording:
   what was implemented, deviations from the plan, and key findings for future phases.
 
