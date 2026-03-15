@@ -55,7 +55,7 @@ regardless of conversation language. Human-facing UI strings are exempt.
   (`todo/`, `idea/`, `ref/`, `tba/`, `stale/` etc.).
 - Phases requiring non-trivial design before coding are marked **(plan mode)** — use
   `EnterPlanMode`, explore + design, get user approval, then `ExitPlanMode` to implement.
-- After completing a ticket phase, append a `### Result (<short-hash>)` subsection recording:
+- After completing a ticket phase, append a `### Result (<short-hash>) - YY-MM-DD` subsection recording:
   what was implemented, deviations from the plan, and key findings for future phases.
 
 **MEMORY.md** (`~/.claude/projects/.../memory/MEMORY.md`) persists across sessions.
