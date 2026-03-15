@@ -14,6 +14,11 @@ When invoked in plan mode, embed this line at the top of the plan:
 
 > Execute this plan using `/implement`. Load the skill before starting.
 
+**Context capture:** Plan execution resets context — only the plan text survives.
+Collect design decisions, user directives, domain constraints, relevant file
+paths, and mental-model insights. Embed them in the plan; it must be
+self-contained.
+
 ## Step 0: Understand
 
 1. Read the ticket/description.
