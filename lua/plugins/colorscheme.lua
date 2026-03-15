@@ -39,9 +39,9 @@ return {
           -- VSCode workbench.colorCustomizations 대응
           -- ════════════════════════════════════════
 
-          -- editor.background: #131212
-          hl("Normal", { bg = "#060606" })
-          hl("NormalNC", { bg = "#121212" })
+          -- editor.background: tmux window-style 상속 (투명)
+          hl("Normal", { bg = "NONE" })
+          hl("NormalNC", { bg = "#1c1c1c" })
 
           -- editor.lineHighlightBackground: #ffffff11 (투명 흰색 → 근사값)
           hl("CursorLine", { bg = "#1e1c1c" })
