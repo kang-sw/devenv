@@ -52,7 +52,7 @@ regardless of conversation language. Human-facing UI strings are exempt.
 - Frontmatter requires `title` and `status`. Add `started: YYYY-MM-DD` on move to
   `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
 - Status is directory-based: `wip/`, `done/`, plus project-specific ones
-  (`todo/`, `idea/`, `stale/`, `discard/`, etc.).
+  (`todo/`, `idea/`, `ref/`, `tba/`, `stale/` etc.).
 - Phases requiring non-trivial design before coding are marked **(plan mode)** — use
   `EnterPlanMode`, explore + design, get user approval, then `ExitPlanMode` to implement.
 - After completing a ticket phase, append a `### Result (<short-hash>)` subsection recording:
