@@ -7,6 +7,9 @@ COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
 PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 TOKENS_USED=$(echo "$input" | jq -r '.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)')
 TOKENS_K=$(awk "BEGIN {printf \"%.0f\", $TOKENS_USED / 1000}")
+CTX_MAX=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
+MAX_K=$(awk "BEGIN {printf \"%.0f\", $CTX_MAX / 1000}")
+VISUAL_PCT=$(awk "BEGIN {v = sqrt($PCT / 100.0) * 100; if (v > 100) v = 100; printf \"%.0f\", v}")
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
 LINES_ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
@@ -20,14 +23,14 @@ LIGHTBLUE='\033[94m'
 PINK='\033[95m'
 RESET='\033[0m'
 
-# Pick bar color based on context usage
-if [ "$PCT" -ge 90 ]; then
+# Pick bar color based on visual (sqrt-scaled) context usage
+if [ "$VISUAL_PCT" -ge 90 ]; then
   BAR_COLOR="$RED"
-elif [ "$PCT" -ge 70 ]; then
+elif [ "$VISUAL_PCT" -ge 70 ]; then
   BAR_COLOR="$YELLOW"
 else BAR_COLOR="$GREEN"; fi
 
-FILLED=$((PCT / 10))
+FILLED=$((VISUAL_PCT / 10))
 EMPTY=$((10 - FILLED))
 BAR=$(printf "%${FILLED}s" | tr ' ' '█')$(printf "%${EMPTY}s" | tr ' ' '░')
 
@@ -84,5 +87,5 @@ if [[ $BRANCH ]]; then
   echo -e "$BRANCH"
 fi
 COST_FMT=$(printf '$%.2f' "$COST")
-echo -e "${BAR_COLOR}${BAR}${RESET} ${PCT}% (${TOKENS_K}k) | ${YELLOW}${COST_FMT}${RESET}"
+echo -e "${BAR_COLOR}${BAR}${RESET} ${VISUAL_PCT}% (${TOKENS_K}/${MAX_K}k) | ${YELLOW}${COST_FMT}${RESET}"
 echo -e "⏱️ ${TIME_FMT} | 🤔 ${API_TIME_FMT}"
