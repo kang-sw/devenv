@@ -44,7 +44,7 @@ Continue until the user signals the discussion is done.
 
 Ask the user how (or whether) to persist the outcome:
 
-- **New ticket** — `ai-docs/tickets/todo/YYMMDD-<name>.md`
+- **New ticket** — `ai-docs/tickets/todo/YYMMDD-<category>-<name>.md`
 - **Ticket update** — Append design notes to an existing ticket phase.
 - **Mental-model update** — Revise a doc if architectural understanding changed.
 

@@ -46,8 +46,9 @@ public API. Update the specific section/doc, not everything.
 `### Result` entries, `MEMORY` sections, and inline code comments — must be in English,
 regardless of conversation language. Human-facing UI strings are exempt.
 
-**Tickets** (`ai-docs/tickets/<status>/YYMMDD-<name>.md`) track substantial features.
+**Tickets** (`ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md`) track substantial features.
 `YYMMDD` is the **creation date**; it never changes when the ticket moves between statuses.
+Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
 
 - Frontmatter requires `title` and `status`. Add `started: YYYY-MM-DD` on move to
   `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
