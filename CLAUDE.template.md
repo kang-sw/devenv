@@ -4,8 +4,7 @@
 
 <!-- One paragraph: what the project is, who it's for, current milestone/target. -->
 
-**[PROJECT_NAME]** — [brief description]. [Solo dev / team size].
-Target: **[YYYY-MM milestone description].**
+**[PROJECT_NAME]** — [brief description].
 
 ## Tech Stack
 
