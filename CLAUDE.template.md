@@ -38,6 +38,15 @@ Project state, architecture, and source layout live in **`ai-docs/_index.md`**.
 All files under `ai-docs/` are AI-maintained; this is the primary cross-session
 context store.
 
+```
+ai-docs/
+  _index.md          — project state overview (load at session start)
+  mental-model/      — architecture docs, regenerable from source
+  deps/              — external library API delta docs
+  ref/               — static reference material (external specs, protocol docs, design notes)
+  tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
+```
+
 **When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
 **When to update:** After implementing changes that affect operational state or a module's
 public API. Update the specific section/doc, not everything.
@@ -52,8 +61,7 @@ Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
 
 - Frontmatter requires `title` and `status`. Add `started: YYYY-MM-DD` on move to
   `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
-- Status is directory-based: `wip/`, `done/`, plus project-specific ones
-  (`todo/`, `idea/`, `ref/`, `tba/`, `stale/` etc.).
+- Status is directory-based: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
 - Phases requiring non-trivial design before coding are marked **(plan mode)** — use
   `EnterPlanMode`, explore + design, get user approval, then `ExitPlanMode` to implement.
 - After completing a ticket phase, append a `### Result (<short-hash>) - YY-MM-DD` subsection recording:
