@@ -43,7 +43,7 @@ ai-docs/
   mental-model/      — architecture docs, regenerable from source
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
-  tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
+  tickets/<status>/  — idea/ todo/ wip/ done/ dropped/ backlog/
 ```
 
 **When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
