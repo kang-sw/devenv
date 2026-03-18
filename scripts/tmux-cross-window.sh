@@ -4,6 +4,9 @@
 #   arrive-from: "left" = we came from the left  → select leftmost pane
 #                "right" = we came from the right → select rightmost pane
 
+# Only activate when explicitly opted in
+[ "$TMUX_ENABLE_PANE_NAVIGATION_OVER_WINDOW" = "1" ] || exit 0
+
 dir="$1"
 
 if [ "$dir" = "right" ]; then
