@@ -40,9 +40,13 @@ Free-form conversation:
 
 Continue until the user signals the discussion is done.
 
-## Step 2: Capture conclusions
+## Step 2: Capture conclusions (only when the user signals done)
 
-Ask the user how (or whether) to persist the outcome:
+Do NOT proactively ask whether to wrap up or persist. Wait for the user to
+signal the discussion is over (e.g., explicit request, moving to a new topic,
+or asking to create a ticket).
+
+When the user signals done, offer persistence options if conclusions warrant it:
 
 - **New ticket** — `ai-docs/tickets/todo/YYMMDD-<category>-<name>.md`
 - **Ticket update** — Append design notes to an existing ticket phase.
