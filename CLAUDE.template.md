@@ -61,8 +61,6 @@ Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
 - Frontmatter requires `title` and `status`. Add `started: YYYY-MM-DD` on move to
   `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
 - Status is directory-based: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
-- Phases requiring non-trivial design before coding are marked **(plan mode)** — use
-  `EnterPlanMode`, explore + design, get user approval, then `ExitPlanMode` to implement.
 - After completing a ticket phase, append a `### Result (<short-hash>) - YY-MM-DD` subsection
   recording what was implemented, deviations from the plan, and key findings for future phases.
 
