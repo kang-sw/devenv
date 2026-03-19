@@ -73,8 +73,8 @@ prior context execute this plan correctly?" If not, add what's missing.
 
 ## Step 3: Verify Plan
 
-Dispatch a **general-purpose subagent** to verify the plan against the actual
-codebase:
+Dispatch a **sonnet-level general-purpose subagent** to verify the plan against
+the actual codebase:
 
 > **Task:** Verify the following implementation plan against the actual source
 > code and mental-model docs.
