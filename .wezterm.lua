@@ -501,58 +501,89 @@ config.key_tables = {
 -- ──────────────────────────────────────────────
 -- Tab Title (powerline style, mode-aware colors)
 -- ──────────────────────────────────────────────
+--- Extract tab window name (#W) and pane command from tab info
+--- Process names are cached in wezterm.GLOBAL.pane_procs by update-status
+local function tab_label(tab)
+  local pane_info = tab.active_pane
+  local w_name = tab.tab_title
+  if not w_name or #w_name == 0 then
+    w_name = (pane_info.title or ""):match("([^/\\]+)$") or pane_info.title or "?"
+  end
+  -- Read cached process name (populated by update-status event)
+  local procs = wezterm.GLOBAL.pane_procs or {}
+  local cmd = procs[tostring(pane_info.pane_id)] or ""
+  return w_name, cmd
+end
+
 wezterm.on("format-tab-title", function(tab, tabs, panes, cfg, hover, max_width)
   local index = tab.tab_index + 1
-  local title = tab.tab_title
-  if not title or #title == 0 then
-    title = tab.active_pane.title or ""
-    title = title:match("([^/\\]+)$") or title
-  end
-
-  local process = (tab.active_pane.foreground_process_name or ""):match("([^/\\]+)$") or ""
-  local display
-  if process ~= "" and process ~= title then
-    display = string.format(" %d: %s (%s) ", index, title, process)
-  else
-    display = string.format(" %d: %s ", index, title)
-  end
-
+  local w_name, cmd = tab_label(tab)
   local prefix_on = wezterm.GLOBAL.prefix_active or false
   local remote_on = wezterm.GLOBAL.remote_mode or false
   local bar_bg = "#1a1a1a"
 
   if tab.is_active then
+    -- ── Active tab: powerline ◀ #I  name (cmd) ▶ ──
     local bg = "#2e8b57"
+    local inner_bg = "#146746"
     if prefix_on then
-      bg = "#8b0000"
+      bg, inner_bg = "#8b0000", "#600000"
     elseif remote_on then
-      bg = "#804000"
+      bg, inner_bg = "#804000", "#603000"
     end
-    return {
+
+    local elements = {
       { Background = { Color = bar_bg } },
       { Foreground = { Color = bg } },
       { Text = "\u{e0b6}" },
+      -- Index section
       { Background = { Color = bg } },
       { Foreground = { Color = "#ffffff" } },
       { Attribute = { Intensity = "Bold" } },
-      { Text = display },
-      { Background = { Color = bar_bg } },
-      { Foreground = { Color = bg } },
-      { Text = "\u{e0b4}" },
+      { Text = string.format(" %d ", index) },
+      -- Name section (slightly darker bg)
+      { Background = { Color = inner_bg } },
     }
-  else
-    local bg = "#252525"
-    local fg = "#808080"
-    if prefix_on then
-      bg, fg = "#2a0000", "#aa8800"
-    elseif remote_on then
-      bg, fg = "#2a2000", "#aa8800"
+    if cmd ~= "" and cmd ~= w_name then
+      -- name (command) — command in accent color
+      table.insert(elements, { Foreground = { Color = "#ffffff" } })
+      table.insert(elements, { Text = " " .. w_name .. " " })
+      table.insert(elements, { Foreground = { Color = "#ffe066" } })
+      table.insert(elements, { Text = "(" .. cmd .. ") " })
+    else
+      table.insert(elements, { Foreground = { Color = "#ffe066" } })
+      table.insert(elements, { Text = " " .. w_name .. " " })
     end
-    return {
-      { Background = { Color = bg } },
-      { Foreground = { Color = fg } },
-      { Text = display },
+    -- Closing powerline arrow
+    table.insert(elements, { Background = { Color = bar_bg } })
+    table.insert(elements, { Foreground = { Color = bg } })
+    table.insert(elements, { Text = "\u{e0b4}" })
+    return elements
+
+  else
+    -- ── Inactive tab:  #I  name (cmd) ──
+    local idx_bg = prefix_on and "#3d0000" or (remote_on and "#3d2000" or "#313131")
+    local body_bg = prefix_on and "#2a0000" or (remote_on and "#2a2000" or "#252525")
+    local idx_fg = "#606060"
+    local name_fg = "#606060"
+    local cmd_fg = prefix_on and "#aa8800" or (remote_on and "#aa8800" or "#998a00")
+
+    local elements = {
+      { Background = { Color = idx_bg } },
+      { Foreground = { Color = idx_fg } },
+      { Text = string.format(" %d ", index) },
+      { Background = { Color = body_bg } },
     }
+    if cmd ~= "" and cmd ~= w_name then
+      table.insert(elements, { Foreground = { Color = name_fg } })
+      table.insert(elements, { Text = " " .. w_name .. " " })
+      table.insert(elements, { Foreground = { Color = cmd_fg } })
+      table.insert(elements, { Text = "(" .. cmd .. ") " })
+    else
+      table.insert(elements, { Foreground = { Color = cmd_fg } })
+      table.insert(elements, { Text = " " .. w_name .. " " })
+    end
+    return elements
   end
 end)
 
@@ -569,6 +600,20 @@ wezterm.on("update-status", function(window, pane)
   -- Sync to GLOBAL for format-tab-title
   wezterm.GLOBAL.prefix_active = is_prefix
   wezterm.GLOBAL.remote_mode = is_remote
+
+  -- Cache foreground process names for all panes (mux domains don't
+  -- populate PaneInformation.foreground_process_name, so we query here
+  -- where real pane objects are available)
+  local procs = {}
+  for _, tab in ipairs(window:mux_window():tabs()) do
+    for _, p in ipairs(tab:panes()) do
+      local name = p:get_foreground_process_name()
+      if name then
+        procs[tostring(p:pane_id())] = name:match("([^/\\]+)$") or ""
+      end
+    end
+  end
+  wezterm.GLOBAL.pane_procs = procs
 
   -- ── Copy mode: yellowish background tint ──
   local want_copy_bg = is_copy
@@ -587,34 +632,68 @@ wezterm.on("update-status", function(window, pane)
     window:set_config_overrides(overrides)
   end
 
-  -- ── Left status: mode indicator ──
-  local left = ""
+  -- ── Left status: [PREFIX] hostname ▶ [session] ▶ ──
+  -- Matches tmux: status-left = PREFIX + #h + #S
+  local hostname = (wezterm.hostname() or ""):match("^([^.]+)") or ""
+  local workspace = window:active_workspace() or ""
+  local bar_bg = "#1a1a1a"
+
+  local left_elements = {}
+
+  -- Mode indicator (PREFIX / COPY)
   if is_prefix then
-    left = wezterm.format({
-      { Background = { Color = "#f5a623" } },
-      { Foreground = { Color = "#000000" } },
-      { Attribute = { Intensity = "Bold" } },
-      { Text = "  PREFIX  " },
-    })
+    table.insert(left_elements, { Background = { Color = "#8b0000" } })
+    table.insert(left_elements, { Foreground = { Color = "#ffcccc" } })
+    table.insert(left_elements, { Attribute = { Intensity = "Bold" } })
+    table.insert(left_elements, { Text = "  PREFIX  " })
+    table.insert(left_elements, { Background = { Color = bar_bg } })
+    table.insert(left_elements, { Foreground = { Color = "#8b0000" } })
+    table.insert(left_elements, { Attribute = { Intensity = "Normal" } })
+    table.insert(left_elements, { Text = "\u{e0b4}" })
   elseif is_copy then
-    left = wezterm.format({
-      { Background = { Color = "#c67200" } },
-      { Foreground = { Color = "#ffffff" } },
-      { Attribute = { Intensity = "Bold" } },
-      { Text = "  COPY  " },
-    })
-  elseif is_remote then
-    left = wezterm.format({
+    table.insert(left_elements, { Background = { Color = "#c67200" } })
+    table.insert(left_elements, { Foreground = { Color = "#ffffff" } })
+    table.insert(left_elements, { Attribute = { Intensity = "Bold" } })
+    table.insert(left_elements, { Text = "  COPY  " })
+    table.insert(left_elements, { Background = { Color = bar_bg } })
+    table.insert(left_elements, { Foreground = { Color = "#c67200" } })
+    table.insert(left_elements, { Attribute = { Intensity = "Normal" } })
+    table.insert(left_elements, { Text = "\u{e0b4}" })
+  end
+
+  -- Hostname
+  table.insert(left_elements, { Background = { Color = bar_bg } })
+  table.insert(left_elements, { Foreground = { Color = "#c0c0c0" } })
+  table.insert(left_elements, { Text = " " .. hostname .. "  " })
+
+  -- Session/workspace name (blue bg, matches tmux #S)
+  local sess_bg = is_prefix and "#8b0000" or (is_remote and "#804000" or "#143ea8")
+  table.insert(left_elements, { Foreground = { Color = sess_bg } })
+  table.insert(left_elements, { Text = "\u{e0b6}" })
+  table.insert(left_elements, { Background = { Color = sess_bg } })
+  table.insert(left_elements, { Foreground = { Color = "#ffffff" } })
+  table.insert(left_elements, { Attribute = { Intensity = "Bold" } })
+  table.insert(left_elements, { Text = "  " .. workspace .. "  " })
+  table.insert(left_elements, { Background = { Color = bar_bg } })
+  table.insert(left_elements, { Foreground = { Color = sess_bg } })
+  table.insert(left_elements, { Attribute = { Intensity = "Normal" } })
+  table.insert(left_elements, { Text = "\u{e0b4}" })
+
+  if is_remote then
+    left_elements = {
       { Background = { Color = "#804000" } },
       { Foreground = { Color = "#ffffff" } },
       { Attribute = { Intensity = "Bold" } },
       { Text = "  REMOTE  " },
-    })
+      { Background = { Color = bar_bg } },
+      { Foreground = { Color = "#804000" } },
+      { Text = "\u{e0b4}" },
+    }
   end
-  window:set_left_status(left)
 
-  -- ── Right status: hostname + datetime ──
-  local hostname = (wezterm.hostname() or ""):match("^([^.]+)") or ""
+  window:set_left_status(wezterm.format(left_elements))
+
+  -- ── Right status: ◀[datetime] ──
   local date = wezterm.strftime("%Y-%m-%d  %H:%M")
   local accent = "#2e8b57"
   if is_prefix then
@@ -624,8 +703,7 @@ wezterm.on("update-status", function(window, pane)
   end
 
   window:set_right_status(wezterm.format({
-    { Foreground = { Color = "#808080" } },
-    { Text = hostname .. "  " },
+    { Background = { Color = bar_bg } },
     { Foreground = { Color = accent } },
     { Text = "\u{e0b6}" },
     { Background = { Color = accent } },
