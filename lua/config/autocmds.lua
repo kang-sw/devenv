@@ -71,11 +71,3 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
--- ------------------------------------------------------------
--- 인수 없이 nvim 실행 시 마지막 세션 자동 복원
--- autocmds.lua는 VeryLazy에 로드되므로 직접 실행
-if vim.fn.argc() == 0 then
-  vim.schedule(function()
-    require("persistence").load()
-  end)
-end

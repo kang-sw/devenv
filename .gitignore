@@ -1,4 +1,5 @@
 tt.*
+.claude
 .tests
 doc/tags
 debug
