@@ -125,6 +125,11 @@ local function get_cwd(pane)
   return url and url.file_path or nil
 end
 
+--- Wrap action to also exit prefix mode (for non-repeatable bindings)
+local function one_shot(action)
+  return act.Multiple({ action, act.PopKeyTable })
+end
+
 --- Spawn command in a new tab; tab auto-closes on process exit
 local function spawn_cmd_tab(args, env)
   return wezterm.action_callback(function(window, pane)
@@ -134,7 +139,7 @@ local function spawn_cmd_tab(args, env)
   end)
 end
 
---- Vim-aware pane navigation with optional cross-tab movement at edges
+--- Vim-aware pane navigation (one-shot: exits prefix after action)
 --- NOTE: For vim-internal-split → WezTerm pane handoff, nvim config needs
 ---       wezterm cli support (see navigate_lr in lua/config/keymaps.lua)
 local function vim_nav(direction, vim_key, cross_tab_dir)
@@ -151,10 +156,33 @@ local function vim_nav(direction, vim_key, cross_tab_dir)
     if cross_tab_dir then
       local after_id = mux_win:active_tab():active_pane():pane_id()
       if before_id == after_id then
-        -- At edge: cross to adjacent tab
         window:perform_action(act.ActivateTabRelative(cross_tab_dir), pane)
       end
     end
+  end)
+end
+
+--- Vim-aware pane navigation (repeatable: stays in prefix table)
+--- For Ctrl+hjkl — pops table only when handing off to vim
+local function vim_nav_repeat(direction, vim_key, cross_tab_dir)
+  return wezterm.action_callback(function(window, pane)
+    if is_vim(pane) then
+      window:perform_action(act.SendKey({ key = vim_key, mods = "CTRL|ALT" }), pane)
+      window:perform_action(act.PopKeyTable, pane)
+      return
+    end
+
+    local mux_win = window:mux_window()
+    local before_id = mux_win:active_tab():active_pane():pane_id()
+    window:perform_action(act.ActivatePaneDirection(direction), pane)
+
+    if cross_tab_dir then
+      local after_id = mux_win:active_tab():active_pane():pane_id()
+      if before_id == after_id then
+        window:perform_action(act.ActivateTabRelative(cross_tab_dir), pane)
+      end
+    end
+    -- Table stays active → user can press C-h/j/k/l again
   end)
 end
 
@@ -229,7 +257,7 @@ config.keys = {
         window:perform_action(
           act.ActivateKeyTable({
             name = "tmux_prefix",
-            one_shot = true,
+            one_shot = false,
             timeout_milliseconds = 2500,
           }),
           pane
@@ -286,120 +314,126 @@ config.keys = {
 config.key_tables = {
   tmux_prefix = {
     -- ═══════ Tab (tmux Window) ═══════
-    { key = "c", action = act.SpawnTab("CurrentPaneDomain") },
-    { key = "w", action = act.ShowTabNavigator },
-    { key = "{", action = act.ActivateTabRelative(-1) },
-    { key = "}", action = act.ActivateTabRelative(1) },
-    { key = "&", action = act.CloseCurrentTab({ confirm = true }) },
-    { key = "X", action = act.CloseCurrentTab({ confirm = true }) },
+    { key = "c", action = one_shot(act.SpawnTab("CurrentPaneDomain")) },
+    { key = "w", action = one_shot(act.ShowTabNavigator) },
+    { key = "&", action = one_shot(act.CloseCurrentTab({ confirm = true })) },
+    { key = "X", action = one_shot(act.CloseCurrentTab({ confirm = true })) },
     {
       key = ",",
-      action = act.PromptInputLine({
+      action = one_shot(act.PromptInputLine({
         description = "Rename tab",
         action = wezterm.action_callback(function(window, _, line)
           if line then window:active_tab():set_title(line) end
         end),
-      }),
+      })),
     },
 
     -- Direct tab selection (display 1-based, internal 0-based)
-    { key = "1", action = act.ActivateTab(0) },
-    { key = "2", action = act.ActivateTab(1) },
-    { key = "3", action = act.ActivateTab(2) },
-    { key = "4", action = act.ActivateTab(3) },
-    { key = "5", action = act.ActivateTab(4) },
-    { key = "6", action = act.ActivateTab(5) },
-    { key = "7", action = act.ActivateTab(6) },
-    { key = "8", action = act.ActivateTab(7) },
-    { key = "9", action = act.ActivateTab(8) },
-    { key = "0", action = act.ActivateTab(9) },
+    { key = "1", action = one_shot(act.ActivateTab(0)) },
+    { key = "2", action = one_shot(act.ActivateTab(1)) },
+    { key = "3", action = one_shot(act.ActivateTab(2)) },
+    { key = "4", action = one_shot(act.ActivateTab(3)) },
+    { key = "5", action = one_shot(act.ActivateTab(4)) },
+    { key = "6", action = one_shot(act.ActivateTab(5)) },
+    { key = "7", action = one_shot(act.ActivateTab(6)) },
+    { key = "8", action = one_shot(act.ActivateTab(7)) },
+    { key = "9", action = one_shot(act.ActivateTab(8)) },
+    { key = "0", action = one_shot(act.ActivateTab(9)) },
+
+    -- ══ Repeatable: tab navigation (tmux bind -r { / }) ══
+    { key = "{", action = act.ActivateTabRelative(-1) },
+    { key = "}", action = act.ActivateTabRelative(1) },
 
     -- ═══════ Pane (tmux Pane) ═══════
 
     -- Split (CurrentPaneDomain: stays in same WSL/local/domain + cwd)
-    { key = '"', action = act.SplitVertical({ domain = "CurrentPaneDomain" }) },
-    { key = "%", action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }) },
-    { key = "|", action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }) },
-    { key = "-", action = act.SplitVertical({ domain = "CurrentPaneDomain" }) },
+    { key = '"', action = one_shot(act.SplitVertical({ domain = "CurrentPaneDomain" })) },
+    { key = "%", action = one_shot(act.SplitHorizontal({ domain = "CurrentPaneDomain" })) },
+    { key = "|", action = one_shot(act.SplitHorizontal({ domain = "CurrentPaneDomain" })) },
+    { key = "-", action = one_shot(act.SplitVertical({ domain = "CurrentPaneDomain" })) },
 
     -- Close / zoom
-    { key = "x", action = act.CloseCurrentPane({ confirm = true }) },
-    { key = "z", action = act.TogglePaneZoomState },
+    { key = "x", action = one_shot(act.CloseCurrentPane({ confirm = true })) },
+    { key = "z", action = one_shot(act.TogglePaneZoomState) },
 
     -- Pane select / cycle
-    { key = "q", action = act.PaneSelect({}) },
-    { key = "o", action = act.ActivatePaneDirection("Next") },
-    { key = ";", action = act.ActivatePaneDirection("Prev") },
+    { key = "q", action = one_shot(act.PaneSelect({})) },
+    { key = "o", action = one_shot(act.ActivatePaneDirection("Next")) },
+    { key = ";", action = one_shot(act.ActivatePaneDirection("Prev")) },
 
-    -- Vim-aware pane navigation (h/l cross tab at edges)
-    { key = "h", action = vim_nav("Left", "h", -1) },
-    { key = "j", action = vim_nav("Down", "j") },
-    { key = "k", action = vim_nav("Up", "k") },
-    { key = "l", action = vim_nav("Right", "l", 1) },
+    -- Vim-aware pane navigation — one-shot (h/l cross tab at edges)
+    { key = "h", action = one_shot(vim_nav("Left", "h", -1)) },
+    { key = "j", action = one_shot(vim_nav("Down", "j")) },
+    { key = "k", action = one_shot(vim_nav("Up", "k")) },
+    { key = "l", action = one_shot(vim_nav("Right", "l", 1)) },
 
-    -- Same with Ctrl (matches tmux bind -r C-hjkl)
-    { key = "h", mods = "CTRL", action = vim_nav("Left", "h", -1) },
-    { key = "j", mods = "CTRL", action = vim_nav("Down", "j") },
-    { key = "k", mods = "CTRL", action = vim_nav("Up", "k") },
-    { key = "l", mods = "CTRL", action = vim_nav("Right", "l", 1) },
+    -- ══ Repeatable: Ctrl+hjkl pane nav (tmux bind -r C-hjkl) ══
+    -- Stays in prefix table so you can Ctrl-b, then C-h C-h C-h ...
+    -- Pops table when vim is detected (hands off to vim)
+    -- No cross-tab at edges (unlike bare h/l)
+    { key = "h", mods = "CTRL", action = vim_nav_repeat("Left", "h") },
+    { key = "j", mods = "CTRL", action = vim_nav_repeat("Down", "j") },
+    { key = "k", mods = "CTRL", action = vim_nav_repeat("Up", "k") },
+    { key = "l", mods = "CTRL", action = vim_nav_repeat("Right", "l") },
 
-    -- Arrow keys (non-vim-aware, for quick access)
-    { key = "LeftArrow", action = act.ActivatePaneDirection("Left") },
-    { key = "DownArrow", action = act.ActivatePaneDirection("Down") },
-    { key = "UpArrow", action = act.ActivatePaneDirection("Up") },
-    { key = "RightArrow", action = act.ActivatePaneDirection("Right") },
+    -- ══ Repeatable: Ctrl+arrow resize (1 cell, tmux default behavior) ══
+    { key = "LeftArrow", mods = "CTRL", action = act.AdjustPaneSize({ "Left", 1 }) },
+    { key = "DownArrow", mods = "CTRL", action = act.AdjustPaneSize({ "Down", 1 }) },
+    { key = "UpArrow", mods = "CTRL", action = act.AdjustPaneSize({ "Up", 1 }) },
+    { key = "RightArrow", mods = "CTRL", action = act.AdjustPaneSize({ "Right", 1 }) },
 
-    -- Pane resize (Shift + hjkl, 5 cells at a time)
+    -- ══ Repeatable: pane resize (Shift + hjkl, 5 cells) ══
     { key = "H", action = act.AdjustPaneSize({ "Left", 5 }) },
     { key = "J", action = act.AdjustPaneSize({ "Down", 5 }) },
     { key = "K", action = act.AdjustPaneSize({ "Up", 5 }) },
     { key = "L", action = act.AdjustPaneSize({ "Right", 5 }) },
 
     -- ═══════ Copy / Paste ═══════
-    { key = "[", action = act.ActivateCopyMode },
-    { key = "]", action = act.PasteFrom("PrimarySelection") },
-    { key = "p", action = act.PasteFrom("Clipboard") },
-    { key = "=", action = act.PasteFrom("Clipboard") },
+    { key = "[", action = one_shot(act.ActivateCopyMode) },
+    { key = "]", action = one_shot(act.PasteFrom("PrimarySelection")) },
+    { key = "p", action = one_shot(act.PasteFrom("Clipboard")) },
+    { key = "=", action = one_shot(act.PasteFrom("Clipboard")) },
 
     -- ═══════ Popup Replacements (new tab, auto-close on exit) ═══════
-    { key = "g", action = spawn_cmd_tab({ "lazygit" }) },
-    { key = "T", action = spawn_cmd_tab({ "btop" }) },
+    { key = "g", action = one_shot(spawn_cmd_tab({ "lazygit" })) },
+    { key = "T", action = one_shot(spawn_cmd_tab({ "btop" })) },
     {
       key = "S",
-      action = wezterm.action_callback(function(window, pane)
+      action = one_shot(wezterm.action_callback(function(window, pane)
         window:mux_window():spawn_tab({ cwd = get_cwd(pane) })
-      end),
+      end)),
     },
-    { key = "e", action = spawn_cmd_tab({ "nvim", "." }) },
-    { key = "E", action = spawn_cmd_tab({ "lf" }, { EDITOR = "nvim" }) },
+    { key = "e", action = one_shot(spawn_cmd_tab({ "nvim", "." })) },
+    { key = "E", action = one_shot(spawn_cmd_tab({ "lf" }, { EDITOR = "nvim" })) },
 
     -- ═══════ Other ═══════
 
     -- Send literal Ctrl-b (for remote tmux in non-F12 mode)
-    { key = "b", mods = "CTRL", action = act.SendKey({ key = "b", mods = "CTRL" }) },
+    { key = "b", mods = "CTRL", action = one_shot(act.SendKey({ key = "b", mods = "CTRL" })) },
 
     -- Detach from mux domain
-    { key = "d", action = act.DetachDomain("CurrentPaneDomain") },
+    { key = "d", action = one_shot(act.DetachDomain("CurrentPaneDomain")) },
 
     -- Search in scrollback
-    { key = "f", action = act.Search({ CaseSensitiveString = "" }) },
+    { key = "f", action = one_shot(act.Search({ CaseSensitiveString = "" })) },
 
     -- Session/domain launcher (tmux choose-session)
-    { key = "s", action = act.ShowLauncherArgs({ flags = "WORKSPACES|DOMAINS" }) },
+    { key = "s", action = one_shot(act.ShowLauncherArgs({ flags = "WORKSPACES|DOMAINS" })) },
 
     -- Command palette (tmux-fzf replacement, fuzzy search)
-    { key = ":", action = command_palette() },
+    { key = ":", action = one_shot(command_palette()) },
 
     -- Debug / help
-    { key = "?", action = act.ShowDebugOverlay },
-    { key = "t", action = act.ShowDebugOverlay },
+    { key = "?", action = one_shot(act.ShowDebugOverlay) },
+    { key = "t", action = one_shot(act.ShowDebugOverlay) },
 
     -- Reload config
-    { key = "r", action = act.ReloadConfiguration },
+    { key = "r", action = one_shot(act.ReloadConfiguration) },
 
     -- Cancel prefix
     { key = "Escape", action = act.PopKeyTable },
     { key = "c", mods = "CTRL", action = act.PopKeyTable },
+    { key = "Space", mods = "CTRL", action = act.PopKeyTable },
   },
 
   -- ──────────────────────────────────────────
@@ -460,6 +494,7 @@ config.key_tables = {
     { key = "q", action = act.CopyMode("Close") },
     { key = "Escape", action = act.CopyMode("Close") },
     { key = "c", mods = "CTRL", action = act.CopyMode("Close") },
+    { key = "Space", mods = "CTRL", action = act.CopyMode("Close") },
   },
 }
 
@@ -614,7 +649,7 @@ config.colors = {
   split = "#2e8b57",
 }
 
--- Inactive panes: dimmed (tmux window-style equivalent)
+-- Inactive panes: dimmed + lighter background (like tmux window-style bg=#202020)
 config.inactive_pane_hsb = {
   saturation = 0.7,
   brightness = 0.7,
