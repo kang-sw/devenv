@@ -32,9 +32,8 @@ tasks between them.
   ... (implementation tasks — one per unit of work) ...
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
-[ ] [fixed] Spawn mental-model-updater subagent (background)
+[ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update project docs — _index.md, CLAUDE.md # MEMORY, ticket result
-[ ] [fixed] Wait for mental-model-updater to finish
 [ ] [fixed] Commit
 [ ] [fixed] Report process issues to user
 ```
@@ -99,11 +98,12 @@ Fix Critical and Important issues before proceeding. Minor issues are optional.
 
 ### Mental-model-updater task
 
-Dispatch a **background subagent** to update mental-model docs based on the
-changes made. Prompt it with: the list of files changed, a summary of what was
-added/modified, and the path to `ai-docs/mental-model/overview.md`. The subagent
-reads existing mental-model docs and updates them to reflect the new state. Skip
-if the change has no mental-model impact (e.g., config tweaks, typo fixes).
+Dispatch a **subagent** to update mental-model docs based on the
+changes made and wait it finishes. Prompt it with: the list of files changed, a 
+summary of what was added/modified, and the path to 
+`ai-docs/mental-model/overview.md`. The subagent reads existing mental-model 
+docs and updates them to reflect the new state. Skip if the change has no 
+mental-model impact (e.g., config tweaks, typo fixes).
 
 ### Docs task
 

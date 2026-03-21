@@ -9,7 +9,7 @@ TOKENS_USED=$(echo "$input" | jq -r '.context_window.current_usage | (.input_tok
 TOKENS_K=$(awk "BEGIN {printf \"%.0f\", $TOKENS_USED / 1000}")
 CTX_MAX=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
 MAX_K=$(awk "BEGIN {printf \"%.0f\", $CTX_MAX / 1000}")
-VISUAL_PCT=$(awk "BEGIN {v = sqrt($PCT / 100.0) * 100; if (v > 100) v = 100; printf \"%.0f\", v}")
+VISUAL_PCT=$(awk "BEGIN {v = $PCT; if (v > 100) v = 100; printf \"%.0f\", v}")
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
 LINES_ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
