@@ -2,6 +2,8 @@
 
 ## Project Summary
 
+<!-- One paragraph: what the project is, who it's for, current milestone/target. -->
+
 Personal development environment: Neovim (LazyVim), tmux, WezTerm, Zsh, and
 shell tooling, maintained as a single git repo. Primary target is macOS; partial
 compatibility with WSL/Linux. `install.sh` bootstraps a fresh machine by
@@ -9,10 +11,14 @@ symlinking dotfiles and installing dependencies via Homebrew.
 
 ## Tech Stack
 
+<!-- List primary languages, frameworks, key libraries. -->
+
 Lua + LazyVim (Neovim config). tmux config, WezTerm Lua, Bash scripts,
 Starship TOML, Zsh (plugins via Homebrew — no Oh My Zsh).
 
 ## Workspace
+
+<!-- Describe top-level directories and their roles. -->
 
 ```
 lua/config/       — Neovim core: options, keymaps, autocmds
@@ -29,6 +35,8 @@ install.sh        — Bootstrap: Homebrew deps, symlinks, zsh snippet injection
 `~/.config/nvim` is the repo itself — no symlink needed for Neovim.
 
 ## Architecture Rules
+
+<!-- Project-specific invariants the AI must never violate. -->
 
 1. **LazyVim as base.** Do not override LazyVim defaults without a specific
    reason. Prefer spec-level overrides (`opts`, `keys`, `dependencies`) over
@@ -56,6 +64,8 @@ below is the cross-session context store — update it after non-trivial session
 
 ## Code Standards
 
+<!-- Principles governing code quality and style. -->
+
 1. **Simplicity.** Write the simplest code that works. Implement fully when the
    spec is clear — judge scope by AI effort, not human-hours.
 2. **Surgical changes.** Change only what the task requires. Follow existing
@@ -77,6 +87,7 @@ below is the cross-session context store — update it after non-trivial session
   cross-module interface changes, anything that changes observable behavior.
 - **Always ask**: Deleting existing functionality, changing protocol/API
   semantics, modifying symlink targets in `install.sh`.
+  <!-- ↑ "Always ask" tail is usually project-specific — update when copying. -->
 
 ### Commit Rules
 
@@ -132,6 +143,8 @@ approach was chosen.
 
 ## Build & Workflow
 
+<!-- Commands, flags, known pitfalls that affect every session. -->
+
 - No build step.
 - Neovim: `:Lazy sync` to update plugins; `lazy-lock.json` tracks lockfile —
   commit after intentional updates.
@@ -142,6 +155,8 @@ approach was chosen.
 
 ## Recent Work
 
+<!-- Max 3 items. What was done, what's next. -->
+
 - tmux `prefix+:` fzf command picker: custom wrapper `scripts/tmux-fzf-command.sh`
   adds trailing space after selection so cursor isn't glued to command name.
   Plugin source is untouched; binding in `.tmux.conf` points to the wrapper.
@@ -150,6 +165,8 @@ approach was chosen.
   endpoint so wheel scroll doesn't extend it).
 
 ## Workspace Reference
+
+<!-- Key package/crate names, important paths, architecture quick-ref. -->
 
 - Neovim entry: `init.lua` → `lua/config/lazy.lua`
 - tmux config: `.tmux.conf` (symlinked to `~/.tmux.conf` by `install.sh`)
@@ -160,5 +177,7 @@ approach was chosen.
 - Agents: `claude-agents/` → `~/.claude/agents/` (directory symlinked)
 
 ## Documented Dependencies
+
+<!-- Packages with verified API docs in ai-docs/deps/. Read before using. -->
 
 -
