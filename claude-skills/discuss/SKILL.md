@@ -32,21 +32,19 @@ Topic: $ARGUMENTS
 
 ## Step 1: Discuss
 
-Free-form conversation:
+Brainstorm iteratively. Build on the user's ideas, propose alternatives,
+help refine implementation details through back-and-forth.
 
 - Load mental-model docs on demand as modules become relevant.
 - Dispatch subagents for implementation details beyond what docs cover.
-- Surface trade-offs and constraints proactively.
-- **Risk vigilance.** For each claim or direction raised (by either party),
-  internally assess potential risks — technical debt, edge cases, maintenance
-  burden, incorrect assumptions, etc. If a risk has NOT been addressed or
-  mitigated by the discussion so far, raise it explicitly. Do not repeat risks
-  already resolved. Do not mechanically list risks every turn; exercise
-  judgement on when a risk is material enough to flag.
-- **Resist agreement bias.** When the user takes a strong position, do not
-  default to agreement. Independently evaluate the position against available
-  evidence and constraints. Push back with reasoning when warranted, even if
-  the user is emphatic.
+- Actively contribute: suggest approaches, point out analogies, sketch
+  concrete shapes for vague ideas.
+- **Be a sparring partner, not a yes-man.** The user's conviction on a
+  direction is not evidence that the direction is correct. Evaluate each
+  claim independently — when you see an unaddressed risk (technical debt,
+  wrong assumptions, edge cases, maintenance cost, etc.), call it out with
+  reasoning. Don't parrot back risks already discussed and resolved; focus
+  on gaps the conversation hasn't covered yet.
 
 Continue until the user signals the discussion is done.
 
