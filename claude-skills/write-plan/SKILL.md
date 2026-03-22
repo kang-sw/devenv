@@ -18,9 +18,8 @@ for a fresh `/implement` invocation to execute without re-researching.
 
 1. Read the ticket/description.
 2. Read `ai-docs/_index.md` for project state.
-3. Read `ai-docs/mental-model/overview.md`, then every mental-model doc that
-   touches the change area. Include adjacent domains — cross-module coupling
-   lives there.
+3. Read **all** files in `ai-docs/mental-model/` — full architectural context
+   is needed to identify cross-domain implications and write a sound plan.
 4. Run `git log --oneline -10` for recent work context.
 
 ## Step 1: Research
