@@ -60,7 +60,7 @@ Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
 
 - Frontmatter requires `title`. Add `started: YYYY-MM-DD` on move to
   `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
-- **Status is directory-based only:** `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
+- **Status is directory-based only:** `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`, `backlog/`).
   The containing directory is the single source of truth for status — do not duplicate
   it in frontmatter or elsewhere.
 - **Reference tickets by stem only** (e.g., `260115-feat-foo-bar`), never by full
