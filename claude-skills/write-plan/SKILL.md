@@ -77,7 +77,11 @@ Dispatch a **sonnet-level general-purpose subagent** to verify the plan against
 the actual codebase:
 
 > **Task:** Verify the following implementation plan against the actual source
-> code and mental-model docs.
+> code.
+>
+> **Project context:** Read `CLAUDE.md` code standards. Read **all** of
+> `ai-docs/mental-model/` — understand the full project architecture,
+> cross-module contracts, and invariants before evaluating the plan.
 >
 > **Plan:**
 > [full plan text]
@@ -86,7 +90,8 @@ the actual codebase:
 > - Do referenced files, functions, and types actually exist?
 > - Do described conventions match actual code patterns?
 > - Are there missing considerations (error handling, edge cases, dependencies)?
-> - Does the plan conflict with mental-model constraints or invariants?
+> - Does the plan conflict with documented contracts or invariants?
+> - Does the plan introduce unintended coupling or violate module boundaries?
 > - Are implementation steps concrete enough to execute without ambiguity?
 >
 > **Be aggressive.** Flag anything suspicious — false positives are fine.
