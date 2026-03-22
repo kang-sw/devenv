@@ -64,13 +64,14 @@ If no base commit is provided, use `git log --oneline -20` to infer the range.
 1. **Determine changes**: `git diff <base-commit> HEAD --stat` for overview,
    then full diff for details.
 
-2. **Identify affected domains**: Read `ai-docs/mental-model/overview.md` for
-   the domain layout. Map changed files to domains. A single file may affect
+2. **Read all mental-model docs**: Read every file in `ai-docs/mental-model/`
+   to understand the full project architecture, contracts, and coupling before
+   assessing impact. Map changed files to domains. A single file may affect
    multiple domains. Consider whether new domains are warranted.
 
-3. **Assess impact**: For each affected domain, read the current document and
-   check: changed contracts? New coupling? Extension points added/removed?
-   New silent-failure risks? Debt resolved?
+3. **Assess impact**: For each affected domain, check: changed contracts?
+   New coupling? Extension points added/removed? New silent-failure risks?
+   Debt resolved? Cross-domain side effects?
 
 4. **Update documents**: Surgical edits only.
    - Add content for new contracts or coupling.

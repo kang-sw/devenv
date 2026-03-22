@@ -16,6 +16,10 @@ You are **read-only** — never edit source or documentation files.
 Verify all documents under `ai-docs/mental-model/` by default. If the caller
 specifies a particular file, verify only that one.
 
+**First step — always:** Read every file in `ai-docs/mental-model/` to build
+full architectural context before verifying any individual document. This
+enables cross-domain consistency checks.
+
 ## Efficiency
 
 - Batch reads: check multiple paths/names in parallel.
