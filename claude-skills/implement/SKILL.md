@@ -115,23 +115,26 @@ changes, or anything in the "Ask first" approval category.
 
 > Review the changes for production readiness.
 >
-> **What was implemented:** [summary]
+> **Scope:** [which files/modules changed — no design rationale]
 > **Requirements:** [ticket phase or description]
+> **Project context:** Read `CLAUDE.md` code standards. Read
+> `ai-docs/mental-model/overview.md` and any domain docs relevant to the
+> changed modules — form your own understanding of contracts and invariants.
 > **Git range:** `git diff $(git merge-base <original-branch> HEAD)..HEAD`
 >
 > Check: correctness, edge cases, error handling, test coverage, adherence
-> to CLAUDE.md Code Standards. Categorize issues as Critical / Important / Minor.
+> to code standards and documented contracts. Categorize issues as
+> Critical / Important / Minor.
 > Give a clear verdict: ready to merge, or list fixes needed.
+
+Do **not** include implementation rationale or design justifications in the
+review prompt — the reviewer should evaluate the code independently to avoid
+confirmation bias.
 
 Fix Critical and Important issues before proceeding. Minor issues are optional.
 After fixing, re-run the verify step (tests & build), then re-dispatch code
 review. Repeat until the review returns no Critical or Important issues.
-
-**False positives:** The review subagent lacks full project context and may flag
-correct code as problematic. Before acting on an issue, verify it against the
-actual codebase — read the relevant code, check the contracts, confirm the
-concern is real. Dismiss false positives with a brief rationale rather than
-applying unnecessary "fixes" that degrade the code.
+Dismiss false positives with a brief rationale — do not apply unnecessary fixes.
 
 ### Mental-model-updater task
 
