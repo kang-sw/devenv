@@ -127,6 +127,12 @@ Fix Critical and Important issues before proceeding. Minor issues are optional.
 After fixing, re-run the verify step (tests & build), then re-dispatch code
 review. Repeat until the review returns no Critical or Important issues.
 
+**False positives:** The review subagent lacks full project context and may flag
+correct code as problematic. Before acting on an issue, verify it against the
+actual codebase — read the relevant code, check the contracts, confirm the
+concern is real. Dismiss false positives with a brief rationale rather than
+applying unnecessary "fixes" that degrade the code.
+
 ### Mental-model-updater task
 
 Dispatch a **subagent** to update mental-model docs based on the
