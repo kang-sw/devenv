@@ -74,11 +74,11 @@ Work through tasks sequentially. For each:
 When a repetitive edit spans 3+ locations, delegate to conserve the main
 agent's context window. Choose the right tool for the job:
 
-| Method | When | Example |
-|--------|------|---------|
-| **sed / replace_all** | Pure text substitution expressible as regex | Rename variable, update import path |
-| **haiku subagent** | Fixed pattern, no ambiguity, no judgment needed | Add same parameter to identical function signatures |
-| **sonnet subagent** | Needs structural understanding or has any ambiguity | Refactor call sites after API change, update match arms with varying context |
+| Method | When |
+|--------|------|
+| **sed / replace_all** | Pure text substitution expressible as regex |
+| **haiku subagent** | Fixed pattern, no ambiguity, no judgment needed |
+| **sonnet subagent** | Needs structural understanding or has any ambiguity |
 
 **Required in the delegation prompt:**
 1. Before/after example (extracted from the first instance)
