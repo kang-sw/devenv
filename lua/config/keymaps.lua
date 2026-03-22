@@ -41,6 +41,10 @@ vim.keymap.set({ "n", "i", "t" }, "<C-M-l>", navigate_lr("R", "l", "pane_at_righ
 vim.keymap.set("n", '<leader>"', "<cmd>split<CR>", { desc = "Horizontal split" })
 vim.keymap.set("n", "<leader>%", "<cmd>vsplit<CR>", { desc = "Vertical split" })
 
+-- Visual mode: c, p가 register를 덮어쓰지 않도록
+map("x", "c", '"_c', { desc = "Change without yank" })
+map("x", "p", '"_dP', { desc = "Paste without yank" })
+
 -- Ctrl-C를 Esc처럼 동작하게 매핑 (InsertLeave 이벤트 발생시킴)
 vim.keymap.set("i", "<C-c>", "<Esc>")
 

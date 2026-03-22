@@ -5,9 +5,9 @@
 # Debug: tmux show-environment -g | grep MYTMUX_WINDOW
 #   State format: hash|last_active_epoch|last_check_epoch|frame_index
 
-EVAL_INTERVAL=5 # seconds between full ps/capture-pane checks
-COOLDOWN=5      # seconds to keep spinner after last detected change
-FRAMES=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+EVAL_INTERVAL=2 # seconds between full ps/capture-pane checks
+COOLDOWN=2      # seconds to keep spinner after last detected change
+FRAMES=(🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘)
 
 WINDOW="${1:-}"
 [[ -z "$WINDOW" ]] && exit 0
@@ -17,7 +17,7 @@ STATE_KEY="MYTMUX_WINDOW_${WIN_IDX}"
 
 now=$(date +%s)
 state=$(tmux show-environment -g "$STATE_KEY" 2>/dev/null | cut -d= -f2-)
-IFS='|' read -r prev_hash last_active last_check frame <<< "$state"
+IFS='|' read -r prev_hash last_active last_check frame <<<"$state"
 
 # ── Full evaluation every EVAL_INTERVAL seconds ────────────
 if [[ -z "$last_check" || $((now - last_check)) -ge $EVAL_INTERVAL ]]; then
@@ -43,7 +43,7 @@ fi
 
 # ── Spinner output (every tick) ─────────────────────────────
 if [[ -n "$last_active" && $((now - last_active)) -lt $COOLDOWN ]]; then
-  frame=$(( (${frame:-0} + 1) % ${#FRAMES[@]} ))
+  frame=$(((${frame:-0} + 1) % ${#FRAMES[@]}))
   printf ' %s' "${FRAMES[$frame]}"
 else
   frame=""
