@@ -41,8 +41,8 @@ tasks between them.
 [ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update project docs — CLAUDE.md # MEMORY, ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
-[ ] [fixed] Merge & cleanup — user confirm → merge --no-ff → delete branch
 [ ] [fixed] Report process issues to user
+[ ] [fixed] Merge & cleanup — user confirm → merge --no-ff → delete branch
 ```
 
 State assumptions and success criteria before the first implementation task.
