@@ -71,18 +71,27 @@ Work through tasks sequentially. For each:
 
 ### Mechanical-edit delegation
 
-When a repetitive, mechanical edit spans 3+ locations, delegate to a sonnet
-subagent to conserve the main agent's context window.
+When a repetitive edit spans 3+ locations, delegate to conserve the main
+agent's context window. Choose the right tool for the job:
+
+| Method | When | Example |
+|--------|------|---------|
+| **sed / replace_all** | Pure text substitution expressible as regex | Rename variable, update import path |
+| **haiku subagent** | Fixed pattern, no ambiguity, no judgment needed | Add same parameter to identical function signatures |
+| **sonnet subagent** | Needs structural understanding or has any ambiguity | Refactor call sites after API change, update match arms with varying context |
 
 **Required in the delegation prompt:**
 1. Before/after example (extracted from the first instance)
 2. Target file list
 3. Success criteria appropriate to the stage (e.g., `cargo check` passes,
    grep confirms pattern applied)
-4. Bail-out condition: "If a target file's structure differs from the example
-   or the expected pattern is not found — skip that file and report it back"
+4. Bail-out condition (sonnet only): "If a target file's structure differs
+   from the example or the expected pattern is not found — skip that file
+   and report it back"
 
-**Execution:** `Agent` with `model: "sonnet"` (no worktree — preserve build cache)
+**Execution:** `Agent` with `model: "haiku"` or `"sonnet"`, no worktree
+(preserve build cache). Use haiku only when the pattern is rigid enough that
+bail-out judgment is unnecessary.
 
 **Rollback:** On criteria failure or unexpected structure, the subagent runs
 `git checkout -- <modified-files>` to revert, then reports the failure reason.
