@@ -43,7 +43,7 @@ ai-docs/
   mental-model/      — architecture docs, regenerable from source
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
-  tickets/<status>/  — idea/ todo/ wip/ done/ dropped/ backlog/
+  tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
 ```
 
 **When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
@@ -60,7 +60,7 @@ Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
 
 - Frontmatter requires `title`. Add `started: YYYY-MM-DD` on move to
   `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
-- **Status is directory-based only:** `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`, `backlog/`).
+- **Status is directory-based only:** `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
   The containing directory is the single source of truth for status — do not duplicate
   it in frontmatter or elsewhere.
 - **Reference tickets by stem only** (e.g., `260115-feat-foo-bar`), never by full
