@@ -117,14 +117,19 @@ changes, or anything in the "Ask first" approval category.
 >
 > **Scope:** [which files/modules changed — no design rationale]
 > **Requirements:** [ticket phase or description]
-> **Project context:** Read `CLAUDE.md` code standards. Read
-> `ai-docs/mental-model/overview.md` and any domain docs relevant to the
-> changed modules — form your own understanding of contracts and invariants.
+> **Project context:** Read `CLAUDE.md` code standards. Read **all** of
+> `ai-docs/mental-model/` — understand the full project architecture,
+> cross-module contracts, and invariants before reviewing the diff.
 > **Git range:** `git diff $(git merge-base <original-branch> HEAD)..HEAD`
 >
-> Check: correctness, edge cases, error handling, test coverage, adherence
-> to code standards and documented contracts. Categorize issues as
-> Critical / Important / Minor.
+> Review as a PM + senior engineer with full project awareness:
+> - **Correctness** — logic errors, edge cases, error handling
+> - **Architectural fit** — does this change respect documented contracts
+>   and module boundaries? Any unintended coupling or side effects?
+> - **Test coverage** — adequate for the change scope?
+> - **Code standards** — adherence to CLAUDE.md conventions
+>
+> Categorize issues as Critical / Important / Minor.
 > Give a clear verdict: ready to merge, or list fixes needed.
 
 Do **not** include implementation rationale or design justifications in the
