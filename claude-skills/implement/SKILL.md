@@ -17,6 +17,7 @@ Target: $ARGUMENTS
    domains — cross-module coupling is often documented there. If no mental-model
    docs exist yet, note this for the docs task.
 4. Run `git log --oneline -10` to check recent work.
+5. Create a feature branch: `implement/<scope>` from the current branch.
 
 Carry mental-model context forward into task breakdown and implementation. When
 unsure about a contract or boundary, re-read the relevant mental-model doc.
@@ -29,12 +30,13 @@ tasks between them.
 
 ```
 [ ] [fixed] Collect context — read target files, verify contracts against code
-  ... (implementation tasks — one per unit of work) ...
+  ... (implementation tasks — commit freely at logical points) ...
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
 [ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update project docs — _index.md, CLAUDE.md # MEMORY, ticket result
-[ ] [fixed] Commit
+[ ] [fixed] Final commit — docs & remaining changes
+[ ] [fixed] Merge & cleanup — user confirm → merge --no-ff → delete branch
 [ ] [fixed] Report process issues to user
 ```
 
@@ -61,6 +63,27 @@ Work through tasks sequentially. For each:
   behavior.
 - When tests fail, diagnose whether the test assumptions or the implementation
   is wrong.
+
+### Mechanical-edit delegation
+
+When a repetitive, mechanical edit spans 3+ locations, delegate to a sonnet
+subagent to conserve the main agent's context window.
+
+**Required in the delegation prompt:**
+1. Before/after example (extracted from the first instance)
+2. Target file list
+3. Success criteria appropriate to the stage (e.g., `cargo check` passes,
+   grep confirms pattern applied)
+4. Bail-out condition: "If a target file's structure differs from the example
+   or the expected pattern is not found — skip that file and report it back"
+
+**Execution:** `Agent` with `model: "sonnet"` (no worktree — preserve build cache)
+
+**Rollback:** On criteria failure or unexpected structure, the subagent runs
+`git checkout -- <modified-files>` to revert, then reports the failure reason.
+
+**Main agent responsibility:** Review the subagent's diff before proceeding.
+Intermediate commits are safe — work is on a feature branch.
 
 ### Approval protocol
 
@@ -113,20 +136,33 @@ mental-model impact (e.g., config tweaks, typo fixes).
 - If completing a ticket phase, append `### Result` to the ticket doc.
 - Prune aggressively — keep docs focused on current state.
 
-### Commit task
+### Intermediate commits
 
-Wait for mental-model-updater to finish before committing.
+Work happens on a feature branch, so commit freely at logical checkpoints.
+Keep messages brief — the merge commit carries the final summary.
 
-```
-<type>(<scope>): <summary>
+### Final commit task
+
+Wait for mental-model-updater to finish before the last commit.
+Commit remaining docs and cleanup changes.
+
+### Merge & cleanup task
+
+After all tasks pass, ask the user for final confirmation.
+
+```bash
+git checkout <original-branch>
+git merge --no-ff implement/<scope> -m "<type>(<scope>): <summary>
 
 <what changed — brief>
 
 ## AI Context
-- <decision rationale, rejected alternatives, user directives>
+- <decision rationale, rejected alternatives, user directives>"
+git branch -d implement/<scope>
 ```
 
-Include documentation changes in the commit.
+The merge commit message serves as the conventional-commit record.
+If the user declines, keep the branch intact and stop.
 
 ### Report task
 
