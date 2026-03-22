@@ -24,8 +24,9 @@ Target: $ARGUMENTS
    and continue from the existing task list. Otherwise, create a feature branch:
    `implement/<scope>` from the current branch.
 
-Carry mental-model context forward into task breakdown and implementation. When
-unsure about a contract or boundary, re-read the relevant mental-model doc.
+If mental-model docs exist, carry that context forward into task breakdown and
+implementation. When unsure about a contract or boundary, re-read the relevant
+mental-model doc.
 
 ## Step 1: Task List
 
@@ -38,8 +39,8 @@ tasks between them.
   ... (implementation tasks — commit freely at logical points) ...
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
-[ ] [fixed] Update mental model with mental-model-updater subagent
-[ ] [fixed] Update project docs — _index.md, CLAUDE.md # MEMORY, ticket result
+[ ] [fixed] Update mental model with mental-model-updater subagent (skip if no ai-docs/)
+[ ] [fixed] Update project docs — CLAUDE.md # MEMORY, ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Merge & cleanup — user confirm → merge --no-ff → delete branch
 [ ] [fixed] Report process issues to user
@@ -61,7 +62,8 @@ Work through tasks sequentially. For each:
 
 - Follow CLAUDE.md Code Standards.
 - Before touching a module, verify its contracts and invariants in the
-  mental-model docs. Prefer documented extension points over new abstractions.
+  mental-model docs (if available). Prefer documented extension points over
+  new abstractions.
 - **Testable pure logic** (calculations, parsing, state transitions):
   define expected behavior first, write test cases, then implement.
 - **Integration/FFI code**: implement first, then add tests for observable
@@ -150,7 +152,7 @@ Keep messages brief — the merge commit carries the final summary.
 
 ### Final commit task
 
-Wait for mental-model-updater to finish before the last commit.
+Wait for mental-model-updater to finish (if dispatched) before the last commit.
 Commit remaining docs and cleanup changes.
 
 ### Merge & cleanup task
