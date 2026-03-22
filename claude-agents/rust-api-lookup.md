@@ -24,6 +24,17 @@ syntax.
 
 2. **Run `cargo brief` with appropriate scope.** Start narrow (specific module),
    widen if needed. Use `cargo brief --help` if unsure about flags.
+   - For **API signatures and types**: use `api` or `search` subcommands.
+     - Module API: `cargo brief api self::net`
+     - Find a type: `cargo brief search self TcpStream`
+     - Remote crate: `cargo brief -C api serde@1 --compact`
+   - For **structural code patterns** (how a type is constructed, call sites,
+     impl blocks, match arms, trait usage in context): use `cargo brief ts`
+     with a tree-sitter S-expression query. Run `cargo brief ts --help` for
+     query syntax and node type reference. Examples:
+     - Find impl blocks: `cargo brief ts self '(impl_item trait: (type_identifier) @t (#eq? @t "MyTrait"))'`
+     - Find call sites: `cargo brief ts self '(call_expression function: (identifier) @fn (#eq? @fn "spawn"))' -q`
+     - Remote crate: `cargo brief -C ts serde@1 '(struct_item)' --limit 10`
 
 3. **Digest and return only what's relevant.**
    - Don't dump the full output if only one type matters.

@@ -38,7 +38,7 @@ if [[ -z "$last_check" || $((now - last_check)) -ge $EVAL_INTERVAL ]]; then
     [[ -n "$prev_hash" && "$hash" != "$prev_hash" ]] && last_active=$now
     prev_hash=$hash
 
-    if printf '%s' "$content" | grep -q '╌╌╌╌'; then
+    if printf '%s' "$content" | grep -q '1. Yes'; then
       has_prompt=1
     else
       has_prompt=""
@@ -50,7 +50,7 @@ fi
 
 # ── Indicator output (every tick) ───────────────────────────
 if [[ -n "$has_prompt" ]]; then
-  printf ' 🥶'
+  printf ' 🔥'
 elif [[ -n "$last_active" && $((now - last_active)) -le $COOLDOWN ]]; then
   frame=$(((${frame:-0} + 1) % ${#FRAMES[@]}))
   printf ' %s' "${FRAMES[$frame]}"
