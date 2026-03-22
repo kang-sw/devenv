@@ -1,6 +1,6 @@
 ---
 name: discuss
-description: Open-ended project discussion. Loads mental-model context on demand; captures conclusions as tickets or doc updates when appropriate.
+description: Open-ended project discussion with full architectural context. Captures conclusions as tickets or doc updates when appropriate.
 argument-hint: "[topic, ticket path, or question — optional]"
 ---
 

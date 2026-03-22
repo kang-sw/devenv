@@ -145,10 +145,9 @@ Dismiss false positives with a brief rationale — do not apply unnecessary fixe
 
 Dispatch a **subagent** to update mental-model docs based on the
 changes made and wait for it to finish. Prompt it with: the list of files
-changed, a summary of what was added/modified, and the path to
-`ai-docs/mental-model/overview.md`. The subagent reads existing mental-model
-docs and updates them to reflect the new state. Skip if the change has no
-mental-model impact (e.g., config tweaks, typo fixes).
+changed and a summary of what was added/modified. The subagent reads all
+mental-model docs and updates them to reflect the new state. Skip if the
+change has no mental-model impact (e.g., config tweaks, typo fixes).
 
 **Wait for the subagent to finish before starting the docs task.**
 Code review fixes can change the implementation substantially — mental-model
@@ -168,7 +167,6 @@ Keep messages brief — the merge commit carries the final summary.
 
 ### Final commit task
 
-Wait for mental-model-updater to finish before the last commit.
 Commit remaining docs and cleanup changes.
 
 ### Merge & cleanup task
