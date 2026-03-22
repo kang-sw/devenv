@@ -13,14 +13,15 @@ Target: $ARGUMENTS
 1. Read the ticket/description/plan text.
 2. Read `ai-docs/_index.md` for current project state (skip if `ai-docs/`
    does not exist).
-3. Read `ai-docs/mental-model/overview.md` to identify relevant domains.
-   Read every mental-model doc that touches the change area, including adjacent
-   domains — cross-module coupling is often documented there. If no mental-model
-   docs exist yet, note this for the docs task. Skip if `ai-docs/` does not
-   exist.
+3. If `ai-docs/` exists, read `ai-docs/mental-model/overview.md` to identify
+   relevant domains. Read every mental-model doc that touches the change area,
+   including adjacent domains — cross-module coupling is often documented there.
+   If the directory exists but mental-model docs are missing, note this for the
+   docs task.
 4. Run `git log --oneline -10` to check recent work.
 5. Record the current branch as `<original-branch>`. If already on an
-   `implement/` branch, treat it as a resumed session — skip branch creation
+   `implement/` branch, treat it as a resumed session — infer
+   `<original-branch>` from the merge-base with `main`, skip branch creation,
    and continue from the existing task list. Otherwise, create a feature branch:
    `implement/<scope>` from the current branch.
 
@@ -100,8 +101,9 @@ Intermediate commits are safe — work is on a feature branch.
 
 ### Verify task
 
-Run the project's test suite(s) and build step. If the project has a separate
-integration test (see CLAUDE.md `# MEMORY → Build & Workflow`), run that too.
+Run the project's test suite(s) and build step (see CLAUDE.md
+`# MEMORY → Build & Workflow`). If the project has a separate integration test,
+run that too. Skip if the project has no test suite or build step.
 **Read the full output.** Claim "pass" only after confirming the actual result —
 never "should pass" or "looks correct." All tests must pass before proceeding.
 
@@ -122,7 +124,7 @@ changes, or anything in the "Ask first" approval category.
 >
 > Check: correctness, edge cases, error handling, test coverage, adherence
 > to CLAUDE.md Code Standards. Categorize issues as Critical / Important / Minor.
-> Give a clear verdict: ready to commit, or list fixes needed.
+> Give a clear verdict: ready to merge, or list fixes needed.
 
 Fix Critical and Important issues before proceeding. Minor issues are optional.
 
@@ -161,12 +163,15 @@ After all tasks pass, ask the user for final confirmation.
 
 ```bash
 git checkout <original-branch>
-git merge --no-ff implement/<scope> -m "<type>(<scope>): <summary>
+git merge --no-ff implement/<scope> -m "$(cat <<'EOF'
+<type>(<scope>): <summary>
 
 <what changed — brief>
 
 ## AI Context
-- <decision rationale, rejected alternatives, user directives>"
+- <decision rationale, rejected alternatives, user directives>
+EOF
+)"
 git branch -d implement/<scope>
 ```
 
@@ -175,7 +180,7 @@ If the user declines, keep the branch intact and stop.
 
 ### Report task
 
-After committing, report to the user any **process issues** encountered during
+After merging, report to the user any **process issues** encountered during
 implementation:
 
 - Dependency doc gaps — APIs that were missing, wrong, or misleading in
