@@ -42,7 +42,7 @@ tasks between them.
 [ ] [fixed] Update project docs — CLAUDE.md # MEMORY, ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Report process issues to user
-[ ] [fixed] Merge & cleanup — user confirm → merge --no-ff → delete branch
+[ ] [fixed] Merge & cleanup — user reviews report → confirm → merge --no-ff → delete branch
 ```
 
 State assumptions and success criteria before the first implementation task.
@@ -178,9 +178,22 @@ Keep messages brief — the merge commit carries the final summary.
 
 Commit remaining docs and cleanup changes.
 
+### Report task
+
+Report to the user any **process issues** encountered during implementation:
+
+- Dependency doc gaps — APIs that were missing, wrong, or misleading in
+  `ai-docs/deps/` docs
+- Mental-model inaccuracies — contracts or invariants that didn't match reality
+- Convention mismatches — patterns described in docs that diverged from actual
+  code
+
+Skip if nothing notable. The user reviews this report before confirming merge —
+do not silently swallow friction that could be fixed for next time.
+
 ### Merge & cleanup task
 
-After all tasks pass, ask the user for final confirmation.
+After the user has reviewed the report, ask for final confirmation.
 
 ```bash
 git checkout <original-branch>
@@ -198,17 +211,3 @@ git branch -d implement/<scope>
 
 The merge commit message serves as the conventional-commit record.
 If the user declines, keep the branch intact and stop.
-
-### Report task
-
-After merging, report to the user any **process issues** encountered during
-implementation:
-
-- Dependency doc gaps — APIs that were missing, wrong, or misleading in
-  `ai-docs/deps/` docs
-- Mental-model inaccuracies — contracts or invariants that didn't match reality
-- Convention mismatches — patterns described in docs that diverged from actual
-  code
-
-Skip if nothing notable. This is the last task — do not silently swallow
-friction that could be fixed for next time.
