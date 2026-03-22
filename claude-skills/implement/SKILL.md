@@ -37,6 +37,7 @@ tasks between them.
   ... (implementation tasks — commit freely at logical points) ...
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
+  ↳ if Critical/Important issues: fix → re-test → re-review (loop until clean)
 [ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update project docs — CLAUDE.md # MEMORY, ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
@@ -123,6 +124,8 @@ changes, or anything in the "Ask first" approval category.
 > Give a clear verdict: ready to merge, or list fixes needed.
 
 Fix Critical and Important issues before proceeding. Minor issues are optional.
+After fixing, re-run the verify step (tests & build), then re-dispatch code
+review. Repeat until the review returns no Critical or Important issues.
 
 ### Mental-model-updater task
 
