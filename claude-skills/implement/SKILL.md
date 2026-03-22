@@ -11,13 +11,18 @@ Target: $ARGUMENTS
 ## Step 0: Understand
 
 1. Read the ticket/description/plan text.
-2. Read `ai-docs/_index.md` for current project state.
+2. Read `ai-docs/_index.md` for current project state (skip if `ai-docs/`
+   does not exist).
 3. Read `ai-docs/mental-model/overview.md` to identify relevant domains.
    Read every mental-model doc that touches the change area, including adjacent
    domains — cross-module coupling is often documented there. If no mental-model
-   docs exist yet, note this for the docs task.
+   docs exist yet, note this for the docs task. Skip if `ai-docs/` does not
+   exist.
 4. Run `git log --oneline -10` to check recent work.
-5. Create a feature branch: `implement/<scope>` from the current branch.
+5. Record the current branch as `<original-branch>`. If already on an
+   `implement/` branch, treat it as a resumed session — skip branch creation
+   and continue from the existing task list. Otherwise, create a feature branch:
+   `implement/<scope>` from the current branch.
 
 Carry mental-model context forward into task breakdown and implementation. When
 unsure about a contract or boundary, re-read the relevant mental-model doc.
@@ -111,7 +116,7 @@ changes, or anything in the "Ask first" approval category.
 >
 > **What was implemented:** [summary]
 > **Requirements:** [ticket phase or description]
-> **Git range:** `git diff <base-sha>..HEAD`
+> **Git range:** `git diff $(git merge-base <original-branch> HEAD)..HEAD`
 >
 > Check: correctness, edge cases, error handling, test coverage, adherence
 > to CLAUDE.md Code Standards. Categorize issues as Critical / Important / Minor.
@@ -122,15 +127,17 @@ Fix Critical and Important issues before proceeding. Minor issues are optional.
 ### Mental-model-updater task
 
 Dispatch a **subagent** to update mental-model docs based on the
-changes made and wait it finishes. Prompt it with: the list of files changed, a 
-summary of what was added/modified, and the path to 
-`ai-docs/mental-model/overview.md`. The subagent reads existing mental-model 
-docs and updates them to reflect the new state. Skip if the change has no 
-mental-model impact (e.g., config tweaks, typo fixes).
+changes made and wait for it to finish. Prompt it with: the list of files
+changed, a summary of what was added/modified, and the path to
+`ai-docs/mental-model/overview.md`. The subagent reads existing mental-model
+docs and updates them to reflect the new state. Skip if the change has no
+mental-model impact (e.g., config tweaks, typo fixes) or if `ai-docs/` does
+not exist.
 
 ### Docs task
 
-- Update `ai-docs/_index.md` if project capabilities changed.
+- Update `ai-docs/_index.md` if project capabilities changed (skip if
+  `ai-docs/` does not exist).
 - Continue with doc updates while the mental-model-updater subagent runs.
 - Update `# MEMORY` section in `CLAUDE.md`.
 - If completing a ticket phase, append `### Result` to the ticket doc.
@@ -170,8 +177,9 @@ After committing, report to the user any **process issues** encountered during
 implementation:
 
 - Dependency doc gaps — APIs that were missing, wrong, or misleading in
-  `ai-docs/deps/` docs
+  `ai-docs/deps/` docs (if the project uses `ai-docs/`)
 - Mental-model inaccuracies — contracts or invariants that didn't match reality
+  (if the project uses mental-model docs)
 - Convention mismatches — patterns described in docs that diverged from actual
   code
 
