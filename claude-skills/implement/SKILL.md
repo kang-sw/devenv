@@ -11,13 +11,11 @@ Target: $ARGUMENTS
 ## Step 0: Understand
 
 1. Read the ticket/description/plan text.
-2. Read `ai-docs/_index.md` for current project state (skip if `ai-docs/`
-   does not exist).
-3. If `ai-docs/` exists, read `ai-docs/mental-model/overview.md` to identify
-   relevant domains. Read every mental-model doc that touches the change area,
-   including adjacent domains — cross-module coupling is often documented there.
-   If the directory exists but mental-model docs are missing, note this for the
-   docs task.
+2. Read `ai-docs/_index.md` for current project state.
+3. Read `ai-docs/mental-model/overview.md` to identify relevant domains.
+   Read every mental-model doc that touches the change area, including adjacent
+   domains — cross-module coupling is often documented there. If no mental-model
+   docs exist yet, note this for the docs task.
 4. Run `git log --oneline -10` to check recent work.
 5. Record the current branch as `<original-branch>`. If already on an
    `implement/` branch, treat it as a resumed session — infer
@@ -25,9 +23,8 @@ Target: $ARGUMENTS
    and continue from the existing task list. Otherwise, create a feature branch:
    `implement/<scope>` from the current branch.
 
-If mental-model docs exist, carry that context forward into task breakdown and
-implementation. When unsure about a contract or boundary, re-read the relevant
-mental-model doc.
+Carry mental-model context forward into task breakdown and implementation. When
+unsure about a contract or boundary, re-read the relevant mental-model doc.
 
 ## Step 1: Task List
 
@@ -40,7 +37,7 @@ tasks between them.
   ... (implementation tasks — commit freely at logical points) ...
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
-[ ] [fixed] Update mental model with mental-model-updater subagent (skip if no ai-docs/)
+[ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update project docs — CLAUDE.md # MEMORY, ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Merge & cleanup — user confirm → merge --no-ff → delete branch
@@ -63,8 +60,7 @@ Work through tasks sequentially. For each:
 
 - Follow CLAUDE.md Code Standards.
 - Before touching a module, verify its contracts and invariants in the
-  mental-model docs (if available). Prefer documented extension points over
-  new abstractions.
+  mental-model docs. Prefer documented extension points over new abstractions.
 - **Testable pure logic** (calculations, parsing, state transitions):
   define expected behavior first, write test cases, then implement.
 - **Integration/FFI code**: implement first, then add tests for observable
@@ -135,13 +131,11 @@ changes made and wait for it to finish. Prompt it with: the list of files
 changed, a summary of what was added/modified, and the path to
 `ai-docs/mental-model/overview.md`. The subagent reads existing mental-model
 docs and updates them to reflect the new state. Skip if the change has no
-mental-model impact (e.g., config tweaks, typo fixes) or if `ai-docs/` does
-not exist.
+mental-model impact (e.g., config tweaks, typo fixes).
 
 ### Docs task
 
-- Update `ai-docs/_index.md` if project capabilities changed (skip if
-  `ai-docs/` does not exist).
+- Update `ai-docs/_index.md` if project capabilities changed.
 - Continue with doc updates while the mental-model-updater subagent runs.
 - Update `# MEMORY` section in `CLAUDE.md`.
 - If completing a ticket phase, append `### Result` to the ticket doc.
@@ -154,7 +148,7 @@ Keep messages brief — the merge commit carries the final summary.
 
 ### Final commit task
 
-Wait for mental-model-updater to finish (if dispatched) before the last commit.
+Wait for mental-model-updater to finish before the last commit.
 Commit remaining docs and cleanup changes.
 
 ### Merge & cleanup task
@@ -184,9 +178,8 @@ After merging, report to the user any **process issues** encountered during
 implementation:
 
 - Dependency doc gaps — APIs that were missing, wrong, or misleading in
-  `ai-docs/deps/` docs (if the project uses `ai-docs/`)
+  `ai-docs/deps/` docs
 - Mental-model inaccuracies — contracts or invariants that didn't match reality
-  (if the project uses mental-model docs)
 - Convention mismatches — patterns described in docs that diverged from actual
   code
 
