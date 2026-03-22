@@ -11,8 +11,9 @@ Topic: $ARGUMENTS
 ## Constraints
 
 - **Read-only.** No source edits. Documentation/ticket writes only in Step 2.
-- **Lazy context.** Read `ai-docs/_index.md` at start. Load other mental-model
-  docs only when the conversation reaches them.
+- **Full context upfront.** Read `ai-docs/_index.md` and all of
+  `ai-docs/mental-model/` at start — architectural awareness is required
+  to evaluate trade-offs and spot cross-domain implications.
 - **No direct source reading.** Delegate to subagents when details beyond
   mental-model docs are needed.
 - **Honest uncertainty.** If docs are stale or insufficient, say so and suggest
@@ -20,7 +21,7 @@ Topic: $ARGUMENTS
 
 ## Step 0: Orient
 
-1. Read `ai-docs/_index.md` for project structure and mental-model inventory.
+1. Read `ai-docs/_index.md` and all files in `ai-docs/mental-model/`.
 2. If `$ARGUMENTS` references a ticket, read it.
 3. **If `$ARGUMENTS` is empty:** Read WIP tickets and run
    `git log --oneline -10`. Survey project state and propose 2-3 topics
@@ -35,8 +36,7 @@ Topic: $ARGUMENTS
 Brainstorm iteratively. Build on the user's ideas, propose alternatives,
 help refine implementation details through back-and-forth.
 
-- Load mental-model docs on demand as modules become relevant.
-- Dispatch subagents for implementation details beyond what docs cover.
+- Dispatch subagents for implementation details beyond what mental-model docs cover.
 - Actively contribute: suggest approaches, point out analogies, sketch
   concrete shapes for vague ideas.
 - **Be a sparring partner, not a yes-man.** The user's conviction on a
