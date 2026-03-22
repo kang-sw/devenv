@@ -150,10 +150,13 @@ changed, a summary of what was added/modified, and the path to
 docs and updates them to reflect the new state. Skip if the change has no
 mental-model impact (e.g., config tweaks, typo fixes).
 
+**Wait for the subagent to finish before starting the docs task.**
+Code review fixes can change the implementation substantially — mental-model
+must reflect the final state before docs are written.
+
 ### Docs task
 
 - Update `ai-docs/_index.md` if project capabilities changed.
-- Continue with doc updates while the mental-model-updater subagent runs.
 - Update `# MEMORY` section in `CLAUDE.md`.
 - If completing a ticket phase, append `### Result` to the ticket doc.
 - Prune aggressively — keep docs focused on current state.
