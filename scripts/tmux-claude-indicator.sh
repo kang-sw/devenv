@@ -52,12 +52,12 @@ fi
 # ── Indicator output (every tick) ───────────────────────────
 if [[ -n "$has_prompt" ]]; then
   printf ' 🔥'
-  was_active=1
+  [[ "$IS_ACTIVE" != "1" ]] && was_active=1
   completed=""
 elif [[ -n "$last_active" && $((now - last_active)) -le $COOLDOWN ]]; then
   frame=$(((${frame:-0} + 1) % ${#FRAMES[@]}))
   printf ' %s' "${FRAMES[$frame]}"
-  was_active=1
+  [[ "$IS_ACTIVE" != "1" ]] && was_active=1
   completed=""
 elif [[ "$was_active" == "1" ]]; then
   # spinner just stopped — mark completed if user isn't watching
