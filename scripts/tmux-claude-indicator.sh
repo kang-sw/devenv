@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # tmux-claude-indicator.sh — spinner on window tab when Claude Code is actively outputting
-# Usage (in window-status-format): #(~/.config/nvim/scripts/tmux-claude-indicator.sh '#S:#I')
+# Usage (in window-status-format): #(~/.config/nvim/scripts/tmux-claude-indicator.sh '#S:#I' '#{window_active}')
 #
 # Debug: tmux show-environment -g | grep MYTMUX_WINDOW
-#   State format: hash|last_active_epoch|last_check_epoch|frame_index|has_prompt
+#   State format: hash|last_active_epoch|last_check_epoch|frame_index|has_prompt|was_active|completed
 
 EVAL_INTERVAL=3 # seconds between full ps/capture-pane checks
 COOLDOWN=3      # seconds to keep spinner after last detected change
@@ -12,12 +12,13 @@ FRAMES=(🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘)
 WINDOW="${1:-}"
 [[ -z "$WINDOW" ]] && exit 0
 
+IS_ACTIVE="${2:-0}"
 WIN_IDX="${WINDOW##*:}"
 STATE_KEY="MYTMUX_WINDOW_${WIN_IDX}"
 
 now=$(date +%s)
 state=$(tmux show-environment -g "$STATE_KEY" 2>/dev/null | cut -d= -f2-)
-IFS='|' read -r prev_hash last_active last_check frame has_prompt <<<"$state"
+IFS='|' read -r prev_hash last_active last_check frame has_prompt was_active completed <<<"$state"
 
 # ── Full evaluation every EVAL_INTERVAL seconds ────────────
 if [[ -z "$last_check" || $((now - last_check)) -ge $EVAL_INTERVAL ]]; then
@@ -51,11 +52,28 @@ fi
 # ── Indicator output (every tick) ───────────────────────────
 if [[ -n "$has_prompt" ]]; then
   printf ' 🔥'
+  was_active=1
+  completed=""
 elif [[ -n "$last_active" && $((now - last_active)) -le $COOLDOWN ]]; then
   frame=$(((${frame:-0} + 1) % ${#FRAMES[@]}))
   printf ' %s' "${FRAMES[$frame]}"
-else
+  was_active=1
+  completed=""
+elif [[ "$was_active" == "1" ]]; then
+  # spinner just stopped — mark completed if user isn't watching
+  was_active=""
   frame=""
+  if [[ "$IS_ACTIVE" != "1" ]]; then
+    completed=1
+    printf ' ✅'
+  fi
+elif [[ "$completed" == "1" ]]; then
+  # stay ✅ until user switches to this window
+  if [[ "$IS_ACTIVE" == "1" ]]; then
+    completed=""
+  else
+    printf ' ✅'
+  fi
 fi
 
-tmux set-environment -g "$STATE_KEY" "${prev_hash}|${last_active}|${last_check}|${frame}|${has_prompt}"
+tmux set-environment -g "$STATE_KEY" "${prev_hash}|${last_active}|${last_check}|${frame}|${has_prompt}|${was_active}|${completed}"
