@@ -33,9 +33,11 @@ Adapt depth to the change. Pick the appropriate level:
 | **Thorough** | New component, cross-module, unfamiliar area | + Search for similar implementations, extract concrete convention examples |
 
 When uncertain, go one level deeper — over-researching costs less than a wrong
-plan.
+plan. Before designing new components, search for existing utilities or patterns
+that can be reused or extended — include these in the plan's "Relevant Files."
 
-Use subagents for broad codebase searches. Keep the main context for synthesis.
+Use subagents for broad codebase searches, including reuse candidates. Keep the
+main context for synthesis.
 
 ## Step 2: Draft Plan
 
