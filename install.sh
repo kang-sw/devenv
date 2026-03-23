@@ -15,6 +15,13 @@ warn()    { printf "\033[1;33m  ⚠ %s\033[0m\n" "$*"; }
 die()     { printf "\033[1;31m  ✘ %s\033[0m\n" "$*" >&2; exit 1; }
 has()     { command -v "$1" &>/dev/null; }
 
+# Use sudo only when not already root
+if [[ $EUID -eq 0 ]]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Platform detection
 # ══════════════════════════════════════════════════════════════════════════════
@@ -34,8 +41,8 @@ info "Platform: $PLATFORM"
 
 if [[ "$PLATFORM" == "wsl" || "$PLATFORM" == "linux" ]]; then
     info "Updating apt and installing prerequisites..."
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq \
+    $SUDO apt-get update -qq
+    $SUDO apt-get install -y -qq \
         curl git unzip wget ca-certificates gnupg \
         build-essential gcc g++ make cmake pkg-config \
         libssl-dev zlib1g-dev \
@@ -99,7 +106,7 @@ if ! has zsh; then
     if [[ "$PLATFORM" == "macos" ]]; then
         brew_install zsh
     else
-        sudo apt-get install -y -qq zsh
+        $SUDO apt-get install -y -qq zsh
     fi
 fi
 
@@ -108,9 +115,9 @@ ZSH_BIN="$(command -v zsh)"
 if [[ "$SHELL" != "$ZSH_BIN" ]]; then
     info "Setting zsh as default shell ($ZSH_BIN)..."
     if ! grep -qF "$ZSH_BIN" /etc/shells; then
-        echo "$ZSH_BIN" | sudo tee -a /etc/shells
+        echo "$ZSH_BIN" | $SUDO tee -a /etc/shells
     fi
-    chsh -s "$ZSH_BIN" || warn "chsh failed — run manually: chsh -s $ZSH_BIN"
+    chsh -s "$ZSH_BIN" 2>/dev/null || warn "chsh failed — run manually: chsh -s $ZSH_BIN"
 fi
 success "zsh: $ZSH_BIN"
 
