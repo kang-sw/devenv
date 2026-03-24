@@ -9,7 +9,7 @@ FRAMES=(🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘)
 
 # Claude Code thinking spinner chars (from binary):
 #   [·, ✢, ✳, ✶, ✻, ✽] — spinner char + word + "…"
-CLAUDE_SPINNER_RE='[✢✳✶✻✽] [A-Za-z].*…'
+CLAUDE_SPINNER_RE='[·✢✳✶✻✽].*…'
 
 WINDOW="${1:-}"
 [[ -z "$WINDOW" ]] && exit 0
@@ -19,7 +19,8 @@ WIN_IDX="${WINDOW##*:}"
 STATE_KEY="MYTMUX_WINDOW_${WIN_IDX}"
 
 # ── Read persisted state ──────────────────────────────────────────────────────
-state=$(tmux show-environment -g "$STATE_KEY" 2>/dev/null | cut -d= -f2-)
+state=$(tmux show-environment -g "$STATE_KEY" 2>/dev/null)
+state="${state#*=}"
 IFS='|' read -r was_spinning completed frame <<<"$state"
 
 # ── Scan all panes for Claude indicators ──────────────────────────────────────
@@ -32,13 +33,8 @@ has_spinner=""
 while IFS= read -r pane_id; do
   content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
-  if printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
-    has_spinner=1
-  fi
-
-  if printf '%s' "$content" | grep -q '1. Yes'; then
-    has_prompt=1
-  fi
+  printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE" && has_spinner=1
+  [[ "$content" == *"1. Yes"* ]] && has_prompt=1
 
   # Early exit: both found, no need to check remaining panes
   [[ -n "$has_spinner" && -n "$has_prompt" ]] && break
