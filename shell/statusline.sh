@@ -54,23 +54,34 @@ GAUGE=$(awk -v p="$PCT_RAW" 'BEGIN {
   v = p + 0
   if (v < 0)   v = 0
   if (v > 100) v = 100
-  filled = v / 10.0
+  width = 10
+  filled = v / 100.0 * width
   full = int(filled)
   frac = filled - full
+
+  split("▏ ▎ ▍ ▌ ▋ ▊ ▉ █", blk, " ")
+
+  pct_s = sprintf("%d%%", v)
+  pct_len = length(pct_s)
+  label_pos = full + (frac > 0.0625 ? 1 : 0)
+  label_fits = (label_pos + pct_len <= width)
+
   out = ""
-  for (i = 0; i < full; i++) out = out "█"
-  if (full < 10) {
-    idx = int(frac * 8 + 0.5)
-    if      (idx == 1) out = out "▏"
-    else if (idx == 2) out = out "▎"
-    else if (idx == 3) out = out "▍"
-    else if (idx == 4) out = out "▌"
-    else if (idx == 5) out = out "▋"
-    else if (idx == 6) out = out "▊"
-    else if (idx == 7) out = out "▉"
-    else if (idx >= 8) out = out "█"
-    else               out = out " "
-    for (i = full + 1; i < 10; i++) out = out " "
+  li = 0  # index into pct_s
+  for (i = 0; i < width; i++) {
+    if (label_fits && i >= label_pos && li < pct_len) {
+      out = out substr(pct_s, li + 1, 1)
+      li++
+    } else if (i < full) {
+      out = out "█"
+    } else if (i == full && full < width) {
+      idx = int(frac * 8 + 0.5)
+      if (idx >= 8)     out = out "█"
+      else if (idx > 0) out = out blk[idx]
+      else              out = out " "
+    } else {
+      out = out " "
+    }
   }
   printf "%s", out
 }')
@@ -142,5 +153,5 @@ if [[ $BRANCH ]]; then
   echo -e "$BRANCH"
 fi
 COST_FMT=$(printf '$%.2f' "$COST")
-echo -e "${PCT_COLOR}${PCT}%${RESET} ${PCT_COLOR}${GAUGE}${RESET} ${WHITE}${TOKENS_K}${RESET}/${MAX_K}k ${YELLOW}${COST_FMT}${RESET} | ${DIM}${RATE_5HR_COLOR}${RATE_5HR}%${RESET}${DIM}/5hr ${RATE_7D_COLOR}${RATE_7D}%${RESET}${DIM}/week${RESET}"
+echo -e "${PCT_COLOR}${GAUGE}${RESET} ${WHITE}${TOKENS_K}${RESET}/${MAX_K}k ${YELLOW}${COST_FMT}${RESET} | ${DIM}${RATE_5HR_COLOR}${RATE_5HR}%${RESET}${DIM}/5hr ${RATE_7D_COLOR}${RATE_7D}%${RESET}${DIM}/week${RESET}"
 echo -e "⏱️ ${TIME_FMT} | 🤔 ${API_TIME_FMT} ${DIM}(${TOK_SEC}tok/s)${RESET}${SPLIT_SESSION}${SESSION_DELTA}"
