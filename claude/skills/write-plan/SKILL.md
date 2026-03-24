@@ -41,10 +41,13 @@ main context for synthesis.
 
 ## Step 2: Draft Plan
 
-Write the plan in this format:
+Generate a timestamp-based path:
+`ai-docs/plans/YYMM/DD-HHMMSS-<plan-name>.md`
+
+Write the plan to that file using the `Write` tool, in this format:
 
 ```markdown
-> Execute this plan by invoking `/implement`.
+> Execute this plan by invoking `/implement <this-file-path>`.
 
 ## Context
 - Ticket summary and background
@@ -75,25 +78,24 @@ prior context execute this plan correctly?" If not, add what's missing.
 ## Step 3: Verify Plan
 
 Dispatch a **sonnet-level general-purpose subagent** to verify the plan against
-the actual codebase:
+the actual codebase. Pass the **file path only** — the subagent reads the plan
+itself:
 
-> **Task:** Verify the following implementation plan against the actual source
-> code.
+> **Task:** Verify the implementation plan at `<plan-path>` against the actual
+> source code.
 >
-> **Project context:** Read `CLAUDE.md` code standards. Read **all** of
-> `ai-docs/mental-model/` — understand the full project architecture,
-> cross-module contracts, and invariants before evaluating the plan.
->
-> **Plan:**
-> [full plan text]
->
-> **Check each item:**
-> - Do referenced files, functions, and types actually exist?
-> - Do described conventions match actual code patterns?
-> - Are there missing considerations (error handling, edge cases, dependencies)?
-> - Does the plan conflict with documented contracts or invariants?
-> - Does the plan introduce unintended coupling or violate module boundaries?
-> - Are implementation steps concrete enough to execute without ambiguity?
+> **Steps:**
+> 1. Read the plan file.
+> 2. Read `CLAUDE.md` code standards. Read **all** of
+>    `ai-docs/mental-model/` — understand the full project architecture,
+>    cross-module contracts, and invariants before evaluating the plan.
+> 3. Check each item in the plan:
+>    - Do referenced files, functions, and types actually exist?
+>    - Do described conventions match actual code patterns?
+>    - Are there missing considerations (error handling, edge cases, dependencies)?
+>    - Does the plan conflict with documented contracts or invariants?
+>    - Does the plan introduce unintended coupling or violate module boundaries?
+>    - Are implementation steps concrete enough to execute without ambiguity?
 >
 > **Be aggressive.** Flag anything suspicious — false positives are fine.
 > Categorize as Critical / Important / Minor.
@@ -108,9 +110,17 @@ Read the verifier's report. For each flag:
 
 The verifier is intentionally aggressive. Use your judgment on actual severity.
 
-After revision, do a final read-through for coherence and completeness.
+**Edit the plan file directly** using the `Edit` tool — do not rewrite the
+entire file. After revision, do a final read-through for coherence and
+completeness.
 
 ## Step 5: Finalize
 
-Enter plan mode via `EnterPlanMode` with the finalized plan. The user will
-invoke `/implement` in a fresh context to execute it.
+Enter plan mode via `EnterPlanMode` with a short reference only:
+
+```
+> Execute plan: /implement <plan-path>
+```
+
+Do **not** copy the plan text into PlanMode — the file is the source of truth.
+The user will invoke `/implement` in a fresh context to execute it.
