@@ -18,18 +18,7 @@ LINES_REMOVED=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
 RATE_5HR=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | awk '{printf "%d", $1}')
 RATE_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0' | awk '{printf "%d", $1}')
 
-# Colors
-CYAN='\033[36m'
-GREEN='\033[32m'
-YELLOW='\033[33m'
-RED='\033[31m'
-LIGHTBLUE='\033[94m'
-PINK='\033[95m'
-WHITE='\033[97m'
-DIM='\033[2m'
-RESET='\033[0m'
-
-# Green → yellow → red gradient (ANSI 256-color)
+# Green → yellow → red gradient (ANSI 256-color, fg only)
 pct_color() {
   awk -v p="$1" 'BEGIN {
     v = p + 0
@@ -49,7 +38,7 @@ PCT_COLOR="\033[48;5;236m$(pct_color "$PCT_RAW")"
 RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
 RATE_7D_COLOR=$(pct_color "$RATE_7D")
 
-# Context gauge — 10 chars using block characters (▏▎▍▌▋▊▉█)
+# Context gauge — 10 chars using block characters
 GAUGE=$(awk -v p="$PCT_RAW" 'BEGIN {
   v = p + 0
   if (v < 0)   v = 0
@@ -112,50 +101,94 @@ TOK_SEC=$(awk "BEGIN {
   else printf \"0.0\"
 }")
 
-# Git info
-BRANCH=""
+# Git info (raw data for powerline segments)
+BRANCH_NAME=""
+GIT_AHEAD=0
+GIT_BEHIND=0
+GIT_ADDED=0
+GIT_DELETED=0
+GIT_MODIFIED=0
+GIT_UNTRACKED=0
 if git rev-parse --git-dir >/dev/null 2>&1; then
   BRANCH_NAME=$(git branch --show-current 2>/dev/null)
   DIFF_STAT=$(git diff --numstat 2>/dev/null | awk '{a+=$1; d+=$2} END {printf "%d %d", a+0, d+0}')
-  ADDED=$(echo "$DIFF_STAT" | cut -d' ' -f1)
-  DELETED=$(echo "$DIFF_STAT" | cut -d' ' -f2)
-  MODIFIED=$(git diff --name-only 2>/dev/null | wc -l | tr -d ' ')
-  UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
-  GIT_IND=""
-  [ "$ADDED" -gt 0 ] 2>/dev/null && GIT_IND="${GIT_IND}${GREEN}++${ADDED}${RESET} "
-  [ "$DELETED" -gt 0 ] 2>/dev/null && GIT_IND="${GIT_IND}${RED}--${DELETED}${RESET} "
-  [ "$MODIFIED" -gt 0 ] 2>/dev/null && GIT_IND="${GIT_IND}${YELLOW}*${MODIFIED} files${RESET} "
-  [ "$UNTRACKED" -gt 0 ] 2>/dev/null && GIT_IND="${GIT_IND}${CYAN}?${UNTRACKED} untracked${RESET} "
-  AHEAD_BEHIND=""
+  GIT_ADDED=$(echo "$DIFF_STAT" | cut -d' ' -f1)
+  GIT_DELETED=$(echo "$DIFF_STAT" | cut -d' ' -f2)
+  GIT_MODIFIED=$(git diff --name-only 2>/dev/null | wc -l | tr -d ' ')
+  GIT_UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
   if git rev-parse --verify "@{u}" >/dev/null 2>&1; then
-    AHEAD=$(git rev-list --count "@{u}..HEAD" 2>/dev/null || echo 0)
-    BEHIND=$(git rev-list --count "HEAD..@{u}" 2>/dev/null || echo 0)
-    [ "$AHEAD" -gt 0 ] 2>/dev/null && AHEAD_BEHIND="${AHEAD_BEHIND}${GREEN}↑${AHEAD}${RESET} "
-    [ "$BEHIND" -gt 0 ] 2>/dev/null && AHEAD_BEHIND="${AHEAD_BEHIND}${YELLOW}↓${BEHIND}${RESET} "
+    GIT_AHEAD=$(git rev-list --count "@{u}..HEAD" 2>/dev/null || echo 0)
+    GIT_BEHIND=$(git rev-list --count "HEAD..@{u}" 2>/dev/null || echo 0)
   fi
-  SPLIT_1=""
-  SPLIT_2=""
-  if [[ $AHEAD_BEHIND ]]; then SPLIT_1="| "; fi
-  if [[ $GIT_IND ]]; then SPLIT_2="| "; fi
-  BRANCH="🌿 ${BRANCH_NAME} ${SPLIT_1}${AHEAD_BEHIND}${SPLIT_2}${GIT_IND}"
 fi
 
-# Session delta (appended to last line)
-SESSION_DELTA=""
-[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && SESSION_DELTA="${SESSION_DELTA}${LIGHTBLUE}+${LINES_ADDED}${RESET} "
-[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && SESSION_DELTA="${SESSION_DELTA}${PINK}-${LINES_REMOVED}${RESET}"
-SPLIT_SESSION=""
-if [[ $SESSION_DELTA ]]; then SPLIT_SESSION=" | "; fi
-
-# Output
-echo -e "${CYAN}[$MODEL]${RESET} 📁 ${DIR##*/}"
-if [[ $BRANCH ]]; then
-  echo -e "$BRANCH"
-fi
+# Powerline glyphs & Nerd Font icons (hex bytes for bash 3.2 compat)
+SEP=$'\xee\x82\xb0'         # U+E0B0
+LCAP=$'\xee\x82\xb6'        # U+E0B6
+RCAP=$'\xee\x82\xb4'        # U+E0B4
+ICON_DIR=$'\xef\x81\xbc'    # U+F07C
+ICON_BRANCH=$'\xee\x82\xa0' # U+E0A0
+ICON_GIT=$'\xee\x9c\x82'    # U+E702
+ICON_CLOCK=$'\xef\x80\x97'  # U+F017
+ICON_BOLT=$'\xef\x83\xa7'   # U+F0E7
 COST_FMT=$(printf '$%.2f' "$COST")
-BAR_BG="\033[48;5;236m"
-BAR_BG_FG="\033[38;5;236m"
-LCAP=""
-RCAP=""
-echo -e "${BAR_BG_FG}${PCT_COLOR}${LCAP}${GAUGE}${RESET}${BAR_BG_FG}${RCAP}${RESET} ${WHITE}${TOKENS_K}${RESET}/${MAX_K}k ${YELLOW}${COST_FMT}${RESET} | ${DIM}${RATE_5HR_COLOR}${RATE_5HR}%${RESET}${DIM}/5hr ${RATE_7D_COLOR}${RATE_7D}%${RESET}${DIM}/week${RESET}"
-echo -e "⏱️ ${TIME_FMT} | 🤔 ${API_TIME_FMT} ${DIM}(${TOK_SEC}tok/s)${RESET}${SPLIT_SESSION}${SESSION_DELTA}"
+
+# === Line 1: Model → Dir ===
+L1="\033[38;5;53m${LCAP}"
+L1+="\033[48;5;53;38;5;255;1m ${MODEL} \033[22m"
+L1+="\033[48;5;239;38;5;53m${SEP}"
+L1+="\033[48;5;239;38;5;255m 📁 ${DIR##*/} "
+L1+="\033[0m\033[38;5;239m${RCAP}\033[0m"
+
+# === Line 2: Git (optional) ===
+L_GIT=""
+if [[ -n $BRANCH_NAME ]]; then
+  L_GIT="\033[38;5;237m${LCAP}"
+  L_GIT+="\033[48;5;237;38;5;202m \033[38;5;114m🌿 ${BRANCH_NAME}"
+  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;114m↑${GIT_AHEAD}"
+  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;214m↓${GIT_BEHIND}"
+  L_GIT+=" "
+  _gc=""
+  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;114m+${GIT_ADDED} "
+  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;203m-${GIT_DELETED} "
+  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;214m~${GIT_MODIFIED} "
+  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;75m?${GIT_UNTRACKED} "
+  if [[ -n $_gc ]]; then
+    L_GIT+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_gc}\033[0m\033[38;5;235m${RCAP}"
+  else
+    L_GIT+="\033[0m\033[38;5;237m${RCAP}"
+  fi
+  L_GIT+="\033[0m"
+fi
+
+# === Line 2: Gauge capsule + Tokens → Cost → Rates ===
+BAR_FG="\033[38;5;236m"
+L2="${BAR_FG}${PCT_COLOR}${LCAP}${GAUGE}\033[0m${BAR_FG}${RCAP}"
+L2+=" \033[38;5;239m${LCAP}"
+L2+="\033[48;5;239;38;5;255m ${TOKENS_K}/${MAX_K}k "
+L2+="\033[48;5;237;38;5;239m${SEP}"
+L2+="\033[48;5;237;38;5;214m ${COST_FMT} "
+L2+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m "
+L2+="${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;235;38;5;245m/5h "
+L2+="${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk "
+L2+="\033[0m\033[38;5;235m${RCAP}\033[0m"
+
+# === Line 3: Time → API → Delta ===
+L3="\033[38;5;239m${LCAP}"
+L3+="\033[48;5;239;38;5;255m ${ICON_CLOCK} ${TIME_FMT} "
+L3+="\033[48;5;237;38;5;239m${SEP}"
+L3+="\033[48;5;237;38;5;255m ${ICON_BOLT} ${API_TIME_FMT} \033[38;5;245m${TOK_SEC}t/s "
+_dl=""
+[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;75m+${LINES_ADDED} "
+[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;204m-${LINES_REMOVED} "
+if [[ -n $_dl ]]; then
+  L3+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_dl}\033[0m\033[38;5;235m${RCAP}"
+else
+  L3+="\033[0m\033[38;5;237m${RCAP}"
+fi
+L3+="\033[0m"
+
+echo -e "$L1"
+[[ -n $L_GIT ]] && echo -e "$L_GIT"
+echo -e "$L2"
+echo -e "$L3"
