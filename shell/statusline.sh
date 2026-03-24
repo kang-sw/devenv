@@ -175,9 +175,9 @@ L2+="\033[0m\033[38;5;235m${RCAP}\033[0m"
 
 # === Line 3: Time → API → Delta ===
 L3="\033[38;5;239m${LCAP}"
-L3+="\033[48;5;239;38;5;255m ${ICON_CLOCK} ${TIME_FMT} "
+L3+="\033[48;5;239;38;5;255m ⌚️ ${TIME_FMT} "
 L3+="\033[48;5;237;38;5;239m${SEP}"
-L3+="\033[48;5;237;38;5;255m ${ICON_BOLT} ${API_TIME_FMT} \033[38;5;245m${TOK_SEC}t/s "
+L3+="\033[48;5;237;38;5;255m 🤔 ${API_TIME_FMT} \033[38;5;245m${TOK_SEC}t/s "
 _dl=""
 [ "$LINES_ADDED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;75m+${LINES_ADDED} "
 [ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;204m-${LINES_REMOVED} "
