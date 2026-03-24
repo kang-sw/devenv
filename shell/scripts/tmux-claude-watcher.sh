@@ -2,12 +2,9 @@
 # tmux-claude-watcher.sh — single background daemon that scans all windows for
 # Claude Code activity and sets per-window @claude-indicator option.
 #
-# Perf budget (10 windows × 2 panes = 20 panes):
-#   - 1 list-panes -a call  (was N+1 tmux calls)
-#   - 20 capture-pane calls  (bottom 10 lines only)
-#   - 0 forks for pattern matching  (bash [[ =~ ]] + glob, was 2 forks/pane)
-#   - 10 show-environment + 20 set calls
-#   Total: ~51 tmux IPC calls/s, 0 forks  (was ~61 calls + ~40 forks)
+# Timing: full scan every ~2s, spinner animation at ~3fps between scans.
+# The heavy part (capture-pane + grep) runs infrequently; the light part
+# (set-option to advance spinner frame) runs at animation rate.
 #
 # Start from tmux.conf:  run-shell -b '~/.devenv-scripts/tmux-claude-watcher.sh'
 # Use in format string:  #{@claude-indicator}
@@ -16,15 +13,16 @@ FRAMES=(🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘)
 CLAUDE_SPINNER_RE='[·✢✳✶✻✽].*…'
 
 # ── Instance management via token ───────────────────────────────────────────────
-# Each instance stamps a unique token into tmux env. Every loop iteration checks
-# "am I still current?". When source-file spawns a new watcher, it overwrites the
-# token and the old instance exits on its next check (~1s max overlap).
-# No PID files, no signals, no bash signal-deferral headaches.
 TOKEN="$$"
 tmux set-environment -g CLAUDE_WATCHER_TOKEN "$TOKEN"
 
+yield_check() {
+  local cur
+  cur=$(tmux show-environment -g CLAUDE_WATCHER_TOKEN 2>/dev/null) || exit 0
+  [[ "${cur#*=}" != "$TOKEN" ]] && exit 0
+}
+
 # ── Helpers ─────────────────────────────────────────────────────────────────────
-# Flush accumulated scan results for the previous window
 flush_window() {
   [[ -z "$prev_win" ]] && return
 
@@ -42,6 +40,9 @@ flush_window() {
   elif [[ -n "$has_spinner" ]]; then
     frame=$(( (${frame:-0} + 1) % ${#FRAMES[@]} ))
     indicator=" ${FRAMES[$frame]}"; was_spinning=1; completed=""
+    # Track for animation between scans
+    spinning_wins+=("$prev_win")
+    spinning_frames+=("$frame")
   elif [[ "${was_spinning:-}" == "1" ]]; then
     was_spinning=""
     if [[ "$prev_active" != "1" ]]; then completed=1; indicator=' ✅'; fi
@@ -55,18 +56,17 @@ flush_window() {
 
 # ── Main loop ───────────────────────────────────────────────────────────────────
 while tmux list-sessions &>/dev/null; do
-  # Yield to newer instance
-  current=$(tmux show-environment -g CLAUDE_WATCHER_TOKEN 2>/dev/null) || exit 0
-  [[ "${current#*=}" != "$TOKEN" ]] && exit 0
+  yield_check
 
   prev_win=""
   prev_active=""
   has_prompt=""
   has_spinner=""
+  spinning_wins=()
+  spinning_frames=()
 
-  # Single call: every pane across all sessions (output grouped by window)
+  # ── Full scan: capture panes, detect patterns ─────────────────────────
   while IFS=$'\t' read -r win_target active pane_id; do
-    # Window boundary → flush previous window's results
     if [[ "$win_target" != "$prev_win" ]]; then
       flush_window
       prev_win="$win_target"
@@ -75,20 +75,34 @@ while tmux list-sessions &>/dev/null; do
       has_spinner=""
     fi
 
-    # Both patterns found — skip remaining panes in this window
     [[ "$has_prompt" == "1" && "$has_spinner" == "1" ]] && continue
 
     content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
-    # Spinner: grep for reliable unicode matching (bash [[ =~ ]] has
-    # false positives with unicode character classes on macOS bash 3.2)
     printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE" && has_spinner=1
-    # Prompt: glob match is fine (plain ASCII, no regex)
     [[ "$content" == *"1. Yes"* ]] && has_prompt=1
 
   done < <(tmux list-panes -a -F "#{session_name}:#{window_index}	#{window_active}	#{pane_id}" 2>/dev/null)
 
   flush_window  # last window
 
-  sleep 1
+  # ── Animate spinners between scans (~2s at ~3fps) ─────────────────────
+  for _ in 1 2 3 4 5 6; do
+    sleep 0.33
+
+    yield_check
+
+    for i in "${!spinning_wins[@]}"; do
+      f="${spinning_frames[$i]}"
+      f=$(( (f + 1) % ${#FRAMES[@]} ))
+      spinning_frames[$i]=$f
+      tmux set-option -wq -t "${spinning_wins[$i]}" @claude-indicator " ${FRAMES[$f]}" 2>/dev/null || true
+    done
+  done
+
+  # Persist final frame so next scan continues smoothly (no visual stutter)
+  for i in "${!spinning_wins[@]}"; do
+    safe_key="${spinning_wins[$i]//:/_}"
+    tmux set-environment -g "CW_${safe_key}" "1||${spinning_frames[$i]}" 2>/dev/null || true
+  done
 done
