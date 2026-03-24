@@ -4,36 +4,77 @@ input=$(cat)
 MODEL=$(echo "$input" | jq -r '.model.display_name')
 DIR=$(echo "$input" | jq -r '.workspace.current_dir')
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+PCT_RAW=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
+PCT=$(echo "$PCT_RAW" | awk '{printf "%d", $1}')
 TOKENS_USED=$(echo "$input" | jq -r '.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)')
 TOKENS_K=$(awk "BEGIN {printf \"%.0f\", $TOKENS_USED / 1000}")
 CTX_MAX=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
 MAX_K=$(awk "BEGIN {printf \"%.0f\", $CTX_MAX / 1000}")
-VISUAL_PCT=$(awk "BEGIN {v = $PCT; if (v > 100) v = 100; printf \"%.0f\", v}")
+OUTPUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
 LINES_ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
 LINES_REMOVED=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
+RATE_5HR=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0')
+RATE_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0')
 
+# Colors
 CYAN='\033[36m'
 GREEN='\033[32m'
 YELLOW='\033[33m'
 RED='\033[31m'
 LIGHTBLUE='\033[94m'
 PINK='\033[95m'
+DIM='\033[2m'
 RESET='\033[0m'
 
-# Pick bar color based on visual (sqrt-scaled) context usage
-if [ "$VISUAL_PCT" -ge 90 ]; then
-  BAR_COLOR="$RED"
-elif [ "$VISUAL_PCT" -ge 70 ]; then
-  BAR_COLOR="$YELLOW"
-else BAR_COLOR="$GREEN"; fi
+# Green → yellow → red gradient (ANSI 256-color)
+pct_color() {
+  awk -v p="$1" 'BEGIN {
+    v = p + 0
+    if (v < 0)   v = 0
+    if (v > 100) v = 100
+    if (v <= 50) {
+      steps[0]=46; steps[1]=82; steps[2]=118; steps[3]=154; steps[4]=190; steps[5]=226
+      idx = int(v / 50 * 5 + 0.5)
+    } else {
+      steps[0]=226; steps[1]=220; steps[2]=214; steps[3]=208; steps[4]=202; steps[5]=196
+      idx = int((v - 50) / 50 * 5 + 0.5)
+    }
+    printf "\033[38;5;%dm", steps[idx]
+  }'
+}
+PCT_COLOR=$(pct_color "$PCT_RAW")
+RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
+RATE_7D_COLOR=$(pct_color "$RATE_7D")
 
-FILLED=$((VISUAL_PCT / 10))
-EMPTY=$((10 - FILLED))
-BAR=$(printf "%${FILLED}s" | tr ' ' '█')$(printf "%${EMPTY}s" | tr ' ' '░')
+# Context gauge — 10 chars using block characters (▏▎▍▌▋▊▉█)
+GAUGE=$(awk -v p="$PCT_RAW" 'BEGIN {
+  v = p + 0
+  if (v < 0)   v = 0
+  if (v > 100) v = 100
+  filled = v / 10.0
+  full = int(filled)
+  frac = filled - full
+  out = ""
+  for (i = 0; i < full; i++) out = out "█"
+  if (full < 10) {
+    idx = int(frac * 8 + 0.5)
+    if      (idx == 1) out = out "▏"
+    else if (idx == 2) out = out "▎"
+    else if (idx == 3) out = out "▍"
+    else if (idx == 4) out = out "▌"
+    else if (idx == 5) out = out "▋"
+    else if (idx == 6) out = out "▊"
+    else if (idx == 7) out = out "▉"
+    else if (idx >= 8) out = out "█"
+    else               out = out " "
+    for (i = full + 1; i < 10; i++) out = out " "
+  }
+  printf "%s", out
+}')
 
+# Time formatting
 HRS=$((DURATION_MS / 3600000))
 MINS=$(((DURATION_MS % 3600000) / 60000))
 SECS=$(((DURATION_MS % 60000) / 1000))
@@ -43,13 +84,23 @@ API_SECS=$(((API_MS % 60000) / 1000))
 
 fmt_time() {
   local h=$1 m=$2 s=$3
-  if [ "$h" -gt 0 ]; then echo "${h}h ${m}m ${s}s"
-  elif [ "$m" -gt 0 ]; then echo "${m}m ${s}s"
+  if [ "$h" -gt 0 ]; then
+    echo "${h}h ${m}m ${s}s"
+  elif [ "$m" -gt 0 ]; then
+    echo "${m}m ${s}s"
   else echo "${s}s"; fi
 }
 TIME_FMT=$(fmt_time "$HRS" "$MINS" "$SECS")
 API_TIME_FMT=$(fmt_time "$API_HRS" "$API_MINS" "$API_SECS")
 
+# Output tokens/sec
+TOK_SEC=$(awk "BEGIN {
+  a = $API_MS + 0; t = $OUTPUT_TOKENS + 0
+  if (a > 0) printf \"%.1f\", t / (a / 1000)
+  else printf \"0.0\"
+}")
+
+# Git info
 BRANCH=""
 if git rev-parse --git-dir >/dev/null 2>&1; then
   BRANCH_NAME=$(git branch --show-current 2>/dev/null)
@@ -74,18 +125,21 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   SPLIT_2=""
   if [[ $AHEAD_BEHIND ]]; then SPLIT_1="| "; fi
   if [[ $GIT_IND ]]; then SPLIT_2="| "; fi
-  SESSION_DELTA=""
-  [ "$LINES_ADDED" -gt 0 ] 2>/dev/null && SESSION_DELTA="${SESSION_DELTA}${LIGHTBLUE}+${LINES_ADDED}${RESET} "
-  [ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && SESSION_DELTA="${SESSION_DELTA}${PINK}-${LINES_REMOVED}${RESET} "
-  SPLIT_3=""
-  if [[ $SESSION_DELTA ]]; then SPLIT_3="| "; fi
-  BRANCH="🌿 ${BRANCH_NAME} ${SPLIT_1}${AHEAD_BEHIND}${SPLIT_2}${GIT_IND}${SPLIT_3}${SESSION_DELTA}"
+  BRANCH="🌿 ${BRANCH_NAME} ${SPLIT_1}${AHEAD_BEHIND}${SPLIT_2}${GIT_IND}"
 fi
 
+# Session delta (appended to last line)
+SESSION_DELTA=""
+[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && SESSION_DELTA="${SESSION_DELTA}${LIGHTBLUE}+${LINES_ADDED}${RESET} "
+[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && SESSION_DELTA="${SESSION_DELTA}${PINK}-${LINES_REMOVED}${RESET}"
+SPLIT_SESSION=""
+if [[ $SESSION_DELTA ]]; then SPLIT_SESSION=" | "; fi
+
+# Output
 echo -e "${CYAN}[$MODEL]${RESET} 📁 ${DIR##*/}"
 if [[ $BRANCH ]]; then
   echo -e "$BRANCH"
 fi
 COST_FMT=$(printf '$%.2f' "$COST")
-echo -e "${BAR_COLOR}${BAR}${RESET} ${VISUAL_PCT}% (${TOKENS_K}/${MAX_K}k) | ${YELLOW}${COST_FMT}${RESET}"
-echo -e "⏱️ ${TIME_FMT} | 🤔 ${API_TIME_FMT}"
+echo -e "${PCT_COLOR} ${GAUGE}${RESET} ${PCT_COLOR}${PCT}%${RESET} (${TOKENS_K}/${MAX_K}k) | ${YELLOW}${COST_FMT}${RESET} | ${DIM}${RATE_5HR_COLOR}${RATE_5HR}%${RESET}${DIM}/5hr ${RATE_7D_COLOR}${RATE_7D}%${RESET}${DIM}/week${RESET}"
+echo -e "⏱️ ${TIME_FMT} | 🤔 ${API_TIME_FMT} ${DIM}(${TOK_SEC}tok/s)${RESET}${SPLIT_SESSION}${SESSION_DELTA}"
