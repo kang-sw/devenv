@@ -127,6 +127,9 @@ return {
             line:text(icon, highlight)
 
             if vrow == 1 then
+              -- Pad to original line width so the overlay fully hides the buffer text.
+              local orig_w = vim.fn.strdisplaywidth(row.node.text)
+              line:pad(math.max(0, orig_w - line:width()))
               self.marks:over(self.config, "table_border", row.node, {
                 virt_text = line:get(),
                 virt_text_pos = "overlay",
