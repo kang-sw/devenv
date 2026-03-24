@@ -38,9 +38,9 @@ flush_window() {
   if [[ -n "$has_prompt" ]]; then
     indicator=' 🔥'; was_spinning=""; completed=""
   elif [[ -n "$has_spinner" ]]; then
-    frame=$(( (${frame:-0} + 1) % ${#FRAMES[@]} ))
+    frame="${frame:-0}"
     indicator=" ${FRAMES[$frame]}"; was_spinning=1; completed=""
-    # Track for animation between scans
+    # Track for animation between scans (animation loop advances frames)
     spinning_wins+=("$prev_win")
     spinning_frames+=("$frame")
   elif [[ "${was_spinning:-}" == "1" ]]; then
