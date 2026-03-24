@@ -2,18 +2,13 @@
 # tmux-claude-indicator.sh — spinner on window tab when Claude Code is actively outputting
 # Usage (in window-status-format): #(~/.devenv-scripts/tmux-claude-indicator.sh '#S:#I' '#{window_active}')
 #
-# Debug: tmux show-environment -g | grep MYTMUX_WINDOW
-#   State format: _|last_active_epoch|last_check_epoch|frame_index|has_prompt|was_active|completed|has_spinner
+# Priority: 🔥 prompt > 🌑 spinner > ✅ completed (background only)
+# State format (tmux env): was_spinning|completed|frame
 
-EVAL_INTERVAL=3 # seconds between full ps/capture-pane checks
-COOLDOWN=3      # seconds to keep spinner after last detected change
 FRAMES=(🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘)
 
-# Claude Code thinking spinner chars (extracted from binary v2.1.81):
-#   ["·","✢","✳","✶","✻","✽"]  — detect these in pane to confirm Claude is working
-# Match pattern: spinner char + word + "…" (e.g. "✻ Thinking…", "✽ Researching…")
-# NOTE: do NOT use tail -N to limit checked lines — task lists push the spinner
-#       out of the last few rows, causing missed detections (tested & reverted).
+# Claude Code thinking spinner chars (from binary):
+#   [·, ✢, ✳, ✶, ✻, ✽] — spinner char + word + "…"
 CLAUDE_SPINNER_RE='[✢✳✶✻✽] [A-Za-z].*…'
 
 WINDOW="${1:-}"
@@ -23,70 +18,53 @@ IS_ACTIVE="${2:-0}"
 WIN_IDX="${WINDOW##*:}"
 STATE_KEY="MYTMUX_WINDOW_${WIN_IDX}"
 
-now=$(date +%s)
+# ── Read persisted state ──────────────────────────────────────────────────────
 state=$(tmux show-environment -g "$STATE_KEY" 2>/dev/null | cut -d= -f2-)
-IFS='|' read -r _unused last_active last_check frame has_prompt was_active completed has_spinner <<<"$state"
+IFS='|' read -r was_spinning completed frame <<<"$state"
 
-# ── Full evaluation every EVAL_INTERVAL seconds ────────────
-if [[ -z "$last_check" || $((now - last_check)) -ge $EVAL_INTERVAL ]]; then
-  last_check=$now
+# ── Scan all panes for Claude indicators ──────────────────────────────────────
+# Process detection (ps -t tty) is unreliable on WSL where claude runs behind
+# powershell.exe with a different controlling tty. Instead, scan pane content
+# directly — the spinner/prompt patterns are specific enough to avoid false positives.
+has_prompt=""
+has_spinner=""
 
-  claude_pane=""
-  while IFS='|' read -r pane_id pane_tty; do
-    [[ -z "$pane_tty" ]] && continue
-    if ps -t "${pane_tty#/dev/}" -o comm= 2>/dev/null | grep -qx claude; then
-      claude_pane="$pane_id"
-      break
-    fi
-  done < <(tmux list-panes -t "$WINDOW" -F '#{pane_id}|#{pane_tty}' 2>/dev/null)
+while IFS= read -r pane_id; do
+  content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
-  if [[ -n "$claude_pane" ]]; then
-    content=$(tmux capture-pane -t "$claude_pane" -p 2>/dev/null)
-
-    if printf '%s' "$content" | grep -q '1. Yes'; then
-      has_prompt=1
-    else
-      has_prompt=""
-    fi
-
-    # Detect Claude's thinking spinner in pane content
-    # Only spinner presence drives last_active (not hash change),
-    # so user typing alone won't trigger the moon-phase indicator.
-    if printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
-      has_spinner=1
-      last_active=$now
-    else
-      has_spinner=""
-    fi
-  else
-    last_active="" frame="" has_prompt="" has_spinner=""
+  if printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
+    has_spinner=1
   fi
-fi
 
-# ── Indicator output (every tick) ───────────────────────────
+  if printf '%s' "$content" | grep -q '1. Yes'; then
+    has_prompt=1
+  fi
+
+  # Early exit: both found, no need to check remaining panes
+  [[ -n "$has_spinner" && -n "$has_prompt" ]] && break
+done < <(tmux list-panes -t "$WINDOW" -F '#{pane_id}' 2>/dev/null)
+
+# ── Output indicator ──────────────────────────────────────────────────────────
 if [[ -n "$has_prompt" ]]; then
   printf ' 🔥'
-  # Spinner-char detection: Claude is visibly busy → track for ✅
-  [[ "$has_spinner" == "1" ]] && was_active=1
-  # Rollback: IS_ACTIVE approach (uncomment & remove spinner line above)
-  # [[ "$IS_ACTIVE" != "1" ]] && was_active=1
+  # Prompt means user interaction required — not a background completion.
+  # Clear spinning state so answering the prompt won't trigger ✅.
+  was_spinning=""
   completed=""
-elif [[ -n "$last_active" && $((now - last_active)) -le $COOLDOWN ]]; then
-  frame=$(((${frame:-0} + 1) % ${#FRAMES[@]}))
+elif [[ -n "$has_spinner" ]]; then
+  frame=$(( (${frame:-0} + 1) % ${#FRAMES[@]} ))
   printf ' %s' "${FRAMES[$frame]}"
-  [[ "$has_spinner" == "1" ]] && was_active=1
-  # [[ "$IS_ACTIVE" != "1" ]] && was_active=1
+  was_spinning=1
   completed=""
-elif [[ "$was_active" == "1" ]]; then
-  # spinner just stopped — mark completed if user isn't watching
-  was_active=""
-  frame=""
+elif [[ "$was_spinning" == "1" ]]; then
+  # Spinner just stopped — show ✅ only if user isn't watching this window
+  was_spinning=""
   if [[ "$IS_ACTIVE" != "1" ]]; then
     completed=1
     printf ' ✅'
   fi
 elif [[ "$completed" == "1" ]]; then
-  # stay ✅ until user switches to this window
+  # Keep ✅ until user switches to this window
   if [[ "$IS_ACTIVE" == "1" ]]; then
     completed=""
   else
@@ -94,4 +72,4 @@ elif [[ "$completed" == "1" ]]; then
   fi
 fi
 
-tmux set-environment -g "$STATE_KEY" "|${last_active}|${last_check}|${frame}|${has_prompt}|${was_active}|${completed}|${has_spinner}"
+tmux set-environment -g "$STATE_KEY" "${was_spinning}|${completed}|${frame}"
