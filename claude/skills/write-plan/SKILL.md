@@ -47,13 +47,6 @@ Generate a timestamp-based path:
 Write the plan to that file using the `Write` tool, in this format:
 
 ```markdown
-# Steps
-
-1. Load `/implement` skill
-2. Read `@<this-file-path>`
-
----
-
 # <Plan Title>
 
 ## Context
@@ -123,12 +116,15 @@ completeness.
 
 ## Step 5: Finalize
 
-Enter plan mode via `EnterPlanMode` with a single directive:
+Enter plan mode via `EnterPlanMode` with execution steps:
 
 ```
-Plan ready: /implement <plan-path>
+# Steps
+
+1. Load `/implement` skill
+2. Read `@<plan-path>`
 ```
 
 Do **not** copy the plan text into PlanMode — the file is the source of truth.
-The plan's header already instructs `/implement` as the first action, so a fresh
-context will load the skill immediately without re-researching.
+The steps ensure a fresh context loads `/implement` first, then reads the plan
+as input without re-researching.
