@@ -56,11 +56,14 @@ return {
         return #lines > 0 and lines or { "" }
       end
 
-      -- Override concealcursor so char-level conceals stay active on the cursor
-      -- line in normal mode.  render-markdown defaults to rendered='', which
-      -- reveals concealment on the cursor line — breaking our table row conceals.
+      -- Disable wrap in the rendered view to prevent raw buffer lines from
+      -- soft-wrapping and bleeding through virtual-text table decorations.
+      -- Neovim's soft-wrap decision uses the raw buffer line width — extmark
+      -- conceals (conceal='') do NOT affect it on 0.11.x.  wrap=false is the
+      -- only reliable mechanism.  Wrap is restored in insert mode and when
+      -- render-markdown is toggled off.
       opts.win_options = vim.tbl_deep_extend("force", opts.win_options or {}, {
-        concealcursor = { default = vim.o.concealcursor, rendered = "n" },
+        wrap = { default = true, rendered = false },
       })
 
       local ok, TableRender = pcall(require, "render-markdown.render.markdown.table")
@@ -101,14 +104,9 @@ return {
         end
 
         -- -----------------------------------------------------------------------
-        -- Render.multiline_row: conceal the raw buffer row (makes it visually
-        -- empty → no wrap allocation), overlay vrow-1 on that blank visual line,
-        -- then attach overflow vrows as virt_lines below.
-        --
-        -- Uses char-level conceal='' (works on all Neovim versions that
-        -- render-markdown supports, no conceal_lines API needed).
-        -- render-markdown sets conceallevel >= 1 via win_options, so the
-        -- concealment is always active while the plugin is rendering.
+        -- Render.multiline_row: overlay vrow-1 on the buffer line, then attach
+        -- overflow vrows as virt_lines below.  wrap=false (set via win_options)
+        -- prevents the raw buffer line from soft-wrapping.
         -- -----------------------------------------------------------------------
         TableRender.multiline_row = function(self, row)
           local header = row.node.type == "pipe_table_header"
@@ -127,14 +125,7 @@ return {
             num_vrows = math.max(num_vrows, #wrapped[i])
           end
 
-          -- Conceal every character in the buffer row with '' (empty replacement).
-          -- With conceallevel >= 1 the row becomes visually empty: exactly 1 visual
-          -- line, no wrap continuation lines, virt_lines/overlay unaffected.
-          self.marks:over(self.config, true, row.node, {
-            conceal = "",
-          })
-
-          -- vrow 1: overlay on the now-blank concealed buffer line.
+          -- vrow 1: overlay on the buffer line (covers raw text within the window).
           -- vrow 2+: virt_lines below (between this and the next buffer line).
           for vrow = 1, num_vrows do
             local line = self:line()
@@ -173,8 +164,6 @@ return {
             orig_run(self)
             return
           end
-          -- Conceal the delimiter row to prevent its raw buffer text from wrapping.
-          self.marks:over(self.config, true, self.data.delim, { conceal = "" })
           self:delimiter()
           for _, row in ipairs(self.data.rows) do
             self:multiline_row(row)
