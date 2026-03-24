@@ -3,7 +3,7 @@
 # Usage (in window-status-format): #(~/.config/nvim/scripts/tmux-claude-indicator.sh '#S:#I' '#{window_active}')
 #
 # Debug: tmux show-environment -g | grep MYTMUX_WINDOW
-#   State format: hash|last_active_epoch|last_check_epoch|frame_index|has_prompt|was_active|completed|has_spinner
+#   State format: _|last_active_epoch|last_check_epoch|frame_index|has_prompt|was_active|completed|has_spinner
 
 EVAL_INTERVAL=3 # seconds between full ps/capture-pane checks
 COOLDOWN=3      # seconds to keep spinner after last detected change
@@ -25,7 +25,7 @@ STATE_KEY="MYTMUX_WINDOW_${WIN_IDX}"
 
 now=$(date +%s)
 state=$(tmux show-environment -g "$STATE_KEY" 2>/dev/null | cut -d= -f2-)
-IFS='|' read -r prev_hash last_active last_check frame has_prompt was_active completed has_spinner <<<"$state"
+IFS='|' read -r _unused last_active last_check frame has_prompt was_active completed has_spinner <<<"$state"
 
 # ── Full evaluation every EVAL_INTERVAL seconds ────────────
 if [[ -z "$last_check" || $((now - last_check)) -ge $EVAL_INTERVAL ]]; then
@@ -42,9 +42,6 @@ if [[ -z "$last_check" || $((now - last_check)) -ge $EVAL_INTERVAL ]]; then
 
   if [[ -n "$claude_pane" ]]; then
     content=$(tmux capture-pane -t "$claude_pane" -p 2>/dev/null)
-    hash=$(printf '%s' "$content" | cksum | cut -d' ' -f1)
-    [[ -n "$prev_hash" && "$hash" != "$prev_hash" ]] && last_active=$now
-    prev_hash=$hash
 
     if printf '%s' "$content" | grep -q '1. Yes'; then
       has_prompt=1
@@ -53,13 +50,16 @@ if [[ -z "$last_check" || $((now - last_check)) -ge $EVAL_INTERVAL ]]; then
     fi
 
     # Detect Claude's thinking spinner in pane content
+    # Only spinner presence drives last_active (not hash change),
+    # so user typing alone won't trigger the moon-phase indicator.
     if printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
       has_spinner=1
+      last_active=$now
     else
       has_spinner=""
     fi
   else
-    prev_hash="" last_active="" frame="" has_prompt="" has_spinner=""
+    last_active="" frame="" has_prompt="" has_spinner=""
   fi
 fi
 
@@ -94,4 +94,4 @@ elif [[ "$completed" == "1" ]]; then
   fi
 fi
 
-tmux set-environment -g "$STATE_KEY" "${prev_hash}|${last_active}|${last_check}|${frame}|${has_prompt}|${was_active}|${completed}|${has_spinner}"
+tmux set-environment -g "$STATE_KEY" "|${last_active}|${last_check}|${frame}|${has_prompt}|${was_active}|${completed}|${has_spinner}"
