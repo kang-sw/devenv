@@ -47,7 +47,7 @@ Generate a timestamp-based path:
 Write the plan to that file using the `Write` tool, in this format:
 
 ```markdown
-> Execute this plan by invoking `/implement <this-file-path>`.
+> Invoke `/implement <this-file-path>` as soon as the session starts.
 
 ## Context
 - Ticket summary and background
