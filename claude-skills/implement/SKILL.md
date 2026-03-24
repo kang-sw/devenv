@@ -39,7 +39,7 @@ tasks between them.
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
   ↳ if Critical/Important issues: fix → re-test → re-review (loop until clean)
 [ ] [fixed] Update mental model with mental-model-updater subagent
-[ ] [fixed] Update project docs — CLAUDE.md # MEMORY, ai-docs/_index.md, ticket result
+[ ] [fixed] Update project docs — ai-docs/_memory.md, ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Report process issues to user
 [ ] [fixed] Merge & cleanup — user reviews report → confirm → merge --no-ff → delete branch
@@ -107,8 +107,8 @@ Intermediate commits are safe — work is on a feature branch.
 
 ### Verify task
 
-Run the project's test suite(s) and build step (see CLAUDE.md
-`# MEMORY → Build & Workflow`). If the project has a separate integration test,
+Run the project's test suite(s) and build step (see `ai-docs/_memory.md`
+or `ai-docs/_index.md` for commands). If the project has a separate integration test,
 run that too. Skip if the project has no test suite or build step.
 **Read the full output.** Claim "pass" only after confirming the actual result —
 never "should pass" or "looks correct." All tests must pass before proceeding.
@@ -165,8 +165,8 @@ must reflect the final state before docs are written.
 ### Docs task
 
 - Update `ai-docs/_index.md` if project capabilities changed.
-- Update `# MEMORY` section in `CLAUDE.md`.
-- If completing a ticket phase, append `### Result` to the ticket doc.
+- Update `ai-docs/_memory.md`.
+- If completing a ticket phase, load `/write-ticket` for conventions, then append `### Result` to the ticket doc.
 - Prune aggressively — keep docs focused on current state.
 
 ### Intermediate commits
