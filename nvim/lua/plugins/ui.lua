@@ -94,7 +94,8 @@ return {
         end
 
         -- -----------------------------------------------------------------------
-        -- Render.multiline_row: overlay first vrow, append extra vrows as virt_lines.
+        -- Render.multiline_row: hide original line with conceal_lines, render all
+        -- vrows as virt_lines. Requires Neovim 0.11 (conceal_lines extmark option).
         -- -----------------------------------------------------------------------
         TableRender.multiline_row = function(self, row)
           local header = row.node.type == "pipe_table_header"
@@ -113,13 +114,24 @@ return {
             num_vrows = math.max(num_vrows, #wrapped[i])
           end
 
+          -- Hide the original buffer line entirely (conceal_lines = 0 visual lines).
+          -- This prevents set-wrap from rendering blank wrapped continuations of the
+          -- raw markdown text between our virt_lines.
+          -- conceal_lines requires start_col=0, end_row=start_row+1, end_col=0.
+          self.marks:add(self.config, true, row.node.start_row, 0, {
+            end_row = row.node.start_row + 1,
+            end_col = 0,
+            conceal_lines = true,
+          })
+
+          -- Render all vrows as virt_lines below the (now invisible) buffer line.
           for vrow = 1, num_vrows do
             local line = self:line()
             for i = 1, #row.cells do
               local col_w = self.data.cols[i].width
               local content = wrapped[i][vrow] or ""
               local content_w = vim.fn.strdisplaywidth(content)
-              local fill = col_w - padding - content_w -- right fill (includes right padding)
+              local fill = col_w - padding - content_w
               line:text(icon, highlight)
               line:text(pad_str, highlight)
               line:text(content, highlight)
@@ -127,30 +139,10 @@ return {
             end
             line:text(icon, highlight)
 
-            if vrow == 1 then
-              -- Conceal the entire original buffer line so that `set wrap` cannot
-              -- display wrapped continuations of the raw markdown text.
-              -- render-markdown sets conceallevel=2 during rendering, so conceal=''
-              -- makes the original chars visually disappear, leaving only our overlay.
-              local buf_line = vim.api.nvim_buf_get_lines(
-                self.context.buf, row.node.start_row, row.node.start_row + 1, false
-              )[1] or ""
-              if #buf_line > row.node.start_col then
-                self.marks:add(self.config, true, row.node.start_row, row.node.start_col, {
-                  end_col = #buf_line,
-                  conceal = "",
-                })
-              end
-              self.marks:over(self.config, "table_border", row.node, {
-                virt_text = line:get(),
-                virt_text_pos = "overlay",
-              })
-            else
-              self.marks:add(self.config, "virtual_lines", row.node.start_row, 0, {
-                virt_lines = { self:indent():line(true):extend(line):get() },
-                virt_lines_above = false,
-              })
-            end
+            self.marks:add(self.config, "virtual_lines", row.node.start_row, 0, {
+              virt_lines = { self:indent():line(true):extend(line):get() },
+              virt_lines_above = false,
+            })
           end
         end
 
