@@ -141,5 +141,5 @@ if [[ $BRANCH ]]; then
   echo -e "$BRANCH"
 fi
 COST_FMT=$(printf '$%.2f' "$COST")
-echo -e "${PCT_COLOR}${PCT}%${RESET} ${PCT_COLOR}${GAUGE}${RESET} (${TOKENS_K}/${MAX_K}k) | ${YELLOW}${COST_FMT}${RESET} | ${DIM}${RATE_5HR_COLOR}${RATE_5HR}%${RESET}${DIM}/5hr ${RATE_7D_COLOR}${RATE_7D}%${RESET}${DIM}/week${RESET}"
+echo -e "${PCT_COLOR}${PCT}%${RESET} ${PCT_COLOR}${GAUGE}${RESET} | ${TOKENS_K}/${MAX_K}k ${YELLOW}${COST_FMT}${RESET} | ${DIM}${RATE_5HR_COLOR}${RATE_5HR}%${RESET}${DIM}/5hr ${RATE_7D_COLOR}${RATE_7D}%${RESET}${DIM}/week${RESET}"
 echo -e "⏱️ ${TIME_FMT} | 🤔 ${API_TIME_FMT} ${DIM}(${TOK_SEC}tok/s)${RESET}${SPLIT_SESSION}${SESSION_DELTA}"
