@@ -78,8 +78,9 @@ return {
             end
             local total = (n + 1) + content_sum
 
-            if total > win_w and content_sum > 0 then
-              local available = win_w - (n + 1)
+            local margin = 8
+            if total > win_w - margin and content_sum > 0 then
+              local available = win_w - (n + 1) - margin
               local min_col_w = 2 * padding + 1 -- at least 1 char of content per column
               if available >= min_col_w * n then
                 for _, col in ipairs(cols) do
