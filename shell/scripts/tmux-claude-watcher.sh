@@ -65,7 +65,7 @@ while tmux list-sessions &>/dev/null; do
   has_spinner=""
 
   # Single call: every pane across all sessions (output grouped by window)
-  while IFS=$'\t' read -r win_target active pane_id pane_height; do
+  while IFS=$'\t' read -r win_target active pane_id; do
     # Window boundary → flush previous window's results
     if [[ "$win_target" != "$prev_win" ]]; then
       flush_window
@@ -78,16 +78,13 @@ while tmux list-sessions &>/dev/null; do
     # Both patterns found — skip remaining panes in this window
     [[ "$has_prompt" == "1" && "$has_spinner" == "1" ]] && continue
 
-    # Capture only bottom 10 lines (spinner/prompt is always near bottom)
-    start=$(( pane_height - 10 ))
-    (( start < 0 )) && start=0
-    content=$(tmux capture-pane -t "$pane_id" -p -S "$start" 2>/dev/null) || continue
+    content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
     # Pattern matching — pure bash, no forks
     [[ "$content" =~ $CLAUDE_SPINNER_RE ]] && has_spinner=1
     [[ "$content" == *"1. Yes"* ]] && has_prompt=1
 
-  done < <(tmux list-panes -a -F "#{session_name}:#{window_index}	#{window_active}	#{pane_id}	#{pane_height}" 2>/dev/null)
+  done < <(tmux list-panes -a -F "#{session_name}:#{window_index}	#{window_active}	#{pane_id}" 2>/dev/null)
 
   flush_window  # last window
 
