@@ -45,7 +45,7 @@ pct_color() {
     printf "\033[38;5;%dm", steps[idx]
   }'
 }
-PCT_COLOR=$(pct_color "$PCT_RAW")
+PCT_COLOR="\033[48;5;236m$(pct_color "$PCT_RAW")"
 RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
 RATE_7D_COLOR=$(pct_color "$RATE_7D")
 
@@ -142,5 +142,5 @@ if [[ $BRANCH ]]; then
   echo -e "$BRANCH"
 fi
 COST_FMT=$(printf '$%.2f' "$COST")
-echo -e "${PCT_COLOR}${PCT}%${RESET} ${PCT_COLOR}${GAUGE}${RESET} | ${WHITE}${TOKENS_K}${RESET}/${MAX_K}k ${YELLOW}${COST_FMT}${RESET} | ${DIM}${RATE_5HR_COLOR}${RATE_5HR}%${RESET}${DIM}/5hr ${RATE_7D_COLOR}${RATE_7D}%${RESET}${DIM}/week${RESET}"
+echo -e "${PCT_COLOR}${PCT}%${RESET} ${PCT_COLOR}${GAUGE}${RESET} ${WHITE}${TOKENS_K}${RESET}/${MAX_K}k ${YELLOW}${COST_FMT}${RESET} | ${DIM}${RATE_5HR_COLOR}${RATE_5HR}%${RESET}${DIM}/5hr ${RATE_7D_COLOR}${RATE_7D}%${RESET}${DIM}/week${RESET}"
 echo -e "⏱️ ${TIME_FMT} | 🤔 ${API_TIME_FMT} ${DIM}(${TOK_SEC}tok/s)${RESET}${SPLIT_SESSION}${SESSION_DELTA}"
