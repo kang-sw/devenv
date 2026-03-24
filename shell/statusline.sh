@@ -156,7 +156,7 @@ if [[ -n $BRANCH_NAME ]]; then
   if [[ -n $_gc ]]; then
     L_GIT+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_gc}\033[0m\033[38;5;235m${RCAP}"
   else
-    L_GIT+="\033[0m\033[38;5;237m${RCAP}"
+    L_GIT+="\033[0m\033[38;5;237m${RCAP} \033[38;5;242mworking tree clean\033[0m"
   fi
   L_GIT+="\033[0m"
 fi
