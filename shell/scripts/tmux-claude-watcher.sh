@@ -15,25 +15,13 @@
 FRAMES=(🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘)
 CLAUDE_SPINNER_RE='[·✢✳✶✻✽].*…'
 
-# ── Single-instance guard: kill-and-replace on reload ───────────────────────────
-PIDFILE="/tmp/tmux-claude-watcher-$(id -u).pid"
-
-cleanup() { rm -f "$PIDFILE"; }
-trap cleanup EXIT          # runs on any exit (including from the line below)
-trap 'exit 0' INT TERM     # bash traps DON'T exit by default — explicit exit required
-
-# Kill previous instance if running (enables config reload to pick up changes)
-if [[ -f "$PIDFILE" ]]; then
-  old_pid=$(cat "$PIDFILE" 2>/dev/null)
-  if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-    kill "$old_pid" 2>/dev/null
-    for _ in 1 2 3 4 5; do
-      kill -0 "$old_pid" 2>/dev/null || break
-      sleep 0.1
-    done
-  fi
-fi
-echo $$ > "$PIDFILE"
+# ── Instance management via token ───────────────────────────────────────────────
+# Each instance stamps a unique token into tmux env. Every loop iteration checks
+# "am I still current?". When source-file spawns a new watcher, it overwrites the
+# token and the old instance exits on its next check (~1s max overlap).
+# No PID files, no signals, no bash signal-deferral headaches.
+TOKEN="$$"
+tmux set-environment -g CLAUDE_WATCHER_TOKEN "$TOKEN"
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
 # Flush accumulated scan results for the previous window
@@ -67,6 +55,10 @@ flush_window() {
 
 # ── Main loop ───────────────────────────────────────────────────────────────────
 while tmux list-sessions &>/dev/null; do
+  # Yield to newer instance
+  current=$(tmux show-environment -g CLAUDE_WATCHER_TOKEN 2>/dev/null) || exit 0
+  [[ "${current#*=}" != "$TOKEN" ]] && exit 0
+
   prev_win=""
   prev_active=""
   has_prompt=""
