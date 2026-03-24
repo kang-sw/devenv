@@ -167,6 +167,11 @@ return {
             return line
           end
 
+          -- Conceal the raw buffer text so it doesn't bleed through overlays.
+          -- This doesn't prevent wrap (layout is computed before conceal), but
+          -- makes the underlying text invisible for a cleaner overlay result.
+          self.marks:over(self.config, true, row.node, { conceal = "" })
+
           -- Overlay on each physical screen line.
           for si = 1, num_phys do
             local vrow = si <= num_vrows and si or nil
@@ -198,7 +203,8 @@ return {
           end
           local text_w = self._text_w
 
-          -- Delimiter: render normally, then blank-overlay any wrap continuation.
+          -- Delimiter: conceal raw text, render normally, blank-overlay continuations.
+          self.marks:over(self.config, true, self.data.delim, { conceal = "" })
           self:delimiter()
           local delim_offsets = get_wrap_offsets(self.data.delim.text, text_w)
           for si = 2, #delim_offsets do
