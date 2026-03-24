@@ -19,13 +19,14 @@ CLAUDE_SPINNER_RE='[·✢✳✶✻✽].*…'
 PIDFILE="/tmp/tmux-claude-watcher-$(id -u).pid"
 
 cleanup() { rm -f "$PIDFILE"; }
+trap cleanup EXIT          # runs on any exit (including from the line below)
+trap 'exit 0' INT TERM     # bash traps DON'T exit by default — explicit exit required
 
 # Kill previous instance if running (enables config reload to pick up changes)
 if [[ -f "$PIDFILE" ]]; then
   old_pid=$(cat "$PIDFILE" 2>/dev/null)
   if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
     kill "$old_pid" 2>/dev/null
-    # Wait briefly for clean exit (trap cleanup)
     for _ in 1 2 3 4 5; do
       kill -0 "$old_pid" 2>/dev/null || break
       sleep 0.1
@@ -33,7 +34,6 @@ if [[ -f "$PIDFILE" ]]; then
   fi
 fi
 echo $$ > "$PIDFILE"
-trap cleanup EXIT INT TERM
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
 # Flush accumulated scan results for the previous window
