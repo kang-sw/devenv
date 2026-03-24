@@ -15,8 +15,8 @@ DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
 LINES_ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
 LINES_REMOVED=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
-RATE_5HR=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0')
-RATE_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0')
+RATE_5HR=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | awk '{printf "%d", $1}')
+RATE_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0' | awk '{printf "%d", $1}')
 
 # Colors
 CYAN='\033[36m'
