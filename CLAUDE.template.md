@@ -39,6 +39,7 @@
 
 Project state and cross-session context live in `ai-docs/`.
 Read `_index.md` and `_memory.md` at session start.
+Before creating or editing tickets, load `/write-ticket` for conventions.
 
 **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
 `### Result` entries, and inline code comments — must be in English regardless of

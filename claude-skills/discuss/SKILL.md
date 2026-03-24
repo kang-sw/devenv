@@ -58,8 +58,8 @@ or asking to create a ticket).
 
 When the user signals done, offer persistence options if conclusions warrant it:
 
-- **New ticket** — `ai-docs/tickets/todo/YYMMDD-<category>-<name>.md`
-- **Ticket update** — Append design notes to an existing ticket phase.
+- **New ticket** — Load `/write-ticket` for conventions, then create.
+- **Ticket update** — Load `/write-ticket`, then append design notes to an existing ticket phase.
 - **Mental-model update** — Revise a doc if architectural understanding changed.
 
 For ticket writes, consider whether the phase needs integration-test criteria
