@@ -94,11 +94,14 @@ return {
         end
 
         -- -----------------------------------------------------------------------
-        -- Render.multiline_row: hide the original buffer line with conceal_lines
-        -- (0 visual lines, prevents set-wrap blank-line bleed-through), then
-        -- render all vrows as virt_lines attached to the same row.
-        -- Requires Neovim >= 0.11 (released). conceal_lines=true is the stable
-        -- boolean API; the old 0.11 nightly had a broken string-based API.
+        -- Render.multiline_row: conceal the raw buffer row (makes it visually
+        -- empty → no wrap allocation), overlay vrow-1 on that blank visual line,
+        -- then attach overflow vrows as virt_lines below.
+        --
+        -- Uses char-level conceal='' (works on all Neovim versions that
+        -- render-markdown supports, no conceal_lines API needed).
+        -- render-markdown sets conceallevel >= 1 via win_options, so the
+        -- concealment is always active while the plugin is rendering.
         -- -----------------------------------------------------------------------
         TableRender.multiline_row = function(self, row)
           local header = row.node.type == "pipe_table_header"
@@ -117,15 +120,15 @@ return {
             num_vrows = math.max(num_vrows, #wrapped[i])
           end
 
-          -- Completely remove the original buffer line from the visual display.
-          -- conceal_lines requires start_col=0, end_row=start_row+1, end_col=0.
-          self.marks:add(self.config, true, row.node.start_row, 0, {
-            end_row = row.node.start_row + 1,
-            end_col = 0,
-            conceal_lines = true,
+          -- Conceal every character in the buffer row with '' (empty replacement).
+          -- With conceallevel >= 1 the row becomes visually empty: exactly 1 visual
+          -- line, no wrap continuation lines, virt_lines/overlay unaffected.
+          self.marks:over(self.config, true, row.node, {
+            conceal = "",
           })
 
-          -- Render all vrows as virt_lines on the (now invisible) buffer line.
+          -- vrow 1: overlay on the now-blank concealed buffer line.
+          -- vrow 2+: virt_lines below (between this and the next buffer line).
           for vrow = 1, num_vrows do
             local line = self:line()
             for i = 1, #row.cells do
@@ -140,10 +143,17 @@ return {
             end
             line:text(icon, highlight)
 
-            self.marks:add(self.config, "virtual_lines", row.node.start_row, 0, {
-              virt_lines = { self:indent():line(true):extend(line):get() },
-              virt_lines_above = false,
-            })
+            if vrow == 1 then
+              self.marks:over(self.config, "table_border", row.node, {
+                virt_text = line:get(),
+                virt_text_pos = "overlay",
+              })
+            else
+              self.marks:add(self.config, "virtual_lines", row.node.start_row, 0, {
+                virt_lines = { self:indent():line(true):extend(line):get() },
+                virt_lines_above = false,
+              })
+            end
           end
         end
 
