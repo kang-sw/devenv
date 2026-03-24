@@ -405,6 +405,11 @@ for skill_dir in "$REPO_DIR/claude/skills"/*/; do
 done
 
 # Claude Code agents — link each agent file individually
+# Migrate from old folder symlink to per-file symlinks
+if [ -L "$HOME/.claude/agents" ]; then
+    warn "removing old agents folder symlink: $HOME/.claude/agents"
+    rm "$HOME/.claude/agents"
+fi
 mkdir -p "$HOME/.claude/agents"
 for agent_file in "$REPO_DIR/claude/agents"/*.md; do
     [ -f "$agent_file" ] || continue
