@@ -123,7 +123,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 # Powerline glyphs & Nerd Font icons (hex bytes for bash 3.2 compat)
-SEP=$'\xee\x82\xb0'         # U+E0B0
+SEP=$'\xee\x82\xbc'         # U+E0BC (upper-left diagonal)
 LCAP=$'\xee\x82\xb6'        # U+E0B6
 RCAP=$'\xee\x82\xb4'        # U+E0B4
 ICON_DIR=$'\xef\x81\xbc'    # U+F07C
@@ -163,9 +163,9 @@ fi
 
 # === Line 2: Gauge capsule + Tokens → Cost → Rates ===
 BAR_FG="\033[38;5;236m"
-L2="${BAR_FG}${PCT_COLOR}${LCAP}${GAUGE}\033[0m${BAR_FG}${RCAP}"
-L2+=" \033[38;5;239m${LCAP}"
-L2+="\033[48;5;239;38;5;255m ${TOKENS_K}/${MAX_K}k "
+L2="${BAR_FG}${PCT_COLOR}${LCAP}${GAUGE}\033[0m"
+L2+="\033[48;5;239;38;5;236m${SEP}"
+L2+="\033[48;5;239;38;5;255m ${TOKENS_K}\033[38;5;245m/${MAX_K}k "
 L2+="\033[48;5;237;38;5;239m${SEP}"
 L2+="\033[48;5;237;38;5;214m ${COST_FMT} "
 L2+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m "
