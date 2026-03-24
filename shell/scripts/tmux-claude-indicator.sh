@@ -48,7 +48,7 @@ if [[ -n "$has_prompt" ]]; then
   was_spinning=""
   completed=""
 elif [[ -n "$has_spinner" ]]; then
-  frame=$(( (${frame:-0} + 1) % ${#FRAMES[@]} ))
+  frame=$(((${frame:-0} + 1) % ${#FRAMES[@]}))
   printf ' %s' "${FRAMES[$frame]}"
   was_spinning=1
   completed=""
