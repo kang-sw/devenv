@@ -17,7 +17,7 @@ for a fresh `/implement` invocation to execute without re-researching.
 ## Step 0: Understand
 
 1. Read the ticket/description.
-2. Read `ai-docs/_index.md` for project state.
+2. Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project state.
 3. Read **all** files in `ai-docs/mental-model/` — full architectural context
    is needed to identify cross-domain implications and write a sound plan.
 4. Run `git log --oneline -10` for recent work context.

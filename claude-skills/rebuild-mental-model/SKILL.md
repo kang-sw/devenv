@@ -143,9 +143,9 @@ Process verifier output:
 
 **overview.md**: Package graph, shared patterns, cross-domain contracts.
 
-**_index.md**: Update crate-level descriptions and operational state only.
+**_index.md**: Update project-level descriptions and operational state only.
 Do not duplicate module-level detail into `_index.md` — that belongs in
-`lib.rs`/`mod.rs` entry files.
+entry-point files (e.g. `mod.rs`, `index.ts`, `__init__.py`).
 
 ## Step 5: Summary
 
