@@ -42,7 +42,7 @@ main context for synthesis.
 ## Step 2: Draft Plan
 
 Generate a timestamp-based path:
-`ai-docs/plans/YYMM/DD-HHMMSS-<plan-name>.md`
+`ai-docs/plans/YYMM/DD-HHMM-<plan-name>.md`
 
 Write the plan to that file using the `Write` tool, in this format:
 
