@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tmux-claude-indicator.sh — spinner on window tab when Claude Code is actively outputting
-# Usage (in window-status-format): #(~/.config/nvim/scripts/tmux-claude-indicator.sh '#S:#I' '#{window_active}')
+# Usage (in window-status-format): #(~/.devenv-scripts/tmux-claude-indicator.sh '#S:#I' '#{window_active}')
 #
 # Debug: tmux show-environment -g | grep MYTMUX_WINDOW
 #   State format: _|last_active_epoch|last_check_epoch|frame_index|has_prompt|was_active|completed|has_spinner

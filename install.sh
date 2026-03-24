@@ -344,7 +344,16 @@ link() {
     local src="$1" dst="$2"
     mkdir -p "$(dirname "$dst")"
     if [ -L "$dst" ]; then
-        success "already linked: $dst"
+        local cur
+        cur="$(readlink "$dst")"
+        if [ "$cur" = "$src" ]; then
+            success "already linked: $dst"
+        else
+            warn "relink: $dst (was → $cur)"
+            rm "$dst"
+            ln -s "$src" "$dst"
+            success "linked: $dst"
+        fi
     elif [ -e "$dst" ]; then
         warn "backup: $dst → $dst.bak"
         mv "$dst" "$dst.bak"
@@ -359,23 +368,48 @@ link() {
 echo ""
 info "Symlinking dotfiles..."
 
-link "$REPO_DIR/.tmux.conf"         "$HOME/.tmux.conf"
-link "$REPO_DIR/.wezterm.lua"       "$HOME/.wezterm.lua"
-link "$REPO_DIR/.vscode-neovim.lua" "$HOME/.vscode-neovim.lua"
-link "$REPO_DIR/starship.toml"      "$HOME/.config/starship.toml"
-link "$REPO_DIR/lfrc"               "$HOME/.config/lf/lfrc"
-# NOTE: ~/.config/nvim is this repo itself — no symlink needed
+# Shell dotfiles
+link "$REPO_DIR/shell/.tmux.conf"         "$HOME/.tmux.conf"
+link "$REPO_DIR/shell/.wezterm.lua"       "$HOME/.wezterm.lua"
+link "$REPO_DIR/shell/.vscode-neovim.lua" "$HOME/.vscode-neovim.lua"
+link "$REPO_DIR/shell/starship.toml"      "$HOME/.config/starship.toml"
+link "$REPO_DIR/shell/lfrc"               "$HOME/.config/lf/lfrc"
+
+# Scripts (single directory symlink)
+link "$REPO_DIR/shell/scripts"            "$HOME/.devenv-scripts"
+
+# Neovim config
+link "$REPO_DIR/nvim"                     "$HOME/.config/nvim"
 
 # Claude Code skills — link each skill folder individually
 mkdir -p "$HOME/.claude/skills"
-for skill_dir in "$REPO_DIR/claude-skills"/*/; do
+for skill_dir in "$REPO_DIR/claude/skills"/*/; do
     [ -d "$skill_dir" ] || continue
     skill_name="$(basename "$skill_dir")"
     link "$skill_dir" "$HOME/.claude/skills/$skill_name"
 done
 
-# Claude Code agents
-link "$REPO_DIR/claude-agents" "$HOME/.claude/agents"
+# Claude Code agents — link each agent file individually
+mkdir -p "$HOME/.claude/agents"
+for agent_file in "$REPO_DIR/claude/agents"/*.md; do
+    [ -f "$agent_file" ] || continue
+    agent_name="$(basename "$agent_file")"
+    link "$agent_file" "$HOME/.claude/agents/$agent_name"
+done
+
+# Clean up dead symlinks (skills and agents)
+cleanup_dead_links() {
+    local dir="$1"
+    for entry in "$dir"/*; do
+        [ -L "$entry" ] || continue
+        if [ ! -e "$entry" ]; then
+            warn "removing dead link: $entry"
+            rm "$entry"
+        fi
+    done
+}
+cleanup_dead_links "$HOME/.claude/skills"
+cleanup_dead_links "$HOME/.claude/agents"
 
 # ══════════════════════════════════════════════════════════════════════════════
 

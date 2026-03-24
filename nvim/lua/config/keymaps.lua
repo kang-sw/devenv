@@ -27,7 +27,7 @@ local function navigate_lr(dir, wincmd, pane_at, window_cmd)
     -- vim 안에서 더 갈 곳 없음 → tmux에 위임
     local at_edge = vim.fn.system("tmux display-message -p '#{" .. pane_at .. "}'"):gsub("%s+", "")
     if at_edge == "1" then
-      vim.fn.system(vim.fn.expand("~/.config/nvim/scripts/tmux-cross-window.sh") .. " " .. window_cmd)
+      vim.fn.system(vim.fn.expand("~/.devenv-scripts/tmux-cross-window.sh") .. " " .. window_cmd)
     else
       vim.fn.system("tmux select-pane -" .. dir)
     end

@@ -1,6 +1,6 @@
-# Personal Neovim Configuration
+# devenv — Personal Developer Environment
 
-A batteries-included Neovim setup built on [LazyVim](https://lazyvim.github.io/), with deep integration for Claude Code AI, tmux, and a full shell/terminal environment. Beyond Neovim itself, this repo ships a complete developer workstation bootstrap script for macOS, WSL, and Linux.
+A batteries-included developer workstation setup: Neovim (LazyVim), Claude Code AI, tmux, WezTerm, and a full shell environment. One-shot bootstrap script for macOS, WSL, and Linux.
 
 ---
 
@@ -20,12 +20,14 @@ A batteries-included Neovim setup built on [LazyVim](https://lazyvim.github.io/)
 ## Quick Start
 
 ```sh
-git clone https://github.com/kang-sw/devenv.git ~/.config/nvim
-cd ~/.config/nvim
+git clone https://github.com/kang-sw/devenv.git ~/devenv
+cd ~/devenv
 bash install.sh
 ```
 
-The install script is idempotent — safe to re-run after updates.
+The install script is idempotent — safe to re-run after updates. It creates
+symlinks for `~/.config/nvim`, shell dotfiles, scripts, and Claude Code
+skills/agents.
 
 > **Note:** Neovim 0.10+ is required. The script will not install Neovim itself; install it via your package manager or from [neovim.io](https://neovim.io) first.
 
@@ -43,9 +45,10 @@ A ~375-line bootstrap script that handles everything from system packages to dot
 | Quality-of-life extras | eza, zoxide, delta, starship, Nerd Fonts (macOS only) |
 | Zsh plugins | zsh-autosuggestions, zsh-syntax-highlighting, zsh-history-substring-search |
 | `.zshrc` setup | Injects config block (idempotent, marker-guarded) |
-| Dotfile symlinks | `~/.tmux.conf`, `~/.wezterm.lua`, `~/.vscode-neovim.lua`, `~/.config/starship.toml` |
+| Dotfile symlinks | `~/.config/nvim`, `~/.tmux.conf`, `~/.wezterm.lua`, `~/.vscode-neovim.lua`, `~/.config/starship.toml`, `~/.devenv-scripts` |
 | Claude Code skills | Symlinks each skill folder into `~/.claude/skills/` |
-| Claude Code agents | Symlinks each agent into `~/.claude/agents/` |
+| Claude Code agents | Symlinks each agent file into `~/.claude/agents/` |
+| Dead link cleanup | Removes stale symlinks in `~/.claude/skills/` and `~/.claude/agents/` |
 
 ---
 
@@ -179,7 +182,7 @@ After running `install.sh`, the shell gets:
 
 ### Skills (`~/.claude/skills/`)
 
-Custom skills symlinked from `claude-skills/`:
+Custom skills symlinked from `claude/skills/`:
 
 | Skill | Purpose |
 |---|---|
@@ -195,7 +198,7 @@ Specialized subagents for AI-assisted documentation tasks (mental model verifica
 
 ### Project Template
 
-`CLAUDE.template.md` is a copyable template for per-project `CLAUDE.md` files, covering: project summary, tech stack, workspace layout, architecture rules, code standards, and workflow conventions.
+`claude/CLAUDE.template.md` is a copyable template for per-project `CLAUDE.md` files, covering: project summary, tech stack, workspace layout, architecture rules, code standards, and workflow conventions.
 
 ---
 
@@ -234,24 +237,27 @@ VSCode Dark+ theme (`tokyodark` base) with ~190 lines of custom overrides:
 ## Directory Layout
 
 ```
-~/.config/nvim/
-├── init.lua               # Bootstraps lazy.nvim (2 lines)
+~/devenv/
 ├── install.sh             # Full environment setup script
-├── .tmux.conf             # tmux configuration
-├── .wezterm.lua           # WezTerm terminal configuration
-├── .vscode-neovim.lua     # VSCode Neovim extension config
-├── starship.toml          # Shell prompt configuration
-├── statusline.sh          # Claude Code status display for tmux
-├── CLAUDE.template.md     # Template for per-project CLAUDE.md
-├── lua/
-│   ├── config/
-│   │   ├── lazy.lua       # Plugin specs & LazyVim extras
-│   │   ├── keymaps.lua    # Global keybindings
-│   │   ├── options.lua    # Editor options
-│   │   └── autocmds.lua   # Autocommands (IME, formatting)
-│   └── plugins/           # Per-plugin configuration (~23 files)
-├── claude-skills/         # Claude Code skill definitions
-└── claude-agents/         # Claude Code agent definitions
+├── nvim/                  # → ~/.config/nvim
+│   ├── init.lua           # Bootstraps lazy.nvim (2 lines)
+│   ├── lua/
+│   │   ├── config/        # keymaps, options, autocmds, lazy
+│   │   └── plugins/       # Per-plugin configuration (~23 files)
+│   ├── lazy-lock.json
+│   └── lazyvim.json
+├── claude/
+│   ├── skills/            # → ~/.claude/skills/* (per-dir symlinks)
+│   ├── agents/            # → ~/.claude/agents/*.md (per-file symlinks)
+│   └── CLAUDE.template.md # Template for per-project CLAUDE.md
+├── shell/
+│   ├── scripts/           # → ~/.devenv-scripts
+│   ├── .tmux.conf         # → ~/.tmux.conf
+│   ├── .wezterm.lua       # → ~/.wezterm.lua
+│   ├── .vscode-neovim.lua # → ~/.vscode-neovim.lua
+│   ├── starship.toml      # → ~/.config/starship.toml
+│   ├── statusline.sh      # Claude Code status display for tmux
+│   └── lfrc               # → ~/.config/lf/lfrc
 ```
 
 ---
