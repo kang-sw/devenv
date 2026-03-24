@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# tmux-claude-watcher.sh — single background daemon that scans all windows for
-# Claude Code activity and sets per-window @claude-indicator option.
+# tmux-claude-watcher.sh — background daemon for Claude Code activity indicators.
 #
-# Supports multiple agents per window:
-#   2 spinning + 1 prompt + 1 done → " 🔥🌓🌓✅"
+# Per-pane state machine with 1-scan grace period:
+#   S (spinning) → G (grace, still shows 🌑) → D (done, shows ✅)
+#   Any state → S on spinner | P on prompt
+#   D/G → clear when window becomes active
 #
 # Timing: full scan every ~2s, spinner animation at ~3fps between scans.
-#
-# State per window (tmux env CW_<key>): spin_count|done_count|frame
+# All tmux writes batched into a single source-file call.
 #
 # Start from tmux.conf:  run-shell -b '~/.devenv-scripts/tmux-claude-watcher.sh'
 # Use in format string:  #{@claude-indicator}
@@ -26,87 +26,76 @@ yield_check() {
 }
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
-# Repeat a string N times: repeat_str "🔥" 3 → "🔥🔥🔥"
 repeat_str() {
-  local s="" i
-  for ((i=0; i<$2; i++)); do s+="$1"; done
-  printf '%s' "$s"
+  local s="" i; for ((i=0; i<$2; i++)); do s+="$1"; done; printf '%s' "$s"
 }
 
-# Build N moon spinners with +1 phase offset each: build_moons 2 3 → "🌓🌔🌕"
 build_moons() {
   local base=$1 count=$2 s="" i f
   for ((i=0; i<count; i++)); do
-    f=$(( (base + i) % ${#FRAMES[@]} ))
-    s+="${FRAMES[$f]}"
-  done
-  printf '%s' "$s"
+    f=$(( (base + i) % ${#FRAMES[@]} )); s+="${FRAMES[$f]}"
+  done; printf '%s' "$s"
+}
+
+# Lookup key from cached env snapshot (pure bash, no forks)
+lookup() {
+  local key="$1" line
+  while IFS= read -r line; do
+    [[ "$line" == "${key}="* ]] && { printf '%s' "${line#*=}"; return; }
+  done <<<"$all_env"
 }
 
 flush_window() {
   [[ -z "$prev_win" ]] && return
 
   local safe_key="${prev_win//:/_}"
-  local state_key="CW_${safe_key}"
-  local raw prev_spin done_count frame
+  local frame_key="CW_W_${safe_key}"
+  local frame indicator
 
-  raw=$(tmux show-environment -g "$state_key" 2>/dev/null) || true
-  raw="${raw#*=}"
-  IFS='|' read -r prev_spin done_count frame <<<"$raw"
-  prev_spin="${prev_spin:-0}"
-  done_count="${done_count:-0}"
+  frame=$(lookup "$frame_key")
   frame="${frame:-0}"
 
-  # ── Accumulate completions ────────────────────────────────────────────
-  if (( spin_count < prev_spin )); then
-    local newly_done=$(( prev_spin - spin_count ))
-    if [[ "$prev_active" != "1" ]]; then
-      done_count=$(( done_count + newly_done ))
-    fi
-  fi
-
-  # Active window clears done indicators
-  if [[ "$prev_active" == "1" ]]; then
-    done_count=0
-  fi
-
-  # ── Build indicator: 🔥… 🌑… ✅… ───────────────────────────────────
-  local indicator=""
+  # Build indicator: 🔥… 🌑… ✅…
+  indicator=""
   (( prompt_count > 0 )) && indicator+="$(repeat_str '🔥' "$prompt_count")"
   (( spin_count > 0 ))   && indicator+="$(build_moons "$frame" "$spin_count")"
   (( done_count > 0 ))   && indicator+="$(repeat_str '✅' "$done_count")"
   [[ -n "$indicator" ]] && indicator=" $indicator"
 
-  # ── Track spinning windows for animation ──────────────────────────────
+  # Track spinning windows for animation
   if (( spin_count > 0 )); then
     spinning_wins+=("$prev_win")
     spinning_frames+=("$frame")
     spinning_counts+=("$spin_count")
     spinning_prefixes+=("$(repeat_str '🔥' "$prompt_count")")
     spinning_suffixes+=("$(repeat_str '✅' "$done_count")")
-    spinning_states+=("${spin_count}|${done_count}")
   fi
 
-  tmux set-environment -g "$state_key" "${spin_count}|${done_count}|${frame}" 2>/dev/null || true
-  tmux set-option -wq -t "$prev_win" @claude-indicator "$indicator" 2>/dev/null || true
+  printf "set-environment -g %s %s\n" "$frame_key" "$frame" >> "$batch"
+  printf "set-option -wq -t '%s' @claude-indicator '%s'\n" "$prev_win" "$indicator" >> "$batch"
 }
 
 # ── Main loop ───────────────────────────────────────────────────────────────────
 while tmux list-sessions &>/dev/null; do
   yield_check
 
+  # Snapshot all CW_ vars in one IPC call
+  all_env=$(tmux show-environment -g 2>/dev/null | grep '^CW_' || true)
+
+  batch=$(mktemp)
+
   prev_win=""
   prev_active=""
   spin_count=0
   prompt_count=0
+  done_count=0
   spinning_wins=()
   spinning_frames=()
   spinning_counts=()
   spinning_prefixes=()
   spinning_suffixes=()
-  spinning_states=()
 
-  # ── Full scan: capture panes, count patterns per window ───────────────
+  # ── Full scan: per-pane state machine ─────────────────────────────────
   while IFS=$'\t' read -r win_target active pane_id; do
     if [[ "$win_target" != "$prev_win" ]]; then
       flush_window
@@ -114,20 +103,60 @@ while tmux list-sessions &>/dev/null; do
       prev_active="$active"
       spin_count=0
       prompt_count=0
+      done_count=0
     fi
 
     content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
-    # Prompt takes priority over spinner per pane
+    # Detect current pane activity
+    has_prompt=""
+    has_spinner=""
     if printf '%s' "$content" | grep -qE '^\s*1\. Yes'; then
-      prompt_count=$((prompt_count + 1))
+      has_prompt=1
     elif printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
-      spin_count=$((spin_count + 1))
+      has_spinner=1
     fi
+
+    # Per-pane state machine: S → G → D
+    safe_pane="${pane_id#%}"
+    pane_key="CW_P_${safe_pane}"
+    prev_state=$(lookup "$pane_key")
+    new_state=""
+
+    if [[ -n "$has_prompt" ]]; then
+      new_state="P"
+    elif [[ -n "$has_spinner" ]]; then
+      new_state="S"
+    else
+      case "$prev_state" in
+        S) new_state="G" ;;           # was spinning → 1-scan grace
+        G) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
+        D) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
+        *) new_state="" ;;
+      esac
+    fi
+
+    # Batch pane state write
+    if [[ -n "$new_state" ]]; then
+      printf "set-environment -g %s %s\n" "$pane_key" "$new_state" >> "$batch"
+    else
+      printf "set-environment -gu %s\n" "$pane_key" >> "$batch"
+    fi
+
+    # Aggregate counts for window indicator
+    case "$new_state" in
+      P)   prompt_count=$((prompt_count + 1)) ;;
+      S|G) spin_count=$((spin_count + 1)) ;;
+      D)   done_count=$((done_count + 1)) ;;
+    esac
 
   done < <(tmux list-panes -a -F "#{session_name}:#{window_index}	#{window_active}	#{pane_id}" 2>/dev/null)
 
   flush_window  # last window
+
+  # Execute all writes in one IPC call
+  tmux source-file "$batch" 2>/dev/null || true
+  rm -f "$batch"
 
   # ── Animate spinners between scans (~2s at ~3fps) ─────────────────────
   for _ in 1 2 3 4 5 6; do
@@ -145,9 +174,9 @@ while tmux list-sessions &>/dev/null; do
     done
   done
 
-  # Persist final frame so next scan continues smoothly
+  # Persist final animation frames
   for i in "${!spinning_wins[@]}"; do
     safe_key="${spinning_wins[$i]//:/_}"
-    tmux set-environment -g "CW_${safe_key}" "${spinning_states[$i]}|${spinning_frames[$i]}" 2>/dev/null || true
+    tmux set-environment -g "CW_W_${safe_key}" "${spinning_frames[$i]}" 2>/dev/null || true
   done
 done
