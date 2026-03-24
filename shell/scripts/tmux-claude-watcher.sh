@@ -109,7 +109,7 @@ while tmux list-sessions &>/dev/null; do
     content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
     # Prompt takes priority over spinner per pane
-    if [[ "$content" == *"1. Yes"* ]]; then
+    if printf '%s' "$content" | grep -qE '^\s*1\. Yes'; then
       prompt_count=$((prompt_count + 1))
     elif printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
       spin_count=$((spin_count + 1))
