@@ -80,8 +80,10 @@ while tmux list-sessions &>/dev/null; do
 
     content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
-    # Pattern matching — pure bash, no forks
-    [[ "$content" =~ $CLAUDE_SPINNER_RE ]] && has_spinner=1
+    # Spinner: grep for reliable unicode matching (bash [[ =~ ]] has
+    # false positives with unicode character classes on macOS bash 3.2)
+    printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE" && has_spinner=1
+    # Prompt: glob match is fine (plain ASCII, no regex)
     [[ "$content" == *"1. Yes"* ]] && has_prompt=1
 
   done < <(tmux list-panes -a -F "#{session_name}:#{window_index}	#{window_active}	#{pane_id}" 2>/dev/null)
