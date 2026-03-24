@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # install.sh — dotfiles + dev environment bootstrap
 # Supports: macOS, WSL (Ubuntu/Debian), native Linux
+#
+# Usage:
+#   ./install.sh          Full bootstrap (packages + config + symlinks)
+#   ./install.sh update   Config + symlinks only (no packages, no sudo)
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODE="${1:-full}"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -14,13 +19,6 @@ success() { printf "\033[1;32m  ✔ %s\033[0m\n" "$*"; }
 warn()    { printf "\033[1;33m  ⚠ %s\033[0m\n" "$*"; }
 die()     { printf "\033[1;31m  ✘ %s\033[0m\n" "$*" >&2; exit 1; }
 has()     { command -v "$1" &>/dev/null; }
-
-# Use sudo only when not already root
-if [[ $EUID -eq 0 ]]; then
-    SUDO=""
-else
-    SUDO="sudo"
-fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Platform detection
@@ -33,7 +31,22 @@ elif grep -qi microsoft /proc/version 2>/dev/null; then
     PLATFORM="wsl"
 fi
 
-info "Platform: $PLATFORM"
+info "Platform: $PLATFORM  Mode: $MODE"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phases 1-7: Package installation (skipped in update mode)
+# ══════════════════════════════════════════════════════════════════════════════
+
+if [[ "$MODE" == "update" ]]; then
+    info "Update mode — skipping package installation"
+else
+
+# Use sudo only when not already root
+if [[ $EUID -eq 0 ]]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. System prerequisites
@@ -185,6 +198,8 @@ info "Installing zsh plugins..."
 brew_install zsh-autosuggestions
 brew_install zsh-syntax-highlighting
 brew_install zsh-history-substring-search
+
+fi  # end of: if [[ "$MODE" != "update" ]]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 8. Zsh config (~/.zshrc)  — 항상 최신 내용으로 덮어씀 (위치 보존)
