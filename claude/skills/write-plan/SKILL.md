@@ -116,15 +116,24 @@ completeness.
 
 ## Step 5: Finalize
 
-Enter plan mode via `EnterPlanMode` with execution steps:
+Call `EnterPlanMode`, then write the **plan file** with this structure:
 
 ```
 # Steps
 
 1. Load `/implement` skill
 2. Read `@<plan-path>`
+
+---
+
+# <Plan Title>
+
+<brief summary — what changes, why, key decisions>
 ```
 
-Do **not** copy the plan text into PlanMode — the file is the source of truth.
-The steps ensure a fresh context loads `/implement` first, then reads the plan
-as input without re-researching.
+The plan file content is injected as the first prompt when the user clicks
+"Reset Context and auto-accept" after `ExitPlanMode`. The `# Steps` block
+ensures `/implement` loads before the plan is read.
+
+Do **not** copy the full plan text into the plan file — the `@<plan-path>`
+reference is the source of truth.
