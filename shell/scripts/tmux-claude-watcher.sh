@@ -33,6 +33,16 @@ repeat_str() {
   printf '%s' "$s"
 }
 
+# Build N moon spinners with +1 phase offset each: build_moons 2 3 → "🌓🌔🌕"
+build_moons() {
+  local base=$1 count=$2 s="" i f
+  for ((i=0; i<count; i++)); do
+    f=$(( (base + i) % ${#FRAMES[@]} ))
+    s+="${FRAMES[$f]}"
+  done
+  printf '%s' "$s"
+}
+
 flush_window() {
   [[ -z "$prev_win" ]] && return
 
@@ -63,7 +73,7 @@ flush_window() {
   # ── Build indicator: 🔥… 🌑… ✅… ───────────────────────────────────
   local indicator=""
   (( prompt_count > 0 )) && indicator+="$(repeat_str '🔥' "$prompt_count")"
-  (( spin_count > 0 ))   && indicator+="$(repeat_str "${FRAMES[$frame]}" "$spin_count")"
+  (( spin_count > 0 ))   && indicator+="$(build_moons "$frame" "$spin_count")"
   (( done_count > 0 ))   && indicator+="$(repeat_str '✅' "$done_count")"
   [[ -n "$indicator" ]] && indicator=" $indicator"
 
@@ -129,7 +139,7 @@ while tmux list-sessions &>/dev/null; do
       f=$(( (f + 1) % ${#FRAMES[@]} ))
       spinning_frames[$i]=$f
 
-      moon="$(repeat_str "${FRAMES[$f]}" "${spinning_counts[$i]}")"
+      moon="$(build_moons "$f" "${spinning_counts[$i]}")"
       tmux set-option -wq -t "${spinning_wins[$i]}" @claude-indicator \
         " ${spinning_prefixes[$i]}${moon}${spinning_suffixes[$i]}" 2>/dev/null || true
     done
