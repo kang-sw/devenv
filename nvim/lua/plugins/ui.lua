@@ -94,8 +94,11 @@ return {
         end
 
         -- -----------------------------------------------------------------------
-        -- Render.multiline_row: hide original line with conceal_lines, render all
-        -- vrows as virt_lines. Requires Neovim 0.11 (conceal_lines extmark option).
+        -- Render.multiline_row: conceal original line + overlay first vrow,
+        -- append extra vrows as virt_lines.
+        -- wrap is disabled via win_options while render-markdown is active,
+        -- so the concealed single-height buffer line never produces blank
+        -- wrapped visual lines.
         -- -----------------------------------------------------------------------
         TableRender.multiline_row = function(self, row)
           local header = row.node.type == "pipe_table_header"
@@ -114,17 +117,6 @@ return {
             num_vrows = math.max(num_vrows, #wrapped[i])
           end
 
-          -- Hide the original buffer line entirely (conceal_lines = 0 visual lines).
-          -- This prevents set-wrap from rendering blank wrapped continuations of the
-          -- raw markdown text between our virt_lines.
-          -- conceal_lines requires start_col=0, end_row=start_row+1, end_col=0.
-          self.marks:add(self.config, true, row.node.start_row, 0, {
-            end_row = row.node.start_row + 1,
-            end_col = 0,
-            conceal_lines = true,
-          })
-
-          -- Render all vrows as virt_lines below the (now invisible) buffer line.
           for vrow = 1, num_vrows do
             local line = self:line()
             for i = 1, #row.cells do
@@ -139,10 +131,29 @@ return {
             end
             line:text(icon, highlight)
 
-            self.marks:add(self.config, "virtual_lines", row.node.start_row, 0, {
-              virt_lines = { self:indent():line(true):extend(line):get() },
-              virt_lines_above = false,
-            })
+            if vrow == 1 then
+              -- Conceal original buffer chars so they don't show past the overlay.
+              -- With win_options wrap=false active, the buffer line cannot produce
+              -- additional wrapped visual lines regardless of its byte length.
+              local buf_line = vim.api.nvim_buf_get_lines(
+                self.context.buf, row.node.start_row, row.node.start_row + 1, false
+              )[1] or ""
+              if #buf_line > row.node.start_col then
+                self.marks:add(self.config, true, row.node.start_row, row.node.start_col, {
+                  end_col = #buf_line,
+                  conceal = "",
+                })
+              end
+              self.marks:over(self.config, "table_border", row.node, {
+                virt_text = line:get(),
+                virt_text_pos = "overlay",
+              })
+            else
+              self.marks:add(self.config, "virtual_lines", row.node.start_row, 0, {
+                virt_lines = { self:indent():line(true):extend(line):get() },
+                virt_lines_above = false,
+              })
+            end
           end
         end
 
@@ -168,6 +179,12 @@ return {
       require("render-markdown").setup(opts)
     end,
     opts = {
+      -- Disable wrap while render-markdown is active so that wide raw buffer
+      -- lines cannot produce extra blank wrapped visual lines that bleed
+      -- through between table rows. Restored when leaving the markdown window.
+      win_options = {
+        wrap = { default = true, rendered = false },
+      },
       code = {
         border = "thin", -- 코드 블록 위아래에 얇은 구분선 표시
       },
