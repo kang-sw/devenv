@@ -102,7 +102,7 @@ return {
             end
             local total = (n + 1) + content_sum
 
-            local margin = 8
+            local margin = 2
             if total > text_w - margin and content_sum > 0 then
               local available = text_w - (n + 1) - margin
               local min_col_w = 2 * padding + 1
