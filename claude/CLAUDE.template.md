@@ -40,6 +40,8 @@
 Project state and cross-session context live in `ai-docs/`.
 Read `_index.md` and `_memory.md` at session start.
 Before creating or editing tickets, load `/write-ticket` for conventions.
+Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
+full path — stems stay stable across status moves.
 
 **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
 `### Result` entries, and inline code comments — must be in English regardless of
