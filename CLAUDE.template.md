@@ -1,3 +1,7 @@
+<!-- AI-maintained project state — read before work, update after -->
+<!-- - `ai-docs/_index.md` — architecture overview, conventions -->
+<!-- - `ai-docs/_memory.md` — recent work, workspace reference -->
+
 # CLAUDE.md — [PROJECT_NAME]
 
 ## Project Summary
@@ -33,47 +37,36 @@
 
 ## Project Knowledge
 
-Project state, architecture, and source layout live in **`ai-docs/_index.md`**.
-All files under `ai-docs/` are AI-maintained and serve as the primary
-cross-session context store.
+Project state and cross-session context live in `ai-docs/`.
+Read `_index.md` and `_memory.md` at session start.
 
-```
+**Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
+`### Result` entries, and inline code comments — must be in English regardless of
+conversation language. Human-facing UI strings are exempt.
+
+<!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
+
 ai-docs/
-  _index.md          — project state overview (load at session start)
+  _index.md          — project architecture and stable conventions
+  _memory.md         — cross-session continuity, updated each session
   mental-model/      — architecture docs, regenerable from source
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
   tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
-```
 
-**When to read:** Load `_index.md` at session start. Load relevant module docs before tasks.
-**When to update:** After implementing changes that affect operational state or a module's
-public API. Update the specific section/doc, not everything.
+_index.md should cover:
+  - Project state overview (current milestone, active initiatives)
+  - Module/directory map and relationships
+  - Conventions (tickets, dependency docs, naming rules)
+  - Build/test commands and operational pitfalls
 
-**Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
-`### Result` entries, `MEMORY` sections, and inline code comments — must be in
-English regardless of conversation language. Human-facing UI strings are exempt.
+_memory.md should cover:
+  - Recent work context (what was done, what's pending)
+  - Workspace quick-reference (key paths, package names)
+  - Ephemeral memos (temporary notes that may expire)
 
-**Tickets** (`ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md`) track substantial features.
-`YYMMDD` is the **creation date**; it never changes when the ticket moves between statuses.
-Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
-
-- Frontmatter requires `title`. Add `started: YYYY-MM-DD` on move to
-  `wip/`; add `completed: YYYY-MM-DD` on move to `done/`.
-- **Status is directory-based only:** `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
-  The containing directory is the single source of truth for status — do not duplicate
-  it in frontmatter or elsewhere.
-- **Reference tickets by stem only** (e.g., `260115-feat-foo-bar`), never by full
-  path including the status directory. This keeps references stable across moves.
-- **Move tickets immediately** when status changes — `git mv` to the new directory
-  in the same commit. Since references use stems, no cross-link updates are needed.
-- After completing a ticket phase, append a `### Result (<short-hash>) - YY-MM-DD` subsection
-  recording what was implemented, deviations from the plan, and key findings for future phases.
-
-**MEMORY.md** (`~/.claude/projects/.../memory/MEMORY.md`) persists across sessions
-and stores user-specific preferences only (communication style, workflow habits).
-Project-specific memory (build memos, recent context, workspace ref) belongs in the
-`# MEMORY` section at the bottom of this file, keeping it git-tracked with the project.
+Adapt structure to fit the project — these are guidelines, not a rigid schema.
+-->
 
 ## Code Standards
 
@@ -118,20 +111,8 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ### Session Start
 
-- Read `ai-docs/_index.md` for project state and architecture.
+- Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project context.
 - Run `git log --oneline -10` for recent changes.
-
-### Dependency API Notes
-
-- **`ai-docs/deps/<package>[v<ver>].md`** stores verified API facts for libraries
-  whose actual API differs from training knowledge or is too recent to be known.
-- **When to read:** Before writing code that uses a package listed in
-  `# MEMORY → Documented Dependencies`. On compile/type errors resembling wrong
-  signatures, missing types, or changed fields, consult `ai-docs/deps/` **before**
-  exploring package source from scratch.
-- **When to write/update:** After discovering API drift (wrong arg count, renamed types,
-  removed methods) or learning a previously unknown package's API. Document the verified
-  correct API so future sessions skip re-exploration.
 
 ### Response Discipline
 
@@ -148,35 +129,3 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - Keep context small. Load only the module docs relevant to the current task.
 - Source code is the ground truth; docs supplement it.
 - When a module doc drifts from source, update the doc (or flag it).
-
----
-
-# MEMORY
-
-<!-- AI-maintained. Update after each non-trivial session. Prune aggressively. -->
-
-## Build & Workflow
-
-<!-- Commands, flags, known pitfalls that affect every session. -->
-
-- Build: `[command]`
-- Test: `[command]`
-- Integration test: `[command]` <!-- prerequisites (e.g. sandbox disabled, server running), when to run -->
-
-## Recent Work
-
-<!-- Max 3 items. What was done, what's next. -->
-
--
-
-## Workspace Reference
-
-<!-- Key package/crate names, important paths, architecture quick-ref. -->
-
--
-
-## Documented Dependencies
-
-<!-- Packages with verified API docs in ai-docs/deps/. Read before using. -->
-
--
