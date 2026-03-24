@@ -127,9 +127,19 @@ return {
             line:text(icon, highlight)
 
             if vrow == 1 then
-              -- Pad to original line width so the overlay fully hides the buffer text.
-              local orig_w = vim.fn.strdisplaywidth(row.node.text)
-              line:pad(math.max(0, orig_w - line:width()))
+              -- Conceal the entire original buffer line so that `set wrap` cannot
+              -- display wrapped continuations of the raw markdown text.
+              -- render-markdown sets conceallevel=2 during rendering, so conceal=''
+              -- makes the original chars visually disappear, leaving only our overlay.
+              local buf_line = vim.api.nvim_buf_get_lines(
+                self.context.buf, row.node.start_row, row.node.start_row + 1, false
+              )[1] or ""
+              if #buf_line > row.node.start_col then
+                self.marks:add(self.config, true, row.node.start_row, row.node.start_col, {
+                  end_col = #buf_line,
+                  conceal = "",
+                })
+              end
               self.marks:over(self.config, "table_border", row.node, {
                 virt_text = line:get(),
                 virt_text_pos = "overlay",
