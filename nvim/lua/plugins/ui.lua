@@ -179,6 +179,15 @@ return {
       require("render-markdown").setup(opts)
     end,
     opts = {
+      win_options = {
+        -- Keep conceal active even on the cursor line. Without this,
+        -- Neovim lifts conceal on the cursor row, re-exposing the wide
+        -- raw table text which then wraps and breaks the layout.
+        -- Trade-off: raw markdown syntax (# for headings, ** for bold)
+        -- is also hidden on the cursor line; use :RenderMarkdown toggle
+        -- to see raw text when needed.
+        concealcursor = { rendered = "nvic" },
+      },
       code = {
         border = "thin", -- 코드 블록 위아래에 얇은 구분선 표시
       },
