@@ -190,7 +190,7 @@ if [[ -n $_dl ]]; then
 fi
 
 # Emit line: indent + content (bg active) + space padding + right diagonal cap
-RCOL=60
+RCOL=70
 _emit() {
   local i=$1 line=$2 bg=$3 rcol=$4
   local pad=$(printf '%*s' "$i" '')
