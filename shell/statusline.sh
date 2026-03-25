@@ -123,7 +123,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 # Powerline glyphs & Nerd Font icons (hex bytes for bash 3.2 compat)
-SEP=$'\xee\x82\xbc'         # U+E0BC (upper-left diagonal)
+SEP=$'\xee\x82\xb8'         # U+E0B8 (lower-left diagonal, / angle)
 LCAP=$'\xee\x82\xb6'        # U+E0B6
 RCAP=$'\xee\x82\xb4'        # U+E0B4
 DIAG=$'\xee\x82\xbe'        # U+E0BE (upper-right diagonal, / left cap)
