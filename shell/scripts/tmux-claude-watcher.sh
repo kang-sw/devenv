@@ -111,7 +111,7 @@ while tmux list-sessions &>/dev/null; do
     # Detect current pane activity
     has_prompt=""
     has_spinner=""
-    if printf '%s' "$content" | grep -qE '^\s*1\. Yes'; then
+    if printf '%s\n' "$content" | awk '/1\. Yes/{y=1} /[0-9]+\. No/{n=1} END{exit !(y && n)}'; then
       has_prompt=1
     elif printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
       has_spinner=1
