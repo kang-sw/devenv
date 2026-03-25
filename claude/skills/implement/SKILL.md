@@ -135,7 +135,9 @@ changes, or anything in the "Ask first" approval category.
 > - **Correctness** — logic errors, edge cases, error handling
 > - **Architectural fit** — does this change respect documented contracts
 >   and module boundaries? Any unintended coupling or side effects?
-> - **Test coverage** — adequate for the change scope?
+> - **Test quality** — adequate coverage, and no deceptive tests (tautological
+>   assertions, unreachable assert paths, mocks bypassing code under test,
+>   expected values derived from the logic being tested)
 > - **Code standards** — adherence to CLAUDE.md conventions
 >
 > Categorize issues as Critical / Important / Minor.
