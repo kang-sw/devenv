@@ -16,7 +16,34 @@ API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
 LINES_ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
 LINES_REMOVED=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
 RATE_5HR=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | awk '{printf "%d", $1}')
-RATE_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0' | awk '{printf "%d", $1}')
+RATE_7D_RAW=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0')
+RATE_7D=$(echo "$RATE_7D_RAW" | awk '{printf "%d", $1}')
+
+# Weekly rate daily delta tracking via shared state file
+_WK_STATE="/tmp/claude-statusline-weekly-${USER}"
+_WK_TODAY=$(date +%Y-%m-%d)
+_WK_NOW=$(date +%s)
+_WK_PIVOT_RATE="$RATE_7D_RAW"
+DELTA_7D=""
+
+if [[ -f "$_WK_STATE" ]]; then
+  _WK_SAVED_DATE=$(cut -d' ' -f1 < "$_WK_STATE")
+  _WK_SAVED_PIVOT=$(cut -d' ' -f2 < "$_WK_STATE")
+  _WK_SAVED_LAST=$(cut -d' ' -f3 < "$_WK_STATE")
+  if [[ "$_WK_SAVED_DATE" != "$_WK_TODAY" ]]; then
+    # Date changed — pivot from the last known fresh value
+    _WK_PIVOT_RATE="${_WK_SAVED_LAST:-$RATE_7D_RAW}"
+  else
+    _WK_PIVOT_RATE="${_WK_SAVED_PIVOT:-$RATE_7D_RAW}"
+  fi
+fi
+echo "$_WK_TODAY $_WK_PIVOT_RATE $RATE_7D_RAW $_WK_NOW" > "$_WK_STATE"
+
+DELTA_7D=$(awk "BEGIN {
+  d = int($RATE_7D_RAW - $_WK_PIVOT_RATE)
+  if (d > 0)      printf \"+%d%%\", d
+  else if (d < 0) printf \"%d%%\", d
+}")
 
 # Green → yellow → red gradient (ANSI 256-color, fg only)
 pct_color() {
@@ -172,7 +199,9 @@ L2+="\033[48;5;237;38;5;238m${SEP}"
 L2+="\033[48;5;237;38;5;214m ${COST_FMT} "
 L2+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m "
 L2+="${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;235;38;5;245m/5h "
-L2+="${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk "
+L2+="${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk"
+[[ -n $DELTA_7D ]] && L2+=" \033[38;5;243m${DELTA_7D}"
+L2+=" "
 L2_BG=235
 
 # === Line 4: Time → API → Delta ===
