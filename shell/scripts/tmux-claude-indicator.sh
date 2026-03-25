@@ -34,7 +34,7 @@ while IFS= read -r pane_id; do
   content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
   printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE" && has_spinner=1
-  [[ "$content" == *"1. Yes"* ]] && has_prompt=1
+  printf '%s\n' "$content" | awk '/1\. Yes/{y=1} /[0-9]+\. No/{n=1} END{exit !(y && n)}' && has_prompt=1
 
   # Early exit: both found, no need to check remaining panes
   [[ -n "$has_spinner" && -n "$has_prompt" ]] && break
