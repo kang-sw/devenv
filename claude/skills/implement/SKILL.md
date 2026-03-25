@@ -189,9 +189,14 @@ Report to the user any **process issues** encountered during implementation:
 - Mental-model inaccuracies — contracts or invariants that didn't match reality
 - Convention mismatches — patterns described in docs that diverged from actual
   code
+- **Ticket status** — if implementing a ticket, report remaining phases or
+  confirm all phases are complete. Help the user decide the next status
+  (`done/` or staying in `wip/`).
 
-Skip if nothing notable. The user reviews this report before confirming merge —
-do not silently swallow friction that could be fixed for next time.
+Skip process issues if nothing notable, but always include the ticket status
+line when a ticket was the input. The user reviews this report before
+confirming merge — do not silently swallow friction that could be fixed for
+next time.
 
 ### Merge & cleanup task
 
