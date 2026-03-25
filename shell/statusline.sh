@@ -33,20 +33,21 @@ input=$(cat)
 
 MODEL=$(echo "$input" | jq -r '.model.display_name')
 DIR=$(echo "$input" | jq -r '.workspace.current_dir')
+PROJECT_DIR=$(echo "$input" | jq -r '.workspace.project_dir')
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
 PCT_RAW=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
 PCT=$(echo "$PCT_RAW" | awk '{printf "%d", $1}')
 TOKENS_USED=$(echo "$input" | jq -r '.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)')
-TOKENS_K=$(awk "BEGIN {printf \"%.0f\", $TOKENS_USED / 1000}")
 CTX_MAX=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
-MAX_K=$(awk "BEGIN {printf \"%.0f\", $CTX_MAX / 1000}")
 OUTPUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
 LINES_ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
 LINES_REMOVED=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
 RATE_5HR=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | awk '{printf "%d", $1}')
+RATE_5HR_RESETS=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // 0')
 RATE_7D_RAW=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0')
+RATE_7D_RESETS=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // 0')
 RATE_7D=$(echo "$RATE_7D_RAW" | awk '{printf "%d", $1}')
 
 # Weekly rate daily delta tracking via shared state file
@@ -57,9 +58,9 @@ _WK_PIVOT_RATE="$RATE_7D_RAW"
 DELTA_7D=""
 
 if [[ -f "$_WK_STATE" ]]; then
-  _WK_SAVED_DATE=$(cut -d' ' -f1 < "$_WK_STATE")
-  _WK_SAVED_PIVOT=$(cut -d' ' -f2 < "$_WK_STATE")
-  _WK_SAVED_LAST=$(cut -d' ' -f3 < "$_WK_STATE")
+  _WK_SAVED_DATE=$(cut -d' ' -f1 <"$_WK_STATE")
+  _WK_SAVED_PIVOT=$(cut -d' ' -f2 <"$_WK_STATE")
+  _WK_SAVED_LAST=$(cut -d' ' -f3 <"$_WK_STATE")
   if [[ "$_WK_SAVED_DATE" != "$_WK_TODAY" ]]; then
     # Date changed — pivot from the last known fresh value
     _WK_PIVOT_RATE="${_WK_SAVED_LAST:-$RATE_7D_RAW}"
@@ -67,7 +68,7 @@ if [[ -f "$_WK_STATE" ]]; then
     _WK_PIVOT_RATE="${_WK_SAVED_PIVOT:-$RATE_7D_RAW}"
   fi
 fi
-echo "$_WK_TODAY $_WK_PIVOT_RATE $RATE_7D_RAW $_WK_NOW" > "$_WK_STATE"
+echo "$_WK_TODAY $_WK_PIVOT_RATE $RATE_7D_RAW $_WK_NOW" >"$_WK_STATE"
 
 DELTA_7D=$(awk "BEGIN {
   d = int($RATE_7D_RAW - $_WK_PIVOT_RATE)
@@ -151,6 +152,25 @@ fmt_time() {
 TIME_FMT=$(fmt_time "$HRS" "$MINS" "$SECS")
 API_TIME_FMT=$(fmt_time "$API_HRS" "$API_MINS" "$API_SECS")
 
+# 5h rate limit reset time (HH:MM)
+RATE_5HR_RESET_FMT=$(date -r "$RATE_5HR_RESETS" "+at %HH" 2>/dev/null || echo "??")
+
+# 7d rate limit reset remaining (Nd Nh)
+_NOW_EPOCH=$(date +%s)
+_7D_REMAIN_S=$((RATE_7D_RESETS - _NOW_EPOCH))
+[ "$_7D_REMAIN_S" -lt 0 ] 2>/dev/null && _7D_REMAIN_S=0
+_7D_RD=$((_7D_REMAIN_S / 86400))
+_7D_RH=$(((_7D_REMAIN_S % 86400) / 3600))
+RATE_7D_TTL="in "
+[ "$_7D_RD" -gt 0 ] && RATE_7D_TTL+="${_7D_RD}d"
+RATE_7D_TTL+="${_7D_RH}h"
+
+# Relative path: current_dir relative to project_dir
+DIR_REL=""
+if [[ "$DIR" == "$PROJECT_DIR"/* && "$DIR" != "$PROJECT_DIR" ]]; then
+  DIR_REL="${DIR#"$PROJECT_DIR"}"
+fi
+
 # Output tokens/sec
 TOK_SEC=$(awk "BEGIN {
   a = $API_MS + 0; t = $OUTPUT_TOKENS + 0
@@ -196,7 +216,9 @@ COST_FMT=$(printf '$%.2f' "$COST")
 L1="\033[38;5;53m${DIAG}"
 L1+="\033[48;5;53;38;5;255;1m ${MODEL} \033[22m"
 L1+="\033[48;5;238;38;5;53m${SEP}"
-L1+="\033[48;5;238;38;5;255m 📁 ${DIR##*/} "
+L1+="\033[48;5;238;38;5;255m 📁 ${DIR##*/}"
+[[ -n $DIR_REL ]] && L1+=" \033[38;5;245m${DIR_REL}"
+L1+=" "
 L1_BG=238
 
 # === Line 2: Git (optional) ===
@@ -221,16 +243,15 @@ if [[ -n $BRANCH_NAME ]]; then
   fi
 fi
 
-# === Line 3: Gauge + Tokens → Cost → Rates ===
+# === Line 3: Gauge + Tokens → 5h Rate → Weekly Rate ===
 L2="${PCT_COLOR}${DIAG}${GAUGE}\033[0m"
 L2+="\033[48;5;238;38;5;236m${SEP}"
-L2+="\033[48;5;238;38;5;255m ${TOKENS_K}\033[38;5;245m/${MAX_K}k "
+L2+="\033[48;5;238;38;5;255m ${TOKENS_USED} "
 L2+="\033[48;5;237;38;5;238m${SEP}"
-L2+="\033[48;5;237;38;5;214m ${COST_FMT} "
-L2+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m "
-L2+="${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;235;38;5;245m/5h "
-L2+="${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk"
-[[ -n $DELTA_7D ]] && L2+=" \033[38;5;243m${DELTA_7D}"
+L2+="\033[48;5;237m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;237;38;5;245m/5h/\033[38;5;255m${RATE_5HR_RESET_FMT} "
+L2+="\033[48;5;235;38;5;237m${SEP}"
+L2+="\033[48;5;235m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk/\033[38;5;255m${RATE_7D_TTL}"
+[[ -n $DELTA_7D ]] && L2+=" \033[38;5;243m(${DELTA_7D})"
 L2+=" "
 L2_BG=235
 
@@ -247,6 +268,9 @@ if [[ -n $_dl ]]; then
   L3+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_dl}"
   L3_BG=235
 fi
+L3+="\033[48;5;236;38;5;${L3_BG}m${SEP}"
+L3+="\033[48;5;236;38;5;214m ${COST_FMT} "
+L3_BG=236
 
 # Emit line: indent + content (bg active) + space padding + right diagonal cap
 RCOL=70
