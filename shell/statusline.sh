@@ -126,6 +126,8 @@ fi
 SEP=$'\xee\x82\xbc'         # U+E0BC (upper-left diagonal)
 LCAP=$'\xee\x82\xb6'        # U+E0B6
 RCAP=$'\xee\x82\xb4'        # U+E0B4
+DIAG=$'\xee\x82\xbe'        # U+E0BE (upper-right diagonal, / left cap)
+RDIAG=$'\xee\x82\xb8'       # U+E0B8 (lower-left diagonal, / right cap)
 ICON_DIR=$'\xef\x81\xbc'    # U+F07C
 ICON_BRANCH=$'\xee\x82\xa0' # U+E0A0
 ICON_GIT=$'\xee\x9c\x82'    # U+E702
@@ -134,16 +136,17 @@ ICON_BOLT=$'\xef\x83\xa7'   # U+F0E7
 COST_FMT=$(printf '$%.2f' "$COST")
 
 # === Line 1: Model → Dir ===
-L1="\033[38;5;53m${LCAP}"
+L1="\033[38;5;53m${DIAG}"
 L1+="\033[48;5;53;38;5;255;1m ${MODEL} \033[22m"
-L1+="\033[48;5;239;38;5;53m${SEP}"
-L1+="\033[48;5;239;38;5;255m 📁 ${DIR##*/} "
-L1+="\033[0m\033[38;5;239m${RCAP}\033[0m"
+L1+="\033[48;5;238;38;5;53m${SEP}"
+L1+="\033[48;5;238;38;5;255m 📁 ${DIR##*/} "
+L1_BG=238
 
 # === Line 2: Git (optional) ===
 L_GIT=""
+L_GIT_BG=237
 if [[ -n $BRANCH_NAME ]]; then
-  L_GIT="\033[38;5;237m${LCAP}"
+  L_GIT="\033[38;5;237m${DIAG}"
   L_GIT+="\033[48;5;237;38;5;202m \033[38;5;114m🌿 ${BRANCH_NAME}"
   [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;114m↑${GIT_AHEAD}"
   [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;214m↓${GIT_BEHIND}"
@@ -154,41 +157,65 @@ if [[ -n $BRANCH_NAME ]]; then
   [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;214m~${GIT_MODIFIED} "
   [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;75m?${GIT_UNTRACKED} "
   if [[ -n $_gc ]]; then
-    L_GIT+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_gc}\033[0m\033[38;5;235m${RCAP}"
+    L_GIT+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_gc}"
+    L_GIT_BG=235
   else
-    L_GIT+="\033[0m\033[38;5;237m${RCAP} \033[38;5;242mworking tree clean\033[0m"
+    L_GIT+="\033[38;5;242m working tree clean "
   fi
-  L_GIT+="\033[0m"
 fi
 
-# === Line 2: Gauge capsule + Tokens → Cost → Rates ===
-BAR_FG="\033[38;5;236m"
-L2="${BAR_FG}${PCT_COLOR}${LCAP}${GAUGE}\033[0m"
-L2+="\033[48;5;239;38;5;236m${SEP}"
-L2+="\033[48;5;239;38;5;255m ${TOKENS_K}\033[38;5;245m/${MAX_K}k "
-L2+="\033[48;5;237;38;5;239m${SEP}"
+# === Line 3: Gauge + Tokens → Cost → Rates ===
+L2="${PCT_COLOR}${DIAG}${GAUGE}\033[0m"
+L2+="\033[48;5;238;38;5;236m${SEP}"
+L2+="\033[48;5;238;38;5;255m ${TOKENS_K}\033[38;5;245m/${MAX_K}k "
+L2+="\033[48;5;237;38;5;238m${SEP}"
 L2+="\033[48;5;237;38;5;214m ${COST_FMT} "
 L2+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m "
 L2+="${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;235;38;5;245m/5h "
 L2+="${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk "
-L2+="\033[0m\033[38;5;235m${RCAP}\033[0m"
+L2_BG=235
 
-# === Line 3: Time → API → Delta ===
-L3="\033[38;5;239m${LCAP}"
-L3+="\033[48;5;239;38;5;255m ⌚️ ${TIME_FMT} "
-L3+="\033[48;5;237;38;5;239m${SEP}"
+# === Line 4: Time → API → Delta ===
+L3="\033[38;5;238m${DIAG}"
+L3+="\033[48;5;238;38;5;255m ⏱️ ${TIME_FMT} "
+L3+="\033[48;5;237;38;5;238m${SEP}"
 L3+="\033[48;5;237;38;5;255m 🤔 ${API_TIME_FMT} \033[38;5;245m${TOK_SEC}t/s "
+L3_BG=237
 _dl=""
 [ "$LINES_ADDED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;75m+${LINES_ADDED} "
 [ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;204m-${LINES_REMOVED} "
 if [[ -n $_dl ]]; then
-  L3+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_dl}\033[0m\033[38;5;235m${RCAP}"
-else
-  L3+="\033[0m\033[38;5;237m${RCAP}"
+  L3+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_dl}"
+  L3_BG=235
 fi
-L3+="\033[0m"
 
-echo -e "$L1"
-[[ -n $L_GIT ]] && echo -e "$L_GIT"
-echo -e "$L2"
-echo -e "$L3"
+# Emit line: indent + content (bg active) + space padding + right diagonal cap
+RCOL=60
+_emit() {
+  local i=$1 line=$2 bg=$3 rcol=$4
+  local pad=$(printf '%*s' "$i" '')
+  local full="\033[0m${pad}${line}"
+  # Measure visible width (strip ANSI escapes, count chars)
+  local stripped=$(echo -ne "$full" | sed $'s/\x1b\[[0-9;]*m//g')
+  local w=${#stripped}
+  # Adjust for wide emojis (2 display cols but 1 char)
+  [[ "$stripped" == *📁* ]] && ((w++))
+  [[ "$stripped" == *🌿* ]] && ((w++))
+  [[ "$stripped" == *🤔* ]] && ((w++))
+  # Pad with spaces (inherits last segment bg) to reach right cap
+  local need=$((rcol - 1 - w))
+  local fill=""
+  [ "$need" -gt 0 ] && fill=$(printf '%*s' "$need" '')
+  echo -e "${full}${fill}\033[0m\033[38;5;${bg}m${RDIAG}\033[0m"
+}
+
+if [[ -n $L_GIT ]]; then
+  _emit 0 "$L1" $L1_BG $((RCOL - 3))
+  _emit 1 "$L_GIT" $L_GIT_BG $((RCOL - 2))
+  _emit 2 "$L2" $L2_BG $((RCOL - 1))
+  _emit 3 "$L3" $L3_BG $((RCOL + 1))
+else
+  _emit 0 "$L1" $L1_BG $((RCOL - 2))
+  _emit 1 "$L2" $L2_BG $((RCOL - 1))
+  _emit 2 "$L3" $L3_BG $((RCOL + 1))
+fi
