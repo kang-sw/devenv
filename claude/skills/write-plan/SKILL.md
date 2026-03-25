@@ -137,3 +137,6 @@ ensures `/implement` loads before the plan is read.
 
 Do **not** copy the full plan text into the plan file — the `@<plan-path>`
 reference is the source of truth.
+
+**The plan MUST be committed!**
+
