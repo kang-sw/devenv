@@ -1,4 +1,34 @@
 #!/bin/bash
+# Claude Code statusline — available JSON fields (v2.1.83):
+#
+# session_id                                       string   session UUID
+# transcript_path                                  string   path to .jsonl transcript
+# cwd                                              string   current working directory
+# model.id                                         string   e.g. "claude-opus-4-6[1m]"
+# model.display_name                               string   e.g. "Opus 4.6 (1M context)"
+# workspace.current_dir                            string
+# workspace.project_dir                            string
+# version                                          string   CLI version
+# output_style.name                                string   e.g. "default"
+# cost.total_cost_usd                              float    cumulative session cost
+# cost.total_duration_ms                           int      wall-clock time
+# cost.total_api_duration_ms                       int      API round-trip time
+# cost.total_lines_added                           int
+# cost.total_lines_removed                         int
+# context_window.total_input_tokens                int      cumulative input tokens
+# context_window.total_output_tokens               int      cumulative output tokens
+# context_window.context_window_size               int      max context (e.g. 1000000)
+# context_window.current_usage.input_tokens        int      current turn input
+# context_window.current_usage.output_tokens       int      current turn output
+# context_window.current_usage.cache_creation_input_tokens  int
+# context_window.current_usage.cache_read_input_tokens      int
+# context_window.used_percentage                   int      context % used
+# context_window.remaining_percentage              int
+# rate_limits.five_hour.used_percentage            float    5h rate limit %
+# rate_limits.five_hour.resets_at                  int      epoch seconds
+# rate_limits.seven_day.used_percentage            float/int  weekly rate limit %
+# rate_limits.seven_day.resets_at                  int      epoch seconds
+
 input=$(cat)
 
 MODEL=$(echo "$input" | jq -r '.model.display_name')
