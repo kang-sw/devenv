@@ -93,6 +93,7 @@ pct_color() {
   }'
 }
 PCT_COLOR="\033[48;5;236m$(pct_color "$PCT_RAW")"
+PCT_COLOR_FWD="$(pct_color "$PCT_RAW")"
 RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
 RATE_7D_COLOR=$(pct_color "$RATE_7D")
 
@@ -244,7 +245,7 @@ if [[ -n $BRANCH_NAME ]]; then
 fi
 
 # === Line 3: Gauge + Tokens → 5h Rate → Weekly Rate ===
-L2="${PCT_COLOR}${DIAG}${GAUGE}\033[0m"
+L2="${PCT_COLOR_FWD}${DIAG}${PCT_COLOR}${GAUGE}\033[0m"
 L2+="\033[48;5;235;38;5;236m${SEP}"
 # L2+="\033[48;5;237;38;5;255m ${TOKENS_USED} "
 L2+="${PCT_COLOR}\033[48;5;235m ${TOKENS_USED} "
@@ -297,9 +298,9 @@ if [[ -n $L_GIT ]]; then
   _emit 0 "$L1" $L1_BG $((RCOL - 3))
   _emit 1 "$L_GIT" $L_GIT_BG $((RCOL - 2))
   _emit 2 "$L2" $L2_BG $((RCOL - 1))
-  _emit 3 "$L3" $L3_BG $((RCOL + 1))
+  _emit 3 "$L3" $L3_BG $((RCOL))
 else
   _emit 0 "$L1" $L1_BG $((RCOL - 2))
   _emit 1 "$L2" $L2_BG $((RCOL - 1))
-  _emit 2 "$L3" $L3_BG $((RCOL + 1))
+  _emit 2 "$L3" $L3_BG $((RCOL))
 fi
