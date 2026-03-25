@@ -153,7 +153,7 @@ TIME_FMT=$(fmt_time "$HRS" "$MINS" "$SECS")
 API_TIME_FMT=$(fmt_time "$API_HRS" "$API_MINS" "$API_SECS")
 
 # 5h rate limit reset time (HH:MM)
-RATE_5HR_RESET_FMT=$(date -r "$RATE_5HR_RESETS" "+at %HH" 2>/dev/null || echo "??")
+RATE_5HR_RESET_FMT=$(date -r "$RATE_5HR_RESETS" "+%HH" 2>/dev/null || echo "??")
 
 # 7d rate limit reset remaining (Nd Nh)
 _NOW_EPOCH=$(date +%s)
@@ -161,7 +161,7 @@ _7D_REMAIN_S=$((RATE_7D_RESETS - _NOW_EPOCH))
 [ "$_7D_REMAIN_S" -lt 0 ] 2>/dev/null && _7D_REMAIN_S=0
 _7D_RD=$((_7D_REMAIN_S / 86400))
 _7D_RH=$(((_7D_REMAIN_S % 86400) / 3600))
-RATE_7D_TTL="in "
+RATE_7D_TTL="~"
 [ "$_7D_RD" -gt 0 ] && RATE_7D_TTL+="${_7D_RD}d"
 RATE_7D_TTL+="${_7D_RH}h"
 
@@ -248,9 +248,9 @@ L2="${PCT_COLOR}${DIAG}${GAUGE}\033[0m"
 L2+="\033[48;5;235;38;5;236m${SEP}"
 # L2+="\033[48;5;237;38;5;255m ${TOKENS_USED} "
 L2+="${PCT_COLOR}\033[48;5;235m ${TOKENS_USED} "
-L2+="\033[48;5;237;38;5;235m${SEP}"
-L2+="\033[48;5;237m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;237;38;5;245m/5h/\033[38;5;255m${RATE_5HR_RESET_FMT} "
-L2+="\033[48;5;235;38;5;237m${SEP}"
+L2+="\033[48;5;233;38;5;235m${SEP}"
+L2+="\033[48;5;233m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;233;38;5;245m/5h/\033[38;5;255m${RATE_5HR_RESET_FMT} "
+L2+="\033[48;5;235;38;5;233m${SEP}"
 L2+="\033[48;5;235m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk/\033[38;5;255m${RATE_7D_TTL}"
 [[ -n $DELTA_7D ]] && L2+=" \033[38;5;243m(${DELTA_7D})"
 L2+=" "
