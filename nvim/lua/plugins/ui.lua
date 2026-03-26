@@ -174,8 +174,6 @@ return {
       end
 
       ---Compute 0-based byte offsets where Neovim soft-wraps a buffer line.
-      ---Respects 'linebreak' — when enabled, breaks at the last breakat
-      ---character before the window edge (matching Neovim's own behaviour).
       ---@param text string
       ---@param w integer  text area width (window width minus signcolumn etc.)
       ---@return integer[]
@@ -184,29 +182,17 @@ return {
         if w <= 0 or vim.fn.strdisplaywidth(text) <= w then
           return offsets
         end
-        local lb = vim.wo.linebreak
-        local bk = lb and vim.o.breakat or ""
         local nchars = vim.fn.strchars(text)
-        local byte, dw = 0, 0
-        local brk_byte, brk_dw = nil, nil -- last word-break candidate
+        local byte = 0
+        local dw = 0
         for ci = 0, nchars - 1 do
           local ch = vim.fn.strcharpart(text, ci, 1)
           local cw = vim.fn.strdisplaywidth(ch)
           if dw + cw > w then
-            if brk_byte and brk_byte > offsets[#offsets] then
-              offsets[#offsets + 1] = brk_byte
-              dw = (dw - brk_dw) + cw
-            else
-              offsets[#offsets + 1] = byte
-              dw = cw
-            end
-            brk_byte, brk_dw = nil, nil
+            offsets[#offsets + 1] = byte
+            dw = cw
           else
             dw = dw + cw
-          end
-          if lb and bk:find(ch, 1, true) then
-            brk_byte = byte + #ch -- break AFTER this character
-            brk_dw = dw
           end
           byte = byte + #ch
         end
