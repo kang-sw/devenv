@@ -65,6 +65,13 @@ RATE_7D_RAW=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0
 RATE_7D_RESETS=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // 0')
 RATE_7D=$(echo "$RATE_7D_RAW" | awk '{printf "%d", $1}')
 
+L2_BG=234
+L3_BG=237
+L2b_BG=235
+RCOL=70
+L_GIT_BG=237
+L1_BG=237
+
 # Weekly rate daily delta tracking via shared state file
 _WK_STATE="/tmp/claude-statusline-weekly-${USER}"
 _WK_TODAY=$(date +%Y-%m-%d)
@@ -107,11 +114,10 @@ pct_color() {
     printf "\033[38;5;%dm", steps[idx]
   }'
 }
-PCT_COLOR="\033[48;5;236m$(pct_color "$PCT_RAW")"
+PCT_COLOR="\033[48;5;${L2_BG}m$(pct_color "$PCT_RAW")"
 PCT_COLOR_FWD="$(pct_color "$PCT_RAW")"
 RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
 RATE_7D_COLOR=$(pct_color "$RATE_7D")
-
 
 # Time formatting
 HRS=$((DURATION_MS / 3600000))
@@ -192,8 +198,6 @@ ICON_CLOCK=$'\xef\x80\x97'  # U+F017
 ICON_BOLT=$'\xef\x83\xa7'   # U+F0E7
 COST_FMT=$(printf '$%.2f' "$COST")
 
-RCOL=70
-
 # === Line 1: Model → Dir ===
 L1="\033[38;5;53m${DIAG}"
 L1+="\033[48;5;53;38;5;255;1m ${MODEL} \033[22m"
@@ -201,11 +205,9 @@ L1+="\033[48;5;237;38;5;53m${SEP}"
 L1+="\033[48;5;237;38;5;255m 📁 ${DIR##*/}"
 [[ -n $DIR_REL ]] && L1+=" \033[38;5;245m${DIR_REL}"
 L1+=" "
-L1_BG=237
 
 # === Line 2: Git (optional) ===
 L_GIT=""
-L_GIT_BG=237
 if [[ -n $BRANCH_NAME ]]; then
   L_GIT="\033[38;5;237m${DIAG}"
   L_GIT+="\033[48;5;237;38;5;202m \033[38;5;114m🌿 ${BRANCH_NAME}"
@@ -264,7 +266,6 @@ BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" -v label="$BAR_LABEL" 'BEGIN {
   printf "%s", out
 }')
 L2="${PCT_COLOR_FWD}${DIAG}${PCT_COLOR}${BAR}"
-L2_BG=236
 
 # === Line 4: Tokens → 5h Rate → Weekly Rate ===
 L2b="\033[38;5;236m${DIAG}"
@@ -275,14 +276,12 @@ L2b+="\033[48;5;235;38;5;233m${SEP}"
 L2b+="\033[48;5;235m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk/\033[38;5;255m${RATE_7D_TTL}"
 [[ -n $DELTA_7D ]] && L2b+=" \033[38;5;243m(${DELTA_7D})"
 L2b+=" "
-L2b_BG=235
 
 # === Line 5: Time → API → Delta ===
 L3="\033[38;5;236m${DIAG}"
 L3+="\033[48;5;236;38;5;255m ⌛️ ${TIME_FMT} "
 L3+="\033[48;5;237;38;5;236m${SEP}"
 L3+="\033[48;5;237;38;5;255m 🤔 ${API_TIME_FMT} \033[38;5;245m${TOK_SEC}t/s "
-L3_BG=237
 _dl=""
 [ "$LINES_ADDED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;75m+${LINES_ADDED} "
 [ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;204m-${LINES_REMOVED} "
