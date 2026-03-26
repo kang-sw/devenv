@@ -80,16 +80,33 @@ return {
           local captures = vim.treesitter.get_captures_at_pos(buf, row, col)
           local skip = false
           local hl = base_hl
+          local best_markup, best_lang = nil, nil
+
           for _, cap in ipairs(captures) do
             local n = cap.capture
             if n == "punctuation.delimiter" or n == "punctuation.bracket" or n == "conceal" or n == "markup.link.url" then
               skip = true
             end
-            -- Use treesitter highlight directly — render-markdown groups like
-            -- RenderMarkdownCodeInline are often empty; the actual style comes
-            -- from treesitter's @markup.* groups defined by the colorscheme.
+            -- Track the most specific (longest) markup.* capture.
             if vim.startswith(n, "markup.") and n ~= "markup.link.url" then
-              hl = "@" .. n
+              if not best_markup or #n > #best_markup then
+                best_markup, best_lang = n, cap.lang
+              end
+            end
+          end
+
+          -- Link syntax chars ([, ], (, )) have only "markup.link" with no
+          -- more-specific sub-capture → treat as syntax and skip.
+          if best_markup == "markup.link" then
+            skip = true
+          end
+
+          -- Build the language-qualified hl group (@markup.raw.markdown_inline
+          -- etc.) for correct colorscheme resolution.
+          if best_markup and not skip then
+            hl = "@" .. best_markup
+            if best_lang then
+              hl = hl .. "." .. best_lang
             end
           end
 
