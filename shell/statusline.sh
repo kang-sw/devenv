@@ -38,6 +38,14 @@ COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
 PCT_RAW=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
 PCT=$(echo "$PCT_RAW" | awk '{printf "%d", $1}')
 TOKENS_USED=$(echo "$input" | jq -r '.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)')
+TOKENS_USED_FMT=$(awk "BEGIN {
+  s = sprintf(\"%d\", int($TOKENS_USED)); r = \"\"; l = length(s)
+  for (i = 1; i <= l; i++) {
+    if (i > 1 && (l - i + 1) % 3 == 0) r = r \",\"
+    r = r substr(s, i, 1)
+  }
+  printf \"%s\", r
+}")
 CTX_MAX=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
 OUTPUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
@@ -248,7 +256,7 @@ fi
 L2="${PCT_COLOR_FWD}${DIAG}${PCT_COLOR}${GAUGE}\033[0m"
 L2+="\033[48;5;235;38;5;236m${SEP}"
 # L2+="\033[48;5;237;38;5;255m ${TOKENS_USED} "
-L2+="${PCT_COLOR}\033[48;5;235m ${TOKENS_USED} "
+L2+="${PCT_COLOR}\033[48;5;235m ${TOKENS_USED_FMT} "
 L2+="\033[48;5;233;38;5;235m${SEP}"
 L2+="\033[48;5;233m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;233;38;5;245m/5h/\033[38;5;255m${RATE_5HR_RESET_FMT} "
 L2+="\033[48;5;235;38;5;233m${SEP}"
