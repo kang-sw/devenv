@@ -34,6 +34,21 @@ Since references use stems, no cross-link updates are needed.
 `### Result (<short-hash>) - YY-MM-DD` subsection recording what was implemented,
 deviations from the plan, and key findings for future phases.
 
+## Phase Structure
+
+A ticket may contain multiple phases (`### Phase N: <title>`). Each phase
+should be **independently implementable** — one `/write-plan` invocation
+can cover it.
+
+Phase scoping rules:
+- One phase touches **one module** unless the change is inherently
+  cross-module (e.g., defining an interface that two modules share).
+- Each phase has its own success criteria or test surface.
+- Later phases may depend on earlier results; note dependencies explicitly.
+
+When in doubt, prefer more phases over fewer. An overly granular ticket is
+cheaper to merge than an oversized phase that stalls mid-implementation.
+
 ## Steps
 
 1. If `$ARGUMENTS` references an existing ticket, read it.
