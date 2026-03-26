@@ -85,14 +85,11 @@ return {
             if n == "punctuation.delimiter" or n == "punctuation.bracket" or n == "conceal" or n == "markup.link.url" then
               skip = true
             end
-            if n == "markup.strong" then
-              hl = "@markup.strong"
-            elseif n == "markup.italic" then
-              hl = "@markup.italic"
-            elseif n == "markup.raw" or n == "markup.raw.markdown_inline" then
-              hl = "RenderMarkdownCodeInline"
-            elseif n == "markup.link.label" or n == "markup.link" then
-              hl = "RenderMarkdownLink"
+            -- Use treesitter highlight directly — render-markdown groups like
+            -- RenderMarkdownCodeInline are often empty; the actual style comes
+            -- from treesitter's @markup.* groups defined by the colorscheme.
+            if vim.startswith(n, "markup.") and n ~= "markup.link.url" then
+              hl = "@" .. n
             end
           end
 
