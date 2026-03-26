@@ -27,21 +27,28 @@ yield_check() {
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
 repeat_str() {
-  local s="" i; for ((i=0; i<$2; i++)); do s+="$1"; done; printf '%s' "$s"
+  local s="" i
+  for ((i = 0; i < $2; i++)); do s+="$1"; done
+  printf '%s' "$s"
 }
 
 build_moons() {
   local base=$1 count=$2 s="" i f
-  for ((i=0; i<count; i++)); do
-    f=$(( (base + i) % ${#FRAMES[@]} )); s+="${FRAMES[$f]}"
-  done; printf '%s' "$s"
+  for ((i = 0; i < count; i++)); do
+    f=$(((base + i) % ${#FRAMES[@]}))
+    s+="${FRAMES[$f]}"
+  done
+  printf '%s' "$s"
 }
 
 # Lookup key from cached env snapshot (pure bash, no forks)
 lookup() {
   local key="$1" line
   while IFS= read -r line; do
-    [[ "$line" == "${key}="* ]] && { printf '%s' "${line#*=}"; return; }
+    [[ "$line" == "${key}="* ]] && {
+      printf '%s' "${line#*=}"
+      return
+    }
   done <<<"$all_env"
 }
 
@@ -57,13 +64,13 @@ flush_window() {
 
   # Build indicator: 🔥… 🌑… ✅…
   indicator=""
-  (( prompt_count > 0 )) && indicator+="$(repeat_str '🔥' "$prompt_count")"
-  (( spin_count > 0 ))   && indicator+="$(build_moons "$frame" "$spin_count")"
-  (( done_count > 0 ))   && indicator+="$(repeat_str '✅' "$done_count")"
+  ((prompt_count > 0)) && indicator+="$(repeat_str '🔥' "$prompt_count")"
+  ((spin_count > 0)) && indicator+="$(build_moons "$frame" "$spin_count")"
+  ((done_count > 0)) && indicator+="$(repeat_str '✅' "$done_count")"
   [[ -n "$indicator" ]] && indicator=" $indicator"
 
   # Track spinning windows for animation
-  if (( spin_count > 0 )); then
+  if ((spin_count > 0)); then
     spinning_wins+=("$prev_win")
     spinning_frames+=("$frame")
     spinning_counts+=("$spin_count")
@@ -71,8 +78,8 @@ flush_window() {
     spinning_suffixes+=("$(repeat_str '✅' "$done_count")")
   fi
 
-  printf "set-environment -g %s %s\n" "$frame_key" "$frame" >> "$batch"
-  printf "set-option -wq -t '%s' @claude-indicator '%s'\n" "$prev_win" "$indicator" >> "$batch"
+  printf "set-environment -g %s %s\n" "$frame_key" "$frame" >>"$batch"
+  printf "set-option -wq -t '%s' @claude-indicator '%s'\n" "$prev_win" "$indicator" >>"$batch"
 }
 
 # ── Main loop ───────────────────────────────────────────────────────────────────
@@ -111,7 +118,7 @@ while tmux list-sessions &>/dev/null; do
     # Detect current pane activity
     has_prompt=""
     has_spinner=""
-    if printf '%s\n' "$content" | awk '/1\. Yes/{y=1} /[0-9]+\. No/{n=1} END{exit !(y && n)}'; then
+    if printf '%s\n' "$content" | awk '/1\. Yes/{y=1}END{exit !(y)}'; then
       has_prompt=1
     elif printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
       has_spinner=1
@@ -129,30 +136,30 @@ while tmux list-sessions &>/dev/null; do
       new_state="S"
     else
       case "$prev_state" in
-        S) new_state="G" ;;           # was spinning → 1-scan grace
-        G) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
-        D) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
-        *) new_state="" ;;
+      S) new_state="G" ;; # was spinning → 1-scan grace
+      G) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
+      D) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
+      *) new_state="" ;;
       esac
     fi
 
     # Batch pane state write
     if [[ -n "$new_state" ]]; then
-      printf "set-environment -g %s %s\n" "$pane_key" "$new_state" >> "$batch"
+      printf "set-environment -g %s %s\n" "$pane_key" "$new_state" >>"$batch"
     else
-      printf "set-environment -gu %s\n" "$pane_key" >> "$batch"
+      printf "set-environment -gu %s\n" "$pane_key" >>"$batch"
     fi
 
     # Aggregate counts for window indicator
     case "$new_state" in
-      P)   prompt_count=$((prompt_count + 1)) ;;
-      S|G) spin_count=$((spin_count + 1)) ;;
-      D)   done_count=$((done_count + 1)) ;;
+    P) prompt_count=$((prompt_count + 1)) ;;
+    S | G) spin_count=$((spin_count + 1)) ;;
+    D) done_count=$((done_count + 1)) ;;
     esac
 
   done < <(tmux list-panes -a -F "#{session_name}:#{window_index}	#{window_active}	#{pane_id}" 2>/dev/null)
 
-  flush_window  # last window
+  flush_window # last window
 
   # Execute all writes in one IPC call
   tmux source-file "$batch" 2>/dev/null || true
@@ -165,7 +172,7 @@ while tmux list-sessions &>/dev/null; do
 
     for i in "${!spinning_wins[@]}"; do
       f="${spinning_frames[$i]}"
-      f=$(( (f + 1) % ${#FRAMES[@]} ))
+      f=$(((f + 1) % ${#FRAMES[@]}))
       spinning_frames[$i]=$f
 
       moon="$(build_moons "$f" "${spinning_counts[$i]}")"
