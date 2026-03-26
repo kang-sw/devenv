@@ -1,6 +1,6 @@
 ---
 name: write-plan
-description: Research the codebase and produce a self-contained implementation plan. Use before `/implement` for non-trivial changes.
+description: Research the codebase and produce a self-contained implementation plan. Use before `/implement` or `/execute-plan` for non-trivial changes.
 argument-hint: [ticket-path or description]
 ---
 
@@ -12,7 +12,17 @@ Target: $ARGUMENTS
 
 Produce a **self-contained plan** that survives context reset. The plan must
 carry enough context — decisions, conventions, file roles, domain constraints —
-for a fresh `/implement` invocation to execute without re-researching.
+for a fresh executor to run without re-researching.
+
+The plan's depth determines which executor runs it:
+
+| Plan depth | Executor | When |
+|-----------|----------|------|
+| **Strategic** — direction + relevant files, tactical decisions left to executor | `/implement` | Small-medium changes, familiar patterns |
+| **Tactical** — step-by-step with testing strategy, delegation decisions, and success criteria per step | `/execute-plan` | Large changes, TDD-eligible modules, cross-module work |
+
+Default to tactical for thorough-level research. Use strategic only when the
+change is simple enough that over-specifying would add noise.
 
 ## Step 0: Understand
 
@@ -63,10 +73,29 @@ Write the plan to that file using the `Write` tool, in this format:
 
 ## Implementation Steps
 1. Concrete action (which file, what change, why)
+   - Delegation: [main | haiku | sonnet] — rationale
+   - Depends on: step N (if ordering matters beyond sequence)
 2. ...
 
 ## Testing Strategy
-- What to test, approach (unit vs integration), key scenarios
+
+Classify each module or component:
+
+| Module | Approach | Rationale |
+|--------|----------|-----------|
+| `path/module` | TDD / post-impl / manual | why this classification |
+
+For TDD modules, specify:
+- **Stub scope** — which signatures to stub, return types
+- **Exemplar cases** — complex/edge cases the main agent should write
+- **Population cases** — simple cases delegable to a subagent
+- **Delegation model** — haiku (parameter-only variation) or sonnet (new scenarios)
+
+For post-impl modules:
+- **Key scenarios** — what observable behavior to test after implementation
+
+For manual modules:
+- **Verification method** — how to confirm correctness without automated tests
 
 ## Success Criteria
 - Observable conditions that mean "done"
@@ -96,6 +125,9 @@ itself:
 >    - Does the plan conflict with documented contracts or invariants?
 >    - Does the plan introduce unintended coupling or violate module boundaries?
 >    - Are implementation steps concrete enough to execute without ambiguity?
+>    - Are testing classifications (TDD/post-impl/manual) appropriate for each module?
+>    - Are delegation decisions (haiku/sonnet/main) reasonable given complexity?
+>    - Do TDD stub definitions cover the necessary type signatures?
 >
 > **Be aggressive.** Flag anything suspicious — false positives are fine.
 > Categorize as Critical / Important / Minor.
@@ -116,12 +148,19 @@ completeness.
 
 ## Step 5: Finalize
 
+Choose the executor based on plan depth:
+
+- **Tactical plan** (has Testing Strategy classifications, delegation
+  decisions, per-step detail) → `/execute-plan`
+- **Strategic plan** (direction + relevant files, no tactical directives)
+  → `/implement`
+
 Call `EnterPlanMode`, then write the **plan file** with this structure:
 
 ```
 # Steps
 
-1. Load `/implement` skill
+1. Load `/<executor>` skill
 2. Read `@<plan-path>`
 
 ---
@@ -131,9 +170,12 @@ Call `EnterPlanMode`, then write the **plan file** with this structure:
 <brief summary — what changes, why, key decisions>
 ```
 
+Where `<executor>` is `execute-plan` or `implement` based on the above
+criteria.
+
 The plan file content is injected as the first prompt when the user clicks
 "Reset Context and auto-accept" after `ExitPlanMode`. The `# Steps` block
-ensures `/implement` loads before the plan is read.
+ensures the executor loads before the plan is read.
 
 Do **not** copy the full plan text into the plan file — the `@<plan-path>`
 reference is the source of truth.
