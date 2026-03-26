@@ -24,6 +24,24 @@ The plan's depth determines which executor runs it:
 Default to tactical for thorough-level research. Use strategic only when the
 change is simple enough that over-specifying would add noise.
 
+## Scope Control
+
+A single plan should cover **one independently verifiable unit of change**.
+Splitting into multiple plans is preferred over writing an oversized plan.
+
+Consider splitting when:
+- Implementation Steps would exceed ~10 concrete actions
+- The change has a natural phase boundary (e.g., "define API" then
+  "wire integration") where the first phase is useful without the second
+
+When splitting, create the **first plan only**. Note remaining scope in the
+plan's Context section so the next `/write-plan` invocation has continuity.
+
+**Ticket modification:** If the input ticket covers too much scope for a
+single plan, split the ticket into phases using `/write-ticket` conventions
+before planning. You have full authority to restructure ticket phases to
+match reasonable implementation units — do not ask for permission.
+
 ## Step 0: Understand
 
 1. Read the ticket/description.
