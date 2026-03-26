@@ -38,9 +38,9 @@ When splitting, create the **first plan only**. Note remaining scope in the
 plan's Context section so the next `/write-plan` invocation has continuity.
 
 **Ticket modification:** If the input ticket covers too much scope for a
-single plan, split the ticket into phases using `/write-ticket` conventions
-before planning. You have full authority to restructure ticket phases to
-match reasonable implementation units — do not ask for permission.
+single plan, split it into phases using `/write-ticket` conventions before
+planning. You have full authority to restructure phases — do not ask for
+permission.
 
 ## Step 0: Understand
 
@@ -187,9 +187,6 @@ Call `EnterPlanMode`, then write the **plan file** with this structure:
 
 <brief summary — what changes, why, key decisions>
 ```
-
-Where `<executor>` is `execute-plan` or `implement` based on the above
-criteria.
 
 The plan file content is injected as the first prompt when the user clicks
 "Reset Context and auto-accept" after `ExitPlanMode`. The `# Steps` block

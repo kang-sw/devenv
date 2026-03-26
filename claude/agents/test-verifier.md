@@ -49,7 +49,7 @@ You will receive:
 
 **Verdict:** [Implementation bug | Test defect | Spec ambiguity | Test infrastructure]
 
-**Failing test(s):** `test_name` in `path/to/test.rs`
+**Failing test(s):** `test_name` in `path/to/test_file`
 
 **Analysis:**
 - What the test expects: ...

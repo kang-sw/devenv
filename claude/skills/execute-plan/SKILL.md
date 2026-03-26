@@ -15,9 +15,11 @@ Follow its Implementation Steps as written. Do not re-research, re-evaluate
 alternatives, or second-guess tactical decisions already made in the plan.
 
 **When to deviate:** only when the plan's assumptions provably don't match
-the current codebase (e.g., a referenced file doesn't exist, a type has a
-different signature). In that case: note the deviation, adapt minimally, and
-continue. For larger deviations, ask the user.
+the current codebase. Threshold:
+- **Cosmetic** (renamed param, minor signature change) — adapt silently,
+  note in report.
+- **Structural** (referenced file/type/function missing or fundamentally
+  different interface) — ask the user before proceeding.
 
 ## Step 0: Load Plan
 
@@ -40,9 +42,6 @@ Wrap them with the mandatory bookend tasks:
 
 ```
 [ ] [fixed] Verify plan assumptions — read target files, confirm plan's claims
-      If a referenced file/type/function doesn't exist or has a fundamentally
-      different interface: ask the user. Cosmetic mismatches (renamed param,
-      minor signature change): adapt silently and note in report.
   ... (tasks derived from plan's Implementation Steps) ...
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent
@@ -120,7 +119,7 @@ implementation bug, and returns a diagnosis. Act on the diagnosis.
 
 ### Mechanical-edit delegation
 
-Same rules as `/implement` — when a repetitive edit spans 3+ locations:
+When a repetitive edit spans 3+ locations:
 
 | Method | When |
 |--------|------|
