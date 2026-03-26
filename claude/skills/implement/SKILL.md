@@ -37,7 +37,7 @@ tasks between them.
   ... (implementation tasks — commit freely at logical points) ...
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
-  ↳ if Critical/Important issues: fix → re-test → re-review (loop until clean)
+  ↳ if Critical/Important issues: fix → re-run full verify → re-review (loop until clean)
 [ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update project docs — ai-docs/_memory.md, ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
