@@ -20,6 +20,8 @@ Target: $ARGUMENTS
 
 **Frontmatter:**
 - Requires `title`.
+- `related:` — optional list of related ticket stems with freeform inline
+  comments (e.g., `260301-feat-foo  # prerequisite`).
 - Add `started: YYYY-MM-DD` on move to `wip/`.
 - Add `completed: YYYY-MM-DD` on move to `done/`.
 
@@ -41,13 +43,30 @@ should be **independently implementable** — one `/write-plan` invocation
 can cover it.
 
 Phase scoping rules:
-- One phase touches **one module** unless the change is inherently
-  cross-module (e.g., defining an interface that two modules share).
+- One phase touches **one cohesive component** (crate, package, directory,
+  or logical subsystem) unless the change is inherently cross-component
+  (e.g., defining an interface that two components share).
 - Each phase has its own success criteria or test surface.
 - Later phases may depend on earlier results; note dependencies explicitly.
+- Phase numbers are sequential and **stable** — do not renumber after
+  creation. Mark dropped phases as `[dropped]` instead of removing them.
 
 When in doubt, prefer more phases over fewer. An overly granular ticket is
 cheaper to merge than an oversized phase that stalls mid-implementation.
+
+## Phase Content
+
+Phases carry **decisions that survive codebase refactoring**: algorithms,
+data formats, synchronization strategies, API contracts, architectural
+patterns. Concrete implementation approaches from discussion (e.g., "use
+Pratt parsing for operator precedence", "lock-free ring buffer for the
+event queue") belong here — they are design decisions, not implementation
+tactics.
+
+Leave to the plan: file paths, function signatures, delegation strategies,
+testing classifications (e.g., "put the parser in `src/parse/expr.rs`",
+"delegate boundary-value tests to a sonnet subagent") — anything that
+depends on the current code layout.
 
 ## Steps
 
