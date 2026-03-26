@@ -55,6 +55,89 @@ return {
         return #lines > 0 and lines or { "" }
       end
 
+      ---Parse inline markdown into display segments, stripping syntax markers.
+      ---@param text string  raw cell text (may contain **, *, `, []() etc.)
+      ---@param base_hl string  fallback highlight for plain text
+      ---@return {text: string, hl: string|string[]}[]
+      local function parse_inline(text, base_hl)
+        local segs = {}
+        local checks = {
+          { "`([^`]+)`", "RenderMarkdownCodeInline" },
+          { "%*%*%*([^%*]+)%*%*%*", "@markup.strong" },
+          { "%*%*([^%*]+)%*%*", "@markup.strong" },
+          { "__([^_]+)__", "@markup.strong" },
+          { "%*([^%*]+)%*", "@markup.italic" },
+          { "_([^_]+)_", "@markup.italic" },
+          { "%[([^%]]+)%]%([^%)]+%)", "RenderMarkdownLink" },
+        }
+        local pos = 1
+        while pos <= #text do
+          local best_s, best_e, best_cap, best_hl
+          for _, c in ipairs(checks) do
+            local s, e, cap = text:find(c[1], pos)
+            if s and (not best_s or s < best_s) then
+              best_s, best_e, best_cap, best_hl = s, e, cap, c[2]
+            end
+          end
+          if best_s then
+            if best_s > pos then
+              segs[#segs + 1] = { text = text:sub(pos, best_s - 1), hl = base_hl }
+            end
+            segs[#segs + 1] = { text = best_cap, hl = best_hl }
+            pos = best_e + 1
+          else
+            segs[#segs + 1] = { text = text:sub(pos), hl = base_hl }
+            break
+          end
+        end
+        return segs
+      end
+
+      ---Word-wrap a segment list to fit within max_w display columns.
+      ---@param segs {text: string, hl: string|string[]}[]
+      ---@param max_w integer
+      ---@return {text: string, hl: string|string[]}[][]  list of lines
+      local function wrap_segments(segs, max_w)
+        if max_w <= 0 then
+          return { {} }
+        end
+        -- Flatten segments into words, preserving highlight.
+        local words = {} ---@type {text: string, hl: string|string[], w: integer}[]
+        for _, seg in ipairs(segs) do
+          for _, part in ipairs(vim.split(seg.text, " ", { plain = true, trimempty = true })) do
+            words[#words + 1] = { text = part, hl = seg.hl, w = vim.fn.strdisplaywidth(part) }
+          end
+        end
+        local lines = {}
+        local cur = {} ---@type typeof(words)
+        local cur_w = 0
+        for _, word in ipairs(words) do
+          local sep = #cur > 0 and 1 or 0
+          if cur_w + sep + word.w <= max_w then
+            cur[#cur + 1] = word
+            cur_w = cur_w + sep + word.w
+          else
+            if #cur > 0 then
+              lines[#lines + 1] = cur
+            end
+            local w = word
+            while w.w > max_w do
+              local chunk = vim.fn.strcharpart(w.text, 0, max_w)
+              local clen = vim.fn.strchars(chunk)
+              lines[#lines + 1] = { { text = chunk, hl = w.hl, w = max_w } }
+              local rest = vim.fn.strcharpart(w.text, clen)
+              w = { text = rest, hl = w.hl, w = vim.fn.strdisplaywidth(rest) }
+            end
+            cur = { w }
+            cur_w = w.w
+          end
+        end
+        if #cur > 0 then
+          lines[#lines + 1] = cur
+        end
+        return #lines > 0 and lines or { {} }
+      end
+
       ---Compute 0-based byte offsets where Neovim soft-wraps a buffer line.
       ---@param text string
       ---@param w integer  text area width (window width minus signcolumn etc.)
@@ -102,7 +185,7 @@ return {
             end
             local total = (n + 1) + content_sum
 
-            local margin = 2
+            local margin = 4
             if total > text_w - margin and content_sum > 0 then
               local available = text_w - (n + 1) - margin
               local min_col_w = 2 * padding + 1
@@ -134,13 +217,14 @@ return {
           local pad_str = string.rep(" ", padding)
           local text_w = self._text_w
 
-          -- Word-wrap each cell to its column's content width.
-          local wrapped = {}
+          -- Parse inline markdown and word-wrap each cell.
+          local wrapped = {} ---@type {text: string, hl: string|string[]}[][][]
           local num_vrows = 1
           for i, cell in ipairs(row.cells) do
             local col_content_w = self.data.cols[i].width - 2 * padding
             local text = cell.node.text:match("^%s*(.-)%s*$") or ""
-            wrapped[i] = wrap_text(text, math.max(1, col_content_w))
+            local segs = parse_inline(text, highlight)
+            wrapped[i] = wrap_segments(segs, math.max(1, col_content_w))
             num_vrows = math.max(num_vrows, #wrapped[i])
           end
 
@@ -153,12 +237,24 @@ return {
             local line = self:line()
             for i = 1, #row.cells do
               local col_w = self.data.cols[i].width
-              local content = vrow and wrapped[i][vrow] or ""
-              local content_w = vim.fn.strdisplaywidth(content)
+              local line_segs = vrow and wrapped[i][vrow] or {}
+              -- Content width = sum of segment widths + spaces between words.
+              local content_w = 0
+              for wi, seg in ipairs(line_segs) do
+                if wi > 1 then
+                  content_w = content_w + 1
+                end
+                content_w = content_w + vim.fn.strdisplaywidth(seg.text)
+              end
               local fill = col_w - padding - content_w
               line:text(icon, highlight)
               line:text(pad_str, highlight)
-              line:text(content, highlight)
+              for wi, seg in ipairs(line_segs) do
+                if wi > 1 then
+                  line:text(" ", highlight)
+                end
+                line:text(seg.text, seg.hl)
+              end
               line:pad(math.max(0, fill))
             end
             line:text(icon, highlight)
