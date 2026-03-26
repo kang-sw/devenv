@@ -231,12 +231,8 @@ if [[ -n $BRANCH_NAME ]]; then
 else
   BAR_WIDTH=$((RCOL - 5))
 fi
-BAR_LABEL_MAIN=" ${PCT}% ${TOKENS_USED_FMT}"
-BAR_LABEL_TAIL=" / ${CTX_MAX_FMT} tokens"
-BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" \
-  -v lbl_main="$BAR_LABEL_MAIN" -v lbl_tail="$BAR_LABEL_TAIL" \
-  -v gray="\033[38;5;245m" \
-'BEGIN {
+BAR_LABEL=" ${PCT}%"
+BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" -v label="$BAR_LABEL" 'BEGIN {
   v = p + 0
   if (v < 0)   v = 0
   if (v > 100) v = 100
@@ -244,23 +240,16 @@ BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" \
   full = int(filled)
   frac = filled - full
   split("▏ ▎ ▍ ▌ ▋ ▊ ▉ █", blk, " ")
-  mlen = length(lbl_main)
-  tlen = length(lbl_tail)
-  total = mlen + tlen
+  lbl_len = length(label)
   lpos = full + (frac > 0.0625 ? 1 : 0)
-  if (lpos + total > w) lpos = w - total
+  if (lpos + lbl_len > w) lpos = w - lbl_len
   if (lpos < 0) lpos = 0
-  tpos = lpos + mlen
   out = ""
-  mi = 0; ti = 0
+  li = 0
   for (i = 0; i < w; i++) {
-    if (i >= lpos && mi < mlen) {
-      out = out substr(lbl_main, mi + 1, 1)
-      mi++
-    } else if (i >= tpos && ti < tlen) {
-      if (ti == 0) out = out gray
-      out = out substr(lbl_tail, ti + 1, 1)
-      ti++
+    if (i >= lpos && li < lbl_len) {
+      out = out substr(label, li + 1, 1)
+      li++
     } else if (i < full) {
       out = out "█"
     } else if (i == full && full < w) {
@@ -277,8 +266,10 @@ BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" \
 L2="${PCT_COLOR_FWD}${DIAG}${PCT_COLOR}${BAR}"
 L2_BG=236
 
-# === Line 4: 5h Rate → Weekly Rate ===
-L2b="\033[38;5;233m${DIAG}"
+# === Line 4: Tokens → 5h Rate → Weekly Rate ===
+L2b="${PCT_COLOR_FWD}${DIAG}"
+L2b+="\033[48;5;236m${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;245m/ ${CTX_MAX_FMT} tokens "
+L2b+="\033[48;5;233;38;5;236m${SEP}"
 L2b+="\033[48;5;233m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;233;38;5;245m/5h/\033[38;5;255m${RATE_5HR_RESET_FMT} "
 L2b+="\033[48;5;235;38;5;233m${SEP}"
 L2b+="\033[48;5;235m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk/\033[38;5;255m${RATE_7D_TTL}"
