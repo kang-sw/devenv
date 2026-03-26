@@ -65,12 +65,49 @@ RATE_7D_RAW=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0
 RATE_7D_RESETS=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // 0')
 RATE_7D=$(echo "$RATE_7D_RAW" | awk '{printf "%d", $1}')
 
-L2_BG=234
-L3_BG=237
-L2b_BG=235
-RCOL=70
-L_GIT_BG=237
-L1_BG=237
+# ═══════════════════════════════════════════════════════════
+# Style parameters — edit these to customize appearance
+# ANSI 256-color codes: https://www.ditig.com/256-colors-cheat-sheet
+# ═══════════════════════════════════════════════════════════
+
+# Layout
+RCOL=70 # Total display width (right edge column)
+
+# Segment backgrounds
+MODEL_BG=53        # Model name (purple)
+L1_BG=236          # Directory
+L_GIT_BG=235       # Git branch
+GIT_CHANGES_BG=237 # Git file changes sub-segment
+L2_BG=232          # Context progress bar
+TOKENS_BG=236      # Token count
+RATE_5H_BG=235     # 5h rate limit
+RATE_7D_BG=236     # Weekly rate limit
+L2b_BG=$RATE_7D_BG # Token/rate row right-cap (= last segment)
+TIME_BG=237        # Wall-clock time
+API_BG=236         # API time
+DELTA_BG=235       # Lines-changed delta
+COST_BG=234        # Cost
+
+# Foreground colors
+FG=255        # Primary text (white)
+FG_DIM=245    # Labels / secondary
+FG_DIMMER=243 # Annotations
+FG_MUTED=242  # Muted ("working tree clean")
+
+# Git status
+GIT_BRANCH_FG=114 # Branch name (green)
+GIT_AHEAD_FG=114  # Ahead count
+GIT_BEHIND_FG=214 # Behind count (yellow)
+GIT_ADD_FG=114    # Added
+GIT_DEL_FG=203    # Deleted (red)
+GIT_MOD_FG=214    # Modified
+GIT_UNT_FG=75     # Untracked (blue)
+
+# Accents
+COST_FG=214      # Cost (yellow)
+LINES_ADD_FG=75  # Lines added (blue)
+LINES_DEL_FG=204 # Lines removed (pink)
+CAP_BG=53        # End-cap accent (medium gray)
 
 # Weekly rate daily delta tracking via shared state file
 _WK_STATE="/tmp/claude-statusline-weekly-${USER}"
@@ -98,9 +135,11 @@ DELTA_7D=$(awk "BEGIN {
   else if (d < 0) printf \"%d%%\", d
 }")
 
-# Green → yellow → red gradient (ANSI 256-color, fg only)
+# Green → yellow → red gradient (ANSI 256-color)
+# Usage: pct_color <percent> [48]  — default fg (38), pass 48 for bg
 pct_color() {
-  awk -v p="$1" 'BEGIN {
+  local mode="${2:-38}"
+  awk -v p="$1" -v m="$mode" 'BEGIN {
     v = p + 0
     if (v < 0)   v = 0
     if (v > 100) v = 100
@@ -111,11 +150,12 @@ pct_color() {
       steps[0]=226; steps[1]=220; steps[2]=214; steps[3]=208; steps[4]=202; steps[5]=196
       idx = int((v - 50) / 50 * 5 + 0.5)
     }
-    printf "\033[38;5;%dm", steps[idx]
+    printf "\033[%d;5;%dm", m, steps[idx]
   }'
 }
 PCT_COLOR="\033[48;5;${L2_BG}m$(pct_color "$PCT_RAW")"
 PCT_COLOR_FWD="$(pct_color "$PCT_RAW")"
+PCT_COLOR_BG="$(pct_color "$PCT_RAW" 48)"
 RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
 RATE_7D_COLOR=$(pct_color "$RATE_7D")
 
@@ -199,39 +239,39 @@ ICON_BOLT=$'\xef\x83\xa7'   # U+F0E7
 COST_FMT=$(printf '$%.2f' "$COST")
 
 # === Line 1: Model → Dir ===
-L1="\033[38;5;53m${DIAG}"
-L1+="\033[48;5;53;38;5;255;1m ${MODEL} \033[22m"
-L1+="\033[48;5;237;38;5;53m${SEP}"
-L1+="\033[48;5;237;38;5;255m 📁 ${DIR##*/}"
-[[ -n $DIR_REL ]] && L1+=" \033[38;5;245m${DIR_REL}"
+L1="\033[38;5;${CAP_BG}m${DIAG}\033[48;5;${MODEL_BG};38;5;${CAP_BG}m${RDIAG}"
+L1+="\033[48;5;${MODEL_BG};38;5;${FG};1m ${MODEL} \033[22m"
+L1+="\033[48;5;${L1_BG};38;5;${MODEL_BG}m${SEP}"
+L1+="\033[48;5;${L1_BG};38;5;${FG}m 📁 ${DIR##*/}"
+[[ -n $DIR_REL ]] && L1+=" \033[38;5;${FG_DIM}m${DIR_REL}"
 L1+=" "
 
 # === Line 2: Git (optional) ===
 L_GIT=""
 if [[ -n $BRANCH_NAME ]]; then
-  L_GIT="\033[38;5;237m${DIAG}"
-  L_GIT+="\033[48;5;237;38;5;202m \033[38;5;114m🌿 ${BRANCH_NAME}"
-  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;114m↑${GIT_AHEAD}"
-  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;214m↓${GIT_BEHIND}"
+  L_GIT="\033[38;5;${CAP_BG}m${DIAG}\033[48;5;${L_GIT_BG};38;5;${CAP_BG}m${RDIAG}"
+  L_GIT+="\033[48;5;${L_GIT_BG};38;5;${GIT_BRANCH_FG}m 🌿 ${BRANCH_NAME}"
+  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"
+  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"
   L_GIT+=" "
   _gc=""
-  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;114m+${GIT_ADDED} "
-  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;203m-${GIT_DELETED} "
-  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;214m~${GIT_MODIFIED} "
-  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;75m?${GIT_UNTRACKED} "
+  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "
+  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "
+  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "
+  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "
   if [[ -n $_gc ]]; then
-    L_GIT+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_gc}"
-    L_GIT_BG=235
+    L_GIT+="\033[48;5;${GIT_CHANGES_BG};38;5;${L_GIT_BG}m${SEP}\033[48;5;${GIT_CHANGES_BG}m ${_gc}"
+    L_GIT_BG=$GIT_CHANGES_BG
   else
-    L_GIT+="\033[38;5;242m working tree clean "
+    L_GIT+="\033[38;5;${FG_MUTED}m working tree clean "
   fi
 fi
 
 # === Line 3: Context progress bar (full-width) ===
 if [[ -n $BRANCH_NAME ]]; then
-  BAR_WIDTH=$((RCOL - 6))
+  BAR_WIDTH=$((RCOL - 8))
 else
-  BAR_WIDTH=$((RCOL - 5))
+  BAR_WIDTH=$((RCOL - 7))
 fi
 BAR_LABEL=" ${PCT}%"
 BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" -v label="$BAR_LABEL" 'BEGIN {
@@ -265,33 +305,34 @@ BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" -v label="$BAR_LABEL" 'BEGIN {
   }
   printf "%s", out
 }')
-L2="${PCT_COLOR_FWD}${DIAG}${PCT_COLOR}${BAR}"
+L2="\033[38;5;${CAP_BG}m${DIAG}${PCT_COLOR_BG}\033[38;5;${CAP_BG}m${RDIAG}${PCT_COLOR}${BAR}"
 
 # === Line 4: Tokens → 5h Rate → Weekly Rate ===
-L2b="\033[38;5;236m${DIAG}"
-L2b+="\033[48;5;236m${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;245m/ ${CTX_MAX_FMT} tokens "
-L2b+="\033[48;5;233;38;5;236m${SEP}"
-L2b+="\033[48;5;233m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;233;38;5;245m/5h/\033[38;5;255m${RATE_5HR_RESET_FMT} "
-L2b+="\033[48;5;235;38;5;233m${SEP}"
-L2b+="\033[48;5;235m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk/\033[38;5;255m${RATE_7D_TTL}"
-[[ -n $DELTA_7D ]] && L2b+=" \033[38;5;243m(${DELTA_7D})"
+L2b="\033[38;5;${CAP_BG}m${DIAG}\033[48;5;${TOKENS_BG};38;5;${CAP_BG}m${RDIAG}"
+L2b+="\033[48;5;${TOKENS_BG}m${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} tokens "
+L2b+="\033[48;5;${RATE_5H_BG};38;5;${TOKENS_BG}m${SEP}"
+L2b+="\033[48;5;${RATE_5H_BG}m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;${RATE_5H_BG};38;5;${FG_DIM}m/5h/\033[38;5;${FG}m${RATE_5HR_RESET_FMT} "
+L2b+="\033[48;5;${RATE_7D_BG};38;5;${RATE_5H_BG}m${SEP}"
+L2b+="\033[48;5;${RATE_7D_BG}m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;${RATE_7D_BG};38;5;${FG_DIM}m/wk/\033[38;5;${FG}m${RATE_7D_TTL}"
+[[ -n $DELTA_7D ]] && L2b+=" \033[38;5;${FG_DIMMER}m(${DELTA_7D})"
 L2b+=" "
 
 # === Line 5: Time → API → Delta ===
-L3="\033[38;5;236m${DIAG}"
-L3+="\033[48;5;236;38;5;255m ⌛️ ${TIME_FMT} "
-L3+="\033[48;5;237;38;5;236m${SEP}"
-L3+="\033[48;5;237;38;5;255m 🤔 ${API_TIME_FMT} \033[38;5;245m${TOK_SEC}t/s "
+L3_BG=$API_BG
+L3="\033[38;5;${CAP_BG}m${DIAG}\033[48;5;${TIME_BG};38;5;${CAP_BG}m${RDIAG}"
+L3+="\033[48;5;${TIME_BG};38;5;${FG}m ⌛️ ${TIME_FMT} "
+L3+="\033[48;5;${API_BG};38;5;${TIME_BG}m${SEP}"
+L3+="\033[48;5;${API_BG};38;5;${FG}m 🤔 ${API_TIME_FMT} \033[38;5;${FG_DIM}m${TOK_SEC}t/s "
 _dl=""
-[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;75m+${LINES_ADDED} "
-[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;204m-${LINES_REMOVED} "
+[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;${LINES_ADD_FG}m+${LINES_ADDED} "
+[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;${LINES_DEL_FG}m-${LINES_REMOVED} "
 if [[ -n $_dl ]]; then
-  L3+="\033[48;5;235;38;5;237m${SEP}\033[48;5;235m ${_dl}"
-  L3_BG=235
+  L3+="\033[48;5;${DELTA_BG};38;5;${API_BG}m${SEP}\033[48;5;${DELTA_BG}m ${_dl}"
+  L3_BG=$DELTA_BG
 fi
-L3+="\033[48;5;236;38;5;${L3_BG}m${SEP}"
-L3+="\033[48;5;236;38;5;214m ${COST_FMT} "
-L3_BG=236
+L3+="\033[48;5;${COST_BG};38;5;${L3_BG}m${SEP}"
+L3+="\033[48;5;${COST_BG};38;5;${COST_FG}m ${COST_FMT} "
+L3_BG=$COST_BG
 
 # Emit line: indent + content (bg active) + space padding + right diagonal cap
 _emit() {
@@ -306,10 +347,10 @@ _emit() {
   [[ "$stripped" == *🌿* ]] && ((w++))
   [[ "$stripped" == *🤔* ]] && ((w++))
   # Pad with spaces (inherits last segment bg) to reach right cap
-  local need=$((rcol - 1 - w))
+  local need=$((rcol - 2 - w))
   local fill=""
   [ "$need" -gt 0 ] && fill=$(printf '%*s' "$need" '')
-  echo -e "${full}${fill}\033[0m\033[38;5;${bg}m${RDIAG}\033[0m"
+  echo -e "${full}${fill}\033[38;5;${CAP_BG}m${DIAG}\033[0m\033[38;5;${CAP_BG}m${RDIAG}\033[0m"
 }
 
 if [[ -n $L_GIT ]]; then
