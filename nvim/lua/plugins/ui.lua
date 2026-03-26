@@ -55,40 +55,61 @@ return {
         return #lines > 0 and lines or { "" }
       end
 
-      ---Parse inline markdown into display segments, stripping syntax markers.
-      ---@param text string  raw cell text (may contain **, *, `, []() etc.)
-      ---@param base_hl string  fallback highlight for plain text
-      ---@return {text: string, hl: string|string[]}[]
-      local function parse_inline(text, base_hl)
+      ---Extract display segments from a cell via treesitter captures.
+      ---Strips syntax markers (delimiters, brackets, URLs); preserves content
+      ---with the highlight treesitter assigned.
+      ---@param buf integer
+      ---@param row integer  0-based buffer row
+      ---@param sc integer   0-based start byte col (trimmed)
+      ---@param ec integer   0-based end byte col (trimmed)
+      ---@param base_hl string  fallback for plain text
+      ---@return {text: string, hl: string}[]
+      local function get_cell_segments(buf, row, sc, ec, base_hl)
+        local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
         local segs = {}
-        local checks = {
-          { "`([^`]+)`", "RenderMarkdownCodeInline" },
-          { "%*%*%*([^%*]+)%*%*%*", "@markup.strong" },
-          { "%*%*([^%*]+)%*%*", "@markup.strong" },
-          { "__([^_]+)__", "@markup.strong" },
-          { "%*([^%*]+)%*", "@markup.italic" },
-          { "_([^_]+)_", "@markup.italic" },
-          { "%[([^%]]+)%]%([^%)]+%)", "RenderMarkdownLink" },
-        }
-        local pos = 1
-        while pos <= #text do
-          local best_s, best_e, best_cap, best_hl
-          for _, c in ipairs(checks) do
-            local s, e, cap = text:find(c[1], pos)
-            if s and (not best_s or s < best_s) then
-              best_s, best_e, best_cap, best_hl = s, e, cap, c[2]
-            end
-          end
-          if best_s then
-            if best_s > pos then
-              segs[#segs + 1] = { text = text:sub(pos, best_s - 1), hl = base_hl }
-            end
-            segs[#segs + 1] = { text = best_cap, hl = best_hl }
-            pos = best_e + 1
-          else
-            segs[#segs + 1] = { text = text:sub(pos), hl = base_hl }
+        local cur_text, cur_hl = "", base_hl
+        local col = sc
+        while col < ec and col < #line do
+          local b = line:byte(col + 1)
+          if not b then
             break
           end
+          local clen = b >= 0xF0 and 4 or b >= 0xE0 and 3 or b >= 0xC0 and 2 or 1
+          local char = line:sub(col + 1, col + clen)
+
+          local captures = vim.treesitter.get_captures_at_pos(buf, row, col)
+          local skip = false
+          local hl = base_hl
+          for _, cap in ipairs(captures) do
+            local n = cap.capture
+            if n == "punctuation.delimiter" or n == "punctuation.bracket" or n == "conceal" or n == "markup.link.url" then
+              skip = true
+            end
+            if n == "markup.strong" then
+              hl = "@markup.strong"
+            elseif n == "markup.italic" then
+              hl = "@markup.italic"
+            elseif n == "markup.raw" or n == "markup.raw.markdown_inline" then
+              hl = "RenderMarkdownCodeInline"
+            elseif n == "markup.link.label" or n == "markup.link" then
+              hl = "RenderMarkdownLink"
+            end
+          end
+
+          if not skip then
+            if hl == cur_hl then
+              cur_text = cur_text .. char
+            else
+              if cur_text ~= "" then
+                segs[#segs + 1] = { text = cur_text, hl = cur_hl }
+              end
+              cur_text, cur_hl = char, hl
+            end
+          end
+          col = col + clen
+        end
+        if cur_text ~= "" then
+          segs[#segs + 1] = { text = cur_text, hl = cur_hl }
         end
         return segs
       end
@@ -217,13 +238,22 @@ return {
           local pad_str = string.rep(" ", padding)
           local text_w = self._text_w
 
-          -- Parse inline markdown and word-wrap each cell.
-          local wrapped = {} ---@type {text: string, hl: string|string[]}[][][]
+          -- Extract cell segments via treesitter and word-wrap.
+          local wrapped = {} ---@type {text: string, hl: string}[][][]
           local num_vrows = 1
           for i, cell in ipairs(row.cells) do
             local col_content_w = self.data.cols[i].width - 2 * padding
-            local text = cell.node.text:match("^%s*(.-)%s*$") or ""
-            local segs = parse_inline(text, highlight)
+            -- Trim leading/trailing whitespace from the cell range.
+            local raw = cell.node.text
+            local lead = #raw - #raw:gsub("^%s+", "")
+            local trail = #raw - #raw:gsub("%s+$", "")
+            local segs = get_cell_segments(
+              self.context.buf,
+              cell.node.start_row,
+              cell.node.start_col + lead,
+              cell.node.end_col - trail,
+              highlight
+            )
             wrapped[i] = wrap_segments(segs, math.max(1, col_content_w))
             num_vrows = math.max(num_vrows, #wrapped[i])
           end
