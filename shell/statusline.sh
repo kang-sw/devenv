@@ -47,6 +47,13 @@ TOKENS_USED_FMT=$(awk "BEGIN {
   printf \"%s\", r
 }")
 CTX_MAX=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
+CTX_MAX_FMT=$(awk "BEGIN {
+  v = $CTX_MAX + 0
+  if (v >= 1000000 && v % 1000000 == 0) printf \"%dM\", v / 1000000
+  else if (v >= 1000000) printf \"%.1fM\", v / 1000000
+  else if (v >= 1000 && v % 1000 == 0) printf \"%dK\", v / 1000
+  else printf \"%d\", v
+}")
 OUTPUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
@@ -105,42 +112,6 @@ PCT_COLOR_FWD="$(pct_color "$PCT_RAW")"
 RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
 RATE_7D_COLOR=$(pct_color "$RATE_7D")
 
-# Context gauge — 10 chars using block characters
-GAUGE=$(awk -v p="$PCT_RAW" 'BEGIN {
-  v = p + 0
-  if (v < 0)   v = 0
-  if (v > 100) v = 100
-  width = 10
-  filled = v / 100.0 * width
-  full = int(filled)
-  frac = filled - full
-
-  split("▏ ▎ ▍ ▌ ▋ ▊ ▉ █", blk, " ")
-
-  pct_s = sprintf("%d%%", v)
-  pct_len = length(pct_s)
-  label_pos = full + (frac > 0.0625 ? 1 : 0)
-  label_fits = (label_pos + pct_len <= width)
-
-  out = ""
-  li = 0  # index into pct_s
-  for (i = 0; i < width; i++) {
-    if (label_fits && i >= label_pos && li < pct_len) {
-      out = out substr(pct_s, li + 1, 1)
-      li++
-    } else if (i < full) {
-      out = out "█"
-    } else if (i == full && full < width) {
-      idx = int(frac * 8 + 0.5)
-      if (idx >= 8)     out = out "█"
-      else if (idx > 0) out = out blk[idx]
-      else              out = out " "
-    } else {
-      out = out " "
-    }
-  }
-  printf "%s", out
-}')
 
 # Time formatting
 HRS=$((DURATION_MS / 3600000))
@@ -221,6 +192,8 @@ ICON_CLOCK=$'\xef\x80\x97'  # U+F017
 ICON_BOLT=$'\xef\x83\xa7'   # U+F0E7
 COST_FMT=$(printf '$%.2f' "$COST")
 
+RCOL=70
+
 # === Line 1: Model → Dir ===
 L1="\033[38;5;53m${DIAG}"
 L1+="\033[48;5;53;38;5;255;1m ${MODEL} \033[22m"
@@ -252,20 +225,68 @@ if [[ -n $BRANCH_NAME ]]; then
   fi
 fi
 
-# === Line 3: Gauge + Tokens → 5h Rate → Weekly Rate ===
-L2="${PCT_COLOR_FWD}${DIAG}${PCT_COLOR}${GAUGE}\033[0m"
-L2+="\033[48;5;235;38;5;236m${SEP}"
-# L2+="\033[48;5;237;38;5;255m ${TOKENS_USED} "
-L2+="${PCT_COLOR}\033[48;5;235m ${TOKENS_USED_FMT} "
-L2+="\033[48;5;233;38;5;235m${SEP}"
-L2+="\033[48;5;233m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;233;38;5;245m/5h/\033[38;5;255m${RATE_5HR_RESET_FMT} "
-L2+="\033[48;5;235;38;5;233m${SEP}"
-L2+="\033[48;5;235m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk/\033[38;5;255m${RATE_7D_TTL}"
-[[ -n $DELTA_7D ]] && L2+=" \033[38;5;243m(${DELTA_7D})"
-L2+=" "
-L2_BG=235
+# === Line 3: Context progress bar (full-width) ===
+if [[ -n $BRANCH_NAME ]]; then
+  BAR_WIDTH=$((RCOL - 6))
+else
+  BAR_WIDTH=$((RCOL - 5))
+fi
+BAR_LABEL_MAIN=" ${PCT}% ${TOKENS_USED_FMT}"
+BAR_LABEL_TAIL=" / ${CTX_MAX_FMT} tokens"
+BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" \
+  -v lbl_main="$BAR_LABEL_MAIN" -v lbl_tail="$BAR_LABEL_TAIL" \
+  -v gray="\033[38;5;245m" \
+'BEGIN {
+  v = p + 0
+  if (v < 0)   v = 0
+  if (v > 100) v = 100
+  filled = v / 100.0 * w
+  full = int(filled)
+  frac = filled - full
+  split("▏ ▎ ▍ ▌ ▋ ▊ ▉ █", blk, " ")
+  mlen = length(lbl_main)
+  tlen = length(lbl_tail)
+  total = mlen + tlen
+  lpos = full + (frac > 0.0625 ? 1 : 0)
+  if (lpos + total > w) lpos = w - total
+  if (lpos < 0) lpos = 0
+  tpos = lpos + mlen
+  out = ""
+  mi = 0; ti = 0
+  for (i = 0; i < w; i++) {
+    if (i >= lpos && mi < mlen) {
+      out = out substr(lbl_main, mi + 1, 1)
+      mi++
+    } else if (i >= tpos && ti < tlen) {
+      if (ti == 0) out = out gray
+      out = out substr(lbl_tail, ti + 1, 1)
+      ti++
+    } else if (i < full) {
+      out = out "█"
+    } else if (i == full && full < w) {
+      idx = int(frac * 8 + 0.5)
+      if (idx >= 8)     out = out "█"
+      else if (idx > 0) out = out blk[idx]
+      else              out = out " "
+    } else {
+      out = out " "
+    }
+  }
+  printf "%s", out
+}')
+L2="${PCT_COLOR_FWD}${DIAG}${PCT_COLOR}${BAR}"
+L2_BG=236
 
-# === Line 4: Time → API → Delta ===
+# === Line 4: 5h Rate → Weekly Rate ===
+L2b="\033[38;5;233m${DIAG}"
+L2b+="\033[48;5;233m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;233;38;5;245m/5h/\033[38;5;255m${RATE_5HR_RESET_FMT} "
+L2b+="\033[48;5;235;38;5;233m${SEP}"
+L2b+="\033[48;5;235m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;235;38;5;245m/wk/\033[38;5;255m${RATE_7D_TTL}"
+[[ -n $DELTA_7D ]] && L2b+=" \033[38;5;243m(${DELTA_7D})"
+L2b+=" "
+L2b_BG=235
+
+# === Line 5: Time → API → Delta ===
 L3="\033[38;5;236m${DIAG}"
 L3+="\033[48;5;236;38;5;255m ⌛️ ${TIME_FMT} "
 L3+="\033[48;5;237;38;5;236m${SEP}"
@@ -283,7 +304,6 @@ L3+="\033[48;5;236;38;5;214m ${COST_FMT} "
 L3_BG=236
 
 # Emit line: indent + content (bg active) + space padding + right diagonal cap
-RCOL=70
 _emit() {
   local i=$1 line=$2 bg=$3 rcol=$4
   local pad=$(printf '%*s' "$i" '')
@@ -303,12 +323,14 @@ _emit() {
 }
 
 if [[ -n $L_GIT ]]; then
-  _emit 0 "$L1" $L1_BG $((RCOL - 3))
-  _emit 1 "$L_GIT" $L_GIT_BG $((RCOL - 2))
-  _emit 2 "$L2" $L2_BG $((RCOL - 1))
-  _emit 3 "$L3" $L3_BG $((RCOL))
+  _emit 0 "$L1" $L1_BG $((RCOL - 4))
+  _emit 1 "$L_GIT" $L_GIT_BG $((RCOL - 3))
+  _emit 2 "$L2" $L2_BG $((RCOL - 2))
+  _emit 3 "$L2b" $L2b_BG $((RCOL - 1))
+  _emit 4 "$L3" $L3_BG $((RCOL))
 else
-  _emit 0 "$L1" $L1_BG $((RCOL - 2))
-  _emit 1 "$L2" $L2_BG $((RCOL - 1))
-  _emit 2 "$L3" $L3_BG $((RCOL))
+  _emit 0 "$L1" $L1_BG $((RCOL - 3))
+  _emit 1 "$L2" $L2_BG $((RCOL - 2))
+  _emit 2 "$L2b" $L2b_BG $((RCOL - 1))
+  _emit 3 "$L3" $L3_BG $((RCOL))
 fi
