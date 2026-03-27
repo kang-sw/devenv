@@ -86,7 +86,7 @@ L2b_BG=$RATE_7D_BG # Token/rate row right-cap (= last segment)
 TIME_BG=237        # Wall-clock time
 API_BG=236         # API time
 DELTA_BG=235       # Lines-changed delta
-COST_BG=234        # Cost
+COST_BG=53         # Cost
 
 # Foreground colors
 FG=255        # Primary text (white)
@@ -104,7 +104,7 @@ GIT_MOD_FG=214    # Modified
 GIT_UNT_FG=75     # Untracked (blue)
 
 # Accents
-COST_FG=214      # Cost (yellow)
+COST_FG=184      # Cost (yellow)
 LINES_ADD_FG=75  # Lines added (blue)
 LINES_DEL_FG=204 # Lines removed (pink)
 CAP_BG=53        # End-cap accent (medium gray)
@@ -331,7 +331,7 @@ if [[ -n $_dl ]]; then
   L3_BG=$DELTA_BG
 fi
 L3+="\033[48;5;${COST_BG};38;5;${L3_BG}m${SEP}"
-L3+="\033[48;5;${COST_BG};38;5;${COST_FG}m ${COST_FMT} "
+L3+="\033[48;5;${COST_BG};38;5;${COST_FG};1m ${COST_FMT} "
 L3_BG=$COST_BG
 
 # Emit line: indent + content (bg active) + space padding + right diagonal cap
