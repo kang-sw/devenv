@@ -67,19 +67,19 @@ cheaper to merge than an oversized phase that stalls mid-implementation.
 > prior conversation must be able to reconstruct the full decision context from
 > the ticket and its linked plans.
 
-Phases carry **intent-level decisions**: goals, constraints, rationale, and
-rejected alternatives. Concrete implementation approaches from discussion
-(e.g., "use Pratt parsing for operator precedence", "lock-free ring buffer
-for the event queue") belong here — they are design decisions, not
-implementation tactics.
+Phases carry **everything from discussion that informs implementation**:
+goals, constraints, rationale, rejected alternatives, and suggested
+approaches — including pseudo code, struct shapes, data formats, and
+algorithm sketches. Both firm decisions and candidate approaches belong
+in the ticket; the plan evaluates candidates against the actual codebase.
 
-Leave to the plan: concrete data specifications (byte layouts, wire formats,
-schema definitions, API signatures), file paths, function signatures,
-delegation strategies, testing classifications — anything that depends on
-the current code layout or requires codebase research to finalize.
+Leave to the plan: **codebase-derived** details that require research to
+determine — file paths, existing type reuse, integration patterns, function
+signatures, delegation strategies, testing classifications. The plan maps
+ticket decisions to the actual code layout.
 
-When `/write-plan` runs for a phase, it pulls intent from the ticket and
-produces the concrete spec. The `plans:` frontmatter field links them.
+When `/write-plan` runs for a phase, it reads the ticket's decisions and
+maps them to the codebase. The `plans:` frontmatter field links them.
 
 ## Steps
 
@@ -94,8 +94,9 @@ produces the concrete spec. The `plans:` frontmatter field links them.
 4. For ticket moves, use `git mv` and update frontmatter dates as needed.
 5. **Intent review** — Re-read the written/edited ticket and verify against
    the preceding conversation:
-   - Are key decisions, constraints, and rejected alternatives captured?
-   - Does the ticket distort or omit any agreed-upon intent?
+   - Are decisions, constraints, rejected alternatives, and suggested
+     approaches captured?
+   - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place, then present a brief summary of what was
      added/corrected (or confirm nothing was missed) to the user.
 

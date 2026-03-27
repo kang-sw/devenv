@@ -11,13 +11,14 @@ Target: $ARGUMENTS
 ## Goal
 
 Produce a **self-contained plan** that survives context reset. The plan must
-carry enough context — intent from the ticket, concrete specifications,
+carry enough context — decisions from the ticket, codebase mapping,
 conventions, file roles, domain constraints — for a fresh executor to run
 without re-researching.
 
-The plan is where intent becomes concrete: ticket phases describe *what* and
-*why*; the plan specifies *how* — including data formats, API contracts,
-schemas, and byte layouts that the ticket intentionally omits.
+The plan maps ticket decisions to the codebase: the ticket carries *what*
+was decided and *which approaches were suggested* (including data formats,
+algorithms, pseudo code); the plan evaluates suggested approaches against
+the actual code, then specifies *where* and *how* to integrate.
 
 The plan's depth determines which executor runs it:
 
@@ -75,9 +76,10 @@ Write the plan to that file using the `Write` tool, in this format:
 # <Plan Title>
 
 ## Context
-- Ticket phase intent (goals, constraints, rejected alternatives)
-- Concrete specifications derived from that intent (data formats,
-  schemas, API contracts, wire formats)
+- Ticket phase decisions and suggested approaches (goals, constraints,
+  rejected alternatives, candidate approaches with rationale)
+- Codebase mapping (existing types to reuse, integration points,
+  file placement)
 
 ## Relevant Files
 - `path/to/file` — role in this change, key types/functions to touch
