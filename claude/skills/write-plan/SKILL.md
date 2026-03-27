@@ -176,7 +176,18 @@ Call `EnterPlanMode`, then write the **plan file** with this structure:
 # <Plan Title>
 
 <brief summary — what changes, why, key decisions>
+
+## Data Contract Changes
+- <what is changing: type/schema/format name and how>
+- <migration or compatibility implications>
 ```
+
+**Data Contract Changes** — include this section when the plan adds, changes,
+or removes data formats that cross a capsule boundary: wire formats (API
+payloads, IPC messages), persistence schemas (DB, file formats), public API
+types consumed outside the owning package, config file formats, environment
+variables, or CLI flags. Omit the entire section for pure-logic or
+internal-only changes.
 
 The plan file content is injected as the first prompt when the user clicks
 "Reset Context and auto-accept" after `ExitPlanMode`. The `# Steps` block
