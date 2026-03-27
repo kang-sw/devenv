@@ -210,4 +210,3 @@ reference is the source of truth.
 
 If the plan implements a ticket phase, update the ticket's `plans:` frontmatter
 to reference this plan (replacing `null` with the plan path stem).
-

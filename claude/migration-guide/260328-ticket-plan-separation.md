@@ -20,8 +20,8 @@ Tickets now support a `plans:` field mapping each phase to its plan:
 
 ```yaml
 plans:
-  - phase-1: 2026-03/28-1430.event-serialization
-  - phase-2: null  # not yet planned
+  phase-1: 2026-03/28-1430.event-serialization
+  phase-2: null  # not yet planned
 ```
 
 The value is the plan's relative path stem under `ai-docs/plans/` (without `.md`).

@@ -26,8 +26,8 @@ Target: $ARGUMENTS
   (without `.md`). Use `null` for phases not yet planned.
   ```yaml
   plans:
-    - phase-1: 2026-03/28-1430.event-serialization
-    - phase-2: null
+    phase-1: 2026-03/28-1430.event-serialization
+    phase-2: null
   ```
 - Add `started: YYYY-MM-DD` on move to `wip/`.
 - Add `completed: YYYY-MM-DD` on move to `done/`.
@@ -65,7 +65,7 @@ cheaper to merge than an oversized phase that stalls mid-implementation.
 
 > A ticket is the primary context-recovery artifact — a fresh session with no
 > prior conversation must be able to reconstruct the full decision context from
-> the ticket alone.
+> the ticket and its linked plans.
 
 Phases carry **intent-level decisions**: goals, constraints, rationale, and
 rejected alternatives. Concrete implementation approaches from discussion
