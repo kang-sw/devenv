@@ -77,14 +77,14 @@ RCOL=70 # Total display width (right edge column)
 MODEL_BG=53        # Model name (purple)
 L1_BG=236          # Directory
 L_GIT_BG=235       # Git branch
-GIT_CHANGES_BG=237 # Git file changes sub-segment
-L2_BG=232          # Context progress bar
-TOKENS_BG=236      # Token count
+GIT_CHANGES_BG=235 # Git file changes sub-segment
+L2_BG=0            # Context progress bar
+TOKENS_BG=235      # Token count
 RATE_5H_BG=235     # 5h rate limit
-RATE_7D_BG=236     # Weekly rate limit
+RATE_7D_BG=235     # Weekly rate limit
 L2b_BG=$RATE_7D_BG # Token/rate row right-cap (= last segment)
-TIME_BG=237        # Wall-clock time
-API_BG=236         # API time
+TIME_BG=235        # Wall-clock time
+API_BG=235         # API time
 DELTA_BG=235       # Lines-changed delta
 COST_BG=53         # Cost
 
@@ -309,7 +309,7 @@ L2="\033[38;5;${CAP_BG}m${DIAG}${PCT_COLOR_BG}\033[38;5;${CAP_BG}m${RDIAG}${PCT_
 
 # === Line 4: Tokens → 5h Rate → Weekly Rate ===
 L2b="\033[38;5;${CAP_BG}m${DIAG}\033[48;5;${TOKENS_BG};38;5;${CAP_BG}m${RDIAG}"
-L2b+="\033[48;5;${TOKENS_BG}m${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} tokens "
+L2b+="\033[48;5;${TOKENS_BG}m${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;${FG_DIM}m/ ${CTX_MAX_FMT}"
 L2b+="\033[48;5;${RATE_5H_BG};38;5;${TOKENS_BG}m${SEP}"
 L2b+="\033[48;5;${RATE_5H_BG}m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;${RATE_5H_BG};38;5;${FG_DIM}m/5h/\033[38;5;${FG}m${RATE_5HR_RESET_FMT} "
 L2b+="\033[48;5;${RATE_7D_BG};38;5;${RATE_5H_BG}m${SEP}"
