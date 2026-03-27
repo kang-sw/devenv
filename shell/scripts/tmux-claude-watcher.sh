@@ -14,6 +14,7 @@
 
 FRAMES=(🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘)
 CLAUDE_SPINNER_RE='[·✢✳✶✻✽].*…'
+CLAUDE_RETRY_RE='Retrying in [0-9]+ seconds'
 
 # ── Instance management via token ───────────────────────────────────────────────
 TOKEN="$$"
@@ -62,10 +63,11 @@ flush_window() {
   frame=$(lookup "$frame_key")
   frame="${frame:-0}"
 
-  # Build indicator: 🔥… 🌑… ✅…
+  # Build indicator: 🔥… 🌑… ❌… ✅…
   indicator=""
   ((prompt_count > 0)) && indicator+="$(repeat_str '🔥' "$prompt_count")"
   ((spin_count > 0)) && indicator+="$(build_moons "$frame" "$spin_count")"
+  ((retry_count > 0)) && indicator+="$(repeat_str '❌' "$retry_count")"
   ((done_count > 0)) && indicator+="$(repeat_str '✅' "$done_count")"
   [[ -n "$indicator" ]] && indicator=" $indicator"
 
@@ -75,7 +77,7 @@ flush_window() {
     spinning_frames+=("$frame")
     spinning_counts+=("$spin_count")
     spinning_prefixes+=("$(repeat_str '🔥' "$prompt_count")")
-    spinning_suffixes+=("$(repeat_str '✅' "$done_count")")
+    spinning_suffixes+=("$(repeat_str '❌' "$retry_count")$(repeat_str '✅' "$done_count")")
   fi
 
   printf "set-environment -g %s %s\n" "$frame_key" "$frame" >>"$batch"
@@ -96,6 +98,7 @@ while tmux list-sessions &>/dev/null; do
   spin_count=0
   prompt_count=0
   done_count=0
+  retry_count=0
   spinning_wins=()
   spinning_frames=()
   spinning_counts=()
@@ -111,6 +114,7 @@ while tmux list-sessions &>/dev/null; do
       spin_count=0
       prompt_count=0
       done_count=0
+      retry_count=0
     fi
 
     content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
@@ -118,13 +122,18 @@ while tmux list-sessions &>/dev/null; do
     # Detect current pane activity
     has_prompt=""
     has_spinner=""
+    has_retry=""
     if printf '%s\n' "$content" | awk '/1\. Yes/{y=1}END{exit !(y)}'; then
       has_prompt=1
-    elif printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
+    fi
+    if printf '%s' "$content" | grep -qE "$CLAUDE_RETRY_RE"; then
+      has_retry=1
+    fi
+    if printf '%s' "$content" | grep -qE "$CLAUDE_SPINNER_RE"; then
       has_spinner=1
     fi
 
-    # Per-pane state machine: S → G → D
+    # Per-pane state machine: S/R → G → D
     safe_pane="${pane_id#%}"
     pane_key="CW_P_${safe_pane}"
     prev_state=$(lookup "$pane_key")
@@ -132,11 +141,13 @@ while tmux list-sessions &>/dev/null; do
 
     if [[ -n "$has_prompt" ]]; then
       new_state="P"
+    elif [[ -n "$has_retry" ]]; then
+      new_state="R"
     elif [[ -n "$has_spinner" ]]; then
       new_state="S"
     else
       case "$prev_state" in
-      S) new_state="G" ;; # was spinning → 1-scan grace
+      S | R) new_state="G" ;; # was spinning/retry → 1-scan grace
       G) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
       D) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
       *) new_state="" ;;
@@ -153,6 +164,7 @@ while tmux list-sessions &>/dev/null; do
     # Aggregate counts for window indicator
     case "$new_state" in
     P) prompt_count=$((prompt_count + 1)) ;;
+    R) retry_count=$((retry_count + 1)) ;;
     S | G) spin_count=$((spin_count + 1)) ;;
     D) done_count=$((done_count + 1)) ;;
     esac
