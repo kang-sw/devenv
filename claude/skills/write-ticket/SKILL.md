@@ -22,6 +22,13 @@ Target: $ARGUMENTS
 - Requires `title`.
 - `related:` — optional list of related ticket stems with freeform inline
   comments (e.g., `260301-feat-foo  # prerequisite`).
+- `plans:` — maps phases to their plan path stems under `ai-docs/plans/`
+  (without `.md`). Use `null` for phases not yet planned.
+  ```yaml
+  plans:
+    - phase-1: 2026-03/28-1430-event-serialization
+    - phase-2: null
+  ```
 - Add `started: YYYY-MM-DD` on move to `wip/`.
 - Add `completed: YYYY-MM-DD` on move to `done/`.
 
@@ -60,17 +67,19 @@ cheaper to merge than an oversized phase that stalls mid-implementation.
 > prior conversation must be able to reconstruct the full decision context from
 > the ticket alone.
 
-Phases carry **decisions that survive codebase refactoring**: algorithms,
-data formats, synchronization strategies, API contracts, architectural
-patterns. Concrete implementation approaches from discussion (e.g., "use
-Pratt parsing for operator precedence", "lock-free ring buffer for the
-event queue") belong here — they are design decisions, not implementation
-tactics.
+Phases carry **intent-level decisions**: goals, constraints, rationale, and
+rejected alternatives. Concrete implementation approaches from discussion
+(e.g., "use Pratt parsing for operator precedence", "lock-free ring buffer
+for the event queue") belong here — they are design decisions, not
+implementation tactics.
 
-Leave to the plan: file paths, function signatures, delegation strategies,
-testing classifications (e.g., "put the parser in `src/parse/expr.rs`",
-"delegate boundary-value tests to a sonnet subagent") — anything that
-depends on the current code layout.
+Leave to the plan: concrete data specifications (byte layouts, wire formats,
+schema definitions, API signatures), file paths, function signatures,
+delegation strategies, testing classifications — anything that depends on
+the current code layout or requires codebase research to finalize.
+
+When `/write-plan` runs for a phase, it pulls intent from the ticket and
+produces the concrete spec. The `plans:` frontmatter field links them.
 
 ## Steps
 

@@ -2,16 +2,43 @@
 
 ## Project Summary
 
-**devenv** — Personal developer environment bootstrap. Neovim (LazyVim), Claude Code skills/agents, tmux, WezTerm, shell dotfiles. One-shot `install.sh` for macOS/WSL/Linux.
+**devenv** — Personal developer environment bootstrap and Claude Code workflow
+authoring. Neovim (LazyVim), Claude Code skills/agents, tmux, WezTerm, shell
+dotfiles. One-shot `install.sh` for macOS/WSL/Linux.
+
+This repo is **not a software project** — it is a configuration and template
+repository. There is no `ai-docs/`, no tickets, no mental-model directory, and
+that is intentional. The skills and agents defined here are consumed by other
+projects via symlink (`install.sh` handles this).
 
 ## Workspace
 
 ```
-nvim/      — Neovim config (LazyVim, plugins, colorscheme)
 claude/    — Claude Code skills, agents, CLAUDE.template.md
+  skills/  — Skill definitions (discuss, write-ticket, write-plan, implement, etc.)
+  agents/  — Agent definitions (rust-api-lookup, etc.)
+  CLAUDE.template.md — Template CLAUDE.md for downstream projects
+nvim/      — Neovim config (LazyVim, plugins, colorscheme)
 shell/     — tmux, WezTerm, starship, zsh dotfiles, helper scripts
 install.sh — Idempotent bootstrap (packages, symlinks, cleanup)
+claude/migration-guide/ — Convention change guides for downstream projects
 ```
+
+## What Happens Here
+
+Sessions in this repo typically involve:
+- **Skill/agent authoring** — editing workflow definitions in `claude/skills/` and `claude/agents/`
+- **Workflow design discussion** — reasoning about use-cases, skill interactions, and convention changes
+- **Template maintenance** — updating `CLAUDE.template.md` and migration guides
+- **Dotfile/config changes** — nvim, tmux, shell, WezTerm configurations
+
+The workflow skills (discuss, write-ticket, write-plan, implement, etc.) are
+**authored** here but **used** in downstream projects. When editing skills,
+think about how they compose in the canonical flows:
+- Full ceremony: `/discuss` → `/write-ticket` → `/write-plan` → `/execute-plan`
+- Strategic: `/discuss` → `/write-ticket` → `/write-plan` → `/implement`
+- Direct: `/implement <description>`
+- Exploratory: `/sprint <topic>`
 
 ## Commit Rules
 

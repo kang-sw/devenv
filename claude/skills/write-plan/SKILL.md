@@ -11,8 +11,13 @@ Target: $ARGUMENTS
 ## Goal
 
 Produce a **self-contained plan** that survives context reset. The plan must
-carry enough context — decisions, conventions, file roles, domain constraints —
-for a fresh executor to run without re-researching.
+carry enough context — intent from the ticket, concrete specifications,
+conventions, file roles, domain constraints — for a fresh executor to run
+without re-researching.
+
+The plan is where intent becomes concrete: ticket phases describe *what* and
+*why*; the plan specifies *how* — including data formats, API contracts,
+schemas, and byte layouts that the ticket intentionally omits.
 
 The plan's depth determines which executor runs it:
 
@@ -57,7 +62,11 @@ main context for synthesis.
 ## Step 2: Draft Plan
 
 Generate a timestamp-based path:
-`ai-docs/plans/YYMM/DD-HHMM-<plan-name>.md`
+`ai-docs/plans/YYYY-MM/DD-hhmm-<plan-name>.md`
+
+Use a descriptive kebab-case name for the plan (e.g.,
+`ai-docs/plans/2026-03/28-1430-event-serialization.md`).
+The plan name is independent of the ticket stem.
 
 Write the plan to that file using the `Write` tool, in this format:
 
@@ -65,9 +74,9 @@ Write the plan to that file using the `Write` tool, in this format:
 # <Plan Title>
 
 ## Context
-- Ticket summary and background
-- Decisions made during discussion, with reasoning
-- Rejected alternatives and why
+- Ticket phase intent (goals, constraints, rejected alternatives)
+- Concrete specifications derived from that intent (data formats,
+  schemas, API contracts, wire formats)
 
 ## Relevant Files
 - `path/to/file` — role in this change, key types/functions to touch
@@ -197,4 +206,7 @@ Do **not** copy the full plan text into the plan file — the `@<plan-path>`
 reference is the source of truth.
 
 **The plan MUST be committed!**
+
+If the plan implements a ticket phase, update the ticket's `plans:` frontmatter
+to reference this plan (replacing `null` with the plan path stem).
 
