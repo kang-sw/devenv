@@ -56,9 +56,9 @@ cheaper to merge than an oversized phase that stalls mid-implementation.
 
 ## Phase Content
 
-A ticket is the primary context-recovery artifact — a fresh session with no
-prior conversation must be able to reconstruct the full decision context from
-the ticket alone.
+> A ticket is the primary context-recovery artifact — a fresh session with no
+> prior conversation must be able to reconstruct the full decision context from
+> the ticket alone.
 
 Phases carry **decisions that survive codebase refactoring**: algorithms,
 data formats, synchronization strategies, API contracts, architectural
