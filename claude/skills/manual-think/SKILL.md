@@ -20,9 +20,14 @@ tags. This restores the deliberation step that is otherwise missing.
 
 ## Core Directive
 
-Before every substantive response, open a `<antml:thinking>` block and
-reason inside it. Close with `</antml:thinking>`, then produce your
-final response.
+You MUST literally emit the XML tag `<antml:thinking>` as the very first
+token of every substantive response. Reason in English inside it. Then
+literally emit `</antml:thinking>` to close the block. Only after closing
+the tag, produce your final user-facing response.
+
+This is not a formatting suggestion — you must output the raw XML tags
+as literal characters in your response stream. The system will intercept
+and process them.
 
 Think whenever you would normally think. This is not about prescribed
 checkpoints — it is about every genuine decision point, every moment
@@ -68,16 +73,16 @@ more challenge-resolve iterations, more alternatives considered.
 
 ## Output Format
 
-Wrap all reasoning in native thinking tags:
+Wrap all reasoning in native thinking tags. You MUST emit the literal
+XML tags — not markdown code fences, not backtick-quoted references,
+but the actual raw tags in your output stream:
 
-```
-<antml:thinking>
-(your reasoning in English here)
-</antml:thinking>
+  <antml:thinking>
+  (your reasoning in English here)
+  </antml:thinking>
 
-(final response in user's language here)
-```
+  (final response in user's language here)
 
-This format ensures reasoning is processed as a deliberation step and
-does not persist in the conversation context, matching native extended
-thinking behavior.
+The system intercepts these tags and processes the content as a
+deliberation step. The reasoning will not persist in the conversation
+context, matching native extended thinking behavior.
