@@ -133,6 +133,9 @@ itself:
 >    - Are testing classifications (TDD/post-impl/manual) appropriate for each module?
 >    - Are delegation decisions (haiku/sonnet/main) reasonable given complexity?
 >    - Do TDD stub definitions cover the necessary type signatures?
+>    - Does the plan reimplement functionality that already exists in the
+>      codebase? Search for existing utilities, helpers, or patterns that
+>      could be reused or extended instead.
 >
 > **Be aggressive.** Flag anything suspicious — false positives are fine.
 > Categorize as Critical / Important / Minor.

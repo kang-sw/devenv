@@ -118,6 +118,8 @@ Set the wrap-up task to `in_progress`, then:
    > - Architectural fit — documented contracts and module boundaries
    > - Test quality — no deceptive tests (tautological assertions, mocks
    >   bypassing code under test)
+   > - **Duplication** — does this reimplement functionality that already
+   >   exists in the codebase? Search for prior art if in doubt.
    > - Code standards — CLAUDE.md conventions
    >
    > Categorize issues as Critical / Important / Minor.

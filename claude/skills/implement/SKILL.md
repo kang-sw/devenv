@@ -138,6 +138,8 @@ changes, or anything in the "Ask first" approval category.
 > - **Test quality** — adequate coverage, and no deceptive tests (tautological
 >   assertions, unreachable assert paths, mocks bypassing code under test,
 >   expected values derived from the logic being tested)
+> - **Duplication** — does this reimplement functionality that already
+>   exists in the codebase? Search for prior art if in doubt.
 > - **Code standards** — adherence to CLAUDE.md conventions
 >
 > Categorize issues as Critical / Important / Minor.
