@@ -12,7 +12,7 @@ The boundary between tickets and plans has been redefined:
 | Tickets held concrete data specs (formats, API contracts, byte layouts) alongside intent | Tickets hold **intent only**: goals, constraints, rejected alternatives, rationale |
 | Plans held implementation tactics (file paths, signatures, delegation) | Plans hold **intent + concrete specs**: data formats, API contracts, schemas, plus implementation tactics |
 | No formal link between ticket phases and plans | Ticket frontmatter includes `plans:` mapping phases to plan paths |
-| Plan path format: `YYMM/DD-HHMM-<plan-name>.md` | Plan path format: `YYYY-MM/DD-hhmm-<plan-name>.md` |
+| Plan path format: `YYMM/DD-HHMM-<plan-name>.md` | Plan path format: `YYYY-MM/DD-hhmm.<plan-name>.md` |
 
 ## Frontmatter Change
 
@@ -20,7 +20,7 @@ Tickets now support a `plans:` field mapping each phase to its plan:
 
 ```yaml
 plans:
-  - phase-1: 2026-03/28-1430-event-serialization
+  - phase-1: 2026-03/28-1430.event-serialization
   - phase-2: null  # not yet planned
 ```
 
@@ -53,7 +53,7 @@ For each active ticket (not in `done/` or `dropped/`):
 5. **Link existing orphan plans.** If plans exist that implement a ticket
    phase but aren't referenced, add the `plans:` mapping.
 
-6. **Rename existing plans** from old format (`YYMM/DD-HHMM-<name>.md`) to
+6. **Rename existing plans** from old format (`YYMM/DD-HHMM.<name>.md`) to
    new format (`YYYY-MM/DD-hhmm-<name>.md`). Use `git mv` to preserve
    history. Update any `@<plan-path>` references in plan-mode files.
 

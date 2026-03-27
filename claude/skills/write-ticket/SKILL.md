@@ -26,7 +26,7 @@ Target: $ARGUMENTS
   (without `.md`). Use `null` for phases not yet planned.
   ```yaml
   plans:
-    - phase-1: 2026-03/28-1430-event-serialization
+    - phase-1: 2026-03/28-1430.event-serialization
     - phase-2: null
   ```
 - Add `started: YYYY-MM-DD` on move to `wip/`.

@@ -62,11 +62,12 @@ main context for synthesis.
 ## Step 2: Draft Plan
 
 Generate a timestamp-based path:
-`ai-docs/plans/YYYY-MM/DD-hhmm-<plan-name>.md`
+`ai-docs/plans/YYYY-MM/DD-hhmm.<plan-name>.md`
 
 Use a descriptive kebab-case name for the plan (e.g.,
-`ai-docs/plans/2026-03/28-1430-event-serialization.md`).
-The plan name is independent of the ticket stem.
+`ai-docs/plans/2026-03/28-1430.event-serialization.md`).
+The plan name is independent of the ticket stem. The `YYYY-MM/DD-hhmm`
+prefix serves as the plan's unique hash.
 
 Write the plan to that file using the `Write` tool, in this format:
 
