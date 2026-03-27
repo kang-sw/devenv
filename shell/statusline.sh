@@ -35,8 +35,6 @@ MODEL=$(echo "$input" | jq -r '.model.display_name')
 DIR=$(echo "$input" | jq -r '.workspace.current_dir')
 PROJECT_DIR=$(echo "$input" | jq -r '.workspace.project_dir')
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-PCT_RAW=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
-PCT=$(echo "$PCT_RAW" | awk '{printf "%d", $1}')
 TOKENS_USED=$(echo "$input" | jq -r '.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)')
 TOKENS_USED_FMT=$(awk "BEGIN {
   s = sprintf(\"%d\", int($TOKENS_USED)); r = \"\"; l = length(s)
@@ -54,6 +52,10 @@ CTX_MAX_FMT=$(awk "BEGIN {
   else if (v >= 1000 && v % 1000 == 0) printf \"%dK\", v / 1000
   else printf \"%d\", v
 }")
+# Compute percentage from token counts for decimal precision
+# (API used_percentage is integer-only)
+PCT_RAW=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.2f\", $TOKENS_USED / $CTX_MAX * 100; else print 0 }")
+PCT=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.1f\", $TOKENS_USED / $CTX_MAX * 100; else print \"0.0\" }")
 OUTPUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
