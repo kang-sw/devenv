@@ -73,18 +73,24 @@ Repeat until the user signals done:
 
 ### Approval protocol
 
-- **Auto-proceed:** bug fixes, small additions following patterns, tests,
-  refactoring within a single module.
+- **Auto-proceed:** bug fixes, pattern-following additions, tests, refactoring.
 - **Ask first:** new components/protocols, architectural changes, cross-module
-  interfaces, anything that would be hard to undo.
+  interfaces.
 - **Always ask:** deleting functionality, changing API semantics, schema changes.
 
 ### Mechanical-edit delegation
 
-When a repetitive edit spans 3+ locations, delegate per `/implement`
-conventions (sed/replace_all for regex, haiku for rigid patterns, sonnet for
-structural edits). Include before/after example, target file list, and success
-criteria. Rollback on failure.
+When a repetitive edit spans 3+ locations:
+
+| Method | When |
+|--------|------|
+| **sed / replace_all** | Pure text substitution expressible as regex |
+| **haiku subagent** | Fixed pattern, no ambiguity, no judgment needed |
+| **sonnet subagent** | Needs structural understanding or has any ambiguity |
+
+Required in the delegation prompt: before/after example, target file list,
+success criteria. On failure, subagent runs `git checkout -- <modified-files>`
+and reports.
 
 ## Step 2: Wrap-up (when user signals done)
 
@@ -97,15 +103,36 @@ Set the wrap-up task to `in_progress`, then:
    project has no test suite.
 2. **Code review** — for non-trivial changes (3+ files, new public APIs,
    architectural changes, or anything in the "Ask first" category), dispatch a
-   review subagent. Use the same review prompt template as `/implement` (scope,
-   requirements, project context via CLAUDE.md + mental-model docs, git range
-   from merge-base). Fix Critical/Important issues, re-test, re-review until
-   clean. Skip for small changes.
+   general-purpose review subagent with:
+
+   > Review the changes for production readiness.
+   >
+   > **Scope:** [which files/modules changed]
+   > **Requirements:** [sprint topic or ticket reference]
+   > **Project context:** Read `CLAUDE.md` code standards. Read **all** of
+   > `ai-docs/mental-model/` before reviewing the diff.
+   > **Git range:** `git diff $(git merge-base <original-branch> HEAD)..HEAD`
+   >
+   > Review as a PM + senior engineer:
+   > - Correctness — logic errors, edge cases, error handling
+   > - Architectural fit — documented contracts and module boundaries
+   > - Test quality — no deceptive tests (tautological assertions, mocks
+   >   bypassing code under test)
+   > - Code standards — CLAUDE.md conventions
+   >
+   > Categorize issues as Critical / Important / Minor.
+   > Give a clear verdict: ready to merge, or list fixes needed.
+
+   Do not include design justifications in the review prompt. Fix Critical and
+   Important issues, re-test, re-review until clean. Skip for small changes.
 3. **Update mental model** — dispatch mental-model-updater subagent if changes
-   have mental-model impact. Skip for config tweaks, typo fixes.
+   have mental-model impact. Skip for config tweaks, typo fixes. **Wait for
+   subagent to finish before step 4** — review fixes may have changed the
+   implementation.
 4. **Update docs** — `ai-docs/_memory.md`, `ai-docs/_index.md` as needed. If a
-   ticket was the input, load `/write-ticket` for conventions, then append
-   `### Result` to the ticket doc.
+   ticket was the input, append a `### Result (<short-hash>) - YY-MM-DD`
+   subsection to the completed phase recording what was implemented, deviations,
+   and key findings.
 5. **Report** — summarize to the user before merge:
    - What was implemented (brief).
    - Process issues encountered (doc gaps, mental-model inaccuracies) — skip if
@@ -129,6 +156,7 @@ Set the wrap-up task to `in_progress`, then:
    git branch -d sprint/<scope>
    ```
    Ask the user for confirmation before merging. If declined, keep branch.
+   If no commits were made during the sprint, skip merge and delete the branch.
 
 Set wrap-up task to `completed`.
 
