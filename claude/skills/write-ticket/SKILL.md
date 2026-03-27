@@ -83,5 +83,11 @@ depends on the current code layout.
    - Read the ticket first.
    - Apply the requested changes (append result, update phase, move status).
 4. For ticket moves, use `git mv` and update frontmatter dates as needed.
+5. **Intent review** — Re-read the written/edited ticket and verify against
+   the preceding conversation:
+   - Are key decisions, constraints, and rejected alternatives captured?
+   - Does the ticket distort or omit any agreed-upon intent?
+   - Fix gaps in-place, then present a brief summary of what was
+     added/corrected (or confirm nothing was missed) to the user.
 
 **Language:** All ticket content must be in English regardless of conversation language.
