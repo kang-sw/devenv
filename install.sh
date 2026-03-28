@@ -228,8 +228,7 @@ SAVEHIST=50000
 setopt HIST_IGNORE_DUPS       # 중복 기록 안 함
 setopt HIST_IGNORE_SPACE      # 앞에 스페이스 붙이면 기록 안 함
 setopt HIST_REDUCE_BLANKS     # 불필요한 공백 제거
-setopt SHARE_HISTORY          # 세션 간 히스토리 공유
-setopt APPEND_HISTORY
+setopt INC_APPEND_HISTORY     # 즉시 파일에 append, 방향키는 로컬 세션 순서 유지
 
 # ── Zsh options ──────────────────────────────────────────────────────────────
 setopt AUTO_CD                # 디렉토리 이름만 입력해도 cd
