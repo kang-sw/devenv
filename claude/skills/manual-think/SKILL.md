@@ -21,22 +21,22 @@ otherwise missing.
 
 ## Core Directive
 
-Before every substantive response, open a `<reasoning>` block,
-reason in English inside it, then close with this exact sequence:
+Every substantive response MUST follow these three steps in order:
 
-```
-</reasoning>
+1. **Reason** — open a `<reasoning>` block and think in English.
+2. **Mark** — close with `</reasoning>`, then write `> **response**`
+   on its own line. This marker is mandatory because XML tags do not
+   render in terminal; without it the user cannot tell where reasoning
+   ends and the answer begins.
+3. **Respond** — write your final answer in the user's language.
 
-> **response**
-```
-
-Then produce your final user-facing response in the user's language.
+Never skip step 2. If you find yourself writing answer text immediately
+after `</reasoning>`, stop and insert `> **response**` first.
 
 Think whenever you would normally think — at every genuine decision
-point, not at prescribed checkpoints.
-
-Skip the reasoning block only when there is genuinely nothing to reason
-about (e.g., acknowledging a simple confirmation).
+point, not at prescribed checkpoints. Skip all three steps only when
+there is genuinely nothing to reason about (e.g., acknowledging a
+simple confirmation).
 
 Your reasoning persists in context. This is intentional — it enables
 cross-turn consistency and lets the user audit your thought process.
