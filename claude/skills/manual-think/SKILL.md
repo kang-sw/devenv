@@ -83,6 +83,7 @@ Wrap reasoning in a `<reasoning>` block, then emit a visible end marker:
 (your reasoning in English here)
 
 </reasoning>
+
 > **response**
 
 (final response in user's language here)
