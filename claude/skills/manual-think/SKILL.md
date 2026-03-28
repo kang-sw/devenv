@@ -91,3 +91,14 @@ Wrap reasoning in a collapsible HTML details block:
 ```
 
 The `---` separator visually distinguishes reasoning from the response.
+
+## Subagent Propagation
+
+When spawning subagents via the Agent tool, prepend the following
+instruction to every subagent prompt:
+
+> Before starting, read `~/.claude/skills/manual-think/SKILL.md` and
+> follow its instructions for all your responses.
+
+This ensures subagents also produce explicit reasoning, compensating
+for the same missing extended thinking.
