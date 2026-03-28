@@ -144,7 +144,7 @@ while tmux list-sessions &>/dev/null; do
     has_prompt=""
     has_spinner=""
     has_retry=""
-    if printf '%s\n' "$content" | awk '/1\. Yes/{y=1}END{exit !(y)}'; then
+    if printf '%s\n' "$content" | awk '/❯.*1\. Yes/{y=1}END{exit !(y)}'; then
       has_prompt=1
     fi
     if printf '%s' "$content" | grep -qE "$CLAUDE_RETRY_RE"; then
