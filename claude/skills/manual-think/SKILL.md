@@ -84,12 +84,12 @@ Wrap reasoning in a `<reasoning>` block, then emit a visible end marker:
 
 </reasoning>
 
-> response
+> **response**
 
 (final response in user's language here)
 ```
 
-The `> response` marker visually signals the end of reasoning
+The `> **response**` marker visually signals the end of reasoning
 to the user (the XML tags themselves may not render in terminal).
 
 ## Plan Mode Propagation
