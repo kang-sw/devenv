@@ -21,9 +21,9 @@ otherwise missing.
 
 ## Core Directive
 
-Before every substantive response, open a `<details>` block with
-`<summary>CoT</summary>`, reason in English inside it, close it, then
-produce your final user-facing response.
+Before every substantive response, open a `<reasoning>` block,
+reason in English inside it, close it, then produce your final
+user-facing response.
 
 Think whenever you would normally think — at every genuine decision
 point, not at prescribed checkpoints.
@@ -75,22 +75,22 @@ more challenge-resolve iterations, more alternatives considered.
 
 ## Output Format
 
-Wrap reasoning in a collapsible HTML details block:
+Wrap reasoning in a `<reasoning>` block, then emit a visible end marker:
 
 ```
-<details>
-<summary>CoT</summary>
+<reasoning>
 
 (your reasoning in English here)
 
-</details>
+</reasoning>
 
----
+> response
 
 (final response in user's language here)
 ```
 
-The `---` separator visually distinguishes reasoning from the response.
+The `> response` marker visually signals the end of reasoning
+to the user (the XML tags themselves may not render in terminal).
 
 ## Plan Mode Propagation
 
