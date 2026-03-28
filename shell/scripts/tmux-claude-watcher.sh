@@ -26,8 +26,8 @@ else
   _hash() { cksum | cut -d' ' -f1; }
 fi
 
-# Per-pane content hash (persists across loop iterations, no tmux IPC)
-declare -A PANE_HASH
+# Per-pane content hash stored as CW_H_<pane> in tmux env (bash 3.2 compat)
+# Retrieved via lookup() from the all_env snapshot — no extra IPC
 
 # ── Instance management via token ───────────────────────────────────────────────
 TOKEN="$$"
@@ -131,13 +131,14 @@ while tmux list-sessions &>/dev/null; do
     fi
 
     content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
+    safe_pane="${pane_id#%}"
 
-    # Content change detection (hash comparison, no IPC)
+    # Content change detection (hash comparison)
     cur_hash=$(printf '%s' "$content" | sed 's/[[:space:]]*$//' | _hash)
-    prev_hash="${PANE_HASH[$pane_id]:-}"
+    hash_key="CW_H_${safe_pane}"
+    prev_hash=$(lookup "$hash_key")
     content_changed=""
     [[ "$cur_hash" != "$prev_hash" ]] && content_changed=1
-    PANE_HASH[$pane_id]="$cur_hash"
 
     # Detect current pane activity
     has_prompt=""
@@ -153,8 +154,7 @@ while tmux list-sessions &>/dev/null; do
       has_spinner=1
     fi
 
-    # Per-pane state machine: S/R → G → D
-    safe_pane="${pane_id#%}"
+    # Per-pane state machine: S/R → A → G → D
     pane_key="CW_P_${safe_pane}"
     prev_state=$(lookup "$pane_key")
     new_state=""
@@ -181,12 +181,13 @@ while tmux list-sessions &>/dev/null; do
       esac
     fi
 
-    # Batch pane state write
+    # Batch pane state + hash write
     if [[ -n "$new_state" ]]; then
       printf "set-environment -g %s %s\n" "$pane_key" "$new_state" >>"$batch"
     else
       printf "set-environment -gu %s\n" "$pane_key" >>"$batch"
     fi
+    printf "set-environment -g %s %s\n" "$hash_key" "$cur_hash" >>"$batch"
 
     # Aggregate counts for window indicator
     case "$new_state" in
