@@ -92,6 +92,23 @@ Wrap reasoning in a collapsible HTML details block:
 
 The `---` separator visually distinguishes reasoning from the response.
 
+## Plan Mode Propagation
+
+When writing plan files via `/write-plan` (Step 5: Finalize) or any workflow
+that enters `EnterPlanMode`, prepend the `/manual-think` load instruction as
+the **first step** in the plan file's `# Steps` block:
+
+```
+# Steps
+
+1. Load `/manual-think` skill
+2. Load `/<executor>` skill
+3. Read `@<plan-path>`
+```
+
+This ensures manual chain-of-thought survives context resets between planning
+and execution sessions.
+
 ## Subagent Propagation
 
 When spawning subagents via the Agent tool, prepend the following
