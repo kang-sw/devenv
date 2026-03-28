@@ -36,8 +36,13 @@ cross-turn consistency and lets the user audit your thought process.
 
 ## How to Think (soft guidelines)
 
-The following patterns tend to produce good reasoning. Adapt, reorder,
-skip, or extend freely:
+For multi-faceted problems, decompose into independent segments first.
+Reason through each segment separately, then synthesize. This prevents
+losing threads in large problems.
+
+The following patterns apply to each segment (or to the whole problem
+when decomposition is unnecessary). Adapt, reorder, skip, or extend
+freely:
 
 - **Parse intent** — What is the user actually asking?
 - **Gather context** — What constraints, prior decisions, or domain
