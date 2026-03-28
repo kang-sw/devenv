@@ -97,6 +97,32 @@ cargo brief ts self '(call_expression function: (identifier) @fn (#eq? @fn "spaw
 
 Run `cargo brief ts --help` for node type reference and predicate syntax.
 
+### "Who calls X? What breaks if I change X?" → `lsp` (Unix only)
+
+Live rust-analyzer queries for call graphs and reference tracking. Use on
+Unix (Linux / macOS) when you need cross-crate call relationships that
+static grep can't reliably capture — e.g., trait method dispatch, renamed
+imports, or transitive caller chains.
+
+```
+cargo brief lsp references resolve_symbol
+cargo brief lsp blast-radius handle_request --depth 3
+cargo brief lsp call-hierarchy spawn --outgoing -q
+```
+
+- **`lsp references <symbol> [-q]`**: All reference sites across the workspace.
+- **`lsp blast-radius <symbol> [--depth N]`**: Direct + transitive callers
+  via BFS (depth 1–10). Answers "what breaks if I change this?"
+- **`lsp call-hierarchy <symbol> [--outgoing] [-q]`**: One-level incoming
+  (default) or outgoing call tree.
+- **`lsp touch`** / **`lsp stop`** / **`lsp status`**: Daemon lifecycle.
+  The daemon spawns automatically on first query; `touch` warms it up.
+- `-q` quiet mode outputs locations only (no source context).
+- First query may be slow while rust-analyzer indexes; subsequent queries
+  are fast.
+- **Not available on Windows.** Falls back to `code --refs` for
+  grep-based reference search on non-Unix platforms.
+
 ## Decision Heuristics
 
 | Situation | Start with | Escalate to |
@@ -106,6 +132,8 @@ Run `cargo brief ts --help` for node type reference and predicate syntax.
 | Need to understand impl details | `code` | `ts` for structural patterns |
 | Unfamiliar crate, first contact | `summary` | `api` on interesting modules |
 | "How do others use this API?" | `examples` | `code --refs-only` |
+| Who calls this / what breaks? (Unix) | `lsp references` | `lsp blast-radius --depth N` |
+| Call graph / outgoing deps (Unix) | `lsp call-hierarchy` | `--outgoing` for callees |
 | Feature-gated API not showing up | Add `-F feat1,feat2` | `-F full` if unsure |
 
 ## Remote Crate Flags
@@ -128,6 +156,9 @@ Run `cargo brief ts --help` for node type reference and predicate syntax.
 - **`code` searches workspace-wide by default.** Unlike other subcommands
   where `self` = current package, `code self` searches ALL workspace
   members. Use `--no-deps` or name a specific crate to narrow.
+- **`lsp` is Unix only.** On Windows or other non-Unix platforms, use
+  `code --refs` / `code --refs-only` as a grep-based fallback for
+  reference tracking.
 
 ## Process
 
