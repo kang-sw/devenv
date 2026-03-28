@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # tmux-claude-watcher.sh — background daemon for Claude Code activity indicators.
 #
-# Per-pane state machine with 1-scan grace period:
-#   S (spinning) → G (grace, still shows 🌑) → D (done, shows ✅)
-#   Any state → S on spinner | P on prompt
+# Per-pane state machine:
+#   S (spinning) → A (active output, content still changing) → G (grace) → D (done ✅)
+#   S → G when content stops changing (skip A)
+#   Any state → S on spinner | P on prompt | R on retry
 #   D/G → clear when window becomes active
 #
 # Timing: full scan every ~2s, spinner animation at ~3fps between scans.
@@ -15,6 +16,18 @@
 FRAMES=(🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘)
 CLAUDE_SPINNER_RE='[·✢✳✶✻✽].*…'
 CLAUDE_RETRY_RE='Retrying in [0-9]+ seconds'
+
+# Cross-platform hash command
+if command -v md5 &>/dev/null; then
+  _hash() { md5 -q; }
+elif command -v md5sum &>/dev/null; then
+  _hash() { md5sum | cut -d' ' -f1; }
+else
+  _hash() { cksum | cut -d' ' -f1; }
+fi
+
+# Per-pane content hash (persists across loop iterations, no tmux IPC)
+declare -A PANE_HASH
 
 # ── Instance management via token ───────────────────────────────────────────────
 TOKEN="$$"
@@ -119,6 +132,13 @@ while tmux list-sessions &>/dev/null; do
 
     content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null) || continue
 
+    # Content change detection (hash comparison, no IPC)
+    cur_hash=$(printf '%s' "$content" | sed 's/[[:space:]]*$//' | _hash)
+    prev_hash="${PANE_HASH[$pane_id]:-}"
+    content_changed=""
+    [[ "$cur_hash" != "$prev_hash" ]] && content_changed=1
+    PANE_HASH[$pane_id]="$cur_hash"
+
     # Detect current pane activity
     has_prompt=""
     has_spinner=""
@@ -147,7 +167,14 @@ while tmux list-sessions &>/dev/null; do
       new_state="S"
     else
       case "$prev_state" in
-      S | R) new_state="G" ;; # was spinning/retry → 1-scan grace
+      S | R)
+        # Spinner/retry stopped — if content still changing, enter A (active output)
+        [[ -n "$content_changed" ]] && new_state="A" || new_state="G"
+        ;;
+      A)
+        # Active output — stay while content keeps changing
+        [[ -n "$content_changed" ]] && new_state="A" || new_state="G"
+        ;;
       G) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
       D) [[ "$active" == "1" ]] && new_state="" || new_state="D" ;;
       *) new_state="" ;;
@@ -165,7 +192,7 @@ while tmux list-sessions &>/dev/null; do
     case "$new_state" in
     P) prompt_count=$((prompt_count + 1)) ;;
     R) retry_count=$((retry_count + 1)) ;;
-    S | G) spin_count=$((spin_count + 1)) ;;
+    S | A | G) spin_count=$((spin_count + 1)) ;;
     D) done_count=$((done_count + 1)) ;;
     esac
 
