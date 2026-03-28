@@ -22,8 +22,15 @@ otherwise missing.
 ## Core Directive
 
 Before every substantive response, open a `<reasoning>` block,
-reason in English inside it, close it, then produce your final
-user-facing response.
+reason in English inside it, then close with this exact sequence:
+
+```
+</reasoning>
+
+> **response**
+```
+
+Then produce your final user-facing response in the user's language.
 
 Think whenever you would normally think — at every genuine decision
 point, not at prescribed checkpoints.
@@ -72,25 +79,6 @@ more challenge-resolve iterations, more alternatives considered.
 
 - **Reasoning block:** always English, regardless of conversation language.
 - **Final response:** match the user's language unless asked otherwise.
-
-## Output Format
-
-Wrap reasoning in a `<reasoning>` block, then emit a visible end marker:
-
-```
-<reasoning>
-
-(your reasoning in English here)
-
-</reasoning>
-
-> **response**
-
-(final response in user's language here)
-```
-
-The `> **response**` marker visually signals the end of reasoning
-to the user (the XML tags themselves may not render in terminal).
 
 ## Plan Mode Propagation
 
