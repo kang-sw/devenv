@@ -190,14 +190,8 @@ API_TIME_FMT=$(fmt_time "$API_HRS" "$API_MINS" "$API_SECS")
 # 5h rate limit reset time (HH:MM)
 RATE_5HR_RESET_FMT=$(date -r "$RATE_5HR_RESETS" "+%HH" 2>/dev/null || echo "??")
 
-# 7d rate limit reset remaining (Nd Nh)
-_7D_REMAIN_S=$((RATE_7D_RESETS - _NOW_EPOCH))
-[ "$_7D_REMAIN_S" -lt 0 ] 2>/dev/null && _7D_REMAIN_S=0
-_7D_RD=$((_7D_REMAIN_S / 86400))
-_7D_RH=$(((_7D_REMAIN_S % 86400) / 3600))
-RATE_7D_TTL="~"
-[ "$_7D_RD" -gt 0 ] && RATE_7D_TTL+="${_7D_RD}d"
-RATE_7D_TTL+="${_7D_RH}h"
+# 7d rate limit reset weekday
+RATE_7D_TTL=$(date -r "$RATE_7D_RESETS" "+%a" 2>/dev/null || echo "??")
 
 # Relative path: current_dir relative to project_dir
 DIR_REL=""
