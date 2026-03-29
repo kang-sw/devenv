@@ -31,11 +31,28 @@
 
 input=$(cat)
 
-MODEL=$(echo "$input" | jq -r '.model.display_name')
-DIR=$(echo "$input" | jq -r '.workspace.current_dir')
-PROJECT_DIR=$(echo "$input" | jq -r '.workspace.project_dir')
-COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-TOKENS_USED=$(echo "$input" | jq -r '.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)')
+# Single jq call to extract all fields (15 → 1 subprocess)
+IFS=$'\t' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
+  DURATION_MS API_MS LINES_ADDED LINES_REMOVED _RATE_5HR RATE_5HR_RESETS \
+  RATE_7D_RAW RATE_7D_RESETS <<< "$(echo "$input" | jq -r '[
+  (.model.display_name // ""),
+  (.workspace.current_dir // ""),
+  (.workspace.project_dir // ""),
+  (.cost.total_cost_usd // 0),
+  (.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)),
+  (.context_window.context_window_size // 0),
+  (.context_window.total_output_tokens // 0),
+  (.cost.total_duration_ms // 0),
+  (.cost.total_api_duration_ms // 0),
+  (.cost.total_lines_added // 0),
+  (.cost.total_lines_removed // 0),
+  (.rate_limits.five_hour.used_percentage // 0),
+  (.rate_limits.five_hour.resets_at // 0),
+  (.rate_limits.seven_day.used_percentage // 0),
+  (.rate_limits.seven_day.resets_at // 0)
+] | @tsv')"
+RATE_5HR=${_RATE_5HR%%.*}
+RATE_7D=${RATE_7D_RAW%%.*}
 TOKENS_USED_FMT=$(awk "BEGIN {
   s = sprintf(\"%d\", int($TOKENS_USED)); r = \"\"; l = length(s)
   for (i = 1; i <= l; i++) {
@@ -44,7 +61,6 @@ TOKENS_USED_FMT=$(awk "BEGIN {
   }
   printf \"%s\", r
 }")
-CTX_MAX=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
 CTX_MAX_FMT=$(awk "BEGIN {
   v = $CTX_MAX + 0
   if (v >= 1000000 && v % 1000000 == 0) printf \"%dM\", v / 1000000
@@ -56,16 +72,6 @@ CTX_MAX_FMT=$(awk "BEGIN {
 # (API used_percentage is integer-only)
 PCT_RAW=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.2f\", $TOKENS_USED / $CTX_MAX * 100; else print 0 }")
 PCT=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.1f\", $TOKENS_USED / $CTX_MAX * 100; else print \"0.0\" }")
-OUTPUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
-DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
-API_MS=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
-LINES_ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
-LINES_REMOVED=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
-RATE_5HR=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | awk '{printf "%d", $1}')
-RATE_5HR_RESETS=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // 0')
-RATE_7D_RAW=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0')
-RATE_7D_RESETS=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // 0')
-RATE_7D=$(echo "$RATE_7D_RAW" | awk '{printf "%d", $1}')
 
 # ═══════════════════════════════════════════════════════════
 # Style parameters — edit these to customize appearance
@@ -206,7 +212,7 @@ TOK_SEC=$(awk "BEGIN {
   else printf \"0.0\"
 }")
 
-# Git info (raw data for powerline segments)
+# Git info — consolidated (8 → 2 subprocesses via git status + git diff)
 BRANCH_NAME=""
 GIT_AHEAD=0
 GIT_BEHIND=0
@@ -214,18 +220,23 @@ GIT_ADDED=0
 GIT_DELETED=0
 GIT_MODIFIED=0
 GIT_UNTRACKED=0
-if git rev-parse --git-dir >/dev/null 2>&1; then
-  BRANCH_NAME=$(git branch --show-current 2>/dev/null)
-  DIFF_STAT=$(git diff --numstat 2>/dev/null | awk '{a+=$1; d+=$2} END {printf "%d %d", a+0, d+0}')
-  GIT_ADDED=$(echo "$DIFF_STAT" | cut -d' ' -f1)
-  GIT_DELETED=$(echo "$DIFF_STAT" | cut -d' ' -f2)
-  GIT_MODIFIED=$(git diff --name-only 2>/dev/null | wc -l | tr -d ' ')
-  GIT_UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
-  if git rev-parse --verify "@{u}" >/dev/null 2>&1; then
-    GIT_AHEAD=$(git rev-list --count "@{u}..HEAD" 2>/dev/null || echo 0)
-    GIT_BEHIND=$(git rev-list --count "HEAD..@{u}" 2>/dev/null || echo 0)
-  fi
-fi
+_git_status=$(git status --porcelain -b 2>/dev/null) && {
+  # Header: ## branch...origin/branch [ahead N, behind M]
+  _git_header="${_git_status%%$'\n'*}"
+  BRANCH_NAME="${_git_header#\#\# }"
+  BRANCH_NAME="${BRANCH_NAME%%...*}"
+  case "$BRANCH_NAME" in
+    "HEAD (no branch)"*|"No commits yet"*|"Initial commit"*) BRANCH_NAME="" ;;
+  esac
+  [[ "$_git_header" =~ ahead\ ([0-9]+) ]] && GIT_AHEAD=${BASH_REMATCH[1]}
+  [[ "$_git_header" =~ behind\ ([0-9]+) ]] && GIT_BEHIND=${BASH_REMATCH[1]}
+  GIT_UNTRACKED=$(echo "$_git_status" | grep -c '^??')
+  # Line counts + modified file count from diff --numstat
+  _diff=$(git diff --numstat 2>/dev/null | awk '{a+=$1; d+=$2; n++} END {print a+0, d+0, n+0}')
+  GIT_ADDED=${_diff%% *}; _diff="${_diff#* }"
+  GIT_DELETED=${_diff%% *}
+  GIT_MODIFIED=${_diff##* }
+}
 
 # Powerline glyphs & Nerd Font icons (hex bytes for bash 3.2 compat)
 SEP=$'\xee\x82\xb8'         # U+E0B8 (lower-left diagonal, / angle)
