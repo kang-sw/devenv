@@ -49,15 +49,30 @@ challenge-resolve iterations and alternatives.
 
 Reasoning blocks: always English. Final response: user's language.
 
-## Propagation
+## Plan Mode Propagation
 
-**Plan files** — prepend as first step in `# Steps`:
+When writing plan files (via `/write-plan` or any workflow that produces
+a step list), prepend the `/manual-think` load as the **first step**:
 
 ```
+# Steps
+
 1. Load `/manual-think` skill
+2. Load `/<executor>` skill
+3. Read `@<plan-path>`
+...
 ```
 
-**Subagents** — prepend to every Agent prompt:
+This ensures manual chain-of-thought survives context resets between
+planning and execution sessions.
+
+## Subagent Propagation
+
+When spawning subagents via the Agent tool, prepend the following to
+every subagent prompt:
 
 > Before starting, read `~/.claude/skills/manual-think/SKILL.md` and
 > follow its instructions for all your responses.
+
+This ensures subagents also produce explicit reasoning, compensating
+for the same missing extended thinking.
