@@ -117,31 +117,32 @@ LINES_ADD_FG=75  # Lines added (blue)
 LINES_DEL_FG=204 # Lines removed (pink)
 CAP_BG=53        # End-cap accent (medium gray)
 
-# Weekly rate daily delta tracking via shared state file
-_WK_STATE="/tmp/claude-statusline-weekly-${USER}"
-_WK_TODAY=$(date +%Y-%m-%d)
-_WK_NOW=$(date +%s)
-_WK_PIVOT_RATE="$RATE_7D_RAW"
-DELTA_7D=""
+# Rate limit budget deltas (actual usage vs linear safe-line)
+# Safe-line = elapsed fraction of window × 100
+# Negative = under budget (good), positive = over budget
+_NOW_EPOCH=$(date +%s)
 
-if [[ -f "$_WK_STATE" ]]; then
-  _WK_SAVED_DATE=$(cut -d' ' -f1 <"$_WK_STATE")
-  _WK_SAVED_PIVOT=$(cut -d' ' -f2 <"$_WK_STATE")
-  _WK_SAVED_LAST=$(cut -d' ' -f3 <"$_WK_STATE")
-  if [[ "$_WK_SAVED_DATE" != "$_WK_TODAY" ]]; then
-    # Date changed — pivot from the last known fresh value
-    _WK_PIVOT_RATE="${_WK_SAVED_LAST:-$RATE_7D_RAW}"
-  else
-    _WK_PIVOT_RATE="${_WK_SAVED_PIVOT:-$RATE_7D_RAW}"
-  fi
-fi
-echo "$_WK_TODAY $_WK_PIVOT_RATE $RATE_7D_RAW $_WK_NOW" >"$_WK_STATE"
-
-DELTA_7D=$(awk "BEGIN {
-  d = int($RATE_7D_RAW - $_WK_PIVOT_RATE)
+_5H_ELAPSED=$((_NOW_EPOCH - (RATE_5HR_RESETS - 18000)))
+[ "$_5H_ELAPSED" -lt 0 ] && _5H_ELAPSED=0
+[ "$_5H_ELAPSED" -gt 18000 ] && _5H_ELAPSED=18000
+DELTA_5HR=$(awk "BEGIN {
+  d = int($_RATE_5HR - $_5H_ELAPSED / 18000.0 * 100)
   if (d > 0)      printf \"+%d%%\", d
   else if (d < 0) printf \"%d%%\", d
 }")
+
+_7D_ELAPSED=$((_NOW_EPOCH - (RATE_7D_RESETS - 604800)))
+[ "$_7D_ELAPSED" -lt 0 ] && _7D_ELAPSED=0
+[ "$_7D_ELAPSED" -gt 604800 ] && _7D_ELAPSED=604800
+DELTA_7D=$(awk "BEGIN {
+  d = int($RATE_7D_RAW - $_7D_ELAPSED / 604800.0 * 100)
+  if (d > 0)      printf \"+%d%%\", d
+  else if (d < 0) printf \"%d%%\", d
+}")
+
+# Delta colors: over budget → red, under budget → green
+_DC_5HR=$FG_DIMMER; [[ "$DELTA_5HR" == +* ]] && _DC_5HR=203; [[ "$DELTA_5HR" == -* ]] && _DC_5HR=114
+_DC_7D=$FG_DIMMER; [[ "$DELTA_7D" == +* ]] && _DC_7D=203; [[ "$DELTA_7D" == -* ]] && _DC_7D=114
 
 # Green → yellow → red gradient (ANSI 256-color)
 # Usage: pct_color <percent> [48]  — default fg (38), pass 48 for bg
@@ -190,7 +191,6 @@ API_TIME_FMT=$(fmt_time "$API_HRS" "$API_MINS" "$API_SECS")
 RATE_5HR_RESET_FMT=$(date -r "$RATE_5HR_RESETS" "+%HH" 2>/dev/null || echo "??")
 
 # 7d rate limit reset remaining (Nd Nh)
-_NOW_EPOCH=$(date +%s)
 _7D_REMAIN_S=$((RATE_7D_RESETS - _NOW_EPOCH))
 [ "$_7D_REMAIN_S" -lt 0 ] 2>/dev/null && _7D_REMAIN_S=0
 _7D_RD=$((_7D_REMAIN_S / 86400))
@@ -324,10 +324,12 @@ L2="\033[38;5;${CAP_BG}m${DIAG}${PCT_COLOR_BG}\033[38;5;${CAP_BG}m${RDIAG}${PCT_
 L2b="\033[38;5;${CAP_BG}m${DIAG}\033[48;5;${TOKENS_BG};38;5;${CAP_BG}m${RDIAG}"
 L2b+="\033[48;5;${TOKENS_BG}m${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;${FG_DIM}m/ ${CTX_MAX_FMT}"
 L2b+="\033[48;5;${RATE_5H_BG};38;5;${TOKENS_BG}m${SEP}"
-L2b+="\033[48;5;${RATE_5H_BG}m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;${RATE_5H_BG};38;5;${FG_DIM}m/5h/\033[38;5;${FG}m${RATE_5HR_RESET_FMT} "
+L2b+="\033[48;5;${RATE_5H_BG}m ${RATE_5HR_COLOR}${RATE_5HR}%\033[48;5;${RATE_5H_BG};38;5;${FG_DIM}m/5h/\033[38;5;${FG}m${RATE_5HR_RESET_FMT}"
+[[ -n $DELTA_5HR ]] && L2b+=" \033[38;5;${_DC_5HR}m(${DELTA_5HR})"
+L2b+=" "
 L2b+="\033[48;5;${RATE_7D_BG};38;5;${RATE_5H_BG}m${SEP}"
 L2b+="\033[48;5;${RATE_7D_BG}m ${RATE_7D_COLOR}${RATE_7D}%\033[48;5;${RATE_7D_BG};38;5;${FG_DIM}m/wk/\033[38;5;${FG}m${RATE_7D_TTL}"
-[[ -n $DELTA_7D ]] && L2b+=" \033[38;5;${FG_DIMMER}m(${DELTA_7D})"
+[[ -n $DELTA_7D ]] && L2b+=" \033[38;5;${_DC_7D}m(${DELTA_7D})"
 L2b+=" "
 
 # === Line 5: Time → API → Delta ===
