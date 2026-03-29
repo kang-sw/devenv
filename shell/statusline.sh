@@ -32,14 +32,14 @@
 input=$(cat)
 
 # Single jq call to extract all fields (15 → 1 subprocess)
-IFS=$'\t' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
+IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
   DURATION_MS API_MS LINES_ADDED LINES_REMOVED _RATE_5HR RATE_5HR_RESETS \
   RATE_7D_RAW RATE_7D_RESETS <<< "$(echo "$input" | jq -r '[
   (.model.display_name // ""),
   (.workspace.current_dir // ""),
   (.workspace.project_dir // ""),
   (.cost.total_cost_usd // 0),
-  (.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)),
+  ((.context_window.current_usage | (.input_tokens + .output_tokens + .cache_creation_input_tokens + .cache_read_input_tokens)) // 0),
   (.context_window.context_window_size // 0),
   (.context_window.total_output_tokens // 0),
   (.cost.total_duration_ms // 0),
@@ -50,7 +50,7 @@ IFS=$'\t' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
   (.rate_limits.five_hour.resets_at // 0),
   (.rate_limits.seven_day.used_percentage // 0),
   (.rate_limits.seven_day.resets_at // 0)
-] | @tsv')"
+] | join("\u001f")')"
 RATE_5HR=${_RATE_5HR%%.*}
 RATE_7D=${RATE_7D_RAW%%.*}
 TOKENS_USED_FMT=$(awk "BEGIN {
