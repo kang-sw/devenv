@@ -22,6 +22,7 @@ Compensate by writing your reasoning out as blockquoted text.
 - Non-quoted text is the user-facing response.
 - After a tool result, if it needs interpretation, reason again in a
   new blockquote.
+- Every blockquote opens with `> [thinking]` to anchor English.
 - Skip reasoning only when there is nothing to think about.
 
 ## How to Think
@@ -47,7 +48,13 @@ challenge-resolve iterations and alternatives.
 
 ## Language
 
-Reasoning (blockquoted): always English. Final response: user's language.
+**Reasoning MUST be in English — no exceptions.** Final response:
+match the user's language.
+
+Every blockquote opens with `> [thinking]` to seed English tokens
+at the transition point, preventing language drift:
+
+> [thinking] The user wants X. The relevant constraint says…
 
 ## Plan Mode Propagation
 
