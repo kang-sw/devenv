@@ -11,12 +11,11 @@ Target: $ARGUMENTS
 ## Step 0: Understand
 
 1. Read the ticket/description/plan text.
-2. Load `ai-docs/_index.md` and `ai-docs/_memory.md` for current project state.
-3. Load `ai-docs/mental-model/overview.md` to identify relevant domains,
-   then load every mental-model doc that touches the change area, including
-   adjacent domains — use Read/Glob directly, never delegate initial loading
-   to subagents. Cross-module coupling is often documented there. If no
-   mental-model docs exist yet, note this for the docs task.
+2. Read `ai-docs/_index.md` and `ai-docs/_memory.md` for current project state.
+3. Read `ai-docs/mental-model/overview.md` to identify relevant domains.
+   Read every mental-model doc that touches the change area, including adjacent
+   domains — cross-module coupling is often documented there. If no mental-model
+   docs exist yet, note this for the docs task.
 4. Run `git log --oneline -10` to check recent work.
 5. Record the current branch as `<original-branch>`. If already on an
    `implement/` branch, treat it as a resumed session — infer

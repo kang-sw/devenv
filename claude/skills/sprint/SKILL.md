@@ -21,10 +21,9 @@ the task list at any time and see the current state of the sprint.
 
 ## Step 0: Bootstrap
 
-1. Load `ai-docs/_index.md` and `ai-docs/_memory.md` for project state.
-2. Load `ai-docs/mental-model/overview.md` and any domain docs relevant to
-   the topic directly (Read/Glob — no subagents). Load more mental-model
-   docs as the sprint touches new areas.
+1. Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project state.
+2. Read `ai-docs/mental-model/overview.md` and any domain docs relevant to the
+   topic. Read more mental-model docs as the sprint touches new areas.
 3. If `$ARGUMENTS` references a ticket, read it.
 4. Run `git log --oneline -10` to check recent work.
 5. Create a feature branch: `sprint/<scope>` from the current branch. Record
