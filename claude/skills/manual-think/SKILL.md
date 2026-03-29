@@ -58,8 +58,9 @@ at the transition point, preventing language drift:
 
 ## Plan Mode Propagation
 
-When writing plan files (via `/write-plan` or any workflow that produces
-a step list), prepend the `/manual-think` load as the **first step**:
+When writing plan files via `/write-plan` (Step 5: Finalize) or any workflow
+that enters `EnterPlanMode`, prepend the `/manual-think` load instruction as
+the **first step** in the plan file's `# Steps` block:
 
 ```
 # Steps

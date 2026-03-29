@@ -44,8 +44,10 @@ always trust `--help` output over this document for flag names and syntax.
   structure.
 - **`lsp` is Unix only.** On non-Unix platforms, use `code --refs` as
   a grep-based fallback for reference tracking.
-- **Remote crate versions must be exact.** `hecs@0.10` may fail;
-  use `hecs@0.10.5`.
+- **Sandbox blocks remote crate downloads.** `-C` commands that need to
+  fetch new crates will fail because the sandbox denies writes to
+  `~/.cargo/registry/`. Use `dangerouslyDisableSandbox: true` for `-C`
+  commands, or work with already-cached crates.
 
 ## Process
 
