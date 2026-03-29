@@ -38,8 +38,9 @@ scope in Context.
 ## Step 0: Understand
 
 1. Read the ticket/description.
-2. Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project state.
-3. Read **all** files in `ai-docs/mental-model/` — full architectural context
+2. Load `ai-docs/_index.md` and `ai-docs/_memory.md` for project state.
+3. Load **all** files in `ai-docs/mental-model/` — use Read/Glob directly,
+   never delegate initial loading to subagents. Full architectural context
    is needed to identify cross-domain implications and write a sound plan.
 4. Run `git log --oneline -10` for recent work context.
 

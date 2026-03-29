@@ -11,9 +11,9 @@ Topic: $ARGUMENTS
 ## Constraints
 
 - **Read-only.** No source edits. Documentation/ticket writes only in Step 2.
-- **Full context upfront.** Read `ai-docs/_index.md`, `ai-docs/_memory.md`,
-  and all of `ai-docs/mental-model/` at start — architectural awareness is
-  required to evaluate trade-offs and spot cross-domain implications.
+- **Full context upfront.** Load `ai-docs/_index.md`, `ai-docs/_memory.md`,
+  and all of `ai-docs/mental-model/` at start — use Read/Glob directly,
+  never delegate initial loading to subagents.
 - **No direct source reading.** Delegate to subagents when details beyond
   mental-model docs are needed.
 - **Honest uncertainty.** If docs are stale or insufficient, say so and suggest
@@ -21,7 +21,8 @@ Topic: $ARGUMENTS
 
 ## Step 0: Orient
 
-1. Read `ai-docs/_index.md`, `ai-docs/_memory.md`, and all files in `ai-docs/mental-model/`.
+1. Load `ai-docs/_index.md`, `ai-docs/_memory.md`, and all files in
+   `ai-docs/mental-model/` directly (Read/Glob — no subagents).
 2. If `$ARGUMENTS` references a ticket, read it.
 3. **If `$ARGUMENTS` is empty:** Read WIP tickets and run
    `git log --oneline -10`. Survey project state and propose 2-3 topics
