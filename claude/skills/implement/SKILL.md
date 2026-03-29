@@ -126,9 +126,10 @@ changes, or anything in the "Ask first" approval category.
 >
 > **Scope:** [which files/modules changed — no design rationale]
 > **Requirements:** [ticket phase or description]
-> **Project context:** Read `CLAUDE.md` code standards. Read **all** of
-> `ai-docs/mental-model/` — understand the full project architecture,
-> cross-module contracts, and invariants before reviewing the diff.
+> **Project context:** Read `CLAUDE.md` code standards. Read **every file**
+> in `ai-docs/mental-model/` regardless of apparent domain relevance —
+> cross-module contracts and invariants often surface in unrelated domains.
+> Do this before reviewing the diff.
 > **Git range:** `git diff $(git merge-base <original-branch> HEAD)..HEAD`
 >
 > Review as a PM + senior engineer with full project awareness:

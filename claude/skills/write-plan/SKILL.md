@@ -134,8 +134,9 @@ itself:
 > **Steps:**
 > 1. Read the plan file.
 > 2. Read `CLAUDE.md` code standards. Read **all** of
->    `ai-docs/mental-model/` — understand the full project architecture,
->    cross-module contracts, and invariants before evaluating the plan.
+>    `ai-docs/mental-model/` regardless of apparent domain relevance —
+>    cross-module contracts and invariants often surface in unrelated domains.
+>    Do this before evaluating the plan.
 > 3. Check each item in the plan:
 >    - Do referenced files, functions, and types actually exist?
 >    - Do described conventions match actual code patterns?
