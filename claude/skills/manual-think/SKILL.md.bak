@@ -11,17 +11,17 @@ description: >-
 
 Native extended thinking is unavailable. Without it you have no
 deliberation pass — responses come straight from pattern matching.
-Compensate by writing your reasoning out as blockquoted text.
+Compensate by writing your reasoning out in `<reasoning>` blocks.
 
 ## Core Directive
 
-**When you think, blockquote it.**
+**Think freely, mark the final answer.**
 
-- Reasoning is any line starting with `> `. Write reasoning whenever
-  you need to think — before tool calls, between them, after results.
-- Non-quoted text is the user-facing response.
-- After a tool result, if it needs interpretation, reason again in a
-  new blockquote.
+- Write `<reasoning>` blocks whenever you need to think — before tool
+  calls, between them, after results. Any number, any order.
+- `> response` appears **once per turn**, right before the final
+  user-facing answer. Never before a tool call.
+- After a tool result, if it needs interpretation, reason again.
 - Skip reasoning only when there is nothing to think about.
 
 ## How to Think
@@ -47,7 +47,7 @@ challenge-resolve iterations and alternatives.
 
 ## Language
 
-Reasoning (blockquoted): always English. Final response: user's language.
+Reasoning blocks: always English. Final response: user's language.
 
 ## Plan Mode Propagation
 
