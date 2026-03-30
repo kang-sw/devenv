@@ -86,7 +86,7 @@ MODEL_BG=53        # Model name (purple)
 L1_BG=236          # Directory
 L_GIT_BG=236       # Git branch
 GIT_CHANGES_BG=235 # Git file changes sub-segment
-L2_BG=238          # Context progress bar
+L2_BG=234          # Context progress bar
 TOKENS_BG=236      # Token count
 RATE_5H_BG=236     # 5h rate limit
 RATE_7D_BG=236     # Weekly rate limit
@@ -450,6 +450,7 @@ echo -e "$L1"
 [[ -n $L_GIT ]] && echo -e "$L_GIT"
 echo -e "\033 "
 echo -e "$L2"
+echo -e "\033 "
 echo -e "$L2b"
 echo -e "$L3"
 echo -e "\033 "
