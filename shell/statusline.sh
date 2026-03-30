@@ -84,9 +84,9 @@ RCOL=70 # Total display width (right edge column)
 # Segment backgrounds
 MODEL_BG=53        # Model name (purple)
 L1_BG=236          # Directory
-L_GIT_BG=235       # Git branch
+L_GIT_BG=236       # Git branch
 GIT_CHANGES_BG=235 # Git file changes sub-segment
-L2_BG=233          # Context progress bar
+L2_BG=238          # Context progress bar
 TOKENS_BG=236      # Token count
 RATE_5H_BG=236     # 5h rate limit
 RATE_7D_BG=236     # Weekly rate limit
@@ -94,7 +94,7 @@ L2b_BG=$RATE_7D_BG # (unused in pills layout, kept for reference)
 TIME_BG=235        # Wall-clock time
 API_BG=235         # API time
 DELTA_BG=235       # Lines-changed delta
-COST_BG=53         # Cost
+COST_BG=240        # Cost
 
 # Foreground colors
 FG=255        # Primary text (white)
@@ -254,7 +254,9 @@ pc() { printf "\033[0m\033[38;5;%dm${RCAP}\033[0m" "$1"; }
 _layout() {
   local n=$1 total=0 tw=0 i
   for ((i = 0; i < n; i++)); do
-    local wv="_PW${i}"; total=$((total + ${!wv} + 2)); tw=$((tw + ${!wv}))
+    local wv="_PW${i}"
+    total=$((total + ${!wv} + 2))
+    tw=$((tw + ${!wv}))
   done
   total=$((total + n - 1)) # inter-pill gaps
   local remain=$((RCOL - total))
@@ -266,11 +268,13 @@ _layout() {
     if [ $i -eq $((n - 1)) ]; then
       pad=$((remain - used))
     elif [ "$tw" -gt 0 ]; then
-      pad=$((remain * w / tw)); used=$((used + pad))
+      pad=$((remain * w / tw))
+      used=$((used + pad))
     else
       pad=0
     fi
-    local fill=""; [ "$pad" -gt 0 ] && fill=$(printf '%*s' "$pad" '')
+    local fill=""
+    [ "$pad" -gt 0 ] && fill=$(printf '%*s' "$pad" '')
     [ $i -gt 0 ] && line+=" "
     line+="$(po $bg)${c}${fill}$(pc $bg)"
   done
@@ -289,7 +293,10 @@ _PBG0=$MODEL_BG
 _dir_name="${DIR##*/}"
 _PC1="\033[38;5;${FG}m 📁 ${_dir_name}"
 _PW1=$((5 + ${#_dir_name})) # " 📁(2col) name "
-[[ -n $DIR_REL ]] && { _PC1+=" \033[38;5;${FG_DIM}m${DIR_REL}"; _PW1=$((_PW1 + 1 + ${#DIR_REL})); }
+[[ -n $DIR_REL ]] && {
+  _PC1+=" \033[38;5;${FG_DIM}m${DIR_REL}"
+  _PW1=$((_PW1 + 1 + ${#DIR_REL}))
+}
 _PC1+=" "
 _PBG1=$L1_BG
 
@@ -300,20 +307,42 @@ L_GIT=""
 if [[ -n $BRANCH_NAME ]]; then
   _PC0="\033[38;5;${GIT_BRANCH_FG}m 🌿 ${BRANCH_NAME}"
   _PW0=$((5 + ${#BRANCH_NAME})) # " 🌿(2col) branch "
-  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && { _PC0+=" \033[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"; _PW0=$((_PW0 + 2 + ${#GIT_AHEAD})); }
-  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && { _PC0+=" \033[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"; _PW0=$((_PW0 + 2 + ${#GIT_BEHIND})); }
+  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && {
+    _PC0+=" \033[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"
+    _PW0=$((_PW0 + 2 + ${#GIT_AHEAD}))
+  }
+  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && {
+    _PC0+=" \033[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"
+    _PW0=$((_PW0 + 2 + ${#GIT_BEHIND}))
+  }
   _PC0+=" "
   _PBG0=$L_GIT_BG
 
   _gc="" _gcw=1 # leading space
-  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && { _gc+="\033[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "; _gcw=$((_gcw + 2 + ${#GIT_ADDED})); }
-  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && { _gc+="\033[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "; _gcw=$((_gcw + 2 + ${#GIT_DELETED})); }
-  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && { _gc+="\033[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "; _gcw=$((_gcw + 2 + ${#GIT_MODIFIED})); }
-  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && { _gc+="\033[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "; _gcw=$((_gcw + 2 + ${#GIT_UNTRACKED})); }
+  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && {
+    _gc+="\033[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "
+    _gcw=$((_gcw + 2 + ${#GIT_ADDED}))
+  }
+  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && {
+    _gc+="\033[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "
+    _gcw=$((_gcw + 2 + ${#GIT_DELETED}))
+  }
+  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && {
+    _gc+="\033[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "
+    _gcw=$((_gcw + 2 + ${#GIT_MODIFIED}))
+  }
+  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && {
+    _gc+="\033[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "
+    _gcw=$((_gcw + 2 + ${#GIT_UNTRACKED}))
+  }
   if [[ -n $_gc ]]; then
-    _PC1=" ${_gc}"; _PW1=$_gcw; _PBG1=$GIT_CHANGES_BG
+    _PC1=" ${_gc}"
+    _PW1=$_gcw
+    _PBG1=$GIT_CHANGES_BG
   else
-    _PC1="\033[38;5;${FG_MUTED}m working tree clean "; _PW1=20; _PBG1=$L_GIT_BG
+    _PC1="\033[38;5;${FG_MUTED}m working tree clean "
+    _PW1=20
+    _PBG1=$L_GIT_BG
   fi
 
   L_GIT=$(_layout 2)
@@ -362,13 +391,19 @@ _PBG0=$TOKENS_BG
 
 _PC1=" ${RATE_5HR_COLOR}${RATE_5HR}%\033[38;5;${FG_DIM}m/5h/\033[38;5;${FG}m${RATE_5HR_RESET_FMT}"
 _PW1=$((7 + ${#RATE_5HR} + ${#RATE_5HR_RESET_FMT})) # " N%/5h/NNH "
-[[ -n $DELTA_5HR ]] && { _PC1+=" \033[38;5;${_DC_5HR}m(${DELTA_5HR})"; _PW1=$((_PW1 + 3 + ${#DELTA_5HR})); }
+[[ -n $DELTA_5HR ]] && {
+  _PC1+=" \033[38;5;${_DC_5HR}m(${DELTA_5HR})"
+  _PW1=$((_PW1 + 3 + ${#DELTA_5HR}))
+}
 _PC1+=" "
 _PBG1=$RATE_5H_BG
 
 _PC2=" ${RATE_7D_COLOR}${RATE_7D}%\033[38;5;${FG_DIM}m/wk/\033[38;5;${FG}m${RATE_7D_TTL}"
 _PW2=$((7 + ${#RATE_7D} + ${#RATE_7D_TTL})) # " N%/wk/Day "
-[[ -n $DELTA_7D ]] && { _PC2+=" \033[38;5;${_DC_7D}m(${DELTA_7D})"; _PW2=$((_PW2 + 3 + ${#DELTA_7D})); }
+[[ -n $DELTA_7D ]] && {
+  _PC2+=" \033[38;5;${_DC_7D}m(${DELTA_7D})"
+  _PW2=$((_PW2 + 3 + ${#DELTA_7D}))
+}
 _PC2+=" "
 _PBG2=$RATE_7D_BG
 
@@ -388,8 +423,14 @@ _PBG1=$API_BG
 _n3=2
 
 _dl="" _dlw=1
-[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && { _dl+="\033[38;5;${LINES_ADD_FG}m+${LINES_ADDED} "; _dlw=$((_dlw + 2 + ${#LINES_ADDED})); }
-[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && { _dl+="\033[38;5;${LINES_DEL_FG}m-${LINES_REMOVED} "; _dlw=$((_dlw + 2 + ${#LINES_REMOVED})); }
+[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && {
+  _dl+="\033[38;5;${LINES_ADD_FG}m+${LINES_ADDED} "
+  _dlw=$((_dlw + 2 + ${#LINES_ADDED}))
+}
+[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && {
+  _dl+="\033[38;5;${LINES_DEL_FG}m-${LINES_REMOVED} "
+  _dlw=$((_dlw + 2 + ${#LINES_REMOVED}))
+}
 if [[ -n $_dl ]]; then
   eval "_PC${_n3}=\" \${_dl}\""
   eval "_PW${_n3}=\$_dlw"
@@ -407,6 +448,8 @@ L3=$(_layout $_n3)
 # Emit
 echo -e "$L1"
 [[ -n $L_GIT ]] && echo -e "$L_GIT"
+echo -e "\033 "
 echo -e "$L2"
 echo -e "$L2b"
 echo -e "$L3"
+echo -e "\033 "
