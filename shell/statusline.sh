@@ -242,38 +242,85 @@ LCAP=$'\xee\x82\xb6' # U+E0B6 (left round cap)
 RCAP=$'\xee\x82\xb4' # U+E0B4 (right round cap)
 COST_FMT=$(printf '$%.2f' "$COST")
 
-# Pill helpers — open/close a colored pill segment
-# Usage: $(po BG) content $(pc BG)  with a space between pills
+# Pill helpers
 po() { printf "\033[38;5;%dm${LCAP}\033[48;5;%dm" "$1" "$1"; }
 pc() { printf "\033[0m\033[38;5;%dm${RCAP}\033[0m" "$1"; }
 
-# === Line 1: [Model] [Dir] ===
-L1="$(po $MODEL_BG)\033[38;5;${FG};1m ${MODEL} \033[22m$(pc $MODEL_BG) "
-L1+="$(po $L1_BG)\033[38;5;${FG}m 📁 ${DIR##*/}"
-[[ -n $DIR_REL ]] && L1+=" \033[38;5;${FG_DIM}m${DIR_REL}"
-L1+=" $(pc $L1_BG)"
+# ───────────────────────────────────────────────────────────
+# Layout engine: build pills, compute widths, pad to RCOL
+# Each pill: _PBG<i>=bg  _PC<i>=content  _PW<i>=visible_width
+# _layout <N> emits a line padded to RCOL (proportional fill)
+# ───────────────────────────────────────────────────────────
+_layout() {
+  local n=$1 total=0 tw=0 i
+  for ((i = 0; i < n; i++)); do
+    local wv="_PW${i}"; total=$((total + ${!wv} + 2)); tw=$((tw + ${!wv}))
+  done
+  total=$((total + n - 1)) # inter-pill gaps
+  local remain=$((RCOL - total))
+  [ "$remain" -lt 0 ] && remain=0
+  local line="" used=0
+  for ((i = 0; i < n; i++)); do
+    local bv="_PBG${i}" cv="_PC${i}" wv="_PW${i}"
+    local bg=${!bv} c=${!cv} w=${!wv} pad
+    if [ $i -eq $((n - 1)) ]; then
+      pad=$((remain - used))
+    elif [ "$tw" -gt 0 ]; then
+      pad=$((remain * w / tw)); used=$((used + pad))
+    else
+      pad=0
+    fi
+    local fill=""; [ "$pad" -gt 0 ] && fill=$(printf '%*s' "$pad" '')
+    [ $i -gt 0 ] && line+=" "
+    line+="$(po $bg)${c}${fill}$(pc $bg)"
+  done
+  echo -e "\033[0m${line}\033[0m"
+}
 
-# === Line 2: [Git branch] [changes] (optional) ===
+# ── Pill content + visible width for each segment ──
+# Width formula: count display columns of visible text inside pill
+# (emoji 📁🌿🤔 = 2 cols / 1 char → +1; ⌛️ = 2 cols / 2 chars → +0)
+
+# === L1: [Model] [Dir] ===
+_PC0="\033[38;5;${FG};1m ${MODEL} \033[22m"
+_PW0=$((${#MODEL} + 2))
+_PBG0=$MODEL_BG
+
+_dir_name="${DIR##*/}"
+_PC1="\033[38;5;${FG}m 📁 ${_dir_name}"
+_PW1=$((5 + ${#_dir_name})) # " 📁(2col) name "
+[[ -n $DIR_REL ]] && { _PC1+=" \033[38;5;${FG_DIM}m${DIR_REL}"; _PW1=$((_PW1 + 1 + ${#DIR_REL})); }
+_PC1+=" "
+_PBG1=$L1_BG
+
+L1=$(_layout 2)
+
+# === L_GIT: [Branch] [Changes] (optional) ===
 L_GIT=""
 if [[ -n $BRANCH_NAME ]]; then
-  L_GIT="$(po $L_GIT_BG)\033[38;5;${GIT_BRANCH_FG}m 🌿 ${BRANCH_NAME}"
-  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"
-  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && L_GIT+=" \033[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"
-  L_GIT+=" $(pc $L_GIT_BG) "
-  _gc=""
-  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "
-  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "
-  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "
-  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && _gc+="\033[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "
+  _PC0="\033[38;5;${GIT_BRANCH_FG}m 🌿 ${BRANCH_NAME}"
+  _PW0=$((5 + ${#BRANCH_NAME})) # " 🌿(2col) branch "
+  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && { _PC0+=" \033[38;5;${GIT_AHEAD_FG}m↑${GIT_AHEAD}"; _PW0=$((_PW0 + 2 + ${#GIT_AHEAD})); }
+  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && { _PC0+=" \033[38;5;${GIT_BEHIND_FG}m↓${GIT_BEHIND}"; _PW0=$((_PW0 + 2 + ${#GIT_BEHIND})); }
+  _PC0+=" "
+  _PBG0=$L_GIT_BG
+
+  _gc="" _gcw=1 # leading space
+  [ "$GIT_ADDED" -gt 0 ] 2>/dev/null && { _gc+="\033[38;5;${GIT_ADD_FG}m+${GIT_ADDED} "; _gcw=$((_gcw + 2 + ${#GIT_ADDED})); }
+  [ "$GIT_DELETED" -gt 0 ] 2>/dev/null && { _gc+="\033[38;5;${GIT_DEL_FG}m-${GIT_DELETED} "; _gcw=$((_gcw + 2 + ${#GIT_DELETED})); }
+  [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && { _gc+="\033[38;5;${GIT_MOD_FG}m~${GIT_MODIFIED} "; _gcw=$((_gcw + 2 + ${#GIT_MODIFIED})); }
+  [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && { _gc+="\033[38;5;${GIT_UNT_FG}m?${GIT_UNTRACKED} "; _gcw=$((_gcw + 2 + ${#GIT_UNTRACKED})); }
   if [[ -n $_gc ]]; then
-    L_GIT+="$(po $GIT_CHANGES_BG) ${_gc}$(pc $GIT_CHANGES_BG)"
+    _PC1=" ${_gc}"; _PW1=$_gcw; _PBG1=$GIT_CHANGES_BG
   else
-    L_GIT+="$(po $L_GIT_BG)\033[38;5;${FG_MUTED}m working tree clean $(pc $L_GIT_BG)"
+    _PC1="\033[38;5;${FG_MUTED}m working tree clean "; _PW1=20; _PBG1=$L_GIT_BG
   fi
+
+  L_GIT=$(_layout 2)
 fi
 
-# === Context progress bar ===
-BAR_WIDTH=$((RCOL - 6))
+# === L2: Context progress bar (special: PCT_COLOR left cap) ===
+BAR_WIDTH=$((RCOL - 3)) # LCAP(1) + BAR + " "(1) + RCAP(1)
 BAR_LABEL=" ${PCT}%"
 BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" -v label="$BAR_LABEL" 'BEGIN {
   v = p + 0
@@ -306,38 +353,60 @@ BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" -v label="$BAR_LABEL" 'BEGIN {
   }
   printf "%s", out
 }')
-L2="${PCT_COLOR_FWD}${LCAP}\033[48;5;${L2_BG}m${BAR} $(pc $L2_BG)"
+L2="\033[0m${PCT_COLOR_FWD}${LCAP}\033[48;5;${L2_BG}m${BAR} $(pc $L2_BG)\033[0m"
 
-# === Tokens / Rate limits ===
-L2b="$(po $TOKENS_BG)${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} $(pc $TOKENS_BG) "
-L2b+="$(po $RATE_5H_BG) ${RATE_5HR_COLOR}${RATE_5HR}%\033[38;5;${FG_DIM}m/5h/\033[38;5;${FG}m${RATE_5HR_RESET_FMT}"
-[[ -n $DELTA_5HR ]] && L2b+=" \033[38;5;${_DC_5HR}m(${DELTA_5HR})"
-L2b+=" $(pc $RATE_5H_BG) "
-L2b+="$(po $RATE_7D_BG) ${RATE_7D_COLOR}${RATE_7D}%\033[38;5;${FG_DIM}m/wk/\033[38;5;${FG}m${RATE_7D_TTL}"
-[[ -n $DELTA_7D ]] && L2b+=" \033[38;5;${_DC_7D}m(${DELTA_7D})"
-L2b+=" $(pc $RATE_7D_BG)"
+# === L2b: [Tokens] [5h Rate] [7d Rate] ===
+_PC0="${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} "
+_PW0=$((${#TOKENS_USED_FMT} + ${#CTX_MAX_FMT} + 5)) # " TOK / MAX "
+_PBG0=$TOKENS_BG
 
-# === Time / API / Delta / Cost ===
-L3="$(po $TIME_BG)\033[38;5;${FG}m ⌛️ ${TIME_FMT} $(pc $TIME_BG) "
-L3+="$(po $API_BG)\033[38;5;${FG}m 🤔 ${API_TIME_FMT} \033[38;5;${FG_DIM}m${TOK_SEC}t/s $(pc $API_BG)"
-_dl=""
-[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;${LINES_ADD_FG}m+${LINES_ADDED} "
-[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && _dl+="\033[38;5;${LINES_DEL_FG}m-${LINES_REMOVED} "
-[[ -n $_dl ]] && L3+=" $(po $DELTA_BG) ${_dl}$(pc $DELTA_BG)"
-L3+=" $(po $COST_BG)\033[38;5;${COST_FG};1m ${COST_FMT} \033[22m$(pc $COST_BG)"
+_PC1=" ${RATE_5HR_COLOR}${RATE_5HR}%\033[38;5;${FG_DIM}m/5h/\033[38;5;${FG}m${RATE_5HR_RESET_FMT}"
+_PW1=$((7 + ${#RATE_5HR} + ${#RATE_5HR_RESET_FMT})) # " N%/5h/NNH "
+[[ -n $DELTA_5HR ]] && { _PC1+=" \033[38;5;${_DC_5HR}m(${DELTA_5HR})"; _PW1=$((_PW1 + 3 + ${#DELTA_5HR})); }
+_PC1+=" "
+_PBG1=$RATE_5H_BG
 
-# Emit lines
-_line() { echo -e "\033[0m$1\033[0m"; }
+_PC2=" ${RATE_7D_COLOR}${RATE_7D}%\033[38;5;${FG_DIM}m/wk/\033[38;5;${FG}m${RATE_7D_TTL}"
+_PW2=$((7 + ${#RATE_7D} + ${#RATE_7D_TTL})) # " N%/wk/Day "
+[[ -n $DELTA_7D ]] && { _PC2+=" \033[38;5;${_DC_7D}m(${DELTA_7D})"; _PW2=$((_PW2 + 3 + ${#DELTA_7D})); }
+_PC2+=" "
+_PBG2=$RATE_7D_BG
 
-if [[ -n $L_GIT ]]; then
-  _line "$L1"
-  _line "$L_GIT"
-  _line "$L2"
-  _line "$L2b"
-  _line "$L3"
-else
-  _line "$L1"
-  _line "$L2"
-  _line "$L2b"
-  _line "$L3"
+L2b=$(_layout 3)
+
+# === L3: [Time] [API] [Delta?] [Cost] ===
+_n3=0
+
+_PC0="\033[38;5;${FG}m ⌛️ ${TIME_FMT} "
+_PW0=$((5 + ${#TIME_FMT})) # " ⌛️ TIME " (⌛️: 2col/2char → no adj)
+_PBG0=$TIME_BG
+_n3=1
+
+_PC1="\033[38;5;${FG}m 🤔 ${API_TIME_FMT} \033[38;5;${FG_DIM}m${TOK_SEC}t/s "
+_PW1=$((9 + ${#API_TIME_FMT} + ${#TOK_SEC})) # " 🤔(+1) APITIME TOKt/s "
+_PBG1=$API_BG
+_n3=2
+
+_dl="" _dlw=1
+[ "$LINES_ADDED" -gt 0 ] 2>/dev/null && { _dl+="\033[38;5;${LINES_ADD_FG}m+${LINES_ADDED} "; _dlw=$((_dlw + 2 + ${#LINES_ADDED})); }
+[ "$LINES_REMOVED" -gt 0 ] 2>/dev/null && { _dl+="\033[38;5;${LINES_DEL_FG}m-${LINES_REMOVED} "; _dlw=$((_dlw + 2 + ${#LINES_REMOVED})); }
+if [[ -n $_dl ]]; then
+  eval "_PC${_n3}=\" \${_dl}\""
+  eval "_PW${_n3}=\$_dlw"
+  eval "_PBG${_n3}=\$DELTA_BG"
+  _n3=$((_n3 + 1))
 fi
+
+eval "_PC${_n3}=\"\033[38;5;\${COST_FG};1m \${COST_FMT} \033[22m\""
+eval "_PW${_n3}=\$((${#COST_FMT} + 2))"
+eval "_PBG${_n3}=\$COST_BG"
+_n3=$((_n3 + 1))
+
+L3=$(_layout $_n3)
+
+# Emit
+echo -e "$L1"
+[[ -n $L_GIT ]] && echo -e "$L_GIT"
+echo -e "$L2"
+echo -e "$L2b"
+echo -e "$L3"
