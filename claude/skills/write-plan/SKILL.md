@@ -182,8 +182,8 @@ Call `EnterPlanMode`, then write the **plan file** with this structure:
 ```
 # Steps
 
-1. Load `/<executor>` skill
-2. Read `@<plan-path>`
+- Load `/<executor>` skill
+- Read `@<plan-path>`
 
 ---
 

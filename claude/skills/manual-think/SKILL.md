@@ -58,21 +58,20 @@ at the transition point, preventing language drift:
 
 ## Plan Mode Propagation
 
-When writing plan files via `/write-plan` (Step 5: Finalize) or any workflow
-that enters `EnterPlanMode`, prepend the `/manual-think` load instruction as
-the **first step** in the plan file's `# Steps` block:
+When writing the plan file between `EnterPlanMode` and `ExitPlanMode`,
+verify the `# Steps` block starts with `Load /manual-think skill`
+before the executor line:
 
 ```
 # Steps
 
-1. Load `/manual-think` skill
-2. Load `/<executor>` skill
-3. Read `@<plan-path>`
-...
+- Load `/manual-think` skill
+- Load `/<executor>` skill
+- Read `@<plan-path>`
 ```
 
-This ensures manual chain-of-thought survives context resets between
-planning and execution sessions.
+The next session has zero memory of this skill — omitting it silently
+loses manual chain-of-thought.
 
 ## Subagent Propagation
 
