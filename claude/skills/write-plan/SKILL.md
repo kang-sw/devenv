@@ -119,6 +119,14 @@ For manual modules:
 - Observable conditions that mean "done"
 ```
 
+**Data contract gate.** Scan the draft for data contract changes — formats
+that cross a capsule boundary (wire formats, persistence schemas, public API
+types consumed outside the owning package, config file formats, environment
+variables, or CLI flags). If any contract is defined or modified but **not**
+specified in the ticket, present the proposed shape and rationale to the user
+and wait for confirmation. Do not proceed to verification with unconfirmed
+contracts.
+
 **Self-containedness check.** Before moving on, ask: "Could an agent with no
 prior context execute this plan correctly?" If not, add what's missing.
 
@@ -197,11 +205,8 @@ Call `EnterPlanMode`, then write the **plan file** with this structure:
 ```
 
 **Data Contract Changes** — include this section when the plan adds, changes,
-or removes data formats that cross a capsule boundary: wire formats (API
-payloads, IPC messages), persistence schemas (DB, file formats), public API
-types consumed outside the owning package, config file formats, environment
-variables, or CLI flags. Omit the entire section for pure-logic or
-internal-only changes.
+or removes data contracts (see Step 2 gate for the full list). Omit the
+entire section for pure-logic or internal-only changes.
 
 The plan file content is injected as the first prompt when the user clicks
 "Reset Context and auto-accept" after `ExitPlanMode`. The `# Steps` block
