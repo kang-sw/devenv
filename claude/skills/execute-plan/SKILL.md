@@ -182,6 +182,9 @@ Loop until clean. Dismiss false positives with a brief rationale.
 
 ### Mental-model-updater task
 
+Wait for the code review loop to fully resolve before starting — fixes
+may change the final implementation.
+
 Dispatch a **mental-model-updater subagent** with the list of files changed
 and a summary of what was added/modified. Wait for completion before the
 docs task.
