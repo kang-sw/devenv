@@ -83,9 +83,9 @@ RCOL=70 # Total display width (right edge column)
 
 # Segment backgrounds
 MODEL_BG=53        # Model name (purple)
-L1_BG=236          # Directory
-L_GIT_BG=236       # Git branch
-GIT_CHANGES_BG=235 # Git file changes sub-segment
+L1_BG=235          # Directory
+L_GIT_BG=235       # Git branch
+GIT_CHANGES_BG=236 # Git file changes sub-segment
 L2_BG=234          # Context progress bar
 TOKENS_BG=236      # Token count
 RATE_5H_BG=236     # 5h rate limit
@@ -94,13 +94,14 @@ L2b_BG=$RATE_7D_BG # (unused in pills layout, kept for reference)
 TIME_BG=235        # Wall-clock time
 API_BG=235         # API time
 DELTA_BG=235       # Lines-changed delta
-COST_BG=240        # Cost
+COST_BG=53         # Cost
 
 # Foreground colors
 FG=255        # Primary text (white)
 FG_DIM=245    # Labels / secondary
 FG_DIMMER=243 # Annotations
 FG_MUTED=242  # Muted ("working tree clean")
+FG_HSEP=236   # Separator
 
 # Git status
 GIT_BRANCH_FG=114 # Branch name (green)
@@ -448,12 +449,14 @@ _n3=$((_n3 + 1))
 
 L3=$(_layout $_n3)
 
+LSEP="\033[38;5;${FG_HSEP}m $(printf "%$((RCOL - 2))s" | tr ' ' '·')"
+
 # Emit
-echo -e "$L1"
-[[ -n $L_GIT ]] && echo -e "$L_GIT"
-echo -e "\033 "
 echo -e "$L2"
-echo -e "\033 "
+echo -e "$LSEP"
 echo -e "$L2b"
 echo -e "$L3"
+echo -e "\033 "
+echo -e "$L1"
+[[ -n $L_GIT ]] && echo -e "$L_GIT"
 echo -e "\033 "
