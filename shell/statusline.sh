@@ -191,11 +191,14 @@ fmt_time() {
 TIME_FMT=$(fmt_time "$HRS" "$MINS" "$SECS")
 API_TIME_FMT=$(fmt_time "$API_HRS" "$API_MINS" "$API_SECS")
 
+# Portable epoch → formatted date (GNU: date -d @EPOCH, BSD: date -r EPOCH)
+_fmt_epoch() { date -d "@$1" "$2" 2>/dev/null || date -r "$1" "$2" 2>/dev/null || echo "??"; }
+
 # 5h rate limit reset time (HH:MM)
-RATE_5HR_RESET_FMT=$(date -r "$RATE_5HR_RESETS" "+%HH" 2>/dev/null || echo "??")
+RATE_5HR_RESET_FMT=$(_fmt_epoch "$RATE_5HR_RESETS" "+%HH")
 
 # 7d rate limit reset weekday
-RATE_7D_TTL=$(date -r "$RATE_7D_RESETS" "+%a" 2>/dev/null || echo "??")
+RATE_7D_TTL=$(_fmt_epoch "$RATE_7D_RESETS" "+%a")
 
 # Relative path: current_dir relative to project_dir
 DIR_REL=""
