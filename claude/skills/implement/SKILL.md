@@ -157,11 +157,9 @@ Dismiss false positives with a brief rationale — do not apply unnecessary fixe
 
 ### Mental-model-updater task
 
-Dispatch a **subagent** to update mental-model docs based on the
-changes made and wait for it to finish. Prompt it with: the list of files
-changed and a summary of what was added/modified. The subagent reads all
-mental-model docs and updates them to reflect the new state. Skip if the
-change has no mental-model impact (e.g., config tweaks, typo fixes).
+Dispatch a **mental-model-updater subagent** with the list of files changed
+and a summary of what was added/modified. Skip if the change has no
+mental-model impact (e.g., config tweaks, typo fixes).
 
 **Wait for the subagent to finish before starting the docs task.**
 Code review fixes can change the implementation substantially — mental-model

@@ -28,6 +28,10 @@ fixes, test code). The plan fills the gap:
 3. **Supplement** — when the ticket lacks contracts or leaves decisions open,
    research the codebase and propose them (subject to the data contract gate).
 
+When the plan's formal definitions differ from the ticket's sketches, the
+plan takes precedence — it reflects codebase research the ticket did not
+have. Note the change and rationale in Context.
+
 **Do not include:** implementation code for pattern-following edits,
 construction-site inventories the compiler will surface, line numbers,
 import statements, or delegation strategy that would be "main" for every
@@ -69,7 +73,7 @@ Adapt depth to the change. Pick the appropriate level:
 
 When uncertain, go one level deeper — over-researching costs less than a wrong
 plan. Before designing new components, search for existing utilities or patterns
-that can be reused or extended — include these in the plan's "Relevant Files."
+that can be reused or extended — reference them in the plan's Steps.
 
 Use subagents for broad codebase searches, including reuse candidates. Keep the
 main context for synthesis.
@@ -84,54 +88,44 @@ Use a descriptive kebab-case name for the plan (e.g.,
 The plan name is independent of the ticket stem. The `YYYY-MM/DD-hhmm`
 prefix serves as the plan's unique hash.
 
-Write the plan to that file using the `Write` tool, in this format:
+Write the plan to that file using the `Write` tool. Include only
+sections that carry information — omit empty or trivial sections.
+Length varies with complexity; the content-type rules below govern
+what belongs, not a line count.
 
 ```markdown
 # <Plan Title>
 
 ## Context
-- Ticket phase decisions and suggested approaches (goals, constraints,
-  rejected alternatives, candidate approaches with rationale)
-- Codebase mapping (existing types to reuse, integration points,
-  file placement)
+What the executor cannot re-derive from code alone: ticket decisions
+and rejected alternatives relevant to this phase, research-discovered
+pitfalls, integration constraints that require specific sequencing.
 
-## Relevant Files
-- `path/to/file` — role in this change, key types/functions to touch
-
-## Conventions (verified from code)
-- Naming, structure, error handling patterns observed
-- Concrete examples from existing code where helpful
-
-## Implementation Steps
-
+## Steps
 Steps specify **contracts and decisions**, not code.
 
-For each step:
-- What changes and in which file(s)
-- Exact definitions for new/changed contracts (struct layouts, API
-  signatures, type definitions that cross module boundaries)
+When a step introduces or changes a public interface, lead with its
+contract: struct/enum definitions with all public fields and types,
+trait definitions, public function signatures. These are the plan's
+primary deliverable — the executor must not have to invent them.
+
+Carry forward ticket-mandated approaches (algorithms, patterns,
+constraints agreed during discussion) explicitly.
+
+Also include:
 - Non-obvious constraints or ordering dependencies
 - Pattern references ("same as ExternalSink::on_event") instead of
   duplicated code
-- Delegation: only when haiku/sonnet — omit for main (default)
 
 Leave to the executor: construction-site fixes (compiler-guided),
 pattern-following code, line numbers, import changes.
 
-## Testing Strategy
-
-Classify each module and list key scenarios to verify:
-
-| Module | Approach | Key scenarios |
-|--------|----------|---------------|
-| `path/module` | TDD / post-impl / manual | what to test |
-
-For TDD modules, add stub scope (which signatures, return types).
-For manual modules, add verification method.
-Post-impl needs only the key scenarios column.
+## Testing
+Key scenarios to verify after implementation. Classify modules as
+TDD / post-impl / manual only when non-obvious; default is post-impl.
 
 ## Success Criteria
-- Observable conditions that mean "done"
+Observable conditions that mean "done".
 ```
 
 **Data contract gate.** Scan the draft for data contract changes — formats
@@ -145,62 +139,39 @@ contracts.
 **Self-containedness check.** Before moving on, ask: "Could an agent with no
 prior context execute this plan correctly?" If not, add what's missing.
 
-## Step 3: Verify Plan
+## Step 3: Verify
 
-Dispatch a **sonnet-level general-purpose subagent** to verify the plan against
-the actual codebase. Pass the **file path only** — the subagent reads the plan
-itself:
+Dispatch a **sonnet subagent** to verify the plan from a fresh context.
+The value is not thoroughness but **fresh eyes** — the planner has
+accumulated assumptions that a new context window does not share.
 
-> **Task:** Verify the implementation plan at `<plan-path>` against the actual
-> source code.
+> **Task:** Verify the implementation plan at `<plan-path>`.
 >
-> **Steps:**
-> 1. Read the plan file.
-> 2. Read `CLAUDE.md` code standards. Read **all** of
->    `ai-docs/mental-model/` regardless of apparent domain relevance —
->    cross-module contracts and invariants often surface in unrelated domains.
->    Do this before evaluating the plan.
-> 3. Check each item in the plan:
->    - Do referenced files, functions, and types actually exist?
->    - Do described conventions match actual code patterns?
->    - Are there missing considerations (error handling, edge cases, dependencies)?
->    - Does the plan conflict with documented contracts or invariants?
->    - Does the plan introduce unintended coupling or violate module boundaries?
->    - Are implementation steps concrete enough to execute without ambiguity?
->    - Are testing classifications (TDD/post-impl/manual) appropriate for each module?
->    - Are delegation decisions (haiku/sonnet/main) reasonable given complexity?
->    - Do TDD stub definitions cover the necessary type signatures?
->    - Does the plan reimplement functionality that already exists in the
->      codebase? Search for existing utilities, helpers, or patterns that
->      could be reused or extended instead.
+> Read the plan, then read `CLAUDE.md` and all of `ai-docs/mental-model/`.
+> Check:
+> - Do referenced files, functions, and types actually exist?
+> - Do described conventions match actual code patterns?
+> - Does the plan conflict with documented contracts or invariants?
+> - Are new/changed public contracts (structs, traits, function
+>   signatures) specified with all public members and types?
+> - Could an executor with no prior context implement this correctly?
+> - Does the plan reimplement something that already exists?
 >
-> **Be aggressive.** Flag anything suspicious — false positives are fine.
 > Categorize as Critical / Important / Minor.
 
-## Step 4: Triage & Revise
+Fix Critical issues in the plan. Assess Important — revise if valid.
+Skip Minor unless useful.
 
-Read the verifier's report. For each flag:
-
-- **Critical**: fix in the plan. These are factual errors.
-- **Important**: assess whether the concern applies. Revise if it does.
-- **Minor**: note if useful, skip if not.
-
-The verifier is intentionally aggressive. Use your judgment on actual severity.
-
-**Edit the plan file directly** using the `Edit` tool — do not rewrite the
-entire file. After revision, do a final read-through for coherence and
-completeness.
-
-## Step 5: Finalize
+## Step 4: Finalize
 
 Choose the executor based on plan depth:
 
-- **Tactical plan** (has Testing Strategy classifications, delegation
-  decisions, per-step detail) → `/execute-plan`
-- **Strategic plan** (direction + relevant files, no tactical directives)
+- **Tactical** (contracts with integration notes, testing classifications,
+  success criteria) → `/execute-plan`
+- **Strategic** (direction + relevant files, decisions left to executor)
   → `/implement`
 
-Call `EnterPlanMode`, then write the **plan file** with this structure:
+Call `EnterPlanMode` and write this structure:
 
 ```
 # Steps
@@ -227,8 +198,8 @@ The plan file content is injected as the first prompt when the user clicks
 "Reset Context and auto-accept" after `ExitPlanMode`. The `# Steps` block
 ensures the executor loads before the plan is read.
 
-Do **not** copy the full plan text into the plan file — the `@<plan-path>`
-reference is the source of truth.
+Do **not** copy the full plan here — the `@<plan-path>` reference is the
+source of truth.
 
 **The plan MUST be committed!**
 

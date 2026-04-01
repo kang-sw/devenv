@@ -1,6 +1,6 @@
 ---
 name: execute-plan
-description: Execute a tactical implementation plan produced by /write-plan. Follows plan steps mechanically with structured task tracking, testing, and documentation.
+description: Execute a tactical implementation plan produced by /write-plan. Implements the plan's contracts and decisions with structured task tracking, testing, and documentation.
 argument-hint: <plan-path>
 ---
 
@@ -30,9 +30,8 @@ the current codebase. Threshold:
 
 1. Read the plan file at `$ARGUMENTS`.
 2. Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project state.
-3. Read mental-model docs referenced in the plan's Relevant Files or Context
-   sections. Read additional mental-model docs only if the plan explicitly
-   instructs it.
+3. Read mental-model docs referenced in the plan's Context section. Read
+   additional mental-model docs only if the plan explicitly instructs it.
 4. Run `git log --oneline -10` to check recent work.
 5. Record the current branch as `<original-branch>`. If already on an
    `execute/` branch, treat it as a resumed session — infer
@@ -42,12 +41,13 @@ the current codebase. Threshold:
 
 ## Step 1: Task List
 
-Convert the plan's Implementation Steps into tasks via `TaskCreate`.
-Wrap them with the mandatory bookend tasks:
+Convert the plan's Steps into tasks via `TaskCreate`. The tasks marked
+`[fixed]` are mandatory bookend tasks — do not skip or reorder them.
+Fill plan-derived tasks between them:
 
 ```
 [ ] [fixed] Verify plan assumptions — read target files, confirm plan's claims
-  ... (tasks derived from plan's Implementation Steps) ...
+  ... (tasks derived from plan's Steps) ...
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent
   > if Critical/Important issues: fix > re-test > re-review (loop until clean)
@@ -70,7 +70,7 @@ Work through tasks sequentially. For each:
 2. Do the work as specified by the plan.
 3. Set task to `completed`.
 
-### Following the plan's Testing Strategy
+### Following the plan's Testing section
 
 The plan classifies modules into testing approaches. Follow them exactly:
 
@@ -113,7 +113,7 @@ When tests fail after implementation, before manual debugging, dispatch a
 >
 > **Failing test:** `test_name` in `path/to/test_file`
 > **Implementation:** `path/to/impl_file`
-> **Success criteria:** [from the plan's Testing Strategy for this module]
+> **Success criteria:** [from the plan's Testing section for this module]
 > **Error output:**
 > ```
 > [paste test runner output]
@@ -150,7 +150,8 @@ result — never "should pass" or "looks correct."
 
 ### Code review task
 
-Skip for small, single-file changes.
+Skip for small, single-file changes. **When to run:** changes touching
+3+ files, new public APIs, or architectural changes.
 
 **Dispatch a general-purpose subagent with:**
 
@@ -169,7 +170,7 @@ Skip for small, single-file changes.
 > - **Correctness** — logic errors, edge cases, error handling
 > - **Plan adherence** — does the implementation match the plan's intent?
 > - **Architectural fit** — does this change respect documented contracts
->   and module boundaries?
+>   and module boundaries? Any unintended coupling or side effects?
 > - **Test quality** — adequate coverage, no deceptive tests (tautological
 >   assertions, unreachable assert paths, mocks bypassing code under test,
 >   expected values derived from the logic being tested)
@@ -192,7 +193,8 @@ may change the final implementation.
 
 Dispatch a **mental-model-updater subagent** with the list of files changed
 and a summary of what was added/modified. Wait for completion before the
-docs task.
+docs task — docs must reflect the final mental-model state. Skip if the
+change has no mental-model impact (e.g., config tweaks, typo fixes).
 
 ### Docs task
 
@@ -222,9 +224,11 @@ Report to the user:
 - Testing strategy changes (e.g., TDD module switched to post-impl)
 
 **Process issues** (skip if nothing notable):
-- Dependency doc gaps
-- Mental-model inaccuracies
-- Convention mismatches
+- Dependency doc gaps — APIs that were missing, wrong, or misleading in
+  `ai-docs/deps/` docs
+- Mental-model inaccuracies — contracts or invariants that didn't match reality
+- Convention mismatches — patterns described in docs that diverged from actual
+  code
 
 **Ticket status** (always include when a ticket was the input):
 - Remaining phases or confirmation that all phases are complete
