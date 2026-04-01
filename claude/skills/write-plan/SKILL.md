@@ -120,6 +120,9 @@ Also include:
 Leave to the executor: construction-site fixes (compiler-guided),
 pattern-following code, line numbers, import changes.
 
+Implementation sketches may be approximate or pseudo-code — precision
+is the executor's responsibility, not the plan's.
+
 ## Testing
 Key scenarios to verify after implementation. Classify modules as
 TDD / post-impl / manual only when non-obvious; default is post-impl.
