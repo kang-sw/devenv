@@ -14,11 +14,14 @@ MODE="${1:-full}"
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
-info()    { printf "\033[1;34m  ➜ %s\033[0m\n" "$*"; }
+info() { printf "\033[1;34m  ➜ %s\033[0m\n" "$*"; }
 success() { printf "\033[1;32m  ✔ %s\033[0m\n" "$*"; }
-warn()    { printf "\033[1;33m  ⚠ %s\033[0m\n" "$*"; }
-die()     { printf "\033[1;31m  ✘ %s\033[0m\n" "$*" >&2; exit 1; }
-has()     { command -v "$1" &>/dev/null; }
+warn() { printf "\033[1;33m  ⚠ %s\033[0m\n" "$*"; }
+die() {
+  printf "\033[1;31m  ✘ %s\033[0m\n" "$*" >&2
+  exit 1
+}
+has() { command -v "$1" &>/dev/null; }
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Platform detection
@@ -26,9 +29,9 @@ has()     { command -v "$1" &>/dev/null; }
 
 PLATFORM="linux"
 if [[ "$(uname)" == "Darwin" ]]; then
-    PLATFORM="macos"
+  PLATFORM="macos"
 elif grep -qi microsoft /proc/version 2>/dev/null; then
-    PLATFORM="wsl"
+  PLATFORM="wsl"
 fi
 
 info "Platform: $PLATFORM  Mode: $MODE"
@@ -38,168 +41,168 @@ info "Platform: $PLATFORM  Mode: $MODE"
 # ══════════════════════════════════════════════════════════════════════════════
 
 if [[ "$MODE" == "update" ]]; then
-    info "Update mode — skipping package installation"
+  info "Update mode — skipping package installation"
 else
 
-# Use sudo only when not already root
-if [[ $EUID -eq 0 ]]; then
+  # Use sudo only when not already root
+  if [[ $EUID -eq 0 ]]; then
     SUDO=""
-else
+  else
     SUDO="sudo"
-fi
+  fi
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 1. System prerequisites
-# ══════════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 1. System prerequisites
+  # ══════════════════════════════════════════════════════════════════════════════
 
-if [[ "$PLATFORM" == "wsl" || "$PLATFORM" == "linux" ]]; then
+  if [[ "$PLATFORM" == "wsl" || "$PLATFORM" == "linux" ]]; then
     info "Updating apt and installing prerequisites..."
     $SUDO apt-get update -qq
     $SUDO apt-get install -y -qq \
-        curl git unzip wget ca-certificates gnupg \
-        build-essential gcc g++ make cmake pkg-config \
-        libssl-dev zlib1g-dev \
-        xclip xsel
+      curl git unzip wget ca-certificates gnupg \
+      build-essential gcc g++ make cmake pkg-config \
+      libssl-dev zlib1g-dev \
+      xclip xsel
     success "apt prerequisites installed"
-fi
+  fi
 
-if [[ "$PLATFORM" == "macos" ]]; then
+  if [[ "$PLATFORM" == "macos" ]]; then
     if ! xcode-select -p &>/dev/null; then
-        info "Installing Xcode Command Line Tools..."
-        xcode-select --install || true
-        until xcode-select -p &>/dev/null; do sleep 5; done
-        success "Xcode CLT installed"
+      info "Installing Xcode Command Line Tools..."
+      xcode-select --install || true
+      until xcode-select -p &>/dev/null; do sleep 5; done
+      success "Xcode CLT installed"
     else
-        success "Xcode CLT already present"
+      success "Xcode CLT already present"
     fi
-fi
+  fi
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 2. Homebrew
-# ══════════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 2. Homebrew
+  # ══════════════════════════════════════════════════════════════════════════════
 
-if ! has brew; then
+  if ! has brew; then
     info "Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     if [[ "$PLATFORM" == "macos" ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
+      eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
     else
-        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+      eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
     fi
     success "Homebrew installed"
-else
+  else
     success "Homebrew already present"
     brew update --quiet
-fi
+  fi
 
-# Ensure brew is on PATH for the rest of this script
-if [[ "$PLATFORM" == "macos" ]]; then
+  # Ensure brew is on PATH for the rest of this script
+  if [[ "$PLATFORM" == "macos" ]]; then
     eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null || true)"
-else
+  else
     eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv 2>/dev/null || true)"
-fi
+  fi
 
-brew_install() {
+  brew_install() {
     local pkg="$1"
     if brew list --formula "$pkg" &>/dev/null; then
-        success "$pkg already installed (brew)"
+      success "$pkg already installed (brew)"
     else
-        info "brew install $pkg"
-        brew install "$pkg"
-        success "$pkg installed"
+      info "brew install $pkg"
+      brew install "$pkg"
+      success "$pkg installed"
     fi
-}
+  }
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 3. Zsh (no Oh My Zsh — plugins installed via brew instead)
-# ══════════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 3. Zsh (no Oh My Zsh — plugins installed via brew instead)
+  # ══════════════════════════════════════════════════════════════════════════════
 
-if ! has zsh; then
+  if ! has zsh; then
     info "Installing zsh..."
     if [[ "$PLATFORM" == "macos" ]]; then
-        brew_install zsh
+      brew_install zsh
     else
-        $SUDO apt-get install -y -qq zsh
+      $SUDO apt-get install -y -qq zsh
     fi
-fi
+  fi
 
-ZSH_BIN="$(command -v zsh)"
+  ZSH_BIN="$(command -v zsh)"
 
-if [[ "$SHELL" != "$ZSH_BIN" ]]; then
+  if [[ "$SHELL" != "$ZSH_BIN" ]]; then
     info "Setting zsh as default shell ($ZSH_BIN)..."
     if ! grep -qF "$ZSH_BIN" /etc/shells; then
-        echo "$ZSH_BIN" | $SUDO tee -a /etc/shells
+      echo "$ZSH_BIN" | $SUDO tee -a /etc/shells
     fi
     chsh -s "$ZSH_BIN" 2>/dev/null || warn "chsh failed — run manually: chsh -s $ZSH_BIN"
-fi
-success "zsh: $ZSH_BIN"
+  fi
+  success "zsh: $ZSH_BIN"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 4. Core CLI tools
-# ══════════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 4. Core CLI tools
+  # ══════════════════════════════════════════════════════════════════════════════
 
-info "Installing core CLI tools..."
+  info "Installing core CLI tools..."
 
-brew_install fzf
-brew_install ripgrep
-brew_install fd
-brew_install bat
-brew_install tmux
+  brew_install fzf
+  brew_install ripgrep
+  brew_install fd
+  brew_install bat
+  brew_install tmux
 
-# fzf shell integration (~/.fzf.zsh)
-FZF_PREFIX="$(brew --prefix fzf 2>/dev/null || echo "")"
-if [[ -n "$FZF_PREFIX" && -f "$FZF_PREFIX/install" ]]; then
+  # fzf shell integration (~/.fzf.zsh)
+  FZF_PREFIX="$(brew --prefix fzf 2>/dev/null || echo "")"
+  if [[ -n "$FZF_PREFIX" && -f "$FZF_PREFIX/install" ]]; then
     "$FZF_PREFIX/install" --key-bindings --completion --no-update-rc --no-bash --no-fish 2>/dev/null || true
-fi
+  fi
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 5. Neovim + LazyVim dependencies
-# ══════════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 5. Neovim + LazyVim dependencies
+  # ══════════════════════════════════════════════════════════════════════════════
 
-info "Installing Neovim and LazyVim dependencies..."
+  info "Installing Neovim and LazyVim dependencies..."
 
-brew_install neovim
-brew_install tree-sitter
-brew_install lazygit
-brew_install node
-brew_install python3
+  brew_install neovim
+  brew_install tree-sitter
+  brew_install lazygit
+  brew_install node
+  brew_install python3
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 6. Quality-of-life extras
-# ══════════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 6. Quality-of-life extras
+  # ══════════════════════════════════════════════════════════════════════════════
 
-info "Installing extras..."
+  info "Installing extras..."
 
-brew_install eza
-brew_install zoxide
-brew_install delta
-brew_install starship
-brew_install lf
+  brew_install eza
+  brew_install zoxide
+  brew_install delta
+  brew_install starship
+  brew_install lf
 
-# Nerd Font (macOS cask only; on Linux/WSL install on the host terminal side)
-if [[ "$PLATFORM" == "macos" ]]; then
+  # Nerd Font (macOS cask only; on Linux/WSL install on the host terminal side)
+  if [[ "$PLATFORM" == "macos" ]]; then
     if ! brew list --cask font-jetbrains-mono-nerd-font &>/dev/null; then
-        info "Installing JetBrainsMono Nerd Font..."
-        brew install --cask font-jetbrains-mono-nerd-font
-        success "JetBrainsMono Nerd Font installed"
+      info "Installing JetBrainsMono Nerd Font..."
+      brew install --cask font-jetbrains-mono-nerd-font
+      success "JetBrainsMono Nerd Font installed"
     else
-        success "JetBrainsMono Nerd Font already installed"
+      success "JetBrainsMono Nerd Font already installed"
     fi
-else
+  else
     warn "Linux/WSL: install a Nerd Font on the host/Windows terminal side for icon rendering."
-fi
+  fi
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 7. Zsh plugins (via brew — replaces Oh My Zsh)
-# ══════════════════════════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 7. Zsh plugins (via brew — replaces Oh My Zsh)
+  # ══════════════════════════════════════════════════════════════════════════════
 
-info "Installing zsh plugins..."
+  info "Installing zsh plugins..."
 
-brew_install zsh-autosuggestions
-brew_install zsh-syntax-highlighting
-brew_install zsh-history-substring-search
+  brew_install zsh-autosuggestions
+  brew_install zsh-syntax-highlighting
+  brew_install zsh-history-substring-search
 
-fi  # end of: if [[ "$MODE" != "update" ]]
+fi # end of: if [[ "$MODE" != "update" ]]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 8. Zsh config (~/.zshrc)  — 항상 최신 내용으로 덮어씀 (위치 보존)
@@ -213,7 +216,7 @@ ZSH_END_MARKER="# <<< dotfiles bootstrap <<<"
 
 # 새 스니펫을 임시 파일에 작성
 _SNIPPET_TMP=$(mktemp)
-cat > "$_SNIPPET_TMP" << 'EOF'
+cat >"$_SNIPPET_TMP" <<'EOF'
 # >>> dotfiles bootstrap >>>
 
 # ── brew (Linux / WSL) ───────────────────────────────────────────────────────
@@ -257,14 +260,6 @@ export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
 # ── bat ──────────────────────────────────────────────────────────────────────
 export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 export BAT_THEME="Monokai Extended"
-
-# ── eza ──────────────────────────────────────────────────────────────────────
-if command -v eza &>/dev/null; then
-    alias ls='eza --icons'
-    alias ll='eza -lah --icons --git'
-    alias lt='eza --tree --icons -L 2'
-    alias la='eza -a --icons'
-fi
 
 # ── zoxide ───────────────────────────────────────────────────────────────────
 if command -v zoxide &>/dev/null; then
@@ -313,8 +308,8 @@ EOF
 
 # 마커가 이미 있으면 해당 위치에서 교체, 없으면 파일 끝에 추가
 if grep -qF "$ZSH_START_MARKER" "$ZSHRC"; then
-    info "Updating zsh config snippet in $ZSHRC (in-place)..."
-    python3 - "$ZSHRC" "$_SNIPPET_TMP" << 'PYEOF'
+  info "Updating zsh config snippet in $ZSHRC (in-place)..."
+  python3 - "$ZSHRC" "$_SNIPPET_TMP" <<'PYEOF'
 import sys
 
 zshrc_path, snippet_path = sys.argv[1], sys.argv[2]
@@ -341,11 +336,11 @@ for line in lines:
 with open(zshrc_path, 'w') as f:
     f.writelines(out)
 PYEOF
-    success "zsh config snippet updated"
+  success "zsh config snippet updated"
 else
-    info "Appending zsh config to $ZSHRC..."
-    cat "$_SNIPPET_TMP" >> "$ZSHRC"
-    success "zsh config appended"
+  info "Appending zsh config to $ZSHRC..."
+  cat "$_SNIPPET_TMP" >>"$ZSHRC"
+  success "zsh config appended"
 fi
 
 rm -f "$_SNIPPET_TMP"
@@ -355,77 +350,77 @@ rm -f "$_SNIPPET_TMP"
 # ══════════════════════════════════════════════════════════════════════════════
 
 link() {
-    local src="$1" dst="$2"
-    mkdir -p "$(dirname "$dst")"
-    if [ -L "$dst" ]; then
-        local cur
-        cur="$(readlink "$dst")"
-        if [ "$cur" = "$src" ]; then
-            success "already linked: $dst"
-        else
-            warn "relink: $dst (was → $cur)"
-            rm "$dst"
-            ln -s "$src" "$dst"
-            success "linked: $dst"
-        fi
-    elif [ -e "$dst" ]; then
-        warn "backup: $dst → $dst.bak"
-        mv "$dst" "$dst.bak"
-        ln -s "$src" "$dst"
-        success "linked: $dst"
+  local src="$1" dst="$2"
+  mkdir -p "$(dirname "$dst")"
+  if [ -L "$dst" ]; then
+    local cur
+    cur="$(readlink "$dst")"
+    if [ "$cur" = "$src" ]; then
+      success "already linked: $dst"
     else
-        ln -s "$src" "$dst"
-        success "linked: $dst"
+      warn "relink: $dst (was → $cur)"
+      rm "$dst"
+      ln -s "$src" "$dst"
+      success "linked: $dst"
     fi
+  elif [ -e "$dst" ]; then
+    warn "backup: $dst → $dst.bak"
+    mv "$dst" "$dst.bak"
+    ln -s "$src" "$dst"
+    success "linked: $dst"
+  else
+    ln -s "$src" "$dst"
+    success "linked: $dst"
+  fi
 }
 
 echo ""
 info "Symlinking dotfiles..."
 
 # Shell dotfiles
-link "$REPO_DIR/shell/.tmux.conf"         "$HOME/.tmux.conf"
-link "$REPO_DIR/shell/.wezterm.lua"       "$HOME/.wezterm.lua"
+link "$REPO_DIR/shell/.tmux.conf" "$HOME/.tmux.conf"
+link "$REPO_DIR/shell/.wezterm.lua" "$HOME/.wezterm.lua"
 link "$REPO_DIR/shell/.vscode-neovim.lua" "$HOME/.vscode-neovim.lua"
-link "$REPO_DIR/shell/starship.toml"      "$HOME/.config/starship.toml"
-link "$REPO_DIR/shell/lfrc"               "$HOME/.config/lf/lfrc"
+link "$REPO_DIR/shell/starship.toml" "$HOME/.config/starship.toml"
+link "$REPO_DIR/shell/lfrc" "$HOME/.config/lf/lfrc"
 
 # Scripts (single directory symlink)
-link "$REPO_DIR/shell/scripts"            "$HOME/.devenv-scripts"
+link "$REPO_DIR/shell/scripts" "$HOME/.devenv-scripts"
 
 # Neovim config
-link "$REPO_DIR/nvim"                     "$HOME/.config/nvim"
+link "$REPO_DIR/nvim" "$HOME/.config/nvim"
 
 # Claude Code skills — link each skill folder individually
 mkdir -p "$HOME/.claude/skills"
 for skill_dir in "$REPO_DIR/claude/skills"/*/; do
-    [ -d "$skill_dir" ] || continue
-    skill_name="$(basename "$skill_dir")"
-    link "$skill_dir" "$HOME/.claude/skills/$skill_name"
+  [ -d "$skill_dir" ] || continue
+  skill_name="$(basename "$skill_dir")"
+  link "$skill_dir" "$HOME/.claude/skills/$skill_name"
 done
 
 # Claude Code agents — link each agent file individually
 # Migrate from old folder symlink to per-file symlinks
 if [ -L "$HOME/.claude/agents" ]; then
-    warn "removing old agents folder symlink: $HOME/.claude/agents"
-    rm "$HOME/.claude/agents"
+  warn "removing old agents folder symlink: $HOME/.claude/agents"
+  rm "$HOME/.claude/agents"
 fi
 mkdir -p "$HOME/.claude/agents"
 for agent_file in "$REPO_DIR/claude/agents"/*.md; do
-    [ -f "$agent_file" ] || continue
-    agent_name="$(basename "$agent_file")"
-    link "$agent_file" "$HOME/.claude/agents/$agent_name"
+  [ -f "$agent_file" ] || continue
+  agent_name="$(basename "$agent_file")"
+  link "$agent_file" "$HOME/.claude/agents/$agent_name"
 done
 
 # Clean up dead symlinks (skills and agents)
 cleanup_dead_links() {
-    local dir="$1"
-    for entry in "$dir"/*; do
-        [ -L "$entry" ] || continue
-        if [ ! -e "$entry" ]; then
-            warn "removing dead link: $entry"
-            rm "$entry"
-        fi
-    done
+  local dir="$1"
+  for entry in "$dir"/*; do
+    [ -L "$entry" ] || continue
+    if [ ! -e "$entry" ]; then
+      warn "removing dead link: $entry"
+      rm "$entry"
+    fi
+  done
 }
 cleanup_dead_links "$HOME/.claude/skills"
 cleanup_dead_links "$HOME/.claude/agents"
