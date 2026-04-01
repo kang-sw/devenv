@@ -29,7 +29,7 @@ the current codebase. Threshold:
 ## Step 0: Load Plan
 
 1. Read the plan file at `$ARGUMENTS`.
-2. Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project state.
+2. Read `ai-docs/_index.md` for project state.
 3. Read mental-model docs referenced in the plan's Context section. Read
    additional mental-model docs only if the plan explicitly instructs it.
 4. Run `git log --oneline -10` to check recent work.
@@ -52,7 +52,7 @@ Fill plan-derived tasks between them:
 [ ] [fixed] Code review — dispatch subagent
   > if Critical/Important issues: fix > re-test > re-review (loop until clean)
 [ ] [fixed] Update mental model with mental-model-updater subagent
-[ ] [fixed] Update project docs — ai-docs/_memory.md, ai-docs/_index.md, ticket result
+[ ] [fixed] Update project docs — ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Report — plan deviations (if any), process issues (if any)
 [ ] [fixed] Merge & cleanup — user confirms > merge --no-ff > delete branch
@@ -143,8 +143,7 @@ and reports.
 
 ### Verify task
 
-Run the project's test suite(s) and build step (see `ai-docs/_memory.md`
-or `ai-docs/_index.md` for commands). Skip if the project has no test suite.
+Run the project's test suite(s) and build step (see `ai-docs/_index.md` for commands). Skip if the project has no test suite.
 **Read the full output.** Claim "pass" only after confirming the actual
 result — never "should pass" or "looks correct."
 
@@ -199,7 +198,6 @@ change has no mental-model impact (e.g., config tweaks, typo fixes).
 ### Docs task
 
 - Update `ai-docs/_index.md` if project capabilities changed.
-- Update `ai-docs/_memory.md`.
 - If completing a ticket phase, load `/write-ticket` for conventions, then
   append `### Result` to the ticket doc.
 - Prune aggressively — keep docs focused on current state.

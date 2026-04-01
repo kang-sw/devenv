@@ -11,33 +11,26 @@ Topic: $ARGUMENTS
 ## Constraints
 
 - **Read-only.** No source edits. Documentation/ticket writes only in Step 2.
-- **Full context upfront.** Load `ai-docs/_index.md`, `ai-docs/_memory.md`,
-  and all of `ai-docs/mental-model/` at start — use Read/Glob directly,
-  never delegate initial loading to subagents.
-- **No direct source reading.** Delegate to subagents when details beyond
-  mental-model docs are needed.
+- **Lazy context.** Load only `ai-docs/_index.md` and directory structure
+  at start. Read mental-model docs on-demand as topics emerge.
+- **No direct source reading.** Dispatch Explore agents when implementation
+  details beyond mental-model docs are needed.
 - **Honest uncertainty.** If docs are stale or insufficient, say so and suggest
   `/rebuild-mental-model` rather than speculating.
 
 ## Step 0: Orient
 
-1. Load `ai-docs/_index.md`, `ai-docs/_memory.md`, and all files in
-   `ai-docs/mental-model/` directly (Read/Glob — no subagents).
+1. Glob `ai-docs/**/*` and read `ai-docs/_index.md`.
 2. If `$ARGUMENTS` references a ticket, read it.
-3. **If `$ARGUMENTS` is empty:** Read WIP tickets and run
-   `git log --oneline -10`. Survey project state and propose 2-3 topics
-   for the user to pick from (or let them raise something else).
-4. If the topic spans independent subsystems, propose splitting into
-   separate tickets before diving in.
-5. Broad/ambiguous topics: state your understanding and confirm before
-   proceeding. Focused questions: answer directly.
 
 ## Step 1: Discuss
 
 Brainstorm iteratively. Build on the user's ideas, propose alternatives,
 help refine implementation details through back-and-forth.
 
-- Dispatch subagents for implementation details beyond what mental-model docs cover.
+- Read mental-model docs as conversation touches relevant domains.
+- Dispatch Explore agents for implementation details beyond what
+  mental-model docs cover.
 - Actively contribute: suggest approaches, point out analogies, sketch
   concrete shapes for vague ideas.
 - **Reuse over reinvention.** Before proposing new abstractions, surface

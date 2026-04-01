@@ -21,7 +21,7 @@ the task list at any time and see the current state of the sprint.
 
 ## Step 0: Bootstrap
 
-1. Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project state.
+1. Read `ai-docs/_index.md` for project state.
 2. Read `ai-docs/mental-model/overview.md` and any domain docs relevant to the
    topic. Read more mental-model docs as the sprint touches new areas.
 3. If `$ARGUMENTS` references a ticket, read it.
@@ -97,7 +97,7 @@ and reports.
 Set the wrap-up task to `in_progress`, then:
 
 1. **Run tests & verify** — run the project's test suite and build step (see
-   `ai-docs/_memory.md` or `ai-docs/_index.md` for commands). Read the full
+   `ai-docs/_index.md` for commands). Read the full
    output. Claim "pass" only after confirming the actual result — never "should
    pass" or "looks correct." Skip if changes are trivial (docs, config) or the
    project has no test suite.
@@ -133,7 +133,7 @@ Set the wrap-up task to `in_progress`, then:
    have mental-model impact. Skip for config tweaks, typo fixes. **Wait for
    subagent to finish before step 4** — review fixes may have changed the
    implementation.
-4. **Update docs** — `ai-docs/_memory.md`, `ai-docs/_index.md` as needed. If a
+4. **Update docs** — `ai-docs/_index.md` as needed. If a
    ticket was the input, append a `### Result (<short-hash>) - YY-MM-DD`
    subsection to the completed phase recording what was implemented, deviations,
    and key findings.

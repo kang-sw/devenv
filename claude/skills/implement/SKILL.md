@@ -11,7 +11,7 @@ Target: $ARGUMENTS
 ## Step 0: Understand
 
 1. Read the ticket/description/plan text.
-2. Read `ai-docs/_index.md` and `ai-docs/_memory.md` for current project state.
+2. Read `ai-docs/_index.md` for current project state.
 3. Read `ai-docs/mental-model/overview.md` to identify relevant domains.
    Read every mental-model doc that touches the change area, including adjacent
    domains — cross-module coupling is often documented there. If no mental-model
@@ -39,7 +39,7 @@ tasks between them.
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
   ↳ if Critical/Important issues: fix → re-run full verify → re-review (loop until clean)
 [ ] [fixed] Update mental model with mental-model-updater subagent
-[ ] [fixed] Update project docs — ai-docs/_memory.md, ai-docs/_index.md, ticket result
+[ ] [fixed] Update project docs — ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Report process issues to user
 [ ] [fixed] Merge & cleanup — user reviews report → confirm → merge --no-ff → delete branch
@@ -107,8 +107,7 @@ Intermediate commits are safe — work is on a feature branch.
 
 ### Verify task
 
-Run the project's test suite(s) and build step (see `ai-docs/_memory.md`
-or `ai-docs/_index.md` for commands). If the project has a separate integration test,
+Run the project's test suite(s) and build step (see `ai-docs/_index.md` for commands). If the project has a separate integration test,
 run that too. Skip if the project has no test suite or build step.
 **Read the full output.** Claim "pass" only after confirming the actual result —
 never "should pass" or "looks correct." All tests must pass before proceeding.
@@ -168,7 +167,6 @@ must reflect the final state before docs are written.
 ### Docs task
 
 - Update `ai-docs/_index.md` if project capabilities changed.
-- Update `ai-docs/_memory.md`.
 - If completing a ticket phase, load `/write-ticket` for conventions, then append `### Result` to the ticket doc.
 - Prune aggressively — keep docs focused on current state.
 
