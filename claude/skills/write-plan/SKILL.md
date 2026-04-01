@@ -11,21 +11,34 @@ Target: $ARGUMENTS
 ## Goal
 
 Produce a **self-contained plan** that survives context reset. The plan must
-carry enough context — decisions from the ticket, codebase mapping,
-conventions, file roles, domain constraints — for a fresh executor to run
-without re-researching.
+carry enough context for a fresh executor to implement without re-researching.
 
-The plan maps ticket decisions to the codebase: the ticket carries *what*
-was decided and *which approaches were suggested* (including data formats,
-algorithms, pseudo code); the plan evaluates suggested approaches against
-the actual code, then specifies *where* and *how* to integrate.
+### Role: fill the gap between ticket and codebase
 
-The plan's depth determines which executor runs it:
+The ticket owns *what* was decided (contracts, design choices, rejected
+alternatives). The executor owns *how* to implement (code, construction-site
+fixes, test code). The plan fills the gap:
+
+1. **Distill** — extract this phase's contracts and decisions from the ticket
+   (which may be messy or multi-phase). Do not duplicate; summarize and
+   reference.
+2. **Map** — identify which files, types, and patterns in the codebase are
+   affected. Add integration notes the executor would miss without reading
+   the code (conventions, gotchas, pattern references).
+3. **Supplement** — when the ticket lacks contracts or leaves decisions open,
+   research the codebase and propose them (subject to the data contract gate).
+
+**Do not include:** implementation code for pattern-following edits,
+construction-site inventories the compiler will surface, line numbers,
+import statements, or delegation strategy that would be "main" for every
+step.
+
+### Plan depth
 
 | Plan depth | Executor | When |
 |-----------|----------|------|
 | **Strategic** — direction + relevant files, tactical decisions left to executor | `/implement` | Small-medium changes, familiar patterns |
-| **Tactical** — step-by-step with testing strategy, delegation decisions, and success criteria per step | `/execute-plan` | Large changes, TDD-eligible modules, cross-module work |
+| **Tactical** — contracts + integration notes + testing strategy + success criteria | `/execute-plan` | Large changes, cross-module work, new patterns |
 
 Default to tactical for thorough-level research. Use strategic only when the
 change is simple enough that over-specifying would add noise.
@@ -90,30 +103,32 @@ Write the plan to that file using the `Write` tool, in this format:
 - Concrete examples from existing code where helpful
 
 ## Implementation Steps
-1. Concrete action (which file, what change, why)
-   - Delegation: [main | haiku | sonnet] — rationale
-   - Depends on: step N (if ordering matters beyond sequence)
-2. ...
+
+Steps specify **contracts and decisions**, not code.
+
+For each step:
+- What changes and in which file(s)
+- Exact definitions for new/changed contracts (struct layouts, API
+  signatures, type definitions that cross module boundaries)
+- Non-obvious constraints or ordering dependencies
+- Pattern references ("same as ExternalSink::on_event") instead of
+  duplicated code
+- Delegation: only when haiku/sonnet — omit for main (default)
+
+Leave to the executor: construction-site fixes (compiler-guided),
+pattern-following code, line numbers, import changes.
 
 ## Testing Strategy
 
-Classify each module or component:
+Classify each module and list key scenarios to verify:
 
-| Module | Approach | Rationale |
-|--------|----------|-----------|
-| `path/module` | TDD / post-impl / manual | why this classification |
+| Module | Approach | Key scenarios |
+|--------|----------|---------------|
+| `path/module` | TDD / post-impl / manual | what to test |
 
-For TDD modules, specify:
-- **Stub scope** — which signatures to stub, return types
-- **Exemplar cases** — complex/edge cases the main agent should write
-- **Population cases** — simple cases delegable to a subagent
-- **Delegation model** — haiku (parameter-only variation) or sonnet (new scenarios)
-
-For post-impl modules:
-- **Key scenarios** — what observable behavior to test after implementation
-
-For manual modules:
-- **Verification method** — how to confirm correctness without automated tests
+For TDD modules, add stub scope (which signatures, return types).
+For manual modules, add verification method.
+Post-impl needs only the key scenarios column.
 
 ## Success Criteria
 - Observable conditions that mean "done"

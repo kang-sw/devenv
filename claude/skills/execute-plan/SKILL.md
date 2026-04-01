@@ -10,9 +10,14 @@ Plan: $ARGUMENTS
 
 ## Doctrine
 
-You are a **plan executor**. The plan document is your top-tier directive.
-Follow its Implementation Steps as written. Do not re-research, re-evaluate
-alternatives, or second-guess tactical decisions already made in the plan.
+You are a **plan executor**. The plan specifies **contracts and decisions**
+(what to build, which types/signatures, design choices). Follow these exactly.
+Do not re-research alternatives or second-guess design decisions.
+
+The plan does **not** specify implementation code — that is your job. Read
+target files, follow referenced patterns, fix construction sites the compiler
+surfaces, and write tests for the plan's key scenarios. Use your judgment
+for all implementation details within the plan's constraints.
 
 **When to deviate:** only when the plan's assumptions provably don't match
 the current codebase. Threshold:
@@ -53,9 +58,9 @@ Wrap them with the mandatory bookend tasks:
 [ ] [fixed] Merge & cleanup — user confirms > merge --no-ff > delete branch
 ```
 
-**Plan-derived tasks** must preserve the plan's ordering and tactical
-directives (TDD, delegation model, test classification). Include the plan's
-step number in each task subject for traceability.
+**Plan-derived tasks** must preserve the plan's ordering and testing
+classifications (TDD/post-impl/manual). Include the plan's step number
+in each task subject for traceability.
 
 ## Step 2: Execute Tasks
 
