@@ -1,6 +1,5 @@
 <!-- AI-maintained project state — read before work, update after -->
-<!-- - `ai-docs/_index.md` — architecture overview, conventions -->
-<!-- - `ai-docs/_memory.md` — recent work, workspace reference -->
+<!-- - `ai-docs/_index.md` — architecture, conventions, build/test, session notes -->
 
 # CLAUDE.md — [PROJECT_NAME]
 
@@ -38,7 +37,7 @@
 ## Project Knowledge
 
 Project state and cross-session context live in `ai-docs/`.
-Read `_index.md` and `_memory.md` at session start.
+Read `_index.md` at session start.
 Before creating or editing tickets, load `/write-ticket` for conventions.
 Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
 full path — stems stay stable across status moves.
@@ -51,23 +50,17 @@ conversation language. Human-facing UI strings are exempt.
 <!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
 
 ai-docs/
-  _index.md          — project architecture and stable conventions
-  _memory.md         — cross-session continuity, updated each session
+  _index.md          — single session-start read; project context
   mental-model/      — architecture docs, regenerable from source
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
   tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
 
 _index.md should cover:
-  - Project state overview (current milestone, active initiatives)
-  - Module/directory map and relationships
+  - Architecture (module/directory map, relationships)
   - Conventions (tickets, dependency docs, naming rules)
   - Build/test commands and operational pitfalls
-
-_memory.md should cover:
-  - Recent work context (what was done, what's pending)
-  - Workspace quick-reference (key paths, package names)
-  - Ephemeral memos (temporary notes that may expire)
+  - Session notes (cross-session intent only, 2-5 lines max, delete when stale)
 
 Adapt structure to fit the project — these are guidelines, not a rigid schema.
 -->
@@ -115,7 +108,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ### Session Start
 
-- Read `ai-docs/_index.md` and `ai-docs/_memory.md` for project context.
+- Read `ai-docs/_index.md` for project context.
 - Run `git log --oneline -10` for recent changes. Read full messages
   (`git show`) when a commit is relevant — they carry decision context.
 

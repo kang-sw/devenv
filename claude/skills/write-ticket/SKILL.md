@@ -14,7 +14,7 @@ Target: $ARGUMENTS
 
 **Naming:**
 - `YYMMDD` is the **creation date** — never changes when the ticket moves.
-- Categories: `bug`, `feat`, `refactor`, `chore`, `research`.
+- Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
   full path including the status directory. This keeps references stable across moves.
 
@@ -29,6 +29,8 @@ Target: $ARGUMENTS
     phase-1: 2026-03/28-1430.event-serialization
     phase-2: null
   ```
+- `parent:` — optional epic stem this ticket belongs to
+  (e.g., `260401-epic-auth-rewrite`).
 - Add `started: YYYY-MM-DD` on move to `wip/`.
 - Add `completed: YYYY-MM-DD` on move to `done/`.
 
@@ -42,6 +44,22 @@ Since references use stems, no cross-link updates are needed.
 **Result entries:** After completing a ticket phase, append a
 `### Result (<short-hash>) - YY-MM-DD` subsection recording what was implemented,
 deviations from the plan, and key findings for future phases.
+
+## Epic Tickets
+
+An `epic` is an umbrella ticket spanning multiple child tickets across a
+broad architectural scope. It follows the same lifecycle as any ticket
+(`idea/` → `todo/` → `wip/` → `done/`).
+
+**How epics differ from `feat`:**
+- Body defines **scope and decomposition**, not implementation spec.
+- Completion means child work is done, not a single code merge.
+- Phases are optional — the epic may simply list child ticket stems.
+
+**Parent–child convention:**
+- Epic body lists child tickets (stems or planned descriptions).
+- Child tickets set `parent:` in frontmatter (see above).
+- An epic moves to `done/` when its scope is satisfied.
 
 ## Phase Structure
 
