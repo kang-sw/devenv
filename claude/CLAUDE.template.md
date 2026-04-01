@@ -139,6 +139,9 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
       where applicable. Epic tickets use category `epic`.
 - [ ] If plan paths use old format (`YYMM/DD-HHMM.<name>.md`), rename to
       `YYYY-MM/DD-hhmm.<name>.md` via `git mv`.
+- [ ] If Session Start uses `git log --oneline`, remove the `--oneline`
+      flag. Full commit messages include AI Context sections with design
+      decisions that inform the current session.
 
 Prioritize migrating universal conventions (ai-docs/ structure, workflow
 procedures, code standards) from the current template. Project-specific
