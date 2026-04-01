@@ -32,8 +32,7 @@ the current codebase. Threshold:
 2. Read `ai-docs/_index.md` for project state.
 3. Read mental-model docs referenced in the plan's Context section. Read
    additional mental-model docs only if the plan explicitly instructs it.
-4. Run `git log --oneline -10` to check recent work.
-5. Record the current branch as `<original-branch>`. If already on an
+4. Record the current branch as `<original-branch>`. If already on an
    `execute/` branch, treat it as a resumed session — infer
    `<original-branch>` from the merge-base with `main`, skip branch creation,
    and continue from the existing task list. Otherwise, create a feature branch:

@@ -59,7 +59,6 @@ scope in Context.
 3. Load **all** files in `ai-docs/mental-model/` — use Read/Glob directly,
    never delegate initial loading to subagents. Full architectural context
    is needed to identify cross-domain implications and write a sound plan.
-4. Run `git log --oneline -10` for recent work context.
 
 ## Step 1: Research
 

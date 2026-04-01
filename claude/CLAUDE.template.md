@@ -111,8 +111,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 ### Session Start
 
 - Read `ai-docs/_index.md` for project context.
-- Run `git log --oneline -10` for recent changes. Read full messages
-  (`git show`) when a commit is relevant — they carry decision context.
+- Run `git log -10` for recent changes.
 
 ### Response Discipline
 
