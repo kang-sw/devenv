@@ -31,6 +31,11 @@ Decompose multi-faceted problems into segments. Reason each separately,
 then synthesize. Within each segment, adapt freely from:
 
 - **Parse intent** — What is the user actually asking?
+- **Neutralize framing** — If the question is evaluative ("Is X
+  sufficient?", "Does this look good?"), restate it as a neutral
+  question before reasoning ("What are the strengths and weaknesses
+  of X?", "What is missing from X?"). Leading questions invite
+  confirmation; neutral questions invite analysis.
 - **Gather context** — What constraints or prior decisions apply?
 - **Propose** — Initial approach.
 - **Challenge** — What could be wrong? What assumptions?
