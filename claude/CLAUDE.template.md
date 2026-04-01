@@ -75,12 +75,9 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
    clear — judge scope by AI effort, not human-hours.
 2. **Surgical changes.** Change only what the task requires. Follow existing style. Every
    changed line must trace to the request.
-3. **Module structure.** Split files at ~300 lines. Extract an entry file
-   (e.g. `mod.rs`, `index.ts`, `__init__.py`) containing doc comments and public
-   re-exports only — reading it alone conveys the module's interface.
-4. **Hot-path performance.** In performance-critical paths, prefer minimal allocation
-   and data locality over convenience abstractions. Apply only when benefit clearly
-   outweighs complexity cost.
+3. **Small surface.** Keep each module's public interface minimal and
+   its responsibility narrow.
+4. **[Project-specific rule].** [Description.]
 
 ## Workflow
 
