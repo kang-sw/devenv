@@ -75,8 +75,8 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
    clear — judge scope by AI effort, not human-hours.
 2. **Surgical changes.** Change only what the task requires. Follow existing style. Every
    changed line must trace to the request.
-3. **Small surface.** Keep each module's public interface minimal and
-   its responsibility narrow.
+3. **Responsibility check.** As you implement, ask whether each change
+   keeps the module's role clean. Split when responsibility drifts.
 4. **[Project-specific rule].** [Description.]
 
 ## Workflow
