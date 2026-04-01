@@ -131,8 +131,11 @@ Set the wrap-up task to `in_progress`, then:
    Important issues, re-test, re-review until clean. Skip for small changes.
 3. **Update mental model** — dispatch mental-model-updater subagent if changes
    have mental-model impact. Skip for config tweaks, typo fixes. **Wait for
-   subagent to finish before step 4** — review fixes may have changed the
+   subagent to finish before step 3a** — review fixes may have changed the
    implementation.
+3a. **Update spec** — dispatch spec-updater subagent with the base commit to
+   check whether public-facing features were affected. Skip if `ai-docs/spec/`
+   does not exist. Wait for completion before step 4.
 4. **Update docs** — `ai-docs/_index.md` as needed. If a
    ticket was the input, append a `### Result (<short-hash>) - YY-MM-DD`
    subsection to the completed phase recording what was implemented, deviations,

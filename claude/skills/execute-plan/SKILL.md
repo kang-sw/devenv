@@ -52,6 +52,7 @@ Fill plan-derived tasks between them:
 [ ] [fixed] Code review — dispatch subagent
   > if Critical/Important issues: fix > re-test > re-review (loop until clean)
 [ ] [fixed] Update mental model with mental-model-updater subagent
+[ ] [fixed] Update spec with spec-updater subagent
 [ ] [fixed] Update project docs — ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Report — plan deviations (if any), process issues (if any)
@@ -192,8 +193,14 @@ may change the final implementation.
 
 Dispatch a **mental-model-updater subagent** with the list of files changed
 and a summary of what was added/modified. Wait for completion before the
-docs task — docs must reflect the final mental-model state. Skip if the
-change has no mental-model impact (e.g., config tweaks, typo fixes).
+spec-updater task — docs must reflect the final mental-model state. Skip if
+the change has no mental-model impact (e.g., config tweaks, typo fixes).
+
+### Spec-updater task
+
+Dispatch a **spec-updater subagent** with the base commit (branch point) to
+check whether public-facing features were affected. Skip if `ai-docs/spec/`
+does not exist. Wait for completion before the docs task.
 
 ### Docs task
 

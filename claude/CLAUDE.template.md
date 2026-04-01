@@ -51,6 +51,7 @@ conversation language. Human-facing UI strings are exempt.
 
 ai-docs/
   _index.md          — single session-start read; project context
+  spec/              — external-facing feature specs (what the project does)
   mental-model/      — architecture docs, regenerable from source
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
@@ -58,6 +59,7 @@ ai-docs/
 
 _index.md should cover:
   - Architecture (module/directory map, relationships)
+  - Spec index (list spec files with one-line summaries)
   - Conventions (tickets, dependency docs, naming rules)
   - Build/test commands and operational pitfalls
   - Session notes (cross-session intent only, 2-5 lines max, delete when stale)
@@ -127,3 +129,18 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - Keep context small. Load only the module docs relevant to the current task.
 - Source code is the ground truth; docs supplement it.
 - When a module doc drifts from source, update the doc (or flag it).
+
+<!-- MIGRATION CHECKLIST — apply on contact, then delete completed items.
+
+- [ ] If `ai-docs/_memory.md` exists, merge any useful content into
+      `ai-docs/_index.md` and delete `_memory.md`.
+- [ ] If `ai-docs/spec/` does not exist, set it up. Load `/write-spec` for
+      conventions. Add a spec index section to `_index.md`.
+- [ ] If tickets lack `plans:` frontmatter, add it (use `null` for unplanned
+      phases). Audit phase content: discussion decisions stay in tickets,
+      codebase-derived details belong in plans.
+- [ ] If tickets lack `parent:` frontmatter for epic relationships, add it
+      where applicable. Epic tickets use category `epic`.
+- [ ] If plan paths use old format (`YYMM/DD-HHMM.<name>.md`), rename to
+      `YYYY-MM/DD-hhmm.<name>.md` via `git mv`.
+-->

@@ -39,6 +39,7 @@ tasks between them.
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
   ↳ if Critical/Important issues: fix → re-run full verify → re-review (loop until clean)
 [ ] [fixed] Update mental model with mental-model-updater subagent
+[ ] [fixed] Update spec with spec-updater subagent
 [ ] [fixed] Update project docs — ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Report process issues to user
@@ -160,9 +161,15 @@ Dispatch a **mental-model-updater subagent** with the list of files changed
 and a summary of what was added/modified. Skip if the change has no
 mental-model impact (e.g., config tweaks, typo fixes).
 
-**Wait for the subagent to finish before starting the docs task.**
+**Wait for the subagent to finish before starting the spec-updater task.**
 Code review fixes can change the implementation substantially — mental-model
 must reflect the final state before docs are written.
+
+### Spec-updater task
+
+Dispatch a **spec-updater subagent** with the base commit (branch point) to
+check whether public-facing features were affected. Skip if `ai-docs/spec/`
+does not exist. Wait for completion before the docs task.
 
 ### Docs task
 
