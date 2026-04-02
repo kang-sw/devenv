@@ -25,7 +25,7 @@ at the task list at any time and see the current state of the sprint.
 ## Step 0: Bootstrap
 
 1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
-   -name '*.md' | sort` if the script is missing) and read `ai-docs/_index.md`.
+   -name '*.md' | sort` if the script is missing).
 2. If `$ARGUMENTS` references a ticket, read it.
 3. Create a feature branch: `sprint/<scope>` from the current branch. Record
    the current branch as `<original-branch>`. If already on a `sprint/` branch,

@@ -29,8 +29,7 @@ the current codebase. Threshold:
 ## Step 0: Load Plan
 
 1. Read the plan file at `$ARGUMENTS`.
-2. Read `ai-docs/_index.md` for project state.
-3. Read mental-model docs referenced in the plan's Context section. Read
+2. Read mental-model docs referenced in the plan's Context section. Read
    additional mental-model docs only if the plan explicitly instructs it.
 4. Record the current branch as `<original-branch>`. If already on an
    `execute/` branch, treat it as a resumed session — infer

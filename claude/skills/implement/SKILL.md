@@ -14,8 +14,7 @@ Target: $ARGUMENTS
 ## Step 0: Understand
 
 1. Read the ticket/description/plan text.
-2. Read `ai-docs/_index.md` for current project state.
-3. Read `ai-docs/mental-model/overview.md` to identify relevant domains.
+2. Read `ai-docs/mental-model/overview.md` to identify relevant domains.
    Read every mental-model doc that touches the change area, including adjacent
    domains — cross-module coupling is often documented there. If no mental-model
    docs exist yet, note this for the docs task.
