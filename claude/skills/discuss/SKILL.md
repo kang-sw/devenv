@@ -14,8 +14,8 @@ Topic: $ARGUMENTS
 ## Constraints
 
 - **Read-only.** No source edits. Documentation/ticket writes only in Step 2.
-- **Lazy context.** Load only `ai-docs/_index.md` and directory structure
-  at start. Read mental-model docs on-demand as topics emerge.
+- **Lazy context.** Load active doc listing at start. Read mental-model
+  docs on-demand as topics emerge.
 - **No direct source reading.** Dispatch Explore agents when implementation
   details beyond mental-model docs are needed.
 - **Honest uncertainty.** If docs are stale or insufficient, say so and suggest

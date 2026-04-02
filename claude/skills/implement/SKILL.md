@@ -18,7 +18,7 @@ Target: $ARGUMENTS
    Read every mental-model doc that touches the change area, including adjacent
    domains — cross-module coupling is often documented there. If no mental-model
    docs exist yet, note this for the docs task.
-4. Record the current branch as `<original-branch>`. If already on an
+3. Record the current branch as `<original-branch>`. If already on an
    `implement/` branch, treat it as a resumed session — infer
    `<original-branch>` from the merge-base with `main`, skip branch creation,
    and continue from the existing task list. Otherwise, create a feature branch:

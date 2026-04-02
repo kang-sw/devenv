@@ -31,7 +31,7 @@ the current codebase. Threshold:
 1. Read the plan file at `$ARGUMENTS`.
 2. Read mental-model docs referenced in the plan's Context section. Read
    additional mental-model docs only if the plan explicitly instructs it.
-4. Record the current branch as `<original-branch>`. If already on an
+3. Record the current branch as `<original-branch>`. If already on an
    `execute/` branch, treat it as a resumed session — infer
    `<original-branch>` from the merge-base with `main`, skip branch creation,
    and continue from the existing task list. Otherwise, create a feature branch:
