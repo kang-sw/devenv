@@ -44,7 +44,7 @@ Repeat until the user signals done:
   what mental-model docs cover. Read mental-model or spec docs on-demand as
   topics emerge.
 - **Implementation:** Set task to `in_progress`, read target files, implement,
-  commit at logical checkpoints, set task to `completed`.
+  **commit per task** (one task = one commit), set task to `completed`.
 - **Task discipline:** Create tasks eagerly for any actionable item. Update
   status in real-time. Cancel stale tasks immediately with a brief reason.
   Split tasks that grow larger than expected.
