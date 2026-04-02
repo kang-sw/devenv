@@ -1,10 +1,8 @@
 ---
 name: write-spec
 description: >
-  Use when the user mentions creating, writing, or updating a spec.
-  Create or update feature spec documents in ai-docs/spec/. Canonical
-  spec convention reference — other skills should load this before spec
-  operations.
+  When the user mentions creating, writing, or updating a spec, or
+  when chained from /write-ticket after a user-facing feature change.
 argument-hint: "[component/feature name, or spec file path to update]"
 ---
 

@@ -1,10 +1,9 @@
 ---
 name: write-plan
 description: >
-  Use when the user mentions creating, writing, or drafting an
-  implementation plan. Research the codebase and produce a self-contained
-  implementation plan. Use before `/implement` or `/execute-plan` for
-  non-trivial changes.
+  When the user mentions creating or drafting an implementation plan,
+  or when non-trivial implementation needs codebase research before
+  action.
 argument-hint: [ticket-path or description]
 ---
 

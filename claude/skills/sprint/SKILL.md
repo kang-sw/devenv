@@ -2,8 +2,8 @@
 name: sprint
 description: >
   If the user starts requesting code changes without loading a workflow
-  skill, invoke this. Informal iterative implementation with real-time
-  task tracking for ad-hoc feature requests, tweaks, and exploratory work.
+  skill, invoke this. For ad-hoc feature requests, tweaks, and
+  exploratory work.
 argument-hint: "[ticket-path, topic, or description]"
 ---
 

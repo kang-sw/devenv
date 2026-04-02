@@ -1,6 +1,9 @@
 ---
 name: implement
-description: Execute an implementation with structured task tracking, testing, and documentation. Use when starting work on a ticket, plan, or description.
+description: >
+  When the user provides a ticket, plan, or description for structured
+  implementation. Heavier than /sprint — use when the scope warrants
+  task tracking.
 argument-hint: [ticket-path or description]
 ---
 

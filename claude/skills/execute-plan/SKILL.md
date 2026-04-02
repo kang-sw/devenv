@@ -1,6 +1,6 @@
 ---
 name: execute-plan
-description: Execute a tactical implementation plan produced by /write-plan. Implements the plan's contracts and decisions with structured task tracking, testing, and documentation.
+description: When a tactical plan file from /write-plan is ready for execution.
 argument-hint: <plan-path>
 ---
 

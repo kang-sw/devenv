@@ -1,10 +1,8 @@
 ---
 name: write-ticket
 description: >
-  Use when the user mentions creating, writing, or editing a ticket.
-  Create or edit a ticket following project conventions. Also serves as
-  the canonical ticket convention reference — other skills should load
-  this before ticket operations.
+  When the user mentions creating, writing, or editing a ticket, or
+  when chained from /discuss or another workflow skill.
 argument-hint: "[topic/description for new ticket, or ticket path to edit]"
 ---
 
@@ -123,7 +121,7 @@ maps them to the codebase. The `plans:` frontmatter field links them.
      added/corrected (or confirm nothing was missed) to the user.
 6. **Spec check** — If the ticket introduces, changes, or removes
    user-facing behavior (typically `feat` or behavior-altering `bug`
-   categories), invoke `/write-spec` to add or update the relevant spec
+   categories), load and invoke `/write-spec` to add or update the relevant spec
    entries with 🚧 markers. Internal-only tickets (`refactor`, `chore`,
    most `research`) usually do not affect the spec.
 

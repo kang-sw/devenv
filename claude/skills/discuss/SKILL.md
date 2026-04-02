@@ -1,6 +1,9 @@
 ---
 name: discuss
-description: Open-ended project discussion with full architectural context. Captures conclusions as tickets or doc updates when appropriate.
+description: >
+  When the user explores approach or direction rather than requesting
+  immediate code changes, invoke this. Captures conclusions as tickets
+  or plans.
 argument-hint: "[topic, ticket path, or question — optional]"
 ---
 
@@ -52,8 +55,8 @@ or asking to create a ticket).
 
 When the user signals done, offer persistence options if conclusions warrant it:
 
-- **New ticket** — Load `/write-ticket` for conventions, then create.
-- **Ticket update** — Load `/write-ticket`, then append design notes to an existing ticket phase.
+- **New ticket** — Invoke `/write-ticket`.
+- **Ticket update** — Invoke `/write-ticket`, then append design notes to an existing ticket phase.
 - **Mental-model update** — Revise a doc if architectural understanding changed.
 
 For ticket writes, consider whether the phase needs integration-test criteria
