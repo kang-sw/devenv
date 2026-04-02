@@ -108,9 +108,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 ### Session Start
 
 - Read `ai-docs/_index.md` for project context.
-- Run `git log -10` for recent changes. **Never use `--oneline`** — full
-  commit messages contain AI Context sections with design decisions that
-  inform the current session.
+- Run `git log -10` for recent changes. (without `--oneline`!)
 
 ### Response Discipline
 
