@@ -66,7 +66,8 @@ Set the wrap-up task to `in_progress`. Execute in order:
 5. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the input,
    load `/write-ticket` for conventions, then append `### Result`.
    If no ticket was the input but the changes relate to an existing ticket,
-   ask the user whether to append a `### Result` entry.
+   ask the user; if yes, load `/write-ticket` for conventions and append
+   a `### Result` entry.
 6. **Final commit** — docs and remaining changes.
 7. **Report** — summarize to the user: what was implemented, process issues
    (if any), ticket status (if applicable).

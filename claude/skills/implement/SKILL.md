@@ -2,8 +2,8 @@
 name: implement
 description: >
   When the user provides a ticket, plan, or description for structured
-  implementation. Heavier than /sprint — use when the scope warrants
-  task tracking.
+  implementation, invoke this. Heavier than /sprint — use when the
+  scope warrants task tracking.
 argument-hint: [ticket-path or description]
 ---
 

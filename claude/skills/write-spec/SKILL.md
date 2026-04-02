@@ -2,7 +2,8 @@
 name: write-spec
 description: >
   When the user mentions creating, writing, or updating a spec, or
-  when chained from /write-ticket after a user-facing feature change.
+  when chained from /write-ticket after a user-facing feature change,
+  invoke this.
 argument-hint: "[component/feature name, or spec file path to update]"
 ---
 

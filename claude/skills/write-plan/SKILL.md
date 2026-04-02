@@ -3,7 +3,7 @@ name: write-plan
 description: >
   When the user mentions creating or drafting an implementation plan,
   or when non-trivial implementation needs codebase research before
-  action.
+  action, invoke this.
 argument-hint: [ticket-path or description]
 ---
 

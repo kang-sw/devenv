@@ -1,6 +1,6 @@
 ---
 name: execute-plan
-description: When a tactical plan file from /write-plan is ready for execution.
+description: When a tactical plan file from /write-plan is ready for execution, invoke this.
 argument-hint: <plan-path>
 ---
 
