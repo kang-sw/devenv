@@ -1,6 +1,10 @@
 ---
 name: write-ticket
-description: Create or edit a ticket following project conventions. Also serves as the canonical ticket convention reference — other skills should load this before ticket operations.
+description: >
+  Use when the user mentions creating, writing, or editing a ticket.
+  Create or edit a ticket following project conventions. Also serves as
+  the canonical ticket convention reference — other skills should load
+  this before ticket operations.
 argument-hint: "[topic/description for new ticket, or ticket path to edit]"
 ---
 

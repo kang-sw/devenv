@@ -1,6 +1,10 @@
 ---
 name: write-spec
-description: Create or update feature spec documents in ai-docs/spec/. Canonical spec convention reference — other skills should load this before spec operations.
+description: >
+  Use when the user mentions creating, writing, or updating a spec.
+  Create or update feature spec documents in ai-docs/spec/. Canonical
+  spec convention reference — other skills should load this before spec
+  operations.
 argument-hint: "[component/feature name, or spec file path to update]"
 ---
 
