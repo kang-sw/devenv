@@ -117,5 +117,10 @@ maps them to the codebase. The `plans:` frontmatter field links them.
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place, then present a brief summary of what was
      added/corrected (or confirm nothing was missed) to the user.
+6. **Spec check** — If the ticket introduces, changes, or removes
+   user-facing behavior (typically `feat` or behavior-altering `bug`
+   categories), invoke `/write-spec` to add or update the relevant spec
+   entries with 🚧 markers. Internal-only tickets (`refactor`, `chore`,
+   most `research`) usually do not affect the spec.
 
 **Language:** All ticket content must be in English regardless of conversation language.
