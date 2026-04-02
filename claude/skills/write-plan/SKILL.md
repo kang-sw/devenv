@@ -58,8 +58,10 @@ scope in Context.
 ## Step 0: Understand
 
 1. Read the ticket/description.
-2. Load `ai-docs/_index.md` for project state.
-3. Load **all** files in `ai-docs/mental-model/` — use Read/Glob directly,
+2. If the ticket has prior phases with `### Result` entries or linked plans,
+   read them — earlier discoveries override the ticket's original assumptions.
+3. Load `ai-docs/_index.md` for project state.
+4. Load **all** files in `ai-docs/mental-model/` — use Read/Glob directly,
    never delegate initial loading to subagents. Full architectural context
    is needed to identify cross-domain implications and write a sound plan.
 

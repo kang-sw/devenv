@@ -24,7 +24,8 @@ at the task list at any time and see the current state of the sprint.
 
 ## Step 0: Bootstrap
 
-1. Glob `ai-docs/**/*` and read `ai-docs/_index.md`.
+1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
+   -name '*.md' | sort` if the script is missing) and read `ai-docs/_index.md`.
 2. If `$ARGUMENTS` references a ticket, read it.
 3. Create a feature branch: `sprint/<scope>` from the current branch. Record
    the current branch as `<original-branch>`. If already on a `sprint/` branch,
@@ -64,6 +65,8 @@ Set the wrap-up task to `in_progress`. Execute in order:
    does not exist. Wait for completion before step 5.
 5. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the input,
    load `/write-ticket` for conventions, then append `### Result`.
+   If no ticket was the input but the changes relate to an existing ticket,
+   ask the user whether to append a `### Result` entry.
 6. **Final commit** — docs and remaining changes.
 7. **Report** — summarize to the user: what was implemented, process issues
    (if any), ticket status (if applicable).

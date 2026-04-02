@@ -23,7 +23,8 @@ Topic: $ARGUMENTS
 
 ## Step 0: Orient
 
-1. Glob `ai-docs/**/*` and read `ai-docs/_index.md`.
+1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
+   -name '*.md' | sort` if the script is missing) and read `ai-docs/_index.md`.
 2. If `$ARGUMENTS` references a ticket, read it.
 
 ## Step 1: Discuss
