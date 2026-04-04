@@ -246,6 +246,8 @@ Multiple concurrent members are fine (e.g., `implementer.ui`,
   architecture with no existing patterns to follow.
 - **Implementer**: sonnet (default). Opus if implementing complex algorithms
   or cross-module changes where structural judgment is critical.
+- **Worker**: sonnet (default). Haiku for mechanical tasks (file moves,
+  simple config changes).
 - **Exploration** (via `claude -p` inside team members): haiku.
 
 ## Step 2: Session End (when user signals done)
