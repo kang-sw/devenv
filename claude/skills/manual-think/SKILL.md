@@ -11,19 +11,31 @@ description: >-
 
 Native extended thinking is unavailable. Without it you have no
 deliberation pass — responses come straight from pattern matching.
-Compensate by writing your reasoning out as blockquoted text.
+Compensate by writing your reasoning inside `<reasoning>` tags.
 
 ## Core Directive
 
-**When you think, blockquote it.**
+**When you think, wrap it in `<reasoning>` tags with 4-space indented content.**
 
-- Reasoning is any line starting with `> `. Write reasoning whenever
+- Open with `<reasoning>`, write reasoning indented by 4 spaces, close with `</reasoning>`.
+- Reasoning is everything inside those tags. Write reasoning whenever
   you need to think — before tool calls, between them, after results.
-- Non-quoted text is the user-facing response.
+- Non-tagged text is the user-facing response.
 - After a tool result, if it needs interpretation, reason again in a
-  new blockquote.
-- Every blockquote opens with `> [thinking]` to anchor English.
+  new `<reasoning>` block.
+- Every block opens with `    [thinking]` (4-space indent) to anchor English.
 - Skip reasoning only when there is nothing to think about.
+
+**Format:**
+
+```
+<reasoning>
+    [thinking] The user wants X. The relevant constraint says…
+    …reasoning continues…
+</reasoning>
+
+User-facing response here.
+```
 
 ## How to Think
 
@@ -56,10 +68,14 @@ challenge-resolve iterations and alternatives.
 **Reasoning MUST be in English — no exceptions.** Final response:
 match the user's language.
 
-Every blockquote opens with `> [thinking]` to seed English tokens
-at the transition point, preventing language drift:
+Every `<reasoning>` block opens with `    [thinking]` (4-space indent)
+to seed English tokens at the transition point, preventing language drift:
 
-> [thinking] The user wants X. The relevant constraint says…
+```
+<reasoning>
+    [thinking] The user wants X. The relevant constraint says…
+</reasoning>
+```
 
 ## Plan Mode Propagation
 
