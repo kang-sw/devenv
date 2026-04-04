@@ -11,27 +11,25 @@ description: >-
 
 Native extended thinking is unavailable. Without it you have no
 deliberation pass — responses come straight from pattern matching.
-Compensate by writing your reasoning inside `<reasoning>` tags.
+Compensate by writing your reasoning inside `[thinking]` / `[/thinking]` blockquote markers.
 
 ## Core Directive
 
-**When you think, wrap it in `<reasoning>` tags with blockquoted content.**
+**When you think, wrap it in `[thinking]` / `[/thinking]` blockquote markers.**
 
-- Open with `<reasoning>`, write reasoning as `> ` blockquote lines, close with `</reasoning>`.
-- Reasoning is everything inside those tags. Write reasoning whenever
-  you need to think — before tool calls, between them, after results.
-- Non-tagged text is the user-facing response.
-- After a tool result, if it needs interpretation, reason again in a
-  new `<reasoning>` block.
+- Open with `> [thinking]`, write reasoning as `> ` blockquote lines, close with `> [/thinking]`.
+- Write reasoning whenever you need to think — before tool calls, between them, after results.
+- Non-quoted text is the user-facing response.
+- After a tool result, if it needs interpretation, reason again in a new block.
 - Skip reasoning only when there is nothing to think about.
 
 **Format:**
 
 ```
-<reasoning>
+> [thinking]
 > The user wants X. The relevant constraint says…
 > …reasoning continues…
-</reasoning>
+> [/thinking]
 
 User-facing response here.
 ```
