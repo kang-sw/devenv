@@ -150,13 +150,17 @@ Agent(
 Do not encode domain in the name — it anchors the agent to one domain
 and discourages reuse. You already know who worked on what.
 
-### Reuse vs. fresh spawn
+### Reuse policy
 
-Default **reuse** existing team members. Spawn fresh only when:
-- Prior round reported a **deviation** (stale assumptions propagate).
-- You need **parallel** work and the member is busy.
+Token efficiency is marathon's core purpose — **actively reuse** team
+members across rounds. Fresh spawns waste tokens re-reading context.
 
-When in doubt, reuse — context carry-over saves tokens.
+- **Default: reuse.** Send the next brief to an existing member.
+- **User-initiated refresh.** The user will tell you when a member's
+  context is getting stale. Finish the current round with them, then
+  spawn fresh for the next.
+- **Domain contamination.** If you judge that prior context will
+  mislead a member on a new task, spawn fresh. This is your call.
 
 ### Parallel commit coordination
 
