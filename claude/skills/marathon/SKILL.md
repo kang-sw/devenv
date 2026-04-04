@@ -16,8 +16,8 @@ Target: $ARGUMENTS
 
 Marathon is the **token-efficient implementation workflow**. You are the
 **lead** — you orchestrate discussion, decisions, and review. All code
-reading and
-writing is delegated to team members. This keeps the main context lean,
+reading and writing is delegated to team members. This keeps the main
+context lean,
 enabling sessions that span many implementation cycles without hitting
 context limits.
 
@@ -44,7 +44,8 @@ list at any time and see the current state.
    TeamCreate("marathon-<scope>")
    ```
 5. Team members are spawned on-demand when the first implementation
-   request arrives (see Team Management below).
+   request arrives. See **Team Management** below for spawn conventions,
+   naming, model selection, and parallel coordination.
 6. Create an initial task:
    ```
    [ ] [fixed] Marathon wrap-up — review, docs, merge
@@ -73,7 +74,9 @@ Assess each implementation request and route accordingly:
 |-----------|-------|--------|
 | **Trivial** — user gives exact file + value | Implementer with inline brief | Direct commit on `marathon/<scope>` |
 | **Simple** — clear scope, 1-2 files | Implementer with brief (skip planner) | `<type>/<round>` (e.g., `feat/add-parser`) |
-| **Complex** — multi-file, needs research, **no ticket/plan** | Planner → review → implementer | `<type>/<round>` (e.g., `refactor/chunk-api`) |
+| **Complex with ticket** — multi-file, ticket has contracts | Implementer with brief (skip planner) | `<type>/<round>` |
+| **Complex without ticket** — multi-file, needs research | Planner → review → implementer | `<type>/<round>` (e.g., `refactor/chunk-api`) |
+| **Non-code** — documents, config, research output | Worker with brief | `<type>/<round>` (e.g., `docs/update-slides`) |
 
 #### Trivial route
 
@@ -95,9 +98,7 @@ Constraints: <any constraints from discussion>
 Branch: <type>/<round>  (create from marathon/<scope>)
 ```
 
-For **complex** without sufficient ticket/plan spec, brief the planner
-first. If a ticket already specifies contracts and target files, skip the
-planner and send the implementer a brief directly (same as simple route).
+For **complex without ticket**, brief the planner first:
 
 1. **Brief the planner.** Send a message with:
    ```
@@ -111,7 +112,9 @@ planner and send the implementer a brief directly (same as simple route).
 2. **Review the plan.** When the planner reports completion, read the
    plan file. Verify against mental-model docs — check that contracts
    make sense and the approach aligns with architectural conventions.
-   If issues are found, message the planner with corrections.
+   If issues are found, message the planner with corrections. If the
+   planner cannot converge after two rounds, rewrite the brief or
+   dispatch the implementer directly with inline guidance.
 
 3. **Dispatch the implementer.** Send:
    ```
@@ -132,7 +135,7 @@ When the implementer reports completion:
    - **Accept** — merge and continue:
      ```bash
      git checkout marathon/<scope>
-     git merge --no-ff <type>/<round> -m "<brief summary>"
+     git merge --no-ff <type>/<round> -m "<type>(<scope>): <brief summary>"
      git branch -d <type>/<round>
      ```
    - **Fix** — message implementer to address issues on the same sub-branch.
@@ -156,8 +159,8 @@ reflect the split before proceeding.
 
 **Flow** (sequential — review may produce fixes):
 
-1. **Code review.** Dispatch a fresh sonnet Agent (general-purpose, not
-   a team member) with the round's diff:
+1. **Code review.** Dispatch a fresh **sonnet** Agent (general-purpose,
+   not a team member) with the round's diff:
    ```
    git diff <pre-round-commit>..HEAD
    ```
@@ -168,7 +171,8 @@ reflect the split before proceeding.
    branch → implementer re-tests → re-dispatch reviewer. Loop until clean.
 
 2. **Doc updates.** After review is clean:
-   - Dispatch in parallel (fresh sonnet Agents, not team members):
+   - Dispatch in parallel (fresh sonnet Agents, not team members;
+     apply **parallel commit coordination**):
      - **spec-updater** — skip if `ai-docs/spec/` does not exist.
      - **mental-model-updater** — skip for config/typo changes.
    - Wait for both to complete.
@@ -313,7 +317,15 @@ done incrementally via checkpoints. Session end is lightweight:
 6. **Merge** — ask user for confirmation, then:
    ```bash
    git checkout <original-branch>
-   git merge --no-ff marathon/<scope> -m "<conventional-commit message>"
+   git merge --no-ff marathon/<scope> -m "$(cat <<'EOF'
+   <type>(<scope>): <summary>
+
+   <what changed — brief>
+
+   ## AI Context
+   - <decision rationale, rejected alternatives, user directives>
+   EOF
+   )"
    git branch -d marathon/<scope>
    ```
    If no commits were made, skip merge and delete the branch.
@@ -327,10 +339,10 @@ Set wrap-up task to `completed`.
 - **No source code reading.** You read mental-model docs, tickets, plans,
   diff output, and team reports. For anything else, message a team member.
 - **Ticket as live document.** When a ticket exists, keep unimplemented
-  phases accurate as discussion evolves — edit phase descriptions in
-  place to reflect the current agreed direction. Completed phases
-  (those with `### Result`) are immutable. The ticket should always be
-  the source of truth for what will be built next.
+  phases accurate as discussion evolves — with user agreement, edit phase
+  descriptions in place to reflect the current agreed direction. Completed
+  phases (those with `### Result`) are immutable. The ticket should always
+  be the source of truth for what will be built next.
 - **User controls session lifecycle.** Never enter Session End, propose
   wrapping up, or shut down teammates unless the user explicitly signals
   done. Completing a ticket phase, running out of obvious tasks, or

@@ -42,7 +42,7 @@ SendMessage calls.
 
 ## Rules
 
-- All output in English unless the lead specifies otherwise.
+- All output in English regardless of message language.
 - Do not modify files outside the task scope without messaging the lead.
 - **Do not merge sub-branches.** The lead reviews and merges after your
   report.
