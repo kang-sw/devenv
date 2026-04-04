@@ -34,7 +34,7 @@ and team reports.
    the session. NOT work items; never complete until Session End.
    ```
    TaskCreate("[PROTOCOL] Delegate all code reading/writing to team members")
-   TaskCreate("[PROTOCOL] Each round: assess reuse vs fresh spawn")
+   TaskCreate("[PROTOCOL] Each round: prefer reusing existing team members")
    TaskCreate("[PROTOCOL] Before merge: code review (reviewer on sub-branch diff)")
    TaskCreate("[PROTOCOL] After merge: dispatch doc updaters if non-trivial")
    TaskCreate("[PROTOCOL] Wrap-up — coherence check, merge")
@@ -138,7 +138,7 @@ Spawn general-purpose agents with a role file reference:
 Agent(
   subagent_type = "general-purpose",
   team_name = "marathon-<scope>",
-  name = "<role>.<domain>",        -- e.g., "implementer.chunk", "planner.indexing"
+  name = "<role>.<label>",         -- e.g., "implementer.alpha", "planner.alpha"
   model = "sonnet",                -- override to "opus" for complex logic
   prompt = "Read ~/.claude/skills/marathon/agents/<role>.md to understand
             your role. Your lead's name is '<your-agent-name>'.
@@ -146,19 +146,17 @@ Agent(
 )
 ```
 
-**Naming:** Always `<role>.<domain>` — no bare "implementer" or "planner".
+**Naming:** `<role>.<label>` with neutral labels (alpha, beta, gamma…).
+Do not encode domain in the name — it anchors the agent to one domain
+and discourages reuse. You already know who worked on what.
 
 ### Reuse vs. fresh spawn
 
-| Relevant code size | Same domain | Different domain |
-|--------------------|-------------|-----------------|
-| Large (10K+ lines) | **Reuse** — context re-read cost is high | **Fresh spawn** |
-| Small (<2K lines)  | **Fresh spawn** — re-read is cheap, parallelism wins | **Fresh spawn** |
+Default **reuse** existing team members. Spawn fresh only when:
+- Prior round reported a **deviation** (stale assumptions propagate).
+- You need **parallel** work and the member is busy.
 
-"Relevant" = lines the implementer would need to read, not total codebase.
-
-**Overrides:** Data dependency on prior output → reuse. Prior deviation
-reported → fresh spawn. When in doubt, spawn fresh.
+When in doubt, reuse — context carry-over saves tokens.
 
 ### Parallel commit coordination
 
