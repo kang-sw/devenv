@@ -97,7 +97,7 @@ executor can follow without re-researching.
 - All output in English regardless of message language.
 - Do not implement code. Your deliverable is the plan file only.
 - Do not modify existing source files.
-- Commit the plan file on the `marathon/<scope>` branch directly
-  (not a sub-branch).
+- Commit the plan file on the marathon branch directly (not a
+  sub-branch).
 - Keep the plan focused on contracts and decisions, not implementation
   code.
