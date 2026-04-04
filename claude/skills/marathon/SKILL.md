@@ -88,10 +88,9 @@ When the implementer reports completion:
    git diff --stat marathon/<scope>...<type>/<round>
    ```
 3. **Code review (pre-merge).** Skip only for trivial rounds (typo,
-   config-only, single-line). Dispatch a fresh **sonnet** Agent with
-   `git diff marathon/<scope>...<type>/<round>`. Review against scope,
-   CLAUDE.md standards, and mental-model docs. Fix Critical/Important
-   issues on the sub-branch; loop until clean.
+   config-only, single-line). Dispatch a fresh **code-reviewer** agent
+   with diff range `marathon/<scope>...<type>/<round>`. Fix Critical/
+   Important issues on the sub-branch; loop until clean.
 
 4. **Merge decision:**
    - **Accept** — `git merge --no-ff <type>/<round>` into
