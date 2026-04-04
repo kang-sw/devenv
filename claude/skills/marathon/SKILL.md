@@ -1,48 +1,35 @@
 ---
 name: marathon
 description: >
-  When the user requests implementation work — from ad-hoc fixes through
-  multi-step features — invoke this. The default implementation workflow.
-  Delegates code interaction to team members, keeping the main context
-  lean for long-running sessions.
+  Team-based implementation workflow. Delegates code interaction to
+  team members, keeping the main context lean for long sessions.
 argument-hint: "[ticket-path, topic, or description]"
 ---
 
 # Marathon
 
-Target: $ARGUMENTS
+User Argument: $ARGUMENTS
 
 ## Doctrine
 
-Marathon is the **token-efficient implementation workflow**. You are the
-**lead** — you orchestrate discussion, decisions, and review. All code
-reading and writing is delegated to team members. This keeps the main
-context lean,
-enabling sessions that span many implementation cycles without hitting
-context limits.
-
-**You do not read source code.** You read: mental-model docs, tickets,
-plan files, diff summaries, and team member reports. Everything else goes
-through team members. If you catch yourself opening a source file, stop
-and delegate.
+You are the **lead** — orchestrate discussion, decisions, and review.
+**Do not read source code.** All code reading/writing is delegated to
+team members. You only read: mental-model docs, tickets, plans, diffs,
+and team reports.
 
 ## Step 0: Bootstrap
 
 1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
    -name '*.md' | sort` if the script is missing).
 2. If `$ARGUMENTS` references a ticket, read it.
-3. Create a feature branch: `marathon/<scope>` from the current branch.
-   Record the current branch as `<original-branch>`. If already on a
-   `marathon/` branch, treat as a resumed session — infer
-   `<original-branch>` from the merge-base with `main`, skip branch
-   creation, and continue.
+3. Create branch `marathon/<scope>` from current branch (record as
+   `<original-branch>`). If already on a `marathon/` branch, resume —
+   infer `<original-branch>` from merge-base with `main`.
 4. Create the team:
    ```
    TeamCreate("marathon-<scope>")
    ```
-5. Team members are spawned on-demand when the first implementation
-   request arrives. See **Team Management** below for spawn conventions,
-   naming, model selection, and parallel coordination.
+5. Team members are spawned on-demand. See **Team Management** below.
 6. Create **protocol tasks** — persistent reminders visible throughout
    the session. NOT work items; never complete until Session End.
    ```
@@ -100,19 +87,11 @@ When the implementer reports completion:
    ```bash
    git diff --stat marathon/<scope>...<type>/<round>
    ```
-3. **Code review (pre-merge).** Run unless the round was trivial
-   (typo, config-only, single-line fix). When in doubt, run it.
-
-   Dispatch a fresh **sonnet** Agent (general-purpose, not a team
-   member) with the sub-branch diff:
-   ```
-   git diff marathon/<scope>...<type>/<round>
-   ```
-   Review prompt: scope, requirements, CLAUDE.md standards, mental-model
-   docs. Categorize as Critical / Important / Minor.
-
-   Fix Critical/Important issues: message implementer to fix on the
-   sub-branch → re-dispatch reviewer. Loop until clean.
+3. **Code review (pre-merge).** Skip only for trivial rounds (typo,
+   config-only, single-line). Dispatch a fresh **sonnet** Agent with
+   `git diff marathon/<scope>...<type>/<round>`. Review against scope,
+   CLAUDE.md standards, and mental-model docs. Fix Critical/Important
+   issues on the sub-branch; loop until clean.
 
 4. **Merge decision:**
    - **Accept** — `git merge --no-ff <type>/<round>` into
@@ -188,10 +167,8 @@ mixed), append to each spawn prompt:
 > You are working in parallel with other agents. Before every git
 > commit, message me and wait for approval.
 
-Then serialize commit approvals one at a time. This applies to all
-parallel agents — implementers, spec-updater, mental-model-updater,
-or any combination. The git index is shared; concurrent commits corrupt
-staging.
+Then serialize commit approvals one at a time — the git index is
+shared.
 
 ### Model selection
 
