@@ -35,7 +35,7 @@ and team reports.
    ```
    TaskCreate("[PROTOCOL] Delegate all code reading/writing to team members")
    TaskCreate("[PROTOCOL] Each round: assess reuse vs fresh spawn")
-   TaskCreate("[PROTOCOL] Before merge: code review (fresh sonnet on sub-branch diff)")
+   TaskCreate("[PROTOCOL] Before merge: code review (reviewer on sub-branch diff)")
    TaskCreate("[PROTOCOL] After merge: dispatch doc updaters if non-trivial")
    TaskCreate("[PROTOCOL] Wrap-up — coherence check, merge")
    ```
@@ -88,9 +88,10 @@ When the implementer reports completion:
    git diff --stat marathon/<scope>...<type>/<round>
    ```
 3. **Code review (pre-merge).** Skip only for trivial rounds (typo,
-   config-only, single-line). Dispatch a fresh **code-reviewer** agent
-   with diff range `marathon/<scope>...<type>/<round>`. Fix Critical/
-   Important issues on the sub-branch; loop until clean.
+   config-only, single-line). Message the **reviewer** team member
+   with diff range `marathon/<scope>...<type>/<round>` (spawn one if
+   not yet alive). Fix Critical/Important on the sub-branch; loop
+   until clean.
 
 4. **Merge decision:**
    - **Accept** — `git merge --no-ff <type>/<round>` into
@@ -128,6 +129,7 @@ Role descriptions are in `~/.claude/skills/marathon/agents/`:
 |-----------|---------|
 | `planner.md` | Codebase exploration → plan file |
 | `implementer.md` | Code implementation from plan or brief |
+| `reviewer.md` | Code review on diffs (read-only, reusable) |
 | `worker.md` | Non-code tasks (documents, config, research output) |
 
 Spawn general-purpose agents with a role file reference:
