@@ -194,13 +194,16 @@ general-purpose agents with a role file reference:
 Agent(
   subagent_type = "general-purpose",
   team_name = "marathon-<scope>",
-  name = "planner" or "executor",  -- or domain-specific names
+  name = "<role>.<domain>",        -- e.g., "executor.chunk", "planner.indexing"
   model = "sonnet",                -- override to "opus" for complex logic
   prompt = "Read ~/.claude/skills/marathon/agents/<role>.md to understand
             your role. Your lead's name is '<your-agent-name>'.
             Then: <brief or plan reference>"
 )
 ```
+
+**Naming convention:** Always `<role>.<domain>` — no bare "executor" or
+"planner". This keeps naming consistent whether one or many are spawned.
 
 The role files include team communication patterns (SendMessage usage,
 when to ask vs. proceed, report format). This context is unavailable
@@ -221,8 +224,8 @@ in generic agent definitions.
   domain — stale assumptions propagate.
 - **Correctness > token savings.** When in doubt, spawn fresh.
 
-Multiple concurrent members are fine — name them descriptively
-(e.g., "executor-ui", "executor-backend").
+Multiple concurrent members are fine (e.g., `executor.ui`,
+`executor.backend`).
 
 ### Model selection
 
