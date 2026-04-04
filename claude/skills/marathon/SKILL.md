@@ -66,19 +66,35 @@ unimplemented phases to reflect discussion conclusions in real-time.
    **implementer**.
 3. Otherwise → **implementer** directly (the common case).
 
+**Routing check:** Before dispatching, ask: *"Can I write a complete
+Description for this task — specific enough that the implementer knows
+which files to touch and what approach to take?"* If yes → implementer
+directly. If not → planner.
+
 **Branch:** one-liner → direct commit on `marathon/<datetime>`.
 Everything else → sub-branch `<type>/<round>` from `marathon/<datetime>`.
 
-**Brief template** (all routes):
+**Implementer brief:**
 ```
-Brief: <what to change>
-Files: <target files if known>
+Brief:       <one-line summary>
+Files:       <target files if known>
 Constraints: <any constraints from discussion>
-Branch: <branch per above>
+Branch:      <branch per above>
+[Plan:       ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md]
+Description: <detailed guidance — approach, specific files/patterns, edge cases>
 ```
 
-**Planner flow:** brief with description, plan path
-(`ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md`), ticket path, and
+**Planner brief:**
+```
+Brief:       <one-line summary>
+Files:       <target files if known>
+Constraints: <any constraints from discussion>
+Branch:      <branch per above>
+Plan:        ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md
+Description: <what is uncertain — what the planner should research>
+```
+
+**Planner flow:** use the planner brief above; also include ticket path and
 mental-model hints. Review the plan against mental-model docs; if no
 convergence after two rounds, dispatch implementer with inline guidance.
 
