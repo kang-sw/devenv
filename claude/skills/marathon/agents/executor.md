@@ -34,9 +34,9 @@ SendMessage calls.
 ## Process
 
 1. **Set up branch**: The lead's message specifies which branch to work on.
-   - If the branch includes a round path (e.g.,
-     `round/<scope>/<round>`), create it from the marathon branch:
-     `git checkout -b round/<scope>/<round> marathon/<scope>`
+   - If the branch is a round branch (e.g., `feat/add-parser`),
+     create it from the marathon branch:
+     `git checkout -b <type>/<round> marathon/<scope>`
    - If the branch is just `marathon/<scope>`, commit directly (trivial
      changes).
 

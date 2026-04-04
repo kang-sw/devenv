@@ -71,8 +71,8 @@ Assess each implementation request and route accordingly:
 | Complexity | Route | Branch |
 |-----------|-------|--------|
 | **Trivial** — user gives exact file + value | Executor with inline brief | Direct commit on `marathon/<scope>` |
-| **Simple** — clear scope, 1-2 files | Executor with brief (skip planner) | Sub-branch `round/<scope>/<round>` |
-| **Complex** — multi-file, needs research, **no ticket/plan** | Planner → review → executor | Sub-branch `round/<scope>/<round>` |
+| **Simple** — clear scope, 1-2 files | Executor with brief (skip planner) | `<type>/<round>` (e.g., `feat/add-parser`) |
+| **Complex** — multi-file, needs research, **no ticket/plan** | Planner → review → executor | `<type>/<round>` (e.g., `refactor/chunk-api`) |
 
 #### Trivial route
 
@@ -91,7 +91,7 @@ For **simple**, send the executor a brief with a sub-branch:
 Brief: <what to change>
 Files: <target files if known>
 Constraints: <any constraints from discussion>
-Branch: round/<scope>/<round>  (create from marathon/<scope>)
+Branch: <type>/<round>  (create from marathon/<scope>)
 ```
 
 For **complex** without sufficient ticket/plan spec, brief the planner
@@ -115,7 +115,7 @@ planner and send the executor a brief directly (same as simple route).
 3. **Dispatch the executor.** Send:
    ```
    Plan path: <plan-path>
-   Branch: round/<scope>/<round>  (create from marathon/<scope>)
+   Branch: <type>/<round>  (create from marathon/<scope>)
    ```
 
 ### After each implementation — merge gate
@@ -125,20 +125,20 @@ When the executor reports completion:
 1. Read the executor's report (summary, files changed, test results).
 2. For sub-branch work, review the scope:
    ```bash
-   git diff --stat marathon/<scope>...round/<scope>/<round>
+   git diff --stat marathon/<scope>...<type>/<round>
    ```
 3. **Decide:**
    - **Accept** — merge and continue:
      ```bash
      git checkout marathon/<scope>
-     git merge --no-ff round/<scope>/<round> -m "<brief summary>"
-     git branch -d round/<scope>/<round>
+     git merge --no-ff <type>/<round> -m "<brief summary>"
+     git branch -d <type>/<round>
      ```
    - **Fix** — message executor to address issues on the same sub-branch.
    - **Rollback** — discard the round entirely:
      ```bash
      git checkout marathon/<scope>
-     git branch -D round/<scope>/<round>
+     git branch -D <type>/<round>
      ```
 4. Report results to the user.
 5. Update task status.
