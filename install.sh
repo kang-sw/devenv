@@ -411,6 +411,40 @@ for agent_file in "$REPO_DIR/claude/agents"/*.md; do
   link "$agent_file" "$HOME/.claude/agents/$agent_name"
 done
 
+# Claude Code settings — ensure required env vars are set
+CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+info "Ensuring Claude Code settings..."
+mkdir -p "$HOME/.claude"
+python3 - "$CLAUDE_SETTINGS" <<'PYEOF'
+import json, sys, os
+
+settings_path = sys.argv[1]
+required_env = {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+}
+
+if os.path.isfile(settings_path):
+    with open(settings_path) as f:
+        settings = json.load(f)
+else:
+    settings = {}
+
+env = settings.setdefault("env", {})
+changed = False
+for key, val in required_env.items():
+    if env.get(key) != val:
+        env[key] = val
+        changed = True
+
+if changed:
+    with open(settings_path, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+    print(f"  \033[1;32m  ✔ Claude Code settings updated\033[0m")
+else:
+    print(f"  \033[1;32m  ✔ Claude Code settings already current\033[0m")
+PYEOF
+
 # Clean up dead symlinks (skills and agents)
 cleanup_dead_links() {
   local dir="$1"
