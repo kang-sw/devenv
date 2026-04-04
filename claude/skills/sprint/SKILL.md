@@ -1,9 +1,8 @@
 ---
 name: sprint
 description: >
-  If the user starts requesting code changes without loading a workflow
-  skill, invoke this. For ad-hoc feature requests, tweaks, and
-  exploratory work.
+  Lightweight single-agent implementation for trivial changes when
+  marathon team overhead is unnecessary. Prefer /marathon for most work.
 argument-hint: "[ticket-path, topic, or description]"
 ---
 
