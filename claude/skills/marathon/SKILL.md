@@ -185,14 +185,23 @@ larger than expected.
 
 ### Spawning team members
 
+Role descriptions are in `~/.claude/skills/marathon/agents/`. Spawn
+general-purpose agents with a role file reference:
+
 ```
 Agent(
-  subagent_type = "marathon-planner" or "marathon-executor",
+  subagent_type = "general-purpose",
   team_name = "marathon-<scope>",
   name = "planner" or "executor",  -- or domain-specific names
-  model = "sonnet"                 -- override to "opus" for complex logic
+  model = "sonnet",                -- override to "opus" for complex logic
+  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md to understand
+            your role. Then: <brief or plan reference>"
 )
 ```
+
+The role files include team communication patterns (SendMessage usage,
+when to ask vs. proceed, report format). This context is unavailable
+in generic agent definitions.
 
 ### Reuse vs. fresh spawn
 
