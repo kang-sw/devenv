@@ -70,13 +70,13 @@ Assess each implementation request and route accordingly:
 
 | Complexity | Route | Branch |
 |-----------|-------|--------|
-| **Trivial** — user gives exact file + value | Executor with inline brief | Direct commit on `marathon/<scope>` |
-| **Simple** — clear scope, 1-2 files | Executor with brief (skip planner) | `<type>/<round>` (e.g., `feat/add-parser`) |
-| **Complex** — multi-file, needs research, **no ticket/plan** | Planner → review → executor | `<type>/<round>` (e.g., `refactor/chunk-api`) |
+| **Trivial** — user gives exact file + value | Implementer with inline brief | Direct commit on `marathon/<scope>` |
+| **Simple** — clear scope, 1-2 files | Implementer with brief (skip planner) | `<type>/<round>` (e.g., `feat/add-parser`) |
+| **Complex** — multi-file, needs research, **no ticket/plan** | Planner → review → implementer | `<type>/<round>` (e.g., `refactor/chunk-api`) |
 
 #### Trivial route
 
-Send the executor an inline brief:
+Send the implementer an inline brief:
 ```
 Brief: <what to change>
 Files: <target files if known>
@@ -86,7 +86,7 @@ Branch: marathon/<scope>  (direct commit, no sub-branch)
 
 #### Simple / Complex route
 
-For **simple**, send the executor a brief with a sub-branch:
+For **simple**, send the implementer a brief with a sub-branch:
 ```
 Brief: <what to change>
 Files: <target files if known>
@@ -96,7 +96,7 @@ Branch: <type>/<round>  (create from marathon/<scope>)
 
 For **complex** without sufficient ticket/plan spec, brief the planner
 first. If a ticket already specifies contracts and target files, skip the
-planner and send the executor a brief directly (same as simple route).
+planner and send the implementer a brief directly (same as simple route).
 
 1. **Brief the planner.** Send a message with:
    ```
@@ -112,7 +112,7 @@ planner and send the executor a brief directly (same as simple route).
    make sense and the approach aligns with architectural conventions.
    If issues are found, message the planner with corrections.
 
-3. **Dispatch the executor.** Send:
+3. **Dispatch the implementer.** Send:
    ```
    Plan path: <plan-path>
    Branch: <type>/<round>  (create from marathon/<scope>)
@@ -120,9 +120,9 @@ planner and send the executor a brief directly (same as simple route).
 
 ### After each implementation — merge gate
 
-When the executor reports completion:
+When the implementer reports completion:
 
-1. Read the executor's report (summary, files changed, test results).
+1. Read the implementer's report (summary, files changed, test results).
 2. For sub-branch work, review the scope:
    ```bash
    git diff --stat marathon/<scope>...<type>/<round>
@@ -134,7 +134,7 @@ When the executor reports completion:
      git merge --no-ff <type>/<round> -m "<brief summary>"
      git branch -d <type>/<round>
      ```
-   - **Fix** — message executor to address issues on the same sub-branch.
+   - **Fix** — message implementer to address issues on the same sub-branch.
    - **Rollback** — discard the round entirely:
      ```bash
      git checkout marathon/<scope>
@@ -163,8 +163,8 @@ reflect the split before proceeding.
    Review prompt: scope, requirements, CLAUDE.md standards, mental-model
    docs. Categorize as Critical / Important / Minor.
 
-   Fix Critical/Important issues: message executor to fix on the same
-   branch → executor re-tests → re-dispatch reviewer. Loop until clean.
+   Fix Critical/Important issues: message implementer to fix on the same
+   branch → implementer re-tests → re-dispatch reviewer. Loop until clean.
 
 2. **Doc updates.** After review is clean, dispatch in parallel:
    - **spec-updater** agent — skip if `ai-docs/spec/` does not exist.
@@ -194,7 +194,7 @@ general-purpose agents with a role file reference:
 Agent(
   subagent_type = "general-purpose",
   team_name = "marathon-<scope>",
-  name = "<role>.<domain>",        -- e.g., "executor.chunk", "planner.indexing"
+  name = "<role>.<domain>",        -- e.g., "implementer.chunk", "planner.indexing"
   model = "sonnet",                -- override to "opus" for complex logic
   prompt = "Read ~/.claude/skills/marathon/agents/<role>.md to understand
             your role. Your lead's name is '<your-agent-name>'.
@@ -202,7 +202,7 @@ Agent(
 )
 ```
 
-**Naming convention:** Always `<role>.<domain>` — no bare "executor" or
+**Naming convention:** Always `<role>.<domain>` — no bare "implementer" or
 "planner". This keeps naming consistent whether one or many are spawned.
 
 The role files include team communication patterns (SendMessage usage,
@@ -216,7 +216,7 @@ in generic agent definitions.
 | Large (10K+ lines) | **Reuse** — context re-read cost is high | **Fresh spawn** |
 | Small (<2K lines)  | **Fresh spawn** — re-read is cheap, parallelism wins | **Fresh spawn** |
 
-"Relevant" = lines the executor would need to read, not total codebase.
+"Relevant" = lines the implementer would need to read, not total codebase.
 
 **Override factors** (take precedence over the matrix):
 - **Data dependency** on previous task's output → reuse regardless of size.
@@ -224,14 +224,14 @@ in generic agent definitions.
   domain — stale assumptions propagate.
 - **Correctness > token savings.** When in doubt, spawn fresh.
 
-Multiple concurrent members are fine (e.g., `executor.ui`,
-`executor.backend`).
+Multiple concurrent members are fine (e.g., `implementer.ui`,
+`implementer.backend`).
 
 ### Model selection
 
 - **Planner**: sonnet (default). Opus if the change involves novel
   architecture with no existing patterns to follow.
-- **Executor**: sonnet (default). Opus if implementing complex algorithms
+- **Implementer**: sonnet (default). Opus if implementing complex algorithms
   or cross-module changes where structural judgment is critical.
 - **Exploration** (via `claude -p` inside team members): haiku.
 
