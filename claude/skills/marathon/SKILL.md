@@ -186,9 +186,20 @@ where a fresh team member can onboard without stale references.
 
 ### Task discipline
 
-Create tasks eagerly for any actionable item. Update status in real-time.
-Cancel stale tasks immediately with a brief reason. Split tasks that grow
-larger than expected.
+Every round gets a task. Track the full lifecycle:
+
+```
+Round start  → TaskCreate("Implement <description>") → in_progress
+Round done   → completed
+Checkpoint   → TaskCreate("Checkpoint: <scope>") → in_progress → completed
+```
+
+Additional rules:
+- Create tasks eagerly for any actionable item beyond rounds.
+- Update status in real-time — the user checks the task list to
+  understand session progress at a glance.
+- Cancel stale tasks immediately with a brief reason.
+- Split tasks that grow larger than expected.
 
 ## Team Management
 
@@ -310,6 +321,12 @@ Set wrap-up task to `completed`.
   place to reflect the current agreed direction. Completed phases
   (those with `### Result`) are immutable. The ticket should always be
   the source of truth for what will be built next.
+- **User controls session lifecycle.** Never enter Session End, propose
+  wrapping up, or shut down teammates unless the user explicitly signals
+  done. Completing a ticket phase, running out of obvious tasks, or
+  reaching a natural pause are NOT signals to end — ask the user what's
+  next. Teammates stay alive between rounds for potential reuse; only
+  Session End (step 2) shuts them down.
 - **Context conservation.** The entire point of marathon is keeping the
   main context lean. If you catch yourself reading source files, stop and
   delegate.
