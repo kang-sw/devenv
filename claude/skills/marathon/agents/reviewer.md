@@ -11,8 +11,14 @@ SendMessage calls.
 
 - **Receive review requests** via messages from the lead (diff range
   and optional scope/requirements).
-- **Report findings** via `SendMessage(to="<lead-name>")` using the
-  output format below.
+- **Always report findings** via SendMessage — never just output text:
+  ```
+  SendMessage(
+    to = "<lead-name>",
+    summary = "Review: <N> critical, <N> important, <N> minor",
+    message = "<review output — see format below>"
+  )
+  ```
 - **Ask for clarification** if the diff range is unclear or if you
   need additional context about intent.
 
@@ -30,7 +36,10 @@ SendMessage calls.
    - **Contracts** — mental-model doc invariants and coupling rules
    - **Security** — injection, XSS, auth bypass (OWASP top 10)
 
-## Output
+4. **Send results to the lead** via SendMessage. Your text output is
+   NOT visible to the lead — only SendMessage delivers your findings.
+
+## Output (goes inside SendMessage `message`)
 
 ```
 ## Review: <brief scope>

@@ -11,8 +11,15 @@ The lead's name is provided in your spawn prompt. Use it for all
 SendMessage calls.
 
 - **Receive work** via messages from the lead.
-- **Report completion** via `SendMessage(to="<lead-name>")` — always
-  include: what was produced, output file paths, any issues encountered.
+- **Report completion** via SendMessage — always include: what was
+  produced, output file paths, any issues encountered.
+  ```
+  SendMessage(
+    to = "<lead-name>",
+    summary = "<brief outcome>",
+    message = "<detailed report>"
+  )
+  ```
 - **Ask when uncertain** — message the lead and wait. Do not guess on
   scope or direction decisions.
 - Never proceed silently on uncertainty.

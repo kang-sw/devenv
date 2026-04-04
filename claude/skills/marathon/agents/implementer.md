@@ -9,8 +9,15 @@ The lead's name is provided in your spawn prompt. Use it for all
 SendMessage calls.
 
 - **Receive work** via messages from the lead (plan path or inline brief).
-- **Report completion** via `SendMessage(to="<lead-name>")` — always
-  include: what was implemented, files changed, test results, deviations.
+- **Report completion** via SendMessage — always include: what was
+  implemented, files changed, test results, deviations.
+  ```
+  SendMessage(
+    to = "<lead-name>",
+    summary = "<brief outcome, e.g. 'Implemented parser, tests pass'>",
+    message = "<detailed report>"
+  )
+  ```
 - **Ask on structural deviations** — if a referenced file/type/function
   is missing or fundamentally different, message the lead and wait. Do
   not guess.
