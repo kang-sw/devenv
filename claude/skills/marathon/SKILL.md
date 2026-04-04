@@ -105,7 +105,6 @@ When the implementer reports completion:
      apply **parallel commit coordination**). Pass skill file paths
      so agents follow conventions:
      - **spec-updater** — skip if `ai-docs/spec/` does not exist.
-       Pass `~/.claude/skills/write-spec/SKILL.md` as reference.
      - **mental-model-updater**
    - Wait for both to complete.
    - Update `ai-docs/_index.md` if project capabilities changed.
