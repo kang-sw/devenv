@@ -25,9 +25,11 @@ context limits.
 plan files, diff summaries, and team member reports. Everything else goes
 through team members.
 
-**Task list is the live dashboard.** Create, update, and cancel tasks as
-the conversation evolves. The user should be able to glance at the task
-list at any time and see the current state.
+**Protocol tasks are your checklist.** At session start, create
+persistent `[PROTOCOL]` tasks that encode critical workflow steps.
+These stay visible in your context throughout the session, surviving
+context compression. They are reminders, not work items — never
+complete them until Session End.
 
 ## Step 0: Bootstrap
 
@@ -46,9 +48,15 @@ list at any time and see the current state.
 5. Team members are spawned on-demand when the first implementation
    request arrives. See **Team Management** below for spawn conventions,
    naming, model selection, and parallel coordination.
-6. Create an initial task:
+6. Create **protocol tasks** — persistent reminders that stay visible
+   in your context throughout the session. These are NOT work items;
+   never mark them completed until Session End.
    ```
-   [ ] [fixed] Marathon wrap-up — review, docs, merge
+   TaskCreate("[PROTOCOL] Delegate all code reading/writing to team members")
+   TaskCreate("[PROTOCOL] Each round: assess reuse vs fresh spawn for implementer")
+   TaskCreate("[PROTOCOL] Before merge: code review via fresh sonnet agent on sub-branch diff")
+   TaskCreate("[PROTOCOL] After merge: dispatch doc updaters if non-trivial")
+   TaskCreate("[PROTOCOL] Wrap-up — final review, coherence check, merge")
    ```
 
 ## Step 1: Marathon Loop
@@ -131,79 +139,63 @@ When the implementer reports completion:
    ```bash
    git diff --stat marathon/<scope>...<type>/<round>
    ```
-3. **Decide:**
+3. **Code review (pre-merge).** Run unless the round was trivial
+   (typo, config-only, single-line fix). When in doubt, run it.
+
+   Dispatch a fresh **sonnet** Agent (general-purpose, not a team
+   member) with the sub-branch diff:
+   ```
+   git diff marathon/<scope>...<type>/<round>
+   ```
+   Review prompt: scope, requirements, CLAUDE.md standards, mental-model
+   docs. Categorize as Critical / Important / Minor.
+
+   Fix Critical/Important issues: message implementer to fix on the
+   sub-branch → re-dispatch reviewer. Loop until clean.
+
+4. **Merge decision:**
    - **Accept** — merge and continue:
      ```bash
      git checkout marathon/<scope>
      git merge --no-ff <type>/<round> -m "<type>(<scope>): <brief summary>"
      git branch -d <type>/<round>
      ```
-   - **Fix** — message implementer to address issues on the same sub-branch.
    - **Rollback** — discard the round entirely:
      ```bash
      git checkout marathon/<scope>
      git branch -D <type>/<round>
      ```
-4. Report results to the user.
-5. Update task status.
-6. If the round warrants it, run a **checkpoint** (see below).
-
-### Checkpoint
-
-A checkpoint runs verification agents against the latest changes.
-Trigger at your discretion — typically after each ticket phase or
-substantial implementation unit. Skip for trivial/config changes.
-
-When splitting a ticket phase into subphases, update the ticket to
-reflect the split before proceeding.
-
-**Flow** (sequential — review may produce fixes):
-
-1. **Code review.** Dispatch a fresh **sonnet** Agent (general-purpose,
-   not a team member) with the round's diff:
-   ```
-   git diff <pre-round-commit>..HEAD
-   ```
-   Review prompt: scope, requirements, CLAUDE.md standards, mental-model
-   docs. Categorize as Critical / Important / Minor.
-
-   Fix Critical/Important issues: message implementer to fix on the same
-   branch → implementer re-tests → re-dispatch reviewer. Loop until clean.
-
-2. **Doc updates.** After review is clean:
+5. **Doc updates (post-merge).** Skip for config/typo changes.
    - Dispatch in parallel (fresh sonnet Agents, not team members;
      apply **parallel commit coordination**):
      - **spec-updater** — skip if `ai-docs/spec/` does not exist.
-     - **mental-model-updater** — skip for config/typo changes.
+     - **mental-model-updater**
    - Wait for both to complete.
    - Update `ai-docs/_index.md` if project capabilities changed.
    - If completing a ticket phase, append `### Result` to the ticket
      (load `/write-ticket` for conventions).
    - Commit doc changes.
+6. Report results to the user.
+
+When splitting a ticket phase into subphases, update the ticket to
+reflect the split before proceeding.
 
 **Verification agents are always fresh** — no persistence, no context
 carry-over. They read current diff + current docs independently.
 This prevents context contamination across checkpoints.
 
-**Docs are always current.** Every checkpoint leaves docs in a state
-where a fresh team member can onboard without stale references.
-
 ### Task discipline
 
-Every round gets a task. Track the full lifecycle:
+**Protocol tasks** (created in Step 0) are persistent reminders —
+not work items. They stay pending throughout the session and are
+cleaned up only at Session End. Do not mark them completed, do not
+update their status. Their sole purpose is to keep critical protocol
+steps visible in your context.
 
-```
-Round start  → TaskCreate("Implement <description>") → in_progress
-Round done   → completed
-Checkpoint   → TaskCreate("Checkpoint: <scope>") → in_progress → completed
-```
-
-Additional rules:
-- Create tasks eagerly for any actionable item beyond rounds.
-- Update status in real-time — the user checks the task list to
-  understand session progress at a glance.
-- Cancel stale tasks immediately with a brief reason.
-- Split tasks that grow larger than expected.
+**Work tasks** are optional. Create them only when they help the user
+track meaningful progress — e.g., multi-phase ticket work, parallel
+implementation streams. Do not create a task for every round; most
+rounds are short enough that the merge-gate report covers it.
 
 ## Team Management
 
@@ -281,8 +273,8 @@ staging.
 
 ## Step 2: Session End (when user signals done)
 
-Set the wrap-up task to `in_progress`. Most verification work has been
-done incrementally via checkpoints. Session end is lightweight:
+Most verification work has been done incrementally via checkpoints.
+Session end is lightweight:
 
 1. **Final checkpoint** — run one if the last round didn't trigger one.
 
@@ -313,9 +305,12 @@ done incrementally via checkpoints. Session end is lightweight:
    - Process issues (if any)
    - Ticket status (if applicable)
 
-5. **Shutdown team** — send shutdown request to all team members.
+5. **Clean up protocol tasks** — mark all `[PROTOCOL]` tasks as
+   completed.
 
-6. **Merge** — ask user for confirmation, then:
+6. **Shutdown team** — send shutdown request to all team members.
+
+7. **Merge** — ask user for confirmation, then:
    ```bash
    git checkout <original-branch>
    git merge --no-ff marathon/<scope> -m "$(cat <<'EOF'
@@ -330,8 +325,6 @@ done incrementally via checkpoints. Session end is lightweight:
    git branch -d marathon/<scope>
    ```
    If no commits were made, skip merge and delete the branch.
-
-Set wrap-up task to `completed`.
 
 ## Rules
 
