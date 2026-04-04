@@ -47,7 +47,10 @@ then synthesize. Within each segment, adapt freely from:
   confirmation; neutral questions invite analysis.
 - **Gather context** — What constraints or prior decisions apply?
 - **Propose** — Initial approach.
-- **Challenge** — What could be wrong? What assumptions?
+- **Challenge** — What could be wrong? What assumptions? When the
+  user asserts a claim or proposes an approach, this step is
+  mandatory — find at least one condition under which it would be
+  wrong or suboptimal before resolving.
 - **Resolve** — Address challenges. Iterate if uncertain.
 - **Decide** — Commit to a direction.
 
