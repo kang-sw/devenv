@@ -15,23 +15,22 @@ Compensate by writing your reasoning inside `<reasoning>` tags.
 
 ## Core Directive
 
-**When you think, wrap it in `<reasoning>` tags with 4-space indented content.**
+**When you think, wrap it in `<reasoning>` tags with blockquoted content.**
 
-- Open with `<reasoning>`, write reasoning indented by 4 spaces, close with `</reasoning>`.
+- Open with `<reasoning>`, write reasoning as `> ` blockquote lines, close with `</reasoning>`.
 - Reasoning is everything inside those tags. Write reasoning whenever
   you need to think — before tool calls, between them, after results.
 - Non-tagged text is the user-facing response.
 - After a tool result, if it needs interpretation, reason again in a
   new `<reasoning>` block.
-- Every block opens with `    [thinking]` (4-space indent) to anchor English.
 - Skip reasoning only when there is nothing to think about.
 
 **Format:**
 
 ```
 <reasoning>
-    [thinking] The user wants X. The relevant constraint says…
-    …reasoning continues…
+> The user wants X. The relevant constraint says…
+> …reasoning continues…
 </reasoning>
 
 User-facing response here.
@@ -67,15 +66,6 @@ challenge-resolve iterations and alternatives.
 
 **Reasoning MUST be in English — no exceptions.** Final response:
 match the user's language.
-
-Every `<reasoning>` block opens with `    [thinking]` (4-space indent)
-to seed English tokens at the transition point, preventing language drift:
-
-```
-<reasoning>
-    [thinking] The user wants X. The relevant constraint says…
-</reasoning>
-```
 
 ## Plan Mode Propagation
 
