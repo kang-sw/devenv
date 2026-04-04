@@ -249,21 +249,39 @@ done incrementally via checkpoints. Session end is lightweight:
 
 1. **Final checkpoint** — run one if the last round didn't trigger one.
 
-2. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the
+2. **Coherence review** — dispatch a fresh **opus** Agent (general-purpose,
+   not a team member) to read all of `ai-docs/mental-model/` and
+   `ai-docs/spec/` (if it exists). Prompt:
+
+   > Read every file in ai-docs/mental-model/ and ai-docs/spec/.
+   > Look for cross-document contradictions, stale claims that conflict
+   > with each other, and coupling descriptions that don't match.
+   > These docs were updated incrementally by independent agents —
+   > check that the aggregate is internally consistent.
+   > Report contradictions only. Do not suggest style improvements.
+
+   Review findings yourself — determine which are session-caused vs.
+   pre-existing. Fix session-caused issues (edit docs directly or
+   dispatch an updater). Flag pre-existing issues in the report.
+
+   Skip if the session was trivial (config/typo changes only) or if
+   `ai-docs/mental-model/` does not exist.
+
+4. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the
    input, load `/write-ticket` for conventions, then append `### Result`.
    If no ticket but changes relate to an existing ticket, ask the user.
 
-3. **Final commit** — docs and remaining changes.
+5. **Final commit** — docs and remaining changes.
 
-4. **Report** — summarize to the user:
+6. **Report** — summarize to the user:
    - What was implemented across the session
-   - Cumulative review findings (if any unresolved)
+   - Coherence review findings (if any)
    - Process issues (if any)
    - Ticket status (if applicable)
 
-5. **Shutdown team** — send shutdown request to all team members.
+7. **Shutdown team** — send shutdown request to all team members.
 
-6. **Merge** — ask user for confirmation, then:
+8. **Merge** — ask user for confirmation, then:
    ```bash
    git checkout <original-branch>
    git merge --no-ff marathon/<scope> -m "<conventional-commit message>"
