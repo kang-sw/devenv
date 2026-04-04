@@ -70,7 +70,7 @@ Assess each implementation request and route accordingly:
 |-----------|-------|--------|
 | **Trivial** — user gives exact file + value | Executor with inline brief | Direct commit on `marathon/<scope>` |
 | **Simple** — clear scope, 1-2 files | Executor with brief (skip planner) | Sub-branch `marathon/<scope>/<step>` |
-| **Complex** — multi-file, needs research | Planner → review → executor | Sub-branch `marathon/<scope>/<step>` |
+| **Complex** — multi-file, needs research, **no ticket/plan** | Planner → review → executor | Sub-branch `marathon/<scope>/<step>` |
 
 #### Trivial route
 
@@ -92,7 +92,9 @@ Constraints: <any constraints from discussion>
 Branch: marathon/<scope>/<step-name>  (create from marathon/<scope>)
 ```
 
-For **complex**, brief the planner first:
+For **complex** without sufficient ticket/plan spec, brief the planner
+first. If a ticket already specifies contracts and target files, skip the
+planner and send the executor a brief directly (same as simple route).
 
 1. **Brief the planner.** Send a message with:
    ```
@@ -158,16 +160,23 @@ Agent(
 )
 ```
 
-### Lifecycle decisions (your judgment)
+### Reuse vs. fresh spawn
 
-- **Reuse** a team member when the next task is in the same domain and
-  the member's context is still relevant.
-- **Spawn fresh** when switching to a different domain, or when the
-  member's accumulated context might cause confusion.
-- **Multiple members** are fine — e.g., one executor per domain if working
-  on parallel concerns. Name them descriptively (e.g., "executor-ui",
-  "executor-backend").
+| Relevant code size | Same domain | Different domain |
+|--------------------|-------------|-----------------|
+| Large (10K+ lines) | **Reuse** — context re-read cost is high | **Fresh spawn** |
+| Small (<2K lines)  | **Fresh spawn** — re-read is cheap, parallelism wins | **Fresh spawn** |
+
+"Relevant" = lines the executor would need to read, not total codebase.
+
+**Override factors** (take precedence over the matrix):
+- **Data dependency** on previous task's output → reuse regardless of size.
+- **Prior deviation** reported in previous task → fresh spawn regardless of
+  domain — stale assumptions propagate.
 - **Correctness > token savings.** When in doubt, spawn fresh.
+
+Multiple concurrent members are fine — name them descriptively
+(e.g., "executor-ui", "executor-backend").
 
 ### Model selection
 
@@ -232,3 +241,9 @@ Set wrap-up task to `completed`.
   delegate.
 - **Team members cannot spawn subagents.** They use `claude -p` via Bash
   for exploration instead. This is documented in their agent definitions.
+- **Scope expansion.** When a new concern surfaces mid-session (e.g., a
+  trait needs refactoring while implementing a feature): discuss and create
+  a ticket now while context is fresh; defer implementation to the next
+  session unless trivially small. Record discovered constraints and context
+  in the new ticket — the current session's knowledge must survive the
+  context boundary.

@@ -54,6 +54,15 @@ and report back.
    `ai-docs/_index.md` for commands). Read the full output. Claim "pass"
    only after confirming actual results.
 
+   **Test writing guidance** (when the plan/brief does not specify):
+   - **Testable pure logic** (calculations, parsing, state transitions):
+     write test cases first, then implement until tests pass.
+   - **Integration/FFI code**: implement first, then add tests for
+     observable behavior.
+   - When tests fail, diagnose whether the test or the implementation is
+     wrong before fixing. For non-obvious failures, describe the failure
+     in your report so the lead can dispatch a test-verifier if needed.
+
 6. **Report**: Message the lead with:
    - What was implemented (1-3 sentences)
    - Files changed
