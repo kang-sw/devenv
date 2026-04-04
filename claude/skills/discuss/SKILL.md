@@ -13,7 +13,9 @@ Topic: $ARGUMENTS
 
 ## Constraints
 
-- **Read-only.** No source edits. Documentation/ticket writes only in Step 2.
+- **Source read-only.** No source edits. Documentation writes only in
+  Step 2 — except tickets: unimplemented phases may be edited during
+  discussion to keep the ticket accurate as a live document (see below).
 - **Lazy context.** Load active doc listing at start. Read mental-model
   docs on-demand as topics emerge.
 - **No direct source reading.** Dispatch Explore agents when implementation
@@ -45,6 +47,12 @@ help refine implementation details through back-and-forth.
   wrong assumptions, edge cases, maintenance cost, etc.), call it out with
   reasoning. Don't parrot back risks already discussed and resolved; focus
   on gaps the conversation hasn't covered yet.
+
+**Ticket as live document.** When discussion changes the direction of
+unimplemented ticket phases, update the phase descriptions in place
+with user agreement. Completed phases (with `### Result`) are immutable.
+The ticket should always reflect the current agreed direction — don't
+defer updates to wrap-up when they can be captured now.
 
 Continue until the user signals the discussion is done.
 
