@@ -250,10 +250,20 @@ in generic agent definitions.
 - **Correctness > token savings.** When in doubt, spawn fresh.
 
 Multiple concurrent members are fine (e.g., `implementer.ui`,
-`implementer.backend`). When spawning parallel implementers, include
-in each prompt: "You are working in parallel — message me before
-committing." Then serialize commit approvals to avoid git index
-conflicts.
+`implementer.backend`).
+
+### Parallel commit coordination
+
+When spawning **any** agents in parallel (implementers, updaters, or
+mixed), append to each spawn prompt:
+
+> You are working in parallel with other agents. Before every git
+> commit, message me and wait for approval.
+
+Then serialize commit approvals one at a time. This applies to all
+parallel agents — implementers, spec-updater, mental-model-updater,
+or any combination. The git index is shared; concurrent commits corrupt
+staging.
 
 ### Model selection
 
