@@ -14,8 +14,9 @@ Target: $ARGUMENTS
 
 ## Doctrine
 
-Marathon is the **token-efficient implementation workflow**. The main agent
-(you) orchestrates discussion, decisions, and review. All code reading and
+Marathon is the **token-efficient implementation workflow**. You are the
+**lead** — you orchestrate discussion, decisions, and review. All code
+reading and
 writing is delegated to team members. This keeps the main context lean,
 enabling sessions that span many implementation cycles without hitting
 context limits.
@@ -42,7 +43,8 @@ list at any time and see the current state.
    ```
    TeamCreate("marathon-<scope>")
    ```
-5. Spawn initial team members as needed (see Team Management below).
+5. Team members are spawned on-demand when the first implementation
+   request arrives (see Team Management below).
 6. Create an initial task:
    ```
    [ ] [fixed] Marathon wrap-up — review, docs, merge
@@ -76,7 +78,7 @@ Assess each implementation request and route accordingly:
 
 Send the executor an inline brief:
 ```
-Implement: <what to change>
+Brief: <what to change>
 Files: <target files if known>
 Constraints: <any constraints from discussion>
 Branch: marathon/<scope>  (direct commit, no sub-branch)
@@ -86,10 +88,10 @@ Branch: marathon/<scope>  (direct commit, no sub-branch)
 
 For **simple**, send the executor a brief with a sub-branch:
 ```
-Implement: <what to change>
+Brief: <what to change>
 Files: <target files if known>
 Constraints: <any constraints from discussion>
-Branch: marathon/<scope>/<step-name>  (create from marathon/<scope>)
+Branch: marathon/<scope>/<step>  (create from marathon/<scope>)
 ```
 
 For **complex** without sufficient ticket/plan spec, brief the planner
@@ -100,7 +102,7 @@ planner and send the executor a brief directly (same as simple route).
    ```
    Brief: <natural-language description of the change>
    Plan path: ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md
-   Ticket: <path if applicable>
+   Ticket path: <path if applicable>
    Mental-model hints: <relevant domains>
    ```
    The planner commits the plan file on `marathon/<scope>`.
@@ -112,8 +114,8 @@ planner and send the executor a brief directly (same as simple route).
 
 3. **Dispatch the executor.** Send:
    ```
-   Plan: <plan-path>
-   Branch: marathon/<scope>/<step-name>  (create from marathon/<scope>)
+   Plan path: <plan-path>
+   Branch: marathon/<scope>/<step>  (create from marathon/<scope>)
    ```
 
 ### After each implementation — merge gate
@@ -161,8 +163,8 @@ reflect the split before proceeding.
    Review prompt: scope, requirements, CLAUDE.md standards, mental-model
    docs. Categorize as Critical / Important / Minor.
 
-   Fix Critical/Important issues via executor → re-test → re-review
-   until clean.
+   Fix Critical/Important issues: message executor to fix on the same
+   branch → executor re-tests → re-dispatch reviewer. Loop until clean.
 
 2. **Doc updates.** After review is clean, dispatch in parallel:
    - **spec-updater** agent — skip if `ai-docs/spec/` does not exist.
@@ -195,7 +197,8 @@ Agent(
   name = "planner" or "executor",  -- or domain-specific names
   model = "sonnet",                -- override to "opus" for complex logic
   prompt = "Read ~/.claude/skills/marathon/agents/<role>.md to understand
-            your role. Then: <brief or plan reference>"
+            your role. Your lead's name is '<your-agent-name>'.
+            Then: <brief or plan reference>"
 )
 ```
 

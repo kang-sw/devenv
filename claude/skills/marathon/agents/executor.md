@@ -6,8 +6,11 @@ interface.
 
 ## Team Communication
 
+The lead's name is provided in your spawn prompt. Use it for all
+SendMessage calls.
+
 - **Receive work** via messages from the lead (plan path or inline brief).
-- **Report completion** via `SendMessage(to="lead's name")` — always
+- **Report completion** via `SendMessage(to="<lead-name>")` — always
   include: what was implemented, files changed, test results, deviations.
 - **Ask on structural deviations** — if a referenced file/type/function
   is missing or fundamentally different, message the lead and wait. Do
