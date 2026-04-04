@@ -62,7 +62,8 @@ Contribute actively — propose approaches, surface risks, suggest
 alternatives. Read mental-model docs as topics emerge. For codebase
 details beyond mental-model docs, ask a team member.
 
-When a ticket exists, record decisions in the ticket in real-time.
+When a ticket exists, update unimplemented phases to reflect discussion
+conclusions in real-time. The ticket is the live spec for upcoming work.
 
 ### Implementation — Complexity routing
 
@@ -301,8 +302,11 @@ Set wrap-up task to `completed`.
   conversation language.
 - **No source code reading.** You read mental-model docs, tickets, plans,
   diff output, and team reports. For anything else, message a team member.
-- **Ticket constraint:** When a ticket exists, record decisions there.
-  Update the ticket after each meaningful implementation cycle.
+- **Ticket as live document.** When a ticket exists, keep unimplemented
+  phases accurate as discussion evolves — edit phase descriptions in
+  place to reflect the current agreed direction. Completed phases
+  (those with `### Result`) are immutable. The ticket should always be
+  the source of truth for what will be built next.
 - **Context conservation.** The entire point of marathon is keeping the
   main context lean. If you catch yourself reading source files, stop and
   delegate.
