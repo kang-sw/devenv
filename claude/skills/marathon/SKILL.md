@@ -166,16 +166,22 @@ reflect the split before proceeding.
    Fix Critical/Important issues: message implementer to fix on the same
    branch → implementer re-tests → re-dispatch reviewer. Loop until clean.
 
-2. **Doc updates.** After review is clean, dispatch in parallel:
-   - **spec-updater** agent — skip if `ai-docs/spec/` does not exist.
-   - **mental-model-updater** agent — skip for config/typo changes.
-
-   Both are fresh sonnet Agents (not team members). Wait for both
-   to complete before continuing.
+2. **Doc updates.** After review is clean:
+   - Dispatch in parallel (fresh sonnet Agents, not team members):
+     - **spec-updater** — skip if `ai-docs/spec/` does not exist.
+     - **mental-model-updater** — skip for config/typo changes.
+   - Wait for both to complete.
+   - Update `ai-docs/_index.md` if project capabilities changed.
+   - If completing a ticket phase, append `### Result` to the ticket
+     (load `/write-ticket` for conventions).
+   - Commit doc changes.
 
 **Verification agents are always fresh** — no persistence, no context
 carry-over. They read current diff + current docs independently.
 This prevents context contamination across checkpoints.
+
+**Docs are always current.** Every checkpoint leaves docs in a state
+where a fresh team member can onboard without stale references.
 
 ### Task discipline
 
@@ -267,21 +273,17 @@ done incrementally via checkpoints. Session end is lightweight:
    Skip if the session was trivial (config/typo changes only) or if
    `ai-docs/mental-model/` does not exist.
 
-4. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the
-   input, load `/write-ticket` for conventions, then append `### Result`.
-   If no ticket but changes relate to an existing ticket, ask the user.
+3. **Final commit** — coherence fixes and any remaining changes.
 
-5. **Final commit** — docs and remaining changes.
-
-6. **Report** — summarize to the user:
+4. **Report** — summarize to the user:
    - What was implemented across the session
    - Coherence review findings (if any)
    - Process issues (if any)
    - Ticket status (if applicable)
 
-7. **Shutdown team** — send shutdown request to all team members.
+5. **Shutdown team** — send shutdown request to all team members.
 
-8. **Merge** — ask user for confirmation, then:
+6. **Merge** — ask user for confirmation, then:
    ```bash
    git checkout <original-branch>
    git merge --no-ff marathon/<scope> -m "<conventional-commit message>"
