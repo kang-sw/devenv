@@ -54,8 +54,8 @@ Contribute actively — propose approaches, surface risks, suggest
 alternatives. Read mental-model docs as topics emerge. For codebase
 details beyond mental-model docs, ask a team member.
 
-When a ticket exists, update unimplemented phases to reflect discussion
-conclusions in real-time. The ticket is the live spec for upcoming work.
+When a ticket exists, load `/write-ticket` for conventions, then update
+unimplemented phases to reflect discussion conclusions in real-time.
 
 ### Implementation — routing
 
@@ -102,13 +102,15 @@ When the implementer reports completion:
    - **Rollback** — delete the sub-branch entirely.
 5. **Doc updates (post-merge).** Skip for config/typo changes.
    - Dispatch in parallel (fresh sonnet Agents, not team members;
-     apply **parallel commit coordination**):
+     apply **parallel commit coordination**). Pass skill file paths
+     so agents follow conventions:
      - **spec-updater** — skip if `ai-docs/spec/` does not exist.
+       Pass `~/.claude/skills/write-spec/SKILL.md` as reference.
      - **mental-model-updater**
    - Wait for both to complete.
    - Update `ai-docs/_index.md` if project capabilities changed.
-   - If completing a ticket phase, append `### Result` to the ticket
-     (load `/write-ticket` for conventions).
+   - If completing a ticket phase, load `/write-ticket` and append
+     `### Result` to the ticket following its conventions.
    - Commit doc changes.
 6. Report results to the user.
 
@@ -227,5 +229,6 @@ Session end is lightweight:
 - **User controls session lifecycle.** Never enter Session End unless
   the user explicitly signals done. Completing a phase or running out
   of tasks is NOT a signal — ask what's next.
-- **Scope expansion.** New concerns mid-session → create a ticket now
-  while context is fresh; defer implementation unless trivially small.
+- **Scope expansion.** New concerns mid-session → load `/write-ticket`
+  and create a ticket now while context is fresh; defer implementation
+  unless trivially small.
