@@ -14,8 +14,9 @@ User Argument: $ARGUMENTS
 
 Marathon is **token-efficient** — keep the main context lean by
 delegating. You are the **lead**: orchestrate discussion, decisions,
-and review. **Do not read source code.** You only read: mental-model
-docs, tickets, plans, diffs, and team reports.
+and review. **Do not read source code** — use Explore agents for
+codebase lookups. You only read: mental-model docs, tickets, plans,
+diffs, team reports, and explore results.
 
 ## Step 0: Bootstrap
 
@@ -52,7 +53,7 @@ enough to act on, skip discussion and route directly.
 
 Contribute actively — propose approaches, surface risks, suggest
 alternatives. Read mental-model docs as topics emerge. For codebase
-details beyond mental-model docs, ask a team member.
+details beyond mental-model docs, dispatch an **Explore agent**.
 
 When a ticket exists, load `/write-ticket` for conventions, then update
 unimplemented phases to reflect discussion conclusions in real-time.
@@ -69,7 +70,8 @@ unimplemented phases to reflect discussion conclusions in real-time.
 **Routing check:** Before dispatching, ask: *"Can I write a complete
 Description for this task — specific enough that the implementer knows
 which files to touch and what approach to take?"* If yes → implementer
-directly. If not → planner.
+directly. If almost — use an **Explore agent** to fill the gaps. If
+fundamentally unclear → planner.
 
 **Branch:** one-liner → direct commit on `marathon/<datetime>`.
 Everything else → sub-branch `<type>/<round>` from `marathon/<datetime>`.
@@ -142,13 +144,30 @@ parallel work where the user benefits from progress visibility.
 
 ## Team Management
 
+### Explore agents
+
+Explore agents are **not team members** — they are the lead's direct
+tool for codebase lookups. Spawn with `subagent_type="Explore"`:
+
+```
+Agent(
+  subagent_type = "Explore",
+  prompt = "<question about the codebase>"
+)
+```
+
+Default model (haiku) handles file locations, signatures, and simple
+pattern searches. Use `model="sonnet"` when tracing call chains or
+cross-module relationships. If even a sonnet explore is insufficient,
+the question likely needs a **planner**.
+
 ### Spawning team members
 
 Role descriptions are in `~/.claude/skills/marathon/agents/`:
 
 | Role file | Purpose |
 |-----------|---------|
-| `planner.md` | Codebase exploration → plan file |
+| `planner.md` | Deep codebase research → plan file |
 | `implementer.md` | Code implementation from plan or brief |
 | `reviewer.md` | Code review on diffs (read-only, reusable) |
 | `worker.md` | Non-code tasks (documents, config, research output) |
@@ -202,7 +221,9 @@ Default **sonnet** for all roles. When a task involves novel
 architecture or complex cross-module logic, spawn with **opus** and
 mark the name `.expert`. If an existing sonnet member needs upgrading,
 spawn a fresh `.expert` peer instead of reusing. **Haiku** for
-mechanical worker tasks and `claude -p` exploration only.
+mechanical worker tasks and `claude -p --model haiku` exploration only.
+**Explore agents** default to haiku; upgrade to **sonnet** for
+relational queries (see **Explore agents** above).
 
 ## Step 2: Session End (when user signals done)
 
