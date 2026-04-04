@@ -23,13 +23,8 @@ context limits.
 
 **You do not read source code.** You read: mental-model docs, tickets,
 plan files, diff summaries, and team member reports. Everything else goes
-through team members.
-
-**Protocol tasks are your checklist.** At session start, create
-persistent `[PROTOCOL]` tasks that encode critical workflow steps.
-These stay visible in your context throughout the session, surviving
-context compression. They are reminders, not work items — never
-complete them until Session End.
+through team members. If you catch yourself opening a source file, stop
+and delegate.
 
 ## Step 0: Bootstrap
 
@@ -48,15 +43,14 @@ complete them until Session End.
 5. Team members are spawned on-demand when the first implementation
    request arrives. See **Team Management** below for spawn conventions,
    naming, model selection, and parallel coordination.
-6. Create **protocol tasks** — persistent reminders that stay visible
-   in your context throughout the session. These are NOT work items;
-   never mark them completed until Session End.
+6. Create **protocol tasks** — persistent reminders visible throughout
+   the session. NOT work items; never complete until Session End.
    ```
    TaskCreate("[PROTOCOL] Delegate all code reading/writing to team members")
-   TaskCreate("[PROTOCOL] Each round: assess reuse vs fresh spawn for implementer")
-   TaskCreate("[PROTOCOL] Before merge: code review via fresh sonnet agent on sub-branch diff")
+   TaskCreate("[PROTOCOL] Each round: assess reuse vs fresh spawn")
+   TaskCreate("[PROTOCOL] Before merge: code review (fresh sonnet on sub-branch diff)")
    TaskCreate("[PROTOCOL] After merge: dispatch doc updaters if non-trivial")
-   TaskCreate("[PROTOCOL] Wrap-up — final review, coherence check, merge")
+   TaskCreate("[PROTOCOL] Wrap-up — coherence check, merge")
    ```
 
 ## Step 1: Marathon Loop
@@ -74,61 +68,28 @@ details beyond mental-model docs, ask a team member.
 When a ticket exists, update unimplemented phases to reflect discussion
 conclusions in real-time. The ticket is the live spec for upcoming work.
 
-### Implementation — Complexity routing
+### Implementation — routing
 
-Assess each implementation request and route accordingly:
+1. **Non-code** task → dispatch **worker**.
+2. Needs codebase research (no ticket/contracts to guide) →
+   **planner** first, then **implementer**.
+3. Otherwise → **implementer** directly.
 
-| Complexity | Route | Branch |
-|-----------|-------|--------|
-| **Trivial** — user gives exact file + value | Implementer with inline brief | Direct commit on `marathon/<scope>` |
-| **Simple** — clear scope, 1-2 files | Implementer with brief (skip planner) | `<type>/<round>` (e.g., `feat/add-parser`) |
-| **Complex with ticket** — multi-file, ticket has contracts | Implementer with brief (skip planner) | `<type>/<round>` |
-| **Complex without ticket** — multi-file, needs research | Planner → review → implementer | `<type>/<round>` (e.g., `refactor/chunk-api`) |
-| **Non-code** — documents, config, research output | Worker with brief | `<type>/<round>` (e.g., `docs/update-slides`) |
+**Branch:** one-liner → direct commit on `marathon/<scope>`.
+Everything else → sub-branch `<type>/<round>` from `marathon/<scope>`.
 
-#### Trivial route
-
-Send the implementer an inline brief:
+**Brief template** (all routes):
 ```
 Brief: <what to change>
 Files: <target files if known>
 Constraints: <any constraints from discussion>
-Branch: marathon/<scope>  (direct commit, no sub-branch)
+Branch: <branch per above>
 ```
 
-#### Simple / Complex route
-
-For **simple**, send the implementer a brief with a sub-branch:
-```
-Brief: <what to change>
-Files: <target files if known>
-Constraints: <any constraints from discussion>
-Branch: <type>/<round>  (create from marathon/<scope>)
-```
-
-For **complex without ticket**, brief the planner first:
-
-1. **Brief the planner.** Send a message with:
-   ```
-   Brief: <natural-language description of the change>
-   Plan path: ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md
-   Ticket path: <path if applicable>
-   Mental-model hints: <relevant domains>
-   ```
-   The planner commits the plan file on `marathon/<scope>`.
-
-2. **Review the plan.** When the planner reports completion, read the
-   plan file. Verify against mental-model docs — check that contracts
-   make sense and the approach aligns with architectural conventions.
-   If issues are found, message the planner with corrections. If the
-   planner cannot converge after two rounds, rewrite the brief or
-   dispatch the implementer directly with inline guidance.
-
-3. **Dispatch the implementer.** Send:
-   ```
-   Plan path: <plan-path>
-   Branch: <type>/<round>  (create from marathon/<scope>)
-   ```
+**Planner flow:** brief with description, plan path
+(`ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md`), ticket path, and
+mental-model hints. Review the plan against mental-model docs; if no
+convergence after two rounds, dispatch implementer with inline guidance.
 
 ### After each implementation — merge gate
 
@@ -154,17 +115,9 @@ When the implementer reports completion:
    sub-branch → re-dispatch reviewer. Loop until clean.
 
 4. **Merge decision:**
-   - **Accept** — merge and continue:
-     ```bash
-     git checkout marathon/<scope>
-     git merge --no-ff <type>/<round> -m "<type>(<scope>): <brief summary>"
-     git branch -d <type>/<round>
-     ```
-   - **Rollback** — discard the round entirely:
-     ```bash
-     git checkout marathon/<scope>
-     git branch -D <type>/<round>
-     ```
+   - **Accept** — `git merge --no-ff <type>/<round>` into
+     `marathon/<scope>`, then delete the sub-branch.
+   - **Rollback** — delete the sub-branch entirely.
 5. **Doc updates (post-merge).** Skip for config/typo changes.
    - Dispatch in parallel (fresh sonnet Agents, not team members;
      apply **parallel commit coordination**):
@@ -178,24 +131,14 @@ When the implementer reports completion:
 6. Report results to the user.
 
 When splitting a ticket phase into subphases, update the ticket to
-reflect the split before proceeding.
-
-**Verification agents are always fresh** — no persistence, no context
-carry-over. They read current diff + current docs independently.
-This prevents context contamination across checkpoints.
+reflect the split before proceeding. Verification agents are always
+fresh — no context carry-over between checkpoints.
 
 ### Task discipline
 
-**Protocol tasks** (created in Step 0) are persistent reminders —
-not work items. They stay pending throughout the session and are
-cleaned up only at Session End. Do not mark them completed, do not
-update their status. Their sole purpose is to keep critical protocol
-steps visible in your context.
-
-**Work tasks** are optional. Create them only when they help the user
-track meaningful progress — e.g., multi-phase ticket work, parallel
-implementation streams. Do not create a task for every round; most
-rounds are short enough that the merge-gate report covers it.
+Protocol tasks stay pending until Session End — they are reminders,
+not work. Work tasks are optional; create only for multi-phase or
+parallel work where the user benefits from progress visibility.
 
 ## Team Management
 
@@ -223,12 +166,7 @@ Agent(
 )
 ```
 
-**Naming convention:** Always `<role>.<domain>` — no bare "implementer" or
-"planner". This keeps naming consistent whether one or many are spawned.
-
-The role files include team communication patterns (SendMessage usage,
-when to ask vs. proceed, report format). This context is unavailable
-in generic agent definitions.
+**Naming:** Always `<role>.<domain>` — no bare "implementer" or "planner".
 
 ### Reuse vs. fresh spawn
 
@@ -239,14 +177,8 @@ in generic agent definitions.
 
 "Relevant" = lines the implementer would need to read, not total codebase.
 
-**Override factors** (take precedence over the matrix):
-- **Data dependency** on previous task's output → reuse regardless of size.
-- **Prior deviation** reported in previous task → fresh spawn regardless of
-  domain — stale assumptions propagate.
-- **Correctness > token savings.** When in doubt, spawn fresh.
-
-Multiple concurrent members are fine (e.g., `implementer.ui`,
-`implementer.backend`).
+**Overrides:** Data dependency on prior output → reuse. Prior deviation
+reported → fresh spawn. When in doubt, spawn fresh.
 
 ### Parallel commit coordination
 
@@ -263,13 +195,9 @@ staging.
 
 ### Model selection
 
-- **Planner**: sonnet (default). Opus if the change involves novel
-  architecture with no existing patterns to follow.
-- **Implementer**: sonnet (default). Opus if implementing complex algorithms
-  or cross-module changes where structural judgment is critical.
-- **Worker**: sonnet (default). Haiku for mechanical tasks (file moves,
-  simple config changes).
-- **Exploration** (via `claude -p` inside team members): haiku.
+Default **sonnet** for all roles. Override to **opus** for novel
+architecture or complex cross-module logic. Override to **haiku** for
+mechanical worker tasks and `claude -p` exploration.
 
 ## Step 2: Session End (when user signals done)
 
@@ -278,24 +206,11 @@ Session end is lightweight:
 
 1. **Final checkpoint** — run one if the last round didn't trigger one.
 
-2. **Coherence review** — dispatch a fresh **opus** Agent (general-purpose,
-   not a team member) to read all of `ai-docs/mental-model/` and
-   `ai-docs/spec/` (if it exists). Prompt:
-
-   > Read every file in ai-docs/mental-model/ and ai-docs/spec/.
-   > Look for cross-document contradictions, stale claims that conflict
-   > with each other, and coupling descriptions that don't match.
-   > These docs were updated incrementally by independent agents —
-   > check that the aggregate is internally consistent.
-   > Report contradictions only. Do not suggest style improvements.
-
-   Review findings yourself — determine which are session-caused vs.
-   pre-existing. Fix session-caused issues (edit docs directly or
-   dispatch an updater). Flag pre-existing issues in the report.
-
-   Skip if the session was trivial (config/typo changes only), if
-   `ai-docs/mental-model/` does not exist, or if no doc files were
-   updated during this session (no checkpoint produced doc commits).
+2. **Coherence review** — dispatch a fresh **opus** Agent to read all
+   of `ai-docs/mental-model/` and `ai-docs/spec/` (if exists). Look
+   for cross-document contradictions from incremental updates. Fix
+   session-caused issues; flag pre-existing ones in the report.
+   Skip if trivial session, no mental-model dir, or no docs updated.
 
 3. **Final commit** — coherence fixes and any remaining changes.
 
@@ -310,47 +225,25 @@ Session end is lightweight:
 
 6. **Shutdown team** — send shutdown request to all team members.
 
-7. **Merge** — ask user for confirmation, then:
-   ```bash
-   git checkout <original-branch>
-   git merge --no-ff marathon/<scope> -m "$(cat <<'EOF'
-   <type>(<scope>): <summary>
-
-   <what changed — brief>
-
-   ## AI Context
-   - <decision rationale, rejected alternatives, user directives>
-   EOF
-   )"
-   git branch -d marathon/<scope>
+7. **Merge** — ask user for confirmation, then merge `marathon/<scope>`
+   into `<original-branch>` with `--no-ff`. Commit message format:
    ```
-   If no commits were made, skip merge and delete the branch.
+   <type>(<scope>): <summary>
+   <what changed>
+   ## AI Context
+   - <decisions, alternatives, directives>
+   ```
+   Delete `marathon/<scope>` after merge. Skip if no commits were made.
 
 ## Rules
 
 - **Language:** All code, commits, and docs in English regardless of
   conversation language.
-- **No source code reading.** You read mental-model docs, tickets, plans,
-  diff output, and team reports. For anything else, message a team member.
-- **Ticket as live document.** When a ticket exists, keep unimplemented
-  phases accurate as discussion evolves — with user agreement, edit phase
-  descriptions in place to reflect the current agreed direction. Completed
-  phases (those with `### Result`) are immutable. The ticket should always
-  be the source of truth for what will be built next.
-- **User controls session lifecycle.** Never enter Session End, propose
-  wrapping up, or shut down teammates unless the user explicitly signals
-  done. Completing a ticket phase, running out of obvious tasks, or
-  reaching a natural pause are NOT signals to end — ask the user what's
-  next. Teammates stay alive between rounds for potential reuse; only
-  Session End (step 2) shuts them down.
-- **Context conservation.** The entire point of marathon is keeping the
-  main context lean. If you catch yourself reading source files, stop and
-  delegate.
-- **Team members cannot spawn subagents.** They use `claude -p` via Bash
-  for exploration instead. This is documented in their agent definitions.
-- **Scope expansion.** When a new concern surfaces mid-session (e.g., a
-  trait needs refactoring while implementing a feature): discuss and create
-  a ticket now while context is fresh; defer implementation to the next
-  session unless trivially small. Record discovered constraints and context
-  in the new ticket — the current session's knowledge must survive the
-  context boundary.
+- **Ticket as live document.** Keep unimplemented phases accurate as
+  discussion evolves (with user agreement). Completed phases (with
+  `### Result`) are immutable.
+- **User controls session lifecycle.** Never enter Session End unless
+  the user explicitly signals done. Completing a phase or running out
+  of tasks is NOT a signal — ask what's next.
+- **Scope expansion.** New concerns mid-session → create a ticket now
+  while context is fresh; defer implementation unless trivially small.
