@@ -7,15 +7,19 @@ authoring. Neovim (LazyVim), Claude Code skills/agents, tmux, WezTerm, shell
 dotfiles. One-shot `install.sh` for macOS/WSL/Linux.
 
 This repo is **not a software project** — it is a configuration and template
-repository. There is no `ai-docs/`, no tickets, no mental-model directory, and
-that is intentional. The skills and agents defined here are consumed by other
-projects via symlink (`install.sh` handles this).
+repository. `ai-docs/` may exist but is not structured like downstream
+projects — no mental-model directory, no spec. Tickets here track skill
+design research, not software implementation. The skills and agents
+defined here are consumed by other projects via symlink (`install.sh`
+handles this).
 
 ## Workspace
 
 ```
+ai-docs/   — Skill design research tickets (non-standard structure)
 claude/    — Claude Code skills, agents, CLAUDE.template.md
   skills/  — Skill definitions (discuss, write-ticket, write-plan, implement, etc.)
+    marathon/agents/ — Team-scoped role descriptions for marathon skill
   agents/  — Agent definitions (rust-api-lookup, etc.)
   CLAUDE.template.md — Template CLAUDE.md for downstream projects
 nvim/      — Neovim config (LazyVim, plugins, colorscheme)
@@ -38,7 +42,8 @@ think about how they compose in the canonical flows:
 - Full ceremony: `/discuss` → `/write-ticket` → `/write-plan` → `/execute-plan`
 - Strategic: `/discuss` → `/write-ticket` → `/write-plan` → `/implement`
 - Direct: `/implement <description>`
-- Exploratory: `/sprint <topic>`
+- Default (token-efficient): `/marathon <topic>` — team-based delegation
+- Lightweight: `/sprint <topic>` — single-agent, trivial changes only
 
 ## Commit Rules
 
