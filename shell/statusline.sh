@@ -68,6 +68,14 @@ CTX_MAX_FMT=$(awk "BEGIN {
   else if (v >= 1000 && v % 1000 == 0) printf \"%dK\", v / 1000
   else printf \"%d\", v
 }")
+OUTPUT_TOKENS_FMT=$(awk "BEGIN {
+  s = sprintf(\"%d\", int($OUTPUT_TOKENS)); r = \"\"; l = length(s)
+  for (i = 1; i <= l; i++) {
+    if (i > 1 && (l - i + 1) % 3 == 0) r = r \",\"
+    r = r substr(s, i, 1)
+  }
+  printf \"%s\", r
+}")
 # Compute percentage from token counts for decimal precision
 # (API used_percentage is integer-only)
 PCT_RAW=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.2f\", $TOKENS_USED / $CTX_MAX * 100; else print 0 }")
@@ -116,6 +124,7 @@ GIT_UNT_FG=75     # Untracked (blue)
 COST_FG=184      # Cost (yellow)
 LINES_ADD_FG=75  # Lines added (blue)
 LINES_DEL_FG=204 # Lines removed (pink)
+OUTPUT_TOK_FG=73 # Output token count (dim cyan)
 CAP_BG=53        # (unused in pills layout, kept for reference)
 
 # Rate limit budget deltas (actual usage vs linear safe-line)
@@ -388,13 +397,13 @@ BAR=$(awk -v p="$PCT_RAW" -v w="$BAR_WIDTH" -v label="$BAR_LABEL" 'BEGIN {
 }')
 L2="\033[0m${PCT_COLOR_FWD}${LCAP}\033[48;5;${L2_BG}m${BAR} $(pc $L2_BG)\033[0m"
 
-# === L2b: [Tokens] [5h Rate] [7d Rate] ===
+# === L2b: [Tokens] [5h Rate] [7d Rate] [TotalOut] ===
 _PC0="${PCT_COLOR_FWD} ${TOKENS_USED_FMT} \033[38;5;${FG_DIM}m/ ${CTX_MAX_FMT} "
 _PW0=$((${#TOKENS_USED_FMT} + ${#CTX_MAX_FMT} + 5)) # " TOK / MAX "
 _PBG0=$TOKENS_BG
 
-_PC1=" ${RATE_5HR_COLOR}${RATE_5HR}%\033[38;5;${FG_DIM}m/5h/\033[38;5;${FG}m${RATE_5HR_RESET_FMT}"
-_PW1=$((7 + ${#RATE_5HR} + ${#RATE_5HR_RESET_FMT})) # " N%/5h/NNH "
+_PC1=" ${RATE_5HR_COLOR}${RATE_5HR}%\033[38;5;${FG_DIM}m/\033[38;5;${FG}m${RATE_5HR_RESET_FMT}"
+_PW1=$((4 + ${#RATE_5HR} + ${#RATE_5HR_RESET_FMT})) # " N%/NNH "
 [[ -n $DELTA_5HR ]] && {
   _PC1+=" \033[38;5;${_DC_5HR}m(${DELTA_5HR})"
   _PW1=$((_PW1 + 3 + ${#DELTA_5HR}))
@@ -402,8 +411,8 @@ _PW1=$((7 + ${#RATE_5HR} + ${#RATE_5HR_RESET_FMT})) # " N%/5h/NNH "
 _PC1+=" "
 _PBG1=$RATE_5H_BG
 
-_PC2=" ${RATE_7D_COLOR}${RATE_7D}%\033[38;5;${FG_DIM}m/wk/\033[38;5;${FG}m${RATE_7D_TTL}"
-_PW2=$((7 + ${#RATE_7D} + ${#RATE_7D_TTL})) # " N%/wk/Day "
+_PC2=" ${RATE_7D_COLOR}${RATE_7D}%\033[38;5;${FG_DIM}m/\033[38;5;${FG}m${RATE_7D_TTL}"
+_PW2=$((4 + ${#RATE_7D} + ${#RATE_7D_TTL})) # " N%/Day "
 [[ -n $DELTA_7D ]] && {
   _PC2+=" \033[38;5;${_DC_7D}m(${DELTA_7D})"
   _PW2=$((_PW2 + 3 + ${#DELTA_7D}))
@@ -411,7 +420,11 @@ _PW2=$((7 + ${#RATE_7D} + ${#RATE_7D_TTL})) # " N%/wk/Day "
 _PC2+=" "
 _PBG2=$RATE_7D_BG
 
-L2b=$(_layout 3)
+_PC3="\033[38;5;${OUTPUT_TOK_FG}m ↑${OUTPUT_TOKENS_FMT} "
+_PW3=$((3 + ${#OUTPUT_TOKENS_FMT})) # " ↑OUT "
+_PBG3=$TOKENS_BG
+
+L2b=$(_layout 4)
 
 # === L3: [Time] [API] [Delta?] [Cost] ===
 _n3=0
