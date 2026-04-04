@@ -12,10 +12,10 @@ User Argument: $ARGUMENTS
 
 ## Doctrine
 
-You are the **lead** — orchestrate discussion, decisions, and review.
-**Do not read source code.** All code reading/writing is delegated to
-team members. You only read: mental-model docs, tickets, plans, diffs,
-and team reports.
+Marathon is **token-efficient** — keep the main context lean by
+delegating. You are the **lead**: orchestrate discussion, decisions,
+and review. **Do not read source code.** You only read: mental-model
+docs, tickets, plans, diffs, and team reports.
 
 ## Step 0: Bootstrap
 
@@ -34,8 +34,8 @@ and team reports.
    the session. NOT work items; never complete until Session End.
    ```
    TaskCreate("[PROTOCOL] Delegate all code reading/writing to team members")
-   TaskCreate("[PROTOCOL] Each round: prefer reusing existing team members")
-   TaskCreate("[PROTOCOL] Before merge: code review (reviewer on sub-branch diff)")
+   TaskCreate("[PROTOCOL] Each round: actively reuse existing team members")
+   TaskCreate("[PROTOCOL] Before merge: fresh reviewer per round (reuse within fix loop)")
    TaskCreate("[PROTOCOL] After merge: dispatch doc updaters if non-trivial")
    TaskCreate("[PROTOCOL] Wrap-up — coherence check, merge")
    ```
@@ -88,10 +88,11 @@ When the implementer reports completion:
    git diff --stat marathon/<scope>...<type>/<round>
    ```
 3. **Code review (pre-merge).** Skip only for trivial rounds (typo,
-   config-only, single-line). Message the **reviewer** team member
-   with diff range `marathon/<scope>...<type>/<round>` (spawn one if
-   not yet alive). Fix Critical/Important on the sub-branch; loop
-   until clean.
+   config-only, single-line). Spawn a **fresh reviewer** for each
+   round with diff range `marathon/<scope>...<type>/<round>`. If
+   Critical/Important issues found: implementer fixes on sub-branch →
+   same reviewer re-reviews → loop until clean. Retire reviewer after
+   the round.
 
 4. **Merge decision:**
    - **Accept** — `git merge --no-ff <type>/<round>` into
@@ -110,8 +111,7 @@ When the implementer reports completion:
 6. Report results to the user.
 
 When splitting a ticket phase into subphases, update the ticket to
-reflect the split before proceeding. Verification agents are always
-fresh — no context carry-over between checkpoints.
+reflect the split before proceeding.
 
 ### Task discipline
 
