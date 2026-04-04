@@ -19,6 +19,16 @@ docs, tickets, plans, diffs, and team reports.
 
 ## Step 0: Bootstrap
 
+**First action — before anything else**, create protocol tasks:
+```
+TaskCreate("[PROTOCOL] Delegate all code reading/writing to team members")
+TaskCreate("[PROTOCOL] Each round: actively reuse existing team members")
+TaskCreate("[PROTOCOL] Before merge: fresh reviewer per round (reuse within fix loop)")
+TaskCreate("[PROTOCOL] After merge: dispatch doc updaters if non-trivial")
+TaskCreate("[PROTOCOL] Wrap-up — coherence check, merge")
+```
+
+Then:
 1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
    -name '*.md' | sort` if the script is missing).
 2. If `$ARGUMENTS` references a ticket, read it.
@@ -30,15 +40,6 @@ docs, tickets, plans, diffs, and team reports.
    TeamCreate("marathon-<scope>")
    ```
 5. Team members are spawned on-demand. See **Team Management** below.
-6. Create **protocol tasks** — persistent reminders visible throughout
-   the session. NOT work items; never complete until Session End.
-   ```
-   TaskCreate("[PROTOCOL] Delegate all code reading/writing to team members")
-   TaskCreate("[PROTOCOL] Each round: actively reuse existing team members")
-   TaskCreate("[PROTOCOL] Before merge: fresh reviewer per round (reuse within fix loop)")
-   TaskCreate("[PROTOCOL] After merge: dispatch doc updaters if non-trivial")
-   TaskCreate("[PROTOCOL] Wrap-up — coherence check, merge")
-   ```
 
 ## Step 1: Marathon Loop
 
