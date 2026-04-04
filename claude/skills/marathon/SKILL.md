@@ -151,7 +151,8 @@ Agent(
 
 **Naming:** `<role>.<label>` with neutral labels (alpha, beta, gamma…).
 Append `.expert` when spawning with opus — this makes the model visible
-in the name so you can make correct reuse-vs-upgrade decisions later.
+so you can make correct reuse-vs-upgrade decisions later. Examples:
+`impl.alpha` (sonnet), `impl.beta.expert` (opus), `planner.alpha`.
 Do not encode domain in the name — you already know who worked on what.
 
 ### Reuse policy
