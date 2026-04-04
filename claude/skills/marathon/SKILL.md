@@ -32,12 +32,13 @@ Then:
 1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
    -name '*.md' | sort` if the script is missing).
 2. If `$ARGUMENTS` references a ticket, read it.
-3. Create branch `marathon/<scope>` from current branch (record as
-   `<original-branch>`). If already on a `marathon/` branch, resume —
-   infer `<original-branch>` from merge-base with `main`.
+3. Create branch `marathon/<date>` from current branch where `<date>`
+   is `YYYY-MM-DD-hhmm` (e.g., `marathon/2026-04-04-1530`). Record
+   current branch as `<original-branch>`. If already on a `marathon/`
+   branch, resume — infer `<original-branch>` from merge-base with `main`.
 4. Create the team:
    ```
-   TeamCreate("marathon-<scope>")
+   TeamCreate("marathon-<date>")
    ```
 5. Team members are spawned on-demand. See **Team Management** below.
 
@@ -63,8 +64,8 @@ conclusions in real-time. The ticket is the live spec for upcoming work.
    **planner** first, then **implementer**.
 3. Otherwise → **implementer** directly.
 
-**Branch:** one-liner → direct commit on `marathon/<scope>`.
-Everything else → sub-branch `<type>/<round>` from `marathon/<scope>`.
+**Branch:** one-liner → direct commit on `marathon/<date>`.
+Everything else → sub-branch `<type>/<round>` from `marathon/<date>`.
 
 **Brief template** (all routes):
 ```
@@ -86,18 +87,18 @@ When the implementer reports completion:
 1. Read the implementer's report (summary, files changed, test results).
 2. For sub-branch work, review the scope:
    ```bash
-   git diff --stat marathon/<scope>...<type>/<round>
+   git diff --stat marathon/<date>...<type>/<round>
    ```
 3. **Code review (pre-merge).** Skip only for trivial rounds (typo,
    config-only, single-line). Spawn a **fresh reviewer** for each
-   round with diff range `marathon/<scope>...<type>/<round>`. If
+   round with diff range `marathon/<date>...<type>/<round>`. If
    Critical/Important issues found: implementer fixes on sub-branch →
    same reviewer re-reviews → loop until clean. Retire reviewer after
    the round.
 
 4. **Merge decision:**
    - **Accept** — `git merge --no-ff <type>/<round>` into
-     `marathon/<scope>`, then delete the sub-branch.
+     `marathon/<date>`, then delete the sub-branch.
    - **Rollback** — delete the sub-branch entirely.
 5. **Doc updates (post-merge).** Skip for config/typo changes.
    - Dispatch in parallel (fresh sonnet Agents, not team members;
@@ -138,7 +139,7 @@ Spawn general-purpose agents with a role file reference:
 ```
 Agent(
   subagent_type = "general-purpose",
-  team_name = "marathon-<scope>",
+  team_name = "marathon-<date>",
   name = "<role>.<label>",         -- e.g., "implementer.alpha", "planner.alpha"
   model = "sonnet",                -- override to "opus" for complex logic
   prompt = "Read ~/.claude/skills/marathon/agents/<role>.md to understand
@@ -206,7 +207,7 @@ Session end is lightweight:
 
 6. **Shutdown team** — send shutdown request to all team members.
 
-7. **Merge** — ask user for confirmation, then merge `marathon/<scope>`
+7. **Merge** — ask user for confirmation, then merge `marathon/<date>`
    into `<original-branch>` with `--no-ff`. Commit message format:
    ```
    <type>(<scope>): <summary>
@@ -214,7 +215,7 @@ Session end is lightweight:
    ## AI Context
    - <decisions, alternatives, directives>
    ```
-   Delete `marathon/<scope>` after merge. Skip if no commits were made.
+   Delete `marathon/<date>` after merge. Skip if no commits were made.
 
 ## Rules
 
