@@ -187,8 +187,15 @@ larger than expected.
 
 ### Spawning team members
 
-Role descriptions are in `~/.claude/skills/marathon/agents/`. Spawn
-general-purpose agents with a role file reference:
+Role descriptions are in `~/.claude/skills/marathon/agents/`:
+
+| Role file | Purpose |
+|-----------|---------|
+| `planner.md` | Codebase exploration → plan file |
+| `implementer.md` | Code implementation from plan or brief |
+| `worker.md` | Non-code tasks (documents, config, research output) |
+
+Spawn general-purpose agents with a role file reference:
 
 ```
 Agent(
