@@ -60,9 +60,11 @@ unimplemented phases to reflect discussion conclusions in real-time.
 ### Implementation — routing
 
 1. **Non-code** task → dispatch **worker**.
-2. Needs codebase research (no ticket/contracts to guide) →
-   **planner** first, then **implementer**.
-3. Otherwise → **implementer** directly.
+2. **Complex and uncertain** — change scope is unclear, multiple
+   modules involved, and no ticket/plan to guide. Dispatch **planner**
+   first to research the codebase and produce a plan, then
+   **implementer**.
+3. Otherwise → **implementer** directly (the common case).
 
 **Branch:** one-liner → direct commit on `marathon/<datetime>`.
 Everything else → sub-branch `<type>/<round>` from `marathon/<datetime>`.
