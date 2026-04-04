@@ -239,7 +239,10 @@ in generic agent definitions.
 - **Correctness > token savings.** When in doubt, spawn fresh.
 
 Multiple concurrent members are fine (e.g., `implementer.ui`,
-`implementer.backend`).
+`implementer.backend`). When spawning parallel implementers, include
+in each prompt: "You are working in parallel — message me before
+committing." Then serialize commit approvals to avoid git index
+conflicts.
 
 ### Model selection
 

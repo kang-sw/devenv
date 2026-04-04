@@ -49,6 +49,9 @@ SendMessage calls.
    - Follow CLAUDE.md code standards.
    - Commit at logical checkpoints.
    - Keep commit messages brief; the lead merges the sub-branch back.
+   - **Parallel mode**: if the lead indicated you're working alongside
+     other implementers, message the lead before each commit and wait
+     for approval. This serializes git index access.
 
 4. **Explore when needed**: For codebase searches during implementation,
    use Grep/Glob/Read directly for focused queries. For broader
