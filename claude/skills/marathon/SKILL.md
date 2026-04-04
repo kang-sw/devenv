@@ -141,8 +141,8 @@ Spawn general-purpose agents with a role file reference:
 Agent(
   subagent_type = "general-purpose",
   team_name = "marathon-<datetime>",
-  name = "<role>.<label>",         -- e.g., "implementer.alpha", "planner.alpha"
-  model = "sonnet",                -- override to "opus" for complex logic
+  name = "<role>.<label>[.expert]", -- e.g., "impl.alpha", "impl.alpha.expert"
+  model = "sonnet",                 -- or "opus" when .expert
   prompt = "Read ~/.claude/skills/marathon/agents/<role>.md to understand
             your role. Your lead's name is '<your-agent-name>'.
             Then: <brief or plan reference>"
@@ -150,8 +150,9 @@ Agent(
 ```
 
 **Naming:** `<role>.<label>` with neutral labels (alpha, beta, gamma…).
-Do not encode domain in the name — it anchors the agent to one domain
-and discourages reuse. You already know who worked on what.
+Append `.expert` when spawning with opus — this makes the model visible
+in the name so you can make correct reuse-vs-upgrade decisions later.
+Do not encode domain in the name — you already know who worked on what.
 
 ### Reuse policy
 
@@ -178,9 +179,11 @@ shared.
 
 ### Model selection
 
-Default **sonnet** for all roles. Override to **opus** for novel
-architecture or complex cross-module logic. Override to **haiku** for
-mechanical worker tasks and `claude -p` exploration.
+Default **sonnet** for all roles. When a task involves novel
+architecture or complex cross-module logic, spawn with **opus** and
+mark the name `.expert`. If an existing sonnet member needs upgrading,
+spawn a fresh `.expert` peer instead of reusing. **Haiku** for
+mechanical worker tasks and `claude -p` exploration only.
 
 ## Step 2: Session End (when user signals done)
 
