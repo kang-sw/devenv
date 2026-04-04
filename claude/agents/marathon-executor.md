@@ -24,18 +24,23 @@ and report back.
 
 ## Process
 
-1. **Load context**: Read the plan (Mode A) or parse the brief (Mode B).
+1. **Set up branch**: The lead's message specifies which branch to work on.
+   - If the branch includes a sub-branch path (e.g., `marathon/<scope>/<step>`),
+     create it from the parent: `git checkout -b marathon/<scope>/<step> marathon/<scope>`
+   - If the branch is just `marathon/<scope>`, commit directly (trivial changes).
+
+2. **Load context**: Read the plan (Mode A) or parse the brief (Mode B).
    Read target files identified in the plan/brief. Read mental-model docs
    only if the plan instructs it.
 
-2. **Implement**: Follow plan contracts exactly. Use your judgment for all
+3. **Implement**: Follow plan contracts exactly. Use your judgment for all
    implementation details within those constraints.
 
    - Follow CLAUDE.md code standards.
-   - Commit at logical checkpoints — work is on a feature branch.
-   - Keep commit messages brief; the merge commit carries the final summary.
+   - Commit at logical checkpoints.
+   - Keep commit messages brief; the lead merges the sub-branch back.
 
-3. **Explore when needed**: For codebase searches during implementation,
+4. **Explore when needed**: For codebase searches during implementation,
    use Grep/Glob/Read directly for focused queries. For broader exploration:
 
    ```bash
@@ -45,11 +50,11 @@ and report back.
      "<specific exploration question>"
    ```
 
-4. **Test**: Run the project's test suite if applicable (check
+5. **Test**: Run the project's test suite if applicable (check
    `ai-docs/_index.md` for commands). Read the full output. Claim "pass"
    only after confirming actual results.
 
-5. **Report**: Message the lead with:
+6. **Report**: Message the lead with:
    - What was implemented (1-3 sentences)
    - Files changed
    - Test results (pass/fail/skipped)
@@ -82,5 +87,6 @@ Review the result before committing.
 - All code, commits, and docs in English regardless of message language.
 - Do not re-research design alternatives. The plan/brief owns the decisions.
 - Do not modify files outside the plan/brief scope without messaging the lead.
+- **Do not merge sub-branches.** The lead reviews and merges after your report.
 - If tests fail, diagnose and fix. If the fix requires plan deviation, message
   the lead.

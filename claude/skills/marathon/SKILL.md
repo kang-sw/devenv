@@ -66,23 +66,33 @@ When a ticket exists, record decisions in the ticket in real-time.
 
 Assess each implementation request and route accordingly:
 
-| Complexity | Route | What the lead does |
-|-----------|-------|-------------------|
-| **Trivial** — user gives exact file + value | Message executor with inline brief | Review one-line report |
-| **Simple** — clear scope, 1-2 files, no exploration needed | Message executor with brief (skip planner) | Review report + diff summary |
-| **Complex** — multi-file, needs codebase research | Message planner → review plan → message executor | Review plan, then report + diff summary |
+| Complexity | Route | Branch |
+|-----------|-------|--------|
+| **Trivial** — user gives exact file + value | Executor with inline brief | Direct commit on `marathon/<scope>` |
+| **Simple** — clear scope, 1-2 files | Executor with brief (skip planner) | Sub-branch `marathon/<scope>/<step>` |
+| **Complex** — multi-file, needs research | Planner → review → executor | Sub-branch `marathon/<scope>/<step>` |
 
-#### Trivial / Simple route
+#### Trivial route
 
 Send the executor an inline brief:
 ```
 Implement: <what to change>
 Files: <target files if known>
 Constraints: <any constraints from discussion>
-Branch: marathon/<scope>
+Branch: marathon/<scope>  (direct commit, no sub-branch)
 ```
 
-#### Complex route
+#### Simple / Complex route
+
+For **simple**, send the executor a brief with a sub-branch:
+```
+Implement: <what to change>
+Files: <target files if known>
+Constraints: <any constraints from discussion>
+Branch: marathon/<scope>/<step-name>  (create from marathon/<scope>)
+```
+
+For **complex**, brief the planner first:
 
 1. **Brief the planner.** Send a message with:
    ```
@@ -91,6 +101,7 @@ Branch: marathon/<scope>
    Ticket: <path if applicable>
    Mental-model hints: <relevant domains>
    ```
+   The planner commits the plan file on `marathon/<scope>`.
 
 2. **Review the plan.** When the planner reports completion, read the
    plan file. Verify against mental-model docs — check that contracts
@@ -100,16 +111,33 @@ Branch: marathon/<scope>
 3. **Dispatch the executor.** Send:
    ```
    Plan: <plan-path>
-   Branch: marathon/<scope>
+   Branch: marathon/<scope>/<step-name>  (create from marathon/<scope>)
    ```
 
-### After each implementation
+### After each implementation — merge gate
 
-- Read the executor's report (summary, files changed, test results).
-- If tests failed or deviations occurred, decide: message executor to
-  fix, or discuss with the user first.
-- Report results to the user.
-- Update task status.
+When the executor reports completion:
+
+1. Read the executor's report (summary, files changed, test results).
+2. For sub-branch work, review the scope:
+   ```bash
+   git diff --stat marathon/<scope>...marathon/<scope>/<step>
+   ```
+3. **Decide:**
+   - **Accept** — merge and continue:
+     ```bash
+     git checkout marathon/<scope>
+     git merge --no-ff marathon/<scope>/<step> -m "<brief summary>"
+     git branch -d marathon/<scope>/<step>
+     ```
+   - **Fix** — message executor to address issues on the same sub-branch.
+   - **Rollback** — discard the step entirely:
+     ```bash
+     git checkout marathon/<scope>
+     git branch -D marathon/<scope>/<step>
+     ```
+4. Report results to the user.
+5. Update task status.
 
 ### Task discipline
 
