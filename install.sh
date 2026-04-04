@@ -411,14 +411,15 @@ for agent_file in "$REPO_DIR/claude/agents"/*.md; do
   link "$agent_file" "$HOME/.claude/agents/$agent_name"
 done
 
-# Claude Code settings — ensure required env vars are set
-CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+# Claude Code settings — ensure required config is set
 info "Ensuring Claude Code settings..."
 mkdir -p "$HOME/.claude"
-python3 - "$CLAUDE_SETTINGS" <<'PYEOF'
+python3 - "$HOME/.claude/settings.json" "$HOME/.claude.json" <<'PYEOF'
 import json, sys, os
 
-settings_path = sys.argv[1]
+settings_path, claude_json_path = sys.argv[1], sys.argv[2]
+
+# ── settings.json (project-level: env vars) ──────────────────────────────────
 required_env = {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
 }
@@ -440,9 +441,34 @@ if changed:
     with open(settings_path, "w") as f:
         json.dump(settings, f, indent=2)
         f.write("\n")
-    print(f"  \033[1;32m  ✔ Claude Code settings updated\033[0m")
+    print("  \033[1;32m  ✔ Claude Code settings.json updated\033[0m")
 else:
-    print(f"  \033[1;32m  ✔ Claude Code settings already current\033[0m")
+    print("  \033[1;32m  ✔ Claude Code settings.json already current\033[0m")
+
+# ── claude.json (global user config) ─────────────────────────────────────────
+required_global = {
+    "teammateMode": "in-process",
+}
+
+if os.path.isfile(claude_json_path):
+    with open(claude_json_path) as f:
+        global_cfg = json.load(f)
+else:
+    global_cfg = {}
+
+changed = False
+for key, val in required_global.items():
+    if global_cfg.get(key) != val:
+        global_cfg[key] = val
+        changed = True
+
+if changed:
+    with open(claude_json_path, "w") as f:
+        json.dump(global_cfg, f, indent=2)
+        f.write("\n")
+    print("  \033[1;32m  ✔ Claude Code claude.json updated\033[0m")
+else:
+    print("  \033[1;32m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
 # Clean up dead symlinks (skills and agents)
