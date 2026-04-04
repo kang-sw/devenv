@@ -35,8 +35,8 @@ SendMessage calls.
 
 1. **Set up branch**: The lead's message specifies which branch to work on.
    - If the branch includes a sub-branch path (e.g.,
-     `marathon/<scope>/<step>`), create it from the parent:
-     `git checkout -b marathon/<scope>/<step> marathon/<scope>`
+     `marathon/<scope>/<round>`), create it from the parent:
+     `git checkout -b marathon/<scope>/<round> marathon/<scope>`
    - If the branch is just `marathon/<scope>`, commit directly (trivial
      changes).
 

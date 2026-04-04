@@ -71,8 +71,8 @@ Assess each implementation request and route accordingly:
 | Complexity | Route | Branch |
 |-----------|-------|--------|
 | **Trivial** — user gives exact file + value | Executor with inline brief | Direct commit on `marathon/<scope>` |
-| **Simple** — clear scope, 1-2 files | Executor with brief (skip planner) | Sub-branch `marathon/<scope>/<step>` |
-| **Complex** — multi-file, needs research, **no ticket/plan** | Planner → review → executor | Sub-branch `marathon/<scope>/<step>` |
+| **Simple** — clear scope, 1-2 files | Executor with brief (skip planner) | Sub-branch `marathon/<scope>/<round>` |
+| **Complex** — multi-file, needs research, **no ticket/plan** | Planner → review → executor | Sub-branch `marathon/<scope>/<round>` |
 
 #### Trivial route
 
@@ -91,7 +91,7 @@ For **simple**, send the executor a brief with a sub-branch:
 Brief: <what to change>
 Files: <target files if known>
 Constraints: <any constraints from discussion>
-Branch: marathon/<scope>/<step>  (create from marathon/<scope>)
+Branch: marathon/<scope>/<round>  (create from marathon/<scope>)
 ```
 
 For **complex** without sufficient ticket/plan spec, brief the planner
@@ -115,7 +115,7 @@ planner and send the executor a brief directly (same as simple route).
 3. **Dispatch the executor.** Send:
    ```
    Plan path: <plan-path>
-   Branch: marathon/<scope>/<step>  (create from marathon/<scope>)
+   Branch: marathon/<scope>/<round>  (create from marathon/<scope>)
    ```
 
 ### After each implementation — merge gate
@@ -125,24 +125,24 @@ When the executor reports completion:
 1. Read the executor's report (summary, files changed, test results).
 2. For sub-branch work, review the scope:
    ```bash
-   git diff --stat marathon/<scope>...marathon/<scope>/<step>
+   git diff --stat marathon/<scope>...marathon/<scope>/<round>
    ```
 3. **Decide:**
    - **Accept** — merge and continue:
      ```bash
      git checkout marathon/<scope>
-     git merge --no-ff marathon/<scope>/<step> -m "<brief summary>"
-     git branch -d marathon/<scope>/<step>
+     git merge --no-ff marathon/<scope>/<round> -m "<brief summary>"
+     git branch -d marathon/<scope>/<round>
      ```
    - **Fix** — message executor to address issues on the same sub-branch.
-   - **Rollback** — discard the step entirely:
+   - **Rollback** — discard the round entirely:
      ```bash
      git checkout marathon/<scope>
-     git branch -D marathon/<scope>/<step>
+     git branch -D marathon/<scope>/<round>
      ```
 4. Report results to the user.
 5. Update task status.
-6. If the step warrants it, run a **checkpoint** (see below).
+6. If the round warrants it, run a **checkpoint** (see below).
 
 ### Checkpoint
 
@@ -156,9 +156,9 @@ reflect the split before proceeding.
 **Flow** (sequential — review may produce fixes):
 
 1. **Code review.** Dispatch a fresh sonnet Agent (general-purpose, not
-   a team member) with the step diff:
+   a team member) with the round's diff:
    ```
-   git diff <pre-step-commit>..HEAD
+   git diff <pre-round-commit>..HEAD
    ```
    Review prompt: scope, requirements, CLAUDE.md standards, mental-model
    docs. Categorize as Critical / Important / Minor.
@@ -237,7 +237,7 @@ Multiple concurrent members are fine — name them descriptively
 Set the wrap-up task to `in_progress`. Most verification work has been
 done incrementally via checkpoints. Session end is lightweight:
 
-1. **Final checkpoint** — run one if the last step didn't trigger one.
+1. **Final checkpoint** — run one if the last round didn't trigger one.
 
 2. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the
    input, load `/write-ticket` for conventions, then append `### Result`.
