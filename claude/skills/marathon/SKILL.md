@@ -301,8 +301,9 @@ done incrementally via checkpoints. Session end is lightweight:
    pre-existing. Fix session-caused issues (edit docs directly or
    dispatch an updater). Flag pre-existing issues in the report.
 
-   Skip if the session was trivial (config/typo changes only) or if
-   `ai-docs/mental-model/` does not exist.
+   Skip if the session was trivial (config/typo changes only), if
+   `ai-docs/mental-model/` does not exist, or if no doc files were
+   updated during this session (no checkpoint produced doc commits).
 
 3. **Final commit** — coherence fixes and any remaining changes.
 
