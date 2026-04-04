@@ -140,6 +140,40 @@ When the executor reports completion:
      ```
 4. Report results to the user.
 5. Update task status.
+6. If the step warrants it, run a **checkpoint** (see below).
+
+### Checkpoint
+
+A checkpoint runs verification agents against the latest changes.
+Trigger at your discretion — typically after each ticket phase or
+substantial implementation unit. Skip for trivial/config changes.
+
+When splitting a ticket phase into subphases, update the ticket to
+reflect the split before proceeding.
+
+**Flow** (sequential — review may produce fixes):
+
+1. **Code review.** Dispatch a fresh sonnet Agent (general-purpose, not
+   a team member) with the step diff:
+   ```
+   git diff <pre-step-commit>..HEAD
+   ```
+   Review prompt: scope, requirements, CLAUDE.md standards, mental-model
+   docs. Categorize as Critical / Important / Minor.
+
+   Fix Critical/Important issues via executor → re-test → re-review
+   until clean.
+
+2. **Doc updates.** After review is clean, dispatch in parallel:
+   - **spec-updater** agent — skip if `ai-docs/spec/` does not exist.
+   - **mental-model-updater** agent — skip for config/typo changes.
+
+   Both are fresh sonnet Agents (not team members). Wait for both
+   to complete before continuing.
+
+**Verification agents are always fresh** — no persistence, no context
+carry-over. They read current diff + current docs independently.
+This prevents context contamination across checkpoints.
 
 ### Task discipline
 
@@ -186,39 +220,28 @@ Multiple concurrent members are fine — name them descriptively
   or cross-module changes where structural judgment is critical.
 - **Exploration** (via `claude -p` inside team members): haiku.
 
-## Step 2: Wrap-up (when user signals done)
+## Step 2: Session End (when user signals done)
 
-Set the wrap-up task to `in_progress`. Execute in order:
+Set the wrap-up task to `in_progress`. Most verification work has been
+done incrementally via checkpoints. Session end is lightweight:
 
-1. **Code review** — read `git diff <base>..HEAD` yourself. You have the
-   discussion context (what was intended) but no code context (how it was
-   built), making you a natural independent reviewer. Check:
-   - Does the diff match the discussed intent?
-   - Any obvious issues visible in the diff?
-   - For large diffs, focus on public interfaces and tests.
+1. **Final checkpoint** — run one if the last step didn't trigger one.
 
-2. **Update mental model** — dispatch a mental-model-updater agent (not
-   team member — standard Agent subagent). Skip for config/typo changes.
-   Wait for completion before step 3.
-
-3. **Update spec** — dispatch a spec-updater agent. Skip if
-   `ai-docs/spec/` does not exist. Wait for completion before step 4.
-
-4. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the
+2. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the
    input, load `/write-ticket` for conventions, then append `### Result`.
    If no ticket but changes relate to an existing ticket, ask the user.
 
-5. **Final commit** — docs and remaining changes.
+3. **Final commit** — docs and remaining changes.
 
-6. **Report** — summarize to the user:
-   - What was implemented
-   - Review findings (if any)
+4. **Report** — summarize to the user:
+   - What was implemented across the session
+   - Cumulative review findings (if any unresolved)
    - Process issues (if any)
    - Ticket status (if applicable)
 
-7. **Shutdown team** — send shutdown request to all team members.
+5. **Shutdown team** — send shutdown request to all team members.
 
-8. **Merge** — ask user for confirmation, then:
+6. **Merge** — ask user for confirmation, then:
    ```bash
    git checkout <original-branch>
    git merge --no-ff marathon/<scope> -m "<conventional-commit message>"
