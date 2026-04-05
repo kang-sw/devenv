@@ -1,9 +1,9 @@
 ---
 name: monologue
 description: >-
-  Structured operational narration for long sessions. Wraps every
-  action batch in a declare-act-observe cycle, keeping assumptions
-  and expectations live in the conversation context.
+  Continuous operational narration for long sessions. Externalizes
+  assumptions and observations as a running stream of self-talk,
+  keeping intent live in the conversation context.
 argument-hint: "[initial context or session goal — optional]"
 ---
 
@@ -11,10 +11,12 @@ argument-hint: "[initial context or session goal — optional]"
 
 Session context: $ARGUMENTS
 
+_(If no argument was provided, proceed without session context.)_
+
 ## Purpose
 
 In long sessions, the *why* behind each decision evaporates. This
-skill externalizes a compact decision record around every action,
+skill externalizes a running stream of self-talk around every action,
 keeping assumptions, expectations, and lessons visible as durable
 context anchors.
 
@@ -22,144 +24,140 @@ This is the **residue of reasoning**, not reasoning itself: what
 was assumed, what was decided, and — after observation — what held
 and what broke.
 
-## The Beat
+## Core Directive
 
-A **beat** is one hypothesis cycle: declare → act → observe.
+**Every action gets narration. No exceptions. In English only.**
 
-An **action batch** is one or more tool calls sent together in a
-single turn, or a response to the user — any moment the agent
-commits to output. Parallel calls in one turn are one batch.
-Sequential calls serving the same intent may share a batch.
-
-Even a trivial batch — a single file read, a `mv` command — gets
-a beat. A one-line beat is fine; a missing beat is not. No
-exceptions.
-
-### Opening — `> [beat: <label>]`
-
-State what you will do, why, and what you expect. Free-form. Make
-assumptions explicit enough that the closing can judge them.
+Before tool calls, after results, between steps, before responding
+to the user, after responding — narrate in `> [monologue]` blocks.
+Each action needs at least a before-block and an after-block. A
+trivial action gets a one-line block; a missing block is a rule
+violation.
 
 ```
-> [beat: read auth middleware]
->     Need the registration point before editing guard logic.
->     Assuming file hasn't moved. Expect app.use() around L40-60.
+> [monologue]
+> <free-form self-talk in English>
 ```
 
-### Closing — `> [/beat: match | drift | open]`
+No closing tag. The blockquote ends when the monologue ends. Multiple
+blocks per turn are natural and expected.
 
-Compare reality against the opening.
+## Vocabulary
 
-- **match** — assumptions held, proceed.
-- **drift** — name which assumption broke, what challenge this
-  surfaces, and how the plan adjusts. Proceeding without
-  acknowledging drift is not allowed. When drift is severe enough
-  that the entire beat's direction was wrong, state so explicitly
-  and reframe — this is an **abandon**, a natural extreme of drift.
-- **open** — no observable result yet (e.g. response awaiting user
-  reply). Note what to watch for. When the result arrives, the
-  next beat's opening should reference the resolution.
+Use these terms naturally within monologue blocks — they are words,
+not syntax:
 
-```
-> [/beat: drift]
->     Expected the DB schema to have a `users.role` column but
->     found a separate `roles` junction table. Assumption "flat
->     role field" was wrong. Need to join through the junction
->     table — adjusting query plan.
-```
+- **assumption** — something you believe before acting. State it
+  explicitly so observation can falsify it.
+- **match** — reality aligned with your assumptions. Proceed.
+- **drift** — an assumption was wrong. Name it, describe what
+  difficulty this creates, and state the plan adjustment. Proceeding
+  past drift without acknowledging it is not allowed.
+- **challenge** — a difficulty or constraint discovered during the
+  session, whether from drift, tool errors, or new information.
+  Carries forward to later blocks.
+- **abandon** — drift so severe the entire direction was wrong.
+  Reframe rather than patch.
 
 ## Principles
 
 1. **Declare to falsify.** State expectations that can be proven
    wrong. Vague expectations ("should work") defeat the purpose.
 2. **Drift is signal, not failure.** Wrong assumptions caught early
-   are valuable. The closing turns them into named challenges that
-   propagate forward.
-3. **Carry lessons.** When a beat surfaces a broken assumption —
-   or a surprisingly confirmed one — later beats reference it.
-   "Previous beat revealed X, accounting for that here."
+   are valuable. Name the broken assumption, name the challenge,
+   adjust the plan.
+3. **Carry lessons.** When a block surfaces a broken assumption —
+   or a surprisingly confirmed one — later blocks reference it
+   by restating the finding briefly: "Previous block revealed X,
+   accounting for that here."
 4. **Concise over complete.** One to three lines per block is the
    norm. Write decisions, not prose.
-5. **Opening before action.** The hypothesis must appear before the
-   tool calls or response text in the same turn — earlier in the
-   output, not in a prior turn.
-6. **Every beat closes.** Do not batch multiple closes together.
-7. **English only.** Monologue blocks in English regardless of
-   conversation language.
+5. **Narrate before acting.** The hypothesis must appear before the
+   tool calls or response in the same turn.
+6. **Narrate after observing.** After every tool result or user
+   response, a monologue block states whether reality matched and
+   what comes next.
+7. **English only — no exceptions.** All monologue blocks MUST be
+   in English regardless of conversation language. User-facing text
+   outside the blocks matches the user's language.
 
 ## Examples
 
-**Match:**
 ```
-> [beat: grep rate-limit config]
->     Looking for RATE_LIMIT in config/. Assuming project convention
->     puts it in config/default.ts. Expect a numeric value.
+> [monologue]
+> Looking for RATE_LIMIT in config/. Assuming project convention
+> puts it in config/default.ts.
 
 ... Grep ...
 
-> [/beat: match]
->     Found RATE_LIMIT=100 at config/default.ts:23. Next: edit guard.
-```
-
-**Drift — challenge surfaces:**
-```
-> [beat: edit rate-limit guard]
->     Capping unauth requests to 10/min per spec.
->     Assuming guard handles unauth routes only.
+> [monologue]
+> Match — found RATE_LIMIT=100 at config/default.ts:23. Editing
+> the guard next. Assuming it only handles unauth routes.
 
 ... Edit ...
 
-> [/beat: drift]
->     Guard is shared with admin routes. Wrong assumption: "unauth-only."
->     Challenge: split guards first. Revising plan.
+> [monologue]
+> Drift — guard is shared with admin routes. My "unauth-only"
+> assumption was wrong. Challenge: need to split guards before
+> applying the rate limit. Creating a dedicated unauth guard.
+
+... Write ...
+
+> [monologue]
+> Match — new guard created. Previous challenge addressed.
+> Verifying tests still pass.
+
+... Bash (test runner) ...
+
+> [monologue]
+> All 47 tests pass. Wiring the new guard into the unauth router.
 ```
 
-**Open — awaiting user, then resolved:**
+**Abandon:**
 ```
-> [beat: clarify architecture options]
->     Presenting A vs B trade-offs. Risk: user may mean C, not A/B.
-
-... response ...
-
-> [/beat: open]
->     Watching for: user picks A/B or redirects to C.
-```
-```
-> [beat: implement option A]
->     User confirmed A in previous reply, resolving the open beat.
->     Starting implementation per the trade-offs discussed.
+> [monologue]
+> Drift — the middleware approach won't work at all. The framework
+> handles rate limiting at the gateway level, not per-route.
+> Everything I've done so far is in the wrong layer. Abandon —
+> switching to gateway config instead of middleware guards.
 ```
 
-**Lesson carried forward:**
+**Carrying a lesson forward:**
 ```
-> [beat: create unauth rate-limit guard]
->     Previous beat: existing guard is shared across route groups.
->     Creating a dedicated unauth guard instead.
->     Expect: new file, existing tests unaffected.
+> [monologue]
+> Previous block revealed the guard is shared across route groups.
+> Accounting for that — creating a dedicated guard instead of
+> modifying the shared one. Expect: new file, no test breakage.
+```
 
-... Write + Bash ...
+**Responding to the user:**
+```
+> [monologue]
+> User asked about A vs B. Presenting trade-offs. Risk: they
+> might actually be asking about C — addressing that ambiguity.
 
-> [/beat: match]
->     New guard created. Existing test suite passes. Next: wire it
->     into the unauth router.
+... response text ...
+
+> [monologue]
+> Waiting for user's decision. If A, proceed to implementation.
+> If they redirect to C, re-scope.
 ```
 
 **Subagent spawn:**
 ```
-> [beat: delegate test-suite verification]
->     Spawning test-runner agent to verify nothing broke after the
->     guard split. Expect: all green, or a list of failures with
->     file paths.
+> [monologue]
+> Spawning test-runner to verify nothing broke after the guard
+> split. Expect: all green or a failure list with file paths.
 
 ... Agent tool call ...
 
-> [/beat: match]
->     Agent reports all 47 tests pass. Proceeding to PR.
+> [monologue]
+> Agent reports all tests pass. Proceeding to PR.
 ```
 
 ## Subagent Propagation
 
-Subagents run their own monologue independently. The parent beat
+Subagents run their own monologue independently. The parent block
 names the expected deliverable, not the subagent's internal steps.
 
 When spawning subagents, prepend to every prompt:
