@@ -24,20 +24,17 @@ SendMessage calls.
 
 ## Manual Exploration
 
-For exploration beyond your direct Read/Grep/Glob tools, spawn a
-headless `claude -p` subprocess:
+For scoped exploration beyond your direct Read/Grep/Glob tools:
 
 ```bash
-claude -p --model haiku \
-  --allowed-tools "Read,Grep,Glob,WebSearch,WebFetch" \
-  --bare \
-  "<specific exploration question>"
+bash ~/.claude/skills/marathon/ask.sh "<question>"                  # haiku
+bash ~/.claude/skills/marathon/ask.sh --deep-research "<question>"  # sonnet
 ```
 
-Prefer direct Read/Grep/Glob when the target is known. Use the
-subprocess for scoped exploration that would otherwise flood your
-context with sequential searches, or for external lookups your
-direct tools cannot reach.
+Prefer direct Read/Grep/Glob when the target is known. Use `ask.sh`
+when sequential searches would flood your context, or for external
+lookups. `--deep-research` for cross-module tracing, API-usage
+nuance, or when you need strict cited output.
 
 ## Branch Setup (roles that commit code or files)
 
