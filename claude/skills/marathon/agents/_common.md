@@ -39,6 +39,19 @@ subprocess for scoped exploration that would otherwise flood your
 context with sequential searches, or for external lookups your
 direct tools cannot reach.
 
+## Branch Setup (roles that commit code or files)
+
+The lead's message specifies which branch to work on.
+
+- If it is a round branch (e.g., `feat/add-parser`,
+  `docs/update-slides`), create it from the marathon branch:
+  `git checkout -b <type>/<round> marathon/<datetime>`
+- If it is just `marathon/<datetime>`, commit directly (trivial
+  changes).
+
+Commit at logical checkpoints. Keep commit messages brief; the
+lead merges the sub-branch back.
+
 ## Rules (all roles)
 
 - All output in English regardless of message language.

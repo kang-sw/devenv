@@ -80,14 +80,16 @@ User Argument: $ARGUMENTS
      `marathon/<datetime>`, then delete sub-branch
    - **rollback** → delete sub-branch
 5. Doc updates (skip for config/typo):
-   - Dispatch `spec-updater` (skip if no `ai-docs/spec/`) and
-     `mental-model-updater` in parallel. Apply the parallel spawn
-     addendum.
+   - Spawn two parallel one-shot doc-update agents (not team
+     members; fresh `general-purpose` Agents): one to refresh
+     `ai-docs/mental-model/` against the merged diff, one to
+     refresh `ai-docs/spec/` (skip the spec one if `ai-docs/spec/`
+     does not exist). Apply the parallel spawn addendum.
    - Wait for both.
    - Update `ai-docs/_index.md` if project capabilities changed.
    - If completing a ticket phase → dispatch clerk to append `### Result`.
-   - Refresh active advisors with the names of updated files (selective
-     re-read).
+   - Refresh active advisors with the names of files the doc-update
+     agents touched (selective re-read).
    - Commit doc changes.
 6. Report results to the user.
 
@@ -98,12 +100,16 @@ split directive before proceeding.
 
 0. **REQUIRE** an explicit user signal of completion. Phase completion
    or task exhaustion is NOT a signal — ask what's next.
-1. Final checkpoint if the last round didn't trigger one.
-2. Coherence review — dispatch a fresh sonnet Agent to read
-   `ai-docs/mental-model/` and `ai-docs/spec/` (if exists). Look for
-   cross-document contradictions from incremental updates. Fix
-   session-caused issues; flag pre-existing ones in the report. Skip
-   if trivial session, no mental-model dir, or no docs updated.
+1. Final checkpoint — if the last round did not already run the
+   doc-update + commit sequence from "On: implementer reports
+   complete", run it now for any pending changes on
+   `marathon/<datetime>`.
+2. Coherence review — spawn a one-shot `general-purpose` Agent
+   (sonnet, not a team member) to read `ai-docs/mental-model/` and
+   `ai-docs/spec/` (if exists) and look for cross-document
+   contradictions from incremental updates. Fix session-caused
+   issues; flag pre-existing ones in the report. Skip if trivial
+   session, no mental-model dir, or no docs updated.
 3. Final commit for coherence fixes and any remaining changes.
 4. Summary report to user: what was implemented, coherence findings,
    process issues, ticket status.
@@ -122,8 +128,9 @@ split directive before proceeding.
 
 ## Judgments
 
-Soft signals, not deterministic branches. Each judgment name appears
-in the event handlers above; the criteria live here.
+Soft signals, not deterministic branches. The event handlers above
+invoke these by name (`judge: <name>`) or reference them implicitly;
+the criteria live here.
 
 - **routing-check** — *"Can I write a complete Description for the
   implementer — specific enough to know which files to touch and what

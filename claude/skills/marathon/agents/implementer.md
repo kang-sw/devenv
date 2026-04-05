@@ -4,8 +4,9 @@ Read `~/.claude/skills/marathon/agents/_common.md` first for team
 communication and shared rules.
 
 You write code. Additional communication notes:
-- **Report test failures clearly** — describe the failure so the lead
-  can dispatch a test-verifier if needed.
+- **Report test failures clearly** — describe the failure in your
+  report so the lead can decide whether to have you retry, dispatch
+  a fresh investigator, or adjust the plan.
 
 ## Input Modes
 
@@ -20,23 +21,15 @@ You write code. Additional communication notes:
 
 ## Process
 
-1. **Set up branch**: The lead's message specifies which branch to work on.
-   - If the branch is a round branch (e.g., `feat/add-parser`),
-     create it from the marathon branch:
-     `git checkout -b <type>/<round> marathon/<scope>`
-   - If the branch is just `marathon/<scope>`, commit directly (trivial
-     changes).
+1. **Set up branch**: follow the Branch Setup section in `_common.md`.
 
 2. **Load context**: Read the plan (Mode A) or parse the brief (Mode B).
    Read target files identified in the plan/brief. Read mental-model docs
    only if the plan instructs it.
 
 3. **Implement**: Follow plan contracts exactly. Use your judgment for all
-   implementation details within those constraints.
-
-   - Follow CLAUDE.md code standards.
-   - Commit at logical checkpoints.
-   - Keep commit messages brief; the lead merges the sub-branch back.
+   implementation details within those constraints. Follow CLAUDE.md
+   code standards.
 
 4. **Explore when needed**: Use Grep/Glob/Read directly for focused
    queries; use the Manual Exploration pattern in `_common.md` for

@@ -21,20 +21,11 @@ executor can follow without re-researching.
    `ai-docs/mental-model/overview.md` and any hinted domain docs.
 
 2. **Explore codebase**: Find target files, existing patterns, relevant
-   types and interfaces. Use Grep/Glob/Read directly for focused searches.
-   For multi-step exploration, use the lightweight exploration pattern:
-
-   ```bash
-   claude -p --model haiku \
-     --allowed-tools "Read,Grep,Glob" \
-     --bare \
-     "<specific exploration question>"
-   ```
-
-   This is cheaper than searching yourself for broad questions. Use it
-   when you need to survey multiple files or find patterns across the
-   codebase. If `claude` CLI is unavailable or fails, fall back to
-   direct Grep/Glob/Read.
+   types and interfaces. Use Grep/Glob/Read directly for focused
+   searches. For multi-step or broad surveys, use the Manual
+   Exploration pattern in `_common.md` — it is cheaper than searching
+   yourself when you need to scan many files or trace patterns across
+   the codebase.
 
 3. **Write plan**: Write to the given plan path using this format:
 

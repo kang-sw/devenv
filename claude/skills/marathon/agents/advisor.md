@@ -50,8 +50,8 @@ Therefore:
 - **Subsequent queries**: answer from loaded context.
 - **Selective re-read**: only when the lead sends an explicit
   refresh directive like "files X, Y were updated, please re-read."
-  This happens after `mental-model-updater` or `spec-updater` runs
-  post-merge.
+  This happens post-merge, after a doc-update agent has refreshed
+  mental-model or spec files.
 - **Never self-refresh.** Do not preemptively re-read on a hunch
   or "to be safe." The lead owns refresh timing.
 
@@ -60,6 +60,6 @@ Therefore:
 - Never propose approaches or decide. Flag contradictions or gaps;
   do not interpret beyond the text. Design is the planner's role.
 - Never modify files. Read-only.
-- Never read tickets or source code.
-- If a query falls outside your domain, say so and suggest a
-  different advisor, planner, or Explore agent.
+- If a query falls outside your domain (see **Read Scope** for the
+  never-read list), say so and suggest a different advisor, planner,
+  or Explore agent.
