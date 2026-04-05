@@ -169,6 +169,71 @@ principle rather than an exception:
 Clerk feeds the team board with ticket summaries; advisor can read
 the team board for domain context. The lead is the only writer.
 
+### Delegation plan block
+
+The lead's delegation discipline fails under attention pressure.
+Users phrase requests imperatively ("do X", "fix Y"), and the lead's
+attention gets captured by the imperative phrasing in the most recent
+turn, mirroring straight into direct execution instead of routing
+through team members. Persistent delegation rules lose against a
+fresh imperative — repeating "delegate" in more places does not help,
+because the failure is attention dynamics, not missing knowledge.
+
+The counter-mechanism is a structured block the lead emits before
+responding to any user message. The block is the first thing written
+in the turn, ahead of any tool calls. Format:
+
+```
+## Delegation plan
+Intent: <what the user actually wants, in the lead's own words>
+Decomposition:
+  - <step 1> → <role or "lead-direct (discussion)" or "lead-direct (_index.md)">
+  - <step 2> → <role>
+Routing: <concrete next action — which agent gets the next message, or "respond in discussion">
+```
+
+**Hard rules.**
+- Every response to a user message begins with the block. No tool
+  calls precede it.
+- `lead-direct` is only valid for two cases: **discussion turns** and
+  **`_index.md` updates**. Any other `lead-direct` entry is a rule
+  violation and a signal the lead is about to self-execute.
+- Pure discussion turns still emit the block. A one-line `Intent`
+  plus `Decomposition: lead-direct (discussion)` plus `Routing:
+  respond in discussion` is sufficient.
+- The block is structured output, not monologue. It does not replace
+  monologue narration, which continues in parallel.
+- `lead-direct` entries may also cover **one-shot reads of small
+  soft-lock documents** (mental-model, plans). Recurring reads of
+  the same soft-lock document across turns signal migration to an
+  advisor delegation in subsequent turns. Tickets, source code, and
+  diffs never qualify for `lead-direct`.
+
+**Mandatory, not conditional.** A conditional rule ("emit the block
+when the user asks you to do something") forces the lead to classify
+the turn first — which is exactly the decision the imperative
+phrasing would bias. Unconditional emission removes the classification
+step: the lead writes the block first, then classifies inside the
+block's `Decomposition` field. Mechanism first, judgment second.
+Carving exceptions re-opens the attention loophole the block exists
+to close. The ~4-line repetition on discussion-heavy turns is
+accepted as the price of mechanical enforcement; any shortform
+variant is deferred until the mandatory form has been dogfooded.
+
+**Relationship to monologue.** The delegation plan block is a
+structured, one-per-user-message artifact emitted at the turn's
+entry point. Monologue continues as free-form narration before and
+after tool calls throughout the turn. They do not overlap: monologue
+is continuous, the delegation plan is an entry-point checkpoint. The
+block is not a replacement for monologue, and monologue is not a
+replacement for the block — both are mandatory. If the plan proves
+wrong mid-turn, the lead emits a revised plan block in the same
+`## Delegation plan` form with a `(revision)` marker on the header
+line rather than silently re-routing.
+
+**Token cost.** Trivial. The block is ~4 lines for most turns. The
+protection is worth the noise.
+
 ### Rationale for clerk-as-writer (not just as oracle)
 
 Tickets are read-write and read-heavy from multiple points in the
@@ -220,7 +285,7 @@ read/write skew and keeps the lead out of `/write-ticket` skill loads.
   `subagent_type="general-purpose"` with inline labels. Out of scope
   for this ticket — tracked in Open Questions.
 
-### Protocol task split (already staged, uncommitted)
+### Protocol task split (already committed)
 
 The single `[PROTOCOL]` task is split into two for stronger attention:
 1. **Marathon rules** (session-level): delegate code R/W, never
@@ -228,7 +293,8 @@ The single `[PROTOCOL]` task is split into two for stronger attention:
 2. **Per-round checklist**: check teammate usage before dispatch,
    reuse or fresh spawn, dispatch fresh reviewer, merge gate.
 
-This change is already in the working tree; it rolls up into Phase 1.
+This change was committed earlier in the session (`0748303`,
+`ba17f43`) and rolls up into Phase 1 for documentation purposes.
 
 ## Phases
 
@@ -242,6 +308,14 @@ Apply all doctrinal and procedural changes to
   Keep the "token-efficient" opening sentence. Add the team-board
   principle: the lead maintains `_index.md` as its working memory,
   everything else is delegated.
+- **Delegation plan block.** Add a top-level section to SKILL.md
+  near the Doctrine section, before Step 0, specifying the mandatory
+  block format (`## Delegation plan` with `Intent` / `Decomposition`
+  / `Routing`), the `lead-direct` carve-outs for discussion turns
+  and `_index.md` updates, and the relationship to monologue
+  (parallel, not overlapping). Also add a corresponding Rules
+  bullet: every response to a user message begins with the block,
+  no exceptions.
 - **Bootstrap step.** Add: "If `$ARGUMENTS` references a ticket, spawn
   `clerk` and have it read the ticket; receive the summary and active
   phase from clerk — do not open the file directly." Move the existing
