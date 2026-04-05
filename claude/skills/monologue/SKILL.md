@@ -71,16 +71,13 @@ not syntax:
    or a surprisingly confirmed one — later blocks reference it
    by restating the finding briefly: "Previous block revealed X,
    accounting for that here."
-4. **Concise over complete.** One to three lines per block is the
-   norm. Write decisions, not prose.
-5. **Narrate before acting.** The hypothesis must appear before the
+4. **Narrate before acting.** The hypothesis must appear before the
    tool calls or response in the same turn.
-6. **Narrate after observing.** After every tool result or user
+5. **Narrate after observing.** After every tool result or user
    response, a monologue block states whether reality matched and
    what comes next.
-7. **English only — no exceptions.** All monologue blocks MUST be
-   in English regardless of conversation language. User-facing text
-   outside the blocks matches the user's language.
+6. **English only — no exceptions.** All monologue blocks **MUST**
+   be in English regardless of conversation language.
 
 ## Examples
 
