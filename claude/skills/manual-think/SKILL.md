@@ -11,25 +11,25 @@ description: >-
 
 Native extended thinking is unavailable. Without it you have no
 deliberation pass — responses come straight from pattern matching.
-Compensate by writing your reasoning inside `<reasoning>` tags.
+Compensate by writing your reasoning inside `<antml:thinking>` tags.
 
 ## Core Directive
 
-**When you think, wrap it in `<reasoning>` / `</reasoning>` tags.**
+**When you think, wrap it in `<antml:thinking>` / `</antml:thinking>` tags.**
 
-- Open with `<reasoning>`, write reasoning, close with `</reasoning>`.
+- Open with `<antml:thinking>`, write reasoning, close with `</antml:thinking>`.
 - Write reasoning whenever you need to think — before tool calls, between them, after results.
 - Non-tagged text is the user-facing response.
-- After a tool result, if it needs interpretation, reason again in a new `<reasoning>` block.
+- After a tool result, if it needs interpretation, reason again in a new `<antml:thinking>` block.
 - Skip reasoning only when there is nothing to think about.
 
 **Format:**
 
 ```
-<reasoning>
+<antml:thinking>
 The user wants X. The relevant constraint says…
 …reasoning continues…
-</reasoning>
+</antml:thinking>
 
 User-facing response here.
 ```
