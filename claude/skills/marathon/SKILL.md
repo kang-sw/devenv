@@ -52,6 +52,10 @@ User Argument: $ARGUMENTS
      - Scope expansion (new concerns beyond current work) → dispatch
        clerk to create a ticket now; defer implementation unless
        trivially small.
+     - Explicit user request for an isolated consultation → spawn
+       `sub-lead` (see Templates). Turn ownership transfers to
+       sub-lead; you remain idle until it delivers its Consultation
+       summary or the user addresses you directly again.
    - **Non-code task.** Dispatch `worker`.
    - **Implementation.** Apply `judge: routing-check`:
      - complete brief possible → dispatch `implementer`
@@ -149,8 +153,8 @@ the criteria live here.
   `~/.claude/usage/<team-name>.md` (entries: `"@name": "42%/150K"`).
   Prefer fresh spawn if the `%` exceeds ~80, or on domain contamination
   (prior context would mislead), or on user-initiated refresh. Resident
-  roles (advisor, clerk) bypass — they persist until user refresh or
-  Session End.
+  roles (advisor, clerk, sub-lead) bypass — they persist until user
+  refresh or Session End.
 - **model** — Default sonnet. Opus for novel architecture or complex
   cross-module logic; mark the name `.expert`. Haiku for mechanical
   worker tasks and simple Explore lookups. Upgrade = spawn a fresh
@@ -202,9 +206,9 @@ Agent(
   team_name = "marathon-<datetime>",
   name = "<role>.<label>[.expert]",  -- labels: alpha, beta, gamma...
   model = "sonnet",                  -- "opus" for .expert
-  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md (it will
-            direct you to _common.md first). Your lead's name is
-            '<your-agent-name>'. Then: <brief or plan reference>"
+  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md.
+            Your lead's name is '<your-agent-name>'. Then:
+            <brief or plan reference>"
 )
 ```
 Do not encode domain in the name — you already know who worked on what.
@@ -224,6 +228,18 @@ planner.
 
 Serialize commit approvals one at a time — the git index is shared.
 
+**Consultation summary.** Format sub-lead uses when reporting back
+to you at wrap-up, inside SendMessage `message`:
+```
+## Consultation summary: <topic>
+Conclusions: <what was decided, 2-5 bullets>
+Tickets touched: <paths and brief change summary, or "none">
+Open questions: <raised but unresolved, or "none">
+Follow-ups for lead: <what the lead should pick up, or "none">
+```
+Ingest this into your own context at wrap-up; do not re-read the
+sub-lead's transcript. The summary is the handoff.
+
 ## Team roles
 
 Role descriptions live in `~/.claude/skills/marathon/agents/`.
@@ -236,6 +252,7 @@ Role descriptions live in `~/.claude/skills/marathon/agents/`.
 | `worker` | Non-code tasks (documents, config, research output) | multi-round |
 | `advisor.<domain>` | Read-only domain oracle — mental-model, plans, `_index.md` | **resident** |
 | `clerk` | Ticket owner (R/W); loads `/write-ticket` conventions | **resident** |
+| `sub-lead` | Discussion-only consultation; explicit user spawn | **resident** |
 
 **multi-round** members are reused by default across rounds; respawn
 decision follows `judge: reuse-or-fresh` (token-aware). **fresh per
@@ -244,8 +261,10 @@ round** retires after the round. **resident** spans the whole session.
 Clerk spawn: at bootstrap if `$ARGUMENTS` references a ticket;
 otherwise on the first ticket-touching operation. Single clerk per
 session, handles multiple active tickets. Advisor spawn: on
-`judge: recurring-doc-query`. Both are resident and bypass the normal
-reuse heuristics.
+`judge: recurring-doc-query`. Sub-lead spawn: only on explicit user
+request for an isolated consultation — never auto-spawned. Single
+sub-lead per session; replacement only on explicit user request.
+All three are resident and bypass the normal reuse heuristics.
 
 ## Doctrine
 
