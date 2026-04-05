@@ -69,69 +69,67 @@ Words used naturally inside blocks, not as syntax:
 
 ## Templates
 
-**Block format:**
+All templates use angle-bracket slots for the author to fill. No concrete domain content — that belongs in the session, not in this file.
+
+**Block format.**
 
 ```
 > [monologue]
 > <free-form self-talk in English>
 ```
 
-**Subagent propagation line** (prepend to every spawned prompt):
+No closing tag. The blockquote ends when the monologue ends. Multiple blocks per turn are expected.
+
+**Before-block (tool call).**
+
+```
+> [monologue]
+> <assumption being tested, phrased so observation can falsify it>
+> Dropped: <rejected candidate> (<one-phrase reason>); <rejected candidate> (<one-phrase reason>).
+```
+
+`Dropped:` tail only when reasoning weighed alternatives.
+
+**Before-block (user response).**
+
+```
+> [monologue]
+> Reading: <neutralized English restatement of the user's message>. Decomposed: (1) <sub-question>, (2) <sub-question>.
+> <response-strategy assumption — what the response will cover, how the user is expected to react>
+> Dropped: <rejected framing> (<reason>); <...>.
+```
+
+**After-block — match.**
+
+```
+> [monologue]
+> <observation confirms the assumption>. <next assumption, chaining into the next before-block>
+```
+
+**After-block — drift.**
+
+```
+> [monologue]
+> Drift — <broken assumption>. Challenge: <new difficulty>. <plan adjustment>.
+```
+
+**After-block — abandon.**
+
+```
+> [monologue]
+> Drift — <severity>. Abandon — <reframe the whole direction, not a patch>.
+```
+
+**Carry-lesson phrasing.** When a later block must account for a prior finding, open with:
+
+```
+> Previous block revealed <finding>. Accounting for that — <adjustment>.
+```
+
+**Subagent propagation line.** Prepend to every spawned prompt:
 
 > Before starting, read `~/.claude/skills/monologue/SKILL.md` and
 > follow its instructions for all your responses.
-
-## Examples
-
-Drift, then carrying the lesson forward:
-
-```
-> [monologue]
-> Editing the auth guard. Assuming it only handles unauth routes.
-> Dropped: middleware chain split (too invasive for this PR);
-> per-route decorator (auth isn't route-scoped here).
-
-... Edit ...
-
-> [monologue]
-> Drift — guard is shared with admin routes. Challenge: must split
-> guards before applying the rate limit. Creating a dedicated
-> unauth guard.
-
-... Write ...
-
-> [monologue]
-> Previous block revealed the guard was shared. Accounting for
-> that — the new file isolates unauth. Expect: tests still green.
-```
-
-User response with interpretation drift:
-
-```
-> [monologue]
-> Reading: user asks "is the retry logic correct?" — evaluative
-> framing. Neutralized: what are the failure modes of the current
-> retry logic and which are handled? Decomposed: (1) backoff
-> coverage, (2) max-attempt ceiling, (3) idempotency. Assuming all
-> three are in scope; response will cover each with trade-offs.
-
-... response ...
-
-> [monologue]
-> Drift on interpretation — user follow-up shows (3) was the real
-> concern; (1) and (2) were context. Previous Reading weighted
-> evenly but idempotency dominates. Re-centering next turn on
-> idempotency alone.
-```
-
-Abandon:
-
-```
-> [monologue]
-> Drift — framework handles rate limiting at the gateway, not per
-> route. Middleware approach is in the wrong layer entirely.
-> Abandon — switching to gateway config.
-```
 
 ## Doctrine
 
