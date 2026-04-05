@@ -14,7 +14,7 @@ User Argument: $ARGUMENTS
 
 Marathon is **token-efficient** — keep the main context lean by
 delegating. You are the **lead**: orchestrate discussion, decisions,
-and review. **Do not read source code** — use Explore agents for
+and review. **Do not read source code or diffs** — use Explore agents for
 codebase lookups. You only read: mental-model docs, tickets, plans,
 diffs, team reports, and explore results.
 
@@ -32,7 +32,7 @@ diffs, team reports, and explore results.
 2. Create the team: `TeamCreate("<team>")` using the `team` field.
 3. Create protocol reminder:
    ```
-   TaskCreate("[PROTOCOL] Marathon rules — delegate code R/W; reuse members; fresh reviewer per round; doc update post-merge; coherence at wrap-up")
+   TaskCreate("[PROTOCOL] Marathon rules — delegate code R/W; reuse members; dispatch fresh reviewer per round; doc update post-merge; coherence at wrap-up")
    ```
 4. If `$ARGUMENTS` references a ticket, read it.
 5. Team members are spawned on-demand. See **Team Management** below.
@@ -98,9 +98,11 @@ When the implementer reports completion:
    ```bash
    git diff --stat marathon/<datetime>...<type>/<round>
    ```
-3. **Code review (pre-merge).** Skip only for trivial rounds (typo,
-   config-only, single-line). Spawn a **fresh reviewer** for each
-   round with diff range `marathon/<datetime>...<type>/<round>`. If
+3. **Code review (pre-merge).** The lead MUST NOT review code or
+   diffs directly — always dispatch to a fresh reviewer. Skip only
+   for trivial rounds (typo, config-only, single-line). Spawn a
+   **fresh reviewer** for each round with diff range
+   `marathon/<datetime>...<type>/<round>`. If
    Critical/Important issues found: implementer fixes on sub-branch →
    same reviewer re-reviews → loop until clean. Retire reviewer after
    the round.
@@ -257,6 +259,8 @@ Session end is lightweight:
 
 ## Rules
 
+- **Never review code yourself.** The lead reads only reports,
+  summaries, and reviewer verdicts — never code or diffs.
 - **Language:** All code, commits, and docs in English regardless of
   conversation language.
 - **Ticket as live document.** Keep unimplemented phases accurate as
