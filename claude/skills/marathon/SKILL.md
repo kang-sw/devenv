@@ -30,9 +30,10 @@ diffs, team reports, and explore results.
    If already on a `marathon/` branch, it resumes instead of creating.
    Record `original_branch` for Session End merge.
 2. Create the team: `TeamCreate("<team>")` using the `team` field.
-3. Create protocol reminder:
+3. Create protocol reminders:
    ```
-   TaskCreate("[PROTOCOL] Marathon rules — delegate code R/W; reuse members; dispatch fresh reviewer per round; doc update post-merge; coherence at wrap-up")
+   TaskCreate("[PROTOCOL] Marathon rules — delegate code R/W; never self-execute; doc update post-merge; coherence at wrap-up")
+   TaskCreate("[PROTOCOL] Per-round checklist — check teammate usage before dispatch; reuse or fresh spawn; dispatch fresh reviewer; merge gate")
    ```
 4. If `$ARGUMENTS` references a ticket, read it.
 5. Team members are spawned on-demand. See **Team Management** below.
