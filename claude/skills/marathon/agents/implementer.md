@@ -38,16 +38,9 @@ You write code. Additional communication notes:
    - Commit at logical checkpoints.
    - Keep commit messages brief; the lead merges the sub-branch back.
 
-4. **Explore when needed**: For codebase searches during implementation,
-   use Grep/Glob/Read directly for focused queries. For broader
-   exploration:
-
-   ```bash
-   claude -p --model haiku \
-     --allowed-tools "Read,Grep,Glob" \
-     --bare \
-     "<specific exploration question>"
-   ```
+4. **Explore when needed**: Use Grep/Glob/Read directly for focused
+   queries; use the Manual Exploration pattern in `_common.md` for
+   broader or external lookups.
 
 5. **Test**: Run the project's test suite if applicable (check
    `ai-docs/_index.md` for commands). Read the full output. Claim "pass"
