@@ -308,14 +308,17 @@ Apply all doctrinal and procedural changes to
   Keep the "token-efficient" opening sentence. Add the team-board
   principle: the lead maintains `_index.md` as its working memory,
   everything else is delegated.
-- **Delegation plan block.** Add a top-level section to SKILL.md
-  near the Doctrine section, before Step 0, specifying the mandatory
-  block format (`## Delegation plan` with `Intent` / `Decomposition`
-  / `Routing`), the `lead-direct` carve-outs for discussion turns
-  and `_index.md` updates, and the relationship to monologue
-  (parallel, not overlapping). Also add a corresponding Rules
-  bullet: every response to a user message begins with the block,
-  no exceptions.
+- **Delegation plan block.** Add a top-level `## Delegation plan`
+  section to SKILL.md near the Doctrine section, before Step 0,
+  specifying the three-field block (`Intent` / `Decomposition` /
+  `Routing`), the full Hard rules list from the design section
+  above (`lead-direct` carve-outs for discussion turns, `_index.md`
+  updates, and one-shot reads of small soft-lock documents; tickets,
+  source, and diffs never qualify), the mandatory-not-conditional
+  rationale, and the relationship-to-monologue note (parallel, both
+  mandatory; revised plans use `(revision)` marker on the header
+  line). Also add a corresponding Rules bullet: every response to a
+  user message begins with the block, no exceptions.
 - **Bootstrap step.** Add: "If `$ARGUMENTS` references a ticket, spawn
   `clerk` and have it read the ticket; receive the summary and active
   phase from clerk — do not open the file directly." Move the existing
