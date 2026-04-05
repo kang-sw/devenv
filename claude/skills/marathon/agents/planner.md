@@ -54,7 +54,8 @@ executor can follow without re-researching.
 
    This is cheaper than searching yourself for broad questions. Use it
    when you need to survey multiple files or find patterns across the
-   codebase.
+   codebase. If `claude` CLI is unavailable or fails, fall back to
+   direct Grep/Glob/Read.
 
 3. **Write plan**: Write to the given plan path using this format:
 

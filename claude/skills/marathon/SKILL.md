@@ -20,13 +20,9 @@ diffs, team reports, and explore results.
 
 ## Step 0: Bootstrap
 
-**First action — before anything else**, create protocol tasks:
+**First action — before anything else**, create a single protocol reminder:
 ```
-TaskCreate("[PROTOCOL] Delegate all code reading/writing to team members")
-TaskCreate("[PROTOCOL] Each round: actively reuse existing team members")
-TaskCreate("[PROTOCOL] Before merge: fresh reviewer per round (reuse within fix loop)")
-TaskCreate("[PROTOCOL] After merge: dispatch doc updaters if non-trivial")
-TaskCreate("[PROTOCOL] Wrap-up — coherence check, merge")
+TaskCreate("[PROTOCOL] Marathon rules — delegate code R/W; reuse members; fresh reviewer per round; doc update post-merge; coherence at wrap-up")
 ```
 
 Then:
@@ -232,7 +228,7 @@ Session end is lightweight:
 
 1. **Final checkpoint** — run one if the last round didn't trigger one.
 
-2. **Coherence review** — dispatch a fresh **opus** Agent to read all
+2. **Coherence review** — dispatch a fresh **sonnet** Agent to read all
    of `ai-docs/mental-model/` and `ai-docs/spec/` (if exists). Look
    for cross-document contradictions from incremental updates. Fix
    session-caused issues; flag pre-existing ones in the report.
