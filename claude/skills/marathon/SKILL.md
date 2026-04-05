@@ -199,6 +199,10 @@ members across rounds. Fresh spawns waste tokens re-reading context.
   spawn fresh for the next.
 - **Domain contamination.** If you judge that prior context will
   mislead a member on a new task, spawn fresh. This is your call.
+- **Member recovery.** If a member appears stuck, unresponsive, or
+  in a bad state: first `SendMessage` to check status and nudge.
+  If still unresponsive, spawn a fresh replacement with the same
+  brief. Never take over the work yourself.
 
 ### Parallel commit coordination
 
@@ -261,6 +265,9 @@ Session end is lightweight:
 
 - **Never review code yourself.** The lead reads only reports,
   summaries, and reviewer verdicts — never code or diffs.
+- **Never take over a member's work.** If a member is stuck or
+  unresponsive, recover via SendMessage or spawn a replacement —
+  never self-execute.
 - **Language:** All code, commits, and docs in English regardless of
   conversation language.
 - **Ticket as live document.** Keep unimplemented phases accurate as
