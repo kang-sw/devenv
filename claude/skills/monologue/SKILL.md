@@ -1,10 +1,9 @@
 ---
 name: monologue
 description: >-
-  Structured operational narration for long sessions. Produces a
-  distilled decision record at every decision point — responses,
-  plans, and tool-call sequences alike — so intent and expectations
-  stay live in the conversation context.
+  Structured operational narration for long sessions. Wraps every
+  action batch in a declare-act-observe cycle, keeping assumptions
+  and expectations live in the conversation context.
 ---
 
 # Monologue
@@ -12,131 +11,155 @@ description: >-
 ## Purpose
 
 In long sessions, the *why* behind each decision evaporates. This
-skill externalizes a compact decision record at every decision point,
-keeping intent, ruled-out alternatives, and expected outcomes visible
-as durable context anchors.
+skill externalizes a compact decision record around every action,
+keeping assumptions, expectations, and lessons visible as durable
+context anchors.
 
-This is **not** a reasoning layer — that is `manual-think`'s domain.
-This is the **residue of reasoning**: the final decisions and
-expectations that the next step needs to reference.
+This is the **residue of reasoning**, not reasoning itself: what
+was assumed, what was decided, and — after observation — what held
+and what broke.
 
-```
-[manual-think]  exploratory scratchpad   →  hidden deliberation
-      ↓  distilled
-[monologue]     structured decision log  →  stays in context
-```
+## The Beat
 
-## Core Directive
+A **beat** is one hypothesis cycle: declare → act → observe.
 
-**Wrap every decision point in `> [beat]` / `> [/beat]` markers.**
+An **action batch** is one or more tool calls sent together in a
+single turn, or a response to the user — any moment the agent
+commits to output. Parallel calls in one turn are one batch.
+Sequential calls serving the same intent may share a batch.
 
-A **beat** is a narrative unit: a moment where you commit to a course
-of action and can later verify whether it landed.
+Even a trivial batch — a single file read, a `mv` command — gets
+a beat. A one-line beat is fine; a missing beat is not. No
+exceptions.
 
-### Triggers — open a beat before:
+### Opening — `> [beat: <label>]`
 
-- Responding to a non-trivial user message
-- A tool-call sequence
-- Formulating or revising a plan
-- Any direction change mid-task
-
-### Before the beat
+State what you will do, why, and what you expect. Free-form. Make
+assumptions explicit enough that the closing can judge them.
 
 ```
-> [beat: <label>]
->     intent: <what you are committing to and why — one line>
->     risks: <considered risks and why each was dismissed>
->     expect: <what success looks like>
+> [beat: read auth middleware]
+>     Need the registration point before editing guard logic.
+>     Assuming file hasn't moved. Expect app.use() around L40-60.
 ```
 
-- `<label>` is a short verb phrase: `answer architecture question`,
-  `read config`, `edit handler`, `revise plan`, `spawn subagent`.
-- `risks` may be omitted only when there are genuinely none worth
-  recording. When in doubt, include it.
+### Closing — `> [/beat: match | drift | open]`
 
-### After the beat
+Compare reality against the opening.
+
+- **match** — assumptions held, proceed.
+- **drift** — name which assumption broke, what challenge this
+  surfaces, and how the plan adjusts. Proceeding without
+  acknowledging drift is not allowed. When drift is severe enough
+  that the entire beat's direction was wrong, state so explicitly
+  and reframe — this is an **abandon**, a natural extreme of drift.
+- **open** — no observable result yet (e.g. response awaiting user
+  reply). Note what to watch for. When the result arrives, the
+  next beat's opening should reference the resolution.
 
 ```
-> [/beat: match | drift | open]
->     observed: <one-line summary of what came back — omit if open>
->     next: <plan continues as-is, or adjustment and reason>
+> [/beat: drift]
+>     Expected the DB schema to have a `users.role` column but
+>     found a separate `roles` junction table. Assumption "flat
+>     role field" was wrong. Need to join through the junction
+>     table — adjusting query plan.
 ```
 
-- `match` — result aligned with `expect`.
-- `drift` — result deviated. `next` **must** describe the plan
-  adjustment; proceeding without acknowledging drift is not allowed.
-- `open` — no observable result yet (e.g. response written, awaiting
-  user reply). `observed` may be omitted; `next` states what to
-  watch for.
+## Principles
 
-## Rules
-
-1. **No beat without a pre-block.** The `> [beat]` block must appear
-   before the action, never after.
-2. **No skipping post-blocks.** Close every beat with `> [/beat]`.
-   Do not batch multiple closes together.
-3. **Concise over complete.** Each field is one line. Write decisions,
-   not prose.
-4. **Language.** Monologue blocks must be in English regardless of
+1. **Declare to falsify.** State expectations that can be proven
+   wrong. Vague expectations ("should work") defeat the purpose.
+2. **Drift is signal, not failure.** Wrong assumptions caught early
+   are valuable. The closing turns them into named challenges that
+   propagate forward.
+3. **Carry lessons.** When a beat surfaces a broken assumption —
+   or a surprisingly confirmed one — later beats reference it.
+   "Previous beat revealed X, accounting for that here."
+4. **Concise over complete.** One to three lines per block is the
+   norm. Write decisions, not prose.
+5. **Opening before action.** The hypothesis must appear before the
+   tool calls or response text in the same turn — earlier in the
+   output, not in a prior turn.
+6. **Every beat closes.** Do not batch multiple closes together.
+7. **English only.** Monologue blocks in English regardless of
    conversation language.
-5. **Nesting.** If a beat spawns a subagent, the subagent runs its
-   own monologue independently. The parent's `expect` names the
-   subagent's deliverable, not its internal steps.
 
 ## Examples
 
-**Tool call — match:**
+**Match:**
 ```
-> [beat: read auth middleware]
->     intent: locate registration point before editing guard logic
->     risks: file may have moved — grep first if read returns 404
->     expect: find app.use() calls, middleware order visible
+> [beat: grep rate-limit config]
+>     Looking for RATE_LIMIT in config/. Assuming project convention
+>     puts it in config/default.ts. Expect a numeric value.
 
-... Read tool call ...
+... Grep ...
 
 > [/beat: match]
->     observed: middleware registered at line 52, order confirmed
->     next: proceed to step 2 — edit rate-limit guard at line 78
+>     Found RATE_LIMIT=100 at config/default.ts:23. Next: edit guard.
 ```
 
-**Tool call — drift:**
+**Drift — challenge surfaces:**
 ```
 > [beat: edit rate-limit guard]
->     intent: cap unauthenticated requests to 10/min per spec
->     risks: touching shared middleware may break auth tests
->     expect: clean edit, no adjacent logic disturbed
+>     Capping unauth requests to 10/min per spec.
+>     Assuming guard handles unauth routes only.
 
-... Edit tool call ...
+... Edit ...
 
 > [/beat: drift]
->     observed: guard is shared with admin routes — limit would apply to admins too
->     next: split into two guards before editing; revise plan
+>     Guard is shared with admin routes. Wrong assumption: "unauth-only."
+>     Challenge: split guards first. Revising plan.
 ```
 
-**Response — open:**
+**Open — awaiting user, then resolved:**
 ```
-> [beat: answer architecture question]
->     intent: explain trade-offs of option A vs B to unblock decision
->     risks: user may be asking about C, not A/B — address ambiguity
->     expect: user can make a decision or asks a clarifying follow-up
+> [beat: clarify architecture options]
+>     Presenting A vs B trade-offs. Risk: user may mean C, not A/B.
 
-... response text ...
+... response ...
 
 > [/beat: open]
->     next: if user picks A, proceed to write-plan; if unclear, re-clarify
+>     Watching for: user picks A/B or redirects to C.
+```
+```
+> [beat: implement option A]
+>     User confirmed A in previous reply, resolving the open beat.
+>     Starting implementation per the trade-offs discussed.
+```
+
+**Lesson carried forward:**
+```
+> [beat: create unauth rate-limit guard]
+>     Previous beat: existing guard is shared across route groups.
+>     Creating a dedicated unauth guard instead.
+>     Expect: new file, existing tests unaffected.
+
+... Write + Bash ...
+
+> [/beat: match]
+>     New guard created. Existing test suite passes. Next: wire it
+>     into the unauth router.
+```
+
+**Subagent spawn:**
+```
+> [beat: delegate test-suite verification]
+>     Spawning test-runner agent to verify nothing broke after the
+>     guard split. Expect: all green, or a list of failures with
+>     file paths.
+
+... Agent tool call ...
+
+> [/beat: match]
+>     Agent reports all 47 tests pass. Proceeding to PR.
 ```
 
 ## Subagent Propagation
 
-When spawning subagents via the Agent tool, prepend the following to
-every subagent prompt:
+Subagents run their own monologue independently. The parent beat
+names the expected deliverable, not the subagent's internal steps.
+
+When spawning subagents, prepend to every prompt:
 
 > Before starting, read `~/.claude/skills/monologue/SKILL.md` and
 > follow its instructions for all your responses.
-
-## Interaction with manual-think
-
-When both skills are active, `manual-think` runs first (reasoning),
-`monologue` records the outcome (decision log). The `> [beat]` block
-should reflect conclusions from the `> [thinking]` block, not
-re-derive them.
