@@ -20,9 +20,10 @@ skill externalizes a running stream of self-talk around every action,
 keeping assumptions, expectations, and lessons visible as durable
 context anchors.
 
-This is the **residue of reasoning**, not reasoning itself: what
-was assumed, what was decided, and — after observation — what held
-and what broke.
+Where internal reasoning verifies hypotheses against itself (propose
+→ challenge → resolve), monologue verifies them against **external
+reality** (assume → act → observe). It records what was assumed,
+what was decided, and — after observation — what held and what broke.
 
 ## Core Directive
 
