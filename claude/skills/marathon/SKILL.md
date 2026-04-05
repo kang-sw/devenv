@@ -37,7 +37,13 @@ Then:
    ```
    TeamCreate("marathon-<datetime>")
    ```
-5. Team members are spawned on-demand. See **Team Management** below.
+5. Initialize the token usage file:
+   ```bash
+   mkdir -p ~/.claude/usage
+   printf '# Token Usage: marathon-<datetime>\n```json\n{}\n```\n' \
+     > ~/.claude/usage/marathon-<datetime>.md
+   ```
+6. Team members are spawned on-demand. See **Team Management** below.
 
 ## Step 1: Marathon Loop
 
@@ -194,6 +200,11 @@ Token efficiency is marathon's core purpose — **actively reuse** team
 members across rounds. Fresh spawns waste tokens re-reading context.
 
 - **Default: reuse.** Send the next brief to an existing member.
+- **Token-aware refresh.** Before dispatching to an existing member,
+  read `~/.claude/usage/<team-name>.md`. If a member exceeds **~80%**,
+  prefer spawning fresh. The file is updated automatically by a
+  `TeammateIdle` hook that tracks per-member token consumption as a
+  percentage of the 150K soft limit.
 - **User-initiated refresh.** The user will tell you when a member's
   context is getting stale. Finish the current round with them, then
   spawn fresh for the next.

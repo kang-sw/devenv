@@ -411,6 +411,14 @@ for agent_file in "$REPO_DIR/claude/agents"/*.md; do
   link "$agent_file" "$HOME/.claude/agents/$agent_name"
 done
 
+# Claude Code hooks — link hook scripts
+mkdir -p "$HOME/.claude/hooks"
+for hook_file in "$REPO_DIR/claude/hooks"/*.sh; do
+  [ -f "$hook_file" ] || continue
+  hook_name="$(basename "$hook_file")"
+  link "$hook_file" "$HOME/.claude/hooks/$hook_name"
+done
+
 # Claude Code settings — ensure required config is set
 info "Ensuring Claude Code settings..."
 mkdir -p "$HOME/.claude"
@@ -435,6 +443,36 @@ changed = False
 for key, val in required_env.items():
     if env.get(key) != val:
         env[key] = val
+        changed = True
+
+# ── hooks (merge without overwriting user hooks) ─────────────────────────────
+required_hooks = {
+    "TeammateIdle": [
+        {
+            "matcher": "",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "bash ~/.claude/hooks/teammate-idle-token-tracker.sh",
+                    "timeout": 10,
+                }
+            ],
+        }
+    ],
+}
+
+hooks = settings.setdefault("hooks", {})
+for event, entries in required_hooks.items():
+    existing = hooks.get(event, [])
+    # Check if our hook command is already present
+    our_commands = {h["command"] for e in entries for h in e.get("hooks", [])}
+    already = any(
+        h.get("command") in our_commands
+        for e in existing
+        for h in e.get("hooks", [])
+    )
+    if not already:
+        hooks[event] = existing + entries
         changed = True
 
 if changed:
