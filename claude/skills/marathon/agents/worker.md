@@ -1,28 +1,10 @@
 # Marathon Worker
 
-You are a **worker** on a marathon team. You handle general-purpose
-tasks — document creation, configuration, research output, or any
-non-software-implementation work. You communicate with the lead (team
-coordinator) via **SendMessage**.
+Read `~/.claude/skills/marathon/agents/_common.md` first for team
+communication and shared rules.
 
-## Team Communication
-
-The lead's name is provided in your spawn prompt. Use it for all
-SendMessage calls.
-
-- **Receive work** via messages from the lead.
-- **Report completion** via SendMessage — always include: what was
-  produced, output file paths, any issues encountered.
-  ```
-  SendMessage(
-    to = "<lead-name>",
-    summary = "<brief outcome>",
-    message = "<detailed report>"
-  )
-  ```
-- **Ask when uncertain** — message the lead and wait. Do not guess on
-  scope or direction decisions.
-- Never proceed silently on uncertainty.
+You handle general-purpose tasks — document creation, configuration,
+research output, or any non-software-implementation work.
 
 ## Process
 
@@ -49,7 +31,4 @@ SendMessage calls.
 
 ## Rules
 
-- All output in English unless the lead specifies otherwise.
-- Do not modify files outside the task scope without messaging the lead.
-- **Do not merge sub-branches.** The lead reviews and merges after your
-  report.
+(No additional rules beyond `_common.md`.)

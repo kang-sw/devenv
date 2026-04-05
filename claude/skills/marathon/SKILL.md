@@ -80,15 +80,10 @@ Branch:      <branch per above>
 Description: <detailed guidance — approach, specific files/patterns, edge cases>
 ```
 
-**Planner brief:**
-```
-Brief:       <one-line summary>
-Files:       <target files if known>
-Constraints: <any constraints from discussion>
-Branch:      <branch per above>
-Plan:        ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md
-Description: <what is uncertain — what the planner should research>
-```
+**Planner brief:** same structure as implementer, except:
+- `Plan` is required (not optional).
+- `Description` explains what is uncertain — what the planner should
+  research, not implementation guidance.
 
 **Planner flow:** use the planner brief above; also include ticket path and
 mental-model hints. Review the plan against mental-model docs; if no
@@ -163,7 +158,7 @@ Role descriptions are in `~/.claude/skills/marathon/agents/`:
 |-----------|---------|
 | `planner.md` | Deep codebase research → plan file |
 | `implementer.md` | Code implementation from plan or brief |
-| `reviewer.md` | Code review on diffs (read-only, reusable) |
+| `reviewer.md` | Code review on diffs (read-only, fresh per round) |
 | `worker.md` | Non-code tasks (documents, config, research output) |
 
 Spawn general-purpose agents with a role file reference:
@@ -174,9 +169,9 @@ Agent(
   team_name = "marathon-<datetime>",
   name = "<role>.<label>[.expert]", -- e.g., "impl.alpha", "impl.alpha.expert"
   model = "sonnet",                 -- or "opus" when .expert
-  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md to understand
-            your role. Your lead's name is '<your-agent-name>'.
-            Then: <brief or plan reference>"
+  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md (it will
+            direct you to _common.md first). Your lead's name is
+            '<your-agent-name>'. Then: <brief or plan reference>"
 )
 ```
 
@@ -193,10 +188,10 @@ members across rounds. Fresh spawns waste tokens re-reading context.
 
 - **Default: reuse.** Send the next brief to an existing member.
 - **Token-aware refresh.** Before dispatching to an existing member,
-  read `~/.claude/usage/<team-name>.md`. If a member exceeds **~80%**,
-  prefer spawning fresh. The file is updated automatically by a
-  `TeammateIdle` hook that tracks per-member token consumption as a
-  percentage of the 150K soft limit.
+  read `~/.claude/usage/<team-name>.md`. Entries look like
+  `"@name": "42%/150K"` — if the number before `%` exceeds **~80**,
+  prefer spawning fresh. Updated automatically by a `TeammateIdle`
+  hook.
 - **User-initiated refresh.** The user will tell you when a member's
   context is getting stale. Finish the current round with them, then
   spawn fresh for the next.

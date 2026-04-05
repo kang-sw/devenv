@@ -14,18 +14,11 @@ if [[ "$CURRENT_BRANCH" == marathon/* ]]; then
   BRANCH="$CURRENT_BRANCH"
   DATETIME="${CURRENT_BRANCH#marathon/}"
   TEAM="marathon-$DATETIME"
-  # Find the branch that marathon was forked from
-  MERGE_BASE=$(git merge-base main "$CURRENT_BRANCH" 2>/dev/null || true)
-  if [ -n "$MERGE_BASE" ]; then
-    # Check if merge-base is the tip of a known branch
-    ORIGINAL=$(git branch --contains "$MERGE_BASE" --format='%(refname:short)' \
-      | grep -v '^marathon/' | head -1 || echo "main")
-  else
-    ORIGINAL="main"
-  fi
+  ORIGINAL=$(git config "branch.$BRANCH.marathon-parent" 2>/dev/null || echo "main")
 else
   ORIGINAL="$CURRENT_BRANCH"
   git checkout -b "$BRANCH"
+  git config "branch.$BRANCH.marathon-parent" "$ORIGINAL"
 fi
 
 # Initialize token usage file
