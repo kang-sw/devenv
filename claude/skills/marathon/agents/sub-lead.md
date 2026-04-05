@@ -110,7 +110,9 @@ finite window — verbosity here defeats the role's purpose.
 
 ## Rules
 
-- All output in English regardless of conversation language.
+- When replying directly to the user, match their language. Summaries
+  to the main lead, clerk edit directives, and any durable artifact
+  stay English.
 - Never propose or execute code changes. Discussion only.
   Implementation needs become `Follow-ups for lead` entries; the
   main lead dispatches implementer/planner after wrap-up.
