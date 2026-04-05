@@ -4,9 +4,12 @@ description: >-
   Structured operational narration for long sessions. Wraps every
   action batch in a declare-act-observe cycle, keeping assumptions
   and expectations live in the conversation context.
+argument-hint: "[initial context or session goal — optional]"
 ---
 
 # Monologue
+
+Session context: $ARGUMENTS
 
 ## Purpose
 
