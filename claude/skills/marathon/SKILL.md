@@ -26,11 +26,17 @@ User Argument: $ARGUMENTS
    `{"branch", "team", "original_branch", "active_docs"}`. Record
    `original_branch` for Session End merge. If already on a `marathon/`
    branch, bootstrap resumes.
-2. `TeamCreate("<team>")` using the `team` field.
+2. `TeamCreate(team_name="<team>")` using the `team` field.
 3. Create protocol reminders:
    ```
-   TaskCreate("[PROTOCOL] Marathon rules — delegate code R/W; never self-execute; emit delegation plan block per turn; doc update post-merge; coherence at wrap-up")
-   TaskCreate("[PROTOCOL] Per-round checklist — check teammate usage before dispatch; reuse or fresh spawn; dispatch fresh reviewer; dispatch clerk for any ticket touch; merge gate")
+   TaskCreate(
+     subject="[PROTOCOL] Marathon rules",
+     description="Delegate code R/W; never self-execute; emit delegation plan block per turn; doc update post-merge; coherence at wrap-up"
+   )
+   TaskCreate(
+     subject="[PROTOCOL] Per-round checklist",
+     description="Check teammate usage before dispatch; reuse or fresh spawn; dispatch fresh reviewer; dispatch clerk for any ticket touch; merge gate"
+   )
    ```
 4. If `$ARGUMENTS` references a ticket, spawn `clerk` and have it read
    the ticket. Receive summary and active phase from clerk. Do not open
@@ -202,20 +208,26 @@ after two rounds, dispatch implementer with inline guidance.
 **Spawn signature.**
 ```
 Agent(
+  description = "<3-5 words: this round's goal>",  -- e.g., "implement login validation"
   subagent_type = "general-purpose",
   team_name = "marathon-<datetime>",
-  name = "<role>.<label>[.expert]",  -- labels: alpha, beta, gamma...
-  model = "sonnet",                  -- "opus" for .expert
+  name = "<role>.<label>[.expert]",                -- labels: alpha, beta, gamma...
+  model = "sonnet",                                -- "opus" for .expert
   prompt = "Read ~/.claude/skills/marathon/agents/<role>.md.
             Your lead's name is '<your-agent-name>'. Then:
             <brief or plan reference>"
 )
 ```
-Do not encode domain in the name — you already know who worked on what.
+Do not encode domain in the name — `description` carries the round's
+topic (verb-led, 3–5 words), `name` carries the stable team identity.
 
 **Explore agents** are the lead's direct tool, not team members:
 ```
-Agent(subagent_type = "Explore", prompt = "<question>")
+Agent(
+  description = "<3-5 words: the lookup>",  -- e.g., "find auth handlers"
+  subagent_type = "Explore",
+  prompt = "<question>"
+)
 ```
 Default haiku. Use `model="sonnet"` for relational queries or
 cross-module tracing. Insufficient even with sonnet → escalate to
