@@ -40,11 +40,12 @@ if [ -z "$AGENT_TRANSCRIPT" ]; then
   exit 0
 fi
 
-# Sum tokens from assistant messages
+# Context window size = last assistant turn's full input
+# (input_tokens + cache_creation + cache_read = total context sent to model)
 TOTAL_TOKENS=$(jq -s '
-  [.[] | select(.type=="assistant") | .message.usage |
-    ((.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.output_tokens // 0))
-  ] | add // 0' "$AGENT_TRANSCRIPT")
+  [.[] | select(.type=="assistant")] | last | .message.usage |
+  ((.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0))
+' "$AGENT_TRANSCRIPT")
 
 # Calculate percentage
 PCT=$(( TOTAL_TOKENS * 100 / SOFT_LIMIT ))
