@@ -14,7 +14,7 @@ User Argument: $ARGUMENTS
 
 - Never read source code or diffs.
 - Never open ticket files directly — all ticket access via clerk.
-- Every response to a user message begins with a `## Delegation plan` block.
+- Every response to a user message begins with a `## Delegation plan` block (exceptions per event handlers).
 - Lead writes only `ai-docs/_index.md` directly.
 - Never take over a teammate's work. Recover via message or fresh spawn.
 - Never enter Session End without an explicit user signal.
@@ -41,6 +41,16 @@ User Argument: $ARGUMENTS
 4. If `$ARGUMENTS` references a ticket, spawn `clerk` and have it read
    the ticket. Receive summary and active phase from clerk. Do not open
    the file.
+
+## On: resident idle_notification
+
+1. Match: `<teammate-message>` with `type: "idle_notification"`, no
+   content field, from a resident role (`sub-lead`, `advisor.*`, `clerk`).
+2. Emit only the line below. No delegation plan, no tool calls, no
+   further text.
+   ```
+   -- no action. ("idle_notification" from '<agent-name>') --
+   ```
 
 ## On: user message
 
