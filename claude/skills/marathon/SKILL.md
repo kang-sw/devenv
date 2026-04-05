@@ -223,12 +223,16 @@ Role descriptions live in `~/.claude/skills/marathon/agents/`.
 
 | Role | Purpose | Lifespan |
 |------|---------|----------|
-| `planner` | Deep codebase research → plan file | per round |
-| `implementer` | Code implementation from plan or brief | per round |
-| `reviewer` | Code review on diffs (read-only, fresh per round) | per round |
-| `worker` | Non-code tasks (documents, config, research output) | per round |
+| `planner` | Deep codebase research → plan file | multi-round |
+| `implementer` | Code implementation from plan or brief | multi-round |
+| `reviewer` | Code review on diffs (read-only) | fresh per round |
+| `worker` | Non-code tasks (documents, config, research output) | multi-round |
 | `advisor.<domain>` | Read-only domain oracle — mental-model, plans, `_index.md` | **resident** |
 | `clerk` | Ticket owner (R/W); loads `/write-ticket` conventions | **resident** |
+
+**multi-round** members are reused by default across rounds; respawn
+decision follows `judge: reuse-or-fresh` (token-aware). **fresh per
+round** retires after the round. **resident** spans the whole session.
 
 Clerk spawn: at bootstrap if `$ARGUMENTS` references a ticket;
 otherwise on the first ticket-touching operation. Single clerk per
