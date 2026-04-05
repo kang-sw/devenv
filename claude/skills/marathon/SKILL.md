@@ -42,31 +42,26 @@ User Argument: $ARGUMENTS
    classifies the turn inside its `Decomposition` field.
 2. Route per classification:
 
-### Discussion
+   - **Discussion.** Respond actively — propose approaches, surface
+     risks, suggest alternatives.
+     - Codebase lookup needed → dispatch Explore.
+     - Recurring judgment query on a domain → see
+       `judge: recurring-doc-query`.
+     - Conclusion affects an unimplemented ticket phase → dispatch
+       clerk with an edit directive.
+     - Scope expansion (new concerns beyond current work) → dispatch
+       clerk to create a ticket now; defer implementation unless
+       trivially small.
+   - **Non-code task.** Dispatch `worker`.
+   - **Implementation.** Apply `judge: routing-check`:
+     - complete brief possible → dispatch `implementer`
+     - partial (gaps fillable by focused lookup) → Explore →
+       `implementer`
+     - fundamentally unclear → `planner` → `implementer`
 
-Respond actively — propose approaches, surface risks, suggest
-alternatives.
-- Codebase lookup needed → dispatch Explore.
-- Recurring judgment query on a domain → see `judge: recurring-doc-query`.
-- Conclusion affects an unimplemented ticket phase → dispatch clerk
-  with an edit directive.
-- Scope expansion (new concerns beyond current work) → dispatch clerk
-  to create a ticket now; defer implementation unless trivially small.
-
-### Non-code task
-
-Dispatch `worker`.
-
-### Implementation
-
-Apply `judge: routing-check`:
-- complete brief possible → dispatch `implementer`
-- partial (gaps fillable by focused lookup) → Explore → `implementer`
-- fundamentally unclear → `planner` → `implementer`
-
-Branch: one-liner → direct commit on `marathon/<datetime>`; everything
-else → sub-branch `<type>/<round>`. Brief follows the Implementer brief
-template.
+     Branch: one-liner → direct commit on `marathon/<datetime>`;
+     everything else → sub-branch `<type>/<round>`. Brief follows
+     the Implementer brief template.
 
 ## On: implementer reports complete
 
