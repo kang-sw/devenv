@@ -13,152 +13,97 @@ Session context: $ARGUMENTS
 
 _(If no argument was provided, proceed without session context.)_
 
-## Purpose
+## Invariants
 
-In long sessions, the *why* behind each decision evaporates. This
-skill externalizes a running stream of self-talk around every action,
-keeping assumptions, expectations, and lessons visible as durable
-context anchors.
+- Every action gets a monologue block before it and another after the resulting observation. No exceptions.
+- All monologue blocks are in English, regardless of conversation language.
+- Block format is `> [monologue]` on its own line, free-form self-talk beneath, no closing tag.
+- A missing block is a rule violation. Block length scales with reasoning depth: trivial actions may collapse to one line, non-trivial blocks err verbose over terse — anchor density is the point.
+- Every before-block states an assumption phrased so observation can falsify it. Vague expectations like "should work" are disallowed.
+- When the action follows reasoning that weighed alternatives, append a `Dropped:` tail to the before-block listing each rejected candidate with a one-phrase reason. Reasonless entries are noise, not anchors.
+- Every after-block classifies the result as match, drift, or abandon (see Vocabulary).
+- Never proceed past drift without naming the broken assumption, the new challenge, and the plan adjustment.
+- When a prior block surfaced drift or a challenge, later blocks restate the finding briefly before acting on it.
+- Subagent prompts prepend the propagation line (see Templates).
 
-Where internal reasoning verifies hypotheses against itself (propose
-→ challenge → resolve), monologue verifies them against **external
-reality** (assume → act → observe). It records what was assumed,
-what was decided, and — after observation — what held and what broke.
+## On: before any action (tool call or user response)
 
-## Core Directive
+1. Emit a block stating the assumption being tested and the expected observable result.
+2. If reasoning weighed alternatives, append a `Dropped:` tail listing them with one-phrase reasons.
+3. If a prior block surfaced drift or a challenge, restate the finding briefly in this block.
+4. Perform the action.
 
-**Every action gets narration. No exceptions. In English only.**
+## On: after any observation (tool result or user reply)
 
-Before tool calls, after results, between steps, before responding
-to the user, after responding — narrate in `> [monologue]` blocks.
-Each action needs at least a before-block and an after-block. A
-trivial action gets a one-line block; a missing block is a rule
-violation.
+1. Emit a block classifying the result: match, drift, or abandon.
+2. Match — state the next assumption, chaining into the next before-block.
+3. Drift — name the broken assumption, the resulting challenge, and the plan adjustment.
+4. Abandon — reframe the direction rather than patching.
+
+## On: spawning a subagent
+
+1. In the before-block, name the expected deliverable only — not the subagent's internal steps.
+2. Prepend the propagation line (see Templates) to the subagent prompt.
+3. After the subagent returns, the after-block judges whether the deliverable matched.
+
+## Vocabulary
+
+Words used naturally inside blocks, not as syntax:
+
+- **assumption** — a belief stated before acting, phrased so observation can falsify it.
+- **dropped** — a candidate seriously considered in reasoning and rejected. Listed in the before-block tail as `Dropped: A (reason); B (reason)`. Preserves the falsification cost already paid in private reasoning so the same candidate is not re-litigated after context evaporates. Default-no, not permanent — a later drift may legitimately promote a dropped candidate under new evidence.
+- **match** — reality aligned with the assumption. Proceed.
+- **drift** — an assumption was wrong. Name it, name the challenge, state the adjustment.
+- **challenge** — a difficulty surfaced mid-session. Carries forward into later blocks.
+- **abandon** — drift so severe the whole direction was wrong. Reframe, do not patch.
+
+## Templates
+
+**Block format:**
 
 ```
 > [monologue]
 > <free-form self-talk in English>
 ```
 
-No closing tag. The blockquote ends when the monologue ends. Multiple
-blocks per turn are natural and expected.
+**Subagent propagation line** (prepend to every spawned prompt):
 
-## Vocabulary
-
-Use these terms naturally within monologue blocks — they are words,
-not syntax:
-
-- **assumption** — something you believe before acting. State it
-  explicitly so observation can falsify it.
-- **match** — reality aligned with your assumptions. Proceed.
-- **drift** — an assumption was wrong. Name it, describe what
-  difficulty this creates, and state the plan adjustment. Proceeding
-  past drift without acknowledging it is not allowed.
-- **challenge** — a difficulty or constraint discovered during the
-  session, whether from drift, tool errors, or new information.
-  Carries forward to later blocks.
-- **abandon** — drift so severe the entire direction was wrong.
-  Reframe rather than patch.
-
-## Principles
-
-1. **Declare to falsify.** State expectations that can be proven
-   wrong. Vague expectations ("should work") defeat the purpose.
-2. **Drift is signal, not failure.** Wrong assumptions caught early
-   are valuable. Name the broken assumption, name the challenge,
-   adjust the plan.
-3. **Carry lessons.** When a block surfaces a broken assumption —
-   or a surprisingly confirmed one — later blocks reference it
-   by restating the finding briefly: "Previous block revealed X,
-   accounting for that here."
-4. **Narrate before acting.** The hypothesis must appear before the
-   tool calls or response in the same turn.
-5. **Narrate after observing.** After every tool result or user
-   response, a monologue block states whether reality matched and
-   what comes next.
-6. **English only — no exceptions.** All monologue blocks **MUST**
-   be in English regardless of conversation language.
+> Before starting, read `~/.claude/skills/monologue/SKILL.md` and
+> follow its instructions for all your responses.
 
 ## Examples
 
+Drift, then carrying the lesson forward:
+
 ```
 > [monologue]
-> Looking for RATE_LIMIT in config/. Assuming project convention
-> puts it in config/default.ts.
-
-... Grep ...
-
-> [monologue]
-> Match — found RATE_LIMIT=100 at config/default.ts:23. Editing
-> the guard next. Assuming it only handles unauth routes.
+> Editing the auth guard. Assuming it only handles unauth routes.
+> Dropped: middleware chain split (too invasive for this PR);
+> per-route decorator (auth isn't route-scoped here).
 
 ... Edit ...
 
 > [monologue]
-> Drift — guard is shared with admin routes. My "unauth-only"
-> assumption was wrong. Challenge: need to split guards before
-> applying the rate limit. Creating a dedicated unauth guard.
+> Drift — guard is shared with admin routes. Challenge: must split
+> guards before applying the rate limit. Creating a dedicated
+> unauth guard.
 
 ... Write ...
 
 > [monologue]
-> Match — new guard created. Previous challenge addressed.
-> Verifying tests still pass.
-
-... Bash (test runner) ...
-
-> [monologue]
-> All 47 tests pass. Wiring the new guard into the unauth router.
+> Previous block revealed the guard was shared. Accounting for
+> that — the new file isolates unauth. Expect: tests still green.
 ```
 
-**Abandon:**
+Abandon:
+
 ```
 > [monologue]
-> Drift — the middleware approach won't work at all. The framework
-> handles rate limiting at the gateway level, not per-route.
-> Everything I've done so far is in the wrong layer. Abandon —
-> switching to gateway config instead of middleware guards.
+> Drift — framework handles rate limiting at the gateway, not per
+> route. Middleware approach is in the wrong layer entirely.
+> Abandon — switching to gateway config.
 ```
 
-**Carrying a lesson forward:**
-```
-> [monologue]
-> Previous block revealed the guard is shared across route groups.
-> Accounting for that — creating a dedicated guard instead of
-> modifying the shared one. Expect: new file, no test breakage.
-```
+## Doctrine
 
-**Responding to the user:**
-```
-> [monologue]
-> User asked about A vs B. Presenting trade-offs. Risk: they
-> might actually be asking about C — addressing that ambiguity.
-
-... response text ...
-
-> [monologue]
-> Waiting for user's decision. If A, proceed to implementation.
-> If they redirect to C, re-scope.
-```
-
-**Subagent spawn:**
-```
-> [monologue]
-> Spawning test-runner to verify nothing broke after the guard
-> split. Expect: all green or a failure list with file paths.
-
-... Agent tool call ...
-
-> [monologue]
-> Agent reports all tests pass. Proceeding to PR.
-```
-
-## Subagent Propagation
-
-Subagents run their own monologue independently. The parent block
-names the expected deliverable, not the subagent's internal steps.
-
-When spawning subagents, prepend to every prompt:
-
-> Before starting, read `~/.claude/skills/monologue/SKILL.md` and
-> follow its instructions for all your responses.
+Monologue optimizes for **falsifiable externalization**: every action is paired with an explicit, falsifiable assumption before it and an observation after it, so intent stays visible in the conversation context across long sessions. Where internal reasoning verifies hypotheses against themselves (propose → challenge → resolve), monologue verifies them against reality (assume → act → observe). When a rule is ambiguous, apply whichever interpretation more reliably produces assumption-observation pairs a later reader could falsify. The pair is the unit; the block is only its carrier. Return here when a novel case makes a rule feel awkward.
