@@ -20,30 +20,22 @@ diffs, team reports, and explore results.
 
 ## Step 0: Bootstrap
 
-**First action — before anything else**, create a single protocol reminder:
-```
-TaskCreate("[PROTOCOL] Marathon rules — delegate code R/W; reuse members; fresh reviewer per round; doc update post-merge; coherence at wrap-up")
-```
-
-Then:
-1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
-   -name '*.md' | sort` if the script is missing).
-2. If `$ARGUMENTS` references a ticket, read it.
-3. Create branch `marathon/<datetime>` from current branch where `<datetime>`
-   is `YYYY-MM-DD-hhmm` (e.g., `marathon/2026-04-04-1530`). Record
-   current branch as `<original-branch>`. If already on a `marathon/`
-   branch, resume — infer `<original-branch>` from merge-base with `main`.
-4. Create the team:
+1. Run `bash ~/.claude/skills/marathon/bootstrap.sh`. It handles branch
+   creation (`marathon/<datetime>`), token usage file init, and active
+   docs listing. Output is JSON:
+   ```json
+   {"branch": "marathon/...", "team": "marathon-...",
+    "original_branch": "...", "active_docs": "..."}
    ```
-   TeamCreate("marathon-<datetime>")
+   If already on a `marathon/` branch, it resumes instead of creating.
+   Record `original_branch` for Session End merge.
+2. Create the team: `TeamCreate("<team>")` using the `team` field.
+3. Create protocol reminder:
    ```
-5. Initialize the token usage file:
-   ```bash
-   mkdir -p ~/.claude/usage
-   printf '# Token Usage: marathon-<datetime>\n```json\n{}\n```\n' \
-     > ~/.claude/usage/marathon-<datetime>.md
+   TaskCreate("[PROTOCOL] Marathon rules — delegate code R/W; reuse members; fresh reviewer per round; doc update post-merge; coherence at wrap-up")
    ```
-6. Team members are spawned on-demand. See **Team Management** below.
+4. If `$ARGUMENTS` references a ticket, read it.
+5. Team members are spawned on-demand. See **Team Management** below.
 
 ## Step 1: Marathon Loop
 
