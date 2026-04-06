@@ -14,6 +14,7 @@ Initial User Message: $ARGUMENTS
 
 - English only in code, commits, and docs.
 - Delegate implementation work; retain discussion, judgment, and orchestration.
+- New tickets: create directly. Existing ticket edits: delegate to clerk.
 - Use Explore (haiku-first) before spawning a planner — most gaps are lookup-shaped.
 - Never take over a teammate's work. Recover via message or fresh spawn.
 
