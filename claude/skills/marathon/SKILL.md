@@ -82,11 +82,14 @@ User Argument: $ARGUMENTS
      sends findings to implementer, implementer fixes, reviewer
      re-reviews. Lead waits for the reviewer's final report.
      Retire the reviewer after the round.
-4. Merge decision:
-   - **accept** → `git merge --no-ff <type>/<round>` into
-     `marathon/<datetime>`, then delete sub-branch
-   - **rollback** → delete sub-branch
-5. Doc updates (skip for config/typo):
+4. Report round results to the user (summary, review outcome).
+   Wait for user approval before proceeding. If the user batched
+   multiple rounds upfront, proceed without per-round gate.
+   - **accept** → continue to merge and doc updates
+   - **rollback** → delete sub-branch, skip to next round
+5. Merge: `git merge --no-ff <type>/<round>` into
+   `marathon/<datetime>`, then delete sub-branch.
+6. Doc updates (skip for config/typo):
    - Spawn two parallel one-shot doc-update agents (not team
      members; fresh `general-purpose` Agents): one to refresh
      `ai-docs/mental-model/` against the merged diff, one to
@@ -96,7 +99,6 @@ User Argument: $ARGUMENTS
    - Update `ai-docs/_index.md` if project capabilities changed.
    - If completing a ticket phase → dispatch clerk to append `### Result`.
    - Commit doc changes.
-6. Report results to the user.
 
 When splitting a ticket phase into subphases, dispatch clerk with the
 split directive before proceeding.
