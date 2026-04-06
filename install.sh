@@ -430,6 +430,7 @@ settings_path, claude_json_path = sys.argv[1], sys.argv[2]
 # ── settings.json (project-level: env vars) ──────────────────────────────────
 required_env = {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "ENABLE_TOOL_SEARCH": "1"
 }
 
 if os.path.isfile(settings_path):
