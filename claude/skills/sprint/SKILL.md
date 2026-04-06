@@ -1,8 +1,8 @@
 ---
 name: sprint
 description: >
-  Lightweight single-agent implementation for trivial changes when
-  marathon team overhead is unnecessary. Prefer /marathon for most work.
+  Flexible implementation workflow. Defaults to direct execution;
+  user directs delegation scope in real-time.
 argument-hint: "[ticket-path, topic, or description]"
 ---
 
@@ -10,81 +10,132 @@ argument-hint: "[ticket-path, topic, or description]"
 
 Target: $ARGUMENTS
 
-## Doctrine
+## Invariants
 
-Sprint is the **informal implementation mode** — a tight loop of discussion
-and small implementations with real-time task tracking. Trade ceremony for
-velocity. Load context on-demand, commit freely, track everything in the
-task list.
+- Task list is the live dashboard. Create, update, cancel aggressively.
+- Default to direct execution. Delegate when the user directs or when context pressure warrants.
+- Read mental-model/, spec/, _index.md, and reference docs directly.
+- English in code, commits, and docs regardless of conversation language.
 
-**Task list is the live dashboard.** Create, update, and cancel tasks
-aggressively as the conversation evolves. The user should be able to glance
-at the task list at any time and see the current state of the sprint.
+## On: bootstrap
 
-## Step 0: Bootstrap
-
-1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
-   -name '*.md' | sort` if the script is missing).
+1. Run `bash ai-docs/list-active.sh` (falls back to
+   `find ai-docs -type f -name '*.md' | sort` if missing).
 2. If `$ARGUMENTS` references a ticket, read it.
-3. Create a feature branch: `sprint/<scope>` from the current branch. Record
-   the current branch as `<original-branch>`. If already on a `sprint/` branch,
-   treat as a resumed session — infer `<original-branch>` from the merge-base
-   with `main`, skip branch creation, and continue from the existing task list.
-4. Create an initial task:
+3. Create branch `sprint/<scope>` from current branch. Record
+   current branch as `<original-branch>`. If already on a `sprint/`
+   branch, resume — infer `<original-branch>` from merge-base with
+   `main`, skip branch creation.
+4. Create wrap-up task:
    ```
    [ ] [fixed] Sprint wrap-up — test, review, docs, merge
    ```
 
-## Step 1: Sprint Loop
+## On: user message
 
-Repeat until the user signals done:
+1. Classify the turn and act:
 
-- **Discussion:** Contribute actively — propose approaches, surface risks,
-  suggest alternatives. Dispatch Explore agents for codebase details beyond
-  what mental-model docs cover. Read mental-model or spec docs on-demand as
-  topics emerge.
-- **Implementation:** Set task to `in_progress`, read target files, implement,
-  commit at logical checkpoints, set task to `completed`.
-- **Task discipline:** Create tasks eagerly for any actionable item. Update
-  status in real-time. Cancel stale tasks immediately with a brief reason.
-  Split tasks that grow larger than expected.
+   - **Discussion.** Respond actively — propose approaches, surface
+     risks, suggest alternatives. Read mental-model/spec as needed.
+     Dispatch Explore agents for codebase details beyond docs.
+   - **Implementation.** Set task to `in_progress`, read target
+     files, implement, commit at logical checkpoints, set task to
+     `completed`.
+   - **Delegation directive.** User requests delegation — follow it.
+     See Templates for spawn patterns.
 
-## Step 2: Wrap-up (when user signals done)
+2. Task discipline: create tasks for actionable items, update status
+   in real-time, cancel stale tasks with a brief reason, split tasks
+   that grow.
 
-Set the wrap-up task to `in_progress`. Execute in order:
+## On: session end
 
-1. **Test & verify** — run test suite and build. Read full output. Skip if
-   trivial (docs, config) or no test suite.
-2. **Code review** — for non-trivial changes (3+ files, new public APIs,
-   architectural changes), dispatch a review subagent. Load `/implement` for
-   the review prompt template and conventions.
-3. **Update mental model** — dispatch mental-model-updater subagent. Skip for
-   config/typo changes. Wait for completion before step 4.
-4. **Update spec** — dispatch spec-updater subagent. Skip if `ai-docs/spec/`
-   does not exist. Wait for completion before step 5.
-5. **Update docs** — `ai-docs/_index.md` as needed. If a ticket was the input,
-   load `/write-ticket` for conventions, then append `### Result`.
-   If no ticket was the input but the changes relate to an existing ticket,
-   ask the user; if yes, load `/write-ticket` for conventions and append
-   a `### Result` entry.
-6. **Final commit** — docs and remaining changes.
-7. **Report** — summarize to the user: what was implemented, process issues
-   (if any), ticket status (if applicable).
-8. **Merge** — ask user for confirmation, then:
+0. **Require** explicit user signal. Task exhaustion is not a signal.
+1. Set wrap-up task to `in_progress`.
+2. **Test** — run test suite and build. Skip if trivial or no suite.
+3. **Code review** — apply `judge: review-need`:
+   - trivial → skip
+   - else → dispatch reviewer (see Templates)
+4. **Doc updates:**
+   - Dispatch mental-model-updater subagent. Skip for config/typo.
+   - Dispatch spec-updater subagent. Skip if `ai-docs/spec/` absent.
+   - Wait for both.
+   - Update `ai-docs/_index.md` as needed.
+   - If ticket input → load `/write-ticket` conventions, append
+     `### Result`.
+5. **Final commit** — docs and remaining changes.
+6. **Report** — what was implemented, process issues, ticket status.
+7. **Merge** — ask user, then:
    ```bash
    git checkout <original-branch>
-   git merge --no-ff sprint/<scope> -m "<conventional-commit message>"
+   git merge --no-ff sprint/<scope> -m "<conventional-commit>"
    git branch -d sprint/<scope>
    ```
-   If no commits were made, skip merge and delete the branch.
+   Skip if no commits.
+8. Set wrap-up task to `completed`.
 
-Set wrap-up task to `completed`.
+## Judgments
 
-## Rules
+- **review-need** — 3+ files changed, new public APIs, or
+  architectural changes → reviewer. Otherwise skip.
+- **context-pressure** — When context is filling (broad searches,
+  large files, many rounds), suggest delegation to the user. Do not
+  auto-delegate; surface the option.
 
-- **Language:** All code, commits, and docs in English regardless of
-  conversation language.
-- **Stay lightweight.** No ceremony beyond task tracking and commits until
-  wrap-up. The point of sprint is velocity.
-- **Context conservation.** Delegate broad searches and mechanical edits to
-  subagents. Keep the main context for synthesis and decision-making.
+## Templates
+
+**One-shot agent.** For scoped delegation without a team:
+```
+Agent(
+  description = "<3-5 words>",
+  subagent_type = "general-purpose",
+  model = "sonnet",
+  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md.
+            Your lead's name is '<your-agent-name>'. Then:
+            <brief>"
+)
+```
+
+**Team-based delegation.** When the user requests a team:
+```
+TeamCreate(team_name="sprint-<scope>")
+Agent(
+  description = "<3-5 words>",
+  subagent_type = "general-purpose",
+  team_name = "sprint-<scope>",
+  name = "<role>.<label>",
+  model = "sonnet",
+  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md.
+            Your lead's name is '<your-agent-name>'. Then:
+            <brief>"
+)
+```
+Role files live in `~/.claude/skills/marathon/agents/`:
+
+| Role | Purpose |
+|------|---------|
+| `planner` | Deep codebase research → plan file |
+| `implementer` | Code implementation from plan or brief |
+| `reviewer` | Code review on diffs (read-only) |
+| `worker` | Non-code tasks (documents, config, research output) |
+| `clerk` | Ticket owner (R/W); loads `/write-ticket` conventions |
+
+**Reviewer spawn** (session-end or user-directed):
+```
+Agent(
+  description = "review sprint changes",
+  subagent_type = "general-purpose",
+  model = "sonnet",
+  prompt = "Read ~/.claude/skills/marathon/agents/reviewer.md.
+            Your lead's name is '<your-agent-name>'. Then:
+            Review diff range: <original-branch>..sprint/<scope>"
+)
+```
+
+## Doctrine
+
+Sprint optimizes for **user-directed flexibility**. The lead
+defaults to direct execution for velocity and escalates delegation
+scope only as the user directs or context pressure warrants. When
+a rule looks ambiguous, apply whichever interpretation preserves
+the user's ability to steer in real-time.
