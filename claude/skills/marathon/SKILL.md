@@ -12,9 +12,10 @@ User Argument: $ARGUMENTS
 
 ## Invariants
 
-- Never read source code or diffs.
+- Never read source code, diffs, or plans.
 - Never open ticket files directly — all ticket access via clerk.
 - Every response to a user message begins with a `## Delegation plan` block (exceptions per event handlers).
+- Lead reads `_index.md`, `mental-model/`, `spec/`, and reference docs directly.
 - Lead writes only `ai-docs/_index.md` directly.
 - Never take over a teammate's work. Recover via message or fresh spawn.
 - Never enter Session End without an explicit user signal.
@@ -42,16 +43,6 @@ User Argument: $ARGUMENTS
    the ticket. Receive summary and active phase from clerk. Do not open
    the file.
 
-## On: resident idle_notification
-
-1. Match: `<teammate-message>` with `type: "idle_notification"`, no
-   content field, from a resident role (`sub-lead`, `advisor.*`, `clerk`).
-2. Emit only the line below. No delegation plan, no tool calls, no
-   further text.
-   ```
-   -- no action. ("idle_notification" from '<agent-name>') --
-   ```
-
 ## On: user message
 
 1. Emit `## Delegation plan` block first (see Templates). The block
@@ -59,19 +50,14 @@ User Argument: $ARGUMENTS
 2. Route per classification:
 
    - **Discussion.** Respond actively — propose approaches, surface
-     risks, suggest alternatives.
+     risks, suggest alternatives. Read mental-model/spec as needed
+     for conceptual grounding.
      - Codebase lookup needed → dispatch Explore.
-     - Recurring judgment query on a domain → see
-       `judge: recurring-doc-query`.
      - Conclusion affects an unimplemented ticket phase → dispatch
        clerk with an edit directive.
      - Scope expansion (new concerns beyond current work) → dispatch
        clerk to create a ticket now; defer implementation unless
        trivially small.
-     - Explicit user request for an isolated consultation → spawn
-       `sub-lead` (see Templates). Turn ownership transfers to
-       sub-lead; you remain idle until it delivers its Consultation
-       summary or the user addresses you directly again.
    - **Non-code task.** Dispatch `worker`.
    - **Implementation.** Apply `judge: routing-check`:
      - complete brief possible → dispatch `implementer`
@@ -91,10 +77,11 @@ User Argument: $ARGUMENTS
 3. Code review — apply `judge: review-triviality`:
    - trivial (typo/config/single-line) → skip
    - else → spawn a **fresh** reviewer with diff range
-     `marathon/<datetime>...<type>/<round>`
-   - on Critical/Important findings → implementer fixes → same
-     reviewer re-reviews → loop until clean. Retire the reviewer
-     after the round.
+     `marathon/<datetime>...<type>/<round>` and the implementer's
+     name. Reviewer and implementer iterate directly — reviewer
+     sends findings to implementer, implementer fixes, reviewer
+     re-reviews. Lead waits for the reviewer's final report.
+     Retire the reviewer after the round.
 4. Merge decision:
    - **accept** → `git merge --no-ff <type>/<round>` into
      `marathon/<datetime>`, then delete sub-branch
@@ -108,8 +95,6 @@ User Argument: $ARGUMENTS
    - Wait for both.
    - Update `ai-docs/_index.md` if project capabilities changed.
    - If completing a ticket phase → dispatch clerk to append `### Result`.
-   - Refresh active advisors with the names of files the doc-update
-     agents touched (selective re-read).
    - Commit doc changes.
 6. Report results to the user.
 
@@ -157,20 +142,15 @@ the criteria live here.
   approach to take?"* Yes → implementer. Partial (gaps fillable by a
   focused lookup) → Explore + implementer. Fundamentally unclear →
   planner.
-- **recurring-doc-query** — Expect two or more judgment-based queries
-  against the same mental-model/plan domain in this session? → spawn
-  `advisor.<domain>`. Single one-shot lookup → Explore.
-- **read-mode (soft-lock docs)** — Mental-model, plans. Small and
-  one-shot → direct read. Large or recurring → advisor. Tickets are
-  hard-lock (always clerk). Source/diffs are never.
+- **read-mode (soft-lock docs)** — Mental-model, spec, _index.md,
+  reference docs → lead reads directly. Tickets are hard-lock
+  (always clerk). Plans, source, diffs are never.
 - **review-triviality** — Typo, config-only, single-line → skip.
   Otherwise fresh reviewer.
 - **reuse-or-fresh** — Before dispatching to an existing member, read
   `~/.claude/usage/<team-name>.md` (entries: `"@name": "42%/150K"`).
   Prefer fresh spawn if the `%` exceeds ~80, or on domain contamination
-  (prior context would mislead), or on user-initiated refresh. Resident
-  roles (advisor, clerk, sub-lead) bypass — they persist until user
-  refresh or Session End.
+  (prior context would mislead), or on user-initiated refresh.
 - **model** — Default sonnet. Opus for novel architecture or complex
   cross-module logic; mark the name `.expert`. Haiku for mechanical
   worker tasks and simple Explore lookups. Upgrade = spawn a fresh
@@ -192,8 +172,8 @@ Decomposition:
 Routing: <concrete next action — which agent gets the next message, or "respond in discussion">
 ```
 `lead-direct` is valid only for discussion turns, `_index.md` updates,
-and one-shot reads of small soft-lock documents (mental-model, plans).
-Tickets, source, and diffs never qualify. If the plan proves wrong
+and reads of soft-lock documents (mental-model, spec, reference docs).
+Tickets, plans, source, and diffs never qualify. If the plan proves wrong
 mid-turn, emit a revised block with `## Delegation plan (revision)` on
 the header line.
 
@@ -250,18 +230,6 @@ planner.
 
 Serialize commit approvals one at a time — the git index is shared.
 
-**Consultation summary.** Format sub-lead uses when reporting back
-to you at wrap-up, inside SendMessage `message`:
-```
-## Consultation summary: <topic>
-Conclusions: <what was decided, 2-5 bullets>
-Tickets touched: <paths and brief change summary, or "none">
-Open questions: <raised but unresolved, or "none">
-Follow-ups for lead: <what the lead should pick up, or "none">
-```
-Ingest this into your own context at wrap-up; do not re-read the
-sub-lead's transcript. The summary is the handoff.
-
 ## Team roles
 
 Role descriptions live in `~/.claude/skills/marathon/agents/`.
@@ -272,9 +240,7 @@ Role descriptions live in `~/.claude/skills/marathon/agents/`.
 | `implementer` | Code implementation from plan or brief | multi-round |
 | `reviewer` | Code review on diffs (read-only) | fresh per round |
 | `worker` | Non-code tasks (documents, config, research output) | multi-round |
-| `advisor.<domain>` | Read-only domain oracle — mental-model, plans, `_index.md` | **resident** |
 | `clerk` | Ticket owner (R/W); loads `/write-ticket` conventions | **resident** |
-| `sub-lead` | Discussion-only consultation; explicit user spawn | **resident** |
 
 **multi-round** members are reused by default across rounds; respawn
 decision follows `judge: reuse-or-fresh` (token-aware). **fresh per
@@ -282,15 +248,13 @@ round** retires after the round. **resident** spans the whole session.
 
 Clerk spawn: at bootstrap if `$ARGUMENTS` references a ticket;
 otherwise on the first ticket-touching operation. Single clerk per
-session, handles multiple active tickets. Advisor spawn: on
-`judge: recurring-doc-query`. Sub-lead spawn: only on explicit user
-request for an isolated consultation — never auto-spawned. Single
-sub-lead per session; replacement only on explicit user request.
-All three are resident and bypass the normal reuse heuristics.
+session, handles multiple active tickets.
 
 ## Doctrine
 
-The lead has one finite resource: its context window. Every rule
-above preserves it for decisions — delegate reads, encode mechanisms,
-externalize state. When a rule looks ambiguous, apply whichever
-interpretation keeps the window freer for decisions.
+The lead has one finite resource: its context window. The lead
+reads compressed project shape (mental-model, spec) directly for
+decision quality, and delegates implementation-axis work (plans,
+tickets, source, diffs) to preserve the window. When a rule looks
+ambiguous, apply whichever interpretation keeps the window freer
+for decisions without sacrificing direct conceptual grasp.

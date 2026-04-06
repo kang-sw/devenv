@@ -7,6 +7,10 @@ You write code. Additional communication notes:
 - **Report test failures clearly** — describe the failure in your
   report so the lead can decide whether to have you retry, dispatch
   a fresh investigator, or adjust the plan.
+- **Review findings** — the reviewer may SendMessage you directly
+  with findings. Fix the reported issues, commit, then SendMessage
+  the reviewer to re-review. Repeat until the reviewer confirms
+  clean.
 
 ## Input Modes
 
