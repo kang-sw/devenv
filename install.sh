@@ -247,7 +247,8 @@ zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 # ── Word navigation & deletion (Ctrl+Arrow / Ctrl+Backspace / Ctrl+Delete) ──
 bindkey '^[[1;5C' forward-word           # Ctrl+Right
 bindkey '^[[1;5D' backward-word          # Ctrl+Left
-bindkey '^[^?'    backward-kill-word     # Ctrl+Backspace (via WezTerm: ESC+DEL)
+bindkey '^H'      backward-kill-word     # Ctrl+Backspace (Windows Terminal / WSL2)
+bindkey '^[^?'    backward-kill-word     # Option+Backspace (macOS)
 bindkey '^[[3;5~' kill-word              # Ctrl+Delete
 
 # ── fzf ──────────────────────────────────────────────────────────────────────
