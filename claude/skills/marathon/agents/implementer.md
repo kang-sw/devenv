@@ -25,7 +25,7 @@ You write code. Additional communication notes:
 
 ## Process
 
-1. **Set up branch**: follow the Branch Setup section in `_common.md`.
+1. **Branch**: see the Branches section in `_common.md`.
 
 2. **Load context**: Read the plan (Mode A) or parse the brief (Mode B).
    Read target files identified in the plan/brief. Read mental-model docs

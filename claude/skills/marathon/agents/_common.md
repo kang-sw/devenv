@@ -36,18 +36,11 @@ when sequential searches would flood your context, or for external
 lookups. `--deep-research` for cross-module tracing, API-usage
 nuance, or when you need strict cited output.
 
-## Branch Setup (roles that commit code or files)
+## Branches
 
-The lead's message specifies which branch to work on.
-
-- If it is a round branch (e.g., `feat/add-parser`,
-  `docs/update-slides`), create it from the marathon branch:
-  `git checkout -b <type>/<round> marathon/<datetime>`
-- If it is just `marathon/<datetime>`, commit directly (trivial
-  changes).
-
-Commit at logical checkpoints. Keep commit messages brief; the
-lead merges the sub-branch back.
+The lead creates and checks out the working branch before spawning
+you. Commit on the current branch at logical checkpoints. Keep
+commit messages brief; the lead merges back.
 
 ## Rules (all roles)
 

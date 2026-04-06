@@ -8,7 +8,7 @@ research output, or any non-software-implementation work.
 
 ## Process
 
-1. **Set up branch**: follow the Branch Setup section in `_common.md`.
+1. **Branch**: see the Branches section in `_common.md`.
 
 2. **Load context**: Read any referenced files, tickets, or docs from
    the lead's message.

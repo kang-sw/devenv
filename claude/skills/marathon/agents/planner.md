@@ -18,7 +18,7 @@ executor can follow without re-researching.
 ## Process
 
 1. **Read context**: If a ticket path was given, read it. Read
-   `ai-docs/mental-model/overview.md` and any hinted domain docs.
+   `ai-docs/_index.md` and any hinted domain docs.
 
 2. **Explore codebase**: Find target files, existing patterns, relevant
    types and interfaces. Use Grep/Glob/Read directly for focused
@@ -67,7 +67,6 @@ executor can follow without re-researching.
 
 - Do not implement code. Your deliverable is the plan file only.
 - Do not modify existing source files.
-- Commit the plan file on the marathon branch directly (not a
-  sub-branch).
+- Commit the plan file on the current branch.
 - Keep the plan focused on contracts and decisions, not implementation
   code.

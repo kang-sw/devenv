@@ -58,8 +58,8 @@ Initial User Message: $ARGUMENTS
 - **model** — Sonnet default. Opus for novel architecture or complex
   cross-module logic; mark name `.expert`. Haiku for Explore lookups
   (escalate to sonnet only after haiku proves insufficient).
-- **reuse-or-fresh** — Check `~/.claude/usage/<team>.md`. Fresh spawn
-  if usage exceeds ~80% or prior context would mislead.
+- **reuse-or-fresh** — Fresh spawn when prior context would mislead
+  the next task. Reuse by default otherwise.
 
 ## Templates
 
@@ -72,8 +72,9 @@ Agent(
   name = "<role>.<label>[.expert]",
   model = "sonnet",
   prompt = "Read ~/.claude/skills/marathon/agents/<role>.md.
-            Your lead's name is '<lead-name>'. Then:
-            <brief>"
+            Your lead's name is '<lead-name>'.
+            [Peers: <peer-name> (<role>), ...]
+            Then: <brief>"
 )
 ```
 
@@ -106,15 +107,16 @@ agents in parallel:
 
 Role descriptions live in `~/.claude/skills/marathon/agents/`.
 
-| Role | Purpose | Lifespan |
-|------|---------|----------|
-| `planner` | Deep codebase research → plan file | multi-round |
-| `implementer` | Code implementation from plan or brief | multi-round |
-| `reviewer` | Code review on diffs (read-only) | multi-round |
-| `worker` | Non-code tasks (docs, config, research) | multi-round |
-| `clerk` | Ticket read/write; loads `/write-ticket` conventions | resident |
+| Role | Purpose |
+|------|---------|
+| `planner` | Deep codebase research → plan file |
+| `implementer` | Code implementation from plan or brief |
+| `reviewer` | Code review on diffs (read-only) |
+| `worker` | Non-code tasks (docs, config, research) |
+| `clerk` | Ticket read/write; loads `/write-ticket` conventions |
 
-Multi-round members reuse by default; respawn per `judge: reuse-or-fresh`.
+Reuse by default; respawn per `judge: reuse-or-fresh`.
+Doc-update agents are one-shot (fresh `general-purpose`, not team members).
 
 ## Doctrine
 

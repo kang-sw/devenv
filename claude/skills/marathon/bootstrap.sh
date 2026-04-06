@@ -21,11 +21,6 @@ else
   git config "branch.$BRANCH.marathon-parent" "$ORIGINAL"
 fi
 
-# Initialize token usage file
-mkdir -p ~/.claude/usage
-printf '# Token Usage: %s\n```json\n{}\n```\n' "$TEAM" \
-  > ~/.claude/usage/"$TEAM".md
-
 # Collect active docs
 if [ -f ai-docs/list-active.sh ]; then
   ACTIVE_DOCS=$(bash ai-docs/list-active.sh 2>/dev/null || true)
