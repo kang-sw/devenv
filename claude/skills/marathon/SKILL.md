@@ -28,15 +28,16 @@ Initial User Message: $ARGUMENTS
    `original_branch` for Session End merge. If already on a `marathon/`
    branch, bootstrap resumes.
 2. `TeamCreate(team_name="<team>")` using the `team` field.
-3. Create protocol reminders:
+3. Create protocol reminders (rules go in `subject` — only subject
+   is visible in TaskList; `description` requires explicit TaskGet):
    ```
    TaskCreate(
-     subject="[PROTOCOL] Marathon rules",
-     description="Delegate code R/W; never self-execute; emit delegation plan block per turn; doc update post-merge; coherence at wrap-up"
+     subject="[PROTOCOL] Delegate code R/W; never self-execute; emit delegation plan per turn; doc update post-merge; coherence at wrap-up",
+     description=""
    )
    TaskCreate(
-     subject="[PROTOCOL] Per-round checklist",
-     description="Check teammate usage before dispatch; reuse or fresh spawn; dispatch fresh reviewer; dispatch clerk for any ticket touch; merge gate"
+     subject="[PROTOCOL] Per-round: check teammate usage → reuse-or-fresh; fresh reviewer per round; clerk for any ticket touch; user gate before merge",
+     description=""
    )
    ```
 ## On: user message
@@ -151,8 +152,9 @@ the criteria live here.
   (prior context would mislead), or on user-initiated refresh.
 - **model** — Default sonnet. Opus for novel architecture or complex
   cross-module logic; mark the name `.expert`. Haiku for mechanical
-  worker tasks and simple Explore lookups. Upgrade = spawn a fresh
-  `.expert` peer, not reuse.
+  worker tasks and **all Explore lookups** (escalate to sonnet only
+  after haiku proves insufficient). Upgrade = spawn a fresh `.expert`
+  peer, not reuse.
 - **member-recovery** — Teammate stuck or unresponsive → SendMessage
   nudge. Still unresponsive → spawn fresh replacement with the same
   brief. Never self-execute.
@@ -217,9 +219,11 @@ Agent(
   prompt = "<question>"
 )
 ```
-Default haiku. Use `model="sonnet"` for relational queries or
-cross-module tracing. Insufficient even with sonnet → escalate to
-planner.
+**Always haiku unless proven insufficient.** Sonnet only when the
+query requires cross-module tracing or relational reasoning across
+3+ files — not as a comfort upgrade. If haiku returned a partial
+answer, retry with sonnet citing what was missing. Insufficient
+even with sonnet → escalate to planner.
 
 **Parallel spawn addendum.** When spawning any agents in parallel
 (implementers, updaters, or mixed), append to each prompt:
