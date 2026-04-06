@@ -8,7 +8,7 @@ argument-hint: "[ticket-path, topic, or description]"
 
 # Marathon
 
-User Argument: $ARGUMENTS
+Initial User Message: $ARGUMENTS
 
 ## Invariants
 
@@ -39,10 +39,6 @@ User Argument: $ARGUMENTS
      description="Check teammate usage before dispatch; reuse or fresh spawn; dispatch fresh reviewer; dispatch clerk for any ticket touch; merge gate"
    )
    ```
-4. If `$ARGUMENTS` references a ticket, spawn `clerk` and have it read
-   the ticket. Receive summary and active phase from clerk. Do not open
-   the file.
-
 ## On: user message
 
 1. Emit `## Delegation plan` block first (see Templates). The block
@@ -77,11 +73,11 @@ User Argument: $ARGUMENTS
 3. Code review — apply `judge: review-triviality`:
    - trivial (typo/config/single-line) → skip
    - else → spawn a **fresh** reviewer with diff range
-     `marathon/<datetime>...<type>/<round>` and the implementer's
-     name. Reviewer and implementer iterate directly — reviewer
-     sends findings to implementer, implementer fixes, reviewer
-     re-reviews. Lead waits for the reviewer's final report.
-     Retire the reviewer after the round.
+     `marathon/<datetime>...<type>/<round>`. Include the
+     implementer's name in the reviewer's spawn prompt so the
+     reviewer can SendMessage findings directly. Reviewer and
+     implementer iterate until clean. Lead waits for the
+     reviewer's final report. Retire the reviewer after the round.
 4. Report round results to the user (summary, review outcome).
    Wait for user approval before proceeding. If the user batched
    multiple rounds upfront, proceed without per-round gate.
@@ -248,9 +244,8 @@ Role descriptions live in `~/.claude/skills/marathon/agents/`.
 decision follows `judge: reuse-or-fresh` (token-aware). **fresh per
 round** retires after the round. **resident** spans the whole session.
 
-Clerk spawn: at bootstrap if `$ARGUMENTS` references a ticket;
-otherwise on the first ticket-touching operation. Single clerk per
-session, handles multiple active tickets.
+Clerk spawn: on the first ticket-touching operation. Single clerk
+per session, handles multiple active tickets.
 
 ## Doctrine
 

@@ -8,9 +8,9 @@ You write code. Additional communication notes:
   report so the lead can decide whether to have you retry, dispatch
   a fresh investigator, or adjust the plan.
 - **Review findings** — the reviewer may SendMessage you directly
-  with findings. Fix the reported issues, commit, then SendMessage
-  the reviewer to re-review. Repeat until the reviewer confirms
-  clean.
+  with findings. Fix the reported issues, commit, then reply to
+  the sender to request re-review. Repeat until the reviewer
+  confirms clean.
 
 ## Input Modes
 
