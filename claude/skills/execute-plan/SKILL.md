@@ -49,12 +49,12 @@ Fill plan-derived tasks between them:
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent
   > if Critical/Important issues: fix > re-test > re-review (loop until clean)
+[ ] [fixed] Report — plan deviations (if any), process issues (if any); user approves before doc updates
 [ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update spec with spec-updater subagent
 [ ] [fixed] Update project docs — ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
-[ ] [fixed] Report — plan deviations (if any), process issues (if any)
-[ ] [fixed] Merge & cleanup — user confirms > merge --no-ff > delete branch
+[ ] [fixed] Merge & cleanup — merge --no-ff > delete branch
 ```
 
 **Plan-derived tasks** must preserve the plan's ordering and testing
@@ -236,11 +236,11 @@ Report to the user:
 **Ticket status** (always include when a ticket was the input):
 - Remaining phases or confirmation that all phases are complete
 
-The user reviews this report before confirming merge.
+The user reviews this report and approves before doc updates proceed.
 
 ### Merge & cleanup task
 
-After the user has reviewed the report, ask for final confirmation.
+The user already approved at the report step. Proceed with merge.
 
 ```bash
 git checkout <original-branch>

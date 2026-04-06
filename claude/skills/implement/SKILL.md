@@ -39,12 +39,12 @@ tasks between them.
 [ ] [fixed] Run tests & verify — full test suite, read actual output
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
   ↳ if Critical/Important issues: fix → re-run full verify → re-review (loop until clean)
+[ ] [fixed] Report process issues to user — user approves before doc updates
 [ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update spec with spec-updater subagent
 [ ] [fixed] Update project docs — ai-docs/_index.md, ticket result
 [ ] [fixed] Final commit — docs & remaining changes
-[ ] [fixed] Report process issues to user
-[ ] [fixed] Merge & cleanup — user reviews report → confirm → merge --no-ff → delete branch
+[ ] [fixed] Merge & cleanup — merge --no-ff → delete branch
 ```
 
 State assumptions and success criteria before the first implementation task.
@@ -201,13 +201,11 @@ Report to the user any **process issues** encountered during implementation:
   (`done/` or staying in `wip/`).
 
 Skip process issues if nothing notable, but always include the ticket status
-line when a ticket was the input. The user reviews this report before
-confirming merge — do not silently swallow friction that could be fixed for
-next time.
+line when a ticket was the input. The user reviews this report and approves before doc updates proceed. Do not silently swallow friction that could be fixed for next time.
 
 ### Merge & cleanup task
 
-After the user has reviewed the report, ask for final confirmation.
+The user already approved at the report step. Proceed with merge.
 
 ```bash
 git checkout <original-branch>
