@@ -6,6 +6,8 @@
 # Colors match statusline.sh conventions
 
 dir="${1:-.}"
+# Skip git operations on WSL2 Windows mounts (/mnt/c/, /mnt/d/, etc.) — NTFS git is too slow
+[[ "$dir" =~ ^/mnt/[a-z]/ ]] && { echo "—"; exit 0; }
 cd "$dir" 2>/dev/null || { echo "—"; exit 0; }
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "—"; exit 0; }
 
