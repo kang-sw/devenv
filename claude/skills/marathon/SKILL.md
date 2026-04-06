@@ -14,7 +14,7 @@ Initial User Message: $ARGUMENTS
 
 - Never read source code, diffs, or plans.
 - Never open ticket files directly — all ticket access via clerk.
-- Every response to a user message begins with a `## Delegation plan` block (exceptions per event handlers).
+- Every response (user message or teammate report) begins with a `## Delegation plan` block (exceptions per event handlers).
 - Lead reads `_index.md`, `mental-model/`, `spec/`, and reference docs directly.
 - Lead writes only `ai-docs/_index.md` directly.
 - Never take over a teammate's work. Recover via message or fresh spawn.
@@ -32,11 +32,11 @@ Initial User Message: $ARGUMENTS
    is visible in TaskList; `description` requires explicit TaskGet):
    ```
    TaskCreate(
-     subject="[PROTOCOL] Delegate code R/W; never self-execute; emit delegation plan per turn; doc update post-merge; coherence at wrap-up",
+     subject="[PROTOCOL] Never read source/diffs/plans; delegate all code R/W; delegation plan every response; doc update post-merge; coherence at wrap-up",
      description=""
    )
    TaskCreate(
-     subject="[PROTOCOL] Per-round: check teammate usage → reuse-or-fresh; fresh reviewer per round; clerk for any ticket touch; user gate before merge",
+     subject="[PROTOCOL] Per-round: check teammate usage → reuse-or-fresh; reviewer for non-trivial (fresh when planner involved); clerk for any ticket touch; user gate before merge",
      description=""
    )
    ```
@@ -68,17 +68,19 @@ Initial User Message: $ARGUMENTS
 
 ## On: implementer reports complete
 
-1. Read the implementer's report (summary, files changed, test results).
-2. For sub-branch work, check scope:
-   `git diff --stat marathon/<datetime>...<type>/<round>`
+1. Emit `## Delegation plan` block (same as user messages — route
+   before touching content).
+2. Read the implementer's report (summary, files changed, test
+   results). Do **not** run `git diff` or `git diff --stat` — the
+   report is the lead's only view of the round.
 3. Code review — apply `judge: review-triviality`:
-   - trivial (typo/config/single-line) → skip
-   - else → spawn a **fresh** reviewer with diff range
+   - mechanical-only (typo, version bump, single-token change) → skip
+   - else → dispatch reviewer with diff range
      `marathon/<datetime>...<type>/<round>`. Include the
      implementer's name in the reviewer's spawn prompt so the
      reviewer can SendMessage findings directly. Reviewer and
      implementer iterate until clean. Lead waits for the
-     reviewer's final report. Retire the reviewer after the round.
+     reviewer's final report.
 4. Report round results to the user (summary, review outcome).
    Wait for user approval before proceeding. If the user batched
    multiple rounds upfront, proceed without per-round gate.
@@ -144,8 +146,12 @@ the criteria live here.
 - **read-mode (soft-lock docs)** — Mental-model, spec, _index.md,
   reference docs → lead reads directly. Tickets are hard-lock
   (always clerk). Plans, source, diffs are never.
-- **review-triviality** — Typo, config-only, single-line → skip.
-  Otherwise fresh reviewer.
+- **review-triviality** — Mechanical-only (typo, version bump,
+  single-token change) → skip. Everything else → reviewer.
+- **reviewer-freshness** — Reuse the existing reviewer by default
+  (multi-round, subject to `reuse-or-fresh`). **Fresh spawn
+  required** when a planner was involved in the round (complex
+  changes need independent review).
 - **reuse-or-fresh** — Before dispatching to an existing member, read
   `~/.claude/usage/<team-name>.md` (entries: `"@name": "42%/150K"`).
   Prefer fresh spawn if the `%` exceeds ~80, or on domain contamination
@@ -161,11 +167,11 @@ the criteria live here.
 
 ## Templates
 
-**Delegation plan block.** Emitted first in every response to a user
-message, before any tool calls.
+**Delegation plan block.** Emitted first in every response (user
+message or teammate report), before any tool calls.
 ```
 ## Delegation plan
-Intent: <what the user actually wants, in your own words>
+Intent: <what the message requires, in your own words>
 Decomposition:
   - <step 1> → <role or "lead-direct (discussion)" or "lead-direct (_index.md)">
   - <step 2> → <role>
@@ -240,13 +246,14 @@ Role descriptions live in `~/.claude/skills/marathon/agents/`.
 |------|---------|----------|
 | `planner` | Deep codebase research → plan file | multi-round |
 | `implementer` | Code implementation from plan or brief | multi-round |
-| `reviewer` | Code review on diffs (read-only) | fresh per round |
+| `reviewer` | Code review on diffs (read-only) | multi-round |
 | `worker` | Non-code tasks (documents, config, research output) | multi-round |
 | `clerk` | Ticket owner (R/W); loads `/write-ticket` conventions | **resident** |
 
 **multi-round** members are reused by default across rounds; respawn
-decision follows `judge: reuse-or-fresh` (token-aware). **fresh per
-round** retires after the round. **resident** spans the whole session.
+decision follows `judge: reuse-or-fresh` (token-aware). Reviewer
+additionally requires fresh spawn when a planner was involved
+(`judge: reviewer-freshness`). **resident** spans the whole session.
 
 Clerk spawn: on the first ticket-touching operation. Single clerk
 per session, handles multiple active tickets.
