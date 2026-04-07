@@ -21,6 +21,7 @@ Target: $ARGUMENTS
 - One phase touches **one cohesive component** unless the change is inherently cross-component.
 - Each phase has its own success criteria or test surface.
 - All ticket content must be in English regardless of conversation language.
+- Tickets are write-once intent documents. Execution trace and phase forwards live in merge commits (`git log --grep=<ticket-stem>`), not in the ticket.
 
 ## On: invoke
 
