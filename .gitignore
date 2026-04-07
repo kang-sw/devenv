@@ -8,3 +8,4 @@ foo.*
 *.log
 data
 *.docx
+*Zone.Identifier
