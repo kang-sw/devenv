@@ -11,90 +11,50 @@ argument-hint: [ticket-path or description]
 
 Target: $ARGUMENTS
 
-## Goal
+## Invariants
 
-Produce a **self-contained plan** that survives context reset. The plan must
-carry enough context for a fresh executor to implement without re-researching.
+- Plan must be self-contained: a fresh executor implements without re-researching.
+- Plan owns the gap between ticket (what) and executor (how): distill decisions, map affected code, supplement missing contracts.
+- When plan definitions diverge from ticket sketches, plan takes precedence — note the change and rationale in Context.
+- Exclude: implementation code for pattern-following edits, construction-site inventories, line numbers, import statements.
+- One plan per ticket phase; if a phase exceeds ~10 actions, split via `/write-ticket` before continuing.
+- Scan draft for data contracts crossing capsule boundaries (wire formats, persistence schemas, public API types, config, env vars, CLI flags); if any are not in the ticket, present and wait for confirmation.
+- The plan file MUST be committed before finalizing.
 
-### Role: fill the gap between ticket and codebase
+## On: invoked
 
-The ticket owns *what* was decided (contracts, design choices, rejected
-alternatives). The executor owns *how* to implement (code, construction-site
-fixes, test code). The plan fills the gap:
+1. **Understand** — Read the ticket/description. If prior phases have `### Result` entries or linked plans, read them (earlier discoveries override original assumptions). Load **all** files in `ai-docs/mental-model/` via Read/Glob directly — never delegate initial loading.
+2. **Research** — Adapt depth per `judge: research-depth`. Use subagents for broad codebase searches; keep main context for synthesis. Before designing new components, search for reusable existing utilities or patterns.
+3. **Draft** — Generate path `ai-docs/plans/YYYY-MM/DD-hhmm.<kebab-name>.md`. Write using `plan-file` template. Include only sections that carry information. Apply `judge: plan-depth` to calibrate detail level. After drafting, run the data-contract gate (Invariant 6) and self-containedness check ("Could an agent with no prior context execute this?").
+4. **Verify** — Dispatch a sonnet subagent with the `verification-prompt` template. Fix Critical issues. Assess Important — revise if valid. Skip Minor unless useful.
+5. **Finalize** — Choose executor per plan depth (tactical → `/execute-plan`, strategic → `/implement`). Call `EnterPlanMode` and write the `plan-mode-output` template. If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
 
-1. **Distill** — extract this phase's contracts and decisions from the ticket
-   (which may be messy or multi-phase). Do not duplicate; summarize and
-   reference.
-2. **Map** — identify which files, types, and patterns in the codebase are
-   affected. Add integration notes the executor would miss without reading
-   the code (conventions, gotchas, pattern references).
-3. **Supplement** — when the ticket lacks contracts or leaves decisions open,
-   research the codebase and propose them (subject to the data contract gate).
+## Judgments
 
-When the plan's formal definitions differ from the ticket's sketches, the
-plan takes precedence — it reflects codebase research the ticket did not
-have. Note the change and rationale in Context.
+### judge: research-depth
 
-**Do not include:** implementation code for pattern-following edits,
-construction-site inventories the compiler will surface, line numbers,
-import statements, or delegation strategy that would be "main" for every
-step.
+| Level | When | Scope |
+|-------|------|-------|
+| Minimal | Config tweak, typo, single-file mechanical change | Mental-model docs only |
+| Moderate | Feature addition following existing patterns, 2–3 files | + target files and adjacent code for patterns |
+| Thorough | New component, cross-module, unfamiliar area | + search for similar implementations, extract concrete convention examples |
 
-### Plan depth
+Default: when uncertain, go one level deeper — over-researching costs less than a wrong plan.
 
-| Plan depth | Executor | When |
-|-----------|----------|------|
-| **Strategic** — direction + relevant files, tactical decisions left to executor | `/implement` | Small-medium changes, familiar patterns |
-| **Tactical** — contracts + integration notes + testing strategy + success criteria | `/execute-plan` | Large changes, cross-module work, new patterns |
+### judge: plan-depth
 
-Default to tactical for thorough-level research. Use strategic only when the
-change is simple enough that over-specifying would add noise.
+| Depth | Executor | When |
+|-------|----------|------|
+| Strategic — direction + relevant files, tactical decisions left to executor | `/implement` | Small-medium changes, familiar patterns |
+| Tactical — contracts + integration notes + testing strategy + success criteria | `/execute-plan` | Large changes, cross-module work, new patterns |
 
-A single plan covers one ticket phase. If during research a phase proves
-too large (e.g., ~10+ implementation actions), split it using `/write-ticket`
-conventions before continuing. Create the first plan only; note remaining
-scope in Context.
+Default to tactical for thorough-level research. Use strategic only when over-specifying would add noise.
 
-## Step 0: Understand
+## Templates
 
-1. Read the ticket/description.
-2. If the ticket has prior phases with `### Result` entries or linked plans,
-   read them — earlier discoveries override the ticket's original assumptions.
-3. Load **all** files in `ai-docs/mental-model/` — use Read/Glob directly,
-   never delegate initial loading to subagents. Full architectural context
-   is needed to identify cross-domain implications and write a sound plan.
+### plan-file
 
-## Step 1: Research
-
-Adapt depth to the change. Pick the appropriate level:
-
-| Level | When | What to do |
-|-------|------|------------|
-| **Minimal** | Config tweak, typo, single-file mechanical change | Mental-model docs only |
-| **Moderate** | Feature addition following existing patterns, 2-3 files | + Read target files and adjacent code for patterns |
-| **Thorough** | New component, cross-module, unfamiliar area | + Search for similar implementations, extract concrete convention examples |
-
-When uncertain, go one level deeper — over-researching costs less than a wrong
-plan. Before designing new components, search for existing utilities or patterns
-that can be reused or extended — reference them in the plan's Steps.
-
-Use subagents for broad codebase searches, including reuse candidates. Keep the
-main context for synthesis.
-
-## Step 2: Draft Plan
-
-Generate a timestamp-based path:
-`ai-docs/plans/YYYY-MM/DD-hhmm.<plan-name>.md`
-
-Use a descriptive kebab-case name for the plan (e.g.,
-`ai-docs/plans/2026-03/28-1430.event-serialization.md`).
-The plan name is independent of the ticket stem. The `YYYY-MM/DD-hhmm`
-prefix serves as the plan's unique hash.
-
-Write the plan to that file using the `Write` tool. Include only
-sections that carry information — omit empty or trivial sections.
-Length varies with complexity; the content-type rules below govern
-what belongs, not a line count.
+Path: `ai-docs/plans/YYYY-MM/DD-hhmm.<kebab-name>.md`
 
 ```markdown
 # <Plan Title>
@@ -109,47 +69,26 @@ Steps specify **contracts and decisions**, not code.
 
 When a step introduces or changes a public interface, lead with its
 contract: struct/enum definitions with all public fields and types,
-trait definitions, public function signatures. These are the plan's
-primary deliverable — the executor must not have to invent them.
+trait definitions, public function signatures.
 
-Carry forward ticket-mandated approaches (algorithms, patterns,
-constraints agreed during discussion) explicitly.
+Carry forward ticket-mandated approaches explicitly.
 
 Also include:
 - Non-obvious constraints or ordering dependencies
-- Pattern references ("same as ExternalSink::on_event") instead of
-  duplicated code
+- Pattern references ("same as ExternalSink::on_event") instead of duplicated code
 
-Leave to the executor: construction-site fixes (compiler-guided),
-pattern-following code, line numbers, import changes.
-
-Implementation sketches may be approximate or pseudo-code — precision
-is the executor's responsibility, not the plan's.
+Leave to executor: construction-site fixes, pattern-following code,
+line numbers, import changes. Implementation sketches may be approximate.
 
 ## Testing
-Key scenarios to verify after implementation. Classify modules as
-TDD / post-impl / manual only when non-obvious; default is post-impl.
+Key scenarios to verify. Classify modules as TDD / post-impl / manual
+only when non-obvious; default is post-impl.
 
 ## Success Criteria
 Observable conditions that mean "done".
 ```
 
-**Data contract gate.** Scan the draft for data contract changes — formats
-that cross a capsule boundary (wire formats, persistence schemas, public API
-types consumed outside the owning package, config file formats, environment
-variables, or CLI flags). If any contract is defined or modified but **not**
-specified in the ticket, present the proposed shape and rationale to the user
-and wait for confirmation. Do not proceed to verification with unconfirmed
-contracts.
-
-**Self-containedness check.** Before moving on, ask: "Could an agent with no
-prior context execute this plan correctly?" If not, add what's missing.
-
-## Step 3: Verify
-
-Dispatch a **sonnet subagent** to verify the plan from a fresh context.
-The value is not thoroughness but **fresh eyes** — the planner has
-accumulated assumptions that a new context window does not share.
+### verification-prompt
 
 > **Task:** Verify the implementation plan at `<plan-path>`.
 >
@@ -158,26 +97,13 @@ accumulated assumptions that a new context window does not share.
 > - Do referenced files, functions, and types actually exist?
 > - Do described conventions match actual code patterns?
 > - Does the plan conflict with documented contracts or invariants?
-> - Are new/changed public contracts (structs, traits, function
->   signatures) specified with all public members and types?
+> - Are new/changed public contracts specified with all public members and types?
 > - Could an executor with no prior context implement this correctly?
 > - Does the plan reimplement something that already exists?
 >
 > Categorize as Critical / Important / Minor.
 
-Fix Critical issues in the plan. Assess Important — revise if valid.
-Skip Minor unless useful.
-
-## Step 4: Finalize
-
-Choose the executor based on plan depth:
-
-- **Tactical** (contracts with integration notes, testing classifications,
-  success criteria) → `/execute-plan`
-- **Strategic** (direction + relevant files, decisions left to executor)
-  → `/implement`
-
-Call `EnterPlanMode` and write this structure:
+### plan-mode-output
 
 ```
 # Steps
@@ -196,18 +122,11 @@ Call `EnterPlanMode` and write this structure:
 - <migration or compatibility implications>
 ```
 
-**Data Contract Changes** — include this section when the plan adds, changes,
-or removes data contracts (see Step 2 gate for the full list). Omit the
-entire section for pure-logic or internal-only changes.
+Omit **Data Contract Changes** for pure-logic or internal-only changes. Do not copy the full plan — the `@<plan-path>` reference is the source of truth.
 
-The plan file content is injected as the first prompt when the user clicks
-"Reset Context and auto-accept" after `ExitPlanMode`. The `# Steps` block
-ensures the executor loads before the plan is read.
+## Doctrine
 
-Do **not** copy the full plan here — the `@<plan-path>` reference is the
-source of truth.
-
-**The plan MUST be committed!**
-
-If the plan implements a ticket phase, update the ticket's `plans:` frontmatter
-to reference this plan (replacing `null` with the plan path stem).
+The plan bridges ticket decisions and executor action; every authoring
+choice optimizes for **executor self-sufficiency after context reset**.
+When a rule is ambiguous, apply whichever interpretation better preserves
+the executor's ability to implement without re-researching.
