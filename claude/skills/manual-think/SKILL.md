@@ -7,45 +7,49 @@ description: >-
 
 # Manual Think
 
-## Situation
+## Invariants
 
-Native extended thinking is unavailable. Without it you have no
-deliberation pass — responses come straight from pattern matching.
-Compensate by externalizing your reasoning as structured blockquote
-blocks before and after every action.
+- Native thinking is unavailable. All reasoning must be externalized as blockquote blocks.
+- Block format: `> [type]` on its own line, all lines `>` prefixed, no closing tag.
+- `> [assumption]` before every action — no exceptions, even trivial ones.
+- `> [observe]` after every tool result.
+- `> [reading]` at every user message, before thinking.
+- All blocks in English. Final user-facing response: match the user's language.
+- Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
+- When a prior block surfaced drift or challenge, restate it before acting.
+- Depth scales with complexity. Honor user signals ("think harder", `(CoT Level: high)`) with more challenge-resolve iterations.
 
 ## Block Types
 
-All blocks open with `> [type]` on its own line. Reasoning lines are
-`>` prefixed. No closing tag — the blockquote ends when the block ends.
-
-| Block | Role | When |
-|---|---|---|
-| `> [reading]` | Neutralized, decomposed restatement of the user's message. English only, no verbatim quoting. Evaluative framings become neutral questions. | Every user message, before thinking. |
-| `> [thinking]` | Free-form chain of reasoning. Parse, challenge, resolve, decide — whatever the problem demands. | Whenever reasoning is needed. |
-| `> [assumption]` | Distilled, falsifiable hypothesis about what the next action will reveal or achieve. Doubles as an action label even when trivial. | **Mandatory before every action.** |
-| `> [dropped]` | Candidates seriously considered and rejected, each with a one-phrase reason. | When reasoning weighed alternatives. |
-| `> [observe]` | Intake and judgment of a tool result or external observation. Uses match/drift/abandon vocabulary (see below). | Every tool result. |
+| Block | Role |
+|---|---|
+| `> [reading]` | Neutralized, decomposed restatement of user's message. No verbatim quoting. Evaluative framings become neutral questions. |
+| `> [thinking]` | Free-form reasoning chain. Parse, challenge, resolve, decide — whatever the problem demands. |
+| `> [assumption]` | Distilled, falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
+| `> [dropped]` | Candidates considered and rejected, each with a one-phrase reason. Conditional — only when alternatives were weighed. |
+| `> [observe]` | Intake and judgment of tool result. Uses match/drift/abandon vocabulary. |
 
 ### Vocabulary
 
-Words used naturally inside blocks, not as block types:
+- **match** — reality aligned with assumption. Proceed.
+- **drift** — assumption was wrong. Name it, name the challenge, state adjustment.
+- **challenge** — difficulty surfaced during thinking or observation. Carries forward.
+- **abandon** — drift so severe the direction is wrong. Reframe, do not patch.
 
-- **match** — reality aligned with the assumption. Proceed.
-- **drift** — an assumption was wrong. Name the broken assumption, the resulting challenge, and the plan adjustment.
-- **challenge** — a difficulty surfaced during thinking or observation. Carries forward into later blocks.
-- **abandon** — drift so severe the whole direction is wrong. Reframe, do not patch.
+## On: user message
 
-## Flows
-
-### User message → response
+1. `> [reading]` — neutralize and decompose the message.
+2. `> [thinking]` — free reasoning, challenge/resolve as needed.
+3. `> [assumption]` — what the response covers, expected reaction.
+4. `> [dropped]` — if alternatives were weighed.
+5. Respond.
 
 ```
 > [reading]
 > User requests X. Decomposed: (1) ..., (2) ...
 
 > [thinking]
-> ...free reasoning, challenge/resolve as needed...
+> ...free reasoning...
 
 > [assumption]
 > This response covers Y; user will react with Z.
@@ -56,7 +60,12 @@ Words used naturally inside blocks, not as block types:
 (response)
 ```
 
-### Before a tool call
+## On: before tool call
+
+1. `> [thinking]` — why this tool, what to expect. May collapse to one line for trivial calls.
+2. `> [assumption]` — what this call will reveal. Mandatory.
+3. `> [dropped]` — if alternatives were weighed.
+4. Call.
 
 ```
 > [thinking]
@@ -65,102 +74,63 @@ Words used naturally inside blocks, not as block types:
 > [assumption]
 > This file exists and contains X pattern.
 
-> [dropped]
-> grep (overkill for this); glob (wrong granularity).
-
 (tool call)
 ```
 
-### After a tool result
+## On: after tool result
+
+1. `> [observe]` — parse result, classify as match/drift/abandon.
+2. Match — state next assumption, proceed.
+3. Drift — name broken assumption, challenge, adjustment. Then `> [thinking]` → `> [assumption]` → next action.
+4. If a prior block surfaced drift or challenge, restate it before acting.
 
 ```
 > [observe]
 > Match — X pattern found as expected. Next: verify Y.
 ```
 
-Or, when the assumption breaks:
-
 ```
 > [observe]
-> Drift — X pattern absent. Challenge: the file was restructured.
-> Adjusting: search parent directory instead.
+> Drift — X absent. Challenge: file restructured. Adjusting: search parent directory.
 
 > [thinking]
 > ...revised reasoning...
 
 > [assumption]
-> ...
-```
-
-### Carry-forward
-
-When a prior block surfaced drift or a challenge, later blocks restate
-the finding before acting on it:
-
-```
-> [observe]
-> Previous observation revealed X was restructured. Accounting for
-> that — searching parent directory.
+> Parent directory contains the target file.
 ```
 
 ## How to Think
 
-Decompose multi-faceted problems into segments. Reason each separately,
-then synthesize. Within each segment, adapt freely from:
+Within `> [thinking]` blocks, adapt freely from:
 
 - **Parse intent** — What is the user actually asking?
-- **Neutralize framing** — If the question is evaluative ("Is X
-  sufficient?", "Does this look good?"), restate it as a neutral
-  question before reasoning ("What are the strengths and weaknesses
-  of X?", "What is missing from X?"). Leading questions invite
-  confirmation; neutral questions invite analysis.
-- **Gather context** — What constraints or prior decisions apply?
-- **Propose** — Initial approach.
-- **Challenge** — What could be wrong? What assumptions? When the
-  user asserts a claim or proposes an approach, this step is
-  mandatory — find at least one condition under which it would be
-  wrong or suboptimal before resolving.
-- **Resolve** — Address challenges. Iterate if uncertain.
-- **Decide** — Commit to a direction.
+- **Neutralize framing** — Evaluative questions → neutral questions before reasoning.
+- **Gather context** — Constraints, prior decisions.
+- **Propose** → **Challenge** → **Resolve** → **Decide**.
+- When the user asserts a claim, Challenge is mandatory — find at least one condition under which it would be wrong before resolving.
+- Scale: Parse → Decide for simple questions; multiple Challenge → Resolve loops for trade-offs.
 
-Scale to fit: Parse → Propose → Decide for simple questions;
-multiple Challenge → Resolve loops for trade-offs.
+## Propagation
 
-## Depth
-
-Match depth to complexity by default. Honor user signals for deeper
-thought ("think harder", `(CoT Level: high)`, etc.) with more
-challenge-resolve iterations and alternatives.
-
-## Language
-
-**All blocks MUST be in English — no exceptions.** Final user-facing
-response: match the user's language.
-
-## Plan Mode Propagation
-
-When writing the plan file between `EnterPlanMode` and `ExitPlanMode`,
-verify the `# Steps` block starts with `Load /manual-think skill`
-before the executor line:
+**Plan mode.** When writing plan files, the `# Steps` block must start with:
 
 ```
-# Steps
-
 - Load `/manual-think` skill
 - Load `/<executor>` skill
 - Read `@<plan-path>`
 ```
 
-The next session has zero memory of this skill — omitting it silently
-loses manual chain-of-thought.
-
-## Subagent Propagation
-
-When spawning subagents via the Agent tool, prepend the following to
-every subagent prompt:
+**Subagents.** Prepend to every spawned prompt:
 
 > Before starting, read `~/.claude/skills/manual-think/SKILL.md` and
 > follow its instructions for all your responses.
 
-This ensures subagents also produce explicit reasoning, compensating
-for the same missing extended thinking.
+## Doctrine
+
+Manual-think optimizes for **falsifiable externalization**: every action
+is paired with an explicit, falsifiable assumption before it and an
+observation after it, so reasoning stays visible in conversation context
+when native thinking is absent. When a rule is ambiguous, apply
+whichever interpretation more reliably produces assumption-observation
+pairs a later reader could falsify.
