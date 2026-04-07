@@ -1,73 +1,62 @@
 # Implementation Playbook
 
-Shared implementation discipline for anyone writing code — top-level
-skills and subagents alike. No dispatch mechanics; consumers handle
-invocation in their own context.
+## Invariants
 
-## Test Strategy
+- Claim "pass" only after reading full test/build output — never "should pass" or "looks correct."
+- Diagnose blame (test vs implementation) before fixing any failure.
+- Structural deviations → escalate before proceeding. Cosmetic → adapt silently, note in report.
+- Review subprocess results before committing. Roll back on criteria failure.
+- Plan annotations (TDD/post-impl/manual) override default test strategy when present.
 
-Route by the nature of the code under change:
+## §Test Strategy
 
 | Code type | Approach |
 |---|---|
-| **Testable pure logic** (calculations, parsing, state transitions) | Define expected behavior first → write tests → implement until tests pass |
-| **Integration / FFI / IO-bound** | Implement first → add tests for observable behavior |
+| **Pure logic** (calculations, parsing, state transitions) | Tests first → implement until pass |
+| **Integration / FFI / IO-bound** | Implement first → test observable behavior |
 
-When the plan specifies TDD/post-impl/manual annotations, those
-override these defaults.
+TDD: write complex/edge-case tests first (exemplars); populate 3+ remaining simple cases from the exemplar pattern.
 
-For TDD work: write complex/edge-case tests first (exemplars). If 3+
-simple cases remain, populate from the exemplar pattern rather than
-writing each from scratch.
+## §Test Failure Diagnosis
 
-## Test Failure Diagnosis
+Determine blame before fixing:
 
-When tests fail, diagnose **blame** before fixing:
+- **Test wrong** — stale assumption, incorrect setup → fix the test.
+- **Implementation wrong** — logic error, missing edge case → fix the code.
 
-- Is the test's expectation wrong (stale assumption, incorrect setup)?
-- Is the implementation wrong (logic error, missing edge case)?
+Never patch tests to match broken implementation or vice versa.
 
-Fix the side that is actually wrong. Do not patch tests to match broken
-implementation, and do not patch implementation to match broken tests.
+## §Verify
 
-## Verify
+Run the project's test suite(s) and build step (`ai-docs/_index.md` for commands). Skip if no test suite exists. Read the full output.
 
-Run the project's test suite(s) and build step (see `ai-docs/_index.md`
-for commands). Skip if the project has no test suite. Read the **full**
-output. Claim "pass" only after confirming actual results — never
-"should pass" or "looks correct."
+## §Deviation Protocol
 
-## Deviation Protocol
+| Gap type | Action |
+|---|---|
+| **Cosmetic** (renamed param, minor signature change) | Adapt silently, note in report |
+| **Structural** (missing file/type/function, different interface) | Escalate before proceeding |
 
-When assumptions (from plan, brief, or ticket) don't match the current
-codebase:
+Escalation target: user (top-level) or team lead (subagent).
 
-- **Cosmetic** (renamed param, minor signature change) — adapt silently,
-  note in report.
-- **Structural** (referenced file/type/function missing or fundamentally
-  different interface) — escalate before proceeding.
+## §Mechanical-Edit Criteria
 
-Who to escalate to depends on context: the user (top-level) or the
-team lead (subagent).
+Trigger: repetitive edit spans 3+ locations.
 
-## Mechanical-Edit Criteria
-
-When a repetitive edit spans 3+ locations, delegate rather than
-applying manually. The delegation prompt must include:
-
-1. **Before/after example** from the first instance
-2. **Target file list**
-3. **Success criteria** (e.g., `cargo check` passes)
-4. **Bail-out condition** — skip and report if structure differs from
-   the example
-
-Routing:
+Delegation prompt must include: (1) before/after example, (2) target file list, (3) success criteria, (4) bail-out condition.
 
 | Method | When |
 |---|---|
 | **sed / replace_all** | Pure text substitution expressible as regex |
 | **Cheap subprocess** | Fixed pattern, no ambiguity, no judgment needed |
-| **Capable subprocess** | Needs structural understanding or has any ambiguity |
+| **Capable subprocess** | Structural understanding or any ambiguity |
 
-On criteria failure, roll back modified files (`git checkout -- <files>`)
-and report. Review any subprocess result before committing.
+On failure: `git checkout -- <files>`, report.
+
+## Doctrine
+
+The playbook optimizes for **defect prevention before commit** — every
+procedure exists so that incorrect code, misdiagnosed failures, and
+silent deviations do not reach the branch. When a rule is ambiguous,
+apply whichever interpretation catches more errors before they
+propagate.

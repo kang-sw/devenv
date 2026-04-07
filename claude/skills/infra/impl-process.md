@@ -1,13 +1,14 @@
 # Implementation Process
 
-Lifecycle management for whoever owns the implementation branch.
-Subagents doing focused implementation work should NOT read this file —
-they follow `impl-playbook.md` only.
+## Invariants
 
-## Task List
+- Bookend tasks marked `[fixed]` are mandatory — never skip or reorder.
+- Code review loops until no Critical/Important issues remain.
+- User approves the report before doc-update tasks proceed.
+- Dismiss false-positive review issues with rationale — do not apply unnecessary fixes.
+- Doc pipeline runs only after the code review loop fully resolves.
 
-Use `TaskCreate` to track work. Fixed bookend tasks are mandatory and
-never skipped or reordered:
+## §Task List
 
 ```
 [ ] [fixed] Collect context — read target files, verify contracts
@@ -23,51 +24,35 @@ never skipped or reordered:
 [ ] [fixed] Merge & cleanup — merge --no-ff → delete branch
 ```
 
-## Code Review
+## §Code Review
 
-Skip for small, single-file changes. Trigger when: 3+ files changed,
-new public APIs, or architectural changes.
+Skip for small, single-file changes. Trigger: 3+ files, new public APIs, or architectural changes.
 
-Dispatch a subagent with the prompt below. Fix Critical and Important
-issues, re-run verify, re-dispatch review. Loop until clean. Dismiss
-false positives with a brief rationale — do not apply unnecessary fixes.
+Dispatch → fix Critical/Important → re-verify → re-review. Loop until clean.
 
 ### Code review prompt
 
 > Review the changes for production readiness.
 >
-> **Scope:** [which files/modules changed — no design rationale]
+> **Scope:** [files/modules changed — no design rationale]
 > **Requirements:** [ticket phase, plan summary, or description]
-> **Plan reference:** Read `@<plan-path>` for intended design and
-> success criteria (include only when plan-driven).
-> **Project context:** Read `CLAUDE.md` code standards. Read **every
-> file** in `ai-docs/mental-model/` regardless of apparent domain
-> relevance — cross-module contracts and invariants often surface in
-> unrelated domains. Do this before reviewing the diff.
+> **Plan reference:** Read `@<plan-path>` for design and success criteria (plan-driven only).
+> **Project context:** Read `CLAUDE.md` code standards. Read **every file** in `ai-docs/mental-model/` before reviewing the diff.
 > **Git range:** `git diff $(git merge-base <original-branch> HEAD)..HEAD`
 >
-> Review as a PM + senior engineer with full project awareness:
 > - **Correctness** — logic errors, edge cases, error handling
-> - **Plan adherence** — does the implementation match the plan's
->   intent? (include only when plan-driven)
-> - **Architectural fit** — respects documented contracts and module
->   boundaries? Unintended coupling?
-> - **Test quality** — adequate coverage, no deceptive tests
->   (tautological assertions, unreachable asserts, mocks bypassing
->   code under test, expected values derived from tested logic)
-> - **Duplication** — reimplements existing functionality? Search for
->   prior art.
+> - **Plan adherence** — matches plan intent? (plan-driven only)
+> - **Architectural fit** — respects contracts and module boundaries?
+> - **Test quality** — no deceptive tests (tautological assertions, unreachable asserts, mocks bypassing code under test, expected values derived from tested logic)
+> - **Duplication** — reimplements existing functionality?
 > - **Code standards** — CLAUDE.md conventions
 >
-> Categorize: Critical / Important / Minor.
-> Verdict: ready to merge, or list fixes needed.
+> Categorize: Critical / Important / Minor. Verdict: ready or fixes needed.
 
-## Test Failure Dispatch
+## §Test Failure Dispatch
 
 Before manual debugging, dispatch a **test-verifier** subagent:
 
-> Analyze the following test failure.
->
 > **Failing test:** `test_name` in `path/to/test_file`
 > **Implementation:** `path/to/impl_file`
 > **Success criteria:** [from plan or ticket]
@@ -78,38 +63,30 @@ Before manual debugging, dispatch a **test-verifier** subagent:
 
 Act on the diagnosis.
 
-## Doc Pipeline
+## §Doc Pipeline
 
-Run after the code review loop fully resolves:
-
-1. Dispatch **mental-model-updater** subagent with changed files and
-   summary. Skip if no mental-model impact. Wait for completion.
-2. Dispatch **spec-updater** subagent with base commit. Skip if
-   `ai-docs/spec/` does not exist. Wait for completion.
+1. Dispatch **mental-model-updater** with changed files and summary. Skip if no impact. Wait.
+2. Dispatch **spec-updater** with base commit. Skip if no `ai-docs/spec/`. Wait.
 3. Update `ai-docs/_index.md` if project capabilities changed.
-4. If completing a ticket phase, move ticket status via `git mv`
-   (load `/write-ticket` for conventions).
-5. Prune aggressively — keep docs focused on current state.
+4. If completing a ticket phase, move ticket status via `git mv` (load `/write-ticket` for conventions).
+5. Prune aggressively — docs reflect current state only.
 
-## Report
+## §Report
 
-Present to the user before doc updates proceed:
+Present before doc updates. User approves before proceeding.
 
 **Process issues** (skip if nothing notable):
-- Dependency doc gaps — missing/wrong/misleading `ai-docs/deps/` docs
+- Dependency doc gaps — missing/wrong/misleading in `ai-docs/deps/`
 - Mental-model inaccuracies — contracts that didn't match reality
-- Convention mismatches — docs that diverged from actual code
+- Convention mismatches — docs diverged from actual code
 
 **Ticket status** (always when ticket-driven):
-- Remaining phases or confirmation all complete
-- Help user decide `done/` vs `wip/`
+- Remaining phases or all complete; help user decide `done/` vs `wip/`
 
-When plan-driven, also include **plan deviations**:
-- Assumptions that didn't hold
-- Steps that required adaptation
-- Testing strategy changes (e.g., TDD module switched to post-impl)
+**Plan deviations** (plan-driven only):
+- Assumptions that didn't hold, steps adapted, testing strategy changes
 
-## Merge & Cleanup
+## §Merge & Cleanup
 
 ```bash
 git checkout <original-branch>
@@ -129,7 +106,12 @@ EOF
 git branch -d <branch>
 ```
 
-Include `## Ticket Updates` when ticket-driven AND forward-facing
-findings were discovered. Omit when there are no forwards.
+Include `## Ticket Updates` when ticket-driven AND forward-facing findings exist. If user declines merge, keep branch intact.
 
-If the user declines, keep the branch intact and stop.
+## Doctrine
+
+The process optimizes for **verified delivery** — no branch merges
+until every gate (test, review, user approval) has passed in order.
+When a rule is ambiguous, apply whichever interpretation better
+ensures that unreviewed or unapproved changes never reach the target
+branch.
