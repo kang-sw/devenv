@@ -11,66 +11,44 @@ argument-hint: "[topic, ticket path, or question — optional]"
 
 Topic: $ARGUMENTS
 
-## Constraints
+## Invariants
 
-- **Source read-only.** No source edits. Documentation writes only in
-  Step 2 — except tickets: unimplemented phases may be edited during
-  discussion to keep the ticket accurate as a live document (see below).
-- **Lazy context.** Load active doc listing at start. Read mental-model
-  docs on-demand as topics emerge.
-- **No direct source reading.** Dispatch Explore agents when implementation
-  details beyond mental-model docs are needed.
-- **Honest uncertainty.** If docs are stale or insufficient, say so and suggest
-  `/rebuild-mental-model` rather than speculating.
+- No source edits. Only documentation writes, only in the capture step.
+- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate (completed phases with `### Result` are immutable).
+- Load active doc listing at start; read mental-model docs on-demand as topics emerge.
+- Dispatch Explore agents for implementation details beyond mental-model docs — never read source directly.
+- When docs are stale or insufficient, say so and suggest `/rebuild-mental-model` — do not speculate.
+- Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
+- Evaluate each claim independently — call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
+- Never proactively ask to wrap up or persist; wait for the user's explicit signal.
+- All written artifacts must be in English regardless of conversation language.
 
-## Step 0: Orient
+## On: invoke
 
-1. Run `bash ai-docs/list-active.sh` (falls back to `find ai-docs -type f
-   -name '*.md' | sort` if the script is missing).
+1. Run `bash ai-docs/list-active.sh` (fall back to `find ai-docs -type f -name '*.md' | sort`).
 2. If `$ARGUMENTS` references a ticket, read it.
+3. Enter discussion loop.
 
-## Step 1: Discuss
+## On: discussion loop
 
-Brainstorm iteratively. Build on the user's ideas, propose alternatives,
-help refine implementation details through back-and-forth.
+1. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
+2. Read mental-model docs as conversation touches relevant domains; dispatch Explore agents for deeper detail.
+3. When discussion changes unimplemented ticket phases, update them in place with user agreement.
+4. Continue until the user signals done.
 
-- Read mental-model docs as conversation touches relevant domains.
-- Dispatch Explore agents for implementation details beyond what
-  mental-model docs cover.
-- Actively contribute: suggest approaches, point out analogies, sketch
-  concrete shapes for vague ideas.
-- **Reuse over reinvention.** Before proposing new abstractions, surface
-  existing patterns or components that already solve part of the problem.
-- **Be a sparring partner, not a yes-man.** The user's conviction on a
-  direction is not evidence that the direction is correct. Evaluate each
-  claim independently — when you see an unaddressed risk (technical debt,
-  wrong assumptions, edge cases, maintenance cost, etc.), call it out with
-  reasoning. Don't parrot back risks already discussed and resolved; focus
-  on gaps the conversation hasn't covered yet.
+## On: user signals done
 
-**Ticket as live document.** When discussion changes the direction of
-unimplemented ticket phases, update the phase descriptions in place
-with user agreement. Completed phases (with `### Result`) are immutable.
-The ticket should always reflect the current agreed direction — don't
-defer updates to wrap-up when they can be captured now.
+1. Offer persistence options only if conclusions warrant it:
+   - **New ticket** — invoke `/write-ticket`.
+   - **Ticket update** — invoke `/write-ticket`, then append design notes to an existing ticket phase.
+   - **Mental-model update** — revise a doc if architectural understanding changed.
+2. Apply **judge: needs-integration-tests** to ticket writes.
+3. Write only what the user approves. No artifact needed for exploratory discussions.
 
-Continue until the user signals the discussion is done.
+## Judgments
 
-## Step 2: Capture conclusions (only when the user signals done)
+**judge: needs-integration-tests** — Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.
 
-Do NOT proactively ask whether to wrap up or persist. Wait for the user to
-signal the discussion is over (e.g., explicit request, moving to a new topic,
-or asking to create a ticket).
+## Doctrine
 
-When the user signals done, offer persistence options if conclusions warrant it:
-
-- **New ticket** — Invoke `/write-ticket`.
-- **Ticket update** — Invoke `/write-ticket`, then append design notes to an existing ticket phase.
-- **Mental-model update** — Revise a doc if architectural understanding changed.
-
-For ticket writes, consider whether the phase needs integration-test criteria
-(end-to-end scenarios to verify after implementation). Skip for internal refactors.
-
-Write only what the user approves. No artifact needed for exploratory discussions.
-
-**Language:** All written artifacts must be in English regardless of conversation language.
+This skill optimizes for **decision quality per conversation turn**. The user is here to think, not to produce artifacts — so the agent's job is to sharpen reasoning by surfacing risks, reuse opportunities, and concrete alternatives, then capture only what the user approves. When a rule is ambiguous, apply whichever interpretation better preserves decision quality per turn.

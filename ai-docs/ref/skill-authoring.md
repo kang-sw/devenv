@@ -17,8 +17,8 @@ Top-to-bottom order. Simpler skills use the subset they need.
 
 1. **Invariants** — unambiguous imperatives, zero interpretation cost, skimmable.
 2. **Event handlers** (`On: X`) — numbered step lists per entry point. Consistent sub-structure across siblings.
-3. **Judgments** — soft decision points extracted from handlers. In routing-heavy skills, name them (`judge: <name>`) and centralize criteria here; handlers reference by name.
-4. **Templates** — structured outputs: brief formats, spawn signatures, addenda.
+3. **Judgments** — soft decision points extracted from handlers. In routing-heavy skills, name them (`judge: <name>`) and centralize criteria here; handlers reference by name. A fixed lookup table with unambiguous triggers is a routing rule in the handler, not a judgment.
+4. **Templates** — structured output formats: brief formats, spawn signatures, addenda. Procedures ("dispatch X, then do Y") belong in handlers, not here.
 5. **Role table** — one row per role, orthogonal columns.
 6. **Doctrine** — one paragraph, the generator.
 
@@ -31,6 +31,7 @@ Run against each invariant line after drafting. Every item is yes/no.
 - **One line?** — If it needs a paragraph to state, it is not yet distilled.
 - **Context-free?** — Understandable without reading the surrounding file?
 - **Non-redundant?** — Does it say something no other invariant already covers?
+- **Universal?** — Is it a constraint that holds in all situations, not a step at a specific point? ("Never skip tests" is an invariant; "append Result after completing a phase" is a handler step.)
 - **Derivable?** — Can it be regenerated from the Doctrine paragraph?
 
 ### Doctrine format
