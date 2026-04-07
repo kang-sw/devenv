@@ -88,7 +88,7 @@ Skip process issues if nothing notable; always include ticket status when a tick
 1. Dispatch **mental-model-updater subagent** with changed files and summary. Skip if no mental-model impact. Wait for completion.
 2. Dispatch **spec-updater subagent** with base commit. Skip if `ai-docs/spec/` does not exist. Wait for completion.
 3. Update `ai-docs/_index.md` if project capabilities changed.
-4. If completing a ticket phase, load `/write-ticket` for conventions, then append `### Result` to the ticket doc.
+4. If completing a ticket phase, move ticket status via `git mv` if appropriate (load `/write-ticket` for conventions).
 5. Prune aggressively — keep docs focused on current state.
 
 ### 9. Final commit & merge
@@ -132,7 +132,7 @@ If the user declines, keep the branch intact and stop.
 [ ] [fixed] Report process issues to user — user approves before doc updates
 [ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update spec with spec-updater subagent
-[ ] [fixed] Update project docs — ai-docs/_index.md, ticket result
+[ ] [fixed] Update project docs — ai-docs/_index.md, ticket status move
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Merge & cleanup — merge --no-ff -> delete branch
 ```
@@ -168,7 +168,13 @@ If the user declines, keep the branch intact and stop.
 
 ## AI Context
 - <decision rationale, rejected alternatives, user directives>
+
+## Ticket Updates                          # optional — only when ticket-driven
+- <ticket-stem> phase <N>
+  > Forward: <what future phases must know>
 ```
+
+Include `## Ticket Updates` when the execution is ticket-driven AND forward-facing findings were discovered. Omit when there are no forwards — deviations and implementation details already live in `## AI Context`.
 
 ## Doctrine
 

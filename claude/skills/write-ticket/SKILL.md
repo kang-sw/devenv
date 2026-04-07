@@ -33,7 +33,7 @@ Target: $ARGUMENTS
    e. If multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
 3. **Edit** (existing ticket):
    a. Read the ticket first.
-   b. Apply the requested changes (append result, update phase, move status).
+   b. Apply the requested changes (update phase, move status).
    c. For moves, `git mv` and add `started:` (→ `wip/`) or `completed:` (→ `done/`) date in frontmatter.
 4. **Phase content** — carry everything from discussion that informs implementation: goals, constraints, rationale, rejected alternatives, suggested approaches (pseudo code, struct shapes, data formats, algorithm sketches). Leave to the plan: codebase-derived details (file paths, existing type reuse, integration patterns, function signatures, testing classifications).
 5. **Intent review** — re-read the written/edited ticket against the preceding conversation:
@@ -72,14 +72,6 @@ plans:               # maps phases to plan path stems under ai-docs/plans/ (with
 started:             # YYYY-MM-DD, added on move to wip/
 completed:           # YYYY-MM-DD, added on move to done/
 ---
-```
-
-### Result entry
-
-```markdown
-### Result (<short-hash>) - YY-MM-DD
-
-<what was implemented, deviations from plan, key findings for future phases>
 ```
 
 ### Epic body (category = `epic`)

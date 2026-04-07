@@ -85,7 +85,7 @@ Dispatch a **spec-updater subagent** with the base commit (branch point) to chec
 ### Docs task
 
 - Update `ai-docs/_index.md` if project capabilities changed.
-- If completing a ticket phase, load `/write-ticket` for conventions, then append `### Result` to the ticket doc.
+- If completing a ticket phase, move ticket status via `git mv` if appropriate (load `/write-ticket` for conventions).
 - Prune aggressively — keep docs focused on current state.
 
 ### Report task
@@ -122,7 +122,7 @@ When the plan's assumptions don't match the current codebase, classify the gap:
 [ ] [fixed] Report — plan deviations (if any), process issues (if any); user approves before doc updates
 [ ] [fixed] Update mental model with mental-model-updater subagent
 [ ] [fixed] Update spec with spec-updater subagent
-[ ] [fixed] Update project docs — ai-docs/_index.md, ticket result
+[ ] [fixed] Update project docs — ai-docs/_index.md, ticket status move
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Merge & cleanup — merge --no-ff > delete branch
 ```
@@ -191,10 +191,16 @@ git merge --no-ff execute/<scope> -m "$(cat <<'EOF'
 ## AI Context
 - Plan: <plan-path>
 - <deviations, decisions made during execution>
+
+## Ticket Updates                          # optional — only when ticket-driven
+- <ticket-stem> phase <N>
+  > Forward: <what future phases must know>
 EOF
 )"
 git branch -d execute/<scope>
 ```
+
+Include `## Ticket Updates` when the execution is ticket-driven AND forward-facing findings were discovered. Omit when there are no forwards — deviations and implementation details already live in `## AI Context`.
 
 ## Doctrine
 
