@@ -13,7 +13,7 @@
 
 ## Layout
 
-Top-to-bottom order. Simpler skills use the subset they need.
+Top-to-bottom order. Simpler skills use the subset they need. Adapt section types to the document's reading pattern (e.g., named procedures instead of event handlers for reference material) — the principles are universal, the specific sections are not.
 
 1. **Invariants** — unambiguous imperatives, zero interpretation cost, skimmable.
 2. **Event handlers** (`On: X`) — numbered step lists per entry point. Consistent sub-structure across siblings.
