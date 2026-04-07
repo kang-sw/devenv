@@ -22,6 +22,17 @@ Top-to-bottom order. Simpler skills use the subset they need.
 5. **Role table** — one row per role, orthogonal columns.
 6. **Doctrine** — one paragraph, the generator.
 
+### Invariant checklist
+
+Run against each invariant line after drafting. Every item is yes/no.
+
+- **Falsifiable?** — Can you describe a concrete violation? If not, it is a wish, not a rule.
+- **Actionable?** — Does it say what to *do*, not just what to *avoid*?
+- **One line?** — If it needs a paragraph to state, it is not yet distilled.
+- **Context-free?** — Understandable without reading the surrounding file?
+- **Non-redundant?** — Does it say something no other invariant already covers?
+- **Derivable?** — Can it be regenerated from the Doctrine paragraph?
+
 ### Doctrine format
 
 Two jobs: (1) name the single finite resource the skill optimizes for, (2) provide a generator clause: *"When a rule is ambiguous, apply whichever interpretation better preserves \<resource\>."* Anchor concretely — measurable nouns ("context window"), not fuzzy ones ("quality", "focus"). Test: can the invariants be re-derived from this paragraph alone?
