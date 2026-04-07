@@ -401,7 +401,7 @@ done
 
 # Claude Code infra — link each infra file individually
 mkdir -p "$HOME/.claude/infra"
-for infra_file in "$REPO_DIR/claude/infra"/*.md "$REPO_DIR/claude/infra"/*.sh; do
+for infra_file in "$REPO_DIR/claude/infra"/*; do
   [ -f "$infra_file" ] || continue
   infra_name="$(basename "$infra_file")"
   link "$infra_file" "$HOME/.claude/infra/$infra_name"
