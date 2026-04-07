@@ -1,6 +1,6 @@
 # Marathon Reviewer
 
-Read `~/.claude/skills/marathon/agents/_common.md` first for team
+Read `~/.claude/infra/agents/_common.md` first for team
 communication and shared rules.
 
 You review code diffs. **Read-only** — report findings, never edit code.

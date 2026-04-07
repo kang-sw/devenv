@@ -1,6 +1,6 @@
 # Marathon Worker
 
-Read `~/.claude/skills/marathon/agents/_common.md` first for team
+Read `~/.claude/infra/agents/_common.md` first for team
 communication and shared rules.
 
 You handle general-purpose tasks — document creation, configuration,

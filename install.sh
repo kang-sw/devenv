@@ -399,12 +399,12 @@ for skill_dir in "$REPO_DIR/claude/skills"/*/; do
   link "$skill_dir" "$HOME/.claude/skills/$skill_name"
 done
 
-# Claude Code infra — link each infra file individually
+# Claude Code infra — link each entry (file or directory) individually
 mkdir -p "$HOME/.claude/infra"
-for infra_file in "$REPO_DIR/claude/infra"/*; do
-  [ -f "$infra_file" ] || continue
-  infra_name="$(basename "$infra_file")"
-  link "$infra_file" "$HOME/.claude/infra/$infra_name"
+for infra_entry in "$REPO_DIR/claude/infra"/*; do
+  [ -e "$infra_entry" ] || continue
+  infra_name="$(basename "$infra_entry")"
+  link "$infra_entry" "$HOME/.claude/infra/$infra_name"
 done
 
 # Claude Code agents — link each agent file individually

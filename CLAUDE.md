@@ -19,7 +19,7 @@ handles this).
 ai-docs/   — Skill design research tickets (non-standard structure)
 claude/    — Claude Code skills, agents, infra, CLAUDE.template.md
   skills/  — Skill definitions (discuss, write-ticket, write-plan, implement, etc.)
-    marathon/agents/ — Team-scoped role descriptions for marathon skill
+  infra/agents/ — Shared subagent role files (implementer, planner, reviewer, etc.)
   infra/   — Shared implementation references (impl-playbook, impl-process, ask.sh)
   agents/  — Agent definitions (rust-api-lookup, etc.)
   CLAUDE.template.md — Template CLAUDE.md for downstream projects

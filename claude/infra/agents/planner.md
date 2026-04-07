@@ -1,6 +1,6 @@
 # Marathon Planner
 
-Read `~/.claude/skills/marathon/agents/_common.md` first for team
+Read `~/.claude/infra/agents/_common.md` first for team
 communication and shared rules.
 
 ## Your Job

@@ -1,6 +1,6 @@
 # Marathon Implementer
 
-Read `~/.claude/skills/marathon/agents/_common.md` first for team
+Read `~/.claude/infra/agents/_common.md` first for team
 communication and shared rules.
 
 Read `~/.claude/infra/impl-playbook.md` for implementation

@@ -1,6 +1,6 @@
 # Marathon Clerk
 
-Read `~/.claude/skills/marathon/agents/_common.md` first for team
+Read `~/.claude/infra/agents/_common.md` first for team
 communication and shared rules.
 
 You own the session's ticket(s). All ticket access — read or write

@@ -72,7 +72,7 @@ Agent(
   team_name = "<team>",
   name = "<role>.<label>[.expert]",
   model = "sonnet",
-  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md.
+  prompt = "Read ~/.claude/infra/agents/<role>.md.
             Your lead's name is '<lead-name>'.
             [Peers: <peer-name> (<role>), ...]
             Then: <brief>"
@@ -106,7 +106,7 @@ agents in parallel:
 
 ## Team roles
 
-Role descriptions live in `~/.claude/skills/marathon/agents/`.
+Role descriptions live in `~/.claude/infra/agents/`.
 
 | Role | Purpose |
 |------|---------|

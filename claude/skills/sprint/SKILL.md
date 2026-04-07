@@ -90,7 +90,7 @@ Agent(
   description = "<3-5 words>",
   subagent_type = "general-purpose",
   model = "sonnet",
-  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md.
+  prompt = "Read ~/.claude/infra/agents/<role>.md.
             Your lead's name is '<your-agent-name>'. Then:
             <brief>"
 )
@@ -105,12 +105,12 @@ Agent(
   team_name = "sprint-<scope>",
   name = "<role>.<label>",
   model = "sonnet",
-  prompt = "Read ~/.claude/skills/marathon/agents/<role>.md.
+  prompt = "Read ~/.claude/infra/agents/<role>.md.
             Your lead's name is '<your-agent-name>'. Then:
             <brief>"
 )
 ```
-Role files live in `~/.claude/skills/marathon/agents/`:
+Role files live in `~/.claude/infra/agents/`:
 
 | Role | Purpose |
 |------|---------|
@@ -126,7 +126,7 @@ Agent(
   description = "review sprint changes",
   subagent_type = "general-purpose",
   model = "sonnet",
-  prompt = "Read ~/.claude/skills/marathon/agents/reviewer.md.
+  prompt = "Read ~/.claude/infra/agents/reviewer.md.
             Your lead's name is '<your-agent-name>'. Then:
             Review diff range: <original-branch>..sprint/<scope>"
 )
