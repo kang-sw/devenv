@@ -17,9 +17,10 @@ handles this).
 
 ```
 ai-docs/   — Skill design research tickets (non-standard structure)
-claude/    — Claude Code skills, agents, CLAUDE.template.md
+claude/    — Claude Code skills, agents, infra, CLAUDE.template.md
   skills/  — Skill definitions (discuss, write-ticket, write-plan, implement, etc.)
     marathon/agents/ — Team-scoped role descriptions for marathon skill
+  infra/   — Shared implementation references (impl-playbook, impl-process, ask.sh)
   agents/  — Agent definitions (rust-api-lookup, etc.)
   CLAUDE.template.md — Template CLAUDE.md for downstream projects
 nvim/      — Neovim config (LazyVim, plugins, colorscheme)
@@ -39,8 +40,7 @@ Sessions in this repo typically involve:
 The workflow skills (discuss, write-ticket, write-plan, implement, etc.) are
 **authored** here but **used** in downstream projects. When editing skills,
 think about how they compose in the canonical flows:
-- Full ceremony: `/discuss` → `/write-ticket` → `/write-plan` → `/execute-plan`
-- Strategic: `/discuss` → `/write-ticket` → `/write-plan` → `/implement`
+- Full ceremony: `/discuss` → `/write-ticket` → `/write-plan` → `/implement`
 - Direct: `/implement <description>`
 - Default (token-efficient): `/marathon <topic>` — team-based delegation
 - Lightweight: `/sprint <topic>` — single-agent, trivial changes only

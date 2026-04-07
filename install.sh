@@ -399,6 +399,14 @@ for skill_dir in "$REPO_DIR/claude/skills"/*/; do
   link "$skill_dir" "$HOME/.claude/skills/$skill_name"
 done
 
+# Claude Code infra — link each infra file individually
+mkdir -p "$HOME/.claude/infra"
+for infra_file in "$REPO_DIR/claude/infra"/*.md "$REPO_DIR/claude/infra"/*.sh; do
+  [ -f "$infra_file" ] || continue
+  infra_name="$(basename "$infra_file")"
+  link "$infra_file" "$HOME/.claude/infra/$infra_name"
+done
+
 # Claude Code agents — link each agent file individually
 # Migrate from old folder symlink to per-file symlinks
 if [ -L "$HOME/.claude/agents" ]; then
@@ -524,6 +532,7 @@ cleanup_dead_links() {
 }
 cleanup_dead_links "$HOME/.claude/skills"
 cleanup_dead_links "$HOME/.claude/agents"
+cleanup_dead_links "$HOME/.claude/infra"
 
 # ══════════════════════════════════════════════════════════════════════════════
 

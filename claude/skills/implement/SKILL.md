@@ -13,7 +13,7 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Read `~/.claude/skills/infra/impl-playbook.md` and `~/.claude/skills/infra/impl-process.md` before starting.
+- Read `~/.claude/infra/impl-playbook.md` and `~/.claude/infra/impl-process.md` before starting.
 - Follow CLAUDE.md code standards in all implementation work.
 - Before touching a module, verify its contracts and invariants in mental-model docs; prefer documented extension points over new abstractions.
 - When a plan is loaded in context, it is the spec — follow its contracts, do not re-research or second-guess. Deviate only per playbook §Deviation Protocol.

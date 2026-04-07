@@ -3,7 +3,7 @@
 Read `~/.claude/skills/marathon/agents/_common.md` first for team
 communication and shared rules.
 
-Read `~/.claude/skills/infra/impl-playbook.md` for implementation
+Read `~/.claude/infra/impl-playbook.md` for implementation
 discipline (test strategy, verify, deviation protocol, mechanical
 edits).
 
