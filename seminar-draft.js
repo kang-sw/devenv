@@ -69,6 +69,13 @@ function divider() {
     spacing: { after: 240 }
   });
 }
+function code(line) {
+  return new Paragraph({
+    indent: { left: 720 },
+    spacing: { after: 0 },
+    children: [new TextRun({ text: line, font: "Courier New", size: 18, color: "222222" })]
+  });
+}
 function callout(text) {
   return new Paragraph({
     indent: { left: 720 },
@@ -240,6 +247,48 @@ const children = [
   bullet("단일 에이전트 경량 실행 — 서브에이전트 위임 없음."),
   bullet("적합: 소규모·단순 작업, 패턴 추종 변경."),
   callout("모든 실행 경로 공통 — 완료 후 spec-updater와 mental-model-updater 서브에이전트 자동 실행 의무. Write-back loop의 기계적 강제 장치."),
+  spacer(),
+
+  // ── 관측성과 테스트 루프 ──
+  h1("관측성과 테스트 루프 닫기"),
+  p("AI가 코드를 생성한 것과 그 코드가 동작하는 것은 다른 문제."),
+
+  h2("테스트의 3계층"),
+  bullet("유닛 테스트 — 순수 로직, 알고리즘, 데이터 변환. AI가 직접 루프를 닫을 수 있는 계층."),
+  bullet("결합 테스트 — 모듈 간 인터페이스, 프로토콜, 외부 시스템 연동. 부분적 자동화 가능."),
+  bullet("테스트 불가 로직 — 하드웨어 의존성, 물리 공정, 실시간 제약, 센서 피드백. 소프트웨어 루프로 닫을 수 없는 계층."),
+  callout("제조업 도메인에서 세 번째 계층의 비중은 일반 소프트웨어보다 현저히 높음. 이 사실을 워크플로우 설계에 반영해야 함."),
+
+  h2("AI가 루프를 닫을 수 있는 계층"),
+  bullet("테스트 실행 → 결과 확인 → 수정의 사이클을 AI가 직접 수행."),
+  bullet("\"should pass\", \"probably works\"는 주장이 아님 — 실행 결과만 유효한 증거."),
+  bullet("빌드 에러, 타입 에러, 린터 경고를 AI 컨텍스트에 직접 넣고 수정하는 패턴."),
+
+  h2("기만적 테스트 패턴"),
+  bullet("AI가 코드와 테스트를 동시에 작성할 때 발생하는 자기검증 오류."),
+  bullet("구현을 통과시키는 테스트 ≠ 명세를 검증하는 테스트."),
+  spacer(),
+  code("int add(int a, int b);"),
+  spacer(),
+  code("assert(add(1, 3) == 4);"),
+  code("assert(add(3, 1) == 4);"),
+  code("assert(add(255, 131) == add(131, 255));"),
+  spacer(),
+  code("int add(int a, int b) { return 4; }   // 모든 테스트 통과"),
+  spacer(),
+  bullet("테스트가 초록이라도 루프가 의미있게 닫혔는지는 별개의 문제."),
+  bullet("AI는 자신이 작성한 구현에 맞는 테스트를 자연스럽게 생성하는 경향."),
+  bullet("대응: 테스트 케이스(경계값, 물리 제약, 실패 조건)를 사람이 명세로 제공 → AI는 구현만 담당."),
+  bullet("대응: 신선한 컨텍스트의 코드 리뷰 에이전트가 테스트를 독립 검증 — 구현을 작성하지 않은 시각으로 기만 패턴 다수 탐지 가능."),
+  callout("테스트 커버리지는 루프가 닫혔음을 증명하지 않는다. 루프가 올바른 명세에 연결되어 있는지가 관건."),
+  spacer(),
+
+  h2("테스트 불가 계층의 전략"),
+  bullet("AI의 책임: 검증 불가 범위의 명시적 선언. 침묵은 \"동작함\"이 아님."),
+  bullet("대안적 관측성: 로그·상태 노출 포인트 추가, 정적 분석, 사양서 대조, diff 리뷰."),
+  bullet("워크플로우에 사람이 루프를 닫는 지점을 명시적으로 설계 — 암묵적 가정 금지."),
+  bullet("테스트 불가 로직에 대한 티켓/계획서: 검증 방법을 제약 조건으로 명시."),
+  callout("테스트 불가 계층의 존재를 숨기지 않는 것이 핵심. AI가 \"됩니다\"라고 말할 수 없는 영역을 명시해야 사람이 올바른 검증 투자를 결정할 수 있음."),
   spacer(),
 
   // ── Part 6 ──
