@@ -1,7 +1,7 @@
 const {
   Document, Packer, Paragraph, TextRun, HeadingLevel,
   AlignmentType, LevelFormat, TableOfContents, Header, Footer,
-  PageNumber, BorderStyle
+  PageNumber, BorderStyle, ExternalHyperlink
 } = require('docx');
 const fs = require('fs');
 
@@ -30,7 +30,7 @@ const numbering = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function h1(text) {
-  return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(text)] });
+  return new Paragraph({ heading: HeadingLevel.HEADING_1, pageBreakBefore: true, children: [new TextRun(text)] });
 }
 function h2(text) {
   return new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun(text)] });
@@ -115,7 +115,7 @@ const children = [
   h2("1.1 토큰(Token) — AI가 세상을 읽는 단위"),
   bullet("LLM의 텍스트 처리 단위: 문자/단어가 아닌 토큰."),
   bullet("영어 “hello” = 1토큰, 한국어 “안녕하세요” = 4~6토큰."),
-  bullet("원인: 영어 중심 어휘 사전. 영어는 큰 단위 묶음, 비영어는 잔은 분할."),
+  bullet("원인: 영어 중심 어휘 사전. 영어는 큰 단위 묶음, 비영어는 작은 분할."),
   bullet("결과: 한국어는 동일 내용 전달 시 영어 대비 3~5배 토큰 소모."),
 
   h2("1.2 컨텍스트 윈도우와 열화 현상"),
@@ -204,6 +204,7 @@ const children = [
   bullet("/execute-plan: 계획서를 계약으로 충실히 구현. 가정≠실제 시 정지 후 보고. 대규모 변경용."),
   bullet("/implement: 계획서가 방향/파일 목록만 제시하는 경우. 유연한 탐색 기반 구현."),
   bullet("/sprint: 단일 에이전트 경량 실행. 소규모/단순 작업용."),
+  callout("모든 실행 경로 공통 — 완료 후 spec-updater와 mental-model-updater 서브에이전트 자동 실행 의무. Write-back loop의 기계적 강제 장치."),
   spacer(),
 
   // ── Part 6 ──
@@ -220,10 +221,12 @@ const children = [
 
   h2("6.2 Write-back Loop — 상태 동기화의 의무"),
   bullet("구현 완료 후 문서 미갱신 시 코드베이스와의 괴리 축적."),
-  bullet("mental-model: 소스 변경이 기존 이해를 무효화한 부분."),
-  bullet("spec: 사용자 가시적 기능 변경 시."),
+  bullet("mental-model-updater: 소스 변경이 기존 이해를 무효화한 부분을 갱신."),
+  bullet("spec-updater: 사용자 가시적 기능 변경 시 스펙 동기화."),
   bullet("_index.md: 중요 아키텍처 변경이나 새로운 세션 노트."),
   bullet("티켓 Result: 실제 결과와 계획 대비 편차."),
+  bullet("커밋 AI Context: 결정 근거, 기각된 대안, 사용자 지시를 커밋 메시지에 기록 — git history도 외재화 대상."),
+  bullet("git log --oneline 금지: AI Context 섹션이 소실되어 미래 에이전트가 결정 이유를 읽지 못함."),
   callout("코드 변경 → AI 이해 변경의 동기화 의무. 동기화 실패 시 문서는 부채."),
   spacer(),
 
@@ -269,6 +272,27 @@ const children = [
   bullet("Subagent 경계를 넘는 것: 짧고 구조화된 brief. 이 brief가 외재화된 상태."),
   spacer(),
 
+  // ── 부록 ──
+  h1("부록. 추론 투명성 도구"),
+  p("AI 추론 과정 자체를 외재화하는 보조 도구. 상태 외재화 원칙의 연장."),
+
+  h2("A. /manual-think — 추론의 가시화"),
+  bullet("용도: Extended thinking 비가용 환경에서 AI 추론 과정 보완."),
+  bullet("<thinking> 태그로 추론 단계 명시 — 사용자 응답과 물리적 구분."),
+  bullet("핵심 기법: 평가적 프레이밍 중립화 — 「X는 충분한가?」→「X의 강점과 약점은?」 확인 편향 차단."),
+  bullet("사이클: Parse → Challenge(사용자 주장에 반례 탐색 의무) → Resolve → Decide."),
+  bullet("언어 경계 원칙 연장: 추론은 영어 의무, 응답은 사용자 언어."),
+  spacer(),
+
+  h2("B. /monologue — 장세션 정합성 감사"),
+  bullet("용도: 장세션 AI 가정의 가시화, 사용자-AI 이해 간격 추적."),
+  bullet("Reading: 사용자 메시지의 중립화·분해된 영어 재진술 — 해석 단계와 응답 단계 분리."),
+  bullet("가정-관찰 쌍: 행동 전 반증 가능한 가정 명시 → 결과 후 match / drift / abandon 분류."),
+  bullet("Dropped: 기각된 대안을 이유와 함께 기록 — 맥락 소실 후 동일 후보 재검토 방지."),
+  callout("match / drift / abandon — 사용자-AI 정합성 감사 어휘. 어느 단계에서 이해 간격이 벌어졌는지 추적 가능."),
+  bullet("적합한 세션: 장세션, 복수 서브에이전트 위임, 아키텍처 탐색, 감사 필요 작업."),
+  spacer(),
+
   // ── 마치며 ──
   h1("마치며"),
   p("이 문서는 하나의 구체적 구현. 다른 맥락에서는 다른 패턴이 최선일 수 있는 가능성."),
@@ -276,6 +300,21 @@ const children = [
   bullet("아티팩트가 컨텍스트 리셋을 견딘 수 있는 구조."),
   bullet("결정과 탐색의 분리."),
   bullet("오케스트레이터의 lean 유지."),
+  spacer(),
+  new Paragraph({
+    spacing: { after: 80 },
+    children: [new TextRun({ text: "참고 — 본 문서 스킬·에이전트 시스템 소스 코드 (오픈소스): ", size: 20, color: "555555" })]
+  }),
+  new Paragraph({
+    spacing: { after: 0 },
+    children: [new ExternalHyperlink({
+      link: "https://github.com/kang-sw/devenv/tree/main/claude",
+      children: [new TextRun({
+        text: "github.com/kang-sw/devenv/tree/main/claude",
+        style: "Hyperlink", size: 20
+      })]
+    })]
+  }),
   spacer(),
   divider(),
   new Paragraph({
