@@ -21,7 +21,7 @@ Target: $ARGUMENTS
 - Scan draft for data contracts crossing capsule boundaries (wire formats, persistence schemas, public API types, config, env vars, CLI flags); if any are not in the ticket, present and wait for confirmation.
 - The plan file MUST be committed before finalizing.
 
-## On: invoked
+## On: invoke
 
 1. **Understand** — Read the ticket/description. If prior phases have `### Result` entries or linked plans, read them (earlier discoveries override original assumptions). Load **all** files in `ai-docs/mental-model/` via Read/Glob directly — never delegate initial loading.
 2. **Research** — Adapt depth per `judge: research-depth`. Use subagents for broad codebase searches; keep main context for synthesis. Before designing new components, search for reusable existing utilities or patterns.

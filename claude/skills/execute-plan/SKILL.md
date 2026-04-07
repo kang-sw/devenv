@@ -19,7 +19,7 @@ Plan: $ARGUMENTS
 - Commit freely at logical checkpoints on the feature branch; keep messages brief.
 - Do not include design justifications in review prompts.
 
-## On: Start
+## On: invoke
 
 1. Read the plan file at `$ARGUMENTS`.
 2. Read mental-model docs referenced in the plan's Context section. Read additional mental-model docs only if the plan explicitly instructs it.

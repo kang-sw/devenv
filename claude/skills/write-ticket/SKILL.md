@@ -22,7 +22,7 @@ Target: $ARGUMENTS
 - Each phase has its own success criteria or test surface.
 - All ticket content must be in English regardless of conversation language.
 
-## On: invoked
+## On: invoke
 
 1. If `$ARGUMENTS` references an existing ticket, read it.
 2. **Create** (new ticket):
