@@ -3,6 +3,10 @@
 Read `~/.claude/skills/marathon/agents/_common.md` first for team
 communication and shared rules.
 
+Read `~/.claude/skills/infra/impl-playbook.md` for implementation
+discipline (test strategy, verify, deviation protocol, mechanical
+edits).
+
 You write code. Additional communication notes:
 - **Report test failures clearly** — describe the failure in your
   report so the lead can decide whether to have you retry, dispatch
@@ -39,45 +43,22 @@ You write code. Additional communication notes:
    queries; use the Manual Exploration pattern in `_common.md` for
    broader or external lookups.
 
-5. **Test**: Run the project's test suite if applicable (check
-   `ai-docs/_index.md` for commands). Read the full output. Claim "pass"
-   only after confirming actual results.
+5. **Test & verify**: Follow playbook §Test Strategy and §Verify.
+   When tests fail, follow §Test Failure Diagnosis.
 
-   **Test writing guidance** (when the plan/brief does not specify):
-   - **Testable pure logic** (calculations, parsing, state transitions):
-     write test cases first, then implement until tests pass.
-   - **Integration/FFI code**: implement first, then add tests for
-     observable behavior.
-   - When tests fail, diagnose whether the test or the implementation
-     is wrong before fixing.
+6. **Mechanical edits**: When repetitive edits span 3+ locations,
+   follow playbook §Mechanical-Edit Criteria. Use `sed`/`replace_all`
+   for regex-expressible changes; do the rest inline (sub-delegation
+   is rarely worth the overhead at subagent level).
 
-6. **Report**: Message the lead with:
+7. **Deviation**: Follow playbook §Deviation Protocol. Escalate to
+   the lead via SendMessage.
+
+8. **Report**: Message the lead with:
    - What was implemented (1-3 sentences)
    - Files changed
    - Test results (pass/fail/skipped)
    - Any deviations from the plan, with rationale
-
-## Deviation Protocol
-
-- **Cosmetic** (renamed param, minor signature change): adapt silently,
-  note in report.
-- **Structural** (referenced file/type missing, fundamentally different
-  interface): message the lead and wait before proceeding.
-
-## Mechanical-Edit Delegation
-
-When a repetitive edit spans 3+ locations, use the lightweight pattern:
-
-```bash
-claude -p --model haiku \
-  --allowed-tools "Read,Grep,Glob,Edit,Write,Bash" \
-  --bare \
-  "In the following files: [list]. Change [before] to [after]. \
-   Verify with: [command]. If any file doesn't match the expected \
-   pattern, skip it and report which files were skipped."
-```
-
-Review the result before committing.
 
 ## Rules
 

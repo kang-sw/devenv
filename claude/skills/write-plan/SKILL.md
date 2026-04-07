@@ -27,7 +27,7 @@ Target: $ARGUMENTS
 2. **Research** — Adapt depth per `judge: research-depth`. Use subagents for broad codebase searches; keep main context for synthesis. Before designing new components, search for reusable existing utilities or patterns.
 3. **Draft** — Generate path `ai-docs/plans/YYYY-MM/DD-hhmm.<kebab-name>.md`. Write using `plan-file` template. Include only sections that carry information. Apply `judge: plan-depth` to calibrate detail level. After drafting, run the data-contract gate (Invariant 6) and self-containedness check ("Could an agent with no prior context execute this?").
 4. **Verify** — Dispatch a sonnet subagent with the `verification-prompt` template. Fix Critical issues. Assess Important — revise if valid. Skip Minor unless useful.
-5. **Finalize** — Choose executor per plan depth (tactical → `/execute-plan`, strategic → `/implement`). Call `EnterPlanMode` and write the `plan-mode-output` template. If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
+5. **Finalize** — Call `EnterPlanMode` and write the `plan-mode-output` template (executor is always `/implement`). If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
 
 ## Judgments
 
@@ -43,10 +43,10 @@ Default: when uncertain, go one level deeper — over-researching costs less tha
 
 ### judge: plan-depth
 
-| Depth | Executor | When |
-|-------|----------|------|
-| Strategic — direction + relevant files, tactical decisions left to executor | `/implement` | Small-medium changes, familiar patterns |
-| Tactical — contracts + integration notes + testing strategy + success criteria | `/execute-plan` | Large changes, cross-module work, new patterns |
+| Depth | When |
+|-------|------|
+| Strategic — direction + relevant files, tactical decisions left to executor | Small-medium changes, familiar patterns |
+| Tactical — contracts + integration notes + testing strategy + success criteria | Large changes, cross-module work, new patterns |
 
 Default to tactical for thorough-level research. Use strategic only when over-specifying would add noise.
 
@@ -108,7 +108,7 @@ Observable conditions that mean "done".
 ```
 # Steps
 
-- Load `/<executor>` skill
+- Load `/implement` skill
 - Read `@<plan-path>`
 
 ---
