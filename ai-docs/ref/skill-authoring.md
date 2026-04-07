@@ -7,7 +7,7 @@
 - Directives at top, rationale (if any) as a single Doctrine paragraph at bottom. Never interleave.
 - Self-contained. No references to tickets, sessions, or sibling skills — only CLAUDE.md and explicitly declared cross-skill dependencies.
 - Repeatedly violated rule → mechanize (structured output block at entry point), do not repeat louder.
-- Irreducibly soft rule → extract as named judgment (`judge: <name>`) in a Judgments section; event handlers reference by name.
+- Mechanical rules and soft judgments do not mix. Soft decision points must be separated and stated explicitly.
 - After restructuring, spawn a fresh delegate to audit: contradictions, duplication, orphan references, closure gaps.
 - At every authoring turn's end, re-read additions and cut.
 
@@ -17,7 +17,7 @@ Top-to-bottom order. Simpler skills use the subset they need.
 
 1. **Invariants** — unambiguous imperatives, zero interpretation cost, skimmable.
 2. **Event handlers** (`On: X`) — numbered step lists per entry point. Consistent sub-structure across siblings.
-3. **Judgments** — named soft signals (`judge: <name>`) with criteria. Invoked from handlers by name.
+3. **Judgments** — soft decision points extracted from handlers. In routing-heavy skills, name them (`judge: <name>`) and centralize criteria here; handlers reference by name.
 4. **Templates** — structured outputs: brief formats, spawn signatures, addenda.
 5. **Role table** — one row per role, orthogonal columns.
 6. **Doctrine** — one paragraph, the generator.
