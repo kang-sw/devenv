@@ -96,7 +96,7 @@ Description, usage paths, scenarios, examples as needed.
 After writing or updating the spec body:
 
 ```bash
-python3 <skill-dir>/build-index.py <spec-file.md>
+python3 ${CLAUDE_SKILL_DIR}/build-index.py <spec-file.md>
 ```
 
 Parses heading structure, rebuilds feature tree in frontmatter. Preserves `title` and `summary`.
