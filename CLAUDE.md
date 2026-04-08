@@ -89,7 +89,9 @@ claude/migration-guide/ — Convention change guides for downstream projects
 Sessions in this repo typically involve:
 - **Skill/agent authoring** — editing workflow definitions in `claude/skills/` and `claude/agents/`
 - **Workflow design discussion** — reasoning about use-cases, skill interactions, and convention changes
-- **Template maintenance** — updating `CLAUDE.template.md` and migration guides
+- **Template maintenance** — updating `CLAUDE.template.md` and migration guides.
+  When adding a checklist item that supersedes an earlier one, mark the old
+  item `[obsoleted by vNNNN]`.
 - **Dotfile/config changes** — nvim, tmux, shell, WezTerm configurations
 
 The workflow skills (discuss, write-ticket, write-skeleton, write-plan,

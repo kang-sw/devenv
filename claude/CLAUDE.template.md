@@ -130,6 +130,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
 <!-- MIGRATION CHECKLIST
      Read the Template Version tag at the bottom of this file.
      Apply all items with version > current, in order. Then update the tag.
+     Items marked [obsoleted by vNNNN] — skip entirely.
      Project-specific content (Architecture Rules, custom standards) must
      survive — merge surgically, flag conflicts rather than overwriting.
 
