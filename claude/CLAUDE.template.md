@@ -10,7 +10,7 @@ Read in this order at every session start, before any other action:
 2. **Local** — read `ai-docs/_index.local.md` if it exists. .gitignored.
    Machine-bound context (paths, env vars, build config) and personal
    session notes.
-3. **Project arc** — run `git log --oneline --graph -30`. Trajectory and
+3. **Project arc** — run `git log --oneline --graph -50`. Trajectory and
    topic clusters at a glance.
 4. **Recent history** — run `git log -10`. Decision rationale via AI Context
    sections. Fades as history grows.
@@ -196,7 +196,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
 - v0014: Replace the session-start `_index.md` / `_index.local.md` lines
          with the `## Project Memory` section (see template). Replace
          Session Start with two-step git log:
-         `git log --oneline --graph -30` then `git log -10`.
+         `git log --oneline --graph -50` then `git log -10`.
          Add `_index.local.md` to `.gitignore` if not already present.
 -->
 
