@@ -43,6 +43,33 @@ Target: $ARGUMENTS
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
 6. **Spec check** — if the ticket introduces, changes, or removes user-facing behavior (typically `feat` or behavior-altering `bug`), invoke `/write-spec` to add or update spec entries with 🚧 markers. Internal-only tickets (`refactor`, `chore`, most `research`) skip this.
 
+## On: delegate
+
+When ticket edits should not consume the lead's context (e.g., mid-implementation
+updates, routine status moves), spawn a clerk subagent instead of editing directly.
+
+```
+Agent(
+  name = "clerk",
+  model = "sonnet",
+  prompt = """
+    Before starting, read `~/.claude/infra/agents/_common.md` then
+    `~/.claude/infra/agents/clerk.md`.
+
+    Lead name: <lead-name>
+    Ticket: <ticket-path>
+    Directive: <what to change — be specific>
+  """
+)
+```
+
+The clerk reads `/write-ticket` conventions autonomously and applies the
+edit. It reports back what changed and flags convention issues. Use for:
+- Status transitions (`git mv` to `wip/`, `done/`)
+- Phase updates from implementation findings
+- New ticket creation from a delegated context
+- Frontmatter updates (`started:`, `completed:`, `plans:`)
+
 ## Judgments
 
 ### judge: initial-status
