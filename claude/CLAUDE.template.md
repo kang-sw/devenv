@@ -103,7 +103,14 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## AI Context
 - <decision rationale, rejected alternatives, user directives, etc.>
+
+## Ticket Updates                          # optional — only when ticket-driven
+- <ticket-stem>[: <optional-label>]
+  > Forward: <what future phases must know>
 ```
+
+When a commit touches ticket-driven work, include `## Ticket Updates` with
+the ticket stem and any forward-facing findings that future phases need.
 
 ### Session Start
 
@@ -152,6 +159,8 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 - [ ] If Session Start uses `git log --oneline`, remove the `--oneline`
       flag. Full commit messages include AI Context sections with design
       decisions that inform the current session.
+- [ ] If Commit Rules lack `## Ticket Updates`, add it. Ticket-driven
+      commits must record the stem and forward-facing findings.
 
 Prioritize migrating universal conventions (ai-docs/ structure, workflow
 procedures, code standards) from the current template. Project-specific

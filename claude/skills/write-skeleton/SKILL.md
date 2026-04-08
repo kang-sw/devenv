@@ -58,7 +58,8 @@ Target: $ARGUMENTS
 
 1. Commit stubs and tests together as one logical unit.
 2. Commit message: `feat(<scope>): skeleton — <what contracts are established>`
-3. Include `## AI Context` noting which ticket phase this serves and key contract decisions.
+3. Include `## AI Context` with key contract decisions.
+4. Include `## Ticket Updates` with the ticket stem and what future phases must know.
 
 ### 5. Suggest next step
 

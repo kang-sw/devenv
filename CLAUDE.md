@@ -58,6 +58,10 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ## AI Context
 - <decision rationale, rejected alternatives, user directives, etc.>
+
+## Ticket Updates                          # optional — only when ticket-driven
+- <ticket-stem>[: <optional-label>]
+  > Forward: <what future phases must know>
 ```
 
 **Language:** All AI-authored artifacts — commit messages, code comments,

@@ -99,7 +99,7 @@ git merge --no-ff <branch> -m "$(cat <<'EOF'
 - <decision rationale, rejected alternatives, user directives>
 
 ## Ticket Updates                          # optional — only when ticket-driven
-- <ticket-stem> phase <N>
+- <ticket-stem>[: <optional-label>]
   > Forward: <what future phases must know>
 EOF
 )"
