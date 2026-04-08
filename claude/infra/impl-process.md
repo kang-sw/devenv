@@ -41,6 +41,7 @@ Dispatch → fix Critical/Important → re-verify → re-review. Loop until clea
 >
 > - **Correctness** — logic errors, edge cases, error handling
 > - **Plan adherence** — matches plan intent? (plan-driven only)
+> - **Skeleton integrity** — if skeleton stubs/tests exist (`skeletons:` in ticket frontmatter), verify no skeleton contract was modified outside of plan's Skeleton Amendments. (Critical if violated.)
 > - **Architectural fit** — respects contracts and module boundaries?
 > - **Test quality** — no deceptive tests (tautological assertions, unreachable asserts, mocks bypassing code under test, expected values derived from tested logic)
 > - **Duplication** — reimplements existing functionality?

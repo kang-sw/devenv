@@ -17,6 +17,7 @@ Target: $ARGUMENTS
 - Follow CLAUDE.md code standards in all implementation work.
 - Before touching a module, verify its contracts and invariants in mental-model docs; prefer documented extension points over new abstractions.
 - When a plan is loaded in context, it is the spec — follow its contracts, do not re-research or second-guess. Deviate only per playbook §Deviation Protocol.
+- Skeleton files (stubs and integration tests from `/write-skeleton`) are read-only except for amendments explicitly listed in the plan's **Skeleton Amendments** section. Without a plan, all skeleton contracts are fully locked — no amendments possible. If implementation reveals a skeleton conflict not covered by an amendment, **stop and escalate** — do not modify skeleton contracts silently.
 - Claim "pass" only after reading full test/build output — never "should pass" or "looks correct."
 - Do not include design rationale in code-review prompts.
 - Commit freely on the feature branch.

@@ -14,6 +14,7 @@ working, tested code that satisfies its contracts.
 
 - Do not re-research design alternatives; the plan or brief owns the decisions.
 - Do not modify files outside the task scope without escalating.
+- Skeleton files (stubs/tests from `/write-skeleton`) are read-only except for amendments explicitly listed in the plan's **Skeleton Amendments** section. If a skeleton conflict is discovered that no amendment covers, escalate immediately — do not modify skeleton contracts.
 - Follow CLAUDE.md code standards for all edits.
 - Claim "pass" only after reading full test output — never "should pass."
 - All output in English regardless of input language.

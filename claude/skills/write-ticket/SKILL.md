@@ -65,7 +65,7 @@ edit. It reports back what changed and flags convention issues. Use for:
 - Status transitions (`git mv` to `wip/`, `done/`)
 - Phase updates from implementation findings
 - New ticket creation from a delegated context
-- Frontmatter updates (`started:`, `completed:`, `plans:`)
+- Frontmatter updates (`started:`, `completed:`, `plans:`, `skeletons:`)
 
 ## Judgments
 
@@ -89,11 +89,14 @@ related:             # optional; list of stems with inline comments
 parent:              # optional; epic stem (e.g., 260401-epic-auth-rewrite)
 plans:               # maps phases to plan path stems under ai-docs/plans/ (without .md)
   phase-1: 2026-03/28-1430.event-serialization
-  phase-2: null      # not yet planned
+skeletons:           # maps phases to skeleton commit hashes
+  phase-1: abc1234
 started:             # YYYY-MM-DD, added on move to wip/
 completed:           # YYYY-MM-DD, added on move to done/
 ---
 ```
+
+Both `plans:` and `skeletons:` list only phases that have artifacts — omit phases without a plan or skeleton (no null placeholders). Absence means "not yet created" or "not needed."
 
 ### Epic body (category = `epic`)
 

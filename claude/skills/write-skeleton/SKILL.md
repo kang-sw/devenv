@@ -67,6 +67,7 @@ Target: $ARGUMENTS
 2. Commit message: `feat(<scope>): skeleton — <what contracts are established>`
 3. Include `## AI Context` with key contract decisions.
 4. Include `## Ticket Updates` with the ticket stem and what future phases must know.
+5. Update the ticket's `skeletons:` frontmatter with the phase and commit hash (e.g., `phase-1: abc1234`). Only add entries for phases that have a skeleton — no null placeholders.
 
 ### 5. Suggest next step
 

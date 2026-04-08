@@ -25,7 +25,7 @@ You will receive via the spawn prompt:
 - **Plan path**: `ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md`
 - **Ticket path** (optional): read for context and prior decisions.
 - **Mental-model hints** (optional): which domains are relevant.
-- **Skeleton contracts** (optional): stub file paths and integration test paths.
+- **Skeleton contracts** (when skeleton exists, always provided): stub file paths and integration test paths. These are locked — the plan must work within them. If a skeleton contract must change, record it in a **Skeleton Amendments** section: additive changes (new methods/types) need only be noted; breaking changes (signature, field type, test expectation) require the current contract, proposed change, and rationale.
 
 ## Process
 
@@ -42,6 +42,12 @@ You will receive via the spawn prompt:
 ## Context
 What the executor cannot re-derive from code alone: ticket decisions,
 research-discovered pitfalls, integration constraints.
+
+## Skeleton Amendments
+<!-- Include only when skeleton exists and changes are needed. -->
+<!-- Additive (new method/type): note what and where. -->
+<!-- Breaking (signature change, field change, test expectation change): -->
+<!--   state the current contract, proposed change, and rationale. -->
 
 ## Steps
 Contracts and decisions, not code. When a step introduces or changes

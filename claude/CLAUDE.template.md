@@ -139,9 +139,11 @@ the ticket stem and any forward-facing findings that future phases need.
       rationale into `ai-docs/mental-model/` docs. Remove API signatures,
       struct layouts, and status tracking (already in source/tickets).
       Delete `ai-docs/spec/` after migration.
-- [ ] If tickets lack `plans:` frontmatter, add it (use `null` for unplanned
-      phases). Audit phase content: discussion decisions stay in tickets,
-      codebase-derived details belong in plans.
+- [ ] If tickets lack `plans:` frontmatter, add it (only phases with existing
+      plan documents — no null placeholders). Audit phase content: discussion
+      decisions stay in tickets, codebase-derived details belong in plans.
+- [ ] If tickets have `plans:` entries with `null` values, remove those entries.
+      Absence means "not yet created" — null placeholders are no longer used.
 - [ ] If tickets lack `parent:` frontmatter for epic relationships, add it
       where applicable. Epic tickets use category `epic`.
 - [ ] If plan paths use old format (`YYMM/DD-HHMM.<name>.md`), rename to
