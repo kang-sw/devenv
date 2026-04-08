@@ -121,6 +121,14 @@ _index.md should cover:
   - Conventions (tickets, dependency docs, naming rules)
   - Build/test commands and operational pitfalls
   - Session notes (cross-session intent only, 2-5 lines max, delete when stale)
+  - Never reference done/ or dropped/ tickets — they live in git history
+
+_index.md must start with this comment (do not remove after creation):
+
+  <!-- Memory policy: prune aggressively as project advances. Completed
+       work belongs in git history, not here. Keep only what an AI session
+       needs to orient itself and pick up work. If it's derivable from
+       code or git log, delete it from this file. -->
 
 Adapt structure to fit the project — these are guidelines, not a rigid schema.
 -->
@@ -176,6 +184,10 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
 - v0012: Add `_index.local.md` to `.gitignore` (pattern: `ai-docs/_index.local.md`).
          Add the session-start line: "If `ai-docs/_index.local.md` exists,
          read it too — local memory, free-form, not committed."
+- v0013: Add the memory-policy comment to the top of `ai-docs/_index.md`
+         (see MIGRATION block for exact text). Do not remove after adding —
+         permanent pruning guardrail. Remove any references to done/ or
+         dropped/ tickets from `_index.md`.
 -->
 
-<!-- Template Version: v0012 -->
+<!-- Template Version: v0013 -->

@@ -1,3 +1,8 @@
+<!-- Memory policy: prune aggressively as project advances. Completed
+     work belongs in git history, not here. Keep only what an AI session
+     needs to orient itself and pick up work. If it's derivable from
+     code or git log, delete it from this file. -->
+
 # devenv — Project Index
 
 ## What This Repo Is
