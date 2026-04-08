@@ -32,6 +32,43 @@ Target: $ARGUMENTS
 4. **Verify** — Dispatch a sonnet subagent with the `verification-prompt` template. Fix Critical issues. Assess Important — revise if valid. Skip Minor unless useful.
 5. **Finalize** — Call `EnterPlanMode` and write the `plan-mode-output` template (executor is always `/implement`). If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
 
+## On: delegate
+
+When plan writing should not consume the lead's context (routine plan for
+well-scoped ticket, familiar codebase area), delegate to a planner subagent.
+
+1. **Gather skeleton context** — if `/write-skeleton` has been run for this ticket,
+   collect stub file paths and integration test paths. These are the locked contracts
+   the plan must stay within.
+2. **Spawn planner**:
+
+   ```
+   Agent(
+     name = "planner",
+     model = "sonnet",
+     prompt = """
+       Before starting, read `~/.claude/infra/agents/_common.md` then
+       `~/.claude/infra/agents/planner.md`.
+
+       Lead name: <lead-name>
+       Brief: <ticket description or phase scope>
+       Plan path: ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md
+       Ticket path: <ticket-path>
+
+       Skeleton contracts (plan within these):
+       - Stubs: <list of stub file paths, or "none">
+       - Integration tests: <list of test file paths, or "none">
+     """
+   )
+   ```
+
+3. **Review** — read the plan the planner produced. Verify contracts align with
+   skeleton stubs, decisions are sound, and the plan is self-contained. Revise
+   or reject before proceeding to `/implement`.
+
+Use direct writing (the `On: invoke` path) when the plan requires deep
+architectural judgment or crosses unfamiliar domains.
+
 ## Judgments
 
 ### judge: research-depth
