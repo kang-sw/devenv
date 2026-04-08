@@ -1,69 +1,16 @@
-<!-- AI-maintained project state — read before work, update after -->
-<!-- - `ai-docs/_index.md` — architecture, conventions, build/test, session notes -->
-
 # CLAUDE.md — [PROJECT_NAME]
 
-## Project Summary
+Read `ai-docs/_index.md` at session start for project context, conventions, and build/test commands.
 
-<!-- One paragraph: what the project is, who it's for, current milestone/target. -->
+## Response Discipline
 
-**[PROJECT_NAME]** — [brief description].
-
-## Tech Stack
-
-<!-- List primary languages, frameworks, key libraries. -->
-
-[Language] + [Framework/Engine]. Key libs: [lib1], [lib2], [lib3].
-
-## Workspace
-
-<!-- Describe top-level directories and their roles. -->
-
-```
-[dir1]/   — [purpose]
-[dir2]/   — [purpose]
-[dir3]/   — [purpose]
-```
-
-## Architecture Rules
-
-<!-- Project-specific invariants the AI must never violate. -->
-
-1. **[Rule name].** [Rule description.]
-2. **[Rule name].** [Rule description.]
-
----
-
-## Project Knowledge
-
-Project state and cross-session context live in `ai-docs/`.
-Read `_index.md` at session start.
-Before creating or editing tickets, load `/write-ticket` for conventions.
-Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
-full path — stems stay stable across status moves.
-When starting work on a ticket, move it to `wip/` immediately.
-
-**Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
-`### Result` entries, and inline code comments — must be in English regardless of
-conversation language. Human-facing UI strings are exempt.
-
-<!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
-
-ai-docs/
-  _index.md          — single session-start read; project context
-  mental-model/      — project map: contracts, coupling, architectural narrative
-  deps/              — external library API delta docs
-  ref/               — static reference material (external specs, protocol docs, design notes)
-  tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
-
-_index.md should cover:
-  - Architecture (module/directory map, relationships)
-  - Conventions (tickets, dependency docs, naming rules)
-  - Build/test commands and operational pitfalls
-  - Session notes (cross-session intent only, 2-5 lines max, delete when stale)
-
-Adapt structure to fit the project — these are guidelines, not a rigid schema.
--->
+- **Evidence before claims.** Run verification commands and read output before
+  stating success. Never use "should pass", "probably works", or "looks correct."
+- **No performative agreement.** Never respond with "Great point!", "You're
+  absolutely right!", or similar. Restate the technical requirement, verify
+  against the codebase, then act (or push back with reasoning).
+- **Actions over words.** "Fixed. [what changed]" or just show the diff.
+  Skip gratitude expressions and filler.
 
 ## Code Standards
 
@@ -107,29 +54,78 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
   > Forward: <what future phases must know>
 ```
 
-When a commit touches ticket-driven work, include `## Ticket Updates` with
-the ticket stem and any forward-facing findings that future phases need.
-
 ### Session Start
 
-- Read `ai-docs/_index.md` for project context.
 - Run `git log -10` for recent changes. (without `--oneline`!)
-
-### Response Discipline
-
-- **Evidence before claims.** Run verification commands and read output before
-  stating success. Never use "should pass", "probably works", or "looks correct."
-- **No performative agreement.** Never respond with "Great point!", "You're
-  absolutely right!", or similar. Restate the technical requirement, verify
-  against the codebase, then act (or push back with reasoning).
-- **Actions over words.** "Fixed. [what changed]" or just show the diff.
-  Skip gratitude expressions and filler.
 
 ### Context Window Discipline
 
-- Keep context small. Load only the module docs relevant to the current task.
-- Source code is the ground truth; docs supplement it.
-- When a module doc drifts from source, update the doc (or flag it).
+- Source code is ground truth; load only docs relevant to the current task. Update drifted docs on contact.
+
+---
+
+## Project Summary
+
+<!-- One paragraph: what the project is, who it's for, current milestone/target. -->
+
+**[PROJECT_NAME]** — [brief description].
+
+## Tech Stack
+
+<!-- List primary languages, frameworks, key libraries. -->
+
+[Language] + [Framework/Engine]. Key libs: [lib1], [lib2], [lib3].
+
+## Workspace
+
+<!-- Describe top-level directories and their roles. -->
+
+```
+[dir1]/   — [purpose]
+[dir2]/   — [purpose]
+[dir3]/   — [purpose]
+```
+
+## Architecture Rules
+
+<!-- Project-specific invariants the AI must never violate. -->
+
+1. **[Rule name].** [Rule description.]
+2. **[Rule name].** [Rule description.]
+
+## Project Knowledge
+
+Project state and cross-session context live in `ai-docs/`.
+Before creating or editing tickets, load `/write-ticket` for conventions.
+Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
+full path — stems stay stable across status moves.
+When starting work on a ticket, move it to `wip/` immediately.
+
+**Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
+and inline code comments — must be in English regardless of conversation language.
+Human-facing UI strings are exempt.
+
+<!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
+
+ai-docs/
+  _index.md          — single session-start read; project context
+  mental-model/      — project map: contracts, coupling, architectural narrative
+  deps/              — external library API delta docs
+  ref/               — static reference material (external specs, protocol docs, design notes)
+  tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
+
+_index.md should cover:
+  - Architecture (module/directory map, relationships)
+  - Conventions (tickets, dependency docs, naming rules)
+  - Build/test commands and operational pitfalls
+  - Session notes (cross-session intent only, 2-5 lines max, delete when stale)
+
+Adapt structure to fit the project — these are guidelines, not a rigid schema.
+-->
+
+<!-- Inclusion test: if breaking this rule makes a skill produce
+     wrong results, it belongs here. Everything else goes in
+     _index.md (context) or skills (process). -->
 
 <!-- MIGRATION CHECKLIST — apply on contact, then delete completed items.
 
@@ -163,6 +159,9 @@ the ticket stem and any forward-facing findings that future phases need.
       decisions that inform the current session.
 - [ ] If Commit Rules lack `## Ticket Updates`, add it. Ticket-driven
       commits must record the stem and forward-facing findings.
+- [ ] If the `<!-- Inclusion test: ... -->` comment block is missing above
+      this checklist, add it. Do not remove it after migration — it is a
+      permanent authoring guardrail.
 
 Prioritize migrating universal conventions (ai-docs/ structure, workflow
 procedures, code standards) from the current template. Project-specific
