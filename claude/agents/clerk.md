@@ -21,7 +21,7 @@ edits: you choose how to phrase, never what to decide.
 
 ## Process
 
-1. **At spawn**: Read `~/.claude/skills/write-ticket/SKILL.md` in full — load conventions explicitly. If it cascades to `/write-spec`, read that too. If the spawn prompt names existing tickets, read them and prepare a summary (active phase, completed count, open questions, path). Otherwise acknowledge and wait.
+1. **At spawn**: Read `~/.claude/skills/write-ticket/SKILL.md` in full — load conventions explicitly. If the spawn prompt names existing tickets, read them and prepare a summary (active phase, completed count, open questions, path). Otherwise acknowledge and wait.
 2. **Handle queries**: Answer from your loaded ticket state using the query output format below.
 3. **Handle edit directives**: Apply the edit following `/write-ticket` conventions. Commit on the current branch with a brief message (`docs(tickets): <what>`). Report what changed, file path, and flag any convention issues.
 4. **Ambiguity**: If a directive is ambiguous or missing required fields, ask the caller before applying. Do not guess.

@@ -51,15 +51,13 @@ conversation language. Human-facing UI strings are exempt.
 
 ai-docs/
   _index.md          — single session-start read; project context
-  spec/              — external-facing feature specs (what the project does)
-  mental-model/      — architecture docs, regenerable from source
+  mental-model/      — project map: contracts, coupling, architectural narrative
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
   tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
 
 _index.md should cover:
   - Architecture (module/directory map, relationships)
-  - Spec index (list spec files with one-line summaries)
   - Conventions (tickets, dependency docs, naming rules)
   - Build/test commands and operational pitfalls
   - Session notes (cross-session intent only, 2-5 lines max, delete when stale)
@@ -137,8 +135,10 @@ the ticket stem and any forward-facing findings that future phases need.
 
 - [ ] If `ai-docs/_memory.md` exists, merge any useful content into
       `ai-docs/_index.md` and delete `_memory.md`.
-- [ ] If `ai-docs/spec/` does not exist, set it up. Load `/write-spec` for
-      conventions. Add a spec index section to `_index.md`.
+- [ ] If `ai-docs/spec/` exists, merge architectural narrative and design
+      rationale into `ai-docs/mental-model/` docs. Remove API signatures,
+      struct layouts, and status tracking (already in source/tickets).
+      Delete `ai-docs/spec/` after migration.
 - [ ] If tickets lack `plans:` frontmatter, add it (use `null` for unplanned
       phases). Audit phase content: discussion decisions stay in tickets,
       codebase-derived details belong in plans.

@@ -41,7 +41,6 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec check** — if the ticket introduces, changes, or removes user-facing behavior (typically `feat` or behavior-altering `bug`), invoke `/write-spec` to add or update spec entries with 🚧 markers. Internal-only tickets (`refactor`, `chore`, most `research`) skip this.
 
 ## On: delegate
 
@@ -77,10 +76,6 @@ Place in `idea/` when the topic is exploratory or underspecified; place in `todo
 ### judge: phase-need
 
 Prefer more phases over fewer. An overly granular ticket is cheaper to merge than an oversized phase that stalls mid-implementation. Single-component, single-concern work may be one phase.
-
-### judge: spec-check-applicability
-
-User-facing behavior changes (`feat`, behavior-altering `bug`) trigger spec check. Internal-only changes (`refactor`, `chore`, most `research`, `epic` decomposition) do not.
 
 ## Templates
 

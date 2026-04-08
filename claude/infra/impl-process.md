@@ -18,7 +18,6 @@
   > if Critical/Important: fix → re-verify → re-review (loop until clean)
 [ ] [fixed] Report to user — user approves before doc updates
 [ ] [fixed] Update mental model — dispatch mental-model-updater subagent
-[ ] [fixed] Update spec — dispatch spec-updater subagent
 [ ] [fixed] Update project docs — ai-docs/_index.md, ticket status move
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Merge & cleanup — merge --no-ff → delete branch
@@ -66,10 +65,9 @@ Act on the diagnosis.
 ## §Doc Pipeline
 
 1. Dispatch **mental-model-updater** with changed files and summary. Skip if no impact. Wait.
-2. Dispatch **spec-updater** with base commit. Skip if no `ai-docs/spec/`. Wait.
-3. Update `ai-docs/_index.md` if project capabilities changed.
-4. If completing a ticket phase, move ticket status via `git mv` (load `/write-ticket` for conventions).
-5. Prune aggressively — docs reflect current state only.
+2. Update `ai-docs/_index.md` if project capabilities changed.
+3. If completing a ticket phase, move ticket status via `git mv` (load `/write-ticket` for conventions).
+4. Prune aggressively — docs reflect current state only.
 
 ## §Report
 
