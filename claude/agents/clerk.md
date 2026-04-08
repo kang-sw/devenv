@@ -4,6 +4,11 @@ description: >
   Ticket management agent. Owns session ticket files — all ticket read
   and write access flows through the clerk. Translates lead decisions
   into write-ticket-compliant edits.
+
+  Usage: Spawn ONE clerk (name: "clerk") at session start or on first
+  ticket need. Reuse via SendMessage(to: "clerk") for every subsequent
+  ticket read/write — never spawn additional instances. The clerk is
+  a long-lived session agent, not a per-operation disposable.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
 ---
