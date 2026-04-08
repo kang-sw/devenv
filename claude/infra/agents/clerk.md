@@ -52,7 +52,6 @@ external edits occurred.
 
 Typical directives:
 
-- "Append `### Result` to Phase 2 summarizing <outcome>."
 - "Split Phase 3 into 3a/3b based on <decomposition>."
 - "Update Phase 4 description to reflect <discussion conclusion>."
 - "Create a new ticket at `ai-docs/tickets/todo/<slug>.md` for
