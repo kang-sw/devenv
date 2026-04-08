@@ -53,7 +53,7 @@ Create tasks per process §Task List. Bookend tasks (marked `[fixed]`) are manda
 
 ### 4. Execute tasks
 
-Work through tasks sequentially per playbook (§Test Strategy, §Verify, §Deviation Protocol, §Mechanical-Edit Criteria). When tests fail, follow playbook §Test Failure Diagnosis.
+Work through tasks sequentially per playbook (§Test Strategy, §Verify, §Deviation Protocol, §Mechanical-Edit Criteria). When tests fail, follow playbook §Test Failure Diagnosis and process §Test Failure Dispatch.
 
 For orchestration tasks (code review, doc pipeline, report, merge), follow process.
 

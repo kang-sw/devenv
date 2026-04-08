@@ -28,7 +28,7 @@ Target: $ARGUMENTS
 
 1. **Understand** — Read the ticket/description. If prior phases exist, read their linked plans and check `git log --grep=<ticket-stem>` for `## Ticket Updates` with phase forwards (earlier discoveries override original assumptions). Load **all** files in `ai-docs/mental-model/` via Read/Glob directly — never delegate initial loading.
 2. **Research** — Adapt depth per `judge: research-depth`. Use subagents for broad codebase searches; keep main context for synthesis. Before designing new components, search for reusable existing utilities or patterns.
-3. **Draft** — Generate path `ai-docs/plans/YYYY-MM/DD-hhmm.<kebab-name>.md`. Write using `plan-file` template. Include only sections that carry information. Apply `judge: plan-depth` to calibrate detail level. After drafting, run the data-contract gate (Invariant 6) and self-containedness check ("Could an agent with no prior context execute this?").
+3. **Draft** — Generate path `ai-docs/plans/YYYY-MM/DD-hhmm.<kebab-name>.md`. Write using `plan-file` template. Include only sections that carry information. Apply `judge: plan-depth` to calibrate detail level. After drafting, run the data-contract gate (capsule-boundary contracts invariant) and self-containedness check ("Could an agent with no prior context execute this?").
 4. **Verify** — Dispatch a sonnet subagent with the `verification-prompt` template. Fix Critical issues. Assess Important — revise if valid. Skip Minor unless useful.
 5. **Finalize** — Call `EnterPlanMode` and write the `plan-mode-output` template (executor is always `/implement`). If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
 

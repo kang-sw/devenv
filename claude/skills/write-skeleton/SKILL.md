@@ -31,7 +31,7 @@ Target: $ARGUMENTS
    ```
    Agent(
      description = "gather adjacent contracts",
-     subagent_type = "Explore",
+     subagent_type = "Explore",  # read-only codebase search agent; faster than general-purpose for pure exploration
      prompt = "Find and return the public API surface of <module>:
                type definitions, public function signatures, trait impls.
                Read source files directly — do not summarize."

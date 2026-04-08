@@ -41,7 +41,7 @@ Sessions in this repo typically involve:
 The workflow skills (discuss, write-ticket, write-skeleton, write-plan,
 implement, etc.) are **authored** here but **used** in downstream projects.
 When editing skills, think about how they compose in the canonical flows:
-- Full ceremony: `/discuss` → `/write-ticket` → `/write-skeleton` → `/write-plan` → `/implement`
+- Full ceremony: `/discuss` → `/write-ticket` → `/write-skeleton` → (`/write-plan`) → `/implement`
 - Direct: `/implement <description>`
 - Delegation: `/marathon <topic>` — team-based delegation (pending redesign)
 

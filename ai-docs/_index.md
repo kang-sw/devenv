@@ -39,12 +39,12 @@ claude/infra/
 claude/skills/
   discuss/           — explore approach/direction, capture as tickets
   write-ticket/      — create/edit tickets in ai-docs/tickets/
-  write-skeleton/    — public interface stubs + integration tests (NEW)
+  write-skeleton/    — public interface stubs + integration tests
   write-plan/        — deep codebase research → implementation plan
   implement/         — structured implementation (plan-driven or ad-hoc)
   write-spec/        — external-facing feature specs
-  marathon/          — team-based delegation (pending redesign → coordination mode)
-  sprint/            — pending removal (absorbed by skeleton + implement)
+  marathon/          — team-based delegation (redesign planned → coordination mode)
+  sprint/            — scheduled for removal (absorbed by skeleton + implement)
   monologue/         — continuous operational narration
   chat-over-session/ — multi-agent chat across sessions
   manual-think/      — manual chain-of-thought when native thinking unavailable
