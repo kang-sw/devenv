@@ -2,6 +2,7 @@
 title: "Delegation model consolidation — flat skill architecture, session mode removal"
 related:
   - 260405-research-marathon-delegation-hardening  # superseded — marathon removed entirely
+completed: 2026-04-08
 ---
 
 # Delegation Model Consolidation

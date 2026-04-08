@@ -69,6 +69,4 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 ## Session Notes
 
 <!-- Cross-session intent only, 2-5 lines max, delete when stale. -->
-- Delegation model consolidation — sprint/marathon removed, delegated-implement
-  landed. Phase 6 (write-ticket clerk delegation) remains
-  (see ticket `260407-research-delegation-model-consolidation`).
+<!-- no active session notes -->
