@@ -42,9 +42,8 @@ claude/skills/
   write-skeleton/    — public interface stubs + integration tests
   write-plan/        — deep codebase research → implementation plan
   implement/         — structured implementation (plan-driven or ad-hoc)
+  delegated-implement/ — Tier 3 delegation: implementer + reviewer cycle
   write-spec/        — external-facing feature specs
-  marathon/          — scheduled for removal (session mode obsoleted)
-  sprint/            — scheduled for removal (session mode obsoleted)
   monologue/         — continuous operational narration
   chat-over-session/ — multi-agent chat across sessions
   manual-think/      — manual chain-of-thought when native thinking unavailable
@@ -56,7 +55,7 @@ claude/skills/
 ```
 Full ceremony:  /discuss → /write-ticket → /write-skeleton → (/write-plan) → /implement
 Direct:         /implement <description>
-Delegation:     /delegated-implement (planned — implementer + reviewer cycle)
+Delegation:     /delegated-implement (implementer + reviewer cycle)
 ```
 
 Agent suggests next step at each point; user decides. No auto-chaining.
@@ -70,6 +69,6 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 ## Session Notes
 
 <!-- Cross-session intent only, 2-5 lines max, delete when stale. -->
-- Delegation model consolidation in progress — skeleton + implement outline
-  landed, session modes (sprint/marathon) decided for removal, delegated-implement
-  planned (see ticket `260407-research-delegation-model-consolidation`).
+- Delegation model consolidation — sprint/marathon removed, delegated-implement
+  landed. Phase 6 (write-ticket clerk delegation) remains
+  (see ticket `260407-research-delegation-model-consolidation`).
