@@ -14,7 +14,7 @@ description: >-
 - `> [assumption]` before every action — no exceptions, even trivial ones.
 - `> [observe]` after every tool result.
 - `> [reading]` then `> [reading:neutralize]` at every user message, before thinking.
-- **All blocks in English**. Final user-facing response: match the user's language.
+- **All blocks in English — no exceptions.**
 - Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
 - When a prior block surfaced drift or challenge, restate it before acting.
 - Depth scales with complexity. Honor user signals ("think harder", `(CoT Level: high)`) with more challenge-resolve iterations.
