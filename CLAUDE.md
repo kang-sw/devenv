@@ -7,11 +7,12 @@ authoring. Neovim (LazyVim), Claude Code skills/agents, tmux, WezTerm, shell
 dotfiles. One-shot `install.sh` for macOS/WSL/Linux.
 
 This repo is **not a software project** — it is a configuration and template
-repository. `ai-docs/` may exist but is not structured like downstream
-projects — no mental-model directory, no spec. Tickets here track skill
-design research, not software implementation. The skills and agents
-defined here are consumed by other projects via symlink (`install.sh`
-handles this).
+repository. Tickets here track skill design research, not software
+implementation. The skills and agents defined here are consumed by other
+projects via symlink (`install.sh` handles this).
+
+Read `ai-docs/_index.md` at session start for reference docs, infra layout,
+and skill inventory.
 
 ## Workspace
 
@@ -37,13 +38,12 @@ Sessions in this repo typically involve:
 - **Template maintenance** — updating `CLAUDE.template.md` and migration guides
 - **Dotfile/config changes** — nvim, tmux, shell, WezTerm configurations
 
-The workflow skills (discuss, write-ticket, write-plan, implement, etc.) are
-**authored** here but **used** in downstream projects. When editing skills,
-think about how they compose in the canonical flows:
-- Full ceremony: `/discuss` → `/write-ticket` → `/write-plan` → `/implement`
+The workflow skills (discuss, write-ticket, write-skeleton, write-plan,
+implement, etc.) are **authored** here but **used** in downstream projects.
+When editing skills, think about how they compose in the canonical flows:
+- Full ceremony: `/discuss` → `/write-ticket` → `/write-skeleton` → `/write-plan` → `/implement`
 - Direct: `/implement <description>`
-- Default (token-efficient): `/marathon <topic>` — team-based delegation
-- Lightweight: `/sprint <topic>` — single-agent, trivial changes only
+- Delegation: `/marathon <topic>` — team-based delegation (pending redesign)
 
 ## Commit Rules
 

@@ -37,6 +37,10 @@ Target: $ARGUMENTS
 
 Before creating tasks, produce a lightweight inline outline. This is mechanical — apply even for trivial changes.
 
+**Plan-driven:** When a concrete plan has been loaded in step 1, the plan *is* the outline. Skip the scan/sketch below — derive tasks directly from the plan's steps. Still perform the risk check against skeleton stubs if they exist.
+
+**Ad-hoc / brief-driven:**
+
 1. **Reuse scan** — search for existing utilities, patterns, or components that cover part of the work. Grep for similar functionality; check mental-model docs for documented extension points.
 2. **Placement sketch** — list which files get what changes (1-2 lines each). For new files, note where they fit in the module structure.
 3. **Risk check** — identify anything that touches public contracts, cross-module boundaries, or unfamiliar patterns. If skeleton stubs exist, verify the outline stays within their contracts.
