@@ -2,8 +2,11 @@
 name: write-plan
 description: >
   When the user mentions creating or drafting an implementation plan,
-  or when non-trivial implementation needs codebase research before
-  action, invoke this.
+  or when non-trivial implementation needs deep codebase research before
+  action, invoke this. Typically follows /write-skeleton when
+  implementation involves complex multi-module interaction. For simpler
+  cases, /implement's inline outline suffices — suggest /write-plan
+  only when depth warrants it.
 argument-hint: [ticket-path or description]
 ---
 

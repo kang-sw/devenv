@@ -33,11 +33,21 @@ Target: $ARGUMENTS
 4. **Ad-hoc**: research the change area. Before designing new components, search for reusable existing utilities or patterns.
 5. Record current branch as `<original-branch>`. If already on an `implement/` branch, treat as resumed session — infer `<original-branch>` from merge-base with `main`, skip branch creation, continue from existing task list. Otherwise create `implement/<scope>` from current branch.
 
-### 2. Create task list
+### 2. Outline (mandatory)
+
+Before creating tasks, produce a lightweight inline outline. This is mechanical — apply even for trivial changes.
+
+1. **Reuse scan** — search for existing utilities, patterns, or components that cover part of the work. Grep for similar functionality; check mental-model docs for documented extension points.
+2. **Placement sketch** — list which files get what changes (1-2 lines each). For new files, note where they fit in the module structure.
+3. **Risk check** — identify anything that touches public contracts, cross-module boundaries, or unfamiliar patterns. If skeleton stubs exist, verify the outline stays within their contracts.
+
+The outline lives in your response text (not a file). It informs the task list that follows.
+
+### 3. Create task list
 
 Create tasks per process §Task List. Bookend tasks (marked `[fixed]`) are mandatory. Fill implementation tasks between them. State assumptions and success criteria before the first implementation task.
 
-### 3. Execute tasks
+### 4. Execute tasks
 
 Work through tasks sequentially per playbook (§Test Strategy, §Verify, §Deviation Protocol, §Mechanical-Edit Criteria). When tests fail, follow playbook §Test Failure Diagnosis.
 
