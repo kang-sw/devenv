@@ -44,6 +44,7 @@ claude/skills/
   implement/         — structured implementation (plan-driven or ad-hoc)
   delegated-implement/ — Tier 3 delegation: implementer + reviewer cycle
   write-spec/        — external-facing feature specs
+  team-lead/         — team orchestration mode (TeamCreate, coordination, shutdown)
   monologue/         — continuous operational narration
   manual-think/      — manual chain-of-thought when native thinking unavailable
   rebuild-mental-model/ — regenerate ai-docs/mental-model/
