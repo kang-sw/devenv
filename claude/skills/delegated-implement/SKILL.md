@@ -14,7 +14,7 @@ Target: $ARGUMENTS
 ## Invariants
 
 - This skill delegates — the lead does not read source code or write implementation.
-- Skeleton stubs and integration tests are the acceptance criteria. If they don't exist, stop and suggest `/write-skeleton` first.
+- Skeleton stubs and integration tests are the acceptance criteria.
 - The implementer and reviewer communicate directly; the lead receives only final reports.
 - One delegation cycle per invocation. For parallel work, dispatch multiple instances.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).

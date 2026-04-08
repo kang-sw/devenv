@@ -14,7 +14,7 @@ Topic: $ARGUMENTS
 ## Invariants
 
 - No source edits. Only documentation writes, only in the capture step.
-- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Completed phases are immutable — execution trace lives in merge commits (`git log --grep=<ticket-stem>`), not in the ticket.
+- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Completed phases are immutable.
 - Load active doc listing at start; read mental-model docs on-demand as topics emerge.
 - Dispatch Explore agents for implementation details beyond mental-model docs — never read source directly.
 - When docs are stale or insufficient, say so and suggest `/rebuild-mental-model` — do not speculate.

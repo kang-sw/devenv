@@ -18,8 +18,8 @@ Target: $ARGUMENTS
 - Before touching a module, verify its contracts and invariants in mental-model docs; prefer documented extension points over new abstractions.
 - When a plan is loaded in context, it is the spec — follow its contracts, do not re-research or second-guess. Deviate only per playbook §Deviation Protocol.
 - Claim "pass" only after reading full test/build output — never "should pass" or "looks correct."
-- Do not include design rationale in code-review prompts — the reviewer evaluates independently.
-- Commit freely on the feature branch; the merge commit carries the final summary.
+- Do not include design rationale in code-review prompts.
+- Commit freely on the feature branch.
 - User approves the report before doc-update tasks proceed.
 - Dismiss false-positive review issues with a brief rationale — do not apply unnecessary fixes.
 

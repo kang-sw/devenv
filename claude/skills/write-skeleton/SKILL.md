@@ -17,7 +17,6 @@ Target: $ARGUMENTS
 - Main agent writes the skeleton directly. Gathering adjacent contracts may be delegated; writing stubs and tests is not.
 - Stubs define public interfaces only: type definitions, trait/interface declarations, function signatures with `todo!()` / `unimplemented` / `raise NotImplementedError` bodies.
 - Integration tests verify contract joints — cross-module interactions, data flow across boundaries. Not unit tests for internals.
-- The skeleton commit is a stable foundation: implementation can be reverted without losing contracts.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
 
 ## On: invoke

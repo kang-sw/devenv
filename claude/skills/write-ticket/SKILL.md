@@ -14,14 +14,14 @@ Target: $ARGUMENTS
 
 - Ticket path: `ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md` — `YYMMDD` is creation date, never changes on move.
 - Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`.
-- Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by full path — stems survive status moves.
+- Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by full path.
 - Status is directory-based only: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). Never duplicate status in frontmatter.
-- Move tickets with `git mv`; no cross-link updates needed (stems are stable).
+- Move tickets with `git mv`; no cross-link updates needed.
 - Phase numbers are sequential and **stable** — mark dropped phases `[dropped]`, never renumber.
 - One phase touches **one cohesive component** unless the change is inherently cross-component.
 - Each phase has its own success criteria or test surface.
 - All ticket content must be in English regardless of conversation language.
-- Tickets are write-once intent documents. Execution trace and phase forwards live in merge commits (`git log --grep=<ticket-stem>`), not in the ticket.
+- Tickets are write-once intent documents.
 
 ## On: invoke
 

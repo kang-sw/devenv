@@ -18,10 +18,10 @@ _(If no argument was provided, proceed without session context.)_
 - Every action gets a monologue block before it and another after the resulting observation. No exceptions.
 - All monologue blocks are in English, regardless of conversation language.
 - Block format is `> [monologue]` on its own line, free-form self-talk beneath, no closing tag.
-- A missing block is a rule violation. Block length scales with reasoning depth: trivial actions may collapse to one line, non-trivial blocks err verbose over terse — anchor density is the point.
+- Block length scales with reasoning depth: trivial actions may collapse to one line, non-trivial blocks err verbose over terse.
 - Every before-block states an assumption phrased so observation can falsify it. Vague expectations like "should work" are disallowed.
 - Before-blocks for user responses begin with a `Reading:` preamble — a neutralized, decomposed, English restatement of the user's message. Verbatim quoting is not a reading.
-- When the action follows reasoning that weighed alternatives, append a `Dropped:` tail to the before-block listing each rejected candidate with a one-phrase reason. Reasonless entries are noise, not anchors.
+- When the action follows reasoning that weighed alternatives, append a `Dropped:` tail to the before-block listing each rejected candidate with a one-phrase reason.
 - Every after-block classifies the result as match, drift, or abandon (see Vocabulary).
 - Never proceed past drift without naming the broken assumption, the new challenge, and the plan adjustment.
 - When a prior block surfaced drift or a challenge, later blocks restate the finding briefly before acting on it.
