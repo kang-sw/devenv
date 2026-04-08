@@ -12,7 +12,7 @@ Read before authoring or modifying skills, agents, or infra:
 
 | Document | Purpose |
 |----------|---------|
-| `ai-docs/ref/skill-authoring.md` | Skill document layout, invariant checklist, doctrine format |
+| `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
 | `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol |
 | `claude/infra/impl-process.md` | Implementation lifecycle: task list, code review, doc pipeline, merge |
 | `claude/infra/agents/_common.md` | Shared subagent rules: communication, branches, exploration |
