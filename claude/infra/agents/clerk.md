@@ -56,7 +56,7 @@ Typical directives:
 - "Update Phase 4 description to reflect <discussion conclusion>."
 - "Create a new ticket at `ai-docs/tickets/todo/<slug>.md` for
   <topic>."
-- "Transition ticket to `doing/` via `git mv`."
+- "Transition ticket to `wip/` via `git mv`."
 
 For each:
 
@@ -80,4 +80,4 @@ and disambiguate by path.
 
 - Never modify files outside ticket scope — no source changes, no
   mental-model edits, no CLAUDE.md touches. `git mv` for status
-  transitions (`todo/` → `doing/` → `done/`) is in scope.
+  transitions (`todo/` → `wip/` → `done/`) is in scope.

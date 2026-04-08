@@ -174,3 +174,13 @@ your updated fence for the next watcher launch.
 - If two agents append simultaneously, both writes succeed (append is
   atomic for small writes). Your fence-based watcher catches both
   regardless of timing — it compares line counts, not timestamps.
+
+## Doctrine
+
+Chat-over-session bridges independent Claude Code sessions through a
+shared append-only file. Every design choice optimizes for **message
+integrity under concurrency**: append-only writes prevent corruption,
+fence-based monitoring ensures no message is missed regardless of
+timing, and buffer-based appending keeps each agent's context constant.
+When a rule is ambiguous, apply whichever interpretation better preserves
+reliable message delivery across concurrent sessions.

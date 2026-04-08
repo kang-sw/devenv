@@ -153,3 +153,13 @@ Report:
 - Dirty scope: which domains were rebuilt and why
 - Documents created / updated / removed
 - Verifier results: corrections applied, items for manual review
+
+## Doctrine
+
+Mental-model documents exist so that a developer modifying the codebase
+does not cause silent failures from ignorance of implicit contracts.
+Every authoring choice optimizes for **modification-relevant knowledge
+density**: only facts that pass the inclusion test (silent-failure risk
+AND not quickly derivable from source) earn space. When a rule is
+ambiguous, apply whichever interpretation better preserves the density
+of modification-relevant knowledge while excluding derivable content.

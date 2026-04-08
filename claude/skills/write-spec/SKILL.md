@@ -110,3 +110,14 @@ Other fields (`title`, `summary`) are preserved.
    implementation is confirmed.
 
 **Language:** All spec content must be in English regardless of conversation language.
+
+## Doctrine
+
+Spec documents are the pivot between user intent and implementation — a
+planner or implementer reading the spec must know exactly what behavior
+is expected without reading source. Every authoring choice optimizes for
+**external-perspective accuracy**: features described as they appear to
+users, markers reflecting actual implementation state, constraints
+attached to their features. When a rule is ambiguous, apply whichever
+interpretation better preserves accuracy of the external-perspective
+description.
