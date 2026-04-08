@@ -1,5 +1,6 @@
 ---
 title: Consolidate mental-model management and remove spec layer
+completed: 2026-04-08
 plans:
   phase-1: null
   phase-2: null
