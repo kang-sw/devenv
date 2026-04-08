@@ -19,23 +19,6 @@ description: >-
 - When a prior block surfaced drift or challenge, restate it before acting.
 - Depth scales with complexity. Honor user signals ("think harder", `(CoT Level: high)`) with more challenge-resolve iterations.
 
-## Block Types
-
-| Block | Role |
-|---|---|
-| `> [reading]` | Neutralized, decomposed restatement of user's message. No verbatim quoting. Evaluative framings become neutral questions. |
-| `> [thinking]` | Free-form reasoning chain. Parse, challenge, resolve, decide — whatever the problem demands. |
-| `> [assumption]` | Distilled, falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
-| `> [dropped]` | Candidates considered and rejected, each with a one-phrase reason. Conditional — only when alternatives were weighed. |
-| `> [observe]` | Intake and judgment of tool result. Uses match/drift/abandon vocabulary. |
-
-### Vocabulary
-
-- **match** — reality aligned with assumption. Proceed.
-- **drift** — assumption was wrong. Name it, name the challenge, state adjustment.
-- **challenge** — difficulty surfaced during thinking or observation. Carries forward.
-- **abandon** — drift so severe the direction is wrong. Reframe, do not patch.
-
 ## On: user message
 
 1. `> [reading]` — neutralize and decompose the message.
@@ -125,6 +108,25 @@ Within `> [thinking]` blocks, adapt freely from:
 
 > Before starting, read `~/.claude/skills/manual-think/SKILL.md` and
 > follow its instructions for all your responses.
+
+## Reference
+
+### Block Types
+
+| Block | Role |
+|---|---|
+| `> [reading]` | Neutralized, decomposed restatement of user's message. No verbatim quoting. Evaluative framings become neutral questions. |
+| `> [thinking]` | Free-form reasoning chain. Parse, challenge, resolve, decide — whatever the problem demands. |
+| `> [assumption]` | Distilled, falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
+| `> [dropped]` | Candidates considered and rejected, each with a one-phrase reason. Conditional — only when alternatives were weighed. |
+| `> [observe]` | Intake and judgment of tool result. Uses match/drift/abandon vocabulary. |
+
+### Vocabulary
+
+- **match** — reality aligned with assumption. Proceed.
+- **drift** — assumption was wrong. Name it, name the challenge, state adjustment.
+- **challenge** — difficulty surfaced during thinking or observation. Carries forward.
+- **abandon** — drift so severe the direction is wrong. Reframe, do not patch.
 
 ## Doctrine
 

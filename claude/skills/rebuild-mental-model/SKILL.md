@@ -8,54 +8,89 @@ argument-hint: "[target domain or special instruction] (omit for full rebuild)"
 
 Target: $ARGUMENTS
 
-## What Mental Model Documents Are
+## Invariants
 
-Mental-model documents capture **operational knowledge for modifying the codebase**.
+- Mental-model documents capture operational knowledge for modifying the codebase: module contracts, coupling maps, extension points, common mistakes, technical debt.
+- Not API references, type listings, or source paraphrases — those are derivable from code.
+- Inclusion test: record only facts where (a) ignorance causes silent failure AND (b) not derivable from reading entry-point files in <30 seconds. Both must hold.
+- Never record: type/struct field listings, function signatures, API route enumerations, source-paraphrasing descriptions, information already in `_index.md`.
+- No direct source reading — delegate to subagents. Read source yourself only when a subagent summary is clearly insufficient.
+- Each document covers a cross-cutting concern, not a source module. Directory is flat: `ai-docs/mental-model/overview.md` + `<domain>.md` files.
+- Target 60–120 lines per domain. Split past 150; merge thin documents read together.
+- Incremental by default — only rebuild affected domains unless full rebuild is requested.
 
-They are **not** API references, type listings, or source paraphrases.
+## On: invoke
 
-They are:
-- **Module contracts** — implicit invariants not enforced by the type system
-- **Coupling maps** — which changes propagate where
-- **Extension points** — where the code is designed to grow, and what to touch
-- **Common mistakes** — silent-failure footguns
-- **Technical debt** — known limitations, fragile areas
+### 1. Determine dirty scope
 
-## Inclusion Test
+1. Check whether `ai-docs/mental-model/` exists.
+   - **Exists →** Find last commit per domain doc via
+     `git log -1 --format="%H" -- ai-docs/mental-model/<file>`. Collect changed
+     source files via `git diff --name-only <base> HEAD`. Map changed files to
+     affected domains.
+   - **Does not exist →** Full rebuild.
+2. If `$ARGUMENTS` names a specific domain, only rebuild that domain (check
+   cross-domain coupling too).
+3. Carry forward any special instructions from `$ARGUMENTS`.
 
-Before recording any fact, apply this filter:
+### 2. Explore source (subagent-delegated)
 
-> "Would a developer cause a **silent failure** by not knowing this,
-> AND is this NOT derivable from reading the entry point files in <30 seconds?"
+Dispatch one subagent per dirty domain with:
+- The entry point files AND files changed in the dirty scope
+- This analysis directive:
 
-- Both yes → **record** (contract, invariant, non-obvious coupling)
-- Either no → **omit**
+> Analyze this domain for a developer who needs to modify it.
+> Focus on what would cause silent failures if unknown:
+> 1. Implicit contracts between modules (ordering, data flow, sync)
+> 2. Coupling (changes here → must also change there)
+> 3. Extension points (registries, enums, plugin interfaces, config)
+> 4. Fragile areas (invariants that break silently, known debt)
+> 5. Common mistakes (forgetting required steps, silent failures)
+> 6. Distinguish existing patterns from scaffolded/planned features.
+> Be concrete: cite file paths, function names, specific types.
+> Do NOT produce type/field listings or paraphrase what functions do.
 
-Never record:
-- Type/struct field listings
-- Function signatures or argument counts
-- API route/endpoint enumerations
-- "This module does X" descriptions that paraphrase source code
-- Information already in `_index.md`
+Run subagents in parallel.
 
-## Constraints
+### 3. Write / update documents
 
-- **No direct source reading.** Delegate to subagents. Read source yourself only
-  when a subagent summary is clearly insufficient.
-- **Domain-oriented documents.** Each covers a cross-cutting concern, not a source
-  module. The directory is flat:
-  ```
-  ai-docs/mental-model/
-    overview.md          ← project-wide: package graph, shared patterns
-    <domain-a>.md
-    <domain-b>.md
-  ```
-- **Right-sized.** Target 60–120 lines per domain. Split past 150 lines.
-  Merge thin documents that are always read together.
-- **Incremental by default.** Only rebuild affected domains unless a full
-  rebuild is requested.
+Using subagent analyses, create or update `ai-docs/mental-model/` documents:
+- Follow the `document-format` template.
+- Apply the inclusion test to every claim before writing it.
+- Remove documents for domains that no longer exist.
+- Cross-reference other domain docs when relevant.
+- Tag unimplemented features as **(planned)**.
 
-## Document Format
+### 4. Verify (subagent-delegated)
+
+Dispatch one **mental-model-verifier** agent per updated domain with:
+- The full content of the document to verify
+- `git log --oneline --stat` for relevant files (last 30 commits or since last update)
+
+Process verifier output:
+- **[HIGH]**: Apply corrections directly.
+- **[LOW]**: Add if clearly relevant; otherwise collect for summary.
+- **[STALE]**: Rewrite or remove the recipe.
+- **[BLOAT]**: Remove — content fails inclusion test.
+
+### 5. Update overview.md and _index.md
+
+**overview.md**: Package graph, shared patterns, cross-domain contracts.
+
+**_index.md**: Update project-level descriptions and operational state only.
+Do not duplicate module-level detail into `_index.md` — that belongs in
+entry-point files (e.g. `mod.rs`, `index.ts`, `__init__.py`).
+
+### 6. Summary
+
+Report:
+- Dirty scope: which domains were rebuilt and why
+- Documents created / updated / removed
+- Verifier results: corrections applied, items for manual review
+
+## Templates
+
+### document-format
 
 ```markdown
 # [Domain Name]
@@ -86,73 +121,6 @@ Focus on mistakes that fail silently.
 ```
 
 Omit empty sections.
-
-## Step 0: Determine dirty scope
-
-1. Check whether `ai-docs/mental-model/` exists.
-   - **Exists →** Find the last commit that touched each domain document via
-     `git log -1 --format="%H" -- ai-docs/mental-model/<file>`. Collect changed
-     source files via `git diff --name-only <base> HEAD`. Map changed files to
-     affected domains.
-   - **Does not exist →** Full rebuild.
-2. If `$ARGUMENTS` names a specific domain, only rebuild that domain (check
-   cross-domain coupling too).
-3. Carry forward any special instructions from `$ARGUMENTS`.
-
-## Step 1: Explore source (subagent-delegated)
-
-Dispatch one subagent per dirty domain with:
-- The entry point files AND files changed in the dirty scope
-- This analysis directive:
-
-> Analyze this domain for a developer who needs to modify it.
-> Focus on what would cause silent failures if unknown:
-> 1. Implicit contracts between modules (ordering, data flow, sync)
-> 2. Coupling (changes here → must also change there)
-> 3. Extension points (registries, enums, plugin interfaces, config)
-> 4. Fragile areas (invariants that break silently, known debt)
-> 5. Common mistakes (forgetting required steps, silent failures)
-> 6. Distinguish existing patterns from scaffolded/planned features.
-> Be concrete: cite file paths, function names, specific types.
-> Do NOT produce type/field listings or paraphrase what functions do.
-
-Run subagents in parallel.
-
-## Step 2: Write / update documents
-
-Using subagent analyses, create or update `ai-docs/mental-model/` documents:
-- Follow the document format above.
-- Apply the inclusion test to every claim before writing it.
-- Remove documents for domains that no longer exist.
-- Cross-reference other domain docs when relevant.
-- Tag unimplemented features as **(planned)**.
-
-## Step 3: Verify (subagent-delegated)
-
-Dispatch one **mental-model-verifier** agent per updated domain with:
-- The full content of the document to verify
-- `git log --oneline --stat` for relevant files (last 30 commits or since last update)
-
-Process verifier output:
-- **[HIGH]**: Apply corrections directly.
-- **[LOW]**: Add if clearly relevant; otherwise collect for summary.
-- **[STALE]**: Rewrite or remove the recipe.
-- **[BLOAT]**: Remove — content fails inclusion test.
-
-## Step 4: Update overview.md and _index.md
-
-**overview.md**: Package graph, shared patterns, cross-domain contracts.
-
-**_index.md**: Update project-level descriptions and operational state only.
-Do not duplicate module-level detail into `_index.md` — that belongs in
-entry-point files (e.g. `mod.rs`, `index.ts`, `__init__.py`).
-
-## Step 5: Summary
-
-Report:
-- Dirty scope: which domains were rebuilt and why
-- Documents created / updated / removed
-- Verifier results: corrections applied, items for manual review
 
 ## Doctrine
 

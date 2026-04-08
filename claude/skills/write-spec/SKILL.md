@@ -11,26 +11,50 @@ argument-hint: "[component/feature name, or spec file path to update]"
 
 Target: $ARGUMENTS
 
-## Spec Conventions
+## Invariants
 
-**Purpose:** Spec documents describe **what the project does from the external
-perspective** — supported features, planned features, and constraints. They
-answer "does this project support X?" without reading source code.
+- Spec documents describe external-perspective behavior — what the project does, not how it is built.
+- Internal architecture, component coupling, data flow implementation belong in `ai-docs/mental-model/`, not specs.
+- Location: `ai-docs/spec/<name>.md`; index in `ai-docs/_index.md`.
+- No marker = implemented; 🚧 = planned/work-in-progress.
+- `#` = document title (excluded from feature index); `##` and deeper = features, no exceptions.
+- Prefix heading with 🚧 for unimplemented/planned features; nest freely for sub-features.
+- Attach constraints to their feature via `> [!note] Constraints` callout.
+- Verify each unmarked feature actually exists in the codebase before committing.
+- The `features:` frontmatter field is auto-generated — never edit manually.
+- All spec content must be in English regardless of conversation language.
 
-**Not a spec concern:** Internal architecture, component coupling, data flow
-implementation — those belong in `ai-docs/mental-model/`.
+## On: invoke
 
-**Location:** `ai-docs/spec/<name>.md`
+1. If `$ARGUMENTS` references an existing spec file, read it.
+2. If creating a new spec:
+   - Determine the appropriate scope (one feature area or component surface).
+   - Write the spec body following the `spec-format` template.
+   - Run `build-index.py` to generate the frontmatter feature index.
+   - Update the spec index in `ai-docs/_index.md`.
+3. If updating an existing spec:
+   - Read the spec first.
+   - Apply changes: add features, remove 🚧 markers for implemented items,
+     add new 🚧 entries for planned work, update constraints.
+   - Run `build-index.py` to regenerate the frontmatter.
+4. **Accuracy check** — Verify each unmarked feature actually exists in the
+   codebase (use Explore agent if needed). Do not remove 🚧 unless
+   implementation is confirmed.
 
-**Index:** `ai-docs/_index.md` maintains a spec section listing all spec files
-with one-line summaries.
+## Judgments
 
-### Markers
+### judge: body-verbosity
 
-- No marker = implemented and available
-- 🚧 = planned / work-in-progress (not yet implemented)
+| Level | When |
+|-------|------|
+| Minimal — one line per feature | Simple features with obvious behavior |
+| Thorough — scenarios, usage paths, examples, edge cases | Complex features where a future implementer or planner needs behavioral detail |
 
-### Document Format
+Default to thorough — spec is the pivot for all downstream work.
+
+## Templates
+
+### spec-format
 
 ```markdown
 ---
@@ -67,49 +91,15 @@ Description, usage paths, scenarios, examples as needed.
 ...
 ```
 
-**Heading rules:**
-- `#` = document title (excluded from feature index)
-- `##` and deeper = features — every heading is a feature, no exceptions
-- Prefix heading with 🚧 for unimplemented/planned features
-- Nest freely (`###`, `####`, ...) for sub-features
-- Attach constraints to their feature via `> [!note] Constraints` callout
+### build-index
 
-**Body verbosity:** Write as much detail as the feature warrants. Simple
-features get one line. Complex features get scenarios, usage paths, examples,
-edge cases — whatever a future implementer or planner needs to understand
-the intended behavior. Spec is the pivot for all downstream work, so
-thoroughness is valued over brevity.
-
-### Frontmatter Feature Index
-
-The `features:` field in frontmatter is **auto-generated** — do not edit
-manually. After writing or updating the spec body, run:
+After writing or updating the spec body:
 
 ```bash
 python3 <skill-dir>/build-index.py <spec-file.md>
 ```
 
-This parses the heading structure and rebuilds the feature tree in frontmatter.
-Other fields (`title`, `summary`) are preserved.
-
-## Steps
-
-1. If `$ARGUMENTS` references an existing spec file, read it.
-2. If creating a new spec:
-   - Determine the appropriate scope (one feature area or component surface).
-   - Write the spec body following the format above.
-   - Run `build-index.py` to generate the frontmatter feature index.
-   - Update the spec index in `ai-docs/_index.md`.
-3. If updating an existing spec:
-   - Read the spec first.
-   - Apply changes: add features, remove 🚧 markers for implemented items,
-     add new 🚧 entries for planned work, update constraints.
-   - Run `build-index.py` to regenerate the frontmatter.
-4. **Accuracy check** — Verify each unmarked feature actually exists in the
-   codebase (use Explore agent if needed). Do not remove 🚧 unless
-   implementation is confirmed.
-
-**Language:** All spec content must be in English regardless of conversation language.
+Parses heading structure, rebuilds feature tree in frontmatter. Preserves `title` and `summary`.
 
 ## Doctrine
 

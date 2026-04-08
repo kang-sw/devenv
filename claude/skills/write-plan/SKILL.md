@@ -17,18 +17,17 @@ Target: $ARGUMENTS
 ## Invariants
 
 - Plan must be self-contained: a fresh executor implements without re-researching.
-- Plan owns the gap between ticket (what) and executor (how): distill decisions, map affected code, supplement missing contracts.
+- Include every decision and constraint needed for implementation; exclude anything the executor can derive from code.
 - When plan definitions diverge from ticket sketches, plan takes precedence — note the change and rationale in Context.
 - Exclude: implementation code for pattern-following edits, construction-site inventories, line numbers, import statements.
 - One plan per ticket phase; if a phase exceeds ~10 actions, split via `/write-ticket` before continuing.
-- Scan draft for data contracts crossing capsule boundaries (wire formats, persistence schemas, public API types, config, env vars, CLI flags); if any are not in the ticket, present and wait for confirmation.
 - The plan file MUST be committed before finalizing.
 
 ## On: invoke
 
 1. **Understand** — Read the ticket/description. If prior phases exist, read their linked plans and check `git log --grep=<ticket-stem>` for `## Ticket Updates` with phase forwards (earlier discoveries override original assumptions). Load **all** files in `ai-docs/mental-model/` via Read/Glob directly — never delegate initial loading.
 2. **Research** — Adapt depth per `judge: research-depth`. Use subagents for broad codebase searches; keep main context for synthesis. Before designing new components, search for reusable existing utilities or patterns.
-3. **Draft** — Generate path `ai-docs/plans/YYYY-MM/DD-hhmm.<kebab-name>.md`. Write using `plan-file` template. Include only sections that carry information. Apply `judge: plan-depth` to calibrate detail level. After drafting, run the data-contract gate (capsule-boundary contracts invariant) and self-containedness check ("Could an agent with no prior context execute this?").
+3. **Draft** — Generate path `ai-docs/plans/YYYY-MM/DD-hhmm.<kebab-name>.md`. Write using `plan-file` template. Include only sections that carry information. Apply `judge: plan-depth` to calibrate detail level. After drafting, scan for data contracts crossing capsule boundaries (wire formats, persistence schemas, public API types, config, env vars, CLI flags) — if any are not in the ticket, present and wait for confirmation. Run self-containedness check ("Could an agent with no prior context execute this?").
 4. **Verify** — Dispatch a sonnet subagent with the `verification-prompt` template. Fix Critical issues. Assess Important — revise if valid. Skip Minor unless useful.
 5. **Finalize** — Call `EnterPlanMode` and write the `plan-mode-output` template (executor is always `/implement`). If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
 
