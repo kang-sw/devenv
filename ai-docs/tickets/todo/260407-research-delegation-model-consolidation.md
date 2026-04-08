@@ -1,23 +1,23 @@
 ---
-title: "Delegation model consolidation — sprint redesign, shared spawn patterns, agent decolonization"
+title: "Delegation model consolidation — flat skill architecture, session mode removal"
 related:
-  - 260405-research-marathon-delegation-hardening  # marathon-specific subset
+  - 260405-research-marathon-delegation-hardening  # superseded — marathon removed entirely
 ---
 
 # Delegation Model Consolidation
 
 After extracting shared infrastructure (`infra/impl-playbook.md`,
 `infra/impl-process.md`, `infra/agents/`), the delegation model across
-skills has clear structural problems. This ticket captures the remaining
-design decisions.
+skills had clear structural problems. This ticket captures design
+decisions and remaining implementation work.
 
 ## Problem
 
-Three entry points (implement, sprint, marathon) compose four concerns
+Three entry points (implement, sprint, marathon) composed four concerns
 (implementation discipline, lifecycle, team communication, session model)
-in inconsistent ways. Agent role files now live in `infra/agents/` but
-their content still assumes marathon context. Sprint carries full
-lifecycle ceremony despite being "lightweight."
+in inconsistent ways. Session modes (sprint, marathon) added complexity
+without irreducible value once individual skills gained clear delegation
+patterns.
 
 ## Completed (prior session)
 
@@ -59,9 +59,11 @@ what they do.
    research to subagents is fine; writing the skeleton itself is not
    delegated.
 
-2. **Sprint absorbed.** Sprint's roles are covered by the skill toolkit
-   (skeleton, implement, delegated-implement). Session modes are
-   unnecessary when the agent suggests skills per situation.
+2. **Session modes removed entirely.** Both sprint and marathon are
+   deleted. Their value is fully covered by the flat skill set.
+   Marathon's original justification (opus token cost) is resolved by
+   delegated-implement sending Tier 3 work to sonnet subagents.
+   Sprint was redundant once implement gained inline outline.
 
 3. **`/implement` inline outline — mandatory.** Every implementation,
    no matter how trivial, starts with: (a) search for reusable
@@ -72,13 +74,34 @@ what they do.
    outline but at greater depth, possibly delegated. Invoked when
    implementation involves complex multi-module interaction.
 
-5. **Phase 2 (delegation tool) — deferred.** Skeleton as delegation
-   protocol may obviate a separate `/delegate` skill. Revisit after
-   skeleton is in use.
+5. **Flat skill architecture.** No session modes, no team orchestration
+   layer. Each skill owns its own delegation pattern:
+   - `/delegated-implement` — implementer + reviewer cycle (new skill)
+   - `/write-plan` — can delegate research to planner subagent
+   - `/write-ticket` — gains clerk delegation mode for subagent edits
+   - `/write-skeleton` — can delegate contract gathering to Explore agent
+   Parallel work = dispatch multiple delegated-implements. No special
+   coordination mode needed.
 
-6. **Marathon → coordination mode (name TBD).** Marathon shrinks to
-   parallel dispatch + round checkpoints. No longer a heavyweight
-   execution framework. Rename pending.
+6. **infra/agents/ role files retained.** Role definitions survive as
+   references for subagent spawning. Marathon-specific language removed
+   (decolonization).
+
+### Target architecture
+
+```
+Workflow skills:
+  /discuss → /write-ticket → /write-skeleton → (/write-plan) → /implement
+  /delegated-implement  (Tier 3 delegation: implementer + reviewer)
+  /write-spec
+
+Utility skills:
+  /monologue, /manual-think, /rebuild-mental-model, /chat-over-session
+
+infra/agents/:
+  Role definitions consumed by skills when spawning subagents.
+  No team orchestration — each skill manages its own spawns.
+```
 
 ## Remaining phases
 
@@ -87,23 +110,29 @@ what they do.
 Agent files in `infra/agents/` still reference marathon-flavored
 conventions (e.g., `_common.md` mentions marathon branching). Review
 each file and generalize language so they work cleanly from any
-calling context (implement, bare session, future skills).
+calling context (implement, delegated-implement, bare session).
 
-Check if `marathon/ask.sh` should also move to `infra/` or remain
-marathon-specific.
+Move `marathon/ask.sh` to `infra/` if generally useful, or delete.
 
-### Phase 5: Sprint removal
+### Phase 4: Create `/delegated-implement`
 
-Delete `claude/skills/sprint/` once `/write-skeleton` and updated
-`/implement` are validated. Migrate any useful patterns (delegation
-templates, reviewer spawn) to infra or implement.
+New skill: one implementation cycle with implementer + reviewer +
+lead communication. Consumes `infra/agents/implementer.md` and
+`infra/agents/reviewer.md`. Skeleton stubs + integration tests are
+the acceptance criteria.
 
-### Phase 6: Marathon rename + simplification
+### Phase 5: Sprint + Marathon removal
 
-Rename marathon to coordination-focused mode. Strip orchestration
-overhead (bootstrap.sh, TeamCreate, sub-branches, merge ceremony)
-down to: parallel delegated-implement dispatch + round checkpoints +
-integration coordination.
+Delete `claude/skills/sprint/` and `claude/skills/marathon/`.
+Migrate useful patterns to infra or individual skills:
+- Sprint delegation templates → delegated-implement or infra
+- Marathon ask.sh → infra/ (if retained)
+- Sprint/marathon reviewer spawn → delegated-implement
+Update `_index.md`, `CLAUDE.md`, `install.sh`.
 
-Related: `260405-research-marathon-delegation-hardening` covers
-marathon-specific lead discipline issues.
+### Phase 6: write-ticket clerk delegation
+
+Add delegation mode to `/write-ticket`: when invoked by a subagent
+or when the main agent delegates ticket edits, spawn a one-shot
+clerk subagent that reads write-ticket conventions and applies
+directed edits. Replaces the marathon clerk team-member pattern.

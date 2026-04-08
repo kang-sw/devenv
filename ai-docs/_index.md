@@ -43,8 +43,8 @@ claude/skills/
   write-plan/        — deep codebase research → implementation plan
   implement/         — structured implementation (plan-driven or ad-hoc)
   write-spec/        — external-facing feature specs
-  marathon/          — team-based delegation (redesign planned → coordination mode)
-  sprint/            — scheduled for removal (absorbed by skeleton + implement)
+  marathon/          — scheduled for removal (session mode obsoleted)
+  sprint/            — scheduled for removal (session mode obsoleted)
   monologue/         — continuous operational narration
   chat-over-session/ — multi-agent chat across sessions
   manual-think/      — manual chain-of-thought when native thinking unavailable
@@ -56,10 +56,11 @@ claude/skills/
 ```
 Full ceremony:  /discuss → /write-ticket → /write-skeleton → (/write-plan) → /implement
 Direct:         /implement <description>
-Delegation:     /marathon <topic> (pending redesign)
+Delegation:     /delegated-implement (planned — implementer + reviewer cycle)
 ```
 
 Agent suggests next step at each point; user decides. No auto-chaining.
+Parallel work = dispatch multiple /delegated-implement. No session modes.
 
 ## Tickets
 
@@ -70,5 +71,5 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Cross-session intent only, 2-5 lines max, delete when stale. -->
 - Delegation model consolidation in progress — skeleton + implement outline
-  landed, sprint removal and marathon rename pending (see ticket
-  `260407-research-delegation-model-consolidation`).
+  landed, session modes (sprint/marathon) decided for removal, delegated-implement
+  planned (see ticket `260407-research-delegation-model-consolidation`).

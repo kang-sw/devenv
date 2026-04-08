@@ -43,7 +43,7 @@ implement, etc.) are **authored** here but **used** in downstream projects.
 When editing skills, think about how they compose in the canonical flows:
 - Full ceremony: `/discuss` → `/write-ticket` → `/write-skeleton` → (`/write-plan`) → `/implement`
 - Direct: `/implement <description>`
-- Delegation: `/marathon <topic>` — team-based delegation (pending redesign)
+- Delegation: `/delegated-implement` — implementer + reviewer cycle (planned)
 
 ## Commit Rules
 
