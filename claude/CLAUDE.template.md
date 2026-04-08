@@ -1,7 +1,16 @@
 # CLAUDE.md — [PROJECT_NAME]
 
-Read `ai-docs/_index.md` at session start for project context, conventions, and build/test commands.
-If `ai-docs/_index.local.md` exists, read it too — local memory, free-form, not committed.
+## Project Memory
+
+- **Preamble** (`_index.md`) — auto-loaded. Project-level truth that no
+  session should re-derive. Prune aggressively: if derivable from code
+  or commit history, delete.
+- **Local** (`_index.local.md`) — auto-loaded, .gitignored. Machine-bound
+  context (paths, env vars, build config) and personal session notes.
+- **Recent history** (`git log -10`) — on-demand at session start. Decision
+  rationale via AI Context sections. Fades as history grows.
+- **Project arc** (`git log --oneline -30`) — on-demand at session start.
+  Trajectory and topic clusters at a glance.
 
 ## Response Discipline
 
@@ -57,7 +66,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ### Session Start
 
-- Run `git log -10` for recent changes. (without `--oneline`!)
+- Run `git log --oneline --graph -30` then `git log -10` for project arc and recent decisions.
 
 ### Context Window Discipline
 
@@ -128,7 +137,7 @@ _index.md must start with this comment (do not remove after creation):
   <!-- Memory policy: prune aggressively as project advances. Completed
        work belongs in git history, not here. Keep only what an AI session
        needs to orient itself and pick up work. If it's derivable from
-       code or git log, delete it from this file. -->
+       code or git log, delete it from this file. --\>
 
 Adapt structure to fit the project — these are guidelines, not a rigid schema.
 -->
@@ -170,24 +179,26 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
            | sort
          ```
          Then `chmod +x ai-docs/list-active.sh` and commit.
-- v0008: If Session Start uses `git log --oneline`, remove the `--oneline`
-         flag. Full commit messages include AI Context sections.
+- v0008: [obsoleted by v0014]
 - v0009: If Commit Rules lack `## Ticket Updates`, add it. Ticket-driven
          commits must record the stem and forward-facing findings.
-- v0010: If the `<!-- Inclusion test: ... -->` comment block is missing
+- v0010: If the `<!-- Inclusion test: ... --\>` comment block is missing
          above this checklist, add it. Do not remove after migration —
          permanent authoring guardrail.
 - v0011: Template version tracking starts here. If the project has no
-         `<!-- Template Version: ... -->` tag, review v0001-v0010 against
+         `<!-- Template Version: ... --\>` tag, review v0001-v0010 against
          the current project state to determine which items still apply.
          After resolving, add the tag at the bottom of CLAUDE.md.
-- v0012: Add `_index.local.md` to `.gitignore` (pattern: `ai-docs/_index.local.md`).
-         Add the session-start line: "If `ai-docs/_index.local.md` exists,
-         read it too — local memory, free-form, not committed."
+- v0012: [obsoleted by v0014]
 - v0013: Add the memory-policy comment to the top of `ai-docs/_index.md`
          (see MIGRATION block for exact text). Do not remove after adding —
          permanent pruning guardrail. Remove any references to done/ or
          dropped/ tickets from `_index.md`.
+- v0014: Replace the session-start `_index.md` / `_index.local.md` lines
+         with the `## Project Memory` section (see template). Replace
+         Session Start with two-step git log:
+         `git log --oneline --graph -30` then `git log -10`.
+         Add `_index.local.md` to `.gitignore` if not already present.
 -->
 
-<!-- Template Version: v0013 -->
+<!-- Template Version: v0014 -->

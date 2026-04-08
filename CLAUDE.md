@@ -1,8 +1,16 @@
 # CLAUDE.md — devenv
 
-Read `ai-docs/_index.md` at session start for reference docs, infra layout,
-and skill inventory.
-If `ai-docs/_index.local.md` exists, read it too — local memory, free-form, not committed.
+## Project Memory
+
+- **Preamble** (`_index.md`) — auto-loaded. Project-level truth that no
+  session should re-derive. Prune aggressively: if derivable from code
+  or commit history, delete.
+- **Local** (`_index.local.md`) — auto-loaded, .gitignored. Machine-bound
+  context (paths, env vars, build config) and personal session notes.
+- **Recent history** (`git log -10`) — on-demand at session start. Decision
+  rationale via AI Context sections. Fades as history grows.
+- **Project arc** (`git log --oneline -30`) — on-demand at session start.
+  Trajectory and topic clusters at a glance.
 
 ## Response Discipline
 
@@ -50,7 +58,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 ### Session Start
 
-- Run `git log -10` for recent changes. (without `--oneline`!)
+- Run `git log --oneline --graph -30` then `git log -10` for project arc and recent decisions.
 
 ### Context Window Discipline
 
