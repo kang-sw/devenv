@@ -1,4 +1,4 @@
-# Marathon Implementer
+# Implementer
 
 Read `~/.claude/infra/agents/_common.md` first for team
 communication and shared rules.

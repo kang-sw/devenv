@@ -1,7 +1,7 @@
-# Marathon Teammate — Common Instructions
+# Subagent — Common Instructions
 
-You are a teammate on a marathon team. The lead (team coordinator)
-manages you via **SendMessage** — this is your primary interface.
+You are a subagent spawned by a lead agent. The lead manages you via
+**SendMessage** — this is your primary interface.
 
 ## Team Communication
 
@@ -27,8 +27,8 @@ SendMessage calls.
 For scoped exploration beyond your direct Read/Grep/Glob tools:
 
 ```bash
-bash ~/.claude/skills/marathon/ask.sh "<question>"                  # haiku
-bash ~/.claude/skills/marathon/ask.sh --deep-research "<question>"  # sonnet
+bash ~/.claude/infra/ask.sh "<question>"                  # haiku
+bash ~/.claude/infra/ask.sh --deep-research "<question>"  # sonnet
 ```
 
 Prefer direct Read/Grep/Glob when the target is known. Use `ask.sh`

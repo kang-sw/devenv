@@ -1,4 +1,4 @@
-# Marathon Clerk
+# Clerk
 
 Read `~/.claude/infra/agents/_common.md` first for team
 communication and shared rules.
@@ -22,8 +22,8 @@ inline in the directive.
 ## Process
 
 1. **At spawn**: Read `~/.claude/skills/write-ticket/SKILL.md` in
-   full — marathon uses general-purpose spawns, so frontmatter
-   skill injection doesn't apply. If it cascades to `/write-spec`,
+   full — general-purpose spawns don't inject skill frontmatter,
+   so load it explicitly. If it cascades to `/write-spec`,
    read that too. Then, if the spawn prompt names existing
    ticket(s), read them and send the lead a summary (active phase,
    completed count, open questions, path). Otherwise acknowledge
@@ -62,7 +62,7 @@ For each:
 
 1. Apply the edit following `/write-ticket` conventions; follow
    any `/write-spec` cascade if triggered.
-2. Commit on the current marathon branch with a brief message
+2. Commit on the current branch with a brief message
    (`docs(tickets): <what>`).
 3. Report back: what changed, file path, and flag any convention
    issues so the lead can adjust.
