@@ -26,17 +26,25 @@ Target: $ARGUMENTS
 
 1. Read the ticket. Identify public contracts: new types, API surfaces, data formats, module boundaries.
 2. Read `ai-docs/mental-model/overview.md` and docs touching the change area — understand existing contracts the new code must integrate with.
-3. If adjacent modules' public APIs are needed and not in mental-model docs, dispatch a subagent to gather them:
+3. Formulate a skeleton brief: what stubs to create, what integration tests to write, which modules they interact with.
+4. Dispatch an Explore agent with the brief to scout placement and gather adjacent APIs:
 
    ```
    Agent(
-     description = "gather adjacent contracts",
-     subagent_type = "Explore",  # read-only codebase search agent; faster than general-purpose for pure exploration
-     prompt = "Find and return the public API surface of <module>:
-               type definitions, public function signatures, trait impls.
-               Read source files directly — do not summarize."
+     description = "scout skeleton placement",
+     subagent_type = "Explore",
+     prompt = "Skeleton brief: <what stubs and tests are planned, which modules they interact with>
+
+              Find and return:
+              1. Placement: where should new files go? (directory conventions, sibling modules, test file layout)
+              2. Adjacent APIs: public type definitions, function signatures, trait impls of modules the skeleton will interact with.
+              3. Test conventions: how are integration tests organized in this project? (directory, naming, fixtures)
+
+              Read source files directly — do not summarize."
    )
    ```
+
+   Write stubs and tests at the paths the scout identifies. Do not explore the codebase further.
 
 ### 2. Write stubs
 
