@@ -20,9 +20,9 @@ and skill inventory.
 ai-docs/   — Skill design research tickets (non-standard structure)
 claude/    — Claude Code skills, agents, infra, CLAUDE.template.md
   skills/  — Skill definitions (discuss, write-ticket, write-plan, implement, etc.)
-  infra/agents/ — Shared subagent role files (implementer, planner, reviewer, etc.)
+  agents/  — Native agent definitions (implementer, reviewer, planner, clerk, etc.)
   infra/   — Shared implementation references (impl-playbook, impl-process, ask.sh)
-  agents/  — Agent definitions (rust-api-lookup, etc.)
+  infra/agents/ — Subagent dispatch rules (caller-injected)
   CLAUDE.template.md — Template CLAUDE.md for downstream projects
 nvim/      — Neovim config (LazyVim, plugins, colorscheme)
 shell/     — tmux, WezTerm, starship, zsh dotfiles, helper scripts

@@ -15,7 +15,29 @@ Read before authoring or modifying skills, agents, or infra:
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
 | `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol |
 | `claude/infra/impl-process.md` | Implementation lifecycle: task list, code review, doc pipeline, merge |
-| `claude/infra/agents/_common.md` | Shared subagent rules: communication, branches, exploration |
+| `claude/infra/agents/_subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules |
+
+## Native Agents
+
+Agent definitions live in `claude/agents/`. Each file defines what an
+agent IS and HOW it works (identity, constraints, process, output).
+Team communication rules are injected by the calling skill at spawn time.
+
+```
+claude/agents/
+  implementer.md          — code implementation from plan or brief
+  reviewer.md             — code review (read-only, produces findings)
+  planner.md              — codebase research → plan file
+  worker.md               — general-purpose non-code tasks
+  clerk.md                — ticket management
+  rust-api-lookup.md      — Rust crate API lookup via cargo brief
+  test-verifier.md        — test failure blame analysis
+  document-dependency.md  — dependency API documentation
+  mental-model-updater.md — mental-model doc updates after code changes
+  mental-model-verifier.md — mental-model doc verification against source
+  spec-updater.md         — spec doc sync after implementation
+  verify-dependency-document.md — dependency doc verification against source
+```
 
 ## Infra Layout
 
@@ -24,13 +46,8 @@ claude/infra/
   impl-playbook.md   — subagent-safe implementation discipline
   impl-process.md    — top-level lifecycle (review, docs, merge)
   ask.sh             — interactive user query helper
-  agents/            — shared subagent role files
-    _common.md       — team communication + shared rules
-    implementer.md   — code implementation
-    reviewer.md      — code review (read-only)
-    planner.md       — codebase research → plan
-    worker.md        — non-code tasks
-    clerk.md         — ticket management
+  agents/            — subagent dispatch rules (caller-injected)
+    _subagent-rules.md — exploration, branches, general rules
 ```
 
 ## Skill Inventory

@@ -28,22 +28,30 @@ Target: $ARGUMENTS
 3. If brief-driven: the brief is the full specification.
 4. Verify skeleton exists: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests that reference the target contracts. If absent, stop and suggest `/write-skeleton`.
 5. Record current branch as `<original-branch>`. Create `implement/<scope>` branch.
+6. Create a team for the delegation cycle:
+   ```
+   TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
+   ```
 
 ### 2. Spawn implementer
 
 ```
 Agent(
   name = "implementer",
+  subagent_type = "implementer",
   model = "sonnet",
+  team_name = "impl-<scope>",
   prompt = """
-    Before starting, read `~/.claude/infra/agents/_common.md` then
-    `~/.claude/infra/agents/implementer.md`.
-
     Lead name: <lead-name>
     Mode: <A: plan-driven | B: inline brief>
     <Plan path | Brief text>
 
     Acceptance criteria: skeleton integration tests must pass.
+
+    Team rules:
+    - Report completion to the lead via SendMessage.
+    - The reviewer may message you directly with findings — fix and reply.
+    - Commit at logical checkpoints on the current branch.
   """
 )
 ```
@@ -55,14 +63,18 @@ Wait for the implementer's completion report. Note the commit range.
 ```
 Agent(
   name = "reviewer",
+  subagent_type = "reviewer",
   model = "sonnet",
+  team_name = "impl-<scope>",
   prompt = """
-    Before starting, read `~/.claude/infra/agents/_common.md` then
-    `~/.claude/infra/agents/reviewer.md`.
-
     Lead name: <lead-name>
     Implementer name: implementer
     Diff range: <first-commit>..<last-commit>
+
+    Team rules:
+    - SendMessage findings to the implementer by name.
+    - The implementer fixes and notifies you — re-review until clean.
+    - SendMessage the final report to the lead.
   """
 )
 ```
@@ -73,7 +85,8 @@ reports clean. Wait for the reviewer's final report to the lead.
 ### 4. Merge and report
 
 1. Verify all integration tests pass on the implementation branch.
-2. Merge back to `<original-branch>` with a summary commit per CLAUDE.md commit rules.
+2. Shut down teammates and delete the team (`TeamDelete`).
+3. Merge back to `<original-branch>` with a summary commit per CLAUDE.md commit rules.
 3. Report to the user:
    - What was implemented (from implementer report)
    - Review result (from reviewer report)

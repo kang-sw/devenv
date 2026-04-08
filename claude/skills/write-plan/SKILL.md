@@ -44,11 +44,9 @@ well-scoped ticket, familiar codebase area), delegate to a planner subagent.
    ```
    Agent(
      name = "planner",
+     subagent_type = "planner",
      model = "sonnet",
      prompt = """
-       Before starting, read `~/.claude/infra/agents/_common.md` then
-       `~/.claude/infra/agents/planner.md`.
-
        Lead name: <lead-name>
        Brief: <ticket description or phase scope>
        Plan path: ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md

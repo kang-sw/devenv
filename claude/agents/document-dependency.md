@@ -19,10 +19,11 @@ You will receive the dependency name, version, and project context.
 - Filename convention:
   - Known (delta): `<name>[v<version>/<model>].md`
   - Unknown (full): `<name>[v<version>].md`
-- The document's audience is an AI coding assistant. Prioritize precision of
-  signatures, attribute options, and behavioral gotchas over prose explanations.
+- Prioritize precision of signatures, attribute options, and behavioral gotchas over prose explanations.
 
-## Step 1: Dump prior knowledge
+## Process
+
+### 1. Dump prior knowledge
 
 **Before using any tools**, output everything you believe you know about this
 dependency's public API as plain text. Key types, traits/interfaces, functions,
@@ -30,7 +31,7 @@ common patterns, constraints. Pseudo-code or signature style.
 
 If you know nothing, state that explicitly.
 
-## Step 2: Audit project usage
+### 2. Audit project usage
 
 Understand what the project actually uses. The caller should provide a usage
 summary in the prompt. If provided, use it as your priority list. If NOT
@@ -43,12 +44,12 @@ provided, gather it yourself:
 3. **Note patterns** — how does the project use it? Derive macros, builder
    patterns, trait impls, FFI calls, etc.
 
-## Step 3: Systematic API exploration
+### 3. Systematic API exploration
 
 Explore the dependency's actual API surface **methodically**. Do not skip to
 writing after a shallow scan.
 
-### 3a. Locate the source
+#### 3a. Locate the source
 
 The caller should provide source paths. If not, find them yourself:
 
@@ -60,7 +61,7 @@ The caller should provide source paths. If not, find them yourself:
 - **Python**: Check site-packages or venv lib directory.
 - **Go**: `go doc <package>` or source in GOPATH/GOMODCACHE.
 
-### 3b. Enumerate module structure
+#### 3b. Enumerate module structure
 
 List all **public modules and key source files**.
 - **Rust with `cargo brief` available:** Run `cargo brief <crate> --recursive`
@@ -69,7 +70,7 @@ List all **public modules and key source files**.
 
 Build a map of the module tree before diving into details.
 
-### 3c. Deep-dive per module (priority order)
+#### 3c. Deep-dive per module (priority order)
 
 For each significant module, starting with those most used by the project:
 
@@ -80,7 +81,7 @@ For each significant module, starting with those most used by the project:
    `parse` calls in proc-macro source to find the complete option set.
 4. **For traits** — list all required + provided methods with signatures.
 
-### 3d. Cross-reference with prior knowledge
+#### 3d. Cross-reference with prior knowledge
 
 As you explore, specifically look for:
 - **Things that differ from Step 1 knowledge** — renamed types, changed
@@ -90,7 +91,7 @@ As you explore, specifically look for:
 - **Subtle behavioral changes** — different defaults, new safety requirements,
   changed ownership semantics.
 
-## Step 4: Coverage check
+### 4. Coverage check
 
 Before writing, verify:
 
@@ -105,7 +106,7 @@ Before writing, verify:
 
 If any checkbox fails, go back to Step 3 and fill the gap.
 
-## Step 5: Write
+### 5. Write
 
 Compare Step 1 output against exploration results:
 - **Substantial prior knowledge** → delta document listing corrections,
@@ -114,7 +115,7 @@ Compare Step 1 output against exploration results:
 
 Save to `ai-docs/deps/` using the filename convention above.
 
-### Document structure guidelines
+#### Document structure guidelines
 
 - Lead with a concise overview (1-2 lines).
 - Group by module or functional area, not alphabetically.
@@ -131,3 +132,13 @@ Report to caller:
 - Number of corrections / additions (for delta docs).
 - Coverage: which project-used APIs are documented vs. flagged as uncertain.
 - Any uncertainties for manual verification.
+
+## Doctrine
+
+Document-dependency optimizes for **API surface accuracy per
+exploration pass** — every documented signature, type, and behavioral
+claim must trace to actual source code, and the exploration process
+prioritizes project-used APIs to maximize coverage within the agent's
+context budget. When a rule is ambiguous, apply whichever
+interpretation better preserves the traceability of documented APIs to
+their source definitions.

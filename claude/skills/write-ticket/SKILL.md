@@ -51,11 +51,9 @@ updates, routine status moves), spawn a clerk subagent instead of editing direct
 ```
 Agent(
   name = "clerk",
+  subagent_type = "clerk",
   model = "sonnet",
   prompt = """
-    Before starting, read `~/.claude/infra/agents/_common.md` then
-    `~/.claude/infra/agents/clerk.md`.
-
     Lead name: <lead-name>
     Ticket: <ticket-path>
     Directive: <what to change — be specific>
