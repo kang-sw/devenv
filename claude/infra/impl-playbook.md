@@ -21,10 +21,14 @@ TDD: write complex/edge-case tests first (exemplars); populate 3+ remaining simp
 
 Determine blame before fixing:
 
-- **Test wrong** — stale assumption, incorrect setup → fix the test.
 - **Implementation wrong** — logic error, missing edge case → fix the code.
+- **Test wrong** — stale assumption, incorrect setup → fix the test.
+- **Spec ambiguity** — both readings are plausible → escalate for clarification.
+- **Test infrastructure** — setup/teardown/harness issue, not a logic defect → fix the test environment.
 
 Never patch tests to match broken implementation or vice versa.
+
+**Repetition check** (mechanical, every failure): Before fixing, ask and answer: "Is this the same root cause as a previous failure in this session?" If yes, stop and escalate immediately. Do not attempt another fix.
 
 ## §Verify
 
