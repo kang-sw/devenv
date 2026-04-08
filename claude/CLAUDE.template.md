@@ -127,44 +127,49 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
      wrong results, it belongs here. Everything else goes in
      _index.md (context) or skills (process). -->
 
-<!-- MIGRATION CHECKLIST — apply on contact, then delete completed items.
+<!-- MIGRATION CHECKLIST
+     Read the Template Version tag at the bottom of this file.
+     Apply all items with version > current, in order. Then update the tag.
+     Project-specific content (Architecture Rules, custom standards) must
+     survive — merge surgically, flag conflicts rather than overwriting.
 
-- [ ] If `ai-docs/_memory.md` exists, merge any useful content into
-      `ai-docs/_index.md` and delete `_memory.md`.
-- [ ] If `ai-docs/spec/` exists, merge architectural narrative and design
-      rationale into `ai-docs/mental-model/` docs. Remove API signatures,
-      struct layouts, and status tracking (already in source/tickets).
-      Delete `ai-docs/spec/` after migration.
-- [ ] If tickets lack `plans:` frontmatter, add it (only phases with existing
-      plan documents — no null placeholders). Audit phase content: discussion
-      decisions stay in tickets, codebase-derived details belong in plans.
-- [ ] If tickets have `plans:` entries with `null` values, remove those entries.
-      Absence means "not yet created" — null placeholders are no longer used.
-- [ ] If tickets lack `parent:` frontmatter for epic relationships, add it
-      where applicable. Epic tickets use category `epic`.
-- [ ] If plan paths use old format (`YYMM/DD-HHMM.<name>.md`), rename to
-      `YYYY-MM/DD-hhmm.<name>.md` via `git mv`.
-- [ ] If `ai-docs/list-active.sh` does not exist, create it:
-      ```bash
-      #!/usr/bin/env bash
-      find ai-docs -type f -name '*.md' \
-        ! -path '*/tickets/done/*' \
-        ! -path '*/tickets/dropped/*' \
-        ! -path '*/plans/*' \
-        | sort
-      ```
-      Then `chmod +x ai-docs/list-active.sh` and commit.
-- [ ] If Session Start uses `git log --oneline`, remove the `--oneline`
-      flag. Full commit messages include AI Context sections with design
-      decisions that inform the current session.
-- [ ] If Commit Rules lack `## Ticket Updates`, add it. Ticket-driven
-      commits must record the stem and forward-facing findings.
-- [ ] If the `<!-- Inclusion test: ... -->` comment block is missing above
-      this checklist, add it. Do not remove it after migration — it is a
-      permanent authoring guardrail.
-
-Prioritize migrating universal conventions (ai-docs/ structure, workflow
-procedures, code standards) from the current template. Project-specific
-content (Architecture Rules, custom standards, tailored workflows) must
-survive — merge surgically, and flag conflicts rather than overwriting.
+- v0001: If `ai-docs/_memory.md` exists, merge useful content into
+         `ai-docs/_index.md` and delete `_memory.md`.
+- v0002: If `ai-docs/spec/` exists, merge architectural narrative and
+         design rationale into `ai-docs/mental-model/` docs. Remove API
+         signatures, struct layouts, and status tracking (already in
+         source/tickets). Delete `ai-docs/spec/` after migration.
+- v0003: If tickets lack `plans:` frontmatter, add it (only phases with
+         existing plan documents — no null placeholders). Audit phase
+         content: discussion decisions stay in tickets, codebase-derived
+         details belong in plans.
+- v0004: If tickets have `plans:` entries with `null` values, remove them.
+         Absence means "not yet created".
+- v0005: If tickets lack `parent:` frontmatter for epic relationships, add
+         it where applicable. Epic tickets use category `epic`.
+- v0006: If plan paths use old format (`YYMM/DD-HHMM.<name>.md`), rename
+         to `YYYY-MM/DD-hhmm.<name>.md` via `git mv`.
+- v0007: If `ai-docs/list-active.sh` does not exist, create it:
+         ```bash
+         #!/usr/bin/env bash
+         find ai-docs -type f -name '*.md' \
+           ! -path '*/tickets/done/*' \
+           ! -path '*/tickets/dropped/*' \
+           ! -path '*/plans/*' \
+           | sort
+         ```
+         Then `chmod +x ai-docs/list-active.sh` and commit.
+- v0008: If Session Start uses `git log --oneline`, remove the `--oneline`
+         flag. Full commit messages include AI Context sections.
+- v0009: If Commit Rules lack `## Ticket Updates`, add it. Ticket-driven
+         commits must record the stem and forward-facing findings.
+- v0010: If the `<!-- Inclusion test: ... -->` comment block is missing
+         above this checklist, add it. Do not remove after migration —
+         permanent authoring guardrail.
+- v0011: Template version tracking starts here. If the project has no
+         `<!-- Template Version: ... -->` tag, review v0001-v0010 against
+         the current project state to determine which items still apply.
+         After resolving, add the tag at the bottom of CLAUDE.md.
 -->
+
+<!-- Template Version: v0011 -->
