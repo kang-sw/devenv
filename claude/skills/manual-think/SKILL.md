@@ -13,7 +13,7 @@ description: >-
 - Block format: `> [type]` on its own line, all lines `>` prefixed, no closing tag.
 - `> [assumption]` before every action — no exceptions, even trivial ones.
 - `> [observe]` after every tool result.
-- `> [reading]` at every user message, before thinking.
+- `> [reading]` then `> [reading:neutralize]` at every user message, before thinking.
 - **All blocks in English**. Final user-facing response: match the user's language.
 - Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
 - When a prior block surfaced drift or challenge, restate it before acting.
@@ -21,15 +21,22 @@ description: >-
 
 ## On: user message
 
-1. `> [reading]` — neutralize and decompose the message.
-2. `> [thinking]` — free reasoning, challenge/resolve as needed.
-3. `> [assumption]` — what the response covers, expected reaction.
-4. `> [dropped]` — if alternatives were weighed.
-5. Respond.
+1. `> [reading]` — decompose the message into numbered claims.
+2. `> [reading:neutralize]` — for each claim with evaluative framing, restate as neutral question. No framing → "pass".
+3. `> [thinking]` — free reasoning, challenge/resolve as needed.
+4. `> [assumption]` — what the response covers, expected reaction.
+5. `> [dropped]` — if alternatives were weighed.
+6. Respond.
 
 ```
 > [reading]
-> User requests X. Decomposed: (1) ..., (2) ...
+> (1) User requests X
+> (2) User says Y is problematic
+> (3) User wants Z done
+
+> [reading:neutralize]
+> (2) Under what conditions does Y cause issues?
+> (3) — pass
 
 > [thinking]
 > ...free reasoning...
@@ -88,10 +95,10 @@ description: >-
 Within `> [thinking]` blocks, adapt freely from:
 
 - **Parse intent** — What is the user actually asking?
-- **Neutralize framing** — Evaluative questions → neutral questions before reasoning.
 - **Gather context** — Constraints, prior decisions.
 - **Propose** → **Challenge** → **Resolve** → **Decide**.
 - When the user asserts a claim, Challenge is mandatory — find at least one condition under which it would be wrong before resolving.
+- **Imagine** — When a decision is reached, `> [thinking:imagine]` to forward-project 2-3 steps. If drift surfaces, return to `> [thinking]` and re-hypothesize. Not every decision needs this — use when ripple effects are non-obvious.
 - Scale: Parse → Decide for simple questions; multiple Challenge → Resolve loops for trade-offs.
 
 ## Propagation
@@ -115,8 +122,10 @@ Within `> [thinking]` blocks, adapt freely from:
 
 | Block | Role |
 |---|---|
-| `> [reading]` | Neutralized, decomposed restatement of user's message. No verbatim quoting. Evaluative framings become neutral questions. |
+| `> [reading]` | Decomposed restatement of user's message. No verbatim quoting. Numbered claims. |
+| `> [reading:neutralize]` | Per-claim bias filter. Evaluative framings → neutral questions. No framing → "pass". Mandatory after every `[reading]`. |
 | `> [thinking]` | Free-form reasoning chain. Parse, challenge, resolve, decide — whatever the problem demands. |
+| `> [thinking:imagine]` | Forward projection from a tentative decision. State the decision, trace downstream consequences, surface risks. Opt-in — use when a decision's ripple effects need visibility. Uses drift vocabulary if risk is found. |
 | `> [assumption]` | Distilled, falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
 | `> [dropped]` | Candidates considered and rejected, each with a one-phrase reason. Conditional — only when alternatives were weighed. |
 | `> [observe]` | Intake and judgment of tool result. Uses match/drift/abandon vocabulary. |
