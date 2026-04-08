@@ -9,3 +9,4 @@ foo.*
 data
 *.docx
 *Zone.Identifier
+ai-docs/_index.local.md

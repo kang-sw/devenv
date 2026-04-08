@@ -2,6 +2,7 @@
 
 Read `ai-docs/_index.md` at session start for reference docs, infra layout,
 and skill inventory.
+If `ai-docs/_index.local.md` exists, read it too — local memory, free-form, not committed.
 
 ## Response Discipline
 

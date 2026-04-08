@@ -1,6 +1,7 @@
 # CLAUDE.md — [PROJECT_NAME]
 
 Read `ai-docs/_index.md` at session start for project context, conventions, and build/test commands.
+If `ai-docs/_index.local.md` exists, read it too — local memory, free-form, not committed.
 
 ## Response Discipline
 
@@ -109,6 +110,7 @@ Human-facing UI strings are exempt.
 
 ai-docs/
   _index.md          — single session-start read; project context
+  _index.local.md    — local memory (free-form, .gitignored)
   mental-model/      — project map: contracts, coupling, architectural narrative
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
@@ -171,6 +173,9 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          `<!-- Template Version: ... -->` tag, review v0001-v0010 against
          the current project state to determine which items still apply.
          After resolving, add the tag at the bottom of CLAUDE.md.
+- v0012: Add `_index.local.md` to `.gitignore` (pattern: `ai-docs/_index.local.md`).
+         Add the session-start line: "If `ai-docs/_index.local.md` exists,
+         read it too — local memory, free-form, not committed."
 -->
 
-<!-- Template Version: v0011 -->
+<!-- Template Version: v0012 -->
