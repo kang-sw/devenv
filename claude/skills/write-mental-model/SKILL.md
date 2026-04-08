@@ -1,10 +1,14 @@
 ---
-name: rebuild-mental-model
-description: Rebuild or update the ai-docs/mental-model/ directory with operational knowledge for modifying the codebase. Delegates source exploration to subagents to keep the main context window small.
+name: write-mental-model
+description: >
+  Authoritative definition point for mental-model documents — format,
+  inclusion test, and doctrine. Rebuild or update ai-docs/mental-model/
+  with operational knowledge for modifying the codebase. Delegates source
+  exploration to subagents to keep the main context window small.
 argument-hint: "[target domain or special instruction] (omit for full rebuild)"
 ---
 
-# Rebuild Mental Model
+# Write Mental Model
 
 Target: $ARGUMENTS
 
@@ -12,7 +16,7 @@ Target: $ARGUMENTS
 
 - Mental-model documents capture operational knowledge for modifying the codebase: module contracts, coupling maps, extension points, common mistakes, technical debt.
 - Not API references, type listings, or source paraphrases — those are derivable from code.
-- Inclusion test: record only facts where (a) ignorance causes silent failure AND (b) not derivable from reading entry-point files in <30 seconds. Both must hold.
+- Inclusion test: record only facts where (a) ignorance causes wrong outcome AND (b) not derivable from reading entry-point files in <30 seconds. Both must hold.
 - Never record: type/struct field listings, function signatures, API route enumerations, source-paraphrasing descriptions, information already in `_index.md`.
 - No direct source reading — delegate to subagents. Read source yourself only when a subagent summary is clearly insufficient.
 - Each document covers a cross-cutting concern, not a source module. Directory is flat: `ai-docs/mental-model/overview.md` + `<domain>.md` files.
@@ -40,12 +44,12 @@ Dispatch one subagent per dirty domain with:
 - This analysis directive:
 
 > Analyze this domain for a developer who needs to modify it.
-> Focus on what would cause silent failures if unknown:
+> Focus on what would cause wrong outcomes if unknown:
 > 1. Implicit contracts between modules (ordering, data flow, sync)
 > 2. Coupling (changes here → must also change there)
 > 3. Extension points (registries, enums, plugin interfaces, config)
-> 4. Fragile areas (invariants that break silently, known debt)
-> 5. Common mistakes (forgetting required steps, silent failures)
+> 4. Fragile areas (invariants that break silently or cause wrong results, known debt)
+> 5. Common mistakes (forgetting required steps, wrong outcomes)
 > 6. Distinguish existing patterns from scaffolded/planned features.
 > Be concrete: cite file paths, function names, specific types.
 > Do NOT produce type/field listings or paraphrase what functions do.
@@ -113,8 +117,8 @@ Focus on non-obvious coupling.
 Only non-obvious multi-file changes. Mark unimplemented features **(planned)**.
 
 ## Common Mistakes
-- "When adding [X], forgetting [Y] → [silent failure]"
-Focus on mistakes that fail silently.
+- "When adding [X], forgetting [Y] → [wrong outcome]"
+Focus on mistakes that cause wrong outcomes.
 
 ## Technical Debt
 - [Issue]: current state, impact, possible improvement
@@ -125,9 +129,9 @@ Omit empty sections.
 ## Doctrine
 
 Mental-model documents exist so that a developer modifying the codebase
-does not cause silent failures from ignorance of implicit contracts.
+does not produce wrong outcomes from ignorance of implicit contracts.
 Every authoring choice optimizes for **modification-relevant knowledge
-density**: only facts that pass the inclusion test (silent-failure risk
+density**: only facts that pass the inclusion test (wrong-outcome risk
 AND not quickly derivable from source) earn space. When a rule is
 ambiguous, apply whichever interpretation better preserves the density
 of modification-relevant knowledge while excluding derivable content.

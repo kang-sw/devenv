@@ -31,7 +31,6 @@ claude/agents/
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
-  spec-updater.md         — spec doc sync after implementation
 ```
 
 ## Infra Layout
@@ -55,11 +54,10 @@ claude/skills/
   write-plan/        — deep codebase research → implementation plan
   implement/         — structured implementation (plan-driven or ad-hoc)
   delegated-implement/ — Tier 3 delegation: implementer + reviewer cycle
-  write-spec/        — external-facing feature specs
   team-lead/         — team orchestration mode (TeamCreate, coordination, shutdown)
   monologue/         — continuous operational narration
   manual-think/      — manual chain-of-thought when native thinking unavailable
-  rebuild-mental-model/ — regenerate ai-docs/mental-model/
+  write-mental-model/  — mental-model document format, inclusion test, rebuild
 ```
 
 ## Canonical Flows

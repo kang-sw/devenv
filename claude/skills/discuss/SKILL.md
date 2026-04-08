@@ -17,7 +17,7 @@ Topic: $ARGUMENTS
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Completed phases are immutable.
 - Load active doc listing at start; read mental-model docs on-demand as topics emerge.
 - Dispatch Explore agents for implementation details beyond mental-model docs — never read source directly.
-- When docs are stale or insufficient, say so and suggest `/rebuild-mental-model` — do not speculate.
+- When docs are stale or insufficient, say so and suggest `/write-mental-model` — do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 - Evaluate each claim independently — call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
@@ -41,7 +41,7 @@ Topic: $ARGUMENTS
 1. Offer persistence options only if conclusions warrant it:
    - **New ticket** — invoke `/write-ticket`.
    - **Ticket update** — invoke `/write-ticket`, then append design notes to an existing ticket phase.
-   - **Mental-model update** — revise a doc if architectural understanding changed.
+   - **Mental-model update** — if discussion surfaced new architectural understanding, suggest `/write-mental-model` for the update. Do not edit mental-model docs directly.
 2. Apply **judge: needs-integration-tests** to ticket writes.
 3. Write only what the user approves. No artifact needed for exploratory discussions.
 

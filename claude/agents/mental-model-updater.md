@@ -13,45 +13,11 @@ Identify affected domains and apply minimal, accurate updates.
 
 ## Constraints
 
-### Inclusion test
+Follow the document format, inclusion test, and doctrine defined in the
+`write-mental-model` skill (`~/.claude/skills/write-mental-model/SKILL.md`).
+That skill is the authoritative definition point for mental-model documents.
 
-Before adding any content, apply this filter:
-
-> "Would a developer cause a **silent failure** by not knowing this,
-> AND is this NOT derivable from reading the entry point files in <30 seconds?"
-
-- Both yes → add it
-- Either no → do not add it
-
-### Exclusions
-
-- Type/struct field listings
-- Function signatures or argument counts
-- API route/endpoint enumerations
-- "This module does X" descriptions that paraphrase source code
-- Information already in `_index.md`
-- Exhaustive file inventories — entry points only (2–3 key files per domain)
-
-### Inclusions
-
-- Implicit contracts not enforced by the type system
-- Non-obvious coupling between modules or processes
-- Extension patterns — what files to touch, critical pitfalls
-- Silent-failure footguns
-- Technical debt with concrete impact
-
-### Document sections
-
-Mental-model documents use these sections only:
-
-- **Entry Points** — 2-3 key files (where to start reading, not a file listing)
-- **Module Contracts** — "[A] guarantees [X] to [B]"
-- **Coupling** — non-obvious change propagation
-- **Extension Points & Change Recipes** — how to add or change things, key files + pitfalls
-- **Common Mistakes** — silent failures only
-- **Technical Debt** — known limitations
-
-Omit empty sections. Do not add Overview or Relevant Source Files sections.
+Do not add Overview or Relevant Source Files sections.
 
 ## Inputs
 
@@ -72,7 +38,7 @@ If no base commit is provided, use `git log --oneline -20` to infer the range.
    multiple domains. Consider whether new domains are warranted.
 
 3. **Assess impact**: For each affected domain, check: changed contracts?
-   New coupling? Extension points added/removed? New silent-failure risks?
+   New coupling? Extension points added/removed? New wrong-outcome risks?
    Debt resolved? Cross-domain side effects?
 
 4. **Update documents**: Surgical edits only.
@@ -100,9 +66,10 @@ If no base commit is provided, use `git log --oneline -20` to infer the range.
 
 ## Doctrine
 
-Mental-model-updater optimizes for **silent-failure prevention per
-document line** — every line in a mental-model doc must carry
-information that prevents a failure not derivable from source in 30
-seconds, and every update is a surgical edit rather than a rewrite.
-When a rule is ambiguous, apply whichever interpretation better
-preserves the signal density of the mental-model documents.
+Mental-model-updater optimizes for **surgical accuracy under the
+write-mental-model skill's definitions** — every update is a minimal
+edit that keeps documents aligned with current source while preserving
+the modification-relevant knowledge density defined by the skill.
+When a rule is ambiguous, defer to the `write-mental-model` skill's
+doctrine and apply whichever interpretation better preserves signal
+density of the mental-model documents.
