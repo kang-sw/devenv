@@ -45,7 +45,6 @@ claude/skills/
   delegated-implement/ — Tier 3 delegation: implementer + reviewer cycle
   write-spec/        — external-facing feature specs
   monologue/         — continuous operational narration
-  chat-over-session/ — multi-agent chat across sessions
   manual-think/      — manual chain-of-thought when native thinking unavailable
   rebuild-mental-model/ — regenerate ai-docs/mental-model/
 ```
