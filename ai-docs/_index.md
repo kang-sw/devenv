@@ -30,13 +30,8 @@ claude/agents/
   planner.md              — codebase research → plan file
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
-  rust-api-lookup.md      — Rust crate API lookup via cargo brief
-  test-verifier.md        — test failure blame analysis
-  document-dependency.md  — dependency API documentation
   mental-model-updater.md — mental-model doc updates after code changes
-  mental-model-verifier.md — mental-model doc verification against source
   spec-updater.md         — spec doc sync after implementation
-  verify-dependency-document.md — dependency doc verification against source
 ```
 
 ## Infra Layout
