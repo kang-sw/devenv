@@ -16,6 +16,8 @@ Target: $ARGUMENTS
 - This skill delegates — the lead does not read source code or write implementation.
 - Skeleton stubs and integration tests are the acceptance criteria.
 - The implementer and reviewer communicate directly; the lead receives only final reports.
+- User approves the report before merge — no code reaches the target branch without user confirmation.
+- Teammates (implementer, reviewer) stay alive until after doc pipeline completes; cleanup is the final step.
 - One delegation cycle per invocation. For parallel work, dispatch multiple instances.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
 - Task list with `[fixed]` tasks is created at prepare and tracked to completion — no task may be skipped.
@@ -43,9 +45,12 @@ Target: $ARGUMENTS
    [ ] [fixed] Spawn implementer — wait for completion report
    [ ] [fixed] Spawn reviewer — wait for clean report
    [ ] [fixed] Verify integration tests pass
-   [ ] [fixed] Merge and report to user
+   [ ] [fixed] Report to user — wait for approval
+     > if tweaks requested: implementer fixes → reviewer re-reviews → re-verify → re-report (loop)
+   [ ] [fixed] Merge to original branch
    [ ] [fixed] Dispatch mental-model-updater — wait for completion
    [ ] [fixed] Update project docs — ai-docs/_index.md, ticket status
+   [ ] [fixed] Cleanup — shut down teammates, delete team
    ```
    Mark each task as completed when done. Do not skip any.
 
@@ -100,23 +105,36 @@ Agent(
 The reviewer and implementer iterate directly until the reviewer
 reports clean. Wait for the reviewer's final report to the lead.
 
-### 4. Merge and report
+### 4. Report and approval
 
 1. Verify all integration tests pass on the implementation branch.
-2. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
-3. Merge back to `<original-branch>` with a summary commit per CLAUDE.md commit rules.
-3. Report to the user:
+2. Report to the user:
    - What was implemented (from implementer report)
    - Review result (from reviewer report)
    - Test status
    - Any deviations or open items
+3. Wait for user approval. If the user requests tweaks:
+   - Direct the implementer to fix via `SendMessage`.
+   - After implementer reports done, direct the reviewer to re-review.
+   - Re-verify integration tests.
+   - Re-report. Loop until user approves.
 
-### 5. Doc pipeline
+Implementer and reviewer remain alive throughout this loop.
+
+### 5. Merge
+
+1. Merge back to `<original-branch>` with a summary commit per CLAUDE.md commit rules.
+
+### 6. Doc pipeline
 
 1. Dispatch **mental-model-updater** with changed files and implementation summary.
    Provide the commit range from the implementation branch. Always dispatch — the agent determines impact. **Wait for completion before proceeding** — downstream doc updates depend on mental-model accuracy.
 2. Update `ai-docs/_index.md` if project capabilities changed.
 3. If ticket-driven, update ticket status.
+
+### 7. Cleanup
+
+1. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
 
 ## Judgments
 
