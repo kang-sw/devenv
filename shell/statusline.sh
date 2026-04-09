@@ -31,10 +31,11 @@
 
 input=$(cat)
 
-# Single jq call to extract all fields (15 → 1 subprocess)
+# Single jq call to extract all fields (17 → 1 subprocess)
 IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS \
   DURATION_MS API_MS LINES_ADDED LINES_REMOVED _RATE_5HR RATE_5HR_RESETS \
-  RATE_7D_RAW RATE_7D_RESETS <<<"$(echo "$input" | jq -r '[
+  RATE_7D_RAW RATE_7D_RESETS CACHE_CREATE CACHE_READ \
+  <<<"$(echo "$input" | jq -r '[
   (.model.display_name // ""),
   (.workspace.current_dir // ""),
   (.workspace.project_dir // ""),
@@ -49,7 +50,9 @@ IFS=$'\x1f' read -r MODEL DIR PROJECT_DIR COST TOKENS_USED CTX_MAX OUTPUT_TOKENS
   (.rate_limits.five_hour.used_percentage // 0),
   (.rate_limits.five_hour.resets_at // 0),
   (.rate_limits.seven_day.used_percentage // 0),
-  (.rate_limits.seven_day.resets_at // 0)
+  (.rate_limits.seven_day.resets_at // 0),
+  (.context_window.current_usage.cache_creation_input_tokens // 0),
+  (.context_window.current_usage.cache_read_input_tokens // 0)
 ] | join("\u001f")')"
 RATE_5HR=${_RATE_5HR%%.*}
 RATE_7D=${RATE_7D_RAW%%.*}
@@ -80,6 +83,10 @@ OUTPUT_TOKENS_FMT=$(awk "BEGIN {
 # (API used_percentage is integer-only)
 PCT_RAW=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.2f\", $TOKENS_USED / $CTX_MAX * 100; else print 0 }")
 PCT=$(awk "BEGIN { if ($CTX_MAX > 0) printf \"%.1f\", $TOKENS_USED / $CTX_MAX * 100; else print \"0.0\" }")
+
+# Cache hit rate: cache_read / (cache_read + cache_creation)
+CACHE_TOTAL=$((CACHE_READ + CACHE_CREATE))
+CACHE_HIT=$(awk "BEGIN { if ($CACHE_TOTAL > 0) printf \"%.1f\", $CACHE_READ / $CACHE_TOTAL * 100; else print \"\" }")
 
 # ═══════════════════════════════════════════════════════════
 # Style parameters — edit these to customize appearance
@@ -181,6 +188,12 @@ PCT_COLOR_FWD="$(pct_color "$PCT_RAW")"
 PCT_COLOR_BG="$(pct_color "$PCT_RAW" 48)"
 RATE_5HR_COLOR=$(pct_color "$RATE_5HR")
 RATE_7D_COLOR=$(pct_color "$RATE_7D")
+# Cache hit: high = green, low = red → invert for pct_color
+CACHE_HIT_COLOR=""
+if [[ -n $CACHE_HIT ]]; then
+  _ch_inv=$(awk "BEGIN { printf \"%.1f\", 100 - $CACHE_HIT }")
+  CACHE_HIT_COLOR=$(pct_color "$_ch_inv")
+fi
 
 # Time formatting
 HRS=$((DURATION_MS / 3600000))
@@ -434,8 +447,15 @@ _PW0=$((5 + ${#TIME_FMT})) # " ⌛️ TIME " (⌛️: 2col/2char → no adj)
 _PBG0=$TIME_BG
 _n3=1
 
-_PC1="\033[38;5;${FG}m 🤔 ${API_TIME_FMT} \033[38;5;${FG_DIM}m${TOK_SEC}t/s "
-_PW1=$((9 + ${#API_TIME_FMT} + ${#TOK_SEC})) # " 🤔(+1) APITIME TOKt/s "
+_PC1="\033[38;5;${FG}m 🤔 ${API_TIME_FMT} \033[38;5;${FG_DIM}m${TOK_SEC}t/s"
+_PW1=$((8 + ${#API_TIME_FMT} + ${#TOK_SEC})) # " 🤔(+1) APITIME TOKt/s"
+if [[ -n $CACHE_HIT ]]; then
+  _ch_label="ch ${CACHE_HIT}%"
+  _PC1+=" ${CACHE_HIT_COLOR}${_ch_label}"
+  _PW1=$((_PW1 + 1 + ${#_ch_label}))
+fi
+_PC1+=" "
+_PW1=$((_PW1 + 1))
 _PBG1=$API_BG
 _n3=2
 
