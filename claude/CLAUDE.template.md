@@ -85,6 +85,8 @@ Before creating or editing tickets, load `/write-ticket` for conventions.
 Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
 full path — stems stay stable across status moves.
 When starting work on a ticket, move it to `wip/` immediately.
+To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>`
+and look for `## Ticket Updates` sections in matching commits.
 
 **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
 and inline code comments — must be in English regardless of conversation language.
