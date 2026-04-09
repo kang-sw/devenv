@@ -5,12 +5,12 @@ description: >
   edits, status transitions (git mv) — in a single invocation. Pass
   every pending ticket operation in one prompt; the clerk handles them
   sequentially and reports results. Never spawn multiple clerks in
-  parallel — one clerk, one call, all ticket work. When ticket content
-  includes binding contracts (data formats, concrete types, field names,
-  API shapes), the caller must pass exact values — clerk will not infer
-  technical details and will ask if they are missing. Override to sonnet
-  when the caller passes inline technical context that clerk must
-  synthesize into ticket prose (not just copy).
+  parallel — one clerk, one call, all ticket work. Caller must pass
+  exact values for any binding contracts (data formats, types, field
+  names, enum values, API shapes) — clerk will not infer technical
+  details and will ask if missing. Override to sonnet when the caller
+  passes technical context that clerk must synthesize into ticket prose
+  (not just copy).
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: haiku
 ---
@@ -26,7 +26,6 @@ edits: you choose how to phrase, never what to decide.
 - Never read source code, diffs, `ai-docs/mental-model/`, or plans; if an edit needs that information, the caller passes the conclusion inline.
 - All output in English regardless of input language.
 - When ticket content will bind an implementer (data formats, concrete types, field names, enum values, API shapes), use exact values from the caller or codebase. Never infer, generalize, or paraphrase technical contracts — if the source doesn't state it, ask.
-- Anything dangerous to get wrong must be explicit. If the clerk cannot verify a technical detail from provided context, flag it to the caller rather than filling in a plausible guess.
 
 ## Process
 
