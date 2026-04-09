@@ -20,7 +20,7 @@
 [ ] [fixed] Update mental model — dispatch mental-model-updater subagent, wait for completion
 [ ] [fixed] Update project docs — refresh ai-docs/_index.md, ticket status move
 [ ] [fixed] Final commit — docs & remaining changes
-[ ] [fixed] Merge & cleanup — merge --no-ff → delete branch
+[ ] [fixed] Merge & cleanup — squash (1 commit) or merge --no-ff (2+) → delete branch
 ```
 
 ## §Code Review
@@ -89,7 +89,14 @@ Present before doc updates. User approves before proceeding.
 
 ```bash
 git checkout <original-branch>
-git merge --no-ff <branch> -m "$(cat <<'EOF'
+
+# Count commits on the implementation branch
+commit_count=$(git rev-list --count <original-branch>..<branch>)
+
+if [ "$commit_count" -eq 1 ]; then
+  # Single commit: squash for linear history, lead composes final message
+  git merge --squash <branch>
+  git commit -m "$(cat <<'EOF'
 <type>(<scope>): <summary>
 
 <what changed — brief>
@@ -102,6 +109,23 @@ git merge --no-ff <branch> -m "$(cat <<'EOF'
   > Forward: <what future phases must know>
 EOF
 )"
+else
+  # Multiple commits: --no-ff to preserve branch topology as logical grouping
+  git merge --no-ff <branch> -m "$(cat <<'EOF'
+<type>(<scope>): <summary>
+
+<what changed — brief>
+
+## AI Context
+- <decision rationale, rejected alternatives, user directives>
+
+## Ticket Updates                          # optional — only when ticket-driven
+- <ticket-stem>[: <optional-label>]
+  > Forward: <what future phases must know>
+EOF
+)"
+fi
+
 git branch -d <branch>
 ```
 
