@@ -19,6 +19,7 @@ Mode: $ARGUMENTS
 - Merge surgically. When template and project conflict, flag the conflict inline with `<!-- CONFLICT: ... -->` and move on — do not resolve silently.
 - Every migration item is idempotent — re-running on an already-migrated project produces no changes.
 - Commit each logical unit (scaffolding, migration batch, cleanup) separately, following CLAUDE.md commit rules.
+- Delegate aggressively — only handle strategic judgment directly; mechanical work goes to subagents (see `judge: delegation`).
 
 ## On: invocation
 
