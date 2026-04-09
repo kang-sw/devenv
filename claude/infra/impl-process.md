@@ -88,7 +88,7 @@ Present before doc updates. User approves before proceeding.
 ## §Merge & Cleanup
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/merge-branch.sh" <original-branch> <branch> "$(cat <<'EOF'
+bash claude/infra/merge-branch.sh <original-branch> <branch> "$(cat <<'EOF'
 <type>(<scope>): <summary>
 
 <what changed — brief>
