@@ -19,6 +19,10 @@ Mode: $ARGUMENTS
 - Merge surgically. When template and project conflict, flag the conflict inline with `<!-- CONFLICT: ... -->` and move on — do not resolve silently.
 - Every migration item is idempotent — re-running on an already-migrated project produces no changes.
 - Commit each logical unit (scaffolding, migration batch, cleanup) separately, following CLAUDE.md commit rules.
+- **Delegate aggressively.** Only handle strategic judgment directly. Mechanical work goes to subagents:
+  - *haiku* — directory creation, file scaffolding, .gitignore edits, formulaic checklist items (deterministic condition → deterministic apply).
+  - *sonnet* — migration items needing context reads, multi-file coordination, section sync with diff.
+  - *direct* — mode detection, section-merge judgment, conflict resolution, adopt-mode audit.
 
 ## On: invocation
 
