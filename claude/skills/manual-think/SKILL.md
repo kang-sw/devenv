@@ -46,6 +46,8 @@ description: >-
 > [thinking]
 > ...free reasoning...
 
+> [stance: ambiguous]
+
 > [assumption]
 > This response covers Y; user will react with Z.
 
