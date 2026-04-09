@@ -15,7 +15,7 @@ Target: $ARGUMENTS
 
 - Skeleton = the first code change for a ticket. No implementation code — only interface stubs and integration tests.
 - Lead is a lightweight coordinator: identify the ticket, pass contract directives, review, commit.
-- The opus delegate owns design: reads the ticket, explores the codebase, decides type shapes and test structure.
+- The delegate owns design: reads the ticket, explores the codebase, decides type shapes and test structure.
 - Contract directives = lead's judgment on points the delegate cannot derive from ticket + code alone.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
 - The delegate does not commit — lead reviews and commits.
@@ -33,6 +33,7 @@ Target: $ARGUMENTS
 ```
 Agent(
   description = "write skeleton stubs and tests",
+  subagent_type = "general-purpose",
   model = "opus",
   prompt = """
     Read `${CLAUDE_SKILL_DIR}/skeleton-writer.md` first.

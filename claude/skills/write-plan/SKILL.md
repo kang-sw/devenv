@@ -59,7 +59,7 @@ Agent(
 ### 3. Verify & revise
 
 Dispatch a sonnet subagent to verify and fix the plan in-place.
-The lead does **not** read the plan or source files.
+The lead reads only the verifier's report — not the plan file or source code.
 
 ```
 Agent(
