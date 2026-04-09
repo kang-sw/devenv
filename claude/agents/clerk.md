@@ -5,7 +5,10 @@ description: >
   edits, status transitions (git mv) — in a single invocation. Pass
   every pending ticket operation in one prompt; the clerk handles them
   sequentially and reports results. Never spawn multiple clerks in
-  parallel — one clerk, one call, all ticket work.
+  parallel — one clerk, one call, all ticket work. When ticket content
+  includes binding contracts (data formats, concrete types, field names,
+  API shapes), the caller must pass exact values — clerk will not infer
+  technical details and will ask if they are missing.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
 ---
