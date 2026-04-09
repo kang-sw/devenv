@@ -71,30 +71,6 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 
 - Source code is ground truth; load only docs relevant to the current task. Update drifted docs on contact.
 
----
-
-## Project Summary
-
-<!-- One paragraph: what the project is, who it's for, current milestone/target. -->
-
-**[PROJECT_NAME]** — [brief description].
-
-## Tech Stack
-
-<!-- List primary languages, frameworks, key libraries. -->
-
-[Language] + [Framework/Engine]. Key libs: [lib1], [lib2], [lib3].
-
-## Workspace
-
-<!-- Describe top-level directories and their roles. -->
-
-```
-[dir1]/   — [purpose]
-[dir2]/   — [purpose]
-[dir3]/   — [purpose]
-```
-
 ## Architecture Rules
 
 <!-- Project-specific invariants the AI must never violate. -->
@@ -125,7 +101,9 @@ ai-docs/
   tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
 
 _index.md should cover:
-  - Architecture (module/directory map, relationships)
+  - Project summary (what it is, who it's for, current milestone)
+  - Tech stack (languages, frameworks, key libraries)
+  - Workspace (top-level directories and their roles)
   - Conventions (tickets, dependency docs, naming rules)
   - Build/test commands and operational pitfalls
   - Session notes (cross-session intent only, 2-5 lines max, delete when stale)
@@ -194,10 +172,14 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          permanent pruning guardrail. Remove any references to done/ or
          dropped/ tickets from `_index.md`.
 - v0014: Replace the session-start `_index.md` / `_index.local.md` lines
-         with the `## Project Memory` section (see template). Replace
-         Session Start with two-step git log:
-         `git log --oneline --graph -50` then `git log -10`.
+         with the `## Project Memory` section (see template). Remove
+         Session Start section — it is now part of Project Memory.
          Add `_index.local.md` to `.gitignore` if not already present.
+- v0015: Move Project Summary, Tech Stack, and Workspace sections from
+         CLAUDE.md to `ai-docs/_index.md`. Remove the `---` separator
+         if it was used to divide behavioral/contextual sections.
+         CLAUDE.md keeps only behavioral rules (Architecture Rules,
+         Project Knowledge). Context lives in `_index.md`.
 -->
 
-<!-- Template Version: v0014 -->
+<!-- Template Version: v0015 -->
