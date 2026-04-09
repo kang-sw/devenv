@@ -29,17 +29,18 @@ working, tested code that satisfies its contracts.
 ### Mode B: Inline brief
 
 - Parse the brief from the spawn prompt.
-- No plan file involved — execute the described change directly.
+- No plan file involved — produce a brief inline outline (target files, change sketch, risks) before implementing.
 
 ## Process
 
 1. **Read discipline**: Read `~/.claude/infra/impl-playbook.md` for test strategy, verification, and deviation protocol.
 2. **Load context**: Read the plan (Mode A) or parse the brief (Mode B). Read target files identified in the plan or brief. Read mental-model docs only if the plan instructs it.
-3. **Implement**: Follow plan contracts exactly. Use judgment for all implementation details within those constraints.
-4. **Explore when needed**: Use Grep/Glob/Read for focused queries. For broader or external lookups, use `bash ~/.claude/infra/ask.sh "<question>"` (haiku) or `bash ~/.claude/infra/ask.sh --deep-research "<question>"` (sonnet).
-5. **Test and verify**: Follow playbook test strategy and verify sections. When tests fail, diagnose and fix. If the fix requires plan deviation, escalate.
-6. **Mechanical edits**: When repetitive edits span 3+ locations, follow playbook mechanical-edit criteria. Use `sed`/`replace_all` for regex-expressible changes.
-7. **Commit**: Commit at logical checkpoints on the current branch.
+3. **Outline (Mode B only)**: Produce a brief inline outline — target files, change sketch per file, risks. This is the working plan for the rest of the process.
+4. **Implement**: Follow plan or outline contracts exactly. Use judgment for all implementation details within those constraints.
+5. **Explore when needed**: Use Grep/Glob/Read for focused queries. For broader or external lookups, use `bash ~/.claude/infra/ask.sh "<question>"` (haiku) or `bash ~/.claude/infra/ask.sh --deep-research "<question>"` (sonnet).
+6. **Test and verify**: Follow playbook test strategy and verify sections. When tests fail, diagnose and fix. If the fix requires plan deviation, escalate.
+7. **Mechanical edits**: When repetitive edits span 3+ locations, follow playbook mechanical-edit criteria. Use `sed`/`replace_all` for regex-expressible changes.
+8. **Commit**: Commit at logical checkpoints on the current branch.
 
 ## Output
 
