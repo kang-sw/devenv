@@ -43,10 +43,9 @@ Target: $ARGUMENTS
 7. Create task list — all tasks are `[fixed]`:
    ```
    [ ] [fixed] Spawn implementer — wait for completion report
-   [ ] [fixed] Spawn reviewer — wait for clean report
-   [ ] [fixed] Verify integration tests pass
+   [ ] [fixed] Spawn reviewer — implement → verify → review loop until clean
    [ ] [fixed] Report to user — wait for approval
-     > if tweaks requested: implementer fixes → reviewer re-reviews → re-verify → re-report (loop)
+     > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews (loop)
    [ ] [fixed] Merge to original branch
    [ ] [fixed] Dispatch mental-model-updater — wait for completion
    [ ] [fixed] Update project docs — ai-docs/_index.md, ticket status
@@ -102,21 +101,22 @@ Agent(
 )
 ```
 
-The reviewer and implementer iterate directly until the reviewer
-reports clean. Wait for the reviewer's final report to the lead.
+The reviewer and implementer iterate directly. Each iteration:
+implementer fixes → lead verifies integration tests pass → reviewer
+re-reviews. Loop until the reviewer reports clean. Wait for the
+reviewer's final report to the lead.
 
 ### 4. Report and approval
 
-1. Verify all integration tests pass on the implementation branch.
-2. Report to the user:
+1. Report to the user:
    - What was implemented (from implementer report)
    - Review result (from reviewer report)
    - Test status
    - Any deviations or open items
-3. Wait for user approval. If the user requests tweaks:
+2. Wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix via `SendMessage`.
-   - After implementer reports done, direct the reviewer to re-review.
-   - Re-verify integration tests.
+   - After implementer reports done, verify integration tests.
+   - Direct the reviewer to re-review.
    - Re-report. Loop until user approves.
 
 Implementer and reviewer remain alive throughout this loop.
