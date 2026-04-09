@@ -8,9 +8,11 @@ description: >
   parallel — one clerk, one call, all ticket work. When ticket content
   includes binding contracts (data formats, concrete types, field names,
   API shapes), the caller must pass exact values — clerk will not infer
-  technical details and will ask if they are missing.
+  technical details and will ask if they are missing. Override to sonnet
+  when the caller passes inline technical context that clerk must
+  synthesize into ticket prose (not just copy).
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: sonnet
+model: haiku
 ---
 
 You own the session's ticket files. All ticket access — read or write
