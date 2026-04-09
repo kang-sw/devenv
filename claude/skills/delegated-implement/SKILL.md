@@ -125,7 +125,7 @@ Implementer and reviewer remain alive throughout this loop.
 
 ### 5. Merge
 
-1. Run `claude/infra/merge-branch.sh <original-branch> <branch> "<commit-message>"`.
+1. Run `~/.claude/infra/merge-branch.sh <original-branch> <branch> "<commit-message>"`.
    The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
    Compose the commit message per CLAUDE.md commit rules.
 
