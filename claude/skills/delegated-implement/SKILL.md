@@ -49,7 +49,7 @@ Target: $ARGUMENTS
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews (loop)
    [ ] Merge to original branch
    [ ] Dispatch mental-model-updater — wait for completion
-   [ ] Update project docs — ai-docs/_index.md, ticket status
+   [ ] Update project docs — refresh ai-docs/_index.md, ticket status
    [ ] Cleanup — shut down teammates, delete team
    ```
 
@@ -131,7 +131,7 @@ Implementer and reviewer remain alive throughout this loop.
 
 1. Dispatch **mental-model-updater** with changed files and implementation summary.
    Provide the commit range from the implementation branch. Always dispatch — the agent determines impact. **Wait for completion before proceeding** — downstream doc updates depend on mental-model accuracy.
-2. Update `ai-docs/_index.md` if project capabilities changed.
+2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state. Always run, not conditional.
 3. If ticket-driven, update ticket status.
 
 ### 7. Cleanup
