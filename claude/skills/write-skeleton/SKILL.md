@@ -14,19 +14,19 @@ Target: $ARGUMENTS
 ## Invariants
 
 - Skeleton = the first code change for a ticket. No implementation code — only interface stubs and integration tests.
-- Lead formulates the skeleton brief (contract design); an opus subagent writes the code.
-- Stubs define public interfaces only: type definitions, trait/interface declarations, function signatures with `todo!()` / `unimplemented` / `raise NotImplementedError` bodies.
-- Integration tests verify contract joints — cross-module interactions, data flow across boundaries. Not unit tests for internals.
+- Lead is a lightweight coordinator: identify the ticket, pass contract directives, review, commit.
+- The opus delegate owns design: reads the ticket, explores the codebase, decides type shapes and test structure.
+- Contract directives = lead's judgment on points the delegate cannot derive from ticket + code alone.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
-- The subagent does not commit — lead reviews and commits.
+- The delegate does not commit — lead reviews and commits.
 
 ## On: invoke
 
-### 1. Understand the contract
+### 1. Identify contract directives
 
-1. Read the ticket. Identify public contracts: new types, API surfaces, data formats, module boundaries.
-2. Read `ai-docs/mental-model/overview.md` and docs touching the change area — understand existing contracts the new code must integrate with.
-3. Formulate a **skeleton brief**: what stubs to create, what integration tests to write, which modules they interact with, key type shapes and signatures.
+1. Read the ticket. Note ambiguities that need lead judgment — scope boundaries, design choices between alternatives, integration constraints not obvious from the ticket alone.
+2. Skim relevant mental-model docs only if needed to resolve those ambiguities.
+3. Formulate **contract directives**: 2–5 binding decisions. Not a full design — just fences and choices the delegate must follow.
 
 ### 2. Delegate to opus subagent
 
@@ -37,8 +37,10 @@ Agent(
   prompt = """
     Read `${CLAUDE_SKILL_DIR}/skeleton-writer.md` first.
 
-    ## Skeleton brief
-    <brief from step 1>
+    Ticket: <ticket-path>
+
+    ## Contract directives
+    - <binding decisions only — things not derivable from ticket + codebase>
   """
 )
 ```
@@ -46,9 +48,9 @@ Agent(
 ### 3. Review
 
 1. Read the files the subagent created/modified.
-2. Verify contracts match the skeleton brief and ticket intent.
+2. Verify contracts match the ticket intent and honor the directives.
 3. Run build to confirm compilation.
-4. If issues found, either fix directly (minor) or re-delegate (structural).
+4. If issues found, either fix directly (minor) or re-delegate with amended directives (structural).
 
 ### 4. Commit
 
@@ -84,9 +86,10 @@ Present the recommendation with brief rationale. Do not auto-invoke.
 
 ## Doctrine
 
-The skeleton optimizes for **contract-first delegation** — by locking
-public interfaces and acceptance criteria in code before implementation
-begins, delegation becomes safe (implementers cannot deviate from
-contracts) and reversible (implementation reverts without losing the
-contract layer). When a rule is ambiguous, apply whichever interpretation
-better preserves contract stability and delegation safety.
+The skeleton optimizes for **contract-first delegation with minimal
+coordinator overhead** — the lead passes only binding decisions the
+delegate cannot derive, the delegate owns design and exploration. This
+keeps the coordinator's context light while locking public interfaces
+and acceptance criteria in code before implementation begins. When a rule
+is ambiguous, apply whichever interpretation better preserves contract
+stability while minimizing what the coordinator must serialize.
