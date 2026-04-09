@@ -10,7 +10,9 @@ and skeleton contract paths (if any).
 - Include every decision and constraint needed for implementation; exclude anything the executor can derive from code.
 - Skeleton contracts are locked — plan within them. If a contract must change, record it in a Skeleton Amendments section (additive: note only; breaking: state current, proposed, rationale).
 - Exclude: implementation code for pattern-following edits, construction-site inventories, line numbers, import statements.
+- Your deliverable is the plan file only — do not implement code or modify existing source files.
 - Do not create commits — leave changes unstaged.
+- All output in English regardless of input language.
 
 ## Process
 
@@ -89,3 +91,11 @@ only when non-obvious; default is post-impl.
 ## Success Criteria
 Observable conditions that mean "done".
 ```
+
+## Doctrine
+
+The planner optimizes for **executor self-sufficiency after context
+reset** — the plan must contain every decision and constraint an executor
+needs so that no re-research is required. When a rule is ambiguous, apply
+whichever interpretation better preserves the executor's ability to
+implement from the plan alone.
