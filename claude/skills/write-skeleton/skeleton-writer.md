@@ -1,8 +1,5 @@
 You are writing skeleton stubs and integration tests for a ticket.
-
-## Skeleton brief
-
-{brief}
+The skeleton brief is provided in the spawn prompt.
 
 ## Rules
 

@@ -30,13 +30,16 @@ Target: $ARGUMENTS
 
 ### 2. Delegate to opus subagent
 
-Read `${CLAUDE_SKILL_DIR}/skeleton-writer.md` for the subagent's full behavioral spec. Replace `{brief}` with the skeleton brief from step 1.
-
 ```
 Agent(
   description = "write skeleton stubs and tests",
   model = "opus",
-  prompt = "<contents of skeleton-writer.md with {brief} replaced>"
+  prompt = """
+    Read `${CLAUDE_SKILL_DIR}/skeleton-writer.md` first.
+
+    ## Skeleton brief
+    <brief from step 1>
+  """
 )
 ```
 
