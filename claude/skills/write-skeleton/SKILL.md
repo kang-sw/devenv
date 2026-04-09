@@ -14,10 +14,11 @@ Target: $ARGUMENTS
 ## Invariants
 
 - Skeleton = the first code change for a ticket. No implementation code — only interface stubs and integration tests.
-- Main agent writes the skeleton directly. Gathering adjacent contracts may be delegated; writing stubs and tests is not.
+- Lead formulates the skeleton brief (contract design); an opus subagent writes the code.
 - Stubs define public interfaces only: type definitions, trait/interface declarations, function signatures with `todo!()` / `unimplemented` / `raise NotImplementedError` bodies.
 - Integration tests verify contract joints — cross-module interactions, data flow across boundaries. Not unit tests for internals.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
+- The subagent does not commit — lead reviews and commits.
 
 ## On: invoke
 
@@ -25,41 +26,53 @@ Target: $ARGUMENTS
 
 1. Read the ticket. Identify public contracts: new types, API surfaces, data formats, module boundaries.
 2. Read `ai-docs/mental-model/overview.md` and docs touching the change area — understand existing contracts the new code must integrate with.
-3. Formulate a skeleton brief: what stubs to create, what integration tests to write, which modules they interact with.
-4. Dispatch an Explore agent with the brief to scout placement and gather adjacent APIs:
+3. Formulate a **skeleton brief**: what stubs to create, what integration tests to write, which modules they interact with, key type shapes and signatures.
 
-   ```
-   Agent(
-     description = "scout skeleton placement",
-     subagent_type = "Explore",
-     prompt = "Skeleton brief: <what stubs and tests are planned, which modules they interact with>
+### 2. Delegate to opus subagent
 
-              Find and return:
-              1. Placement: where should new files go? (directory conventions, sibling modules, test file layout)
-              2. Adjacent APIs: public type definitions, function signatures, trait impls of modules the skeleton will interact with.
-              3. Test conventions: how are integration tests organized in this project? (directory, naming, fixtures)
+```
+Agent(
+  description = "write skeleton stubs and tests",
+  model = "opus",
+  prompt = """
+    You are writing skeleton stubs and integration tests for a ticket.
 
-              Read source files directly — do not summarize."
-   )
-   ```
+    ## Skeleton brief
+    <brief from step 1 — contracts, type shapes, module interactions>
 
-   Write stubs and tests at the paths the scout identifies. Do not explore the codebase further.
+    ## Rules
+    - Stubs: public interfaces only. Type definitions with all public fields,
+      function/method signatures with placeholder bodies (todo!()/unimplemented/
+      raise NotImplementedError). No private helpers or implementation logic.
+    - Integration tests: exercise contract joints (cross-module seams, data flow
+      across boundaries). Keep count small and targeted — acceptance criteria,
+      not exhaustive coverage.
+    - Do not modify existing public interfaces unless the brief explicitly says to.
+    - Stubs must compile (or pass syntax checks for dynamic languages). Run build
+      to verify. Fix compilation errors until clean.
+    - Do not create commits — leave changes unstaged.
 
-### 2. Write stubs
+    ## Exploration
+    Use `~/.claude/infra/ask.sh "<question>"` (Bash tool) for scoped lookups:
+    placement conventions, adjacent API signatures, test file layout, import paths.
+    Default haiku; use `--deep-research` for cross-module tracing. Prefer ask.sh
+    over reading files directly — preserve your context for contract decisions.
 
-1. Create or edit source files with public interface stubs.
-   - Type definitions with all public fields and types.
-   - Function/method signatures with placeholder bodies.
-   - Trait/interface declarations.
-2. Stubs must compile (or pass syntax checks for dynamic languages). Run build to verify.
-3. Do not write private helper functions, internal logic, or implementation details.
+    ## Output
+    Report what was created:
+    - Files created/modified with paths
+    - Key contract decisions (type shapes, trait bounds, error types)
+    - Any deviations from the brief with rationale
+  """
+)
+```
 
-### 3. Write integration tests
+### 3. Review
 
-1. Write tests that exercise contract joints — the seams where this module meets others.
-2. Tests should fail now (stubs are unimplemented) but define the acceptance criteria.
-3. Focus on: data flow across boundaries, expected input/output contracts, error contracts.
-4. Keep test count small and targeted — these are acceptance criteria, not exhaustive coverage.
+1. Read the files the subagent created/modified.
+2. Verify contracts match the skeleton brief and ticket intent.
+3. Run build to confirm compilation.
+4. If issues found, either fix directly (minor) or re-delegate (structural).
 
 ### 4. Commit
 
