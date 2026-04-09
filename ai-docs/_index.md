@@ -32,7 +32,6 @@ Team communication rules are injected by the calling skill at spawn time.
 claude/agents/
   implementer.md          — code implementation from plan or brief
   reviewer.md             — code review (read-only, produces findings)
-  planner.md              — codebase research → plan file
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
