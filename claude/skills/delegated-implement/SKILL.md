@@ -2,7 +2,7 @@
 name: delegated-implement
 description: >
   Delegate a single implementation cycle to an implementer + reviewer pair.
-  Use for Tier 3 work (internal implementation behind locked contracts).
+  Use for internal implementation behind locked contracts.
   Dispatch multiple instances in parallel for concurrent work.
 argument-hint: "<plan-path or inline brief> [--ticket <ticket-stem>]"
 ---
@@ -14,7 +14,7 @@ Target: $ARGUMENTS
 ## Invariants
 
 - This skill delegates — the lead does not read source code or write implementation.
-- Skeleton stubs and integration tests are the acceptance criteria.
+- When skeleton exists, its stubs and integration tests are the acceptance criteria.
 - The implementer and reviewer communicate directly; the lead receives only final reports.
 - User approves the report before merge — no code reaches the target branch without user confirmation.
 - Teammates (implementer, reviewer) stay alive until after doc pipeline completes; cleanup is the final step.
@@ -125,7 +125,7 @@ Implementer and reviewer remain alive throughout this loop.
 
 ### 5. Merge
 
-1. Merge back to `<original-branch>` with a summary commit per CLAUDE.md commit rules.
+1. Merge back to `<original-branch>` with `--no-ff` and a summary commit per CLAUDE.md commit rules.
 
 ### 6. Doc pipeline
 
