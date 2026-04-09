@@ -65,7 +65,7 @@ Act on the diagnosis.
 
 ## §Doc Pipeline
 
-1. Dispatch **mental-model-updater** with changed files and summary. Skip if no impact. Wait.
+1. Dispatch **mental-model-updater** with changed files and summary. Always dispatch — the agent determines impact. Wait.
 2. Update `ai-docs/_index.md` if project capabilities changed.
 3. If completing a ticket phase, move ticket status via `git mv` (load `/write-ticket` for conventions).
 4. Prune aggressively — docs reflect current state only.

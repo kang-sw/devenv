@@ -96,7 +96,7 @@ reports clean. Wait for the reviewer's final report to the lead.
 ### 5. Doc pipeline
 
 1. Dispatch **mental-model-updater** with changed files and implementation summary.
-   Provide the commit range from the implementation branch. Skip if no impact.
+   Provide the commit range from the implementation branch. Always dispatch — the agent determines impact.
 2. Update `ai-docs/_index.md` if project capabilities changed.
 3. If ticket-driven, update ticket status.
 
