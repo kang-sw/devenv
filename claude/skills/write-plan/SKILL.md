@@ -44,9 +44,9 @@ well-scoped ticket, familiar codebase area), delegate to a planner subagent.
    ```
    Agent(
      name = "planner",
-     subagent_type = "planner",
+     description = "Draft implementation plan",
+     subagent_type = "general-purpose",
      model = "sonnet",
-     mode = "acceptEdits",
      prompt = """
        Lead name: <lead-name>
        Brief: <ticket description or phase scope>
@@ -70,8 +70,9 @@ well-scoped ticket, familiar codebase area), delegate to a planner subagent.
    ```
    Agent(
      name = "plan-verifier",
+     description = "Verify and fix plan",
+     subagent_type = "general-purpose",
      model = "sonnet",
-     mode = "acceptEdits",
      prompt = """
        Verify the implementation plan at `<plan-path>`.
 
