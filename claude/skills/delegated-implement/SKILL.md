@@ -54,7 +54,8 @@ Target: $ARGUMENTS
 ```
 Agent(
   name = "implementer",
-  subagent_type = "implementer",
+  description = "Implement plan on branch",
+  subagent_type = "general-purpose",
   model = "sonnet",
   team_name = "impl-<scope>",
   prompt = """
@@ -79,7 +80,8 @@ Wait for the implementer's completion report. Note the commit range.
 ```
 Agent(
   name = "reviewer",
-  subagent_type = "reviewer",
+  description = "Review implementation diff",
+  subagent_type = "general-purpose",
   model = "sonnet",
   team_name = "impl-<scope>",
   prompt = """
