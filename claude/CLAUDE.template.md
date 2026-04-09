@@ -182,6 +182,10 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          if it was used to divide behavioral/contextual sections.
          CLAUDE.md keeps only behavioral rules (Architecture Rules,
          Project Knowledge). Context lives in `_index.md`.
+- v0016: If Project Knowledge lacks a ticket completion check rule, add:
+         "To check ticket completion or prior phase results, use
+         `git log --grep=<ticket-stem>` and look for `## Ticket Updates`
+         sections in matching commits."
 -->
 
-<!-- Template Version: v0015 -->
+<!-- Template Version: v0016 -->
