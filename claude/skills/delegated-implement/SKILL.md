@@ -131,7 +131,7 @@ Implementer and reviewer remain alive throughout this loop.
 
 1. Dispatch **mental-model-updater** with changed files and implementation summary.
    Provide the commit range from the implementation branch. Always dispatch — the agent determines impact. **Wait for completion before proceeding** — downstream doc updates depend on mental-model accuracy.
-2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state. Always run, not conditional.
+2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
 3. If ticket-driven, update ticket status.
 
 ### 7. Cleanup
