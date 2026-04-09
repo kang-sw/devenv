@@ -20,7 +20,7 @@ Target: $ARGUMENTS
 - Teammates (implementer, reviewer) stay alive until after doc pipeline completes; cleanup is the final step.
 - One delegation cycle per invocation. For parallel work, dispatch multiple instances.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
-- Task list with `[fixed]` tasks is created at prepare and tracked to completion — no task may be skipped.
+- Task list is created at prepare and tracked to completion — no task may be skipped or reordered.
 - `/team-lead` skill must be loaded before any team operations.
 
 ## On: invoke
@@ -41,18 +41,17 @@ Target: $ARGUMENTS
    ```
    TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
    ```
-8. Create task list — all tasks are `[fixed]`:
+8. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
-   [ ] [fixed] Spawn implementer — wait for completion report
-   [ ] [fixed] Spawn reviewer — implement → verify → review loop until clean
-   [ ] [fixed] Report to user — wait for approval
+   [ ] Spawn implementer — wait for completion report
+   [ ] Spawn reviewer — implement → verify → review loop until clean
+   [ ] Report to user — wait for approval
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews (loop)
-   [ ] [fixed] Merge to original branch
-   [ ] [fixed] Dispatch mental-model-updater — wait for completion
-   [ ] [fixed] Update project docs — ai-docs/_index.md, ticket status
-   [ ] [fixed] Cleanup — shut down teammates, delete team
+   [ ] Merge to original branch
+   [ ] Dispatch mental-model-updater — wait for completion
+   [ ] Update project docs — ai-docs/_index.md, ticket status
+   [ ] Cleanup — shut down teammates, delete team
    ```
-   Mark each task as completed when done. Do not skip any.
 
 ### 2. Spawn implementer
 
