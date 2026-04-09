@@ -17,7 +17,7 @@
 [ ] [fixed] Code review — dispatch subagent (skip for small single-file changes)
   > if Critical/Important: fix → re-verify → re-review (loop until clean)
 [ ] [fixed] Report to user — user approves before doc updates
-[ ] [fixed] Update mental model — dispatch mental-model-updater subagent
+[ ] [fixed] Update mental model — dispatch mental-model-updater subagent, wait for completion
 [ ] [fixed] Update project docs — ai-docs/_index.md, ticket status move
 [ ] [fixed] Final commit — docs & remaining changes
 [ ] [fixed] Merge & cleanup — merge --no-ff → delete branch
