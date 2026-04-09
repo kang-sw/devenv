@@ -19,8 +19,13 @@ Target: $ARGUMENTS
 - One delegation cycle per invocation. For parallel work, dispatch multiple instances.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
 - Task list with `[fixed]` tasks is created at prepare and tracked to completion — no task may be skipped.
+- `/team-lead` skill must be loaded before any team operations.
 
 ## On: invoke
+
+### 0. Prerequisites
+
+1. Load `/team-lead` skill if not already loaded.
 
 ### 1. Prepare
 
@@ -29,7 +34,7 @@ Target: $ARGUMENTS
 3. If brief-driven: the brief is the full specification.
 4. Verify skeleton exists: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests that reference the target contracts. If absent, stop and suggest `/write-skeleton`.
 5. Record current branch as `<original-branch>`. Create `implement/<scope>` branch.
-6. Create a team for the delegation cycle:
+6. If already in a team context, use the existing team. Otherwise create one:
    ```
    TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
    ```
@@ -96,7 +101,7 @@ reports clean. Wait for the reviewer's final report to the lead.
 ### 4. Merge and report
 
 1. Verify all integration tests pass on the implementation branch.
-2. Shut down teammates and delete the team (`TeamDelete`).
+2. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
 3. Merge back to `<original-branch>` with a summary commit per CLAUDE.md commit rules.
 3. Report to the user:
    - What was implemented (from implementer report)
