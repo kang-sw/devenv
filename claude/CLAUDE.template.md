@@ -185,6 +185,8 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          "To check ticket completion or prior phase results, use
          `git log --grep=<ticket-stem>` and look for `## Ticket Updates`
          sections in matching commits."
+- v0017: If Project Knowledge items are plain paragraphs, convert to a
+         bulleted list (`- ` prefix per item) for readability.
 -->
 
-<!-- Template Version: v0016 -->
+<!-- Template Version: v0017 -->
