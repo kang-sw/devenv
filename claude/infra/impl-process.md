@@ -88,15 +88,7 @@ Present before doc updates. User approves before proceeding.
 ## §Merge & Cleanup
 
 ```bash
-git checkout <original-branch>
-
-# Count commits on the implementation branch
-commit_count=$(git rev-list --count <original-branch>..<branch>)
-
-if [ "$commit_count" -eq 1 ]; then
-  # Single commit: squash for linear history, lead composes final message
-  git merge --squash <branch>
-  git commit -m "$(cat <<'EOF'
+bash "${CLAUDE_SKILL_DIR}/merge-branch.sh" <original-branch> <branch> "$(cat <<'EOF'
 <type>(<scope>): <summary>
 
 <what changed — brief>
@@ -109,25 +101,9 @@ if [ "$commit_count" -eq 1 ]; then
   > Forward: <what future phases must know>
 EOF
 )"
-else
-  # Multiple commits: --no-ff to preserve branch topology as logical grouping
-  git merge --no-ff <branch> -m "$(cat <<'EOF'
-<type>(<scope>): <summary>
-
-<what changed — brief>
-
-## AI Context
-- <decision rationale, rejected alternatives, user directives>
-
-## Ticket Updates                          # optional — only when ticket-driven
-- <ticket-stem>[: <optional-label>]
-  > Forward: <what future phases must know>
-EOF
-)"
-fi
-
-git branch -d <branch>
 ```
+
+The script selects merge strategy by commit count: squash (1 commit) or --no-ff (2+), then deletes the branch.
 
 Include `## Ticket Updates` when ticket-driven AND forward-facing findings exist. If user declines merge, keep branch intact.
 

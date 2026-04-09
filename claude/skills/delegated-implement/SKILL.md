@@ -125,10 +125,9 @@ Implementer and reviewer remain alive throughout this loop.
 
 ### 5. Merge
 
-1. Count commits on the branch (`git rev-list --count <original-branch>..<branch>`).
-   - **1 commit:** `git merge --squash` — lead composes a single linear commit with merged context.
-   - **2+ commits:** `git merge --no-ff` — preserve branch topology with a merge commit.
-   Both use a summary commit message per CLAUDE.md commit rules.
+1. Run `merge-branch.sh <original-branch> <branch> "<commit-message>"` (in `${CLAUDE_SKILL_DIR}/`).
+   The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
+   Compose the commit message per CLAUDE.md commit rules.
 
 ### 6. Doc pipeline
 
