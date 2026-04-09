@@ -62,6 +62,7 @@ claude/skills/
   monologue/         — continuous operational narration
   manual-think/      — manual chain-of-thought when native thinking unavailable
   write-mental-model/  — mental-model document format, inclusion test, rebuild
+  bootstrap/         — scaffold new project or upgrade existing to canonical template
 ```
 
 ## Canonical Flows
