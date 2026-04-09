@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge-branch.sh — conditional merge strategy for delegated-implement
+# merge-branch.sh — conditional merge strategy for implementation skills
 #
 # Usage: merge-branch.sh <original-branch> <impl-branch> <commit-message>
 #

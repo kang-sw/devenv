@@ -56,8 +56,8 @@ claude/skills/
   write-ticket/      — create/edit tickets in ai-docs/tickets/
   write-skeleton/    — public interface stubs + integration tests
   write-plan/        — deep codebase research → implementation plan
-  implement/         — structured implementation (plan-driven or ad-hoc)
-  delegated-implement/ — Tier 3 delegation: implementer + reviewer cycle
+  implement/         — delegation: implementer + reviewer cycle
+  parallel-implement/ — multiple pairs, worktree isolation, coordinated merge
   team-lead/         — team orchestration mode (TeamCreate, coordination, shutdown)
   monologue/         — continuous operational narration
   manual-think/      — manual chain-of-thought when native thinking unavailable
@@ -70,11 +70,10 @@ claude/skills/
 ```
 Full ceremony:  /discuss → /write-ticket → /write-skeleton → (/write-plan) → /implement
 Direct:         /implement <description>
-Delegation:     /delegated-implement (implementer + reviewer cycle)
+Parallel:       /parallel-implement (multiple implementer pairs, coordinated merge)
 ```
 
 Agent suggests next step at each point; user decides. No auto-chaining.
-Parallel work = dispatch multiple /delegated-implement. No session modes.
 
 ## Tickets
 

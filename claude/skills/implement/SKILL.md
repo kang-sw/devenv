@@ -1,74 +1,157 @@
 ---
 name: implement
 description: >
-  When the user provides a ticket, plan, or description for structured
-  implementation, invoke this. Covers both plan-driven execution and
-  ad-hoc implementation.
-argument-hint: [ticket-path or description]
+  Delegate a single implementation cycle to an implementer + reviewer pair.
+  Use for internal implementation behind locked contracts.
+argument-hint: "<plan-path or inline brief> [--ticket <ticket-stem>]"
 ---
 
-# Implementation Workflow
+# Implementation
 
 Target: $ARGUMENTS
 
 ## Invariants
 
-- All implementation decisions must conform to `~/.claude/infra/impl-playbook.md` and `~/.claude/infra/impl-process.md`.
-- Follow CLAUDE.md code standards in all implementation work.
-- Before touching a module, verify its contracts and invariants in mental-model docs; prefer documented extension points over new abstractions.
-- When a plan is loaded in context, it is the spec — follow its contracts, do not re-research or second-guess. Deviate only per playbook §Deviation Protocol.
-- Skeleton files (stubs and integration tests from `/write-skeleton`) are read-only except for amendments explicitly listed in the plan's **Skeleton Amendments** section. Without a plan, all skeleton contracts are fully locked — no amendments possible. If implementation reveals a skeleton conflict not covered by an amendment, **stop and escalate** — do not modify skeleton contracts silently.
-- Claim "pass" only after reading full test/build output — never "should pass" or "looks correct."
-- Do not include design rationale in code-review prompts.
-- Commit freely on the feature branch.
-- User approves the report before doc-update tasks proceed.
-- Dismiss false-positive review issues with a brief rationale — do not apply unnecessary fixes.
+- This skill delegates — the lead does not read source code or write implementation.
+- When skeleton exists, its stubs and integration tests are the acceptance criteria.
+- The implementer and reviewer communicate directly; the lead receives only final reports.
+- User approves the report before merge — no code reaches the target branch without user confirmation.
+- Teammates (implementer, reviewer) stay alive until after doc pipeline completes; cleanup is the final step.
+- One delegation cycle per invocation.
+- Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
+- Task list is created at prepare and tracked to completion — no task may be skipped or reordered.
+- `/team-lead` skill must be loaded before any team operations.
 
 ## On: invoke
 
-### 1. Understand
+### 0. Prerequisites
 
-1. Read the ticket/description/plan.
-2. Read `ai-docs/mental-model/overview.md`; read every mental-model doc touching the change area and adjacent domains. If none exist, note for docs task.
-3. **Plan-driven**: if a plan has been loaded, its contracts and step ordering are authoritative. Derive tasks from plan steps, preserving testing classifications (TDD/post-impl/manual).
-4. **Ad-hoc**: research the change area. Before designing new components, search for reusable existing utilities or patterns.
-5. Record current branch as `<original-branch>`. If already on an `implement/` branch, treat as resumed session — infer `<original-branch>` from merge-base with `main`, skip branch creation, continue from existing task list. Otherwise create `implement/<scope>` from current branch.
+1. Load `/team-lead` skill if not already loaded.
 
-### 2. Outline (mandatory)
+### 1. Prepare
 
-Before creating tasks, produce a lightweight inline outline. This is mechanical — apply even for trivial changes.
+1. Parse arguments: extract plan path or inline brief, and optional ticket stem.
+2. If plan-driven: verify the plan file exists. Read it to extract scope and branch name hint.
+3. If brief-driven: the brief is the full specification.
+4. Verify skeleton exists: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests that reference the target contracts. If absent, stop and suggest `/write-skeleton`.
+5. Collect integration test context: identify test file paths and the command to run them. This flows into the implementer spawn prompt.
+6. Record current branch as `<original-branch>`. Create `implement/<scope>` branch.
+7. If already in a team context, use the existing team. Otherwise create one:
+   ```
+   TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
+   ```
+8. Create task list. All tasks are mandatory — do not skip or reorder.
+   ```
+   [ ] Spawn implementer — wait for completion report
+   [ ] Spawn reviewer — implement → verify → review loop until clean
+   [ ] Report to user — wait for approval
+     > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews (loop)
+   [ ] Merge to original branch
+   [ ] Dispatch mental-model-updater — wait for completion
+   [ ] Update project docs — refresh ai-docs/_index.md, ticket status
+   [ ] Cleanup — shut down teammates, delete team
+   ```
 
-**Plan-driven:** When a concrete plan has been loaded in step 1, the plan *is* the outline. Skip the scan/sketch below — derive tasks directly from the plan's steps. Still perform the risk check against skeleton stubs if they exist.
+### 2. Spawn implementer
 
-**Ad-hoc / brief-driven:**
+```
+Agent(
+  name = "implementer",
+  description = "Implement plan on branch",
+  subagent_type = "implementer",
+  model = "sonnet",
+  team_name = "impl-<scope>",
+  prompt = """
+    Lead name: <lead-name>
+    Mode: <A: plan-driven | B: inline brief>
+    <Plan path | Brief text>
 
-1. **Reuse scan** — search for existing utilities, patterns, or components that cover part of the work. Grep for similar functionality; check mental-model docs for documented extension points.
-2. **Placement sketch** — list which files get what changes (1-2 lines each). For new files, note where they fit in the module structure.
-3. **Risk check** — identify anything that touches public contracts, cross-module boundaries, or unfamiliar patterns. If skeleton stubs exist, verify the outline stays within their contracts.
+    Acceptance criteria: skeleton integration tests must pass.
+    - Test files: <integration test paths>
+    - Run: <command to execute them>
 
-The outline lives in your response text (not a file). It informs the task list that follows.
+    Team rules:
+    - Verify integration tests pass before reporting completion or after each fix.
+    - Report completion to the lead via SendMessage. Include test results.
+    - The reviewer may message you directly with findings — fix, re-verify tests, and reply.
+    - Commit at logical checkpoints on the current branch.
+  """
+)
+```
 
-### 3. Create task list
+Wait for the implementer's completion report. Note the commit range.
 
-Create tasks per process §Task List. Bookend tasks (marked `[fixed]`) are mandatory. Fill implementation tasks between them. State assumptions and success criteria before the first implementation task.
+### 3. Spawn reviewer
 
-### 4. Execute tasks
+```
+Agent(
+  name = "reviewer",
+  description = "Review implementation diff",
+  subagent_type = "reviewer",
+  model = "sonnet",
+  team_name = "impl-<scope>",
+  prompt = """
+    Lead name: <lead-name>
+    Implementer name: implementer
+    Diff range: <first-commit>..<last-commit>
 
-Work through tasks sequentially per playbook (§Test Strategy, §Verify, §Deviation Protocol, §Mechanical-Edit Criteria). When tests fail, follow playbook §Test Failure Diagnosis and process §Test Failure Dispatch.
+    Team rules:
+    - SendMessage findings to the implementer by name.
+    - The implementer fixes and notifies you — re-review until clean.
+    - SendMessage the final report to the lead.
+  """
+)
+```
 
-For orchestration tasks (code review, doc pipeline, report, merge), follow process.
+The reviewer and implementer iterate directly. Each iteration:
+implementer fixes → implementer verifies integration tests pass →
+reviewer re-reviews. Loop until the reviewer reports clean. Wait for
+the reviewer's final report to the lead.
+
+### 4. Report and approval
+
+1. Report to the user:
+   - What was implemented (from implementer report)
+   - Review result (from reviewer report)
+   - Test status
+   - Any deviations or open items
+2. Wait for user approval. If the user requests tweaks:
+   - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
+   - Direct the reviewer to re-review.
+   - Re-report. Loop until user approves.
+
+Implementer and reviewer remain alive throughout this loop.
+
+### 5. Merge
+
+1. Run `~/.claude/infra/merge-branch.sh <original-branch> <branch> "<commit-message>"`.
+   The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
+   Compose the commit message per CLAUDE.md commit rules.
+
+### 6. Doc pipeline
+
+1. Dispatch **mental-model-updater** with changed files and implementation summary.
+   Provide the commit range from the implementation branch. Always dispatch — the agent determines impact. **Wait for completion before proceeding** — downstream doc updates depend on mental-model accuracy.
+2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
+3. If ticket-driven, update ticket status.
+
+### 7. Cleanup
+
+1. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
 
 ## Judgments
 
-### judge: approval-gate
+### judge: skeleton-check
 
-- **Auto-proceed:** bug fixes, pattern-following additions, tests, refactoring.
-- **Ask first:** new components/protocols, architectural changes, cross-module interfaces.
-- **Always ask:** deleting functionality, changing API semantics, schema changes.
+| Decision | When |
+|----------|------|
+| Proceed without skeleton | Brief is a small, isolated change (single file, no public contracts) |
+| Require skeleton | Change touches public interfaces or cross-module boundaries |
 
 ## Doctrine
 
-Implementation correctness depends on **verified task closure** — every
-task runs through build, test, and review before the branch merges. When
-a rule is ambiguous, apply whichever interpretation better preserves
-verified closure of each task in the sequence.
+Implementation optimizes for **contract-bounded autonomy** —
+the implementer has full freedom within skeleton-locked contracts, and
+the reviewer validates without lead involvement. When a rule is
+ambiguous, apply whichever interpretation better preserves the
+implementer's autonomy within contract boundaries.
