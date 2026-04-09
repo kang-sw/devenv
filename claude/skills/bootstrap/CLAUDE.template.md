@@ -133,10 +133,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
 
 - v0001: If `ai-docs/_memory.md` exists, merge useful content into
          `ai-docs/_index.md` and delete `_memory.md`.
-- v0002: If `ai-docs/spec/` exists, merge architectural narrative and
-         design rationale into `ai-docs/mental-model/` docs. Remove API
-         signatures, struct layouts, and status tracking (already in
-         source/tickets). Delete `ai-docs/spec/` after migration.
+- v0002: [obsoleted by v0018]
 - v0003: If tickets lack `plans:` frontmatter, add it (only phases with
          existing plan documents — no null placeholders). Audit phase
          content: discussion decisions stay in tickets, codebase-derived
@@ -187,6 +184,9 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          sections in matching commits."
 - v0017: If Project Knowledge items are plain paragraphs, convert to a
          bulleted list (`- ` prefix per item) for readability.
+- v0018: Do not delete `ai-docs/spec/` — projects may use it for external
+         specs, protocol docs, or design notes alongside `ref/` and
+         `mental-model/`. Obsoletes v0002's hard-delete rule.
 -->
 
-<!-- Template Version: v0017 -->
+<!-- Template Version: v0018 -->
