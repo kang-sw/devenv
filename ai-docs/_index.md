@@ -68,7 +68,7 @@ claude/skills/
 ## Canonical Flows
 
 ```
-Full ceremony:  /discuss → /write-ticket → /write-skeleton → (/write-plan) → /implement
+Full ceremony:  /discuss → /write-ticket → /write-skeleton → /implement
 Direct:         /implement <description>
 Parallel:       /parallel-implement (multiple implementer pairs, coordinated merge)
 ```
