@@ -35,12 +35,13 @@ Target: $ARGUMENTS
 2. If plan-driven: verify the plan file exists. Read it to extract scope and branch name hint.
 3. If brief-driven: the brief is the full specification.
 4. Verify skeleton exists: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests that reference the target contracts. If absent, stop and suggest `/write-skeleton`.
-5. Record current branch as `<original-branch>`. Create `implement/<scope>` branch.
-6. If already in a team context, use the existing team. Otherwise create one:
+5. Collect integration test context: identify test file paths and the command to run them. This flows into the implementer spawn prompt.
+6. Record current branch as `<original-branch>`. Create `implement/<scope>` branch.
+7. If already in a team context, use the existing team. Otherwise create one:
    ```
    TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
    ```
-7. Create task list — all tasks are `[fixed]`:
+8. Create task list — all tasks are `[fixed]`:
    ```
    [ ] [fixed] Spawn implementer — wait for completion report
    [ ] [fixed] Spawn reviewer — implement → verify → review loop until clean
@@ -68,10 +69,13 @@ Agent(
     <Plan path | Brief text>
 
     Acceptance criteria: skeleton integration tests must pass.
+    - Test files: <integration test paths>
+    - Run: <command to execute them>
 
     Team rules:
-    - Report completion to the lead via SendMessage.
-    - The reviewer may message you directly with findings — fix and reply.
+    - Verify integration tests pass before reporting completion or after each fix.
+    - Report completion to the lead via SendMessage. Include test results.
+    - The reviewer may message you directly with findings — fix, re-verify tests, and reply.
     - Commit at logical checkpoints on the current branch.
   """
 )
@@ -102,9 +106,9 @@ Agent(
 ```
 
 The reviewer and implementer iterate directly. Each iteration:
-implementer fixes → lead verifies integration tests pass → reviewer
-re-reviews. Loop until the reviewer reports clean. Wait for the
-reviewer's final report to the lead.
+implementer fixes → implementer verifies integration tests pass →
+reviewer re-reviews. Loop until the reviewer reports clean. Wait for
+the reviewer's final report to the lead.
 
 ### 4. Report and approval
 
@@ -114,8 +118,7 @@ reviewer's final report to the lead.
    - Test status
    - Any deviations or open items
 2. Wait for user approval. If the user requests tweaks:
-   - Direct the implementer to fix via `SendMessage`.
-   - After implementer reports done, verify integration tests.
+   - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
    - Direct the reviewer to re-review.
    - Re-report. Loop until user approves.
 
