@@ -450,9 +450,9 @@ _n3=1
 _PC1="\033[38;5;${FG}m 🤔 ${API_TIME_FMT} \033[38;5;${FG_DIM}m${TOK_SEC}t/s"
 _PW1=$((8 + ${#API_TIME_FMT} + ${#TOK_SEC})) # " 🤔(+1) APITIME TOKt/s"
 if [[ -n $CACHE_HIT ]]; then
-  _ch_label="ch ${CACHE_HIT}%"
-  _PC1+=" ${CACHE_HIT_COLOR}${_ch_label}"
-  _PW1=$((_PW1 + 1 + ${#_ch_label}))
+  _ch_pct="${CACHE_HIT}%"
+  _PC1+=" \033[38;5;${FG_DIM}mhit:${CACHE_HIT_COLOR}${_ch_pct}"
+  _PW1=$((_PW1 + 5 + ${#_ch_pct})) # " hit:NN.N%"
 fi
 _PC1+=" "
 _PW1=$((_PW1 + 1))
