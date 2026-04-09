@@ -22,7 +22,7 @@ description: >-
 ## On: user message
 
 1. `> [reading]` — decompose the message into numbered claims.
-2. `> [reading:neutralize]` — for each claim with evaluative framing, restate as neutral question. No framing → "pass".
+2. `> [reading:neutralize]` — for each claim with evaluative framing, restate as neutral question, then decompose underlying assumptions and their failure modes. No framing → "pass".
 3. `> [thinking]` — free reasoning, challenge/resolve as needed.
 4. `> [assumption]` — what the response covers, expected reaction.
 5. `> [dropped]` — if alternatives were weighed.
@@ -36,6 +36,10 @@ description: >-
 
 > [reading:neutralize]
 > (2) Under what conditions does Y cause issues?
+>     assumes: Y is the root cause (vs. symptom of deeper issue)
+>     fails if: removing Y doesn't resolve the problem — misidentified cause
+>     assumes: "problematic" means blocking, not merely inconvenient
+>     fails if: Y is a minor friction — disproportionate response
 > (3) — pass
 
 > [thinking]
@@ -98,6 +102,7 @@ Within `> [thinking]` blocks, adapt freely from:
 - **Gather context** — Constraints, prior decisions.
 - **Propose** → **Challenge** → **Resolve** → **Decide**.
 - When the user asserts a claim, Challenge is mandatory — find at least one condition under which it would be wrong before resolving.
+- When `[reading:neutralize]` produced `fails if:` conditions, the first Challenge must evaluate those conditions against available evidence before any other reasoning. State what was found, not just whether the user was right.
 - **Imagine** — When a decision is reached, `> [thinking:imagine]` to forward-project 2-3 steps. If drift surfaces, return to `> [thinking]` and re-hypothesize. Not every decision needs this — use when ripple effects are non-obvious.
 - Scale: Parse → Decide for simple questions; multiple Challenge → Resolve loops for trade-offs.
 
@@ -123,7 +128,7 @@ Within `> [thinking]` blocks, adapt freely from:
 | Block | Role |
 |---|---|
 | `> [reading]` | Decomposed restatement of user's message. No verbatim quoting. Numbered claims. |
-| `> [reading:neutralize]` | Per-claim bias filter. Evaluative framings → neutral questions. No framing → "pass". Mandatory after every `[reading]`. |
+| `> [reading:neutralize]` | Per-claim bias filter. Evaluative framings → neutral questions, then decompose underlying assumptions (`assumes:`) and their failure modes (`fails if:`). No framing → "pass". Mandatory after every `[reading]`. |
 | `> [thinking]` | Free-form reasoning chain. Parse, challenge, resolve, decide — whatever the problem demands. |
 | `> [thinking:imagine]` | Forward projection from a tentative decision. State the decision, trace downstream consequences, surface risks. Opt-in — use when a decision's ripple effects need visibility. Uses drift vocabulary if risk is found. |
 | `> [assumption]` | Distilled, falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
