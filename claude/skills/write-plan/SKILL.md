@@ -63,9 +63,47 @@ well-scoped ticket, familiar codebase area), delegate to a planner subagent.
    )
    ```
 
-3. **Review** — read the plan the planner produced. Verify contracts align with
-   skeleton stubs, decisions are sound, and the plan is self-contained. Revise
-   or reject before proceeding to `/implement`.
+3. **Verify & revise** — dispatch a sonnet subagent to verify and fix the plan
+   in-place. The lead does **not** read the plan or open source files.
+
+   ```
+   Agent(
+     name = "plan-verifier",
+     model = "sonnet",
+     prompt = """
+       Verify the implementation plan at `<plan-path>`.
+
+       Read the plan, then read `CLAUDE.md` and all of `ai-docs/mental-model/`.
+       Check:
+       - Do referenced files, functions, and types actually exist?
+       - Do described conventions match actual code patterns?
+       - Does the plan conflict with documented contracts or invariants?
+       - Are new/changed public contracts specified with all public members and types?
+       - Could an executor with no prior context implement this correctly?
+       - Does the plan reimplement something that already exists?
+       - If skeleton stubs/tests exist: does the plan contradict a skeleton
+         contract without listing it in Skeleton Amendments? (Critical if yes.)
+
+       Categorize each finding as Critical / Important / Minor.
+       - Critical and Important: apply inline fixes to the plan file directly.
+       - Minor: note but do not fix unless trivial.
+
+       After fixes, return a summary report to the lead:
+         ## Verification Report
+         - Findings: <count by severity>
+         - Fixes applied: <list of changes made>
+         - Unresolved: <any issues that need lead judgment>
+
+       Skeleton contracts (locked):
+       - Stubs: <list of stub file paths, or "none">
+       - Integration tests: <list of test file paths, or "none">
+     """
+   )
+   ```
+
+4. **Accept / reject** — read the verifier's report only (not the plan or
+   source code). Accept if no unresolved Critical issues remain. Reject and
+   re-delegate if structural problems persist.
 
 Use direct writing (the `On: invoke` path) when the plan requires deep
 architectural judgment or crosses unfamiliar domains.
