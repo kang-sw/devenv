@@ -18,6 +18,7 @@ Target: $ARGUMENTS
 - The implementer and reviewer communicate directly; the lead receives only final reports.
 - One delegation cycle per invocation. For parallel work, dispatch multiple instances.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
+- Task list with `[fixed]` tasks is created at prepare and tracked to completion — no task may be skipped.
 
 ## On: invoke
 
@@ -32,6 +33,16 @@ Target: $ARGUMENTS
    ```
    TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
    ```
+7. Create task list — all tasks are `[fixed]`:
+   ```
+   [ ] [fixed] Spawn implementer — wait for completion report
+   [ ] [fixed] Spawn reviewer — wait for clean report
+   [ ] [fixed] Verify integration tests pass
+   [ ] [fixed] Merge and report to user
+   [ ] [fixed] Dispatch mental-model-updater
+   [ ] [fixed] Update project docs — ai-docs/_index.md, ticket status
+   ```
+   Mark each task as completed when done. Do not skip any.
 
 ### 2. Spawn implementer
 
