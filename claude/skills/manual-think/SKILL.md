@@ -24,9 +24,10 @@ description: >-
 1. `> [reading]` — decompose the message into numbered claims.
 2. `> [reading:neutralize]` — for each claim with evaluative framing, restate as neutral question, then decompose underlying assumptions and their failure modes. No framing → "pass".
 3. `> [thinking]` — free reasoning, challenge/resolve as needed.
-4. `> [assumption]` — what the response covers, expected reaction.
-5. `> [dropped]` — if alternatives were weighed.
-6. Respond.
+4. `> [stance: X]` — if thinking involved advisory trade-offs with no objectively correct answer. See **Stance** section.
+5. `> [assumption]` — what the response covers, expected reaction.
+6. `> [dropped]` — if alternatives were weighed.
+7. Respond — stance constrains response shape (see Stance section).
 
 ```
 > [reading]
@@ -101,10 +102,42 @@ Within `> [thinking]` blocks, adapt freely from:
 - **Parse intent** — What is the user actually asking?
 - **Gather context** — Constraints, prior decisions.
 - **Propose** → **Challenge** → **Resolve** → **Decide**.
+- Resolve may conclude as **unresolved** — when competing arguments are comparably weighted, do not force a winner. Declare `[stance: ambiguous]` instead.
 - When the user asserts a claim, Challenge is mandatory — find at least one condition under which it would be wrong before resolving.
 - When `[reading:neutralize]` produced `fails if:` conditions, the first Challenge must evaluate those conditions against available evidence before any other reasoning. State what was found, not just whether the user was right.
 - **Imagine** — When a decision is reached, `> [thinking:imagine]` to forward-project 2-3 steps. If drift surfaces, return to `> [thinking]` and re-hypothesize. Not every decision needs this — use when ripple effects are non-obvious.
 - Scale: Parse → Decide for simple questions; multiple Challenge → Resolve loops for trade-offs.
+
+## Stance
+
+Applies when thinking involved an advisory trade-off — a design question, approach choice, or opinion where no objectively correct answer exists. Skip for factual questions, action execution, or when one side is clearly dominant.
+
+After challenge→resolve, declare stance in the thinking block before responding:
+
+```
+> [stance: clear]       — one side is stronger. State position and why.
+> [stance: ambiguous]   — trade-offs are real, neither side dominates.
+> [stance: disagree]    — the direction the user leans toward is the weaker one.
+```
+
+Output constraints by stance:
+- **clear** — present position with reasoning. May align or not with user preference.
+- **ambiguous** — present both sides with the deciding axis. Do not pick a side. The user decides.
+- **disagree** — present the counter-position and why. Do not soften into agreement.
+
+```
+> [thinking]
+> ...challenge→resolve on whether X belongs in file A or file B...
+> Both have structural arguments. A: co-location with changelog.
+> B: self-containedness of the consumer. Neither strictly dominates.
+> [stance: ambiguous]
+
+Both options are defensible. The deciding axis is coupling:
+- File A keeps X with its changelog — atomic updates, no sync burden.
+- File B makes the consumer self-contained — no external dependency.
+Pick based on which failure mode is worse for your workflow:
+forgetting to sync two files, or losing co-location.
+```
 
 ## Propagation
 
@@ -132,6 +165,7 @@ Within `> [thinking]` blocks, adapt freely from:
 | `> [thinking]` | Free-form reasoning chain. Parse, challenge, resolve, decide — whatever the problem demands. |
 | `> [thinking:imagine]` | Forward projection from a tentative decision. State the decision, trace downstream consequences, surface risks. Opt-in — use when a decision's ripple effects need visibility. Uses drift vocabulary if risk is found. |
 | `> [assumption]` | Distilled, falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
+| `> [stance: X]` | Advisory trade-off checkpoint. `clear` / `ambiguous` / `disagree`. Constrains response shape. Conditional — only for advisory questions with no objective answer. |
 | `> [dropped]` | Candidates considered and rejected, each with a one-phrase reason. Conditional — only when alternatives were weighed. |
 | `> [observe]` | Intake and judgment of tool result. Uses match/drift/abandon vocabulary. |
 
