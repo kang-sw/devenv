@@ -41,17 +41,18 @@ Target: $ARGUMENTS
    ```
    TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
    ```
-8. Create task list. Mark each task `[fixed]` when done. Do not skip any.
+8. Create task list — all tasks are `[fixed]`:
    ```
-   [ ] Spawn implementer — wait for completion report
-   [ ] Spawn reviewer — review → fix loop until clean
-   [ ] Report to user — wait for approval
+   [ ] [fixed] Spawn implementer — wait for completion report
+   [ ] [fixed] Spawn reviewer — implement → verify → review loop until clean
+   [ ] [fixed] Report to user — wait for approval
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews (loop)
-   [ ] Merge to original branch
-   [ ] Dispatch mental-model-updater — wait for completion
-   [ ] Update project docs — ai-docs/_index.md, ticket status
-   [ ] Cleanup — shut down teammates, delete team
+   [ ] [fixed] Merge to original branch
+   [ ] [fixed] Dispatch mental-model-updater — wait for completion
+   [ ] [fixed] Update project docs — ai-docs/_index.md, ticket status
+   [ ] [fixed] Cleanup — shut down teammates, delete team
    ```
+   Mark each task as completed when done. Do not skip any.
 
 ### 2. Spawn implementer
 
