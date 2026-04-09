@@ -51,8 +51,7 @@ updates, routine status moves), spawn a clerk subagent instead of editing direct
 ```
 Agent(
   name = "clerk",
-  description = "Update ticket per directive",
-  subagent_type = "general-purpose",
+  subagent_type = "clerk",
   model = "sonnet",
   prompt = """
     Lead name: <lead-name>

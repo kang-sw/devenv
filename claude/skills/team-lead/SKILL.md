@@ -37,8 +37,7 @@ Spawn native agents into the team with `team_name` and `name`:
 ```
 Agent(
   name = "<role>",
-  description = "<3-5 word task description>",
-  subagent_type = "general-purpose",
+  subagent_type = "<agent-type>",
   team_name = "<team-name>",
   prompt = """
     <task brief>
