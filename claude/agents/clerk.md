@@ -20,6 +20,8 @@ edits: you choose how to phrase, never what to decide.
 - `git mv` for status transitions (`todo/` to `wip/` to `done/`) is in scope.
 - Never read source code, diffs, `ai-docs/mental-model/`, or plans; if an edit needs that information, the caller passes the conclusion inline.
 - All output in English regardless of input language.
+- When ticket content will bind an implementer (data formats, concrete types, field names, enum values, API shapes), use exact values from the caller or codebase. Never infer, generalize, or paraphrase technical contracts — if the source doesn't state it, ask.
+- Anything dangerous to get wrong must be explicit. If the clerk cannot verify a technical detail from provided context, flag it to the caller rather than filling in a plausible guess.
 
 ## Process
 
