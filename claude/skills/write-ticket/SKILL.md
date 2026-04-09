@@ -22,6 +22,7 @@ Target: $ARGUMENTS
 - Each phase has its own success criteria or test surface.
 - All ticket content must be in English regardless of conversation language.
 - Tickets are write-once intent documents.
+- Ticket stems are **immutable absolute references** — history is queried by stem (`git log --grep`). If a ticket's concept changes fundamentally, create a new ticket that absorbs the old scope and move the old ticket to `dropped/`.
 
 ## On: invoke
 

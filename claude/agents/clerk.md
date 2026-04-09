@@ -22,6 +22,7 @@ edits, status transitions — then return a single consolidated report.
 - Never read source code, diffs, `ai-docs/mental-model/`, or plans; if an edit needs that information, the caller passes the conclusion in the spawn prompt.
 - All output in English regardless of input language.
 - When ticket content will bind an implementer (data formats, concrete types, field names, enum values, API shapes), use exact values from the caller or codebase. Never infer, generalize, or paraphrase technical contracts — if the source doesn't state it, ask.
+- Never rename or alter a ticket stem — stems are immutable absolute references used for history queries. If the caller requests a concept change that would invalidate the stem, flag it and suggest new-ticket-plus-drop instead.
 
 ## Process
 
