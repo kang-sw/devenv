@@ -1,11 +1,11 @@
+<!-- Fragment concatenated below SKILL.md by dispatch.sh on the bootstrap path.
+     Universal invariants live in SKILL.md above the splitter; only
+     bootstrap-path-specific invariants and handler steps live here. -->
+
 ## Invariants
 
 - Owner never runs `git log`, `git diff`, or reads ticket bodies under `ai-docs/tickets/` directly during bootstrap — all raw scanning happens inside the clerk fork.
 - The clerk fork is scoped to context collection only — no ticket edits, no status transitions, no source or mental-model reads.
-- The Briefing is emitted as a single structured block matching the template — never prose, never merged sections, never reordered.
-- Skill names in the Briefing are `/`-prefixed tokens — never paraphrased, reformatted, or translated.
-- Empty fields are omitted entirely rather than filled with placeholders.
-- All output in English regardless of conversation language.
 
 ## On: invoke
 

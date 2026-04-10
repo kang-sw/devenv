@@ -1,13 +1,13 @@
+<!-- Fragment concatenated below SKILL.md by dispatch.sh on the resume path.
+     Universal invariants live in SKILL.md above the splitter; only
+     resume-path-specific invariants and handler steps live here. -->
+
 ## Invariants
 
 - The Continuation payload appended below by the dispatcher is authoritative — the dispatcher pre-gated this path on HEAD SHA match, so the payload reflects the current commit state.
 - Do not spawn clerk. Do not rescan `git log`, `git diff`, or ticket bodies. The payload is the sole recent-work source.
 - Read `ai-docs/_index.md` directly; it is small and mandated.
 - Never delete or modify `ai-docs/_continue.local.md` — it is consumed non-destructively so re-invocation is idempotent.
-- The Briefing is emitted as a single structured block matching the template — never prose, never merged sections, never reordered.
-- Skill names in the Briefing are `/`-prefixed tokens — never paraphrased, reformatted, or translated.
-- Empty fields are omitted entirely rather than filled with placeholders.
-- All output in English regardless of conversation language.
 
 ## On: invoke
 
