@@ -80,6 +80,12 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 1. **[Rule name].** [Rule description.]
 2. **[Rule name].** [Rule description.]
 
+<!-- Optional — enable for projects with a GUI/TUI presentation layer:
+1. **Headless-testable architecture.** All domain logic and state must live in
+   framework-agnostic layers testable without a display. UI layers are thin
+   adapters: no branching logic, no state ownership, no domain knowledge.
+-->
+
 ## Project Knowledge
 
 - Project state and cross-session context live in `ai-docs/`.
@@ -186,6 +192,12 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          sections in matching commits."
 - v0017: If Project Knowledge items are plain paragraphs, convert to a
          bulleted list (`- ` prefix per item) for readability.
+- v0018: If the project has a GUI/TUI presentation layer and Architecture
+         Rules lacks a headless-testable rule, add:
+         `**Headless-testable architecture.** All domain logic and state
+         must live in framework-agnostic layers testable without a display.
+         UI layers are thin adapters: no branching logic, no state
+         ownership, no domain knowledge.`
 -->
 
-<!-- Template Version: v0017 -->
+<!-- Template Version: v0018 -->
