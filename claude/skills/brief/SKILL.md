@@ -17,6 +17,7 @@ Focus: $ARGUMENTS
 
 - Read-only. No code changes, no commits, no sub-skill invocation.
 - Always outputs the structured briefing — never a conversational response.
+- Briefing output is written in the user's conversation language; switch only on explicit request.
 - Every briefing ends with a `Recommended next` line naming a specific workflow skill by `/`-prefixed name.
 - Does not re-load what CLAUDE.md session-start already loaded; assumes `ai-docs/_index.md` and recent `git log` are in context.
 - The Workflow Map section is authoritative — when a sibling skill's description conflicts with the map, the map governs routing recommendations.
