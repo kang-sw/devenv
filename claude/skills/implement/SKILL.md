@@ -1,8 +1,8 @@
 ---
 name: implement
 description: >
-  Delegate a single implementation cycle to an implementer + reviewer pair.
-  Use for internal implementation behind locked contracts.
+  Single-scope implementation cycle (implementer + reviewer pair).
+  Use for focused work behind locked contracts.
 argument-hint: "<plan-path or inline brief> [--ticket <ticket-stem>]"
 ---
 

@@ -1,10 +1,10 @@
 ---
 name: parallel-implement
 description: >
-  Coordinate multiple implementer+reviewer pairs for parallel work
-  across disjoint scopes. Handles worktree isolation, scope partitioning,
-  and sequential merge coordination.
-argument-hint: "<plan-path or ticket-path with multiple phases>"
+  When implementation spans multiple independent modules that can be
+  built concurrently. Use instead of /implement when skeleton defines
+  disjoint scopes suitable for parallel execution.
+argument-hint: "<ticket-path or scope list>"
 ---
 
 # Parallel Implementation
