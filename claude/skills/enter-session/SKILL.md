@@ -3,9 +3,9 @@ name: enter-session
 description: >
   Bootstrap main-agent context at session start or after context loss
   without burning owner tokens on raw git log, ticket bodies, or sibling
-  skill descriptions. Forks a sonnet-upgraded clerk to synthesize recent
-  work and active tickets, then emits a compact briefing routed to the
-  next workflow step.
+  skill descriptions. Forks clerk to synthesize recent work and active
+  tickets, then emits a compact briefing routed to the next workflow
+  step.
 ---
 
 # Enter Session
@@ -13,7 +13,6 @@ description: >
 ## Invariants
 
 - Owner never runs `git log`, `git diff`, or reads ticket bodies under `ai-docs/tickets/` directly during bootstrap — all raw scanning happens inside the clerk fork.
-- Clerk is spawned with `model: sonnet` override; the base haiku is insufficient for thematic synthesis.
 - The clerk fork is scoped to context collection only — no ticket edits, no status transitions, no source or mental-model reads.
 - The briefing is emitted as a single structured block matching the template — never prose, never merged sections, never reordered.
 - Skill names in the briefing are `/`-prefixed tokens — never paraphrased, reformatted, or translated.
@@ -23,7 +22,7 @@ description: >
 ## On: invoke
 
 1. Read `ai-docs/_index.md` directly — it is small, mandated by `CLAUDE.md`, and anchors the project-level truth the briefing depends on.
-2. Spawn the clerk subagent with `model: sonnet` and the **Clerk spawn prompt** template below. Wait for its report.
+2. Spawn the clerk subagent with the **Clerk spawn prompt** template below. Wait for its report.
 3. Consult the **Workflow Map** section against the clerk report and `_index.md` to pick the next step. Apply `judge: scope-complexity` and `judge: parallelizable` when the mechanical lookup leaves room.
 4. Emit the **Briefing** template, filling fields from the clerk report and omitting empty ones.
 5. Stop. Do not proceed into the recommended next step — the user decides.
