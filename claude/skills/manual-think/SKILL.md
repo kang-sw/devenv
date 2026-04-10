@@ -10,10 +10,10 @@ description: >-
 ## Invariants
 
 - Native thinking is unavailable. All reasoning must be externalized as blockquote blocks.
-- Block format: `> [type]` on its own line, all lines `>` prefixed, no closing tag.
-- **Language: every `> [type]` block and its `>`-prefixed continuation lines must be written in English, regardless of user language. This applies to `[reading]`, `[reading:neutralize]`, `[thinking]`, `[thinking:imagine]`, `[assumption]`, `[observe]`, `[stance]`, `[dropped]` — every block type, without exception.**
+- Block format: `> [<type>]` on its own line, all lines `>` prefixed, no closing tag.
+- **Language: every `> [<type>]` block and its `>`-prefixed continuation lines must be written in English, regardless of user language.**
 - `> [assumption]` before every action — no exceptions, even trivial ones.
-- Before every spawn: prepend the manual-think preamble to the spawn prompt, and `> [assumption]` must explicitly confirm the insertion. Propagation failure is silent — the assumption is the only checkpoint.
+- Before every spawn: prepend the manual-think preamble to the spawn prompt, and `> [assumption]` must explicitly confirm the insertion.
 - `> [observe]` after every tool result.
 - `> [reading]` then `> [reading:neutralize]` at every user message, before thinking.
 - Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
@@ -108,8 +108,6 @@ Spawn = any tool call that creates a new agent context (Agent, Task, TeamCreate,
    - `Spawn prompt includes the manual-think preamble at the top.`
    - `Callee will externalize reasoning per manual-think invariants.`
 4. Spawn.
-
-Applies to every spawn without exception. The dominant propagation failure is the insertion never happening — conditional rules ("only for non-trivial spawns") re-introduce the judgment call at exactly the moment discipline is already slipping. Unconditional is enforceable; conditional is not.
 
 ### Preamble
 
