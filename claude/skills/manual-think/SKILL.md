@@ -11,17 +11,18 @@ description: >-
 
 - Native thinking is unavailable. All reasoning must be externalized as blockquote blocks.
 - Block format: `> [type]` on its own line, all lines `>` prefixed, no closing tag.
+- **Language: every `> [type]` block and its `>`-prefixed continuation lines must be written in English, regardless of user language. This applies to `[reading]`, `[reading:neutralize]`, `[thinking]`, `[thinking:imagine]`, `[assumption]`, `[observe]`, `[stance]`, `[dropped]` — every block type, without exception.**
 - `> [assumption]` before every action — no exceptions, even trivial ones.
+- Before every spawn: prepend the manual-think preamble to the spawn prompt, and `> [assumption]` must explicitly confirm the insertion. Propagation failure is silent — the assumption is the only checkpoint.
 - `> [observe]` after every tool result.
 - `> [reading]` then `> [reading:neutralize]` at every user message, before thinking.
-- **Regardless of user language, ALL THINKING BLOCKS MUST BE WRITTEN IN ENGLISH**
 - Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
 - When a prior block surfaced drift or challenge, restate it before acting.
 - Depth scales with complexity. Honor user signals ("think harder", `(CoT Level: high)`) with more challenge-resolve iterations.
 
 ## On: user message
 
-1. `> [reading]` — decompose the message into numbered claims.
+1. `> [reading]` — decompose the message into numbered claims, in English even when the user wrote in another language.
 2. `> [reading:neutralize]` — for each claim with evaluative framing, restate as neutral question, then decompose underlying assumptions and their failure modes. No framing → "pass".
 3. `> [thinking]` — free reasoning, challenge/resolve as needed.
 4. `> [stance: X]` — if thinking involved advisory trade-offs with no objectively correct answer.
@@ -97,6 +98,38 @@ description: >-
 > Parent directory contains the target file.
 ```
 
+## On: before spawn
+
+Spawn = any tool call that creates a new agent context (Agent, Task, TeamCreate, SendMessage to a new recipient).
+
+1. `> [thinking]` — what the spawn needs to accomplish.
+2. Prepend the preamble below to the spawn prompt, before the task brief.
+3. `> [assumption]` — must include these two lines verbatim, in addition to any task-specific content:
+   - `Spawn prompt includes the manual-think preamble at the top.`
+   - `Callee will externalize reasoning per manual-think invariants.`
+4. Spawn.
+
+Applies to every spawn without exception. The dominant propagation failure is the insertion never happening — conditional rules ("only for non-trivial spawns") re-introduce the judgment call at exactly the moment discipline is already slipping. Unconditional is enforceable; conditional is not.
+
+### Preamble
+
+Prepend verbatim to every spawned prompt:
+
+> Before starting, read `~/.claude/skills/manual-think/SKILL.md` and
+> follow its instructions for all your responses.
+
+```
+> [thinking]
+> Spawning Explore agent to find references to X across the codebase.
+
+> [assumption]
+> Spawn prompt includes the manual-think preamble at the top.
+> Callee will externalize reasoning per manual-think invariants.
+> Explore will return file:line matches for pattern X.
+
+(spawn)
+```
+
 ## How to Think
 
 Within `> [thinking]` blocks, adapt freely from:
@@ -109,21 +142,6 @@ Within `> [thinking]` blocks, adapt freely from:
 - When `[reading:neutralize]` produced `fails if:` conditions, the first Challenge must evaluate those conditions against available evidence before any other reasoning. State what was found, not just whether the user was right.
 - **Imagine** — When a decision is reached, `> [thinking:imagine]` to forward-project 2-3 steps. If drift surfaces, return to `> [thinking]` and re-hypothesize. Not every decision needs this — use when ripple effects are non-obvious.
 - Scale: Parse → Decide for simple questions; multiple Challenge → Resolve loops for trade-offs.
-
-## Propagation
-
-**Plan mode.** When writing plan files, the `# Steps` block must start with:
-
-```
-- Load `/manual-think` skill
-- Load `/<executor>` skill
-- Read `@<plan-path>`
-```
-
-**Subagents.** Prepend to every spawned prompt:
-
-> Before starting, read `~/.claude/skills/manual-think/SKILL.md` and
-> follow its instructions for all your responses.
 
 ## Reference
 
