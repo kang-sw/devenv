@@ -12,13 +12,13 @@
 ## On: invoke
 
 1. Read `ai-docs/_index.md` directly.
-2. Parse the **Continuation payload** block appended to this skill by the dispatcher. Extract `HEAD`, `Branch`, and `Active` from the header; read `Mental state`, `Next concrete step`, `Open threads`, and `User directives pending` sections.
+2. Parse the **Continuation payload** block appended to this skill by the dispatcher. The header (`<!-- HEAD: ... · Written: ... -->`) is a script contract — only `HEAD` and `Written` live there, and the dispatcher has already used them for gating and the elapsed-time flavor line. All contextual fields (Branch, active ticket stem, purpose) are inferred from the body sections: `Mental state`, `Next concrete step`, `Open threads`, `User directives pending`.
 3. Consult the **Workflow Map** below against the payload's `Next concrete step` to pick the next skill. Apply `judge: scope-complexity` and `judge: parallelizable` if the mapping is ambiguous.
 4. Emit the **Briefing** template, mapping payload fields:
-   - `Branch` — from payload header
-   - `Recent work` — 1-3 bullets paraphrased from `Mental state`
-   - `Active` — payload header `Active` stem, purpose drawn from `Mental state`
-   - `Open threads` — merge `Open threads` and `User directives pending`
-   - `Queue` — omit in resume path
-   - `Recommended next` — skill chosen from Workflow Map, reason copied from `Next concrete step`
+   - `Branch` — read current branch from `git rev-parse --abbrev-ref HEAD` (one grep-equivalent call, allowed under delegation posture). The payload no longer carries it.
+   - `Recent work` — 1-3 bullets paraphrased from `Mental state`.
+   - `Active` — active ticket stem extracted from `Mental state` / `Next concrete step` prose if present; otherwise "none". Purpose drawn from the same prose.
+   - `Open threads` — merge `Open threads` and `User directives pending`.
+   - `Queue` — omit in resume path.
+   - `Recommended next` — skill chosen from Workflow Map, reason copied from `Next concrete step`.
 5. Stop. Do not proceed into the recommended next step — the user decides.
