@@ -5,7 +5,6 @@ description: >
   (branch, WIP, active ticket, pending artifacts) and recommends the
   specific workflow skill to invoke next. Also injects the canonical
   workflow map so downstream routing is explicit, not description-dragged.
-disable-model-invocation: true
 argument-hint: "[ticket-stem or scope hint — optional]"
 ---
 
