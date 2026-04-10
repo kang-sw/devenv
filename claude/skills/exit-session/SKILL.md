@@ -17,7 +17,7 @@ description: >
 ## Invariants
 
 - The payload is a compression of the current conversation's working memory — what the owner is holding in attention right now. No filesystem exploration, no scans of `wip/`, no ticket-body reads, no `git log`, nothing beyond the `git status --porcelain` required for the auto-commit step. If it wasn't in this conversation, it does not belong in the payload; surfacing orphan tickets or latent threads is enter-session's job, not this one's.
-- The payload header is written by `seal.sh`, not by the agent. Format is exactly `<!-- HEAD: <sha7> · Written: <ISO> -->` — a minimal script-only contract. HEAD is the fast-path gate for enter-session's dispatcher; Written drives elapsed-time flavor at resume. Branch, active ticket stem, and any other contextual fields live in the body prose where the reading agent extracts them naturally.
+- The payload header is produced by `seal.sh`, not composed by the agent. Format is exactly `<!-- HEAD: <sha7> · Written: <ISO> -->` — a minimal script-only contract. HEAD is the fast-path gate for enter-session's dispatcher; Written drives elapsed-time flavor at resume. Branch, active ticket stem, and any other contextual fields live in the body prose where the reading agent extracts them naturally. The agent copies the header verbatim from its Read of the staged stub into the final Write — never types it from scratch.
 - Overwrite `ai-docs/_continue.local.md` — never append, never merge with prior content.
 - Auto-commit dirty tracked state before writing the payload so the captured HEAD SHA reflects the full state. Use `git add -u` — never `git add .`.
 - Untracked files (`??` in `git status --porcelain`) are reported in the final summary but never auto-staged, to avoid committing secrets or unintended artifacts.
@@ -33,16 +33,19 @@ description: >
    - Compose commit message `wip(<scope>): <one-line session intent>` from session memory, with an `## AI Context` body noting the auto-commit by `/exit-session`.
    - `git add -u` to stage tracked changes only.
    - Commit.
-3. Compose the payload body using the **Payload template** below. Fill each content section strictly from the current conversation — what the owner actually held in attention during this session. Omit sections that would be empty. Do not scan the filesystem, read tickets, or run git commands to pad content; padding the payload with scanned observations corrupts the compression contract.
-4. If every content section is empty, skip writing and report "nothing to capture, continuation file not written." Otherwise write the body to `ai-docs/_continue.local.md` via the Write tool, overwriting any prior content. Do not write a header line — `seal.sh` prepends it in the next step.
-5. Run `bash <skill-dir>/seal.sh ai-docs/_continue.local.md` to prepend the mechanical header (HEAD, Written), where `<skill-dir>` is this skill's base directory shown at the top of this skill invocation. The script is idempotent — re-invocation replaces an existing header rather than stacking.
-6. Report: WIP commit SHA if created, untracked files left alone, payload sections written, and "session sealed."
+3. Decide whether there is anything to capture by mentally composing the payload body from the current conversation — what the owner actually held in attention during this session. The sections are Mental state, Next concrete step, Open threads, User directives pending (see the **Payload template** below). Do not scan the filesystem, read tickets, or run git commands to pad content; padding with scanned observations corrupts the compression contract. If every section would be empty, stop here and report "nothing to capture, continuation file not written" — do not run `seal.sh`, do not touch the file.
+4. Run `bash <skill-dir>/seal.sh ai-docs/_continue.local.md` to stage the mechanical header, where `<skill-dir>` is this skill's base directory shown at the top of this skill invocation. The script creates or overwrites the file with exactly one line: `<!-- HEAD: <sha7> · Written: <ISO> -->`.
+5. Read `ai-docs/_continue.local.md` via the Read tool. This loads only the single-line header stub just staged — no stale prior-session content — and satisfies the Write tool's read-before-write requirement for the next step.
+6. Write `ai-docs/_continue.local.md` via the Write tool. The content is the exact header line from step 5 (copied verbatim, do not retype), a blank line, then the composed body sections from step 3.
+7. Report: WIP commit SHA if created, untracked files left alone, payload sections written, and "session sealed."
 
 ## Payload template
 
-The agent writes only the body below. `seal.sh` prepends the header line.
+The final file is the header line from `seal.sh` (copied verbatim from the Read in step 5), a blank line, then the body sections below.
 
 ```
+<!-- HEAD: <sha7> · Written: <ISO> -->
+
 ## Mental state
 <1-3 bullets: what the owner is currently holding in attention — tentative reasoning that has not crystallized into commits or tickets. If an active ticket stem matters for resume, name it here. Omit section if nothing to capture.>
 

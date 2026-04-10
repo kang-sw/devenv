@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Seal script for /exit-session. Prepends a minimal header to the
-# continuation payload: <!-- HEAD: <sha7> · Written: <ISO> -->.
+# Seal script for /exit-session. Creates or overwrites the
+# continuation payload file with only the mechanical header line:
+#   <!-- HEAD: <sha7> · Written: <ISO> -->
 #
-# Idempotent: if the first line already matches the header pattern,
-# it is replaced in place; otherwise the header is prepended with a
-# blank line separator.
+# Runs BEFORE the agent composes the body, so the agent's subsequent
+# Read (to satisfy the Write tool's read-before-write requirement)
+# loads only this tiny fresh stub rather than the prior session's
+# stale payload. The agent then Writes the full file with the header
+# preserved verbatim from the Read plus the composed body.
 #
-# Invoked from SKILL.md via `bash "${CLAUDE_SKILL_DIR}/seal.sh" <path>`.
+# Invoked from SKILL.md via `bash <skill-dir>/seal.sh <path>`.
 
 set -eu
 
@@ -16,32 +19,13 @@ if [ "$#" -ne 1 ]; then
 fi
 
 payload="$1"
-
-if [ ! -f "${payload}" ]; then
-  echo "seal.sh: payload not found: ${payload}" >&2
-  exit 1
-fi
+dir=$(dirname "${payload}")
+mkdir -p "${dir}"
 
 sha=$(git rev-parse --short HEAD)
 written=$(date -Iseconds)
 header="<!-- HEAD: ${sha} · Written: ${written} -->"
 
-tmp=$(mktemp)
-trap 'rm -f "${tmp}"' EXIT
+printf '%s\n' "${header}" > "${payload}"
 
-first_line=$(sed -n '1p' "${payload}")
-
-if printf '%s' "${first_line}" | grep -q '^<!-- HEAD: '; then
-  # Replace existing header line; keep body verbatim.
-  printf '%s\n' "${header}" > "${tmp}"
-  sed -n '2,$p' "${payload}" >> "${tmp}"
-else
-  # Prepend header plus blank-line separator, keep body verbatim.
-  printf '%s\n\n' "${header}" > "${tmp}"
-  cat "${payload}" >> "${tmp}"
-fi
-
-mv "${tmp}" "${payload}"
-trap - EXIT
-
-echo "sealed: ${payload} (${sha} @ ${written})"
+echo "header staged: ${payload} (${sha} @ ${written})"
