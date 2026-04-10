@@ -200,6 +200,10 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          must live in framework-agnostic layers testable without a display.
          UI layers are thin adapters: no branching logic, no state
          ownership, no domain knowledge.`
+- v0019: Replace any explicit per-file `.local.md` gitignore entries
+         under `ai-docs/` with a single glob: `ai-docs/**/*.local.md`.
+         Covers existing files like `_index.local.md` and session-scratch
+         files like `_continue.local.md` without per-file maintenance.
 -->
 
-<!-- Template Version: v0018 -->
+<!-- Template Version: v0019 -->
