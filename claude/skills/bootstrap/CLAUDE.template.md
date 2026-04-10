@@ -133,6 +133,8 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
      _index.md (context) or skills (process). -->
 
 <!-- MIGRATION CHECKLIST
+     This block is template-internal tooling. NEVER copy it into a
+     project's CLAUDE.md — only the Template Version tag belongs there.
      Read the Template Version tag at the bottom of this file.
      Apply all items with version > current, in order. Then update the tag.
      Items marked [obsoleted by vNNNN] — skip entirely.
