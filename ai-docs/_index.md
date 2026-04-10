@@ -52,12 +52,14 @@ claude/infra/
 
 ```
 claude/skills/
+  enter-session/     — session bootstrap; clerk-forked context synthesis + workflow map injection
   discuss/           — explore approach/direction, capture as tickets
   write-ticket/      — create/edit tickets in ai-docs/tickets/
   write-skeleton/    — public interface stubs + integration tests
   write-plan/        — deep codebase research → implementation plan
   implement/         — delegation: implementer + reviewer cycle
   parallel-implement/ — multiple pairs, worktree isolation, coordinated merge
+  proceed/           — auto-route through the canonical pipeline
   team-lead/         — team orchestration mode (TeamCreate, coordination, shutdown)
   monologue/         — continuous operational narration
   manual-think/      — manual chain-of-thought when native thinking unavailable
