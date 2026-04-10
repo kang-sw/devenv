@@ -49,6 +49,23 @@ Mechanical routing (handler step 3):
 - Multiple disjoint scopes ready (see `judge: parallelizable`) → `/parallel-implement`
 - Any of the above is unclear → `/proceed`
 
+## Delegation Posture
+
+Owner context is finite throughout the session, not only at bootstrap. Every user request is first evaluated for subagent delegation; the owner absorbs reads and searches directly only when delegation overhead would exceed the context saved.
+
+Default to delegation:
+
+- Code exploration beyond one already-known file → dispatch `Explore`.
+- Ticket bodies, plans, or history beyond immediate scope → fork `clerk` or `Explore`.
+- Multi-file diffs, git archaeology, or large log synthesis → fork `clerk`.
+- Implementation work → `/implement` or `/parallel-implement`.
+
+Direct owner read is acceptable for:
+
+- Small mandated docs (`CLAUDE.md`, `ai-docs/_index.md`).
+- A single user-named file the user explicitly asked the owner to inspect.
+- One grep whose result the owner must interpret inline for the next turn.
+
 ## Judgments
 
 **judge: scope-complexity** — Route to `/write-plan` when the ticket requires understanding three or more unfamiliar modules, introduces a new architectural pattern, or crosses established boundaries. Skip `/write-plan` for well-scoped changes with single-module impact.
@@ -116,4 +133,4 @@ Per-field shape is flexible (multi-line, sub-bulleted, or omitted when empty). T
 
 ## Doctrine
 
-The skill optimizes for **owner context burn at session restore** — the finite resource is the main agent's context window at bootstrap, which must absorb project memory, workflow knowledge, and current state without the cumulative cost of raw scanning. Synthesis inside the clerk fork is always cheaper than extraction that punts raw lists to the owner, so thousands of synthesized tokens crossing the fork boundary is acceptable while forcing the owner to re-scan sources is not. When a rule is ambiguous, apply whichever interpretation better preserves owner context at bootstrap.
+The skill optimizes for **owner context conservation** — the finite resource is the main agent's context window, most acutely at bootstrap but persistently throughout the session. Synthesis inside a subagent fork is always cheaper than extraction that punts raw lists, diffs, or bodies to the owner, so generous synthesized tokens crossing the fork boundary are acceptable while forcing the owner to re-scan sources is not. The bootstrap briefing discharges restore-time burn; the delegation posture discharges ongoing burn. When a rule is ambiguous, apply whichever interpretation better preserves owner context.
