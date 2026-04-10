@@ -12,21 +12,7 @@ description: >
 
 # Enter Session
 
-```!
-if [ -f ai-docs/_continue.local.md ]; then
-  stored=$(sed -n '1s/.*HEAD: \([a-f0-9]\{1,\}\).*/\1/p' ai-docs/_continue.local.md)
-  current=$(git rev-parse --short HEAD 2>/dev/null)
-  if [ -n "$stored" ] && [ "$stored" = "$current" ]; then
-    cat "${CLAUDE_SKILL_DIR}/resume.md"
-    printf '\n\n### Continuation payload\n\n'
-    cat ai-docs/_continue.local.md
-  else
-    cat "${CLAUDE_SKILL_DIR}/bootstrap.md"
-  fi
-else
-  cat "${CLAUDE_SKILL_DIR}/bootstrap.md"
-fi
-```
+!`bash "${CLAUDE_SKILL_DIR}/dispatch.sh"`
 
 ## Workflow Map
 
