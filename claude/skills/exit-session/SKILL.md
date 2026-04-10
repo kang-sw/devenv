@@ -16,12 +16,17 @@ description: >
 
 ## Invariants
 
-- The payload is a compression of the current conversation's working memory — what the owner is holding in attention right now. No filesystem exploration, no scans of `wip/`, no ticket-body reads, no `git log`, nothing beyond the `git status --porcelain` required for the auto-commit step. If it wasn't in this conversation, it does not belong in the payload; surfacing orphan tickets or latent threads is enter-session's job, not this one's.
-- The payload header is produced by `seal.sh`, not composed by the agent. Format is exactly `<!-- HEAD: <sha7> · Written: <ISO> -->` — a minimal script-only contract. HEAD is the fast-path gate for enter-session's dispatcher; Written drives elapsed-time flavor at resume. Branch, active ticket stem, and any other contextual fields live in the body prose where the reading agent extracts them naturally. The agent copies the header verbatim from its Read of the staged stub into the final Write — never types it from scratch.
+- The payload's sole source is this conversation's working memory — no filesystem exploration, no `wip/` scans, no ticket-body reads, no `git log`.
+- Only the `git status --porcelain` check required for the auto-commit step may touch the filesystem.
+- The payload header is produced by `seal.sh`, never composed by the agent.
+- Header format is exactly `<!-- HEAD: <sha7> · Written: <ISO> -->` — the sole script-only contract.
+- Contextual fields (Branch, active ticket stem, purpose) live in the body prose, never in the header.
+- The agent copies the header verbatim from the staged stub via Read into the final Write — never retyped.
 - Overwrite `ai-docs/_continue.local.md` — never append, never merge with prior content.
-- Auto-commit dirty tracked state before writing the payload so the captured HEAD SHA reflects the full state. Use `git add -u` — never `git add .`.
-- Untracked files (`??` in `git status --porcelain`) are reported in the final summary but never auto-staged, to avoid committing secrets or unintended artifacts.
-- No edits to `_index.md`, `_index.local.md`, or ticket files. Canonical sources are updated only by their own dedicated skills.
+- Auto-commit dirty tracked state before writing the payload.
+- Use `git add -u` for the auto-commit — never `git add .`.
+- Untracked files (`??` in `git status --porcelain`) are reported in the final summary but never auto-staged.
+- No edits to `_index.md`, `_index.local.md`, or ticket files.
 - If every content section of the payload would be empty, skip writing the file entirely and report "nothing to capture."
 - All output in English regardless of conversation language.
 
@@ -33,15 +38,15 @@ description: >
    - Compose commit message `wip(<scope>): <one-line session intent>` from session memory, with an `## AI Context` body noting the auto-commit by `/exit-session`.
    - `git add -u` to stage tracked changes only.
    - Commit.
-3. Decide whether there is anything to capture by mentally composing the payload body from the current conversation — what the owner actually held in attention during this session. The sections are Mental state, Next concrete step, Open threads, User directives pending (see the **Payload template** below). Do not scan the filesystem, read tickets, or run git commands to pad content; padding with scanned observations corrupts the compression contract. If every section would be empty, stop here and report "nothing to capture, continuation file not written" — do not run `seal.sh`, do not touch the file.
+3. Decide whether there is anything to capture by mentally composing the payload body from the current conversation. Sections are Mental state, Next concrete step, Open threads, User directives pending (see the **Payload template** below). If every section would be empty, stop here and report "nothing to capture, continuation file not written" — do not run `seal.sh`, do not touch the file.
 4. Run `bash <skill-dir>/seal.sh ai-docs/_continue.local.md` to stage the mechanical header, where `<skill-dir>` is this skill's base directory shown at the top of this skill invocation. The script creates or overwrites the file with exactly one line: `<!-- HEAD: <sha7> · Written: <ISO> -->`.
 5. Read `ai-docs/_continue.local.md` via the Read tool. This loads only the single-line header stub just staged — no stale prior-session content — and satisfies the Write tool's read-before-write requirement for the next step.
-6. Write `ai-docs/_continue.local.md` via the Write tool. The content is the exact header line from step 5 (copied verbatim, do not retype), a blank line, then the composed body sections from step 3.
+6. Write `ai-docs/_continue.local.md` via the Write tool. The content is the header line from step 5, a blank line, then the composed body sections from step 3.
 7. Report: WIP commit SHA if created, untracked files left alone, payload sections written, and "session sealed."
 
 ## Payload template
 
-The final file is the header line from `seal.sh` (copied verbatim from the Read in step 5), a blank line, then the body sections below.
+The final file is the header line from `seal.sh`, a blank line, then the body sections below.
 
 ```
 <!-- HEAD: <sha7> · Written: <ISO> -->
@@ -61,4 +66,4 @@ The final file is the header line from `seal.sh` (copied verbatim from the Read 
 
 ## Doctrine
 
-The skill optimizes for **owner context conservation** — the same finite resource enter-session targets. exit-session moves the next bootstrap's cost from "clerk re-synthesizes committed state while the prior session's mental state is lost to the session boundary" to "owner reads a pre-digested payload covering the slice only this session's owner can produce." The single control is **conversation-only sourcing**: the payload is a compression of what was actually said and decided in this session, nothing more. Scanning the filesystem at seal time to find "things the owner might also want to know" fabricates context rather than preserving it — that widening of scope belongs to enter-session's clerk fork or an explicit post-bootstrap user request, never here. When a rule is ambiguous, apply whichever interpretation keeps the payload a faithful compression of the conversation's working memory.
+The skill optimizes for **owner context conservation** — the finite resource is the next session's context window, burned by re-synthesizing committed state from raw sources when the prior session's mental state has been lost to the session boundary. exit-session pre-digests the slice only the current session's owner can produce — tentative reasoning, open threads, next steps — into a payload the next session consumes directly. The single control is **conversation-only sourcing**: the payload is a compression of what was actually said and decided in this session, nothing more. Scanning the filesystem at seal time to find things the owner might also want to know fabricates context rather than preserving it — that widening of scope belongs elsewhere. When a rule is ambiguous, apply whichever interpretation keeps the payload a faithful compression of the conversation's working memory.
