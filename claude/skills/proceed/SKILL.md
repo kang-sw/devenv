@@ -16,6 +16,8 @@ Target: $ARGUMENTS
 - This skill routes — it does not implement, plan, or write skeletons itself.
 - Every routing decision is announced with rationale before execution begins.
 - Each sub-skill is invoked via the Skill tool with the appropriate arguments.
+- Pipeline order is fixed: skeleton → plan → implement. Skeleton establishes locked contracts that the plan consumes.
+- `/parallel-implement` requires a skeleton — it partitions disjoint scopes defined by skeleton stubs.
 - If the target is too vague to route (no ticket, no actionable description), stop and suggest `/write-ticket` or `/discuss`.
 - Never skip announce — the user must see the pipeline before it runs.
 
@@ -41,18 +43,16 @@ Apply routing judgments in order. Each produces a yes/no that builds the pipelin
 3. **judge: needs-skeleton** — Does this need contract stubs before implementation?
 4. **judge: execution-mode** — Single-scope or parallel?
 
-Build the pipeline from the results:
+Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs. Parallel execution requires a skeleton to define disjoint scopes.
 
-| needs-plan | needs-skeleton | execution-mode | Pipeline |
-|------------|----------------|----------------|----------|
+| needs-skeleton | needs-plan | execution-mode | Pipeline |
+|----------------|------------|----------------|----------|
 | no | no | single | `/implement` |
-| no | no | parallel | `/parallel-implement` |
-| no | yes | single | `/write-skeleton` then `/implement` |
-| no | yes | parallel | `/write-skeleton` then `/parallel-implement` |
-| yes | no | single | `/write-plan` then `/implement` |
-| yes | no | parallel | `/write-plan` then `/parallel-implement` |
-| yes | yes | single | `/write-plan` then `/write-skeleton` then `/implement` |
-| yes | yes | parallel | `/write-plan` then `/write-skeleton` then `/parallel-implement` |
+| no | yes | single | `/write-plan` then `/implement` |
+| yes | no | single | `/write-skeleton` then `/implement` |
+| yes | no | parallel | `/write-skeleton` then `/parallel-implement` |
+| yes | yes | single | `/write-skeleton` then `/write-plan` then `/implement` |
+| yes | yes | parallel | `/write-skeleton` then `/write-plan` then `/parallel-implement` |
 
 ### 3. Announce
 
