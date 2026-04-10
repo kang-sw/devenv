@@ -1,25 +1,25 @@
 ---
-name: brief
+name: enter-session
 description: >
-  Restore session context and brief on next steps. Loads current state
-  (branch, WIP, active ticket, pending artifacts) and recommends the
-  specific workflow skill to invoke next. Also injects the canonical
-  workflow map so downstream routing is explicit, not description-dragged.
+  Restore session context after loss and brief on next steps. Injects
+  the canonical workflow map into owner context, delegates state
+  collection to `collect-recent-context` (a forked clerk subagent),
+  then emits a briefing in the user's conversation language. Use at
+  session start or whenever context has drifted.
 argument-hint: "[ticket-stem or scope hint — optional]"
 ---
 
-# Brief
+# Enter session
 
 Focus: $ARGUMENTS
 
 ## Invariants
 
-- Read-only. No code changes, no commits, no sub-skill invocation.
+- Read-only. No code changes, no commits, no sub-skill invocation beyond `collect-recent-context`.
 - Always outputs the structured briefing — never a conversational response.
-- Briefing output is written in the user's conversation language; switch only on explicit request.
+- Briefing output is written in the user's conversation language; the subagent reports in English and you translate when presenting. Preserve `/`-prefixed skill names verbatim — they are invocation tokens, not prose.
 - Every briefing ends with a `Recommended next` line naming a specific workflow skill by `/`-prefixed name.
-- Does not re-load what CLAUDE.md session-start already loaded; assumes `ai-docs/_index.md` and recent `git log` are in context.
-- The Workflow Map section is authoritative — when a sibling skill's description conflicts with the map, the map governs routing recommendations.
+- The Workflow Map below is authoritative — when a sibling skill's description conflicts with the map, the map governs routing recommendations.
 
 ## Workflow Map
 
@@ -29,7 +29,7 @@ The canonical skill chain for implementation work. Triggers are imperative — m
 
 - **Direction unclear, exploring options** → `/discuss [topic]`
 - **Clear scope, no ticket yet** → `/write-ticket [stem]`
-- **Lost context mid-session** → `/brief` (this skill)
+- **Lost context mid-session** → `/enter-session` (this skill)
 - **Know the target, want auto-routing** → `/proceed [ticket or description]`
 
 ### Implementation chain
@@ -48,28 +48,19 @@ The canonical skill chain for implementation work. Triggers are imperative — m
 
 ## On: invoke
 
-### 1. Load state
+### 1. Delegate context collection
 
-Gather facts without reading source code. All data comes from git and ticket metadata.
+Invoke the `collect-recent-context` skill via the Skill tool, passing `$ARGUMENTS` as its args. The skill runs forked as a clerk subagent with session-start git history (`git branch`, `git status --short`, `git log --oneline --graph -50`, `git log -10`) pre-injected into the clerk's task prompt. Clerk scans active tickets, runs `git log --grep=<stem>` per ticket, extracts forward notes from `## Ticket Updates` sections, and returns a compact English `## Recent context` report.
 
-1. Current branch: `git branch --show-current`.
-2. Last commit: `git log -1 --oneline`.
-3. Working tree status: `git status --short`.
-4. If `$ARGUMENTS` names a ticket stem, read that ticket. Otherwise scan `ai-docs/tickets/` for tickets with unfinished phases.
+Do not run any git commands or read any tickets yourself — all heavy IO lives inside the fork so it does not burn owner context.
 
-### 2. Scan pending artifacts
+### 2. Apply judgment
 
-1. For each active ticket, inspect frontmatter `skeletons:` and `plans:` fields to identify which phases have artifacts and which remain.
-2. If current branch matches `implement/<scope>`, note it as in-progress implementation.
-3. If uncommitted changes exist, classify as: WIP on a known phase, orphan changes, or merge conflict.
+Use `judge: recommended-next` against the returned `## Recent context` report to pick the single best next action. Reference the Workflow Map above for routing — do not defer to sibling skill descriptions.
 
-### 3. Apply judgment
+### 3. Produce briefing
 
-Use `judge: recommended-next` to pick the single best next action based on state. Name the specific skill.
-
-### 4. Produce briefing
-
-Emit the briefing block per the template. Do not add conversational prose before or after — the block is the entire response.
+Emit the briefing block per the template, in the user's conversation language. Skill names (`/implement`, `/write-skeleton`, etc.) stay verbatim as invocation tokens. Translate prose labels (Pending item descriptions, `Recommended next` reason) into the user's language.
 
 ## Judgments
 
@@ -111,9 +102,4 @@ Omit a bullet entirely when it has no content (e.g., no WIP → drop the line). 
 
 ## Doctrine
 
-Brief optimizes for **routing clarity after context loss** — it restores
-enough state signal to pick the right next action and injects the
-authoritative workflow map so the recommendation is explicit rather than
-description-dragged. When a rule is ambiguous, apply whichever
-interpretation gets the user to the correct next `/`-invocation faster
-without requiring re-exploration of project state.
+Enter-session optimizes for **routing clarity after context loss with minimal owner-context burn** — it injects the authoritative workflow map so routing is explicit rather than description-dragged, delegates all heavy IO (ticket reads, git log grep, forward-note extraction) to a forked clerk subagent so owner context absorbs only the compact state report, and presents a briefing in the user's language while preserving skill-name invocation tokens verbatim. When a rule is ambiguous, apply whichever interpretation gets the user to the correct next `/`-invocation faster without requiring re-exploration of project state.
