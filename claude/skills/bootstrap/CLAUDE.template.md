@@ -35,7 +35,9 @@ Read in this order at every session start, before any other action:
    changed line must trace to the request.
 3. **Responsibility check.** As you implement, ask whether each change
    keeps the module's role clean. Split when responsibility drifts.
-4. **[Project-specific rule].** [Description.]
+4. **Testability.** Prefer designs that are straightforward to test —
+   explicit dependencies, minimal hidden state, pure logic over side effects.
+5. **[Project-specific rule].** [Description.]
 
 ## Workflow
 
