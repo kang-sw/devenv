@@ -16,6 +16,7 @@ MODE="${1:-full}"
 
 info() { printf "\033[1;34m  ➜ %s\033[0m\n" "$*"; }
 success() { printf "\033[1;32m  ✔ %s\033[0m\n" "$*"; }
+muted() { printf "\033[90m  ✔ %s\033[0m\n" "$*"; }
 warn() { printf "\033[1;33m  ⚠ %s\033[0m\n" "$*"; }
 die() {
   printf "\033[1;31m  ✘ %s\033[0m\n" "$*" >&2
@@ -73,7 +74,7 @@ else
       until xcode-select -p &>/dev/null; do sleep 5; done
       success "Xcode CLT installed"
     else
-      success "Xcode CLT already present"
+      muted "Xcode CLT already present"
     fi
   fi
 
@@ -91,7 +92,7 @@ else
     fi
     success "Homebrew installed"
   else
-    success "Homebrew already present"
+    muted "Homebrew already present"
     brew update --quiet
   fi
 
@@ -105,7 +106,7 @@ else
   brew_install() {
     local pkg="$1"
     if brew list --formula "$pkg" &>/dev/null; then
-      success "$pkg already installed (brew)"
+      muted "$pkg already installed (brew)"
     else
       info "brew install $pkg"
       brew install "$pkg"
@@ -186,7 +187,7 @@ else
       brew install --cask font-jetbrains-mono-nerd-font
       success "JetBrainsMono Nerd Font installed"
     else
-      success "JetBrainsMono Nerd Font already installed"
+      muted "JetBrainsMono Nerd Font already installed"
     fi
   else
     warn "Linux/WSL: install a Nerd Font on the host/Windows terminal side for icon rendering."
@@ -357,7 +358,7 @@ link() {
     local cur
     cur="$(readlink "$dst")"
     if [ "$cur" = "$src" ]; then
-      success "already linked: $dst"
+      muted "already linked: $dst"
     else
       warn "relink: $dst (was → $cur)"
       rm "$dst"
@@ -491,7 +492,7 @@ if changed:
         f.write("\n")
     print("  \033[1;32m  ✔ Claude Code settings.json updated\033[0m")
 else:
-    print("  \033[1;32m  ✔ Claude Code settings.json already current\033[0m")
+    print("  \033[90m  ✔ Claude Code settings.json already current\033[0m")
 
 # ── claude.json (global user config) ─────────────────────────────────────────
 required_global = {
@@ -516,7 +517,7 @@ if changed:
         f.write("\n")
     print("  \033[1;32m  ✔ Claude Code claude.json updated\033[0m")
 else:
-    print("  \033[1;32m  ✔ Claude Code claude.json already current\033[0m")
+    print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
 # Clean up dead symlinks (skills and agents)
