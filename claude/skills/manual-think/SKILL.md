@@ -15,28 +15,32 @@ description: >-
 - `> [assumption]` before every action — no exceptions, even trivial ones.
 - Before every spawn: prepend the manual-think preamble to the spawn prompt, and `> [assumption]` must explicitly confirm the insertion.
 - `> [observe]` after every tool result.
-- `> [reading]` at every user message, before thinking.
+- `> [reading]` then `> [reading:neutralize]` at every user message, before thinking.
 - Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
 - When a prior block surfaced drift or challenge, restate it before acting.
 - Depth scales with complexity. Honor user signals ("think harder", `(CoT Level: high)`) with more challenge-resolve iterations.
 
 ## On: user message
 
-1. `> [reading]` — decompose the message into numbered claims. For each evaluative claim, inline: `- assumes:` / `→ fails if:` pairs, then `- objection:` as conclusion. No evaluative framing → "pass".
-2. `> [thinking]` — free reasoning, challenge/resolve as needed.
-3. `> [stance: X]` — when thinking produced a trade-off or an unresolved challenge.
-4. `> [assumption]` — what the response covers, expected reaction.
-5. `> [dropped]` — if alternatives were weighed.
-6. Respond.
+1. `> [reading]` — decompose the message into numbered claims. For each evaluative claim: `- opposite:` is its direct negation (not a reasoned counter). No evaluative framing → "pass".
+2. `> [reading:neutralize]` — for each evaluative claim: restate as neutral question, then `- assumes:` / `→ fails if:` pairs. No synthesis line. No evaluative framing → "pass".
+3. `> [thinking]` — free reasoning, challenge/resolve as needed.
+4. `> [stance: X]` — when thinking produced a trade-off or an unresolved challenge.
+5. `> [assumption]` — what the response covers, expected reaction.
+6. `> [dropped]` — if alternatives were weighed.
+7. Respond.
 
 ```
 > [reading]
-> (1) User requests X
+> (1) User requests X — pass
 > (2) User says Y is problematic
+>     - opposite: Y is not problematic
+> (3) User wants Z done — pass
+
+> [reading:neutralize]
+> (2) Is Y actually problematic?
 >     - assumes: Y is directly causing the problem  →  fails if: removing Y doesn't fix — misidentified cause
 >     - assumes: "problematic" means blocking  →  fails if: Y is minor friction — disproportionate response
->     - objection: Y may be symptomatic, not causal
-> (3) User wants Z done — pass
 
 > [thinking]
 > ...free reasoning...
@@ -132,7 +136,7 @@ Within `> [thinking]` blocks, adapt freely from:
 - Resolve may conclude as **unresolved** — when competing arguments are comparably weighted, do not force a winner. Declare `[stance: ambiguous]` instead.
 - **Resolution standard**: a challenge is resolved only when the response names a specific, falsifiable condition under which the challenge does not apply. "This is probably fine" without naming that condition = unresolved. An unresolved challenge after two iterations mandates `[stance: ambiguous]` — do not proceed past it.
 - When the user asserts a claim, Challenge is mandatory — find at least one condition under which it would be wrong before resolving.
-- When `[reading]` produced `fails if:` conditions, the first Challenge must evaluate those conditions against available evidence before any other reasoning. State what was found, not just whether the user was right.
+- When `[reading:neutralize]` produced `fails if:` conditions, the first Challenge must evaluate those conditions against available evidence before any other reasoning. State what was found, not just whether the user was right.
 - Scale: Parse → Decide for simple questions; multiple Challenge → Resolve loops for trade-offs.
 
 ## Reference
@@ -141,7 +145,8 @@ Within `> [thinking]` blocks, adapt freely from:
 
 | Block | Role |
 |---|---|
-| `> [reading]` | Decomposed restatement of user's message. No verbatim quoting. Numbered claims. For each evaluative claim: inline `- assumes: X → fails if: Y` pairs, then `- objection:` as derived conclusion. No evaluative framing → "pass". |
+| `> [reading]` | Literal decomposition of user's message into numbered claims. For each evaluative claim: `- opposite:` is its direct negation, not a reasoned counter. No evaluative framing → "pass". |
+| `> [reading:neutralize]` | Analytical decomposition of each evaluative claim. Restate as neutral question, then `- assumes:` / `→ fails if:` pairs. No synthesis line. Mandatory after `[reading]`. |
 | `> [thinking]` | Free-form reasoning chain. Parse, challenge, resolve, decide — whatever the problem demands. |
 | `> [assumption]` | Distilled, falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
 | `> [stance: X]` | Advisory trade-off checkpoint. `clear` = state position; `ambiguous` = present both sides, then state what specific observable evidence would resolve the ambiguity — do not pick; `disagree` = present counter-position, do not soften. **Mandatory when any challenge in `[thinking]` remains unresolved after two iterations.** Not a last resort — fire proactively. |
