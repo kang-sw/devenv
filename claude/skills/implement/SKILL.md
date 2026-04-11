@@ -43,7 +43,6 @@ Target: $ARGUMENTS
    ```
 8. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
-   [ ] Plan (if needed) — invoke /write-plan, fold output into implementer prompt
    [ ] Spawn implementer — wait for completion report
    [ ] Spawn reviewer — implement → verify → review loop until clean
    [ ] Report to user — wait for approval
@@ -53,10 +52,6 @@ Target: $ARGUMENTS
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
    [ ] Cleanup — shut down teammates, delete team
    ```
-
-### 1.5 Plan (optional)
-
-Apply **judge: needs-planning**. If planning is needed, invoke `/write-plan` with the current scope. Fold the resulting implementation notes into the implementer spawn prompt (§2) as additional context. Do not persist a plan document.
 
 ### 2. Spawn implementer
 
@@ -146,13 +141,6 @@ Implementer and reviewer remain alive throughout this loop.
 1. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
 
 ## Judgments
-
-### judge: needs-planning
-
-| Decision | When |
-|----------|------|
-| Skip | Skeleton contracts + integration tests make implementation strategy obvious |
-| Plan | Multi-module interaction, unfamiliar codebase area, or non-obvious approach |
 
 ### judge: skeleton-check
 

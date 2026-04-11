@@ -103,9 +103,10 @@ problems persist.
 
 ### 5. Finalize
 
-1. Call `EnterPlanMode` and write the `plan-mode-output` template (executor is always `/implement`).
-2. If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
-3. Commit the plan file.
+1. If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
+2. Commit the plan file.
+3. Return the plan path to the caller — include it in the completion summary so
+   the caller can pass it directly to `/implement`.
 
 ## Judgments
 
@@ -127,29 +128,6 @@ Default: when uncertain, go one level deeper — over-researching costs less tha
 | Tactical — contracts + integration notes + testing strategy + success criteria | Large changes, cross-module work, new patterns |
 
 Default to tactical for thorough-level research. Use strategic only when over-specifying would add noise.
-
-## Templates
-
-### plan-mode-output
-
-```
-# Steps
-
-- Load `/implement` skill
-- Read `@<plan-path>`
-
----
-
-# <Plan Title>
-
-<brief summary — what changes, why, key decisions>
-
-## Data Contract Changes
-- <what is changing: type/schema/format name and how>
-- <migration or compatibility implications>
-```
-
-Omit **Data Contract Changes** for pure-logic or internal-only changes. Do not copy the full plan — the `@<plan-path>` reference is the source of truth.
 
 ## Doctrine
 
