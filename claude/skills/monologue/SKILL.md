@@ -1,9 +1,10 @@
 ---
 name: monologue
 description: >-
-  Continuous operational narration for long sessions. Externalizes
-  assumptions and observations as a running stream of self-talk,
-  keeping intent live in the conversation context.
+  Continuous operational narration for long sessions with native thinking
+  active. Shapes the internal thinking pipeline and projects its verdicts
+  as a tight stream of falsifiable blocks, keeping intent live in the
+  conversation context after the thinking channel evaporates.
 argument-hint: "[initial context or session goal — optional]"
 ---
 
@@ -13,111 +14,182 @@ Session context: $ARGUMENTS
 
 _(If no argument was provided, proceed without session context.)_
 
+## Gate
+
+Before any tool call or prose, emit the required monologue blocks. A
+turn with no preceding `> [assumption]` is **unfinished output** —
+insert the missing blocks before the action.
+
+Default effort is **high** unless the user explicitly signals otherwise
+("be brief", "skip thinking", "think less", or equivalent). A short
+user message or an apparently simple task is not an exemption.
+High effort means:
+- The thinking pipeline cycles challenge → resolve at least twice
+  before settling on a position.
+- `> [stance]` carries a real position, not a one-word stub.
+- `> [reading]` enumerates every evaluative claim with its neutralized
+  question and the `fails if:` condition checked against evidence.
+
 ## Invariants
 
-- Every action gets a monologue block before it and another after the resulting observation. No exceptions.
-- All monologue blocks are in English, regardless of conversation language.
-- Block format is `> [monologue]` on its own line, free-form self-talk beneath, no closing tag.
-- Block length scales with reasoning depth: trivial actions may collapse to one line, non-trivial blocks err verbose over terse.
-- Every before-block states an assumption phrased so observation can falsify it. Vague expectations like "should work" are disallowed.
-- Before-blocks for user responses begin with a `Reading:` preamble — a neutralized, decomposed, English restatement of the user's message. Verbatim quoting is not a reading.
-- When the action follows reasoning that weighed alternatives, append a `Dropped:` tail to the before-block listing each rejected candidate with a one-phrase reason.
-- Every after-block classifies the result as match, drift, or abandon (see Vocabulary).
-- Never proceed past drift without naming the broken assumption, the new challenge, and the plan adjustment.
-- When a prior block surfaced drift or a challenge, later blocks restate the finding briefly before acting on it.
+- Native thinking is assumed active and carries derivation; monologue blocks carry only its verdicts.
+- No derivation language in blocks ("maybe", "let me think", "on the other hand") — leak, rewrite as verdict.
+- Block format: `> [<type>]` on its own line, `>`-prefixed continuation, no closing tag.
+- **Language: every `> [<type>]` block and its `>`-prefixed continuation lines must be written in English, regardless of user language.**
+- Required blocks are mandatory as stubs; omission is forbidden.
+- `> [assumption]` before every action — no exceptions.
+- `> [observe]` after every tool result or subagent return.
+- `> [reading]` at every user message.
+- `> [stance]` at every user message and at every trade-off the thinking surfaces.
+- `> [dropped]` at every decision point — `none` if no alternatives were considered.
+- Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
+- When a prior block surfaced drift or a challenge, restate it briefly before acting.
 - Subagent prompts prepend the propagation line (see Templates).
+
+## Thinking Pipeline
+
+Monologue assumes an active internal thinking channel. Use it for
+derivation; reserve monologue output for verdicts. The stages below
+describe **what runs inside the thinking channel** — do not render them
+as monologue blocks. Their conclusions land in `[reading]`, `[stance]`,
+`[assumption]`, `[dropped]`, and `[observe]`.
+
+**On a user message, inside thinking:**
+
+1. Decompose the message into numbered claims; separate pass-through from evaluative.
+2. For each evaluative claim, state its direct opposite.
+3. Restate as a neutral question; enumerate `assumes: … → fails if: …` pairs.
+4. Evaluate each `fails if:` against available evidence before any other reasoning.
+5. Propose → Challenge → Resolve → Decide. A challenge is resolved only when a specific falsifiable condition under which the challenge does not apply is named.
+6. An unresolved challenge after two challenge-resolve cycles mandates `[stance: ambiguous]` in output.
+7. When the user asserts a claim, find at least one condition under which it would be wrong before resolving.
+
+**On a tool call, inside thinking:**
+
+1. Why this tool? What observable will it return? What assumption does that observable test?
+2. What alternatives were considered and rejected, on what basis?
+
+**On a tool result, inside thinking:**
+
+1. Parse the result against the pre-call assumption.
+2. If drift: local (patch with new assumption) or directional (abandon and reframe)?
+
+## On: user message
+
+1. `> [reading]` — numbered decomposition; `fails if:` / `found:` per evaluative claim.
+2. `> [stance: X]` — position, or both sides + resolving observable, or counter-position.
+3. `> [assumption]` — response intent, falsifiable.
+4. `> [dropped]` — rejected alternatives, or `none`.
+5. Respond.
 
 ## On: before a tool call
 
-1. Emit a block stating the assumption being tested and the expected observable result.
-2. If reasoning weighed alternatives, append a `Dropped:` tail listing them with one-phrase reasons.
-3. If a prior block surfaced drift or a challenge, restate the finding briefly in this block.
-4. Perform the call.
+1. `> [assumption]` — what the call will reveal, falsifiable.
+2. `> [dropped]` — rejected alternatives, or `none`.
+3. If a prior block surfaced drift or a challenge, restate it briefly.
+4. Call.
 
-## On: before responding to the user
+## On: after a tool result
 
-1. Emit a block opening with a `Reading:` preamble — neutralized, decomposed, English restatement of the user's message. Evaluative framings ("is X good?") become neutral ("what are X's strengths and weaknesses?"). Compound requests are enumerated. If genuinely ambiguous, surface the ambiguity rather than picking silently.
-2. State the response strategy as a falsifiable assumption — what the response will cover and how the user is expected to react.
-3. If reasoning weighed alternatives, append a `Dropped:` tail listing them with one-phrase reasons.
-4. If a prior block surfaced drift or a challenge, restate the finding briefly.
-5. Produce the response.
-
-## On: after any observation (tool result or user reply)
-
-1. Emit a block classifying the result: match, drift, or abandon.
-2. Match — state the next assumption, chaining into the next before-block.
-3. Drift — name the broken assumption, the resulting challenge, and the plan adjustment.
-4. Abandon — reframe the direction rather than patching.
+1. `> [observe]` — classify `match` / `drift` / `abandon` in the first line.
+2. **Match** — state the next assumption.
+3. **Drift** — name the broken assumption, the challenge, the adjustment; follow with `> [assumption]` for the next action.
+4. **Abandon** — reframe the direction rather than patching.
 
 ## On: spawning a subagent
 
-1. In the before-block, name the expected deliverable only — not the subagent's internal steps.
+1. `> [assumption]` names the expected deliverable, not the subagent's internal steps.
 2. Prepend the propagation line (see Templates) to the subagent prompt.
-3. After the subagent returns, the after-block judges whether the deliverable matched.
+3. After return, `> [observe]` judges whether the deliverable matched.
 
-## Vocabulary
+## Reference
 
-Words used naturally inside blocks, not as syntax:
+### Block Types
 
-- **assumption** — a belief stated before acting, phrased so observation can falsify it.
-- **reading** — in a before-response block, a neutralized and decomposed restatement of the user's message. Separates interpretation from delivery so a later drift can be localized to "I misread the request" versus "my response was wrong." English only, even when the user writes another language. Verbatim quoting does not count.
-- **dropped** — a candidate seriously considered in reasoning and rejected. Listed in the before-block tail as `Dropped: A (reason); B (reason)`. Preserves the falsification cost already paid in private reasoning so the same candidate is not re-litigated after context evaporates. Default-no, not permanent — a later drift may legitimately promote a dropped candidate under new evidence.
+| Block | Role |
+|---|---|
+| `> [reading]` | Verdict of the thinking-channel reading+neutralize pipeline on a user message. Numbered claims; each evaluative claim carries its neutralized question, the critical `fails if:` condition, and the `found:` verdict from checking it. Pass-through claims marked `— pass`. |
+| `> [assumption]` | Falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
+| `> [stance: X]` | Trade-off checkpoint verdict. `clear` = state position; `ambiguous` = both sides plus the observable that would resolve them — do not pick; `disagree` = counter-position, unsoftened. |
+| `> [dropped]` | Candidates the thinking rejected, each with a one-phrase reason. `none` if genuinely none. |
+| `> [observe]` | Intake verdict on a tool or subagent result, using `match` / `drift` / `abandon`. |
+
+### Vocabulary
+
+- **verdict** — a conclusion from the thinking channel, short enough to survive context compaction, falsifiable enough for a later reader to challenge it. The unit of monologue output.
+- **leak** — derivation prose that escaped from the thinking channel into monologue output. Identified by hedging and process language ("maybe", "let me think", "on the other hand"). Rewrite as verdict.
 - **match** — reality aligned with the assumption. Proceed.
 - **drift** — an assumption was wrong. Name it, name the challenge, state the adjustment.
-- **challenge** — a difficulty surfaced mid-session. Carries forward into later blocks.
+- **challenge** — a difficulty surfaced during thinking or observation. Carries forward.
 - **abandon** — drift so severe the whole direction was wrong. Reframe, do not patch.
 
 ## Templates
 
-All templates use angle-bracket slots for the author to fill. No concrete domain content — that belongs in the session, not in this file.
+All templates use angle-bracket slots. No concrete domain content.
 
 **Block format.**
 
 ```
-> [monologue]
-> <free-form self-talk in English>
+> [<type>]
+> <verdict in English>
 ```
 
-No closing tag. The blockquote ends when the monologue ends. Multiple blocks per turn are expected.
+No closing tag. Multiple blocks per turn are expected.
 
-**Before-block (tool call).**
-
-```
-> [monologue]
-> <assumption being tested, phrased so observation can falsify it>
-> Dropped: <rejected candidate> (<one-phrase reason>); <rejected candidate> (<one-phrase reason>).
-```
-
-`Dropped:` tail only when reasoning weighed alternatives.
-
-**Before-block (user response).**
+**User-message sequence.**
 
 ```
-> [monologue]
-> Reading: <neutralized English restatement of the user's message>. Decomposed: (1) <sub-question>, (2) <sub-question>.
-> <response-strategy assumption — what the response will cover, how the user is expected to react>
-> Dropped: <rejected framing> (<reason>); <...>.
+> [reading]
+> (1) <pass-through claim> — pass
+> (2) <evaluative claim>
+>     question: <neutralized form>
+>     fails if: <condition checked>  →  found: <what evidence showed>
+> (3) <request> — pass
+
+> [stance: clear|ambiguous|disagree]
+> <position stated / both sides + resolving observable / counter-position>
+
+> [assumption]
+> Response covers <X>; user will react with <Y>.
+
+> [dropped]
+> <rejected framing> (<reason>); <rejected approach> (<reason>).
+> # or: none
 ```
 
-**After-block — match.**
+**Before tool call.**
 
 ```
-> [monologue]
-> <observation confirms the assumption>. <next assumption, chaining into the next before-block>
+> [assumption]
+> <what the call will reveal, phrased so the result can falsify it>.
+
+> [dropped]
+> <rejected tool/pattern> (<reason>); <...>.
+> # or: none
 ```
 
-**After-block — drift.**
+**After — match.**
 
 ```
-> [monologue]
-> Drift — <broken assumption>. Challenge: <new difficulty>. <plan adjustment>.
+> [observe]
+> match — <what confirmed the assumption>. Next: <next assumption>.
 ```
 
-**After-block — abandon.**
+**After — drift.**
 
 ```
-> [monologue]
-> Drift — <severity>. Abandon — <reframe the whole direction, not a patch>.
+> [observe]
+> drift — <broken assumption>. Challenge: <new difficulty>. Adjustment: <plan change>.
+
+> [assumption]
+> <next action's falsifiable hypothesis>.
+```
+
+**After — abandon.**
+
+```
+> [observe]
+> abandon — <severity of drift>. Reframe: <new direction, not a patch>.
 ```
 
 **Carry-lesson phrasing.** When a later block must account for a prior finding, open with:
@@ -133,4 +205,16 @@ No closing tag. The blockquote ends when the monologue ends. Multiple blocks per
 
 ## Doctrine
 
-Monologue optimizes for **falsifiable externalization**: every action is paired with an explicit, falsifiable assumption before it and an observation after it, so intent stays visible in the conversation context across long sessions. Where internal reasoning verifies hypotheses against themselves (propose → challenge → resolve), monologue verifies them against reality (assume → act → observe). When a rule is ambiguous, apply whichever interpretation more reliably produces assumption-observation pairs a later reader could falsify. The pair is the unit; the block is only its carrier. Return here when a novel case makes a rule feel awkward.
+Monologue optimizes for **verdict-level falsifiable externalization**
+under an active native thinking channel. Where manual-think externalizes
+reasoning because the thinking channel is absent, monologue projects a
+thin verdict layer on top of an active one, so intent survives after
+the thinking evaporates before the next turn. The thinking channel
+carries derivation — decomposition, neutralization, challenge, resolve
+— and monologue carries its conclusions as durable falsifiable pairs:
+assumption before action, observation after. When a rule is ambiguous,
+apply whichever interpretation more reliably produces
+assumption-observation pairs a later reader could falsify. If a block
+reads like a thought process rather than a verdict, it leaked thinking
+into the output — rewrite it. The pair is the unit; the block is only
+its carrier.
