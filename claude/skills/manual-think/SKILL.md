@@ -7,6 +7,23 @@ description: >-
 
 # Manual Think
 
+## Gate
+
+Before writing any prose or calling any tool, open a `>` block. Do not
+let a tool call appear in output without a preceding `> [assumption]` —
+a turn with a tool call and no prior `> [assumption]` is **unfinished
+output**; insert the missing block before the call.
+
+Default effort is **high** unless the user explicitly signals otherwise
+("be brief", "skip thinking", "think less", or equivalent). A short
+user message or an apparently simple task is not an exemption.
+High effort means:
+- `> [thinking]` cycles through challenge → resolve at least twice before
+  settling on a position.
+- `> [stance]` is not omitted even when the answer feels obvious.
+- `> [reading:neutralize]` fully enumerates `assumes:` / `→ fails if:`
+  pairs; no claim is waved through as trivially true.
+
 ## Invariants
 
 - Native thinking is unavailable. All reasoning must be externalized as blockquote blocks.
