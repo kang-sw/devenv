@@ -20,7 +20,6 @@ Target: $ARGUMENTS
 - One delegation cycle per invocation.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
 - Task list is created at prepare and tracked to completion — no task may be skipped or reordered.
-- Planning research, when triggered, produces ephemeral implementer context — not a persistent document.
 - `/team-lead` skill must be loaded before any team operations.
 
 ## On: invoke

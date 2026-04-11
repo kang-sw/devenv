@@ -2,8 +2,8 @@
 name: write-plan
 description: >
   Deep codebase research producing an implementation plan. Invoke when
-  the user explicitly requests a plan, or when called internally by
-  /implement for complex scopes needing research before action.
+  the user explicitly requests a plan, or when chained from /proceed
+  before /implement.
 argument-hint: [ticket-path or description]
 ---
 
