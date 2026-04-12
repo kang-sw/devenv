@@ -19,7 +19,7 @@ Identify affected domains and apply minimal, accurate updates.
 
 1. **Determine changes**: Locate the last checkpoint via `git log --grep="mental-model-updated" -1 --format="%H"`. Use that as the base commit. If no stamp is found, use the caller-provided base commit. Run `git diff <base-commit> HEAD --stat` for overview, then full diff for details.
 
-2. **Read all mental-model docs**: Read every file in `ai-docs/mental-model/`
+2. **Read all mental-model docs**: Read `ai-docs/mental-model.md` (index), then every file in `ai-docs/mental-model/`
    to understand the full project architecture, contracts, and coupling before
    assessing impact. Map changed files to domains. A single file may affect
    multiple domains. Consider whether new domains are warranted.

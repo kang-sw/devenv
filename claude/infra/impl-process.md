@@ -36,7 +36,7 @@ Dispatch → fix Critical/Important → re-verify → re-review. Loop until clea
 > **Scope:** [files/modules changed — no design rationale]
 > **Requirements:** [ticket phase, plan summary, or description]
 > **Plan reference:** Read `@<plan-path>` for design and success criteria (plan-driven only).
-> **Project context:** Read `CLAUDE.md` code standards. Read **every file** in `ai-docs/mental-model/` before reviewing the diff.
+> **Project context:** Read `CLAUDE.md` code standards. Read `ai-docs/mental-model.md` (index) and every file in `ai-docs/mental-model/` before reviewing the diff.
 > **Git range:** `git diff $(git merge-base <original-branch> HEAD)..HEAD`
 >
 > - **Correctness** — logic errors, edge cases, error handling

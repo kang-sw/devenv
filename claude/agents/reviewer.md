@@ -19,7 +19,7 @@ You are **read-only** — report findings, never edit code.
 
 ## Process
 
-1. **Read project context**: Read `CLAUDE.md` for project standards. Glob `ai-docs/mental-model/` — read docs relevant to the diff.
+1. **Read project context**: Read `CLAUDE.md` for project standards. Read `ai-docs/mental-model.md`; Glob `ai-docs/mental-model/` and read files relevant to the diff.
 2. **Read the diff**: Run `git diff <range>` and `git diff --stat <range>`.
 3. **Review against**:
    - correctness (logic errors, off-by-one, null handling)

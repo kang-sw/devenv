@@ -98,7 +98,7 @@ Agent(
   prompt = """
     Verify the implementation plan at `<plan-path>`.
 
-    Read the plan, then read `CLAUDE.md` and all of `ai-docs/mental-model/`.
+    Read the plan, then read `CLAUDE.md`, `ai-docs/mental-model.md`, and relevant files in `ai-docs/mental-model/`.
     Check:
     - Do referenced files, functions, and types actually exist?
     - Do described conventions match actual code patterns?
