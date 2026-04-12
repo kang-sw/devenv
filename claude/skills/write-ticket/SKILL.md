@@ -22,6 +22,7 @@ Target: $ARGUMENTS
 - Each phase has its own success criteria or test surface.
 - All ticket content must be in English regardless of conversation language.
 - Tickets are write-once intent documents.
+- Never `Read` a ticket file other than the current target — delegate any other ticket inspection to a clerk subagent.
 - Ticket stems are **immutable absolute references** — history is queried by stem (`git log --grep`). If a ticket's concept changes fundamentally, create a new ticket that absorbs the old scope and move the old ticket to `dropped/`.
 
 ## On: invoke
@@ -68,6 +69,7 @@ edit. It reports back what changed and flags convention issues. Use for:
 - Phase updates from implementation findings
 - New ticket creation from a delegated context
 - Frontmatter updates (`started:`, `completed:`, `plans:`, `skeletons:`)
+- Read-only inspection of other tickets (stem resolution, parent epic scope, dedup, prior-decision survey) — ask clerk for a focused summary, not full bodies.
 
 ## Judgments
 
