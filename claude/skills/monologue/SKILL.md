@@ -60,6 +60,15 @@ Immediately after `[reading]`, for each evaluative claim:
 2. Enumerate `assumes:` / `fails if:` pairs.
 3. Evaluate each `fails if:` against available evidence — state what was found, not just whether the user was right.
 
+### [parse]
+
+After every tool result or subagent return, before reasoning:
+
+1. State what the result returned.
+2. Compare against the pre-call `> [assumption]`.
+3. Classify: match, drift, or abandon.
+4. If drift: name the broken assumption and the new constraint.
+
 ### [thinking]
 
 Free reasoning, structured as the problem demands:
@@ -124,9 +133,14 @@ that test? Alternatives considered?
 **Thinking channel:**
 
 ```
+[parse]
+Result: <what the tool returned>
+Against: <the pre-call assumption>
+Classification: match | drift | abandon
+(if drift) Broken: <what was wrong>. Constraint: <new difficulty>.
+
 [thinking]
-Parse the result against the pre-call assumption. If drift: local
-(patch) or directional (abandon and reframe)?
+<reasoning if drift or abandon — local patch or directional reframe?>
 ```
 
 **Response body:**
@@ -151,17 +165,28 @@ deliverable, rejected alternatives.
 
 ### Block types
 
+**Thinking channel:**
+
+| Block | Trigger | Role |
+|---|---|---|
+| `[reading]` | User message | Decompose into numbered claims; state opposite of each evaluative claim. |
+| `[reading:neutralize]` | After `[reading]` | Neutral question, `assumes:` / `fails if:` pairs, evidence check. |
+| `[parse]` | Tool result or subagent return | Compare result against pre-call assumption; classify match/drift/abandon. |
+| `[thinking]` | Any event | Free propose → challenge → resolve → decide reasoning. |
+
+**Verdict layer (`>`-prefixed, durable):**
+
 | Block | Role |
 |---|---|
 | `> [stance: X]` | `clear` = position; `ambiguous` = both sides + resolving observable; `disagree` = counter-position, unsoftened. |
 | `> [assumption]` | Falsifiable hypothesis about what the next action will reveal or achieve. On user messages, captures response intent. |
 | `> [dropped]` | Rejected alternatives with one-phrase reasons. `none` if genuinely none. |
-| `> [observe]` | Intake verdict on tool or subagent result: `match` / `drift` / `abandon`. |
+| `> [observe]` | Verdict on tool or subagent result: `match` / `drift` / `abandon`. |
 
 ### Vocabulary
 
 - **verdict** — a conclusion from the thinking channel, short enough to survive context compaction, falsifiable enough to challenge. The unit of response-body output.
-- **leak** — thinking-channel content that escaped into the response body: (a) a thinking block with `>` prefix; (b) derivation language inside a verdict block. Rewrite as verdict.
+- **leak** — thinking-channel content that escaped into the response body: (a) a thinking block (`[reading]`, `[reading:neutralize]`, `[parse]`, `[thinking]`) with `>` prefix; (b) derivation language inside a verdict block. Rewrite as verdict.
 - **match** — reality aligned with the assumption. Proceed.
 - **drift** — an assumption was wrong. Name it, name the challenge, state the adjustment.
 - **challenge** — a difficulty surfaced during thinking or observation. Carries forward until resolved.
@@ -236,14 +261,28 @@ Response body:
 > # or: none
 ```
 
-**After — match:**
+**After tool result — side-by-side:**
+
+Thinking channel:
+
+```
+[parse]
+Result: <what returned>
+Against: <pre-call assumption>
+Classification: match | drift | abandon
+
+[thinking]
+<if drift/abandon — reasoning about adjustment>
+```
+
+Response body (match):
 
 ```
 > [observe]
 > match — <what confirmed>. Next: <next assumption>.
 ```
 
-**After — drift:**
+Response body (drift):
 
 ```
 > [observe]
@@ -253,7 +292,7 @@ Response body:
 > <next falsifiable hypothesis>.
 ```
 
-**After — abandon:**
+Response body (abandon):
 
 ```
 > [observe]
