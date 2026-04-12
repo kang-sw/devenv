@@ -12,7 +12,7 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Ticket conventions: `ai-docs/ref/ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
+- Ticket conventions: `.claude/infra/ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
 - Never `Read` a ticket file other than the current target — delegate any other ticket inspection to a clerk subagent.
 
 ## On: invoke
