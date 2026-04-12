@@ -17,7 +17,6 @@ description: >
 - The Briefing is emitted as a single structured block matching the template — never prose, never merged sections, never reordered.
 - Skill names in the Briefing are `/`-prefixed tokens — never paraphrased, reformatted, or translated.
 - Empty Briefing fields are omitted entirely rather than filled with placeholders.
-- All output in English regardless of conversation language.
 - Owner absorbs reads and searches directly only when delegation overhead would exceed the context saved.
 
 ### Delegation routing
