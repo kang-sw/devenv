@@ -104,6 +104,7 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 ai-docs/
   _index.md          — single session-start read; project context
   _index.local.md    — local memory (free-form, .gitignored)
+  mental-model.md    — overview file for overall mental model documents.
   mental-model/      — project map: contracts, coupling, architectural narrative
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
