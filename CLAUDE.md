@@ -27,7 +27,7 @@ Read in this order at every session start, before any other action:
 
 ## Code Standards
 
-Skill and agent documents follow `ai-docs/ref/skill-authoring.md`.
+Skill and agent documents follow `ai-docs/ref/skill-authoring.md` — read it before authoring or auditing any skill/agent file.
 
 ## Workflow
 
