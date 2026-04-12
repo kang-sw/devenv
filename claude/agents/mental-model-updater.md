@@ -40,7 +40,7 @@ Identify affected domains and apply minimal, accurate updates.
 5. **Verify**: Spot-check that file paths, function names, and key claims
    match current source.
 
-6. **Update overview.md** if cross-domain patterns, the crate graph, or shared
+6. **Update `ai-docs/mental-model.md`** if cross-domain patterns, the crate graph, or shared
    conventions changed.
 
 7. **Commit**: Commit all updated documents. Include `(mental-model-updated)` in the

@@ -21,10 +21,9 @@ source-paraphrasing descriptions, information already in `_index.md`.
 
 ## Structure
 
-- Directory is flat: `ai-docs/mental-model/overview.md` + `<domain>.md` files.
-- Each document covers a cross-cutting concern, not a source module.
+- Index: `ai-docs/mental-model.md` — cross-domain patterns, crate graph, shared conventions. No frontmatter.
+- Domain docs: `ai-docs/mental-model/<domain>.md` — flat directory, one file per cross-cutting concern.
 - Target 60–120 lines per domain. Split past 150; merge thin documents that are always read together.
-- `overview.md` has no frontmatter.
 
 ## Frontmatter
 

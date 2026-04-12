@@ -72,9 +72,9 @@ Process verifier output:
 - **[STALE]**: Rewrite or remove the recipe.
 - **[BLOAT]**: Remove — content fails inclusion test.
 
-### 5. Update overview.md and _index.md
+### 5. Update mental-model.md and _index.md
 
-**overview.md**: Package graph, shared patterns, cross-domain contracts.
+**ai-docs/mental-model.md**: Package graph, shared patterns, cross-domain contracts.
 
 **_index.md**: Update project-level descriptions and operational state only.
 Do not duplicate module-level detail into `_index.md` — that belongs in

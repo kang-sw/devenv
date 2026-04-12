@@ -153,16 +153,16 @@ def main() -> None:
 
     targets = sys.argv[1:]
 
-    print('# Mental-model docs — paths are relative to ai-docs/mental-model/')
+    print('# Mental-model index and domain docs (paths relative to ai-docs/)')
 
-    # overview.md — always included, no frontmatter
-    overview = mental_model_dir / 'overview.md'
+    # mental-model.md — index, always included, no frontmatter
+    overview = Path('ai-docs/mental-model.md')
     if overview.exists():
         desc = extract_first_line(overview)
         fm_ov: dict = {}
         if desc:
             fm_ov['description'] = desc
-        render_domain('overview', fm_ov, 'overview.md')
+        render_domain('overview', fm_ov, 'mental-model.md')
 
     for doc in sorted(mental_model_dir.glob('*.md')):
         if doc.name == 'overview.md':
