@@ -48,7 +48,7 @@ Agent(
 
 ### 3. Review
 
-1. Read the files the subagent created/modified.
+1. Run `git diff HEAD` and `git status --short` to review the skeleton output. Read specific files only if a reported deviation warrants deeper inspection.
 2. Verify contracts match the ticket intent and honor the directives.
 3. Run build to confirm compilation. Do not run tests — tests will fail by design because stubs are unimplemented. Passing tests is the implementor's responsibility, not the skeleton's.
 4. If issues found, either fix directly (minor) or re-delegate with amended directives (structural).

@@ -3,6 +3,8 @@ The spawn prompt provides the ticket path and contract directives.
 
 ## Rules
 
+- **Do not create commits — leave all changes unstaged.** The lead reads
+  the diff; committing would hide the output from review.
 - Contract directives from the lead are hard constraints — do not deviate.
 - Everything not covered by a directive is your judgment call.
 - Stubs: public interfaces only. Type definitions with all public fields,
@@ -14,7 +16,6 @@ The spawn prompt provides the ticket path and contract directives.
 - Do not modify existing public interfaces unless a directive explicitly says to.
 - Stubs must compile (or pass syntax checks for dynamic languages). Run build
   to verify. Fix compilation errors until clean.
-- Do not create commits — leave changes unstaged.
 
 ## Process
 
