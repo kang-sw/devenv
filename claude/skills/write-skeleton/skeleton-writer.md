@@ -36,7 +36,7 @@ for file placement, naming, and test structure.
 
 ### 3. Verify
 
-Run build to confirm compilation. Fix errors until clean.
+Run build to confirm compilation. Fix compilation errors until clean. Do not run tests — stubs are intentionally unimplemented and tests will fail; that is the correct outcome. Build-clean is the only acceptance criterion at this stage.
 
 ## Output
 

@@ -50,7 +50,7 @@ Agent(
 
 1. Read the files the subagent created/modified.
 2. Verify contracts match the ticket intent and honor the directives.
-3. Run build to confirm compilation.
+3. Run build to confirm compilation. Do not run tests — tests will fail by design because stubs are unimplemented. Passing tests is the implementor's responsibility, not the skeleton's.
 4. If issues found, either fix directly (minor) or re-delegate with amended directives (structural).
 
 ### 4. Commit
