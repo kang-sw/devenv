@@ -11,11 +11,15 @@ argument-hint: "[topic, ticket path, or question — optional]"
 
 Topic: $ARGUMENTS
 
+## Project Map
+
+!`python3 "${CLAUDE_SKILL_DIR}/list-active.py"`
+
 ## Invariants
 
 - No source edits. Only documentation writes, only in the capture step.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Completed phases are immutable.
-- Load active doc listing at start; read mental-model docs on-demand as topics emerge.
+- Read mental-model docs on-demand as topics emerge.
 - Dispatch Explore agents for implementation details beyond mental-model docs — never read source directly.
 - When docs are stale or insufficient, say so and suggest `/write-mental-model` — do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
@@ -25,9 +29,8 @@ Topic: $ARGUMENTS
 
 ## On: invoke
 
-1. Run `bash ai-docs/list-active.sh` (fall back to `find ai-docs -type f -name '*.md' | sort`).
-2. If `$ARGUMENTS` references a ticket, read it.
-3. Enter discussion loop.
+1. If `$ARGUMENTS` references a ticket, read it.
+2. Enter discussion loop.
 
 ## On: discussion loop
 

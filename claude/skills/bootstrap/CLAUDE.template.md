@@ -204,6 +204,11 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          under `ai-docs/` with a single glob: `ai-docs/**/*.local.md`.
          Covers existing files like `_index.local.md` and session-scratch
          files like `_continue.local.md` without per-file maintenance.
+- v0020: If `related:` entries use list format (`- stem  # comment`),
+         convert to map format (`stem: comment`) across all tickets in
+         `ai-docs/tickets/` (all statuses). Empty lists (`related: []`)
+         may be removed or left as-is — the map script handles both.
+         See `claude/skills/discuss/list-active.py` for canonical parser.
 -->
 
-<!-- Template Version: v0019 -->
+<!-- Template Version: v0020 -->

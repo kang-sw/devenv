@@ -38,8 +38,8 @@ Canonical reference for ticket structure, naming, and lifecycle.
 ```yaml
 ---
 title: <title>
-related:             # optional; list of stems with inline comments
-  - 260301-feat-foo  # prerequisite
+related:             # optional; map of stem → relationship note
+  260301-feat-foo: prerequisite
 parent:              # optional; epic stem (e.g., 260401-epic-auth-rewrite)
 plans:               # maps phases to plan path stems under ai-docs/plans/ (without .md)
   phase-1: 2026-03/28-1430.event-serialization
