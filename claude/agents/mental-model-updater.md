@@ -13,11 +13,9 @@ Identify affected domains and apply minimal, accurate updates.
 
 ## Constraints
 
-Follow the document format, inclusion test, and doctrine defined in the
-`write-mental-model` skill (`~/.claude/skills/write-mental-model/SKILL.md`).
-That skill is the authoritative definition point for mental-model documents.
-
-Do not add Overview or Relevant Source Files sections.
+Follow the document format, inclusion test, and doctrine defined in
+`~/.claude/infra/mental-model-conventions.md`. That file is the authoritative
+definition point for mental-model document content and format.
 
 ## Inputs
 
@@ -66,10 +64,9 @@ If no base commit is provided, use `git log --oneline -20` to infer the range.
 
 ## Doctrine
 
-Mental-model-updater optimizes for **surgical accuracy under the
-write-mental-model skill's definitions** — every update is a minimal
+Mental-model-updater optimizes for **surgical accuracy under the conventions
+in `~/.claude/infra/mental-model-conventions.md`** — every update is a minimal
 edit that keeps documents aligned with current source while preserving
-the modification-relevant knowledge density defined by the skill.
-When a rule is ambiguous, defer to the `write-mental-model` skill's
-doctrine and apply whichever interpretation better preserves signal
-density of the mental-model documents.
+the modification-relevant knowledge density defined there.
+When a rule is ambiguous, defer to that file's doctrine and apply whichever
+interpretation better preserves signal density of the mental-model documents.

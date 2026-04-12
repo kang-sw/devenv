@@ -1,10 +1,9 @@
 ---
 name: write-mental-model
 description: >
-  Authoritative definition point for mental-model documents — format,
-  inclusion test, and doctrine. Rebuild or update ai-docs/mental-model/
-  with operational knowledge for modifying the codebase. Delegates source
-  exploration to subagents to keep the main context window small.
+  Rebuild or update ai-docs/mental-model/ with operational knowledge for
+  modifying the codebase. Delegates source exploration to subagents to keep
+  the main context window small. Format and doctrine: .claude/infra/mental-model-conventions.md.
 argument-hint: "[target domain or special instruction] (omit for full rebuild)"
 ---
 
@@ -14,13 +13,8 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Mental-model documents capture operational knowledge for modifying the codebase: module contracts, coupling maps, extension points, common mistakes, technical debt.
-- Not API references, type listings, or source paraphrases — those are derivable from code.
-- Inclusion test: record only facts where (a) ignorance causes wrong outcome AND (b) not derivable from reading entry-point files in <30 seconds. Both must hold.
-- Never record: type/struct field listings, function signatures, API route enumerations, source-paraphrasing descriptions, information already in `_index.md`.
+- Mental-model conventions: `.claude/infra/mental-model-conventions.md` — inclusion test, document format, sizing, doctrine.
 - No direct source reading — delegate to subagents. Read source yourself only when a subagent summary is clearly insufficient.
-- Each document covers a cross-cutting concern, not a source module. Directory is flat: `ai-docs/mental-model/overview.md` + `<domain>.md` files.
-- Target 60–120 lines per domain. Split past 150; merge thin documents read together.
 - Incremental by default — only rebuild affected domains unless full rebuild is requested.
 
 ## On: invoke
@@ -92,46 +86,3 @@ Report:
 - Documents created / updated / removed
 - Verifier results: corrections applied, items for manual review
 
-## Templates
-
-### document-format
-
-```markdown
-# [Domain Name]
-
-## Entry Points
-2-3 key files that serve as starting points for understanding this domain.
-NOT an exhaustive file listing — just "where to start reading."
-
-## Module Contracts
-- "[A] guarantees [X] to [B]" — enforced by [mechanism] / convention only
-
-## Coupling
-- A ↔ B: bidirectional through [mechanism]
-Focus on non-obvious coupling.
-
-## Extension Points & Change Recipes
-- [Registry/enum/interface]: protocol for adding new entries
-- **Add a new [X]**: key files to touch + critical pitfalls
-- **Change [behavior]**: key files + ripple effects + pitfalls
-Only non-obvious multi-file changes. Mark unimplemented features **(planned)**.
-
-## Common Mistakes
-- "When adding [X], forgetting [Y] → [wrong outcome]"
-Focus on mistakes that cause wrong outcomes.
-
-## Technical Debt
-- [Issue]: current state, impact, possible improvement
-```
-
-Omit empty sections.
-
-## Doctrine
-
-Mental-model documents exist so that a developer modifying the codebase
-does not produce wrong outcomes from ignorance of implicit contracts.
-Every authoring choice optimizes for **modification-relevant knowledge
-density**: only facts that pass the inclusion test (wrong-outcome risk
-AND not quickly derivable from source) earn space. When a rule is
-ambiguous, apply whichever interpretation better preserves the density
-of modification-relevant knowledge while excluding derivable content.
