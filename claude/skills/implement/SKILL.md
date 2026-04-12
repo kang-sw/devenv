@@ -44,10 +44,10 @@ Target: $ARGUMENTS
    ```
    [ ] Spawn implementer — wait for completion report
    [ ] Spawn reviewer — implement → verify → review loop until clean
-   [ ] Report to user — wait for approval
-     > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews (loop)
-   [ ] Merge to original branch
    [ ] Dispatch mental-model-updater — wait for completion
+   [ ] Report to user — wait for approval
+     > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run updater (loop)
+   [ ] Merge to original branch
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
    [ ] Cleanup — shut down teammates, delete team
    ```
@@ -108,7 +108,12 @@ implementer fixes → implementer verifies integration tests pass →
 reviewer re-reviews. Loop until the reviewer reports clean. Wait for
 the reviewer's final report to the lead.
 
-### 4. Report and approval
+### 4. Docs pre-pass
+
+1. Dispatch **mental-model-updater** with changed files and implementation summary.
+   Provide the commit range from the implementation branch. Always dispatch — the agent determines impact. **Wait for completion before proceeding** — the report step should reflect the final doc state.
+
+### 5. Report and approval
 
 1. Report to the user:
    - What was implemented (from implementer report)
@@ -118,24 +123,23 @@ the reviewer's final report to the lead.
 2. Wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
    - Direct the reviewer to re-review.
+   - Re-run **mental-model-updater** with the new commit range. Wait for completion.
    - Re-report. Loop until user approves.
 
 Implementer and reviewer remain alive throughout this loop.
 
-### 5. Merge
+### 6. Merge
 
 1. Run `~/.claude/infra/merge-branch.sh <original-branch> <branch> "<commit-message>"`.
    The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
    Compose the commit message per CLAUDE.md commit rules.
 
-### 6. Doc pipeline
+### 7. Doc pipeline
 
-1. Dispatch **mental-model-updater** with changed files and implementation summary.
-   Provide the commit range from the implementation branch. Always dispatch — the agent determines impact. **Wait for completion before proceeding** — downstream doc updates depend on mental-model accuracy.
-2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
-3. If ticket-driven, update ticket status.
+1. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
+2. If ticket-driven, update ticket status.
 
-### 7. Cleanup
+### 8. Cleanup
 
 1. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
 
