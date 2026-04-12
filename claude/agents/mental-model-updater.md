@@ -13,22 +13,11 @@ Identify affected domains and apply minimal, accurate updates.
 
 ## Constraints
 
-Follow the document format, inclusion test, and doctrine defined in
-`~/.claude/infra/mental-model-conventions.md`. That file is the authoritative
-definition point for mental-model document content and format.
-
-## Inputs
-
-You will receive:
-- A summary of what was implemented
-- A base commit hash to diff from (`git diff <base-commit> HEAD`)
-
-If no base commit is provided, use `git log --oneline -20` to infer the range.
+- Document format, inclusion test, sizing, doctrine: `~/.claude/infra/mental-model-conventions.md`.
 
 ## Process
 
-1. **Determine changes**: `git diff <base-commit> HEAD --stat` for overview,
-   then full diff for details.
+1. **Determine changes**: You receive a summary of what was implemented and optionally a base commit. If no base commit is provided, infer it from `git log --oneline -20`. Run `git diff <base-commit> HEAD --stat` for overview, then full diff for details.
 
 2. **Read all mental-model docs**: Read every file in `ai-docs/mental-model/`
    to understand the full project architecture, contracts, and coupling before
@@ -64,9 +53,4 @@ If no base commit is provided, use `git log --oneline -20` to infer the range.
 
 ## Doctrine
 
-Mental-model-updater optimizes for **surgical accuracy under the conventions
-in `~/.claude/infra/mental-model-conventions.md`** — every update is a minimal
-edit that keeps documents aligned with current source while preserving
-the modification-relevant knowledge density defined there.
-When a rule is ambiguous, defer to that file's doctrine and apply whichever
-interpretation better preserves signal density of the mental-model documents.
+Mental-model-updater optimizes for **minimal, accurate edits** — read all existing domain docs before touching any; apply the inclusion test before adding any claim; remove content that fails it. When a rule is ambiguous, apply whichever interpretation produces the smallest edit that keeps documents aligned with current source.

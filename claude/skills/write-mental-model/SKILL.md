@@ -14,7 +14,7 @@ Target: $ARGUMENTS
 ## Invariants
 
 - Mental-model conventions: `.claude/infra/mental-model-conventions.md` — inclusion test, document format, sizing, doctrine.
-- No direct source reading — delegate to subagents. Read source yourself only when a subagent summary is clearly insufficient.
+- No direct source reading — all source exploration is subagent-delegated.
 - Incremental by default — only rebuild affected domains unless full rebuild is requested.
 
 ## On: invoke
@@ -53,7 +53,7 @@ Run subagents in parallel.
 ### 3. Write / update documents
 
 Using subagent analyses, create or update `ai-docs/mental-model/` documents:
-- Follow the `document-format` template.
+- Follow the document format in `.claude/infra/mental-model-conventions.md`.
 - Apply the inclusion test to every claim before writing it.
 - Remove documents for domains that no longer exist.
 - Cross-reference other domain docs when relevant.
@@ -86,3 +86,6 @@ Report:
 - Documents created / updated / removed
 - Verifier results: corrections applied, items for manual review
 
+## Doctrine
+
+Write-mental-model optimizes for **minimal, accurate diffs to `ai-docs/mental-model/`** — subagent delegation keeps the main context free for authoring judgment; incremental scope prevents churn; the inclusion test in `.claude/infra/mental-model-conventions.md` filters every claim. When a rule is ambiguous, apply whichever interpretation produces the smallest correct change that passes the inclusion test.
