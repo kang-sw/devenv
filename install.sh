@@ -392,6 +392,9 @@ link "$REPO_DIR/shell/scripts" "$HOME/.devenv-scripts"
 # Neovim config
 link "$REPO_DIR/nvim" "$HOME/.config/nvim"
 
+# Claude Code CLAUDE.md — global instructions
+link "$REPO_DIR/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+
 # Claude Code skills — link each skill folder individually
 mkdir -p "$HOME/.claude/skills"
 for skill_dir in "$REPO_DIR/claude/skills"/*/; do
