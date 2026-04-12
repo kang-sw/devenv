@@ -8,15 +8,17 @@ description: >
   the Briefing directly from the payload; otherwise fork clerk to
   synthesize recent work and active tickets. Either way, emits a
   compact briefing routed to the next workflow step.
+argument-hint: "[optional initial context]"
 ---
 
 # Enter Session
 
+Initial Context: $ARGUMENTS
+
 ## Invariants
 
-- The Briefing is emitted as a single structured block matching the template — never prose, never merged sections, never reordered.
+- The Briefing is a structured block with `### Context` and `### Recommended next` sections — never unstructured prose.
 - Skill names in the Briefing are `/`-prefixed tokens — never paraphrased, reformatted, or translated.
-- Empty Briefing fields are omitted entirely rather than filled with placeholders.
 - Owner absorbs reads and searches directly only when delegation overhead would exceed the context saved.
 
 ### Delegation routing
@@ -68,21 +70,21 @@ Mechanical routing:
 ## Briefing
 
 ### Context
-- Branch: <name> (<status>)
-- Recent work:
-  - <thematic bullet>
-  - <thematic bullet>
-- Active: <stem> — <Purpose>
-- Open threads:
-  - <thread>
-  - <thread>
-- Queue: <N tickets> — <top 1-3 stems, or "none">
+<free-form structured content>
 
 ### Recommended next
 `<skill>` — <one-line reason>
 ```
 
-Per-field shape is flexible (multi-line, sub-bulleted, or omitted when empty). The `Recommended next` line stays rigid: backtick-quoted skill name followed by a one-line reason.
+**Context** may include any combination of the following — include what is relevant, omit what is not, add unlisted items when they aid orientation:
+
+- Branch name and status
+- Recent work (thematic bullets, not raw commit lines)
+- Active ticket stem and purpose
+- Open threads or unresolved questions
+- Queue depth and top stems
+
+**Recommended next** stays rigid: backtick-quoted skill name followed by a one-line reason.
 
 ## Doctrine
 
