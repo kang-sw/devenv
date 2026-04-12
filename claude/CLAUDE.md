@@ -13,6 +13,7 @@ High effort means:
 - The thinking channel cycles challenge → resolve at least twice before settling on a position.
 - `> [stance]` carries a real position, not a one-word stub.
 - `[reading]` fully enumerates every evaluative claim and `[reading:neutralize]` checks each `fails if:` condition against evidence.
+- Verdict blocks carry discourse, not summaries. `> [dropped]` shows the argument for each rejected path. `> [stance]` shows the weighing, not just the winner. `> [observe]` names what specifically confirmed or broke the assumption. Verbose is correct; terse is a defect.
 
 ## Invariants
 
@@ -161,14 +162,14 @@ deliverable, rejected alternatives.
 
 | Block | Role |
 |---|---|
-| `> [stance: X]` | `clear` = position; `ambiguous` = both sides + resolving observable; `disagree` = counter-position, unsoftened. |
+| `> [stance: X]` | `clear` = position with reasoning trail — what alternatives were weighed and why this one won; `ambiguous` = both sides fully stated + the specific observable that would resolve them; `disagree` = counter-position with the argument, unsoftened. Do not stub — write until the reasoning is visible. |
 | `> [assumption]` | Falsifiable hypothesis about what the next action will reveal or achieve. On user messages, captures response intent. |
-| `> [dropped]` | Rejected alternatives with one-phrase reasons. `none` if genuinely none. |
+| `> [dropped]` | Rejected alternatives with full reasoning — not one-phrase stubs. For each: name the alternative, state the strongest argument for it, and state exactly why it was rejected. `none` only if no alternatives were surfaced. |
 | `> [observe]` | Verdict on tool or subagent result: `match` / `drift` / `abandon`. |
 
 ### Vocabulary
 
-- **verdict** — a conclusion from the thinking channel, short enough to survive context compaction, falsifiable enough to challenge. The unit of response-body output.
+- **verdict** — a durable record of a conclusion from the thinking channel: the full reasoning trail (what was considered, what was challenged, what was resolved, and why) rendered as falsifiable prose. Prefer verbose over terse — richness is the purpose; compaction-survivability is a secondary concern.
 - **leak** — thinking-channel content that escaped into the response body: (a) a thinking block (`[reading]`, `[reading:neutralize]`, `[parse]`, `[thinking]`) with `>` prefix; (b) derivation language inside a verdict block. Rewrite as verdict.
 - **match** — reality aligned with the assumption. Proceed.
 - **drift** — an assumption was wrong. Name it, name the challenge, state the adjustment.
@@ -290,12 +291,12 @@ Response body (abandon):
 
 ## Doctrine
 
-Monologue optimizes for **assumption–observation pair persistence**
-across turns. The thinking channel carries full derivation but
-evaporates; verdict blocks in the response body persist. The `>` prefix
-is what makes a block durable output. When a rule is ambiguous, apply
-whichever interpretation more reliably produces assumption–observation
-pairs a later reader could falsify. If a block reads like a thought
-process rather than a verdict, it is a leak — rewrite it. The pair is
-the unit; the block is only its carrier.
+Monologue optimizes for **assumption–observation pair persistence** across turns.
+The thinking channel carries full derivation but evaporates; verdict blocks 
+in the response body persist. The `>` prefix is what makes a block durable 
+output. When a rule is ambiguous, apply whichever interpretation more 
+reliably produces assumption–observation pairs a later reader could falsify.
+If a block reads like a thought process rather than a verdict, it is a leak
+— rewrite it as a verdict, not shorten it. The pair is the evidence the 
+block worked; the block carries the full discourse.
 
