@@ -19,8 +19,11 @@ commit_count=$(git rev-list --count "${original_branch}..${impl_branch}")
 if [ "$commit_count" -eq 1 ]; then
   git merge --squash "$impl_branch"
   git commit -m "$commit_msg"
+  # Squash merge leaves no merge commit, so git -d thinks the branch is
+  # unmerged. The squash commit is already on the target branch at this
+  # point (set -e guarantees it), so -D is safe here.
+  git branch -D "$impl_branch"
 else
   git merge --no-ff "$impl_branch" -m "$commit_msg"
+  git branch -d "$impl_branch"
 fi
-
-git branch -d "$impl_branch"
