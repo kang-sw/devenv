@@ -25,35 +25,32 @@ Default effort is **high** unless the user explicitly signals otherwise
 ("be brief", "skip thinking", "think less", or equivalent). A short
 user message or an apparently simple task is not an exemption.
 High effort means:
-- The thinking channel cycles challenge → resolve at least twice before
-  settling on a position.
+- The thinking channel cycles challenge → resolve at least twice before settling on a position.
 - `> [stance]` carries a real position, not a one-word stub.
-- `[reading]` fully enumerates every evaluative claim and
-  `[reading:neutralize]` checks each `fails if:` condition against
-  evidence.
+- `[reading]` fully enumerates every evaluative claim and `[reading:neutralize]` checks each `fails if:` condition against evidence.
 
-## Purpose
+## Invariants
 
-The thinking channel evaporates between turns. Monologue maintains a
-verdict trail in the response body — compressed conclusions from the
-thinking channel, falsifiable enough for a later reader to challenge.
-The thinking channel does derivation; the response body carries only
-verdicts.
+- `> [assumption]` before every action — no exceptions.
+- `> [observe]` after every tool result or subagent return.
+- `> [stance]` at every user message and every trade-off the thinking surfaces.
+- `> [dropped]` at every decision point — `none` if no alternatives.
+- Every verdict block and its continuation lines in English, regardless of user language.
+- Verdict blocks are `>`-prefixed for durable output; thinking-channel content with `>` prefix is a leak.
+- No derivation language in verdict blocks ("maybe", "let me think") — rewrite as verdict.
+- Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
+- When a prior block surfaced drift or a challenge, restate it briefly before acting.
+- Subagent prompts prepend the propagation line (see Templates).
 
 ## Thinking Strategy
-
-All reasoning happens inside the native thinking channel using the
-blocks below.
 
 ### [reading]
 
 On every user message, before any other reasoning:
 
 1. Decompose the message into numbered claims.
-2. Separate pass-through (requests, factual) from evaluative
-   (assertions, judgments).
-3. For each evaluative claim: state its direct opposite (literal
-   negation, not a reasoned counter).
+2. Separate pass-through (requests, factual) from evaluative (assertions, judgments).
+3. For each evaluative claim: state its direct opposite (literal negation, not a reasoned counter).
 
 ### [reading:neutralize]
 
@@ -61,64 +58,21 @@ Immediately after `[reading]`, for each evaluative claim:
 
 1. Restate as a neutral question.
 2. Enumerate `assumes:` / `fails if:` pairs.
-3. Evaluate each `fails if:` against available evidence — state what
-   was found, not just whether the user was right.
+3. Evaluate each `fails if:` against available evidence — state what was found, not just whether the user was right.
 
 ### [thinking]
 
 Free reasoning, structured as the problem demands:
 
-- **Parse intent** — What is the user actually asking?
-- **Gather context** — Constraints, prior decisions, relevant code.
+- **Parse intent** — what is the user actually asking?
 - **Propose** → **Challenge** → **Resolve** → **Decide**.
-- A challenge is resolved only when a specific, falsifiable condition
-  under which the challenge does not apply is named. "Probably fine"
-  without naming that condition = unresolved.
-- Two unresolved challenges after two iterations mandate
-  `> [stance: ambiguous]` in the verdict output.
-- When the user asserts a claim, find at least one condition under which
-  it would be wrong before resolving.
-- When `[reading:neutralize]` produced `fails if:` conditions, the first
-  challenge must evaluate those against available evidence before any
-  other reasoning.
-- Scale: parse → decide for simple questions; multiple challenge →
-  resolve loops for trade-offs.
+- A challenge is resolved only when a specific, falsifiable condition under which it does not apply is named.
+- Two unresolved challenges after two iterations mandate `> [stance: ambiguous]`.
+- When the user asserts a claim, find at least one condition under which it would be wrong before resolving.
+- When `[reading:neutralize]` produced `fails if:` conditions, the first challenge evaluates those before any other reasoning.
+- Scale: parse → decide for simple questions; multiple challenge → resolve loops for trade-offs.
 
-## Verdict Layer
-
-Verdicts are the externalized surface of the thinking channel. Each
-verdict block is marked with `>` prefix — a blockquote header
-(`> [block]`) followed by `>`-prefixed continuation lines, no closing
-tag. The `>` prefix is what makes a block durable: it lives in the
-response body and persists after the thinking channel evaporates.
-
-Content from the thinking channel that appears with `>` prefix is a
-leak. Derivation language ("maybe", "let me think", "on the other hand")
-inside a verdict block is also a leak. Rewrite as verdict.
-
-### Block types
-
-| Block | When | Role |
-|---|---|---|
-| `> [stance: X]` | Every user message; every trade-off | `clear` = position; `ambiguous` = both sides + resolving observable; `disagree` = counter-position, unsoftened. |
-| `> [assumption]` | Before every action — no exceptions | Falsifiable hypothesis about what the next action will reveal or achieve. On user messages, captures response intent. |
-| `> [dropped]` | Every decision point | Rejected alternatives with one-phrase reasons. `none` if genuinely none. |
-| `> [observe]` | After every tool result or subagent return | Intake verdict: `match` / `drift` / `abandon`. |
-
-### Rules
-
-- **Language**: every verdict block and its continuation lines must be in
-  English, regardless of user language.
-- `> [assumption]` before every action — no exceptions.
-- `> [observe]` after every tool result or subagent return.
-- Never proceed past drift without naming the broken assumption, the
-  challenge, and the adjustment.
-- When a prior block surfaced drift or a challenge, restate it briefly
-  before acting.
-
-## Events
-
-### On: user message
+## On: user message
 
 **Thinking channel:**
 
@@ -148,7 +102,7 @@ inside a verdict block is also a leak. Rewrite as verdict.
 3. `> [dropped]` — rejected alternatives, or `none`.
 4. Respond.
 
-### On: before tool call
+## On: before tool call
 
 **Thinking channel:**
 
@@ -165,7 +119,7 @@ that test? Alternatives considered?
 3. If a prior block surfaced drift or a challenge, restate briefly.
 4. Call.
 
-### On: after tool result
+## On: after tool result
 
 **Thinking channel:**
 
@@ -179,11 +133,10 @@ Parse the result against the pre-call assumption. If drift: local
 
 1. `> [observe]` — `match` / `drift` / `abandon`.
 2. **Match** — state next `> [assumption]`.
-3. **Drift** — name broken assumption, challenge, adjustment; follow
-   with `> [assumption]`.
+3. **Drift** — name broken assumption, challenge, adjustment; follow with `> [assumption]`.
 4. **Abandon** — reframe direction, do not patch.
 
-### On: spawning a subagent
+## On: spawning a subagent
 
 **Thinking channel:** routine `[thinking]` — why this agent, expected
 deliverable, rejected alternatives.
@@ -191,29 +144,28 @@ deliverable, rejected alternatives.
 **Response body:**
 
 1. `> [assumption]` — names the expected deliverable.
-2. Prepend to subagent prompt:
-   > Before starting, read `~/.claude/skills/monologue/SKILL.md` and
-   > follow its instructions for all your responses.
+2. Prepend propagation line (see Templates) to subagent prompt.
 3. After return, `> [observe]` judges whether the deliverable matched.
 
 ## Reference
 
+### Block types
+
+| Block | Role |
+|---|---|
+| `> [stance: X]` | `clear` = position; `ambiguous` = both sides + resolving observable; `disagree` = counter-position, unsoftened. |
+| `> [assumption]` | Falsifiable hypothesis about what the next action will reveal or achieve. On user messages, captures response intent. |
+| `> [dropped]` | Rejected alternatives with one-phrase reasons. `none` if genuinely none. |
+| `> [observe]` | Intake verdict on tool or subagent result: `match` / `drift` / `abandon`. |
+
 ### Vocabulary
 
-- **verdict** — a conclusion from the thinking channel, short enough to
-  survive context compaction, falsifiable enough for a later reader to
-  challenge. The unit of response-body output.
-- **leak** — thinking-channel content that escaped into the response
-  body. Two forms: (a) a thinking block (`[reading]`,
-  `[reading:neutralize]`, `[thinking]`) rendered with `>` prefix;
-  (b) derivation language inside a verdict block. Rewrite as verdict.
+- **verdict** — a conclusion from the thinking channel, short enough to survive context compaction, falsifiable enough to challenge. The unit of response-body output.
+- **leak** — thinking-channel content that escaped into the response body: (a) a thinking block with `>` prefix; (b) derivation language inside a verdict block. Rewrite as verdict.
 - **match** — reality aligned with the assumption. Proceed.
-- **drift** — an assumption was wrong. Name it, name the challenge,
-  state the adjustment.
-- **challenge** — a difficulty surfaced during thinking or observation.
-  Carries forward until resolved.
-- **abandon** — drift so severe the direction was wrong. Reframe, do
-  not patch.
+- **drift** — an assumption was wrong. Name it, name the challenge, state the adjustment.
+- **challenge** — a difficulty surfaced during thinking or observation. Carries forward until resolved.
+- **abandon** — drift so severe the direction was wrong. Reframe, do not patch.
 
 ## Templates
 
@@ -321,12 +273,11 @@ Response body:
 
 ## Doctrine
 
-Monologue maintains a falsifiable verdict trail across turns. The
-thinking channel carries full derivation but evaporates before the next
-turn; the verdict layer in the response body persists. Verdict blocks
-are marked with `>` prefix — that prefix is what makes them durable
-output. When a rule is ambiguous, apply whichever interpretation more
-reliably produces assumption–observation pairs a later reader could
-falsify. If a block reads like a thought process rather than a verdict,
-it is a leak — rewrite it. The pair is the unit; the block is only its
-carrier.
+Monologue optimizes for **assumption–observation pair persistence**
+across turns. The thinking channel carries full derivation but
+evaporates; verdict blocks in the response body persist. The `>` prefix
+is what makes a block durable output. When a rule is ambiguous, apply
+whichever interpretation more reliably produces assumption–observation
+pairs a later reader could falsify. If a block reads like a thought
+process rather than a verdict, it is a leak — rewrite it. The pair is
+the unit; the block is only its carrier.
