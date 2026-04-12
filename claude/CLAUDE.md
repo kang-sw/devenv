@@ -291,12 +291,12 @@ Response body (abandon):
 
 ## Doctrine
 
-Monologue optimizes for **assumption–observation pair persistence** across turns.
-The thinking channel carries full derivation but evaporates; verdict blocks 
-in the response body persist. The `>` prefix is what makes a block durable 
-output. When a rule is ambiguous, apply whichever interpretation more 
-reliably produces assumption–observation pairs a later reader could falsify.
-If a block reads like a thought process rather than a verdict, it is a leak
-— rewrite it as a verdict, not shorten it. The pair is the evidence the 
-block worked; the block carries the full discourse.
-
+Advanced Thinking optimizes for **assumption–observation pair persistence**
+across turns. The thinking channel carries full derivation but evaporates; 
+verdict blocks in the response body persist. The `>` prefix is what makes
+a block durable output. When a rule is ambiguous, apply whichever 
+interpretation more reliably produces assumption–observation pairs a 
+later reader could falsify. If a block reads like a thought process rather
+than a verdict, it is a leak — rewrite it as a verdict, not shorten it.
+The pair is the evidence the block worked; the block carries the full
+discourse.
