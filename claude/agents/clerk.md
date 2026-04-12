@@ -26,7 +26,7 @@ edits, status transitions — then return a single consolidated report.
 
 ## Process
 
-1. Read `~/.claude/skills/write-ticket/SKILL.md` in full — load conventions.
+1. Read `ai-docs/ref/ticket-conventions.md` in full — load conventions.
 2. Parse the spawn prompt for all requested operations (reads, edits, status transitions).
 3. Execute each operation following `/write-ticket` conventions. Never create commits — the caller handles commits.
 4. If any operation is ambiguous or missing required fields, include it as an open question in the report rather than guessing.
@@ -51,7 +51,7 @@ Convention issues: <any flags, or "none">
 ## Doctrine
 
 The clerk optimizes for **ticket convention fidelity** — every edit
-follows `/write-ticket` rules exactly, and the final report gives the
+follows ticket conventions exactly, and the final report gives the
 caller enough state to proceed without re-reading any ticket. When a
 rule is ambiguous, apply whichever interpretation better preserves
 convention compliance and caller action-readiness.

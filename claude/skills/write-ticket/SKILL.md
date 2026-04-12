@@ -12,18 +12,8 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Ticket path: `ai-docs/tickets/<status>/YYMMDD-<category>-<name>.md` — `YYMMDD` is creation date, never changes on move.
-- Categories: `bug`, `feat`, `refactor`, `chore`, `research`, `epic`.
-- Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by full path.
-- Status is directory-based only: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). Never duplicate status in frontmatter.
-- Move tickets with `git mv`; no cross-link updates needed.
-- Phase numbers are sequential and **stable** — mark dropped phases `[dropped]`, never renumber.
-- One phase touches **one cohesive component** unless the change is inherently cross-component.
-- Each phase has its own success criteria or test surface.
-- All ticket content must be in English regardless of conversation language.
-- Tickets are write-once intent documents.
+- Ticket conventions: `ai-docs/ref/ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
 - Never `Read` a ticket file other than the current target — delegate any other ticket inspection to a clerk subagent.
-- Ticket stems are **immutable absolute references** — history is queried by stem (`git log --grep`). If a ticket's concept changes fundamentally, create a new ticket that absorbs the old scope and move the old ticket to `dropped/`.
 
 ## On: invoke
 
@@ -63,7 +53,7 @@ Agent(
 )
 ```
 
-The clerk reads `/write-ticket` conventions autonomously and applies the
+The clerk reads ticket conventions from `ai-docs/ref/ticket-conventions.md` and applies the
 edit. It reports back what changed and flags convention issues. Use for:
 - Status transitions (`git mv` to `wip/`, `done/`)
 - Phase updates from implementation findings
@@ -80,34 +70,6 @@ Place in `idea/` when the topic is exploratory or underspecified; place in `todo
 ### judge: phase-need
 
 Prefer more phases over fewer. An overly granular ticket is cheaper to merge than an oversized phase that stalls mid-implementation. Single-component, single-concern work may be one phase.
-
-## Templates
-
-### Frontmatter
-
-```yaml
----
-title: <title>
-related:             # optional; list of stems with inline comments
-  - 260301-feat-foo  # prerequisite
-parent:              # optional; epic stem (e.g., 260401-epic-auth-rewrite)
-plans:               # maps phases to plan path stems under ai-docs/plans/ (without .md)
-  phase-1: 2026-03/28-1430.event-serialization
-skeletons:           # maps phases to skeleton commit hashes
-  phase-1: abc1234
-started:             # YYYY-MM-DD, added on move to wip/
-completed:           # YYYY-MM-DD, added on move to done/
----
-```
-
-Both `plans:` and `skeletons:` list only phases that have artifacts — omit phases without a plan or skeleton (no null placeholders). Absence means "not yet created" or "not needed."
-
-### Epic body (category = `epic`)
-
-- Body defines **scope and decomposition**, not implementation spec.
-- Lists child ticket stems (or planned descriptions).
-- Child tickets set `parent:` in frontmatter pointing back to the epic stem.
-- Epic moves to `done/` when its scope is satisfied.
 
 ## Doctrine
 
