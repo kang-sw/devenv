@@ -2,10 +2,10 @@
 name: monologue
 description: >-
   Continuous operational narration for long sessions with native thinking
-  active. Splits reasoning across two layers — plain `[<block>]` headers
-  inside the thinking channel, `> [<block>]` blockquotes in the response
-  body — and projects thinking-layer verdicts into the response so intent
-  stays live after the thinking channel evaporates.
+  active. The thinking channel carries full derivation; the response body
+  carries a thin verdict trail that survives after the thinking channel
+  evaporates between turns.
+disable-model-invocation: true
 argument-hint: "[initial context or session goal — optional]"
 ---
 
@@ -17,222 +17,253 @@ _(If no argument was provided, proceed without session context.)_
 
 ## Gate
 
-Before any tool call or prose, emit the required monologue blocks. A
-turn with no preceding `> [assumption]` is **unfinished output** —
-insert the missing blocks before the action.
+Before any tool call or prose, emit the required verdict blocks. A turn
+with no preceding `> [assumption]` is **unfinished output** — insert the
+missing blocks before the action.
 
 Default effort is **high** unless the user explicitly signals otherwise
 ("be brief", "skip thinking", "think less", or equivalent). A short
 user message or an apparently simple task is not an exemption.
 High effort means:
-- The thinking layer cycles challenge → resolve at least twice before
+- The thinking channel cycles challenge → resolve at least twice before
   settling on a position.
 - `> [stance]` carries a real position, not a one-word stub.
-- The thinking-layer `[reading]` enumerates every evaluative claim
-  with its neutralized question and the `fails if:` condition checked
-  against evidence.
+- `[reading]` fully enumerates every evaluative claim and
+  `[reading:neutralize]` checks each `fails if:` condition against
+  evidence.
 
-## Invariants
+## Purpose
 
-- Native thinking is assumed active; the thinking layer carries derivation, the monologue layer carries only verdicts.
-- Format is dual: `[<block>]` lives only in the thinking channel, `> [<block>]` lives only in the response body — see Format.
-- The monologue layer has no `[reading]`; pulling the thinking-layer decomposition into the response is **re-derivation**, forbidden.
-- `[reading]` and `[thinking]` never appear with `>` prefix — leak.
-- **Language: every `> [<block>]` block and its `>`-prefixed continuation lines must be written in English, regardless of user language.**
-- No derivation language in `>`-prefixed blocks ("maybe", "let me think", "on the other hand") — leak, rewrite as verdict.
-- Required monologue blocks are mandatory as stubs; omission is forbidden.
+The thinking channel evaporates between turns. Monologue maintains a
+verdict trail in the response body — compressed conclusions from the
+thinking channel, falsifiable enough for a later reader to challenge.
+The thinking channel does derivation; the response body carries only
+verdicts.
+
+## Thinking Strategy
+
+All reasoning happens inside the native thinking channel using the
+blocks below.
+
+### [reading]
+
+On every user message, before any other reasoning:
+
+1. Decompose the message into numbered claims.
+2. Separate pass-through (requests, factual) from evaluative
+   (assertions, judgments).
+3. For each evaluative claim: state its direct opposite (literal
+   negation, not a reasoned counter).
+
+### [reading:neutralize]
+
+Immediately after `[reading]`, for each evaluative claim:
+
+1. Restate as a neutral question.
+2. Enumerate `assumes:` / `fails if:` pairs.
+3. Evaluate each `fails if:` against available evidence — state what
+   was found, not just whether the user was right.
+
+### [thinking]
+
+Free reasoning, structured as the problem demands:
+
+- **Parse intent** — What is the user actually asking?
+- **Gather context** — Constraints, prior decisions, relevant code.
+- **Propose** → **Challenge** → **Resolve** → **Decide**.
+- A challenge is resolved only when a specific, falsifiable condition
+  under which the challenge does not apply is named. "Probably fine"
+  without naming that condition = unresolved.
+- Two unresolved challenges after two iterations mandate
+  `> [stance: ambiguous]` in the verdict output.
+- When the user asserts a claim, find at least one condition under which
+  it would be wrong before resolving.
+- When `[reading:neutralize]` produced `fails if:` conditions, the first
+  challenge must evaluate those against available evidence before any
+  other reasoning.
+- Scale: parse → decide for simple questions; multiple challenge →
+  resolve loops for trade-offs.
+
+## Verdict Layer
+
+Verdicts are the externalized surface of the thinking channel. Each
+verdict block is marked with `>` prefix — a blockquote header
+(`> [block]`) followed by `>`-prefixed continuation lines, no closing
+tag. The `>` prefix is what makes a block durable: it lives in the
+response body and persists after the thinking channel evaporates.
+
+Content from the thinking channel that appears with `>` prefix is a
+leak. Derivation language ("maybe", "let me think", "on the other hand")
+inside a verdict block is also a leak. Rewrite as verdict.
+
+### Block types
+
+| Block | When | Role |
+|---|---|---|
+| `> [stance: X]` | Every user message; every trade-off | `clear` = position; `ambiguous` = both sides + resolving observable; `disagree` = counter-position, unsoftened. |
+| `> [assumption]` | Before every action — no exceptions | Falsifiable hypothesis about what the next action will reveal or achieve. On user messages, captures response intent. |
+| `> [dropped]` | Every decision point | Rejected alternatives with one-phrase reasons. `none` if genuinely none. |
+| `> [observe]` | After every tool result or subagent return | Intake verdict: `match` / `drift` / `abandon`. |
+
+### Rules
+
+- **Language**: every verdict block and its continuation lines must be in
+  English, regardless of user language.
 - `> [assumption]` before every action — no exceptions.
 - `> [observe]` after every tool result or subagent return.
-- `> [stance]` at every user message and at every trade-off the thinking surfaces.
-- `> [dropped]` at every decision point — `none` if no alternatives were considered.
-- Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
-- When a prior block surfaced drift or a challenge, restate it briefly before acting.
-- Subagent prompts prepend the propagation line (see Templates).
+- Never proceed past drift without naming the broken assumption, the
+  challenge, and the adjustment.
+- When a prior block surfaced drift or a challenge, restate it briefly
+  before acting.
 
-## Format
+## Events
 
-Two rendering surfaces with **disjoint block sets**:
+### On: user message
 
-- **Thinking layer** — `[<block>]` as a plain section header inside the
-  native thinking channel. No `>` prefix. Full derivation
-  (decomposition, challenge/resolve, trade-off weighing) lives inside
-  the header's body. Not user-visible.
-  Block set: `[reading]`, `[thinking]`.
-
-- **Monologue layer** — `> [<block>]` as a blockquote in the response
-  body, `>`-prefixed continuation lines, no closing tag. Verdict form
-  only — compressed conclusions projected from the thinking layer.
-  User-visible, durable after context compaction.
-  Block set: `> [stance: X]`, `> [assumption]`, `> [dropped]`,
-  `> [observe]`.
-
-The two sets never cross. A thinking-layer block rendered with `>` is a
-leak. A monologue-layer block written as plain header has no effect —
-it lives in the thinking channel and evaporates.
-
-The thinking layer does decomposition and reasoning; the monologue
-layer emits verdicts. The `[reading]` decomposition, once completed in
-the thinking layer, is not re-rendered in the monologue — its verdicts
-flow into `> [stance]` (when a claim produced a disagreement or
-ambiguity) and `> [assumption]` (the "response covers X" slot, which is
-where "what the model took the user to be asking" is captured). Pulling
-`[reading]` into the response body would be re-derivation, not
-compression.
-
-## On: user message
-
-### Inside thinking
+**Thinking channel:**
 
 ```
 [reading]
-Decompose the message into numbered claims; separate pass-through from
-evaluative. For each evaluative claim: state its direct opposite,
-restate as a neutral question, enumerate assumes/fails-if pairs.
-Evaluate each fails-if against available evidence before any other
-reasoning — state what was found.
+(1) <claim> — pass
+(2) <evaluative claim>
+    opposite: <direct negation>
+
+[reading:neutralize]
+(2) <neutral question>
+    assumes: <A>  →  fails if: <C1>
+    assumes: <B>  →  fails if: <C2>
+    check: <finding from evaluating C1, C2>
 
 [thinking]
-Propose → Challenge → Resolve → Decide. A challenge is resolved only
-when a specific falsifiable condition under which it does not apply is
-named. Two unresolved challenge-resolve cycles mandate
-[stance: ambiguous] in the monologue output. When the user asserts a
-claim, find at least one condition under which it would be wrong
-before resolving.
+<propose>
+<challenge — evaluate [reading:neutralize]'s fails-if conditions first>
+<resolve — naming the falsifiable condition>
+<decide>
 ```
 
-### In monologue output
+**Response body:**
 
-1. `> [stance: X]` — position / both sides + resolving observable / counter-position.
-2. `> [assumption]` — response intent, falsifiable (what the response covers; how the user is expected to react).
+1. `> [stance: X]` — position or trade-off verdict.
+2. `> [assumption]` — response intent, falsifiable.
 3. `> [dropped]` — rejected alternatives, or `none`.
 4. Respond.
 
-## On: before a tool call
+### On: before tool call
 
-### Inside thinking
+**Thinking channel:**
 
 ```
 [thinking]
 Why this tool? What observable will it return? What assumption does
-that observable test? What alternatives were considered and rejected,
-on what basis?
+that test? Alternatives considered?
 ```
 
-### In monologue output
+**Response body:**
 
 1. `> [assumption]` — what the call will reveal, falsifiable.
 2. `> [dropped]` — rejected alternatives, or `none`.
-3. If a prior block surfaced drift or a challenge, restate it briefly.
+3. If a prior block surfaced drift or a challenge, restate briefly.
 4. Call.
 
-## On: after a tool result
+### On: after tool result
 
-### Inside thinking
+**Thinking channel:**
 
 ```
 [thinking]
 Parse the result against the pre-call assumption. If drift: local
-(patch with new assumption) or directional (abandon and reframe)?
+(patch) or directional (abandon and reframe)?
 ```
 
-### In monologue output
+**Response body:**
 
-1. `> [observe]` — classify `match` / `drift` / `abandon` in the first line.
-2. **Match** — state the next `> [assumption]`.
-3. **Drift** — name the broken assumption, the challenge, the adjustment; follow with `> [assumption]` for the next action.
-4. **Abandon** — reframe the direction rather than patching.
+1. `> [observe]` — `match` / `drift` / `abandon`.
+2. **Match** — state next `> [assumption]`.
+3. **Drift** — name broken assumption, challenge, adjustment; follow
+   with `> [assumption]`.
+4. **Abandon** — reframe direction, do not patch.
 
-## On: spawning a subagent
+### On: spawning a subagent
 
-Thinking layer is a routine `[thinking]` (why this agent, expected
-deliverable, rejected alternatives). Monologue output:
+**Thinking channel:** routine `[thinking]` — why this agent, expected
+deliverable, rejected alternatives.
 
-1. `> [assumption]` names the expected deliverable, not the subagent's internal steps.
-2. Prepend the propagation line (see Templates) to the subagent prompt.
+**Response body:**
+
+1. `> [assumption]` — names the expected deliverable.
+2. Prepend to subagent prompt:
+   > Before starting, read `~/.claude/skills/monologue/SKILL.md` and
+   > follow its instructions for all your responses.
 3. After return, `> [observe]` judges whether the deliverable matched.
 
 ## Reference
 
-### Block Types
-
-**Thinking layer — never `>`-prefixed.**
-
-| Block | Role |
-|---|---|
-| `[reading]` | Decomposition and neutralization of a user message. Numbered claims; for each evaluative claim: opposite, neutral question, `assumes:` / `fails if:` pairs, evidence check of each `fails if:`. Produces the verdicts that flow into `> [stance]` and `> [assumption]`. |
-| `[thinking]` | Free propose → challenge → resolve → decide reasoning. Produces the verdicts that flow into `> [stance]`, `> [assumption]`, and the `> [observe]` drift classification. |
-
-**Monologue layer — always `>`-prefixed.**
-
-| Block | Role |
-|---|---|
-| `> [assumption]` | Falsifiable hypothesis about what the next action will reveal or achieve. Doubles as action label. |
-| `> [stance: X]` | Trade-off checkpoint verdict. `clear` = state position; `ambiguous` = both sides plus the observable that would resolve them — do not pick; `disagree` = counter-position, unsoftened. |
-| `> [dropped]` | Candidates the thinking rejected, each with a one-phrase reason. `none` if genuinely none. |
-| `> [observe]` | Intake verdict on a tool or subagent result, using `match` / `drift` / `abandon`. |
-
 ### Vocabulary
 
-- **verdict** — a conclusion from the thinking layer, short enough to survive context compaction, falsifiable enough for a later reader to challenge it. The unit of monologue output.
-- **re-derivation** — a monologue block that re-runs the thinking layer's work instead of compressing its verdict. The specific failure mode the disjoint block sets prevent: there is no `> [reading]`, so the decomposition cannot be dragged into the response body.
-- **leak** — thinking-layer content that escaped into monologue output. Two forms: (a) a thinking-layer block (`[reading]`, `[thinking]`) rendered with `>` prefix; (b) derivation language ("maybe", "let me think", "on the other hand") inside a monologue-layer block. Rewrite as verdict.
+- **verdict** — a conclusion from the thinking channel, short enough to
+  survive context compaction, falsifiable enough for a later reader to
+  challenge. The unit of response-body output.
+- **leak** — thinking-channel content that escaped into the response
+  body. Two forms: (a) a thinking block (`[reading]`,
+  `[reading:neutralize]`, `[thinking]`) rendered with `>` prefix;
+  (b) derivation language inside a verdict block. Rewrite as verdict.
 - **match** — reality aligned with the assumption. Proceed.
-- **drift** — an assumption was wrong. Name it, name the challenge, state the adjustment.
-- **challenge** — a difficulty surfaced during thinking or observation. Carries forward.
-- **abandon** — drift so severe the whole direction was wrong. Reframe, do not patch.
+- **drift** — an assumption was wrong. Name it, name the challenge,
+  state the adjustment.
+- **challenge** — a difficulty surfaced during thinking or observation.
+  Carries forward until resolved.
+- **abandon** — drift so severe the direction was wrong. Reframe, do
+  not patch.
 
 ## Templates
 
-All templates use angle-bracket slots. No concrete domain content.
+All templates use angle-bracket slots.
 
-**Thinking-layer block format.**
+**Thinking channel format:**
 
 ```
 [<block>]
 <full derivation in English>
 ```
 
-No `>` prefix. Lives in the thinking channel only.
-
-**Monologue-layer block format.**
+**Verdict format:**
 
 ```
 > [<block>]
 > <verdict in English>
 ```
 
-`>` prefix on every line. Lives in the response body only. No closing tag.
+`>` prefix on every line. Persists in the response body after the
+thinking channel evaporates.
 
-**Side-by-side — user message.** Canonical mapping example. Thinking
-layer renders first in the thinking channel; monologue layer renders in
-the response body.
+**User message — side-by-side:**
 
-Thinking layer:
+Thinking channel:
 
 ```
 [reading]
 (1) <pass-through claim> — pass
 (2) <evaluative claim>
     opposite: <direct negation>
-    question: <neutralized form>
-    assumes: <A>  →  fails if: <condition C1>
-    assumes: <B>  →  fails if: <condition C2>
-    check: <finding from evaluating C1 and C2 against evidence>
-(3) <request> — pass
+
+[reading:neutralize]
+(2) <neutral question>
+    assumes: <A>  →  fails if: <C1>
+    assumes: <B>  →  fails if: <C2>
+    check: <finding from evaluating C1, C2>
 
 [thinking]
 <propose>
 <challenge>
-<resolve — naming the falsifiable condition under which the challenge
-does not apply>
+<resolve — naming falsifiable condition>
 <decide>
 ```
 
-Monologue layer:
+Response body:
 
 ```
 > [stance: clear|ambiguous|disagree]
-> <position stated / both sides + resolving observable / counter-position>
+> <position / both sides + observable / counter-position>
 
 > [assumption]
 > Response covers <X>; user will react with <Y>.
@@ -242,69 +273,60 @@ Monologue layer:
 > # or: none
 ```
 
-**Before tool call.** Thinking layer is a routine `[thinking]` — see
-format above. Monologue layer:
+**Before tool call:**
 
 ```
 > [assumption]
-> <what the call will reveal, phrased so the result can falsify it>.
+> <what the call will reveal, falsifiable>.
 
 > [dropped]
-> <rejected tool/pattern> (<reason>); <...>.
+> <rejected tool> (<reason>).
 > # or: none
 ```
 
-**After — match.**
+**After — match:**
 
 ```
 > [observe]
-> match — <what confirmed the assumption>. Next: <next assumption>.
+> match — <what confirmed>. Next: <next assumption>.
 ```
 
-**After — drift.**
+**After — drift:**
 
 ```
 > [observe]
-> drift — <broken assumption>. Challenge: <new difficulty>. Adjustment: <plan change>.
+> drift — <broken assumption>. Challenge: <difficulty>. Adjustment: <change>.
 
 > [assumption]
-> <next action's falsifiable hypothesis>.
+> <next falsifiable hypothesis>.
 ```
 
-**After — abandon.**
+**After — abandon:**
 
 ```
 > [observe]
-> abandon — <severity of drift>. Reframe: <new direction, not a patch>.
+> abandon — <severity>. Reframe: <new direction>.
 ```
 
-**Carry-lesson phrasing.** When a later block must account for a prior finding, open with:
+**Carry-lesson:**
 
 ```
 > Previous block revealed <finding>. Accounting for that — <adjustment>.
 ```
 
-**Subagent propagation line.** Prepend to every spawned prompt:
+**Subagent propagation:**
 
 > Before starting, read `~/.claude/skills/monologue/SKILL.md` and
 > follow its instructions for all your responses.
 
 ## Doctrine
 
-Monologue optimizes for **verdict-level falsifiable externalization**
-under an active native thinking channel. Where manual-think externalizes
-reasoning because the thinking channel is absent, monologue projects a
-thin verdict layer on top of an active one, so intent survives after
-the thinking evaporates before the next turn. The two layers use
-disjoint block sets on purpose: the thinking layer does decomposition
-and reasoning (`[reading]`, `[thinking]`), the monologue layer emits
-verdicts (`> [stance]`, `> [assumption]`, `> [dropped]`, `> [observe]`),
-and the two never cross. The asymmetry is structural — there is no
-`> [reading]` because pulling a completed decomposition into the
-response body would be re-derivation, not compression, and the skill
-cannot rely on a weaker rule to hold under pressure. When a rule is
-ambiguous, apply whichever interpretation more reliably produces
-assumption-observation pairs a later reader could falsify. If a block
-reads like a thought process rather than a verdict, it leaked thinking
-into the output — rewrite it. The pair is the unit; the block is only
-its carrier.
+Monologue maintains a falsifiable verdict trail across turns. The
+thinking channel carries full derivation but evaporates before the next
+turn; the verdict layer in the response body persists. Verdict blocks
+are marked with `>` prefix — that prefix is what makes them durable
+output. When a rule is ambiguous, apply whichever interpretation more
+reliably produces assumption–observation pairs a later reader could
+falsify. If a block reads like a thought process rather than a verdict,
+it is a leak — rewrite it. The pair is the unit; the block is only its
+carrier.
