@@ -87,7 +87,7 @@ def parse_frontmatter(path: Path) -> dict:
 # Ticket helpers
 # ---------------------------------------------------------------------------
 
-STATUS_ORDER = ['wip', 'todo', 'idea', 'done', 'dropped']
+STATUS_ORDER = ['wip', 'todo', 'idea']
 
 
 def find_ticket(stem: str, tickets_root: Path) -> Path | None:
