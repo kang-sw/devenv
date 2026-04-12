@@ -52,6 +52,48 @@ completed:           # YYYY-MM-DD, added on move to done/
 
 Both `plans:` and `skeletons:` list only phases that have artifacts — omit phases without a plan or skeleton (no null placeholders). Absence means "not yet created" or "not needed."
 
+### Body (actionable: `feat`, `bug`, `refactor`, `chore`)
+
+```markdown
+# <title>
+
+## Background
+
+<problem or goal — what and why>
+
+## Phases
+
+### Phase 1: <title>
+
+<goals, constraints, rationale, rejected alternatives, suggested approaches>
+
+### Phase 2: <title>
+
+...
+```
+
+Optional sections — add between `## Background` and `## Phases` when relevant:
+
+- `## Decisions` — design choices with rationale and rejected alternatives.
+- `## Constraints` — non-obvious boundaries (performance, compatibility, etc.).
+- `## Prior Art` — existing patterns or components to reuse.
+
+### Body (category = `research`)
+
+```markdown
+# <title>
+
+## Background
+
+<question or context>
+
+## <Topic heading>
+
+<findings, decisions, rejected alternatives>
+```
+
+Research tickets have no phases. Sections after `## Background` are freeform topic headings.
+
 ### Epic body (category = `epic`)
 
 - Body defines **scope and decomposition**, not implementation spec.
