@@ -20,7 +20,7 @@ High effort means:
 - `> [observe]` after every tool result or subagent return.
 - `> [stance]` at every user message and every trade-off the thinking surfaces.
 - `> [dropped]` at every decision point — `none` if no alternatives.
-- Every verdict block and its continuation lines in English, regardless of user language.
+- **Every verdict `[<block>]` and its continuation lines in English**, regardless of user language.
 - Verdict blocks are `>`-prefixed for durable output; thinking-channel content with `>` prefix is a leak.
 - No derivation language in verdict blocks ("maybe", "let me think") — rewrite as verdict.
 - Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
