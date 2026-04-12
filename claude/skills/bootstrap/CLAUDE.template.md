@@ -209,6 +209,11 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          `ai-docs/tickets/` (all statuses). Empty lists (`related: []`)
          may be removed or left as-is — the map script handles both.
          See `claude/skills/discuss/list-active.py` for canonical parser.
+- v0021: If `ai-docs/mental-model/overview.md` exists, promote it to the
+         top-level index: `git mv ai-docs/mental-model/overview.md ai-docs/mental-model.md`.
+         Then run `/write-mental-model` to add frontmatter (`domain`, `description`,
+         `sources`, `related`) to all existing domain docs that lack it.
+         Commit all changes with `(mental-model-updated)` in the message body.
 -->
 
-<!-- Template Version: v0020 -->
+<!-- Template Version: v0021 -->
