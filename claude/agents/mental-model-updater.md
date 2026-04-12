@@ -13,7 +13,7 @@ Identify affected domains and apply minimal, accurate updates.
 
 ## Constraints
 
-- Document format, inclusion test, sizing, doctrine: `~/.claude/infra/mental-model-conventions.md`.
+- Apply the inclusion test and document format from `.claude/infra/mental-model-conventions.md` to every edit.
 
 ## Process
 

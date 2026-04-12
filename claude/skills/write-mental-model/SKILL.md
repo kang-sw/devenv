@@ -13,9 +13,10 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Mental-model conventions: `.claude/infra/mental-model-conventions.md` — inclusion test, document format, sizing, doctrine.
+- Apply the inclusion test and document format from `.claude/infra/mental-model-conventions.md` to every document written.
 - No direct source reading — all source exploration is subagent-delegated.
 - Incremental by default — only rebuild affected domains unless full rebuild is requested.
+- Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
 

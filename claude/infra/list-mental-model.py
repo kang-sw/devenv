@@ -132,7 +132,7 @@ def render_domain(domain: str, fm: dict, doc_name: str) -> None:
         print('  related:')
         for rel_domain, note in related.items():
             note_str = (note or '').strip()
-            print(f'    - {rel_domain}: {qs(note_str)}')
+            print(f'    {rel_domain}: {qs(note_str)}')
 
     sources = fm.get('sources')
     if isinstance(sources, list) and sources:
@@ -153,7 +153,7 @@ def main() -> None:
 
     targets = sys.argv[1:]
 
-    print('# Mental-model index and domain docs (paths relative to ai-docs/)')
+    print('# Mental-model docs — paths relative to ai-docs/mental-model/ (overview: ../mental-model.md)')
 
     # mental-model.md — index, always included, no frontmatter
     overview = Path('ai-docs/mental-model.md')
@@ -162,11 +162,9 @@ def main() -> None:
         fm_ov: dict = {}
         if desc:
             fm_ov['description'] = desc
-        render_domain('overview', fm_ov, 'mental-model.md')
+        render_domain('overview', fm_ov, '../mental-model.md')
 
     for doc in sorted(mental_model_dir.glob('*.md')):
-        if doc.name == 'overview.md':
-            continue
         fm = parse_frontmatter(doc)
         domain = (fm.get('domain') or doc.stem).strip()
 
