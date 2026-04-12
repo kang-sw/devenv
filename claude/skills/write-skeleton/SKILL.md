@@ -73,10 +73,11 @@ Present the recommendation with brief rationale. Do not auto-invoke.
 
 ### judge: test-scope
 
-| Scope | When |
-|-------|------|
-| Cross-module integration tests only | Default — skeleton tests verify seams |
-| Include key behavioral tests | When the ticket specifies complex behavioral contracts |
+| Layer | Default | Condition |
+|---|---|---|
+| Structural seam tests | Always | Every cross-module boundary |
+| Behavioral tests | Include when ticket specifies behavior | Any behavior the ticket describes — drop the "complex" qualifier |
+| Error / edge case tests | Opt-in | Only when the ticket explicitly specifies error contracts or edge conditions |
 
 ### judge: stub-granularity
 

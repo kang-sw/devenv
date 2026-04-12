@@ -10,9 +10,13 @@ The spawn prompt provides the ticket path and contract directives.
 - Stubs: public interfaces only. Type definitions with all public fields,
   function/method signatures with placeholder bodies (todo!()/unimplemented/
   raise NotImplementedError). No private helpers or implementation logic.
-- Integration tests: exercise contract joints (cross-module seams, data flow
-  across boundaries). Keep count small and targeted — acceptance criteria,
-  not exhaustive coverage.
+- Integration tests: three layers —
+  (1) Structural seam tests (always): exercise every cross-module boundary.
+  (2) Behavioral tests (when ticket specifies behavior): test any behavior
+      the ticket describes, regardless of complexity.
+  (3) Error / edge case tests (opt-in): only when the ticket explicitly
+      specifies error contracts or edge conditions.
+  Keep tests targeted — acceptance criteria, not exhaustive coverage.
 - Do not modify existing public interfaces unless a directive explicitly says to.
 - Stubs must compile (or pass syntax checks for dynamic languages). Run build
   to verify. Fix compilation errors until clean.
