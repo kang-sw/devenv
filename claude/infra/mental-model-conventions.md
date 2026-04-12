@@ -33,6 +33,7 @@ Every domain file begins with YAML frontmatter:
 ```yaml
 ---
 domain: <name>
+description: "<one-line summary of what this domain covers>"
 sources:
   - <directory-pattern>/
 related:
@@ -41,6 +42,7 @@ related:
 ```
 
 - `domain`: matches the filename stem (e.g., `auth` for `auth.md`).
+- `description`: one-line summary of the domain's scope, for quick orientation.
 - `sources`: directory-level patterns only — no file paths. The updater maintains this field.
 - `related`: optional map of domain name → one-line coupling/contract note. Omit unrelated domains.
 
@@ -54,6 +56,7 @@ the commit message body. This marks the checkpoint for future updater runs.
 ```markdown
 ---
 domain: <name>
+description: "<one-line summary>"
 sources:
   - <directory-pattern>/
 related:

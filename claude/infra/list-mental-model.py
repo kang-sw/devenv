@@ -8,11 +8,10 @@ Usage:
   With args: list docs whose 'sources' frontmatter patterns overlap
              with any of the provided paths (directory-level matching).
 
-Output (stdout): one entry per matched doc —
-  <doc-path>  # domain: <name>[, related: <d1>, <d2>]
-
-overview.md is always included when it exists.
-Docs with no 'sources' frontmatter are omitted from filtered results.
+Output (stdout): YAML map keyed by domain name.
+  All paths are relative to ai-docs/mental-model/.
+  overview is always included when it exists.
+  Docs with no 'sources' frontmatter are omitted from filtered results.
 """
 
 import re
@@ -50,7 +49,6 @@ def parse_frontmatter(path: Path) -> dict:
             continue
 
         if not line[0].isspace():
-            # Top-level key
             m = re.match(r'^([\w][\w-]*):\s*(.*)', line)
             if not m:
                 cur_key = None
@@ -58,18 +56,16 @@ def parse_frontmatter(path: Path) -> dict:
             cur_key = m.group(1)
             rest = m.group(2).rstrip()
             if rest in ('', '[]', '{}', 'null', '~'):
-                result[cur_key] = None  # populated by children
+                result[cur_key] = None
             else:
                 result[cur_key] = rest.strip('"\'')
         elif cur_key is not None:
             if stripped.startswith('- '):
-                # Sequence item
                 val = stripped[2:].strip()
                 if not isinstance(result.get(cur_key), list):
                     result[cur_key] = []
                 result[cur_key].append(val)
             else:
-                # Mapping entry
                 m = re.match(r'^  (.+?):\s*(.*)', line)
                 if m:
                     if not isinstance(result.get(cur_key), dict):
@@ -81,12 +77,30 @@ def parse_frontmatter(path: Path) -> dict:
     return result
 
 
+def extract_first_line(path: Path) -> str:
+    """Return the first non-heading, non-empty content line (for overview.md)."""
+    try:
+        text = path.read_text(encoding='utf-8')
+    except OSError:
+        return ''
+    in_frontmatter = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s == '---':
+            in_frontmatter = not in_frontmatter
+            continue
+        if in_frontmatter:
+            continue
+        if s and not s.startswith('#'):
+            return s[:120]
+    return ''
+
+
 # ---------------------------------------------------------------------------
 # Matching
 # ---------------------------------------------------------------------------
 
 def overlaps(sources: list[str], targets: list[str]) -> bool:
-    """Return True if any target path overlaps with any source pattern."""
     for pat in sources:
         pat_norm = pat.rstrip('/')
         for tgt in targets:
@@ -97,17 +111,39 @@ def overlaps(sources: list[str], targets: list[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Rendering
+# YAML rendering
 # ---------------------------------------------------------------------------
 
-def format_entry(doc: Path, fm: dict) -> str:
-    domain = fm.get('domain') or doc.stem
-    related = fm.get('related')
-    suffix = ''
-    if isinstance(related, dict) and related:
-        suffix = ', related: ' + ', '.join(related.keys())
-    return f'{doc}  # domain: {domain}{suffix}'
+def qs(s: str) -> str:
+    """Double-quoted YAML scalar with minimal escaping."""
+    return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
+
+def render_domain(domain: str, fm: dict, doc_name: str) -> None:
+    print(f'{domain}:')
+    print(f'  path: {qs(doc_name)}')
+
+    desc = (fm.get('description') or '').strip()
+    if desc:
+        print(f'  description: {qs(desc)}')
+
+    related = fm.get('related')
+    if isinstance(related, dict) and related:
+        print('  related:')
+        for rel_domain, note in related.items():
+            note_str = (note or '').strip()
+            print(f'    - {rel_domain}: {qs(note_str)}')
+
+    sources = fm.get('sources')
+    if isinstance(sources, list) and sources:
+        print('  sources:')
+        for src in sources:
+            print(f'    - {qs(src)}')
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     mental_model_dir = Path('ai-docs/mental-model')
@@ -117,27 +153,31 @@ def main() -> None:
 
     targets = sys.argv[1:]
 
-    # overview.md — always included if present
+    print('# Mental-model docs — paths are relative to ai-docs/mental-model/')
+
+    # overview.md — always included, no frontmatter
     overview = mental_model_dir / 'overview.md'
     if overview.exists():
-        print(str(overview))
+        desc = extract_first_line(overview)
+        fm_ov: dict = {}
+        if desc:
+            fm_ov['description'] = desc
+        render_domain('overview', fm_ov, 'overview.md')
 
     for doc in sorted(mental_model_dir.glob('*.md')):
         if doc.name == 'overview.md':
             continue
         fm = parse_frontmatter(doc)
+        domain = (fm.get('domain') or doc.stem).strip()
 
-        if not targets:
-            # No filter: list all
-            print(format_entry(doc, fm))
-            continue
+        if targets:
+            sources = fm.get('sources')
+            if not isinstance(sources, list) or not sources:
+                continue
+            if not overlaps(sources, targets):
+                continue
 
-        sources = fm.get('sources')
-        if not isinstance(sources, list) or not sources:
-            continue  # no sources indexed — skip in filtered mode
-
-        if overlaps(sources, targets):
-            print(format_entry(doc, fm))
+        render_domain(domain, fm, doc.name)
 
 
 if __name__ == '__main__':
