@@ -17,7 +17,7 @@ Identify affected domains and apply minimal, accurate updates.
 
 ## Process
 
-1. **Determine changes**: You receive a summary of what was implemented and optionally a base commit. If no base commit is provided, infer it from `git log --oneline -20`. Run `git diff <base-commit> HEAD --stat` for overview, then full diff for details.
+1. **Determine changes**: Locate the last checkpoint via `git log --grep="mental-model-updated" -1 --format="%H"`. Use that as the base commit. If no stamp is found, use the caller-provided base commit. Run `git diff <base-commit> HEAD --stat` for overview, then full diff for details.
 
 2. **Read all mental-model docs**: Read every file in `ai-docs/mental-model/`
    to understand the full project architecture, contracts, and coupling before
@@ -34,6 +34,7 @@ Identify affected domains and apply minimal, accurate updates.
    - Remove content that is no longer accurate.
    - Remove content that fails the inclusion test (bloat cleanup).
    - Remove sections not in the document format (Overview, Relevant Source Files).
+   - Update frontmatter: `sources` (directory patterns) and `related` (cross-domain coupling notes).
    - Leave unaffected sections alone.
 
 5. **Verify**: Spot-check that file paths, function names, and key claims
@@ -41,6 +42,9 @@ Identify affected domains and apply minimal, accurate updates.
 
 6. **Update overview.md** if cross-domain patterns, the crate graph, or shared
    conventions changed.
+
+7. **Commit**: Commit all updated documents. Include `(mental-model-updated)` in the
+   commit message body to mark the new checkpoint.
 
 ## Output
 

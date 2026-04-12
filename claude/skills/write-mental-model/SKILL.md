@@ -55,6 +55,7 @@ Run subagents in parallel.
 Using subagent analyses, create or update `ai-docs/mental-model/` documents:
 - Follow the document format in `.claude/infra/mental-model-conventions.md`.
 - Apply the inclusion test to every claim before writing it.
+- Maintain frontmatter: set `domain`, update `sources` (directory-level patterns), update `related`.
 - Remove documents for domains that no longer exist.
 - Cross-reference other domain docs when relevant.
 - Tag unimplemented features as **(planned)**.

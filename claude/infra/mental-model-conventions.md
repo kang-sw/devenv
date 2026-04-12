@@ -24,10 +24,42 @@ source-paraphrasing descriptions, information already in `_index.md`.
 - Directory is flat: `ai-docs/mental-model/overview.md` + `<domain>.md` files.
 - Each document covers a cross-cutting concern, not a source module.
 - Target 60–120 lines per domain. Split past 150; merge thin documents that are always read together.
+- `overview.md` has no frontmatter.
+
+## Frontmatter
+
+Every domain file begins with YAML frontmatter:
+
+```yaml
+---
+domain: <name>
+sources:
+  - <directory-pattern>/
+related:
+  <domain-name>: "<one-line coupling or contract description>"
+---
+```
+
+- `domain`: matches the filename stem (e.g., `auth` for `auth.md`).
+- `sources`: directory-level patterns only — no file paths. The updater maintains this field.
+- `related`: optional map of domain name → one-line coupling/contract note. Omit unrelated domains.
+
+## Commit Stamp
+
+Every commit that updates mental-model documents must include `(mental-model-updated)` in
+the commit message body. This marks the checkpoint for future updater runs.
 
 ## Document Format
 
 ```markdown
+---
+domain: <name>
+sources:
+  - <directory-pattern>/
+related:
+  <domain>: "<coupling or contract>"
+---
+
 # [Domain Name]
 
 ## Entry Points
@@ -55,7 +87,7 @@ Focus on mistakes that cause wrong outcomes.
 - [Issue]: current state, impact, possible improvement
 ```
 
-Omit empty sections.
+Omit empty sections. Omit `related` from frontmatter when no cross-domain coupling exists.
 
 ## Doctrine
 
