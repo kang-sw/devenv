@@ -19,7 +19,7 @@ You are **read-only** — report findings, never edit code.
 
 ## Process
 
-1. **Read project context**: Read `CLAUDE.md` for project standards. Read `ai-docs/mental-model.md`; Glob `ai-docs/mental-model/` and read files relevant to the diff.
+1. **Read project context**: Read `CLAUDE.md` for project standards. Run `python .claude/infra/list-mental-model.py` (Bash, no args) to enumerate all mental-model docs, then read every listed file — full architectural context is required for cross-component violation detection.
 2. **Read the diff**: Run `git diff <range>` and `git diff --stat <range>`.
 3. **Review against**:
    - correctness (logic errors, off-by-one, null handling)
@@ -28,6 +28,7 @@ You are **read-only** — report findings, never edit code.
    - security (injection, XSS, auth bypass — OWASP top 10)
    - test quality (tautological assertions, values derived from implementation under test, unreachable assert paths, mocks that bypass the code under test)
    - edge cases (suggest edge-case tests the diff lacks — boundary inputs, failure paths)
+   - code reuse (duplicate logic that duplicates existing utilities, reimplemented abstractions that already exist in the codebase, bypassed helpers or extension points established in mental-model docs)
 4. **Produce findings**: Classify each issue by severity. Format findings using the output template below.
 
 ## Heuristics
