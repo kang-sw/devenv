@@ -1,4 +1,4 @@
-# Thinking Strategy
+# Advanced Thinking Strategy
 
 ## Gate
 
