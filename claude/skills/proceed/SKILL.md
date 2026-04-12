@@ -94,8 +94,10 @@ Invoke each pipeline stage sequentially via the Skill tool, passing the target a
 | Decision | When |
 |----------|------|
 | Skip | Plan already exists for this scope (found in ticket frontmatter or plans directory) |
-| Skip | Scope is small-to-moderate, follows existing patterns, implementation path is obvious |
-| Plan | Cross-module changes in unfamiliar area, non-obvious architectural decisions, or user explicitly mentioned needing research |
+| Skip | Implementation path is derivable from existing code — even if cross-module, the pattern is established or the implementer can orient during brief planning |
+| Plan | Multiple viable architectural approaches with non-obvious trade-offs that must be resolved before coding starts |
+| Plan | Changes requiring coordination across 3+ modules with no existing pattern to follow |
+| Plan | User explicitly requests deep research |
 
 ### judge: needs-skeleton
 

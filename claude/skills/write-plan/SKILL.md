@@ -1,9 +1,10 @@
 ---
 name: write-plan
 description: >
-  Deep codebase research producing an implementation plan. Invoke when
-  the user explicitly requests a plan, or when chained from /proceed
-  before /implement.
+  Codebase research producing implementation guidance. Routes between
+  survey mode (reusable component discovery, sonnet) and deep mode
+  (architectural planning, opus + verification) based on remaining
+  implementation risk after ticket decisions.
 argument-hint: [ticket-path or description]
 ---
 
@@ -13,23 +14,53 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Plan must be self-contained: a fresh executor implements without re-researching.
-- Lead is a lightweight coordinator: identify the ticket, pass directives, review verifier report, finalize.
-- The delegate owns research and drafting: reads the ticket, explores the codebase, writes the plan.
+- Lead is a lightweight coordinator: assess, route to pipeline mode, pass directives, finalize.
+- The delegate owns research and drafting: reads the ticket, explores the codebase, writes the deliverable.
 - Plan directives = lead's judgment on points the delegate cannot derive from ticket + code alone.
-- When plan definitions diverge from ticket sketches, plan takes precedence — note the change and rationale in Context.
+- **Survey mode**: deliverable is a codebase reconnaissance brief — reusable components, patterns, constraints. Additive context for the implementer, not architectural directive.
+- **Deep mode**: deliverable is a self-contained implementation plan — a fresh executor implements without re-researching. When plan definitions diverge from ticket sketches, plan takes precedence — note the change and rationale in Context.
 - One plan per ticket phase; if a phase exceeds ~10 actions, split via `/write-ticket` before continuing.
-- The plan file MUST be committed before finalizing.
+- The deliverable file MUST be committed before finalizing.
 
 ## On: invoke
 
-### 1. Identify plan directives
+### 1. Assess and route
 
 1. Read the ticket. Note ambiguities needing lead judgment — scope boundaries, architectural choices, phase sequencing.
 2. If `/write-skeleton` has been run, collect stub and test file paths — these are locked contracts.
-3. Formulate **plan directives**: 2–5 binding decisions the delegate must follow.
+3. Apply `judge: pipeline-mode` to determine survey vs deep.
+4. **Survey**: formulate **focus areas** — 2–3 codebase regions where reusable components are likely.
+5. **Deep**: formulate **plan directives** — 2–5 binding decisions the delegate must follow.
 
-### 2. Delegate to planner
+### 2. Delegate
+
+#### Survey mode
+
+```
+Agent(
+  name = "surveyor",
+  description = "Codebase survey for implementation",
+  subagent_type = "general-purpose",
+  model = "sonnet",
+  prompt = """
+    Read `${CLAUDE_SKILL_DIR}/survey-writer.md` first.
+
+    Ticket: <ticket-path>
+    Survey path: ai-docs/plans/YYYY-MM/DD-hhmm.<name>.survey.md
+
+    ## Focus areas
+    - <codebase regions where reusable components are likely>
+
+    ## Skeleton contracts (locked)
+    - Stubs: <list of stub file paths, or "none">
+    - Tests: <list of test file paths, or "none">
+  """
+)
+```
+
+After surveyor returns, skip to step 5 (Finalize).
+
+#### Deep mode
 
 ```
 Agent(
@@ -53,7 +84,7 @@ Agent(
 )
 ```
 
-### 3. Verify & revise
+### 3. Verify & revise (deep mode only)
 
 Dispatch a sonnet subagent to verify and fix the plan in-place.
 The lead reads only the verifier's report — not the plan file or source code.
@@ -95,7 +126,7 @@ Agent(
 )
 ```
 
-### 4. Accept / reject
+### 4. Accept / reject (deep mode only)
 
 Read the verifier's report only (not the plan or source code). Accept if
 no unresolved Critical issues remain. Reject and re-delegate if structural
@@ -109,6 +140,15 @@ problems persist.
    the caller can pass it directly to `/implement`.
 
 ## Judgments
+
+### judge: pipeline-mode
+
+| Mode | When |
+|------|------|
+| Survey | Ticket has resolved the architectural approach; remaining risk is the implementer reinventing existing utilities or missing established patterns |
+| Deep | Multiple viable implementation strategies with non-obvious trade-offs, unfamiliar cross-module integration with cascading effects, or ticket explicitly flags unresolved complexity |
+
+Default to survey — deep mode is the exception, reserved for genuine architectural novelty.
 
 ### judge: research-depth
 
@@ -131,10 +171,12 @@ Default to tactical for thorough-level research. Use strategic only when over-sp
 
 ## Doctrine
 
-The plan bridges ticket decisions and executor action with **minimal
-coordinator overhead** — the lead passes only binding decisions the
-delegate cannot derive, the delegate owns research and drafting. The
-plan itself optimizes for executor self-sufficiency after context reset.
+Write-plan bridges ticket decisions and executor action at **the right
+weight** — survey mode optimizes for implementer context efficiency
+(compact reconnaissance that prevents wasted exploratory search), deep
+mode optimizes for executor self-sufficiency after context reset
+(complete architectural guidance). The lead passes only binding decisions
+the delegate cannot derive, the delegate owns research and drafting.
 When a rule is ambiguous, apply whichever interpretation better preserves
-executor self-sufficiency while minimizing what the coordinator must
-serialize.
+the chosen mode's optimization target while minimizing what the
+coordinator must serialize.
