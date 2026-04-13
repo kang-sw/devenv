@@ -184,6 +184,7 @@ def render_tickets(tickets_root: Path) -> None:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding='utf-8')
     ai_docs = Path('ai-docs')
     if not ai_docs.is_dir():
         print('(no ai-docs/ found)', file=sys.stderr)

@@ -146,6 +146,7 @@ def render_domain(domain: str, fm: dict, doc_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding='utf-8')
     mental_model_dir = Path('ai-docs/mental-model')
     if not mental_model_dir.is_dir():
         print('(no ai-docs/mental-model/ found)', file=sys.stderr)
