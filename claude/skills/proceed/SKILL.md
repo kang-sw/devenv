@@ -17,7 +17,7 @@ Target: $ARGUMENTS
 - Every routing decision is announced with rationale before execution begins.
 - Each sub-skill is invoked via the Skill tool with the appropriate arguments.
 - Pipeline order is fixed: skeleton → plan → implement. Skeleton establishes locked contracts that the plan consumes.
-- `/parallel-implement` requires a skeleton — it partitions disjoint scopes defined by skeleton stubs.
+- `/parallel-implement` is never preceded by `/write-plan` — if a plan is needed, execution-mode is locked to single.
 - If the target is too vague to route (no ticket, no actionable description), stop and suggest `/write-ticket` or `/discuss`.
 - Never skip announce — the user must see the pipeline before it runs.
 
@@ -43,16 +43,16 @@ Apply routing judgments in order. Each produces a yes/no that builds the pipelin
 3. **judge: needs-skeleton** — Does this need contract stubs before implementation?
 4. **judge: execution-mode** — Single-scope or parallel?
 
-Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs. Parallel execution requires a skeleton to define disjoint scopes.
+Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs.
 
 | needs-skeleton | needs-plan | execution-mode | Pipeline |
 |----------------|------------|----------------|----------|
 | no | no | single | `/implement` |
+| no | no | parallel | `/parallel-implement` |
 | no | yes | single | `/write-plan` then `/implement` |
 | yes | no | single | `/write-skeleton` then `/implement` |
 | yes | no | parallel | `/write-skeleton` then `/parallel-implement` |
 | yes | yes | single | `/write-skeleton` then `/write-plan` then `/implement` |
-| yes | yes | parallel | `/write-skeleton` then `/write-plan` then `/parallel-implement` |
 
 ### 3. Announce
 
@@ -109,10 +109,12 @@ Invoke each pipeline stage sequentially via the Skill tool, passing the target a
 
 ### judge: execution-mode
 
+If `needs-plan = yes`, execution-mode is locked to single — do not evaluate parallel.
+
 | Decision | When |
 |----------|------|
 | Single (`/implement`) | Default — one cohesive scope |
-| Parallel (`/parallel-implement`) | Skeleton defines 2+ disjoint scopes with no shared files, AND each scope is independently testable |
+| Parallel (`/parallel-implement`) | 2+ scopes with no shared files and no shared interfaces, each independently testable. Structural isolation (separate directory trees) is sufficient signal without a skeleton; file-level isolation within a shared directory requires a skeleton to confirm disjointness mechanically. |
 
 ## Doctrine
 
