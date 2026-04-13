@@ -12,7 +12,7 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Ticket conventions: `.claude/infra/ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
+- Ticket conventions: `~/.claude/infra/ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
 - Never `Read` a ticket file other than the current target — delegate any other ticket inspection to a clerk subagent.
 
 ## On: invoke
@@ -53,7 +53,7 @@ Agent(
 )
 ```
 
-The clerk reads ticket conventions from `ai-docs/ref/ticket-conventions.md` and applies the
+The clerk reads ticket conventions from `~/.claude/infra/ticket-conventions.md` and applies the
 edit. It reports back what changed and flags convention issues. Use for:
 - Status transitions (`git mv` to `wip/`, `done/`)
 - Phase updates from implementation findings
