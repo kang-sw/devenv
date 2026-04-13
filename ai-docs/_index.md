@@ -31,6 +31,7 @@ Team communication rules are injected by the calling skill at spawn time.
 ```
 claude/agents/
   implementer.md          — code implementation from plan or brief
+  parallel-implementer.md — scope-bounded implementer for parallel runs; never commits
   reviewer.md             — code review (read-only, produces findings)
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
