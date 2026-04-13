@@ -3,8 +3,8 @@ title: Implement parallel-implement skill and parallel-implementer agent
 related:
 plans:
 skeletons:
-started:
-completed:
+started: 2026-04-13
+completed: 2026-04-13
 ---
 
 # Implement parallel-implement skill and parallel-implementer agent
