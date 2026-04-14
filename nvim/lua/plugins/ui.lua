@@ -84,7 +84,12 @@ return {
 
           for _, cap in ipairs(captures) do
             local n = cap.capture
-            if n == "punctuation.delimiter" or n == "punctuation.bracket" or n == "conceal" or n == "markup.link.url" then
+            if
+              n == "punctuation.delimiter"
+              or n == "punctuation.bracket"
+              or n == "conceal"
+              or n == "markup.link.url"
+            then
               skip = true
             end
             -- Track the most specific (longest) markup.* capture.
@@ -223,10 +228,37 @@ return {
             local margin = 4
             if total > text_w - margin and content_sum > 0 then
               local available = text_w - (n + 1) - margin
-              local min_col_w = 2 * padding + 1
+              local min_col_w = math.max(2 * padding + 1, 14)
               if available >= min_col_w * n then
-                for _, col in ipairs(cols) do
-                  col.width = math.max(min_col_w, math.floor(col.width * available / content_sum))
+                -- Iterative allocation: pin columns below min_col_w first, then
+                -- distribute the remaining budget proportionally among the rest.
+                -- Plain math.max overflows available when narrow columns are bumped up.
+                local col_widths = {}
+                for i, col in ipairs(cols) do col_widths[i] = col.width end
+                local assigned = {}
+                local rem_avail = available
+                local rem_csum = content_sum
+                local done = false
+                while not done do
+                  done = true
+                  for i, col in ipairs(cols) do
+                    if not assigned[i] then
+                      local prop = rem_csum > 0
+                        and math.floor(col_widths[i] * rem_avail / rem_csum)
+                        or min_col_w
+                      if prop < min_col_w then
+                        assigned[i] = min_col_w
+                        rem_avail = rem_avail - min_col_w
+                        rem_csum = rem_csum - col_widths[i]
+                        done = false
+                      end
+                    end
+                  end
+                end
+                for i, col in ipairs(cols) do
+                  col.width = assigned[i] or (rem_csum > 0
+                    and math.floor(col_widths[i] * rem_avail / rem_csum)
+                    or min_col_w)
                 end
                 self._multiline = true
                 self._text_w = text_w
