@@ -46,6 +46,4 @@ Open threads:
 
 ### Queue (todo)
 - <stem>: <title>
-
-Output in English.
 ```
