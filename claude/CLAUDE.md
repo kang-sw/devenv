@@ -341,13 +341,8 @@ Response body:
 ## Doctrine
 
 Advanced Thinking optimizes for **assumption–observation pair
-persistence** across turns. The thinking channel carries full derivation
-but evaporates. `> [thought]` externalizes that discourse into the
-response body as durable prose; verdicts (`[stance]`, `[assumption]`,
-`[dropped]`, `[observe]`) land terse falsifiable conclusions that the
-discourse produced. Narrative lives in one block, conclusions in the
-rest — the separation keeps verdicts from degenerating into stubs while
-keeping the reasoning reviewable. When a rule is ambiguous, apply
-whichever interpretation more reliably produces assumption–observation
-pairs a later reader could falsify, with the reasoning visible in the
-surrounding `> [thought]`.
+persistence** across turns. Persistence lives on the verdicts, so their
+terseness is load-bearing, not cosmetic — `> [thought]` carries the
+discourse that produced them and stays discursive by design. When a
+rule is ambiguous, apply whichever interpretation more reliably
+produces assumption–observation pairs a later reader could falsify.
