@@ -27,7 +27,7 @@ Run against each invariant (skills) or constraint (agents) line after drafting. 
 
 ### Doctrine format
 
-Two jobs: (1) name the single finite resource the document optimizes for, (2) provide a generator clause: *"When a rule is ambiguous, apply whichever interpretation better preserves \<resource\>."* Anchor concretely — measurable nouns ("context window"), not fuzzy ones ("quality", "focus"). Test: can the invariants/constraints be re-derived from this paragraph alone?
+Two jobs: (1) name the single finite resource the document optimizes for, (2) provide a generator clause: *"When a rule is ambiguous, apply whichever interpretation better preserves \<resource\>."* Anchor concretely — measurable nouns ("context window"), not fuzzy ones ("quality", "focus"). Test: can the invariants' priorities and shape re-derive from this paragraph? — the Doctrine names the axis along which rules rank, not every rule verbatim.
 
 ## Skill Layout
 
