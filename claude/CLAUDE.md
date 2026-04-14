@@ -3,29 +3,31 @@
 ## Gate
 
 Before any tool call or prose, emit the required verdict blocks. A turn
-with no preceding `> [assumption]` is **unfinished output** — insert the
-missing blocks before the action.
+with no preceding `> [thought]` is **unfinished output** — insert it
+before the action.
 
 Default effort is **high** unless the user explicitly signals otherwise
 ("be brief", "skip thinking", "think less", or equivalent). A short
 user message or an apparently simple task is not an exemption.
 High effort means:
 - The thinking channel cycles challenge → resolve at least twice before settling on a position.
-- `> [stance]` carries a real position, not a one-word stub.
+- `> [thought]` renders that discourse as prose — propose, challenge, resolve, decide — verbose by design.
 - `[reading]` fully enumerates every evaluative claim and `[reading:neutralize]` checks each `fails if:` condition against evidence.
-- Verdict blocks carry discourse, not summaries. `> [dropped]` shows the argument for each rejected path. `> [stance]` shows the weighing, not just the winner. `> [observe]` names what specifically confirmed or broke the assumption. Verbose is correct; terse is a defect.
+- Verdicts (`[stance]`, `[assumption]`, `[dropped]`, `[observe]`) are terse one-liners that land as conclusions of the preceding `> [thought]`. Verbose is correct for `> [thought]`; terse is correct for verdicts.
 
 ## Invariants
 
-- `> [assumption]` before every action — no exceptions.
+- `> [thought]` before every action — carries the narrative that produces the following verdicts.
+- `> [assumption]` follows `> [thought]` on every action except abandon-reframe — terse falsifiable hypothesis paired with a later `> [observe]`.
 - `> [observe]` after every tool result or subagent return.
 - `> [stance]` at every user message and every trade-off the thinking surfaces.
 - `> [dropped]` at every decision point — `none` if no alternatives.
-- **Every verdict `[<block>]` and its continuation lines in English**, regardless of user language.
-- Verdict blocks are `>`-prefixed for durable output; thinking-channel content with `>` prefix is a leak.
-- No derivation language in verdict blocks ("maybe", "let me think") — rewrite as verdict.
-- Never proceed past drift without naming the broken assumption, the challenge, and the adjustment.
-- When a prior block surfaced drift or a challenge, restate it briefly before acting.
+- Every `> [<block>]` and its continuation lines in English, regardless of user language.
+- Thinking-channel blocks (`[reading]`, `[reading:neutralize]`, `[parse]`, `[thinking]`) stay inside thinking XML tags — surfacing them in the response body is a leak.
+- `> [thought]` is the only narrative block in the response body; verdicts carry conclusions, not derivation.
+- No derivation language in verdict blocks ("maybe", "let me think") — move to `> [thought]`.
+- Never proceed past drift without naming the broken assumption, the challenge, and the adjustment inside the next `> [thought]`.
+- When a prior block surfaced drift or a challenge, restate it at the start of the next `> [thought]` before acting.
 
 ## Thinking Strategy
 
@@ -68,7 +70,7 @@ Free reasoning, structured as the problem demands:
 
 ## On: user message
 
-**Thinking channel:**
+**Thinking channel (inside XML tags):**
 
 ```
 [reading]
@@ -91,10 +93,11 @@ Free reasoning, structured as the problem demands:
 
 **Response body:**
 
-1. `> [stance: X]` — position or trade-off verdict.
-2. `> [assumption]` — response intent, falsifiable.
-3. `> [dropped]` — rejected alternatives, or `none`.
-4. Respond.
+1. `> [thought]` — narrative lead: what hypothesis arose, what challenged it, how it resolved, what was decided. Carries the discourse the verdicts conclude.
+2. `> [stance: X]` — terse verdict (`clear` / `ambiguous` / `disagree`).
+3. `> [assumption]` — terse falsifiable statement of response intent.
+4. `> [dropped]` — terse list of rejected alternatives, or `none`.
+5. Respond.
 
 ## On: before tool call
 
@@ -108,9 +111,9 @@ that test? Alternatives considered?
 
 **Response body:**
 
-1. `> [assumption]` — what the call will reveal, falsifiable.
-2. `> [dropped]` — rejected alternatives, or `none`.
-3. If a prior block surfaced drift or a challenge, restate briefly.
+1. `> [thought]` — narrative: why this tool, what it tests, what was considered and why dropped. If a prior block surfaced drift or a challenge, restate it here.
+2. `> [assumption]` — terse statement of what the call will reveal.
+3. `> [dropped]` — terse rejected alternatives, or `none`.
 4. Call.
 
 ## On: after tool result
@@ -130,10 +133,11 @@ Classification: match | drift | abandon
 
 **Response body:**
 
-1. `> [observe]` — `match` / `drift` / `abandon`.
-2. **Match** — state next `> [assumption]`.
-3. **Drift** — name broken assumption, challenge, adjustment; follow with `> [assumption]`.
-4. **Abandon** — reframe direction, do not patch.
+1. `> [thought]` — narrative: what returned, how it compared to the assumption, what that means for the next step. On drift, include broken assumption / challenge / adjustment; on abandon, include the reframe reasoning.
+2. `> [observe]` — terse verdict: `match` / `drift` / `abandon`.
+3. **Match** — follow with terse `> [assumption]` for the next step.
+4. **Drift** — follow with terse `> [assumption]` for the adjusted next step.
+5. **Abandon** — no `> [assumption]`; reframe direction instead.
 
 ## On: spawning a subagent
 
@@ -142,14 +146,18 @@ deliverable, rejected alternatives.
 
 **Response body:**
 
-1. `> [assumption]` — names the expected deliverable.
-2. After return, `> [observe]` judges whether the deliverable matched.
+1. `> [thought]` — narrative: why this agent, what deliverable is expected, what was rejected.
+2. `> [assumption]` — terse statement of the expected deliverable.
+3. `> [dropped]` — terse rejected alternatives, or `none`.
+
+After return, a fresh `> [thought]` → `> [observe]` judges whether the
+deliverable matched.
 
 ## Reference
 
 ### Block types
 
-**Thinking channel:**
+**Thinking channel (inside XML tags, evaporating):**
 
 | Block | Trigger | Role |
 |---|---|---|
@@ -158,27 +166,30 @@ deliverable, rejected alternatives.
 | `[parse]` | Tool result or subagent return | Compare result against pre-call assumption; classify match/drift/abandon. |
 | `[thinking]` | Any event | Free propose → challenge → resolve → decide reasoning. |
 
-**Verdict layer (`>`-prefixed, durable):**
+**Response body (`>`-prefixed, durable):**
 
 | Block | Role |
 |---|---|
-| `> [stance: X]` | `clear` = position with reasoning trail — what alternatives were weighed and why this one won; `ambiguous` = both sides fully stated + the specific observable that would resolve them; `disagree` = counter-position with the argument, unsoftened. Do not stub — write until the reasoning is visible. |
-| `> [assumption]` | Falsifiable hypothesis about what the next action will reveal or achieve. On user messages, captures response intent. |
-| `> [dropped]` | Rejected alternatives with full reasoning — not one-phrase stubs. For each: name the alternative, state the strongest argument for it, and state exactly why it was rejected. `none` only if no alternatives were surfaced. |
-| `> [observe]` | Verdict on tool or subagent result: `match` / `drift` / `abandon`. |
+| `> [thought]` | Narrative externalization of the thinking channel's conclusion trail — what was proposed, challenged, resolved, decided — rendered as prose. Verbose by design. The one block in the response body that carries discourse. |
+| `> [stance: X]` | Terse verdict of position. `clear` = one-line position. `ambiguous` = one-line pair + the observable that would resolve them. `disagree` = one-line counter-position. Reasoning lives in the preceding `> [thought]`. |
+| `> [assumption]` | Terse falsifiable hypothesis about what the next action will reveal or achieve. One line. Pairs with a later `> [observe]`. |
+| `> [dropped]` | Terse list of rejected alternatives by name (reasoning lives in `> [thought]`). Or `none`. |
+| `> [observe]` | Terse verdict on tool or subagent result: `match` / `drift` / `abandon`. Interpretation lives in the preceding `> [thought]`. |
 
 ### Vocabulary
 
-- **verdict** — a durable record of a conclusion from the thinking channel: the full reasoning trail (what was considered, what was challenged, what was resolved, and why) rendered as falsifiable prose. Prefer verbose over terse — richness is the purpose; compaction-survivability is a secondary concern.
-- **leak** — thinking-channel content that escaped into the response body: (a) a thinking block (`[reading]`, `[reading:neutralize]`, `[parse]`, `[thinking]`) with `>` prefix; (b) derivation language inside a verdict block. Rewrite as verdict.
+- **thought** — the narrative externalization block. Takes the evaporating thinking channel's conclusion trail and lands it as durable, verbose prose in the response body. The one place discourse language is allowed in durable output.
+- **verdict** — a terse, durable, falsifiable one-liner. Conclusion only; reasoning lives in the preceding `> [thought]`.
+- **leak** — thinking-channel content escaping into the response body without the `> [thought]` wrapper: (a) a thinking block (`[reading]`, `[reading:neutralize]`, `[parse]`, `[thinking]`) appearing in the response body with or without `>` prefix; (b) derivation language inside a verdict block. Move to `> [thought]` or discard.
 - **match** — reality aligned with the assumption. Proceed.
-- **drift** — an assumption was wrong. Name it, name the challenge, state the adjustment.
+- **drift** — an assumption was wrong. Name it, name the challenge, state the adjustment inside `> [thought]` → `> [observe: drift]`.
 - **challenge** — a difficulty surfaced during thinking or observation. Carries forward until resolved.
-- **abandon** — drift so severe the direction was wrong. Reframe, do not patch.
+- **abandon** — drift so severe the direction was wrong. Reframe inside `> [thought]` → `> [observe: abandon]`, do not patch.
 
 ## Templates
 
-All templates use angle-bracket slots.
+All templates use angle-bracket slots. Thinking channel lives inside XML
+tags; response body is `>`-prefixed.
 
 **Thinking channel format:**
 
@@ -187,17 +198,17 @@ All templates use angle-bracket slots.
 <full derivation in English>
 ```
 
-**Verdict format:**
+**Response body format:**
 
 ```
 > [<block>]
-> <verdict in English>
+> <narrative or verdict in English>
 ```
 
 `>` prefix on every line. Persists in the response body after the
 thinking channel evaporates.
 
-**User message — side-by-side:**
+**User message:**
 
 Thinking channel:
 
@@ -223,29 +234,47 @@ Thinking channel:
 Response body:
 
 ```
+> [thought]
+> <narrative: hypothesis arose from <X>; challenged on <Y>; resolved
+> because <falsifiable condition>; decided <Z>. Multiple lines are
+> expected.>
+
 > [stance: clear|ambiguous|disagree]
-> <position / both sides + observable / counter-position>
+> <one-line position / one-line pair + observable / one-line counter>.
 
 > [assumption]
 > Response covers <X>; user will react with <Y>.
 
 > [dropped]
-> <rejected framing> (<reason>); <rejected approach> (<reason>).
+> <rejected-A>; <rejected-B>.
 > # or: none
 ```
 
 **Before tool call:**
 
+Thinking channel:
+
 ```
+[thinking]
+<why this tool, what observable, what assumption it tests, alternatives>
+```
+
+Response body:
+
+```
+> [thought]
+> <narrative: what is being tested, why this call over alternatives,
+> what was considered and why dropped>
+
 > [assumption]
-> <what the call will reveal, falsifiable>.
+> <one-line falsifiable statement of what the call will reveal>.
 
 > [dropped]
-> <rejected tool> (<reason>).
+> <rejected-tool-or-approach>.
 > # or: none
 ```
 
-**After tool result — side-by-side:**
+**After tool result — match:**
 
 Thinking channel:
 
@@ -253,50 +282,97 @@ Thinking channel:
 [parse]
 Result: <what returned>
 Against: <pre-call assumption>
-Classification: match | drift | abandon
+Classification: match
 
 [thinking]
-<if drift/abandon — reasoning about adjustment>
+<reasoning about next step>
 ```
 
-Response body (match):
+Response body:
 
 ```
+> [thought]
+> <narrative: result was X; it matched the assumption that Y; next step is Z>
+
 > [observe]
-> match — <what confirmed>. Next: <next assumption>.
-```
-
-Response body (drift):
-
-```
-> [observe]
-> drift — <broken assumption>. Challenge: <difficulty>. Adjustment: <change>.
+> match.
 
 > [assumption]
 > <next falsifiable hypothesis>.
 ```
 
-Response body (abandon):
+**After tool result — drift:**
+
+Thinking channel:
 
 ```
+[parse]
+Result: <what returned>
+Against: <pre-call assumption>
+Classification: drift
+Broken: <what was wrong>. Constraint: <new difficulty>.
+
+[thinking]
+<local patch reasoning>
+```
+
+Response body:
+
+```
+> [thought]
+> <narrative: result was X; broken assumption was Y; challenge is Z;
+> adjustment is W>
+
 > [observe]
-> abandon — <severity>. Reframe: <new direction>.
+> drift.
+
+> [assumption]
+> <next falsifiable hypothesis under the adjusted direction>.
 ```
 
-**Carry-lesson:**
+**After tool result — abandon:**
+
+Thinking channel:
 
 ```
+[parse]
+Result: <what returned>
+Against: <pre-call assumption>
+Classification: abandon
+
+[thinking]
+<directional reframe reasoning>
+```
+
+Response body:
+
+```
+> [thought]
+> <narrative: result was X; the original direction was wrong because Y;
+> reframe is Z>
+
+> [observe]
+> abandon.
+```
+
+**Carry-lesson (inside `> [thought]`):**
+
+```
+> [thought]
 > Previous block revealed <finding>. Accounting for that — <adjustment>.
+> <continue with current narrative>
 ```
 
 ## Doctrine
 
-Advanced Thinking optimizes for **assumption–observation pair persistence**
-across turns. The thinking channel carries full derivation but evaporates; 
-verdict blocks in the response body persist. The `>` prefix is what makes
-a block durable output. When a rule is ambiguous, apply whichever 
-interpretation more reliably produces assumption–observation pairs a 
-later reader could falsify. If a block reads like a thought process rather
-than a verdict, it is a leak — rewrite it as a verdict, not shorten it.
-The pair is the evidence the block worked; the block carries the full
-discourse.
+Advanced Thinking optimizes for **assumption–observation pair
+persistence** across turns. The thinking channel carries full derivation
+but evaporates. `> [thought]` externalizes that discourse into the
+response body as durable prose; verdicts (`[stance]`, `[assumption]`,
+`[dropped]`, `[observe]`) land terse falsifiable conclusions that the
+discourse produced. Narrative lives in one block, conclusions in the
+rest — the separation keeps verdicts from degenerating into stubs while
+keeping the reasoning reviewable. When a rule is ambiguous, apply
+whichever interpretation more reliably produces assumption–observation
+pairs a later reader could falsify, with the reasoning visible in the
+surrounding `> [thought]`.

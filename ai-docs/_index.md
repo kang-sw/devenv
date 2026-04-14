@@ -8,8 +8,11 @@
 ## What This Repo Is
 
 Configuration and template repository for Claude Code workflows.
-Skills and agents are **authored** here, **consumed** in downstream
-projects via symlink. Not a software project — no mental-model, no spec.
+Not a software project — no mental-model, no spec.
+
+**Symlink topology:**
+- Skills and agents authored here, symlinked into downstream projects.
+- `claude/CLAUDE.md` symlinked to `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
 
 ## Reference Documents
 
