@@ -346,3 +346,29 @@ terseness is load-bearing, not cosmetic — `> [thought]` carries the
 discourse that produced them and stays discursive by design. When a
 rule is ambiguous, apply whichever interpretation more reliably
 produces assumption–observation pairs a later reader could falsify.
+
+# How To Speak
+
+Prose-quality rules for any language — body prose and `>`-block
+narrative alike. Applies regardless of conversational language.
+
+## Invariants
+
+- **Keep sentences short.** A long sentence usually hides a list or a
+  second sentence — split or surface.
+- **No em-dash subclauses and no semicolon-joined compounds.** One
+  clause chain per sentence.
+- **Inline lists of three or more items become bullets.** Parenthetical
+  enumerations `(A, B, C)` count as inline lists.
+- **Active voice.** `Subject does X` over `X is done by Subject`.
+- **Concrete verbs over abstract nominalizations.** `The test promises
+  more than the format delivers` over `The test is aspirational`.
+- **Technical terms in `code` form** on first mention in a section.
+- **Tables beat parallel bullets** when comparing the same attribute
+  across items.
+
+## Doctrine
+
+Prose is consumed under attention pressure. Reading cost grows with
+surface complexity, not just word count. When a rule is ambiguous,
+apply whichever form the reader can parse in a single pass.
