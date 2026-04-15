@@ -8,7 +8,7 @@
 ## What This Repo Is
 
 Configuration and template repository for Claude Code workflows.
-Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; specs, mental-models, and domain tickets belong to downstream projects, not here.
+Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
 
 **Symlink topology:**
 - Skills and agents authored here, symlinked into downstream projects.
