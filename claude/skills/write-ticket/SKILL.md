@@ -24,6 +24,7 @@ Target: $ARGUMENTS
    c. Write the ticket using the **frontmatter template** and a clear problem/goal statement.
    d. If category is `epic`: body defines scope and decomposition (not implementation spec); list child ticket stems; completion means child work is done.
    e. If multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
+   f. After drafting, verify scope — see `judge: ticket-scope`.
 3. **Edit** (existing ticket):
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
@@ -40,6 +41,10 @@ Target: $ARGUMENTS
 ### judge: initial-status
 
 Place in `idea/` when the topic is exploratory or underspecified; place in `todo/` when the scope and goal are actionable. When uncertain, prefer `idea/` — promotion is cheap.
+
+### judge: ticket-scope
+
+Over ~200 lines is a soft signal; over 300 lines, act. First, prune plan-level detail (file paths, function signatures, integration specifics) — that belongs in a plan document. If still large, the scope is too wide: introduce an epic and split into child tickets, each covering one independently reviewable unit of work.
 
 ### judge: phase-need
 
