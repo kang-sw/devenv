@@ -52,15 +52,17 @@ Load `/team-lead` if not already loaded.
 3. Assert disjoint: verify that no file appears in two scope sets. If any overlap is found, stop — do not proceed until scopes are corrected.
 4. If scope boundaries are ambiguous at any point during inference, stop and ask the user before proceeding. Bias toward escalation — it is never correct to guess scope boundaries.
 5. Derive a `<slug>` from the ticket or brief (lowercase, hyphenated, e.g. `parallel-impl-auth`).
-6. Create the team:
+6. Record current branch as `<original-branch>`. Create `parallel-impl/<slug>` branch.
+7. Create the team:
    ```
    TeamCreate(team_name = "parallel-impl-<slug>", description = "<brief scope description>")
    ```
-7. Create task list. All tasks are mandatory — do not skip or reorder:
+8. Create task list. All tasks are mandatory — do not skip or reorder:
    ```
    [ ] All N implementer+reviewer pairs — wait for all N clean reports
    [ ] Lead collects + commits per scope in partition order
    [ ] Report to user — wait for approval
+   [ ] Merge to original branch
    [ ] Doc pipeline
    [ ] Cleanup
    ```
@@ -160,11 +162,19 @@ Wait for user approval before proceeding. If the user requests tweaks:
 4. Re-run collect+commit for affected scope(s) only (new commit per CLAUDE.md rules).
 5. Re-report. Loop until user approves.
 
-### 6. Doc pipeline
+### 6. Merge
 
-Dispatch **mental-model-updater** with the full commit range covering all scope commits. Wait for completion before proceeding — the cleanup step must not begin until the doc state is final.
+1. Run `~/.claude/infra/merge-branch.sh <original-branch> parallel-impl-<slug> "<commit-message>"`.
+   The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
+   Compose the commit message per CLAUDE.md commit rules summarizing all scopes.
 
-### 7. Cleanup
+### 7. Doc pipeline
+
+1. Dispatch **mental-model-updater** with the full commit range covering all scope commits. Wait for completion before proceeding.
+2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
+3. If ticket-driven, update ticket status.
+
+### 8. Cleanup
 
 Send shutdown requests to all teammates (implementers and reviewers). Wait for shutdown approval from each. Call `TeamDelete` only if this invocation of `/parallel-implement` created the team.
 
