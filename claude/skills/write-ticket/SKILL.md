@@ -13,7 +13,7 @@ Target: $ARGUMENTS
 ## Invariants
 
 - Ticket conventions: `~/.claude/infra/ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
-- Never `Read` a ticket file other than the current target — delegate any other ticket inspection to a clerk subagent.
+- Never `Read` a ticket file other than the current target — delegate any other ticket inspection to an Explore subagent.
 
 ## On: invoke
 
@@ -34,33 +34,6 @@ Target: $ARGUMENTS
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
 6. **Spec check** — if any phase adds or changes user-visible behavior, prompt: "Did this phase introduce or modify public-facing behavior? If yes, invoke `/write-spec` to update the relevant spec."
-
-## On: delegate
-
-When ticket edits should not consume the lead's context (e.g., mid-implementation
-updates, routine status moves), spawn a clerk subagent instead of editing directly.
-
-```
-Agent(
-  name = "clerk",
-  description = "Update ticket per directive",
-  subagent_type = "clerk",
-  model = "sonnet",
-  prompt = """
-    Lead name: <lead-name>
-    Ticket: <ticket-path>
-    Directive: <what to change — be specific>
-  """
-)
-```
-
-The clerk reads ticket conventions from `~/.claude/infra/ticket-conventions.md` and applies the
-edit. It reports back what changed and flags convention issues. Use for:
-- Status transitions (`git mv` to `wip/`, `done/`)
-- Phase updates from implementation findings
-- New ticket creation from a delegated context
-- Frontmatter updates (`started:`, `completed:`, `plans:`, `skeletons:`)
-- Read-only inspection of other tickets (stem resolution, parent epic scope, dedup, prior-decision survey) — ask clerk for a focused summary, not full bodies.
 
 ## Judgments
 
