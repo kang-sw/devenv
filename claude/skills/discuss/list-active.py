@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Project map — pre-injected context for the /discuss skill.
 
-Outputs two sections:
-  1. ai-docs/ directory tree  (excluding tickets/)
-  2. tickets: grouped by status (wip → todo → idea → done → dropped),
+Outputs three sections:
+  1. ai-docs/ directory tree  (excluding tickets/ and spec/)
+  2. spec: hierarchy with frontmatter stats (features, 🚧 count, ticket refs)
+  3. tickets: grouped by status (wip → todo → idea → done → dropped),
      with frontmatter details for parent / related lookups.
 """
 
@@ -71,6 +72,14 @@ def parse_frontmatter(path: Path) -> dict:
             else:
                 result[cur_key] = _strip_inline_comment(rest)
         elif cur_key is not None:
+            # List item (any indentation: "  - value", "    - value", etc.)
+            m_list = re.match(r'^\s+- (.*)', line)
+            if m_list:
+                item = m_list.group(1).strip()
+                if not isinstance(result.get(cur_key), list):
+                    result[cur_key] = []
+                result[cur_key].append(item)
+                continue
             # One-level indented map entry
             m = re.match(r'^  (.+?):\s*(.*)', line)
             if m:
@@ -88,6 +97,7 @@ def parse_frontmatter(path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 STATUS_ORDER = ['wip', 'todo', 'idea']
+TICKET_REF_RE = re.compile(r'\[(\d{6}-[\w-]+/p\d+)\]')
 
 
 def find_ticket(stem: str, tickets_root: Path) -> Path | None:
@@ -137,7 +147,7 @@ def render_ai_docs(ai_docs: Path) -> None:
     except PermissionError:
         return
     for entry in entries:
-        if entry.name == 'tickets':
+        if entry.name in ('tickets', 'spec'):
             continue
         if entry.is_dir():
             print(f'  {entry.name}/')
@@ -145,6 +155,54 @@ def render_ai_docs(ai_docs: Path) -> None:
                 print(line)
         else:
             print(f'  {entry.name}')
+
+
+def spec_stats(fm: dict) -> tuple[int, int, list[str]]:
+    """Return (total_features, wip_count, ticket_refs) from spec frontmatter."""
+    features = fm.get('features', [])
+    if not isinstance(features, list):
+        return 0, 0, []
+    total = len(features)
+    wip = 0
+    refs: list[str] = []
+    for item in features:
+        if item.startswith('🚧'):
+            wip += 1
+            refs.extend(TICKET_REF_RE.findall(item))
+    return total, wip, refs
+
+
+def _render_spec_dir(dir_path: Path, indent: int) -> None:
+    """Recursively render a spec directory with frontmatter stats."""
+    prefix = '  ' * indent
+    try:
+        entries = sorted(dir_path.iterdir(), key=lambda p: (p.is_file(), p.name))
+    except PermissionError:
+        return
+    for entry in entries:
+        if entry.is_dir():
+            print(f'{prefix}{entry.name}/')
+            _render_spec_dir(entry, indent + 1)
+        elif entry.suffix == '.md':
+            fm = parse_frontmatter(entry)
+            title = fm.get('title') or fm.get('summary') or ''
+            total, wip, refs = spec_stats(fm)
+            stats_parts: list[str] = []
+            if total > 0:
+                stats_parts.append(f'{total}f')
+            if wip > 0:
+                wip_str = f'🚧 {wip}'
+                if refs:
+                    wip_str += f' → {", ".join(refs)}'
+                stats_parts.append(wip_str)
+            title_part = f'  — {title}' if title else ''
+            stats_part = f'  [{", ".join(stats_parts)}]' if stats_parts else ''
+            print(f'{prefix}{entry.name}{title_part}{stats_part}')
+
+
+def render_specs(spec_root: Path) -> None:
+    print('spec:')
+    _render_spec_dir(spec_root, indent=1)
 
 
 def render_tickets(tickets_root: Path) -> None:
@@ -192,6 +250,11 @@ def main() -> None:
 
     render_ai_docs(ai_docs)
     print()
+
+    spec_root = ai_docs / 'spec'
+    if spec_root.is_dir():
+        render_specs(spec_root)
+        print()
 
     tickets_root = ai_docs / 'tickets'
     if tickets_root.is_dir():

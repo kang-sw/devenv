@@ -106,6 +106,7 @@ ai-docs/
   _index.local.md    — local memory (free-form, .gitignored)
   mental-model.md    — overview file for overall mental model documents.
   mental-model/      — project map: contracts, coupling, architectural narrative
+  spec/              — external-perspective specs (area/ directories for multi-section areas)
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
   tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
@@ -215,6 +216,10 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          Then run `/write-mental-model` to add frontmatter (`domain`, `description`,
          `sources`, `related`) to all existing domain docs that lack it.
          Commit all changes with `(mental-model-updated)` in the message body.
+- v0022: If spec documents exist in a flat layout under `ai-docs/spec/`, reorganize
+         areas with multiple sub-docs into directories: `ai-docs/spec/<area>/index.md`
+         plus child files. Run `/write-spec` to rebuild the `features:` frontmatter
+         via `build-index.py` for all spec files after reorganization.
 -->
 
-<!-- Template Version: v0021 -->
+<!-- Template Version: v0022 -->

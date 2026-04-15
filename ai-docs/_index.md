@@ -8,7 +8,7 @@
 ## What This Repo Is
 
 Configuration and template repository for Claude Code workflows.
-Not a software project — no mental-model, no spec.
+Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; specs, mental-models, and domain tickets belong to downstream projects, not here.
 
 **Symlink topology:**
 - Skills and agents authored here, symlinked into downstream projects.
@@ -39,6 +39,7 @@ claude/agents/
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
+  spec-updater.md         — strip completed 🚧 markers; flag spec/implementation drift
 ```
 
 ## Infra Layout
@@ -59,6 +60,7 @@ claude/skills/
   enter-session/     — session bootstrap; clerk-forked context synthesis + workflow map injection
   discuss/           — explore approach/direction, capture as tickets
   write-ticket/      — create/edit tickets in ai-docs/tickets/
+  write-spec/        — create/update external-perspective spec docs in ai-docs/spec/
   write-skeleton/    — public interface stubs + integration tests
   write-plan/        — deep codebase research → implementation plan
   implement/         — delegation: implementer + reviewer cycle

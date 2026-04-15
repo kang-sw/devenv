@@ -20,6 +20,7 @@ Topic: $ARGUMENTS
 - No source edits. Only documentation writes, only in the capture step.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Completed phases are immutable.
 - Read mental-model docs on-demand as topics emerge.
+- Read spec docs in `ai-docs/spec/` on-demand as topics emerge — the Project Map above lists available specs.
 - Dispatch Explore agents for implementation details beyond mental-model docs — never read source directly.
 - When docs are stale or insufficient, say so and suggest `/write-mental-model` — do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
@@ -35,7 +36,7 @@ Topic: $ARGUMENTS
 ## On: discussion loop
 
 1. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-2. Read mental-model docs as conversation touches relevant domains; dispatch Explore agents for deeper detail.
+2. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
 3. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 4. Continue until the user signals done.
 

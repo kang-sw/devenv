@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Build the frontmatter feature index from spec document headings.
+
+Usage: python build-index.py <spec-file.md> [<spec-file2.md> ...]
+
+Parses ## and deeper headings from the markdown body, builds an indented
+feature tree, and writes it into the YAML frontmatter `features:` field.
+The `#` heading is treated as the document title and excluded.
+"""
+
+import re
+import sys
+from pathlib import Path
+
+HEADING_RE = re.compile(r"^(#{2,6})\s+(.*)")
+FRONTMATTER_DELIM = "---"
+
+
+def parse_frontmatter_and_body(text: str) -> tuple[str, str]:
+    """Split text into (frontmatter, body). Returns ('', text) if no frontmatter."""
+    if not text.startswith(FRONTMATTER_DELIM):
+        return "", text
+    end = text.index(FRONTMATTER_DELIM, len(FRONTMATTER_DELIM))
+    fm = text[len(FRONTMATTER_DELIM) : end].strip()
+    body = text[end + len(FRONTMATTER_DELIM) :]
+    return fm, body
+
+
+def extract_features(body: str) -> list[tuple[int, str]]:
+    """Extract (depth, title) pairs from headings. ## = depth 0."""
+    features = []
+    for line in body.splitlines():
+        m = HEADING_RE.match(line)
+        if m:
+            depth = len(m.group(1)) - 2  # ## = 0, ### = 1, ...
+            title = m.group(2).strip()
+            features.append((depth, title))
+    return features
+
+
+def build_tree_text(features: list[tuple[int, str]]) -> str:
+    """Build indented list string from (depth, title) pairs."""
+    lines = []
+    for depth, title in features:
+        indent = "  " * depth
+        lines.append(f"{indent}- {title}")
+    return "\n".join(lines)
+
+
+def update_frontmatter(fm: str, features_text: str) -> str:
+    """Replace or insert the features: field in frontmatter."""
+    lines = fm.splitlines() if fm else []
+    new_field = f"features:\n{_indent_block(features_text)}"
+
+    # Find existing features: block and replace it
+    start = None
+    end = None
+    for i, line in enumerate(lines):
+        if line.startswith("features:"):
+            start = i
+            # Find the end of the block (next non-indented line or EOF)
+            for j in range(i + 1, len(lines)):
+                if lines[j] and not lines[j][0].isspace():
+                    end = j
+                    break
+            if end is None:
+                end = len(lines)
+            break
+
+    if start is not None:
+        lines[start:end] = new_field.splitlines()
+    else:
+        if lines and lines[-1]:
+            lines.append("")
+        lines.extend(new_field.splitlines())
+
+    return "\n".join(lines)
+
+
+def _indent_block(text: str, indent: str = "  ") -> str:
+    """Indent every line of text."""
+    return "\n".join(indent + line for line in text.splitlines())
+
+
+def process_file(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    fm, body = parse_frontmatter_and_body(text)
+    features = extract_features(body)
+
+    if not features:
+        print(f"  skip: no headings found in {path}")
+        return
+
+    tree = build_tree_text(features)
+    new_fm = update_frontmatter(fm, tree)
+    output = f"{FRONTMATTER_DELIM}\n{new_fm}\n{FRONTMATTER_DELIM}{body}"
+    path.write_text(output, encoding="utf-8")
+    print(f"  done: {path} ({len(features)} features)")
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <spec-file.md> [...]", file=sys.stderr)
+        sys.exit(1)
+
+    for arg in sys.argv[1:]:
+        process_file(Path(arg))
+
+
+if __name__ == "__main__":
+    main()

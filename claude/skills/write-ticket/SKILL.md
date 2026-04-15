@@ -33,6 +33,7 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
+6. **Spec check** — if any phase adds or changes user-visible behavior, prompt: "Did this phase introduce or modify public-facing behavior? If yes, invoke `/write-spec` to update the relevant spec."
 
 ## On: delegate
 
