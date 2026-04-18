@@ -2,7 +2,7 @@
 
 ## Invariants
 
-- Before implementing, load relevant mental-model docs: `python .claude/infra/list-mental-model.py <target-paths>`; read the listed files.
+- Before implementing, load relevant mental-model docs: `python3 ~/.claude/infra/list-mental-model.py <target-paths>`; read the listed files.
 - Claim "pass" only after reading full test/build output — never "should pass" or "looks correct."
 - Diagnose blame (test vs implementation) before fixing any failure.
 - Structural deviations → escalate before proceeding. Cosmetic → adapt silently, note in report.
