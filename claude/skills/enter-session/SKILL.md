@@ -28,7 +28,8 @@ Delegate:
 - Code exploration beyond one already-known file → `Explore`.
 - Ticket bodies, plans, or history beyond immediate scope → `clerk` or `Explore`.
 - Multi-file diffs, git archaeology, or large log synthesis → `clerk`.
-- Implementation work → `/delegate-implement` or `/parallel-implement`.
+- Cold or wide-scope implementation → `/delegate-implement` (single) or `/parallel-implement` (disjoint multi-scope).
+- Warm single-scope implementation → `/implement` (owner edits directly — not delegation, but the canonical entry point).
 
 Read directly:
 
@@ -40,7 +41,9 @@ Read directly:
 
 **judge: scope-complexity** — Route to `/write-plan` when the ticket requires understanding three or more unfamiliar modules, introduces a new architectural pattern, or crosses established boundaries. Skip `/write-plan` for well-scoped changes with single-module impact.
 
-**judge: parallelizable** — Route to `/parallel-implement` when the skeleton defines two or more scopes with no shared mutable state and independent test paths. Single-scope, interdependent, or sequentially-ordered work stays on `/delegate-implement`.
+**judge: parallelizable** — Route to `/parallel-implement` when the skeleton defines two or more scopes with no shared mutable state and independent test paths. Single-scope, interdependent, or sequentially-ordered work routes to `/implement` (warm owner, direct) or `/delegate-implement` (cold owner or wide scope).
+
+**judge: warmth** — Owner is warm on the target when prior session turns read files in the scope or the user explicitly signaled direct authorship. Warm + small + single-scope → `/implement`. Otherwise → `/delegate-implement`.
 
 ## Workflow Map
 
@@ -50,7 +53,8 @@ Canonical flows. The owner routes to one of these in the briefing's `Recommended
 - `/write-ticket` — create or edit a ticket under `ai-docs/tickets/`.
 - `/write-skeleton` — public interface stubs and integration tests; lands after a ticket, before implementation.
 - `/write-plan` — deep codebase research producing an implementation plan; optional, for research-heavy scopes.
-- `/delegate-implement` — delegated implementer + reviewer cycle, one scope.
+- `/implement` — owner-direct cycle, one scope; for warm sessions where the owner edits, verifies, and commits without delegation.
+- `/delegate-implement` — delegated implementer + reviewer cycle, one scope; for cold sessions or when delegation improves reliability.
 - `/parallel-implement` — multiple implementer pairs on a shared branch with run_request-serialized execution, for disjoint scopes.
 - `/proceed` — auto-route through the pipeline when the owner is unsure which step comes next.
 
@@ -60,7 +64,8 @@ Mechanical routing:
 - Direction clear, no ticket yet → `/write-ticket`
 - Ticket exists, no skeleton → `/write-skeleton`
 - Skeleton exists, scope is research-heavy (see `judge: scope-complexity`) → `/write-plan`
-- Skeleton exists, plan exists or not needed → `/delegate-implement`
+- Skeleton exists, plan exists or not needed, owner is warm on the target (see `judge: warmth`) → `/implement`
+- Skeleton exists, plan exists or not needed, owner is cold or scope is wide → `/delegate-implement`
 - Multiple disjoint scopes ready (see `judge: parallelizable`) → `/parallel-implement`
 - Any of the above is unclear → `/proceed`
 
