@@ -3,7 +3,8 @@ name: proceed
 description: >
   Auto-route and execute the right workflow pipeline. Assesses existing
   artifacts and scope, announces the chosen path, then chains through
-  /write-plan, /write-skeleton, /delegate-implement, or /parallel-implement as needed.
+  /write-plan, /write-skeleton, /implement, /delegate-implement, or
+  /parallel-implement as needed.
 argument-hint: "<ticket-path or inline description>"
 ---
 
@@ -20,7 +21,7 @@ Target: $ARGUMENTS
 - `/parallel-implement` is never preceded by `/write-plan` — if a plan is needed, execution-mode is locked to single.
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only — do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
-- When no pipeline fits (direct-edit verdict), announce direct-edit and return control to the main agent without invoking any sub-skill.
+- When direct-edit verdict fires, announce and invoke `/implement` via the Skill tool.
 - If the target is too vague to route (no ticket, no actionable description), stop and suggest `/write-ticket` or `/discuss`.
 - Never skip announce — the user must see the routing decision before anything proceeds.
 
@@ -67,13 +68,13 @@ Build the pipeline from the results. Skeleton always precedes plan — the plan 
 For a direct-edit verdict, announce:
 
 ```
-## Direct edit
+## Direct edit → /implement
 
 - **Target**: <ticket path or brief summary>
 - **Warmth**: warm — <what the main agent already knows>
 - **Reason**: <why pipeline is overkill for this change>
 
-Main agent proceeding directly.
+Invoking `/implement`.
 ```
 
 For a pipeline verdict, announce:
@@ -94,7 +95,7 @@ Do not ask for confirmation — announce and proceed. The user can interrupt if 
 
 ### 4. Execute
 
-For a direct-edit verdict, return control to the main agent. No sub-skill invocation.
+For a direct-edit verdict, invoke `/implement` via the Skill tool with the target as arguments.
 
 For a pipeline verdict, invoke each stage sequentially via the Skill tool, passing the target as arguments.
 
@@ -111,7 +112,7 @@ For a pipeline verdict, invoke each stage sequentially via the Skill tool, passi
 | Direct edit (skip pipeline) | Main agent is warm on the target area AND change is small and isolated (single file or tightly coupled pair, no new public contracts) AND single-scope AND user has not explicitly requested delegation |
 | Engage pipeline | Any condition above is unmet |
 
-Direct edit returns control to the main agent. Use when pipeline overhead exceeds the value of contract-locking and delegation.
+Direct edit invokes `/implement`. Use when pipeline overhead exceeds the value of contract-locking and delegation.
 
 ### judge: needs-ticket
 
