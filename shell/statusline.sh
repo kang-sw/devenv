@@ -486,10 +486,10 @@ LSEP="\033[38;5;${FG_HSEP}m $(printf "%$((RCOL - 2))s" | tr ' ' '·')"
 
 # Emit
 echo -e "$L2"
-echo -e "$LSEP"
+# echo -e "$LSEP"
 echo -e "$L2b"
 echo -e "$L3"
-echo -e "\033 "
+# echo -e "\033 "
 echo -e "$L1"
 [[ -n $L_GIT ]] && echo -e "$L_GIT"
-echo -e "\033 "
+# echo -e "\033 "
