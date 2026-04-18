@@ -56,6 +56,6 @@ A ticket is the primary context-recovery artifact — a fresh session with no
 prior conversation must reconstruct the full decision context from the ticket
 and its linked plans. Every authoring choice optimizes for **recoverability
 of intent**: decisions, constraints, and rejected alternatives are captured
-at the point of writing so that downstream skills (`/implement`)
+at the point of writing so that downstream skills (`/delegate-implement`)
 never re-derive what was already settled. When a rule is
 ambiguous, apply whichever interpretation better preserves recoverability.

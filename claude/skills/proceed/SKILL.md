@@ -3,7 +3,7 @@ name: proceed
 description: >
   Auto-route and execute the right workflow pipeline. Assesses existing
   artifacts and scope, announces the chosen path, then chains through
-  /write-plan, /write-skeleton, /implement, or /parallel-implement as needed.
+  /write-plan, /write-skeleton, /delegate-implement, or /parallel-implement as needed.
 argument-hint: "<ticket-path or inline description>"
 ---
 
@@ -47,12 +47,12 @@ Build the pipeline from the results. Skeleton always precedes plan — the plan 
 
 | needs-skeleton | needs-plan | execution-mode | Pipeline |
 |----------------|------------|----------------|----------|
-| no | no | single | `/implement` |
+| no | no | single | `/delegate-implement` |
 | no | no | parallel | `/parallel-implement` |
-| no | yes | single | `/write-plan` then `/implement` |
-| yes | no | single | `/write-skeleton` then `/implement` |
+| no | yes | single | `/write-plan` then `/delegate-implement` |
+| yes | no | single | `/write-skeleton` then `/delegate-implement` |
 | yes | no | parallel | `/write-skeleton` then `/parallel-implement` |
-| yes | yes | single | `/write-skeleton` then `/write-plan` then `/implement` |
+| yes | yes | single | `/write-skeleton` then `/write-plan` then `/delegate-implement` |
 
 ### 3. Announce
 
@@ -64,7 +64,7 @@ Output the routing decision as a structured block:
 - **Target**: <ticket path or brief summary>
 - **Plan**: <skip (reason) | /write-plan (reason)>
 - **Skeleton**: <skip (reason) | /write-skeleton (reason)>
-- **Execution**: </implement | /parallel-implement> — <reason>
+- **Execution**: </delegate-implement | /parallel-implement> — <reason>
 
 Proceeding.
 ```
@@ -76,7 +76,7 @@ Do not ask for confirmation — announce and proceed. The user can interrupt if 
 Invoke each pipeline stage sequentially via the Skill tool, passing the target as arguments.
 
 - After each stage, verify it completed (check for committed artifacts).
-- Pass downstream context: if `/write-plan` produces a plan path, pass it to `/implement`.
+- Pass downstream context: if `/write-plan` produces a plan path, pass it to `/delegate-implement`.
 - If a stage fails or the user interrupts, stop — do not continue the pipeline.
 
 ## Judgments
@@ -113,7 +113,7 @@ If `needs-plan = yes`, execution-mode is locked to single — do not evaluate pa
 
 | Decision | When |
 |----------|------|
-| Single (`/implement`) | Default — one cohesive scope |
+| Single (`/delegate-implement`) | Default — one cohesive scope |
 | Parallel (`/parallel-implement`) | 2+ scopes with no shared files and no shared interfaces, each independently testable. Structural isolation (separate directory trees) is sufficient signal without a skeleton; file-level isolation within a shared directory requires a skeleton to confirm disjointness mechanically. |
 
 ## Doctrine

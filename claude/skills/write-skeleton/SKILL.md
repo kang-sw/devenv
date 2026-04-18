@@ -1,7 +1,7 @@
 ---
 name: write-skeleton
 description: >
-  After /write-ticket, before /implement. Crystallize
+  After /write-ticket, before /delegate-implement. Crystallize
   public contracts as interface stubs and integration tests. Suggest
   this when a ticket is ready and code changes haven't started.
 argument-hint: [ticket-path]
@@ -65,7 +65,7 @@ Agent(
 
 Based on implementation complexity:
 - **Wide** (multiple independent modules): suggest `/parallel-implement`
-- **Narrow** (single module or focused change): suggest `/implement`
+- **Narrow** (single module or focused change): suggest `/delegate-implement`
 
 Present the recommendation with brief rationale. Do not auto-invoke.
 

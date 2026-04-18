@@ -2,7 +2,7 @@
 name: parallel-implement
 description: >
   When implementation spans multiple independent modules that can be
-  built concurrently. Use instead of /implement when skeleton defines
+  built concurrently. Use instead of /delegate-implement when skeleton defines
   disjoint scopes suitable for parallel execution.
 argument-hint: "<ticket-path, plan-path, or inline scope description>"
 ---
