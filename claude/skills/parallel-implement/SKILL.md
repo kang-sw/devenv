@@ -13,13 +13,16 @@ Target: $ARGUMENTS
 
 ## Invariants
 
+- The pre-flight manifest is mandatory — every invocation builds a scope manifest with `name`, `file_set`, `description`, and `test_command` per scope before any agent is spawned.
 - Scopes must be disjoint — no two implementers may touch the same file; verify this before spawning.
+- Every scope's `test_command` must be scope-specific — e.g., `cargo test auth::` not `cargo test`. Crate-wide test commands compile the whole project and will pick up another scope's in-progress stubs, breaking isolation even with run_request serialization.
+- Scope-specific test commands are only safe because `/write-skeleton` ensures all stubs compile (see `/write-skeleton` step 3). If no skeleton exists for the target scopes, stop and route through `/write-skeleton` first.
 - Implementers never commit — the lead commits all scopes sequentially in partition order after all reviewer clean reports arrive.
 - Each scope gets its own implementer+reviewer pair running concurrently — not a single shared reviewer.
 - All run_requests are serialized by the lead — only one build/test command executes at a time across all implementers.
 - User approves the aggregate report before the lead proceeds to the doc pipeline.
 - Teammates stay alive until cleanup — do not shut down before doc pipeline completes.
-- Task list is created at prepare and tracked to completion — no task may be skipped or reordered.
+- Task list is registered via TaskCreate at pre-flight and tracked to completion — one task per scope plus one per workflow phase; no task may be skipped or reordered.
 - `/team-lead` skill must be loaded before any team operations.
 - When scope boundaries are ambiguous, stop and ask the user — do not guess.
 
@@ -34,7 +37,7 @@ When `{"type": "run_request", "command": "...", "reason": "..."}` arrives from a
 
 Serialize all run_requests — only one command executes at a time across all implementers. This prevents shared-state collisions: lock files, build artifacts, port conflicts.
 
-This handler is active from the moment implementers are spawned (step 2) through cleanup (step 7). It is not phase-specific.
+This handler is active from the moment implementers are spawned (step 2) through cleanup (step 8). It is not phase-specific.
 
 ## On: invoke
 
@@ -42,30 +45,26 @@ This handler is active from the moment implementers are spawned (step 2) through
 
 Load `/team-lead` if not already loaded.
 
-### 1. Prepare
+### 1. Pre-flight manifest
 
 1. Parse arguments: ticket path, plan path, or inline scope description.
 2. Read the source. Infer N disjoint scope units. Each unit carries:
-   - `name`: short identifier used in agent names and commit messages (lowercase, hyphenated, e.g. `auth-api`)
-   - `file_set`: exhaustive list of files this scope may touch — no file may appear in two scope sets
-   - `description`: what needs to be implemented for this scope
+   - `name`: short identifier used in agent names and commit messages (lowercase, hyphenated, e.g. `auth-api`).
+   - `file_set`: exhaustive list of files this scope may touch — no file may appear in two scope sets.
+   - `description`: what needs to be implemented for this scope.
+   - `test_command`: scope-specific test invocation (e.g., `cargo test auth::`, `pytest tests/auth/`, `npm test -- --testPathPattern=auth`). Must narrow to this scope's tests only — do not accept a crate-wide or suite-wide runner.
 3. Assert disjoint: verify that no file appears in two scope sets. If any overlap is found, stop — do not proceed until scopes are corrected.
-4. If scope boundaries are ambiguous at any point during inference, stop and ask the user before proceeding. Bias toward escalation — it is never correct to guess scope boundaries.
-5. Derive a `<slug>` from the ticket or brief (lowercase, hyphenated, e.g. `parallel-impl-auth`).
-6. Record current branch as `<original-branch>`. Create `parallel-impl/<slug>` branch.
-7. Create the team:
+4. Verify skeleton coverage: confirm stubs exist for every scope (grep for `todo!()` / `unimplemented!()` / `NotImplementedError` in each scope's `file_set`). If absent, stop — route through `/write-skeleton` first to guarantee compilability during parallel work.
+5. If scope boundaries are ambiguous at any point during inference, stop and ask the user before proceeding. Bias toward escalation — it is never correct to guess scope boundaries.
+6. Derive a `<slug>` from the ticket or brief (lowercase, hyphenated, e.g. `parallel-impl-auth`).
+7. Record current branch as `<original-branch>`. Create `parallel-impl/<slug>` branch.
+8. Create the team:
    ```
    TeamCreate(team_name = "parallel-impl-<slug>", description = "<brief scope description>")
    ```
-8. Create task list. All tasks are mandatory — do not skip or reorder:
-   ```
-   [ ] All N implementer+reviewer pairs — wait for all N clean reports
-   [ ] Lead collects + commits per scope in partition order
-   [ ] Report to user — wait for approval
-   [ ] Merge to original branch
-   [ ] Doc pipeline
-   [ ] Cleanup
-   ```
+9. Register tasks via TaskCreate. One task per scope (carries the scope manifest in its description), plus one task per workflow phase. All are mandatory — do not skip or reorder:
+   - Scope tasks (one per scope): `implement-<scope.name>` — description includes file_set + test_command + brief.
+   - Phase tasks: fan-in all reviewer reports / collect and commit per scope / report to user / merge to original branch / doc pipeline / cleanup.
 
 ### 2. Spawn N pairs
 
@@ -85,8 +84,14 @@ Agent(
     Scope: <scope.name>
     Allowed files: <scope.file_set — one per line or comma-separated>
     Task: <scope.description>
+    Scope-specific test command: <scope.test_command>
 
     Team rules:
+    - Use ONLY the scope-specific test command above to verify your work.
+      Do NOT run crate-wide or suite-wide runners (e.g. bare `cargo test`,
+      `pytest` with no path, `npm test` with no filter) — another scope's
+      in-progress code may compile or run alongside yours and produce
+      failures that do not reflect your scope.
     - Request lead approval before any build/test/install command using the run_request protocol:
         send {"type": "run_request", "command": "<cmd>", "reason": "<why>"}
         wait — the lead will send {"type": "run_approved"} when the slot is free
@@ -95,7 +100,7 @@ Agent(
         send {"type": "run_complete", "success": true|false}
     - Do NOT commit. The lead commits all changes after you report completion.
     - Report completion to lead via SendMessage with: summary, exact changed file list, test results, deviations.
-    - The reviewer will contact you directly with findings — fix within the allowed file set, re-verify, reply.
+    - The reviewer will contact you directly with findings — fix within the allowed file set, re-verify with the scope-specific test command, reply.
   """
 )
 ```
@@ -180,8 +185,12 @@ Send shutdown requests to all teammates (implementers and reviewers). Wait for s
 
 ## Doctrine
 
-Parallel implementation optimizes for **throughput with isolation** —
-maximize concurrent work while preventing interference between scope units.
-When a rule is ambiguous, apply whichever interpretation better preserves
-isolation: disjoint file sets, serialized execution, and lead-controlled commits
-are the three mechanisms; none may be relaxed for throughput.
+Parallel implementation optimizes for **throughput with isolation on a
+shared branch** — maximize concurrent work while preventing interference
+between scope units without resorting to worktrees. Four mechanisms
+enforce isolation: disjoint file sets, scope-specific test commands
+(standing on skeleton's compilability guarantee), serialized execution
+via run_request, and lead-controlled commits. None may be relaxed for
+throughput; weakening any one opens a path for one scope's mid-flight
+state to pollute another's verification. When a rule is ambiguous, apply
+whichever interpretation better preserves these four mechanisms.
