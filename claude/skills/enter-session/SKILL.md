@@ -51,7 +51,7 @@ Canonical flows. The owner routes to one of these in the briefing's `Recommended
 - `/write-skeleton` — public interface stubs and integration tests; lands after a ticket, before implementation.
 - `/write-plan` — deep codebase research producing an implementation plan; optional, for research-heavy scopes.
 - `/delegate-implement` — delegated implementer + reviewer cycle, one scope.
-- `/parallel-implement` — multiple implementer pairs in worktrees for disjoint scopes.
+- `/parallel-implement` — multiple implementer pairs on a shared branch with run_request-serialized execution, for disjoint scopes.
 - `/proceed` — auto-route through the pipeline when the owner is unsure which step comes next.
 
 Mechanical routing:
