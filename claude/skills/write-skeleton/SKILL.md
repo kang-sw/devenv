@@ -1,9 +1,9 @@
 ---
 name: write-skeleton
 description: >
-  After /write-ticket, before /delegate-implement. Crystallize
-  public contracts as interface stubs and integration tests. Suggest
-  this when a ticket is ready and code changes haven't started.
+  After /write-ticket, before /implement or /delegate-implement.
+  Crystallize public contracts as interface stubs and integration tests.
+  Suggest this when a ticket is ready and code changes haven't started.
 argument-hint: [ticket-path]
 ---
 
@@ -63,9 +63,12 @@ Agent(
 
 ### 5. Suggest next step
 
-Based on implementation complexity:
-- **Wide** (multiple independent modules): suggest `/parallel-implement`
-- **Narrow** (single module or focused change): suggest `/delegate-implement`
+Based on implementation complexity and session warmth on the target:
+- **Wide** (multiple independent modules): suggest `/parallel-implement`.
+- **Narrow + warm** (single module, main agent already engaged the code): suggest `/implement`.
+- **Narrow + cold** (single module, main agent is cold on the target): suggest `/delegate-implement`.
+
+Warmth is a property of the current session — has the main agent read files in the target scope this session, or did the user explicitly signal direct authorship? If ambiguous, suggest `/proceed` and let its routing judges decide.
 
 Present the recommendation with brief rationale. Do not auto-invoke.
 
