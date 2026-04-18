@@ -2,9 +2,11 @@
 name: write-plan
 description: >
   Codebase research producing implementation guidance. Routes between
-  survey mode (reusable component discovery, sonnet) and deep mode
-  (architectural planning, opus + verification) based on remaining
-  implementation risk after ticket decisions.
+  warm mode (main agent authors, populator enriches), survey mode
+  (reusable component discovery, sonnet delegate), and deep mode
+  (architectural planning, opus delegate + verification) based on
+  whether the main agent already holds relevant codebase context and
+  on remaining implementation risk after ticket decisions.
 argument-hint: [ticket-path or description]
 ---
 
@@ -14,11 +16,11 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Lead is a lightweight coordinator: assess, route to pipeline mode, pass directives, finalize.
-- The delegate owns research and drafting: reads the ticket, explores the codebase, writes the deliverable.
-- Plan directives = lead's judgment on points the delegate cannot derive from ticket + code alone.
-- **Survey mode**: deliverable is a codebase reconnaissance brief — reusable components, patterns, constraints. Additive context for the implementer, not architectural directive.
-- **Deep mode**: deliverable is a self-contained implementation plan — a fresh executor implements without re-researching. When plan definitions diverge from ticket sketches, plan takes precedence — note the change and rationale in Context.
+- **Warm mode**: lead drafts the plan directly from session context (reading source as needed), then spawns `plan-populator` to enrich and verify in one pass.
+- **Survey mode**: lead is a lightweight coordinator; a sonnet delegate produces a reconnaissance brief of reusable components, patterns, and constraints.
+- **Deep mode**: lead is a lightweight coordinator; an opus delegate drafts a self-contained plan; a sonnet verifier fixes drift before finalization.
+- Plan directives = lead's judgment on points a cold delegate cannot derive from ticket and code alone (cold modes only — warm mode embeds directives as the draft itself).
+- When plan definitions diverge from ticket sketches, plan takes precedence — note the change and rationale in Context.
 - One plan per ticket phase; if a phase exceeds ~10 actions, split via `/write-ticket` before continuing.
 - The deliverable file MUST be committed before finalizing.
 
@@ -28,11 +30,38 @@ Target: $ARGUMENTS
 
 1. Read the ticket. Note ambiguities needing lead judgment — scope boundaries, architectural choices, phase sequencing.
 2. If `/write-skeleton` has been run, collect stub and test file paths — these are locked contracts.
-3. Apply `judge: pipeline-mode` to determine survey vs deep.
-4. **Survey**: formulate **focus areas** — 2–3 codebase regions where reusable components are likely.
-5. **Deep**: formulate **plan directives** — 2–5 binding decisions the delegate must follow.
+3. Apply `judge: pipeline-mode` to determine warm, survey, or deep.
+4. **Warm**: identify which source files the lead needs to read before drafting. Read them directly.
+5. **Survey**: formulate **focus areas** — 2–3 codebase regions where reusable components are likely.
+6. **Deep**: formulate **plan directives** — 2–5 binding decisions the delegate must follow.
 
-### 2. Delegate
+### 2. Draft (warm) or delegate (cold)
+
+#### Warm mode
+
+1. Write the draft plan to `ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md` using direct session context. The draft carries:
+   - Binding decisions already settled in conversation.
+   - Specific file paths and symbols the lead knows from direct reads.
+   - Explicit populate targets (e.g. "reuse the existing X utility") where the lead suspects reuse but has not confirmed the concrete symbol.
+2. Spawn `plan-populator` to enrich and verify:
+
+```
+Agent(
+  name = "plan-populator",
+  description = "Enrich and verify draft plan",
+  subagent_type = "plan-populator",
+  model = "sonnet",
+  prompt = """
+    Draft plan path: <plan-path>
+
+    ## Skeleton contracts (locked)
+    - Stubs: <list of stub file paths, or "none">
+    - Tests: <list of test file paths, or "none">
+  """
+)
+```
+
+3. After populator returns, proceed to step 4 (Accept / reject).
 
 #### Survey mode
 
@@ -126,11 +155,11 @@ Agent(
 )
 ```
 
-### 4. Accept / reject (deep mode only)
+### 4. Accept / reject (warm or deep mode)
 
-Read the verifier's report only (not the plan or source code). Accept if
-no unresolved Critical issues remain. Reject and re-delegate if structural
-problems persist.
+Read the populator or verifier report only. Accept if no unresolved
+Critical issues remain. Reject and re-delegate (cold) or re-draft the
+affected sections (warm) if structural problems persist.
 
 ### 5. Finalize
 
@@ -145,10 +174,11 @@ problems persist.
 
 | Mode | When |
 |------|------|
-| Survey | Ticket has resolved the architectural approach; remaining risk is the implementer reinventing existing utilities or missing established patterns |
+| Warm | Main agent already holds relevant codebase context from prior session turns, or user explicitly signals direct authorship; remaining risk is the main-agent draft missing reusable components or misciting existing shapes |
+| Survey | Ticket has resolved the architectural approach, main agent is cold on the relevant area; remaining risk is the cold implementer reinventing existing utilities or missing established patterns |
 | Deep | Multiple viable implementation strategies with non-obvious trade-offs, unfamiliar cross-module integration with cascading effects, or ticket explicitly flags unresolved complexity |
 
-Default to survey — deep mode is the exception, reserved for genuine architectural novelty.
+Prefer warm when the main agent is warm. Among cold modes, survey is the default — deep is the exception, reserved for genuine architectural novelty.
 
 ### judge: research-depth
 
@@ -172,11 +202,14 @@ Default to tactical for thorough-level research. Use strategic only when over-sp
 ## Doctrine
 
 Write-plan bridges ticket decisions and executor action at **the right
-weight** — survey mode optimizes for implementer context efficiency
-(compact reconnaissance that prevents wasted exploratory search), deep
-mode optimizes for executor self-sufficiency after context reset
-(complete architectural guidance). The lead passes only binding decisions
-the delegate cannot derive, the delegate owns research and drafting.
-When a rule is ambiguous, apply whichever interpretation better preserves
-the chosen mode's optimization target while minimizing what the
-coordinator must serialize.
+weight** — warm mode optimizes for preserving session context that
+would otherwise be discarded at subagent fork boundaries, survey mode
+optimizes for implementer context efficiency (compact reconnaissance
+that prevents wasted exploratory search), deep mode optimizes for
+executor self-sufficiency after context reset (complete architectural
+guidance). In cold modes the lead passes only binding decisions the
+delegate cannot derive and the delegate owns research and drafting; in
+warm mode the lead is the drafter and the populator grounds the draft
+in concrete code. When a rule is ambiguous, apply whichever
+interpretation better preserves the chosen mode's optimization target
+while minimizing what the coordinator must serialize.
