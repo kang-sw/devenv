@@ -138,7 +138,9 @@ Implementer and reviewer remain alive throughout this loop.
 ### 7. Doc pipeline
 
 1. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
-2. If ticket-driven, update ticket status.
+2. If ticket-driven:
+   1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase. Content: what was implemented, deviations from plan, key findings for future phases. Short hash = merge commit.
+   2. Move ticket to the next status directory (`git mv`) if all phases are complete.
 
 ### 8. Cleanup
 

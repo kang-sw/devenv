@@ -28,7 +28,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 
 ## General
 
-- Tickets are write-once intent documents.
+- Phases with a `### Result` section are frozen — never edit them. Unimplemented phases remain editable.
 - All ticket content must be in English regardless of conversation language.
 
 ## Templates
@@ -66,6 +66,10 @@ Both `plans:` and `skeletons:` list only phases that have artifacts — omit pha
 ### Phase 1: <title>
 
 <goals, constraints, rationale, rejected alternatives, suggested approaches>
+
+### Result (<short-hash>) - YYYY-MM-DD
+
+<what was implemented, deviations from plan, key findings for future phases>
 
 ### Phase 2: <title>
 

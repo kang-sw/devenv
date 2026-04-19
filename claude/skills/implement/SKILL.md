@@ -80,7 +80,9 @@ Loop until no Critical/Important issues remain.
 
 1. Dispatch **mental-model-updater** with the commit range and a brief implementation summary. Wait for completion.
 2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
-3. If ticket-driven, update ticket status.
+3. If ticket-driven:
+   1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase. Content: what was implemented, deviations from plan, key findings for future phases. Short hash = last implementation commit.
+   2. Move ticket to the next status directory (`git mv`) if all phases are complete.
 
 ### 6. Report
 

@@ -18,7 +18,7 @@ Topic: $ARGUMENTS
 ## Invariants
 
 - No source edits. Only documentation writes, only in the capture step.
-- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Completed phases are immutable.
+- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phases with a `### Result` section are frozen — do not edit them.
 - Read mental-model docs on-demand as topics emerge.
 - Read spec docs in `ai-docs/spec/` on-demand as topics emerge — the Project Map above lists available specs.
 - Dispatch Explore agents for implementation details beyond mental-model docs — never read source directly.
