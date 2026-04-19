@@ -51,6 +51,9 @@ claude/infra/                 — docs only; accessed via load-infra
   ticket-conventions.md       — ticket format, status directories, stem convention
   subagent-rules.md           — exploration, branches, general rules
   implementer.md              — code implementer role; spawn as general-purpose + read first
+  code-review-correctness.md  — Correctness review partition: logic, error paths, contracts, security
+  code-review-fit.md          — Fit review partition: conventions, naming, reuse, patterns
+  code-review-test.md         — Test review partition: assertion validity, coverage, mock integrity
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess

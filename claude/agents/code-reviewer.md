@@ -21,7 +21,10 @@ You are **read-only** — report findings, never edit code.
 
 1. **Read project context**: Read `CLAUDE.md` for project standards. Run `list-mental-model` (Bash, no args) to enumerate all mental-model docs, then read every listed file — full architectural context is required for cross-component violation detection.
 2. **Read the diff**: Run `git diff <range>` and `git diff --stat <range>`.
-3. **Review against**:
+3. **Review against**: if a partition doc was loaded via `load-infra`
+   (e.g. `code-review-correctness.md`), follow its checklist only — do
+   not expand to dimensions outside that partition. Otherwise run the
+   full checklist:
    - correctness (logic errors, off-by-one, null handling)
    - standards (CLAUDE.md conventions, naming, structure)
    - contracts (mental-model doc invariants and coupling rules)
@@ -70,18 +73,6 @@ Remaining: <unresolved minor items, or "none">
 ```
 
 If clean on first pass: `No issues found.`
-
-## Focus override
-
-When spawned with a named focus partition, restrict your review to that
-partition's dimensions only. Do not report findings outside your assigned scope.
-
-| Partition | Cover | Exclude |
-|-----------|-------|---------|
-| **Correctness** | logic errors, error paths, contract compliance, security surface | conventions, naming, reuse, patterns, test quality |
-| **Fit** | conventions, naming, reuse, patterns, test quality | logic correctness, error paths, security, contracts |
-
-When no partition is specified, run the full checklist.
 
 ## Doctrine
 

@@ -93,23 +93,27 @@ based on the implementer's report and the nature of the changes.
 
 #### 3b. Spawn reviewers
 
-Spawn one reviewer per selected partition in parallel:
+Spawn one reviewer per selected partition in parallel. Each reviewer
+loads its partition doc via `load-infra`:
+
+| Partition | Infra doc |
+|-----------|-----------|
+| Correctness | `code-review-correctness.md` |
+| Fit | `code-review-fit.md` |
+| Test | `code-review-test.md` |
 
 ```
 Agent(
-  name = "reviewer-correctness",   # use reviewer-fit for the Fit partition
-  description = "Review implementation — Correctness partition",
+  name = "reviewer-<partition>",
+  description = "Review implementation — <Partition> partition",
   subagent_type = "code-reviewer",
   model = "sonnet",
   team_name = "impl-<scope>",
   prompt = """
+    Run `load-infra code-review-<partition>.md` first.
+
     Lead name: <lead-name>
     Diff range: <first-commit>..<last-commit>
-
-    Focus partition: Correctness
-    Cover: logic errors, error paths, contract compliance, security surface.
-    Exclude: conventions, naming, reuse, patterns, test quality — a separate
-    Fit reviewer covers those.
 
     Team rules:
     - SendMessage your findings report to the lead only.
@@ -117,10 +121,6 @@ Agent(
   """
 )
 ```
-
-For the Fit partition, spawn a parallel reviewer with:
-- `Focus partition: Fit` / Cover: conventions, naming, reuse, patterns, test quality /
-  Exclude: logic correctness, error paths, security, contracts.
 
 Wait for all reviewers to complete.
 
@@ -184,9 +184,10 @@ Evaluate based on the implementer's report and the nature of the changes.
 | Partition | Assign when |
 |-----------|-------------|
 | **Correctness** | New logic introduced, error paths modified, contracts or security surface touched |
-| **Fit** | Existing components reused or modified, new patterns others will follow, test structure changed |
-| **Both** | New feature or non-trivial cross-module change — default for most delegate-implement invocations |
-| **Neither** | Purely mechanical change (format, rename with no semantic change) → assign Correctness as floor |
+| **Fit** | Existing components reused or modified, new patterns others will follow |
+| **Test** | Test files added or modified, or new code paths added without existing coverage |
+| **Default** | New feature or non-trivial cross-module change → all three partitions |
+| **Floor** | Purely mechanical change (format, rename with no semantic change) → Correctness only |
 
 ### judge: skeleton-check
 
