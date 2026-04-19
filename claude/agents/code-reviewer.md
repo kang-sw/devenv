@@ -71,6 +71,18 @@ Remaining: <unresolved minor items, or "none">
 
 If clean on first pass: `No issues found.`
 
+## Focus override
+
+When spawned with a named focus partition, restrict your review to that
+partition's dimensions only. Do not report findings outside your assigned scope.
+
+| Partition | Cover | Exclude |
+|-----------|-------|---------|
+| **Correctness** | logic errors, error paths, contract compliance, security surface | conventions, naming, reuse, patterns, test quality |
+| **Fit** | conventions, naming, reuse, patterns, test quality | logic correctness, error paths, security, contracts |
+
+When no partition is specified, run the full checklist.
+
 ## Doctrine
 
 The reviewer optimizes for **defect signal density** — every finding

@@ -15,7 +15,7 @@ Target: $ARGUMENTS
 
 - This skill delegates — the lead does not read source code or write implementation.
 - When skeleton exists, its stubs and integration tests are the acceptance criteria.
-- The implementer and reviewer communicate directly; the lead receives only final reports.
+- Reviewers report to the lead only — never directly to the implementer. The lead consolidates findings and sends a single list to the implementer.
 - User approves the report before merge — no code reaches the target branch without user confirmation.
 - Teammates (implementer, reviewer) stay alive until after doc pipeline completes; cleanup is the final step.
 - One delegation cycle per invocation.
@@ -44,7 +44,7 @@ Target: $ARGUMENTS
 8. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
    [ ] Spawn implementer — wait for completion report
-   [ ] Spawn reviewer — implement → verify → review loop until clean
+   [ ] Spawn reviewers (partition-allocated) — parallel review → lead consolidates → implementer fixes → re-review loop until clean
    [ ] Dispatch mental-model-updater — wait for completion
    [ ] Report to user — wait for approval
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run updater (loop)
@@ -76,7 +76,7 @@ Agent(
     Team rules:
     - Verify integration tests pass before reporting completion or after each fix.
     - Report completion to the lead via SendMessage. Include test results.
-    - The reviewer may message you directly with findings — fix, re-verify tests, and reply.
+    - The lead will send you consolidated review findings — fix, re-verify tests, and report back to the lead.
     - Commit at logical checkpoints on the current branch.
   """
 )
@@ -84,32 +84,59 @@ Agent(
 
 Wait for the implementer's completion report. Note the commit range.
 
-### 3. Spawn reviewer
+### 3. Review
+
+#### 3a. Partition allocation
+
+Apply `judge: partition-allocation` to determine which review partitions apply
+based on the implementer's report and the nature of the changes.
+
+#### 3b. Spawn reviewers
+
+Spawn one reviewer per selected partition in parallel:
 
 ```
 Agent(
-  name = "reviewer",
-  description = "Review implementation diff",
+  name = "reviewer-correctness",   # use reviewer-fit for the Fit partition
+  description = "Review implementation — Correctness partition",
   subagent_type = "code-reviewer",
   model = "sonnet",
   team_name = "impl-<scope>",
   prompt = """
     Lead name: <lead-name>
-    Implementer name: implementer
     Diff range: <first-commit>..<last-commit>
 
+    Focus partition: Correctness
+    Cover: logic errors, error paths, contract compliance, security surface.
+    Exclude: conventions, naming, reuse, patterns, test quality — a separate
+    Fit reviewer covers those.
+
     Team rules:
-    - SendMessage findings to the implementer by name.
-    - The implementer fixes and notifies you — re-review until clean.
-    - SendMessage the final report to the lead.
+    - SendMessage your findings report to the lead only.
+    - Do not contact the implementer directly.
   """
 )
 ```
 
-The reviewer and implementer iterate directly. Each iteration:
-implementer fixes → implementer verifies integration tests pass →
-reviewer re-reviews. Loop until the reviewer reports clean. Wait for
-the reviewer's final report to the lead.
+For the Fit partition, spawn a parallel reviewer with:
+- `Focus partition: Fit` / Cover: conventions, naming, reuse, patterns, test quality /
+  Exclude: logic correctness, error paths, security, contracts.
+
+Wait for all reviewers to complete.
+
+#### 3c. Consolidate and relay
+
+Read all reviewer reports. Produce a single consolidated findings list —
+deduplicate overlapping issues, assign final severity. SendMessage the
+consolidated list to the implementer.
+
+Wait for the implementer's fix report and integration test confirmation.
+
+#### 3d. Re-review loop
+
+If Critical or Important issues remain unresolved: re-apply
+`judge: partition-allocation` (same partitions) and spawn fresh reviewers.
+Repeat 3b–3d until no Critical or Important issues remain.
 
 ### 4. Docs pre-pass
 
@@ -125,7 +152,7 @@ the reviewer's final report to the lead.
    - Any deviations or open items
 2. Wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
-   - Direct the reviewer to re-review.
+   - Re-apply `judge: partition-allocation` and spawn fresh reviewers per the step 3 pattern. Wait for consolidated findings and implementer fix report.
    - Re-run **mental-model-updater** with the new commit range. Wait for completion.
    - Re-report. Loop until user approves.
 
@@ -149,6 +176,17 @@ Implementer and reviewer remain alive throughout this loop.
 1. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
 
 ## Judgments
+
+### judge: partition-allocation
+
+Evaluate based on the implementer's report and the nature of the changes.
+
+| Partition | Assign when |
+|-----------|-------------|
+| **Correctness** | New logic introduced, error paths modified, contracts or security surface touched |
+| **Fit** | Existing components reused or modified, new patterns others will follow, test structure changed |
+| **Both** | New feature or non-trivial cross-module change — default for most delegate-implement invocations |
+| **Neither** | Purely mechanical change (format, rename with no semantic change) → assign Correctness as floor |
 
 ### judge: skeleton-check
 
