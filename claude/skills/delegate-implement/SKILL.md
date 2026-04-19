@@ -106,7 +106,7 @@ loads its partition doc via `load-infra`:
 Agent(
   name = "reviewer-<partition>",
   description = "Review implementation — <Partition> partition",
-  subagent_type = "code-reviewer",
+  subagent_type = "ws:code-reviewer",
   model = "sonnet",
   team_name = "impl-<scope>",
   prompt = """

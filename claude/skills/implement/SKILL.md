@@ -57,7 +57,7 @@ Apply `judge: needs-review`.
 ```
 Agent(
   description = "Review /implement diff",
-  subagent_type = "code-reviewer",
+  subagent_type = "ws:code-reviewer",
   model = "sonnet",
   prompt = """
     Diff range: <first-commit>..HEAD
