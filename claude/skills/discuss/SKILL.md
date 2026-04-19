@@ -49,6 +49,16 @@ Topic: $ARGUMENTS
 2. Apply **judge: needs-integration-tests** to ticket writes.
 3. Write only what the user approves. No artifact needed for exploratory discussions.
 
+## Workflow Context
+
+Interface and scope decisions made in discussion become downstream inputs:
+- Scope, phases, acceptance criteria → ticket structure (`/write-ticket`)
+- Type shapes, module boundaries, public API → skeleton contract directives (`/write-skeleton`)
+- Approach choices, architectural trade-offs → plan directives (`/write-plan`)
+
+When discussion converges on a decision in any of these categories, frame
+the conclusion in terms its downstream consumer can directly act on.
+
 ## Judgments
 
 **judge: needs-integration-tests** — Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.
