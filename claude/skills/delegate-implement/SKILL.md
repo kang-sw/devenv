@@ -90,7 +90,7 @@ Wait for the implementer's completion report. Note the commit range.
 Agent(
   name = "reviewer",
   description = "Review implementation diff",
-  subagent_type = "reviewer",
+  subagent_type = "code-reviewer",
   model = "sonnet",
   team_name = "impl-<scope>",
   prompt = """

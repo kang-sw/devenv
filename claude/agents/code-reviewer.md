@@ -1,5 +1,5 @@
 ---
-name: reviewer
+name: code-reviewer
 description: >
   Review code diffs for correctness, standards, contracts, and security.
   Read-only — produces findings and a final report, never edits code.

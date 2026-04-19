@@ -113,7 +113,7 @@ Agent(
 Agent(
   name = "reviewer-<scope.name>",
   description = "Review <scope.name> implementation",
-  subagent_type = "reviewer",
+  subagent_type = "code-reviewer",
   model = "sonnet",
   team_name = "parallel-impl-<slug>",
   prompt = """

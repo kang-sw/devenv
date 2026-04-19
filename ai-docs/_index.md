@@ -34,7 +34,8 @@ Team communication rules are injected by the calling skill at spawn time.
 
 ```
 claude/agents/
-  reviewer.md             — code review (read-only, produces findings)
+  code-reviewer.md        — code diff review: correctness, security, contracts (read-only)
+  document-reviewer.md    — fresh-eye design/ticket review against mental-model and spec (read-only)
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
