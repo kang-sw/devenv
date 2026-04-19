@@ -534,6 +534,19 @@ else:
     print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
+# ── blueprint plugin install (cache copy; run `claude plugin update blueprint@blueprint` after changes)
+if has claude; then
+  INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
+  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if 'blueprint@blueprint' in d.get('plugins',{}) else 1)" "$INSTALLED_PLUGINS" 2>/dev/null; then
+    muted "blueprint plugin already installed"
+  else
+    info "Installing blueprint plugin..."
+    claude plugin install blueprint@blueprint && success "blueprint plugin installed" || warn "blueprint plugin install failed — run manually: claude plugin install blueprint@blueprint"
+  fi
+else
+  warn "claude not found — run manually after install: claude plugin install blueprint@blueprint"
+fi
+
 # Clean up dead symlinks (skills and agents)
 cleanup_dead_links() {
   local dir="$1"

@@ -1,6 +1,7 @@
 ---
 title: Blueprint plugin extraction
 started: 2026-04-19
+completed: 2026-04-19
 ---
 
 # Blueprint plugin extraction
@@ -12,8 +13,8 @@ The `claude/` workflow system (skills, agents, infra) living in devenv is being 
 ## Decisions
 
 - **Name**: `blueprint` — maps to `/bp:` prefix. Short, ergonomic, descriptive (blueprints = plans before building).
-- **No separate repo**: devenv is already public. Plugin lives at `claude/` subdirectory, distributed via `git-subdir` marketplace source.
-- **Local install mechanism**: `extraKnownMarketplaces` with `directory` source in `~/.claude/settings.json`. Loads live from devenv — edits immediately reflected, no cache, no extra sync step between machines.
+- **No separate repo**: devenv is already public. Full repo clone is intentional (author convenience over bandwidth). Plugin lives at `claude/` subdirectory; external users install via `/plugin marketplace add kang-sw/devenv` + `/plugin install blueprint@blueprint`.
+- **Local install mechanism**: `extraKnownMarketplaces` with `directory` source in `~/.claude/settings.json`, followed by `claude plugin install blueprint@blueprint`. Plugin files are **copied to cache** (not loaded live); `claude plugin update blueprint@blueprint` is the author's maintenance cost after changes.
 - **infra scripts → `claude/bin/`**: `ask.sh`, `merge-branch.sh`, `list-mental-model.py` become PATH-accessible bare executables (`ask`, `merge-branch`, `list-mental-model`).
 - **infra docs stay in `claude/infra/`**: `impl-playbook.md`, `ticket-conventions.md`, `mental-model-conventions.md`, `_subagent-rules.md`.
 - **`blueprint-infra` helper**: New script in `claude/bin/`. Self-locates plugin root via `dirname` chain, cats any infra doc by name. Required because `$CLAUDE_PLUGIN_ROOT` is available in skill bash injections but **not** in agent execution context.
@@ -87,8 +88,9 @@ Patch `~/.claude/settings.json` to add:
 
 The `<absolute-path-to-devenv>` must be resolved at install time (not hardcoded — machines differ).
 Remove or gate the old `~/.claude/` file-copy behavior; plugin system supersedes it.
+After writing `settings.json`, also run `claude plugin install blueprint@blueprint` (idempotent on re-runs: check `installed_plugins.json` before running).
 
-Success: `install.sh` on a clean machine registers the plugin without copying files.
+Success: `install.sh` on a clean machine registers the marketplace, installs the plugin to cache, and leaves `/doctor` clean.
 
 ### Phase 4: Validation (new session required)
 

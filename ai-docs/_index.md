@@ -10,10 +10,11 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
 
-**Symlink topology:**
-- Skills and agents authored here, symlinked into `~/.claude/skills/` and `~/.claude/agents/`.
-- `claude/CLAUDE.md` symlinked to `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
-- Symlinks are managed by `./install.sh update` — run after adding or renaming a skill, agent, or infra file. If a session reports a missing skill or agent that exists in the repo, the fix is `./install.sh update`, never a manual `ln`.
+**Plugin topology:**
+- Skills and agents are delivered via the `blueprint` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
+- After any change to `claude/`, run `claude plugin update blueprint@blueprint` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
+- `claude/CLAUDE.md` is symlinked to `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
+- External install: `/plugin marketplace add kang-sw/devenv` → `/plugin install blueprint@blueprint`.
 
 ## Reference Documents
 
@@ -22,8 +23,8 @@ Read before authoring or modifying skills, agents, or infra:
 | Document | Purpose |
 |----------|---------|
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
-| `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol |
-| `claude/infra/agents/_subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules |
+| `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `blueprint-infra impl-playbook.md` (agent context) or `${CLAUDE_PLUGIN_ROOT}/infra/impl-playbook.md` (skill context). |
+| `claude/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `blueprint-infra subagent-rules.md`. |
 
 ## Native Agents
 
@@ -46,15 +47,17 @@ claude/agents/
 ## Infra Layout
 
 ```
-claude/infra/
+claude/infra/                 — docs only; accessed via blueprint-infra or ${CLAUDE_PLUGIN_ROOT}/infra/
   impl-playbook.md            — subagent-safe implementation discipline
   mental-model-conventions.md — mental-model doc format and invariants
   ticket-conventions.md       — ticket format, status directories, stem convention
-  list-mental-model.py        — enumerate mental-model docs relevant to target paths
-  merge-branch.sh             — branch merge with strategy selection (squash or --no-ff)
-  ask.sh                      — interactive user query helper
-  agents/                     — subagent dispatch rules (caller-injected)
-    _subagent-rules.md        — exploration, branches, general rules
+  subagent-rules.md           — exploration, branches, general rules
+
+claude/bin/                   — PATH-accessible executables (added by plugin)
+  ask                         — interactive user query helper
+  merge-branch                — branch merge with strategy selection (squash or --no-ff)
+  list-mental-model           — enumerate mental-model docs relevant to target paths
+  blueprint-infra             — cat any infra doc by name (agent Bash tool context)
 ```
 
 ## Skill Inventory
@@ -96,10 +99,8 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260419-chore-blueprint-plugin-extraction` | wip | Package claude/ as a Claude Code plugin named "blueprint"; restructure infra, update references, patch install.sh |
+| `260419-chore-blueprint-plugin-extraction` | done | Package claude/ as a Claude Code plugin named "blueprint"; all phases complete and validated |
 
 ## Session Notes
 
 <!-- Cross-session intent only, 2-5 lines max, delete when stale. -->
-Active: `260419-chore-blueprint-plugin-extraction` — packaging workflow as blueprint plugin.
-Phases 1–3 are implementation (restructure + reference updates + install.sh); Phase 4 requires a fresh session for validation.
