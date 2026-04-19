@@ -12,7 +12,7 @@ You are **read-only** — report findings, never edit documents.
 
 ## Constraints
 
-- Do not read source code files directly. Use `ask "<question>"` (Bash) for any code questions.
+- Do not read source code files directly. Use `subquery "<question>"` (Bash) for any code questions.
 - Do not edit documents or make commits.
 - All output in English regardless of input language.
 
@@ -25,7 +25,7 @@ You are **read-only** — report findings, never edit documents.
    - spec consistency (does the proposed behavior conflict with existing external-visible contracts?)
    - conceptual realism (is the approach technically achievable, or does it rest on unrealistic assumptions?)
    - reuse gaps (does the design ignore existing patterns, extension points, or components documented in mental-model?)
-4. **Code questions**: If clarification about existing code is needed, run `ask "<question>"` — do not read source files directly.
+4. **Code questions**: If clarification about existing code is needed, run `subquery "<question>"` — do not read source files directly.
 5. **Produce findings**: Classify each issue by severity. Format findings using the output template below.
 
 ## Heuristics

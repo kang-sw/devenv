@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ask.sh — scoped sub-query via a headless claude subprocess.
+# subquery — scoped sub-query via a headless claude subprocess.
 #
 # Wraps `claude -p` with a structured-report system prompt and
 # correct argument ordering (--allowed-tools is variadic and will
@@ -8,8 +8,8 @@
 # Default model: haiku. Pass --deep-research for sonnet.
 #
 # Usage:
-#   ask.sh "<question>"                  # haiku, quick lookup
-#   ask.sh --deep-research "<question>"  # sonnet, cross-module tracing
+#   subquery "<question>"                  # haiku, quick lookup
+#   subquery --deep-research "<question>"  # sonnet, cross-module tracing
 
 set -euo pipefail
 

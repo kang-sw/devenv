@@ -53,7 +53,7 @@ claude/infra/                 — docs only; accessed via load-infra
   implementer.md              — code implementer role; spawn as general-purpose + read first
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
-  ask                         — interactive user query helper
+  subquery                    — scoped sub-query via headless claude subprocess
   merge-branch                — branch merge with strategy selection (squash or --no-ff)
   list-mental-model           — enumerate mental-model docs relevant to target paths
   load-infra             — cat any infra doc by name (agent Bash tool context)
