@@ -63,7 +63,7 @@ Agent(
   model = "sonnet",
   team_name = "impl-<scope>",
   prompt = """
-    Read `${CLAUDE_PLUGIN_ROOT}/infra/implementer.md` first.
+    Run `load-infra implementer.md` first.
 
     Lead name: <lead-name>
     Mode: <A: plan-driven | B: inline brief>
