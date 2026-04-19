@@ -24,6 +24,7 @@ Target: $ARGUMENTS
 - When direct-edit verdict fires, announce and invoke `/implement` via the Skill tool.
 - If the target is too vague to route (no ticket, no actionable description), stop and suggest `/write-ticket` or `/discuss`.
 - Never skip announce — the user must see the routing decision before anything proceeds.
+- Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/delegate-implement` and `/parallel-implement`, and merge.
 
 ## On: invoke
 
