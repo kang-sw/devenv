@@ -3,6 +3,7 @@ name: manual-think
 description: >-
   Activate manual chain-of-thought when native extended thinking is
   unavailable. Load at session start during server outages.
+disable-model-invocation: true
 ---
 
 # Manual Think

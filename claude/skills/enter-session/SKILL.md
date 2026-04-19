@@ -8,6 +8,7 @@ description: >
   the Briefing directly from the payload; otherwise fork clerk to
   synthesize recent work and active tickets. Either way, emits a
   compact briefing routed to the next workflow step.
+disable-model-invocation: true
 argument-hint: "[optional initial context]"
 ---
 
