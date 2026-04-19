@@ -395,34 +395,25 @@ link "$REPO_DIR/nvim" "$HOME/.config/nvim"
 # Claude Code CLAUDE.md — global instructions
 link "$REPO_DIR/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
 
-# Claude Code skills — link each skill folder individually
-mkdir -p "$HOME/.claude/skills"
-for skill_dir in "$REPO_DIR/claude/skills"/*/; do
-  [ -d "$skill_dir" ] || continue
-  skill_name="$(basename "$skill_dir")"
-  link "$skill_dir" "$HOME/.claude/skills/$skill_name"
+# Claude Code blueprint plugin — clean up old per-file symlinks we created
+# (skills/agents/infra were previously symlinked individually; now the plugin handles them).
+# Only removes symlinks whose target is inside REPO_DIR — never touches foreign symlinks.
+info "Cleaning up old blueprint skill/agent/infra symlinks..."
+for dir in "$HOME/.claude/skills" "$HOME/.claude/agents" "$HOME/.claude/infra"; do
+  [ -d "$dir" ] || continue
+  for entry in "$dir"/*; do
+    [ -L "$entry" ] || continue
+    if [[ "$(readlink "$entry")" == "$REPO_DIR"* ]]; then
+      rm "$entry"
+      muted "removed own symlink: $entry"
+    fi
+  done
 done
-
-# Claude Code infra — link each entry (file or directory) individually
-mkdir -p "$HOME/.claude/infra"
-for infra_entry in "$REPO_DIR/claude/infra"/*; do
-  [ -e "$infra_entry" ] || continue
-  infra_name="$(basename "$infra_entry")"
-  link "$infra_entry" "$HOME/.claude/infra/$infra_name"
-done
-
-# Claude Code agents — link each agent file individually
-# Migrate from old folder symlink to per-file symlinks
-if [ -L "$HOME/.claude/agents" ]; then
-  warn "removing old agents folder symlink: $HOME/.claude/agents"
+# Remove old agents folder symlink if still present from a very old install
+if [ -L "$HOME/.claude/agents" ] && [[ "$(readlink "$HOME/.claude/agents")" == "$REPO_DIR"* ]]; then
+  warn "removing old agents folder symlink"
   rm "$HOME/.claude/agents"
 fi
-mkdir -p "$HOME/.claude/agents"
-for agent_file in "$REPO_DIR/claude/agents"/*.md; do
-  [ -f "$agent_file" ] || continue
-  agent_name="$(basename "$agent_file")"
-  link "$agent_file" "$HOME/.claude/agents/$agent_name"
-done
 
 # Claude Code hooks — link hook scripts
 mkdir -p "$HOME/.claude/hooks"
@@ -435,10 +426,10 @@ done
 # Claude Code settings — ensure required config is set
 info "Ensuring Claude Code settings..."
 mkdir -p "$HOME/.claude"
-python3 - "$HOME/.claude/settings.json" "$HOME/.claude.json" <<'PYEOF'
+python3 - "$HOME/.claude/settings.json" "$HOME/.claude.json" "$REPO_DIR" <<'PYEOF'
 import json, sys, os
 
-settings_path, claude_json_path = sys.argv[1], sys.argv[2]
+settings_path, claude_json_path, repo_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 
 # ── settings.json (project-level: env vars) ──────────────────────────────────
 required_env = {
@@ -489,6 +480,26 @@ for event, entries in required_hooks.items():
         hooks[event] = existing + entries
         changed = True
 
+# ── blueprint plugin registration ────────────────────────────────────────────
+required_marketplaces = {
+    "blueprint": {
+        "source": {"source": "directory", "path": repo_dir}
+    }
+}
+required_plugins = {"blueprint@blueprint": True}
+
+marketplaces = settings.setdefault("extraKnownMarketplaces", {})
+for name, cfg in required_marketplaces.items():
+    if marketplaces.get(name) != cfg:
+        marketplaces[name] = cfg
+        changed = True
+
+plugins = settings.setdefault("enabledPlugins", {})
+for name, val in required_plugins.items():
+    if plugins.get(name) != val:
+        plugins[name] = val
+        changed = True
+
 if changed:
     with open(settings_path, "w") as f:
         json.dump(settings, f, indent=2)
@@ -536,7 +547,6 @@ cleanup_dead_links() {
 }
 cleanup_dead_links "$HOME/.claude/skills"
 cleanup_dead_links "$HOME/.claude/agents"
-cleanup_dead_links "$HOME/.claude/infra"
 
 # ══════════════════════════════════════════════════════════════════════════════
 
