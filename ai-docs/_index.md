@@ -23,7 +23,7 @@ Read before authoring or modifying skills, agents, or infra:
 | Document | Purpose |
 |----------|---------|
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
-| `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `load-infra impl-playbook.md` (agent context) or `${CLAUDE_PLUGIN_ROOT}/infra/impl-playbook.md` (skill context). |
+| `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `load-infra impl-playbook.md`. |
 | `claude/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `load-infra subagent-rules.md`. |
 
 ## Native Agents
@@ -44,7 +44,7 @@ claude/agents/
 ## Infra Layout
 
 ```
-claude/infra/                 — docs only; accessed via load-infra or ${CLAUDE_PLUGIN_ROOT}/infra/
+claude/infra/                 — docs only; accessed via load-infra
   impl-playbook.md            — subagent-safe implementation discipline
   mental-model-conventions.md — mental-model doc format and invariants
   ticket-conventions.md       — ticket format, status directories, stem convention
@@ -73,6 +73,7 @@ claude/skills/
   delegate-implement/  — delegated implementer + reviewer cycle (cold sessions or wide scope)
   parallel-implement/  — multiple implementer pairs, disjoint file sets on shared branch
   proceed/             — auto-route through the canonical pipeline
+  ship/                — release: version bump, tag, build, publish per project config
   team-lead/           — team orchestration mode (TeamCreate, coordination, shutdown)
   manual-think/        — manual chain-of-thought when native thinking unavailable
   write-mental-model/  — mental-model document format, inclusion test, rebuild

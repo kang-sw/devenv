@@ -179,7 +179,9 @@ Wait for user approval before proceeding. If the user requests tweaks:
 
 1. Dispatch **mental-model-updater** with the full commit range covering all scope commits. Wait for completion before proceeding.
 2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
-3. If ticket-driven, update ticket status.
+3. If ticket-driven:
+   1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase. Content: what was implemented, deviations from plan, key findings for future phases. Short hash = merge commit.
+   2. Move ticket to the next status directory (`git mv`) if all phases are complete.
 
 ### 8. Cleanup
 

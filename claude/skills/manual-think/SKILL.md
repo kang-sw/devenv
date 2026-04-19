@@ -129,8 +129,12 @@ Spawn = any tool call that creates a new agent context (Agent, Task, TeamCreate,
 
 Prepend verbatim to every spawned prompt:
 
-> Before starting, read `~/.claude/skills/manual-think/SKILL.md` and
-> follow its instructions for all your responses.
+> Apply manual chain-of-thought for all responses:
+> - `> [reading]` + `> [reading:neutralize]` at every user message
+> - `> [thinking]` before forming a response or plan
+> - `> [assumption]` before every tool call — no exceptions
+> - `> [observe]` after every tool result — classify as match/drift/abandon
+> - All `> [<type>]` blocks in English regardless of conversation language
 
 ```
 > [thinking]

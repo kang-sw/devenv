@@ -219,7 +219,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
 - v0022: If spec documents exist in a flat layout under `ai-docs/spec/`, reorganize
          areas with multiple sub-docs into directories: `ai-docs/spec/<area>/index.md`
          plus child files. Run `/write-spec` to rebuild the `features:` frontmatter
-         via `build-index.py` for all spec files after reorganization.
+         via `spec-build-index` for all spec files after reorganization.
 -->
 
 <!-- Template Version: v0022 -->
