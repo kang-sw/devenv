@@ -173,11 +173,11 @@ affected sections (warm) if structural problems persist.
 
 | Mode | When |
 |------|------|
-| Warm | Main agent already holds relevant codebase context from prior session turns, or user explicitly signals direct authorship; remaining risk is the main-agent draft missing reusable components or misciting existing shapes |
-| Survey | Ticket has resolved the architectural approach, main agent is cold on the relevant area; remaining risk is the cold implementer reinventing existing utilities or missing established patterns |
+| Warm | Scope is single-module or smaller with no cross-module coordination and no new public contracts; AND main agent holds session context sufficient to draft the plan without source exploration beyond confirming a few specific symbols |
+| Survey | Ticket has resolved the architectural approach; main agent is cold on the relevant area, or scope spans multiple modules; remaining risk is the cold implementer reinventing existing utilities or missing established patterns |
 | Deep | Multiple viable implementation strategies with non-obvious trade-offs, unfamiliar cross-module integration with cascading effects, or ticket explicitly flags unresolved complexity |
 
-Prefer warm when the main agent is warm. Among cold modes, survey is the default — deep is the exception, reserved for genuine architectural novelty.
+Survey is the default. Warm fires only when the scope is genuinely small and the lead can draft from existing session knowledge without codebase exploration. When exploration is needed, cold modes research more thoroughly than a warm lead drafting from memory. Among cold modes, deep is the exception — reserved for genuine architectural novelty.
 
 ### judge: research-depth
 
@@ -201,14 +201,14 @@ Default to tactical for thorough-level research. Use strategic only when over-sp
 ## Doctrine
 
 Write-plan bridges ticket decisions and executor action at **the right
-weight** — warm mode optimizes for preserving session context that
-would otherwise be discarded at subagent fork boundaries, survey mode
-optimizes for implementer context efficiency (compact reconnaissance
-that prevents wasted exploratory search), deep mode optimizes for
-executor self-sufficiency after context reset (complete architectural
-guidance). In cold modes the lead passes only binding decisions the
-delegate cannot derive and the delegate owns research and drafting; in
-warm mode the lead is the drafter and the populator grounds the draft
-in concrete code. When a rule is ambiguous, apply whichever
-interpretation better preserves the chosen mode's optimization target
-while minimizing what the coordinator must serialize.
+weight** — warm mode optimizes for small-scope plans where the lead's
+session context is sufficient to draft without fresh research (the populator
+confirms rather than discovers); survey mode optimizes for implementer
+context efficiency (compact reconnaissance that prevents wasted exploratory
+search); deep mode optimizes for executor self-sufficiency after context
+reset (complete architectural guidance). In all modes, the lead's warmth is
+most valuable as precise directives — sharper inputs to the delegate's
+research, not a substitute for that research. When exploration is needed,
+cold modes do it more thoroughly. When a rule is ambiguous, apply whichever
+interpretation better preserves the chosen mode's optimization target while
+minimizing what the coordinator must serialize.

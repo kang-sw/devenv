@@ -110,10 +110,10 @@ For a pipeline verdict, invoke each stage sequentially via the Skill tool, passi
 
 | Decision | When |
 |----------|------|
-| Direct edit (skip pipeline) | Main agent is warm on the target area AND change is small and isolated (single file or tightly coupled pair, no new public contracts) AND single-scope AND user has not explicitly requested delegation |
-| Engage pipeline | Any condition above is unmet |
+| Direct edit (skip pipeline) | Change is confined to a single file AND purely internal (no callers affected, no new public symbols, no new test files needed) AND user has not explicitly requested delegation |
+| Engage pipeline | Any condition above is unmet — including any cross-file touch, new public contract, or new test file |
 
-Direct edit invokes `/implement`. Use when pipeline overhead exceeds the value of contract-locking and delegation.
+Direct edit invokes `/implement`. This is the exception, not the fast path. Warmth improves briefing quality for delegation — it does not exempt a change from delegation. When the main agent is warm, produce a richer brief for `/delegate-implement` rather than editing directly.
 
 ### judge: needs-ticket
 
@@ -156,10 +156,10 @@ If `needs-plan = yes`, execution-mode is locked to single — do not evaluate pa
 
 Proceed optimizes for **routing accuracy under session-warmth awareness** —
 gather just enough signal from conversation state and artifacts to pick the
-right path, announce the decision for user visibility, then either delegate
-to the chosen sub-skills or return control for direct edit. Warmth is the
-axis that distinguishes "the main agent has context worth preserving" (warm
-paths, including direct edit and warm-mode planning) from "a cold subagent
-must start from scratch" (full-delegation paths). When a rule is ambiguous,
-apply whichever interpretation better matches the observed warmth while
-preserving the user's ability to intervene.
+right path, announce the decision for user visibility, then delegate to the
+chosen sub-skills. Delegation is the default; direct edit is the exception
+for trivially local single-file changes with no external impact. Warmth is
+the axis that improves briefing precision for delegation — a warm agent
+writes sharper directives and a richer brief, not fewer delegation steps.
+When a rule is ambiguous, apply whichever interpretation better preserves
+the user's ability to intervene while keeping delegation as the baseline.
