@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the frontmatter feature index from spec document headings.
 
-Usage: python build-index.py <spec-file.md> [<spec-file2.md> ...]
+Usage: spec-build-index <spec-file.md> [<spec-file2.md> ...]
 
 Parses ## and deeper headings from the markdown body, builds an indented
 feature tree, and writes it into the YAML frontmatter `features:` field.

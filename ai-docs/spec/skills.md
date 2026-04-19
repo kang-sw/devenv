@@ -75,7 +75,7 @@ Key annotation conventions:
 - No `🚧` marker — implemented and verified against the codebase.
 
 Directory structure: one directory per area when multiple sub-docs are needed;
-flat file for self-contained surfaces. `build-index.py` regenerates the `features:`
+flat file for self-contained surfaces. `spec-build-index` regenerates the `features:`
 frontmatter after every write.
 
 ### Skeleton Authoring
