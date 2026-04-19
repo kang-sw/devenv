@@ -94,7 +94,12 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
 Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
+| Stem | Status | Summary |
+|------|--------|---------|
+| `260419-chore-blueprint-plugin-extraction` | wip | Package claude/ as a Claude Code plugin named "blueprint"; restructure infra, update references, patch install.sh |
+
 ## Session Notes
 
 <!-- Cross-session intent only, 2-5 lines max, delete when stale. -->
-<!-- no active session notes -->
+Active: `260419-chore-blueprint-plugin-extraction` — packaging workflow as blueprint plugin.
+Phases 1–3 are implementation (restructure + reference updates + install.sh); Phase 4 requires a fresh session for validation.
