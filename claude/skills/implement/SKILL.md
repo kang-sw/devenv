@@ -14,8 +14,8 @@ Target: $ARGUMENTS
 ## Invariants
 
 - The main agent edits directly — no subagent delegation for the edit itself.
-- Follow `~/.claude/infra/impl-playbook.md` for test strategy, verify, failure diagnosis, deviation protocol, and mechanical-edit criteria.
-- Load relevant mental-model docs before editing — run `python3 ~/.claude/infra/list-mental-model.py <target-paths>` and read every listed file.
+- Follow impl-playbook — run `blueprint-infra impl-playbook.md` for test strategy, verify, failure diagnosis, deviation protocol, and mechanical-edit criteria.
+- Load relevant mental-model docs before editing — run `list-mental-model <target-paths>` and read every listed file.
 - When skeleton exists for the target scope, its stubs and integration tests are the acceptance criteria.
 - Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
 - Escalate to `/delegate-implement` or `/proceed` if scope grows beyond single-scope direct-edit capacity.
@@ -31,8 +31,8 @@ Target: $ARGUMENTS
 2. If plan-driven: read the plan file. Note binding decisions and Skeleton Amendments.
 3. If ticket-driven: read the ticket; collect skeleton and plan references from frontmatter.
 4. Verify skeleton coverage when public contracts are touched: grep for stubs. If `judge: skeleton-check` requires a skeleton and none exists, stop and suggest `/write-skeleton`.
-5. Load mental-model docs: `python3 ~/.claude/infra/list-mental-model.py <target-paths>`; read every listed file.
-6. Read `~/.claude/infra/impl-playbook.md`.
+5. Load mental-model docs: `list-mental-model <target-paths>`; read every listed file.
+6. Run `blueprint-infra impl-playbook.md`.
 7. Identify integration test file paths and the command to run them.
 
 ### 2. Edit

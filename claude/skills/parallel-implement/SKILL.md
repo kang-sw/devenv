@@ -169,7 +169,7 @@ Wait for user approval before proceeding. If the user requests tweaks:
 
 ### 6. Merge
 
-1. Run `~/.claude/infra/merge-branch.sh <original-branch> parallel-impl-<slug> "<commit-message>"`.
+1. Run `merge-branch <original-branch> parallel-impl-<slug> "<commit-message>"`.
    The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
    Compose the commit message per CLAUDE.md commit rules summarizing all scopes.
 

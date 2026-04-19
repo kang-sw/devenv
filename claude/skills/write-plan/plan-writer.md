@@ -30,7 +30,7 @@ Adapt depth to complexity:
 - Moderate (feature following patterns, 2–3 files): + target files, adjacent code for patterns.
 - Thorough (new component, cross-module, unfamiliar area): + search for similar implementations, extract convention examples.
 
-When uncertain, go one level deeper. Use `~/.claude/infra/ask.sh "<question>"`
+When uncertain, go one level deeper. Use `ask "<question>"`
 for scoped lookups. Before designing new components, search for reusable
 existing utilities or patterns.
 

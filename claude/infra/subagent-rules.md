@@ -9,11 +9,11 @@ prompt — subagents do not read this file directly.
 For scoped exploration beyond direct Read/Grep/Glob tools:
 
 ```bash
-bash ~/.claude/infra/ask.sh "<question>"                  # haiku
-bash ~/.claude/infra/ask.sh --deep-research "<question>"  # sonnet
+ask "<question>"                  # haiku
+ask --deep-research "<question>"  # sonnet
 ```
 
-Prefer direct Read/Grep/Glob when the target is known. Use `ask.sh`
+Prefer direct Read/Grep/Glob when the target is known. Use `ask`
 when sequential searches would flood the subagent's context, or for
 external lookups. `--deep-research` for cross-module tracing, API-usage
 nuance, or when strict cited output is needed.

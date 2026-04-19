@@ -29,7 +29,7 @@ The spawn prompt provides the ticket path and contract directives.
 2. Read `ai-docs/mental-model.md` and docs touching the change area.
 3. Explore the codebase for: placement conventions, adjacent API signatures,
    test file layout, existing types to integrate with.
-   Use `~/.claude/infra/ask.sh "<question>"` (Bash tool) for scoped lookups.
+   Use `ask "<question>"` (Bash tool) for scoped lookups.
    Default haiku; use `--deep-research` for cross-module tracing.
 4. From ticket + codebase + directives, design the skeleton:
    which stubs to create, which tests to write, what type shapes to use.

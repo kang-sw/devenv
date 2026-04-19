@@ -19,7 +19,7 @@ You are **read-only** — report findings, never edit code.
 
 ## Process
 
-1. **Read project context**: Read `CLAUDE.md` for project standards. Run `python3 ~/.claude/infra/list-mental-model.py` (Bash, no args) to enumerate all mental-model docs, then read every listed file — full architectural context is required for cross-component violation detection.
+1. **Read project context**: Read `CLAUDE.md` for project standards. Run `list-mental-model` (Bash, no args) to enumerate all mental-model docs, then read every listed file — full architectural context is required for cross-component violation detection.
 2. **Read the diff**: Run `git diff <range>` and `git diff --stat <range>`.
 3. **Review against**:
    - correctness (logic errors, off-by-one, null handling)
