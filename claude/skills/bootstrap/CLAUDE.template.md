@@ -156,16 +156,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          it where applicable. Epic tickets use category `epic`.
 - v0006: If plan paths use old format (`YYMM/DD-HHMM.<name>.md`), rename
          to `YYYY-MM/DD-hhmm.<name>.md` via `git mv`.
-- v0007: If `ai-docs/list-active.sh` does not exist, create it:
-         ```bash
-         #!/usr/bin/env bash
-         find ai-docs -type f -name '*.md' \
-           ! -path '*/tickets/done/*' \
-           ! -path '*/tickets/dropped/*' \
-           ! -path '*/plans/*' \
-           | sort
-         ```
-         Then `chmod +x ai-docs/list-active.sh` and commit.
+- v0007: [obsoleted]
 - v0008: [obsoleted by v0014]
 - v0009: If Commit Rules lack `## Ticket Updates`, add it. Ticket-driven
          commits must record the stem and forward-facing findings.

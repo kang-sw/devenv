@@ -40,10 +40,9 @@ Mode: $ARGUMENTS
    - `ai-docs/_index.local.md` (stub, add to `.gitignore`)
    - `ai-docs/tickets/` with status subdirectories: `idea/`, `todo/`, `wip/`, `done/`, `dropped/`
    - `ai-docs/mental-model/`, `ai-docs/deps/`, `ai-docs/ref/`
-4. Create `ai-docs/list-active.sh` per v0007.
-5. Add `ai-docs/_index.local.md` to `.gitignore` if not present.
-6. Set `<!-- Template Version: vNNNN -->` to latest version from template.
-7. Commit.
+4. Add `ai-docs/_index.local.md` to `.gitignore` if not present.
+5. Set `<!-- Template Version: vNNNN -->` to latest version from template.
+6. Commit.
 
 ## On: upgrade
 
