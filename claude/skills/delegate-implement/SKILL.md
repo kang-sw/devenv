@@ -59,10 +59,12 @@ Target: $ARGUMENTS
 Agent(
   name = "implementer",
   description = "Implement plan on branch",
-  subagent_type = "implementer",
+  subagent_type = "general-purpose",
   model = "sonnet",
   team_name = "impl-<scope>",
   prompt = """
+    Read `${CLAUDE_PLUGIN_ROOT}/infra/implementer.md` first.
+
     Lead name: <lead-name>
     Mode: <A: plan-driven | B: inline brief>
     <Plan path | Brief text>

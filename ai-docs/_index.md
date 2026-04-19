@@ -34,13 +34,10 @@ Team communication rules are injected by the calling skill at spawn time.
 
 ```
 claude/agents/
-  implementer.md          — code implementation from plan or brief
-  parallel-implementer.md — scope-bounded implementer for parallel runs; never commits
   reviewer.md             — code review (read-only, produces findings)
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
-  plan-populator.md       — enrich main-agent draft plan with codebase-grounded detail (warm mode)
   spec-updater.md         — strip completed 🚧 markers; flag spec/implementation drift
 ```
 
@@ -52,6 +49,7 @@ claude/infra/                 — docs only; accessed via load-infra or ${CLAUDE
   mental-model-conventions.md — mental-model doc format and invariants
   ticket-conventions.md       — ticket format, status directories, stem convention
   subagent-rules.md           — exploration, branches, general rules
+  implementer.md              — code implementer role; spawn as general-purpose + read first
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   ask                         — interactive user query helper

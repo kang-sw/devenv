@@ -46,9 +46,11 @@ Target: $ARGUMENTS
 Agent(
   name = "plan-populator",
   description = "Enrich and verify draft plan",
-  subagent_type = "plan-populator",
+  subagent_type = "general-purpose",
   model = "sonnet",
   prompt = """
+    Read `${CLAUDE_SKILL_DIR}/plan-populator.md` first.
+
     Draft plan path: <plan-path>
 
     ## Skeleton contracts (locked)

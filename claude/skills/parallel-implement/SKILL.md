@@ -76,10 +76,12 @@ Spawn all 2N agents in the same message (fully parallel). For each scope unit, s
 Agent(
   name = "implementer-<scope.name>",
   description = "Implement <scope.name> scope",
-  subagent_type = "parallel-implementer",
+  subagent_type = "general-purpose",
   model = "sonnet",
   team_name = "parallel-impl-<slug>",
   prompt = """
+    Read `${CLAUDE_SKILL_DIR}/parallel-implementer.md` first.
+
     Lead name: <lead-name>
     Scope: <scope.name>
     Allowed files: <scope.file_set — one per line or comma-separated>
