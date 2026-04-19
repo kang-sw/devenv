@@ -1,12 +1,9 @@
 ---
 name: write-plan
 description: >
-  Codebase research producing implementation guidance. Routes between
-  warm mode (main agent authors, populator enriches), survey mode
-  (reusable component discovery, sonnet delegate), and deep mode
-  (architectural planning, opus delegate + verification) based on
-  whether the main agent already holds relevant codebase context and
-  on remaining implementation risk after ticket decisions.
+  Codebase research producing an implementation plan. Runs in warm,
+  survey, or deep mode depending on session context and implementation
+  risk.
 argument-hint: [ticket-path or description]
 ---
 

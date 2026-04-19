@@ -1,10 +1,10 @@
 ---
 name: proceed
 description: >
-  Auto-route and execute the right workflow pipeline. Assesses existing
-  artifacts and scope, announces the chosen path, then chains through
-  /write-plan, /write-skeleton, /implement, /delegate-implement, or
-  /parallel-implement as needed.
+  First step for any implementation task. Reads what already exists —
+  tickets, plans, skeletons, session context — and determines the right
+  execution path before any code is touched. Use when starting
+  implementation work on a ticket or task description.
 argument-hint: "<ticket-path or inline description>"
 ---
 

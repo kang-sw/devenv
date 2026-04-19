@@ -1,8 +1,9 @@
 ---
 name: delegate-implement
 description: >
-  Delegated single-scope implementation cycle (implementer + reviewer pair).
-  Use when implementation is handed to subagents behind locked contracts.
+  Delegated single-scope implementation cycle. An implementer-reviewer pair
+  work behind locked contracts; the lead coordinates, merges, and updates
+  docs.
 argument-hint: "<plan-path or inline brief> [--ticket <ticket-stem>]"
 ---
 

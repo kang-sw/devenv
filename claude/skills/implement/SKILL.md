@@ -3,8 +3,7 @@ name: implement
 description: >
   Main-agent-direct single-scope implementation. The main agent reads,
   edits, verifies, and commits directly — no subagent delegation for the
-  edit itself. Use when session context on the target area is warm and
-  scope fits direct-edit capacity.
+  edit itself.
 argument-hint: "[ticket-path or inline brief] [--plan <plan-path>]"
 ---
 

@@ -1,9 +1,9 @@
 ---
 name: parallel-implement
 description: >
-  When implementation spans multiple independent modules that can be
-  built concurrently. Use instead of /delegate-implement when skeleton defines
-  disjoint scopes suitable for parallel execution.
+  Parallel implementation across N disjoint scope units. Spawns one
+  implementer-reviewer pair per scope, serializes build commands through
+  the lead, and commits one scope at a time.
 argument-hint: "<ticket-path, plan-path, or inline scope description>"
 ---
 
