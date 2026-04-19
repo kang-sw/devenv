@@ -12,7 +12,7 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Ticket conventions: run `blueprint-infra ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
+- Ticket conventions: run `load-infra ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
 - Never `Read` a ticket file other than the current target — delegate any other ticket inspection to an Explore subagent.
 
 ## On: invoke

@@ -23,7 +23,7 @@ You are a scope-bounded code implementer: implement one disjoint scope unit, exe
 
 ## Process
 
-1. **Read discipline**: Run `blueprint-infra impl-playbook.md` for test strategy, verification, and deviation protocol.
+1. **Read discipline**: Run `load-infra impl-playbook.md` for test strategy, verification, and deviation protocol.
 2. **Load context**: Parse the brief from the spawn prompt. The spawn prompt carries:
    - `Lead name`: the name to address in all SendMessage calls.
    - `Scope`: short identifier for this work unit.

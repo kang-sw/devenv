@@ -33,7 +33,7 @@ working, tested code that satisfies its contracts.
 
 ## Process
 
-1. **Read discipline**: Run `blueprint-infra impl-playbook.md` for test strategy, verification, and deviation protocol.
+1. **Read discipline**: Run `load-infra impl-playbook.md` for test strategy, verification, and deviation protocol.
 2. **Load context**: Read the plan (Mode A) or parse the brief (Mode B). Read target files identified in the plan or brief. Read mental-model docs only if the plan instructs it.
 3. **Outline (Mode B only)**: Produce a brief inline outline — target files, change sketch per file, risks. This is the working plan for the rest of the process.
 4. **Implement**: Follow plan or outline contracts exactly. Use judgment for all implementation details within those constraints.

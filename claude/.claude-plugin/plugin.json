@@ -1,5 +1,5 @@
 {
-  "name": "blueprint",
+  "name": "ws",
   "version": "0.1.0",
   "description": "Structured AI-assisted development workflow: ticket-driven, contract-first, multi-agent.",
   "author": {

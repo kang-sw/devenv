@@ -3,7 +3,7 @@ name: write-mental-model
 description: >
   Rebuild or update ai-docs/mental-model/ with operational knowledge for
   modifying the codebase. Delegates source exploration to subagents to keep
-  the main context window small. Format and doctrine: run `blueprint-infra mental-model-conventions.md`.
+  the main context window small. Format and doctrine: run `load-infra mental-model-conventions.md`.
 argument-hint: "[target domain or special instruction] (omit for full rebuild)"
 ---
 
@@ -13,7 +13,7 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Apply the inclusion test and document format from `blueprint-infra mental-model-conventions.md` to every document written.
+- Apply the inclusion test and document format from `load-infra mental-model-conventions.md` to every document written.
 - No direct source reading — all source exploration is subagent-delegated.
 - Incremental by default — only rebuild affected domains unless full rebuild is requested.
 - Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
@@ -54,7 +54,7 @@ Run subagents in parallel.
 ### 3. Write / update documents
 
 Using subagent analyses, create or update `ai-docs/mental-model/` documents:
-- Follow the document format in `blueprint-infra mental-model-conventions.md`.
+- Follow the document format in `load-infra mental-model-conventions.md`.
 - Apply the inclusion test to every claim before writing it.
 - Maintain frontmatter: set `domain`, update `sources` (directory-level patterns), update `related`.
 - Remove documents for domains that no longer exist.
@@ -90,4 +90,4 @@ Report:
 
 ## Doctrine
 
-Write-mental-model optimizes for **minimal, accurate diffs to `ai-docs/mental-model/`** — subagent delegation keeps the main context free for authoring judgment; incremental scope prevents churn; the inclusion test in `blueprint-infra mental-model-conventions.md` filters every claim. When a rule is ambiguous, apply whichever interpretation produces the smallest correct change that passes the inclusion test.
+Write-mental-model optimizes for **minimal, accurate diffs to `ai-docs/mental-model/`** — subagent delegation keeps the main context free for authoring judgment; incremental scope prevents churn; the inclusion test in `load-infra mental-model-conventions.md` filters every claim. When a rule is ambiguous, apply whichever interpretation produces the smallest correct change that passes the inclusion test.

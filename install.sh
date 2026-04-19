@@ -482,11 +482,11 @@ for event, entries in required_hooks.items():
 
 # ── blueprint plugin registration ────────────────────────────────────────────
 required_marketplaces = {
-    "blueprint": {
+    "ws": {
         "source": {"source": "directory", "path": repo_dir}
     }
 }
-required_plugins = {"blueprint@blueprint": True}
+required_plugins = {"ws@ws": True}
 
 marketplaces = settings.setdefault("extraKnownMarketplaces", {})
 for name, cfg in required_marketplaces.items():
@@ -534,17 +534,17 @@ else:
     print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
-# ── blueprint plugin install (cache copy; run `claude plugin update blueprint@blueprint` after changes)
+# ── blueprint plugin install (cache copy; run `claude plugin update ws@ws` after changes)
 if has claude; then
   INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
-  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if 'blueprint@blueprint' in d.get('plugins',{}) else 1)" "$INSTALLED_PLUGINS" 2>/dev/null; then
+  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if 'ws@ws' in d.get('plugins',{}) else 1)" "$INSTALLED_PLUGINS" 2>/dev/null; then
     muted "blueprint plugin already installed"
   else
     info "Installing blueprint plugin..."
-    claude plugin install blueprint@blueprint && success "blueprint plugin installed" || warn "blueprint plugin install failed — run manually: claude plugin install blueprint@blueprint"
+    claude plugin install ws@ws && success "blueprint plugin installed" || warn "blueprint plugin install failed — run manually: claude plugin install ws@ws"
   fi
 else
-  warn "claude not found — run manually after install: claude plugin install blueprint@blueprint"
+  warn "claude not found — run manually after install: claude plugin install ws@ws"
 fi
 
 # Clean up dead symlinks (skills and agents)

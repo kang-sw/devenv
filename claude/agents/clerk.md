@@ -26,7 +26,7 @@ edits, status transitions — then return a single consolidated report.
 
 ## Process
 
-1. Run `blueprint-infra ticket-conventions.md` — load conventions in full.
+1. Run `load-infra ticket-conventions.md` — load conventions in full.
 2. Parse the spawn prompt for all requested operations (reads, edits, status transitions).
 3. Execute each operation following `/write-ticket` conventions. Never create commits — the caller handles commits.
 4. If any operation is ambiguous or missing required fields, include it as an open question in the report rather than guessing.
