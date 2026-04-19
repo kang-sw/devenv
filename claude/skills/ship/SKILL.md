@@ -24,12 +24,16 @@ Target: $ARGUMENTS
 
 ### 1. Resolve config
 
-1. Glob `ai-docs/ship/` for `*.md` files.
-2. If `$ARGUMENTS` names a project, load `ai-docs/ship/<proj>.md`. Stop with an error if not found.
+Config files follow two naming conventions:
+- `ai-docs/ship/<proj>.md` — committed; for public publish targets.
+- `ai-docs/ship/<proj>.local.md` — gitignored; for private or sensitive deploy targets (internal registries, SSH deploys, credentials). Takes precedence over the `.md` variant when both exist for the same `<proj>`.
+
+1. Glob `ai-docs/ship/` for `*.md` and `*.local.md` files.
+2. If `$ARGUMENTS` names a project, look for `<proj>.local.md` first, then `<proj>.md`. Stop with an error if neither is found.
 3. If no argument:
-   - One file found → load it.
-   - Multiple files found → list them and ask the user which project to ship.
-   - No files found → go to **On: no config**.
+   - One config found (either variant) → load it.
+   - Multiple configs found → list them (noting which are local) and ask the user which project to ship.
+   - No configs found → go to **On: no config**.
 
 ### 2. Execute
 
@@ -52,11 +56,12 @@ The project has no ship config. Consult the user to establish one.
 
 1. Ask:
    - Which sub-project or component is being shipped (determines `<proj>` name and file path).
+   - Whether the deploy target is public or private/sensitive. Private targets (internal registries, SSH deploys, credentials that must not be committed) go in `<proj>.local.md`; public targets go in `<proj>.md`.
    - Version strategy: options include semantic versioning with manual bump, auto-increment patch, date-based (`YYYY.MM.DD`), or `git describe`.
    - Build and package steps.
-   - Publish targets and commands.
+   - Publish or deploy targets and commands.
    - Post-ship steps (e.g. update changelog, notify).
-2. Write the config to `ai-docs/ship/<proj>.md` using the format below.
+2. Write the config to `ai-docs/ship/<proj>.md` or `ai-docs/ship/<proj>.local.md` depending on the answer above.
 3. Confirm the written config with the user before proceeding to **Execute**.
 
 ## Ship Config Format
