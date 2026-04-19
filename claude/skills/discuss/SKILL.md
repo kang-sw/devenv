@@ -43,8 +43,8 @@ Topic: $ARGUMENTS
 ## On: user signals done
 
 1. Offer persistence options only if conclusions warrant it:
-   - **New ticket** — invoke `/write-ticket`.
-   - **Ticket update** — invoke `/write-ticket`, then append design notes to an existing ticket phase.
+   - **New ticket** — invoke `ws:write-ticket`.
+   - **Ticket update** — invoke `ws:write-ticket`, then append design notes to an existing ticket phase.
    - **Mental-model update** — if discussion surfaced new architectural understanding, suggest `/write-mental-model` for the update. Do not edit mental-model docs directly.
 2. Apply **judge: needs-integration-tests** to ticket writes.
 3. Write only what the user approves. No artifact needed for exploratory discussions.
