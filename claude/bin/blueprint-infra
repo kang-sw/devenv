@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# blueprint-infra — cat a shared infra doc by name.
+# Works in both skill and agent contexts where $CLAUDE_PLUGIN_ROOT
+# is unavailable (e.g. agent Bash tool calls).
+#
+# Usage: blueprint-infra <doc-name>
+#   e.g. blueprint-infra impl-playbook.md
+
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+  echo "usage: blueprint-infra <doc-name>" >&2
+  exit 2
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
+TARGET="${PLUGIN_ROOT}/infra/$1"
+
+if [ ! -f "$TARGET" ]; then
+  echo "blueprint-infra: not found: infra/$1" >&2
+  exit 1
+fi
+
+cat "$TARGET"

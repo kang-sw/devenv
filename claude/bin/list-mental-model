@@ -2,7 +2,7 @@
 """List mental-model domain docs relevant to given source paths.
 
 Usage:
-  python3 ~/.claude/infra/list-mental-model.py [path ...]
+  list-mental-model [path ...]
 
   No args  : list all domain docs.
   With args: list docs whose 'sources' frontmatter patterns overlap

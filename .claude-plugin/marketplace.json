@@ -1,0 +1,13 @@
+{
+  "name": "blueprint-marketplace",
+  "owner": {
+    "name": "kang-sw"
+  },
+  "plugins": [
+    {
+      "name": "blueprint",
+      "source": "./claude",
+      "description": "Structured AI-assisted development workflow: ticket-driven, contract-first, multi-agent."
+    }
+  ]
+}
