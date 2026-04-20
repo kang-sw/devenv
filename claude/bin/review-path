@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# review-path — deterministic temp path for a scope's review report
+#
+# Usage: review-path <slug> <scope>
+#
+# Prints the path to stdout and ensures the parent directory exists.
+
+set -euo pipefail
+
+slug="$1"
+scope="$2"
+
+dir="/tmp/parallel-impl-reviews/${slug}"
+mkdir -p "$dir"
+echo "${dir}/${scope}.md"
