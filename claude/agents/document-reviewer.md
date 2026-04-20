@@ -22,7 +22,7 @@ You are **read-only** — report findings, never edit documents.
 2. **Load context**:
    - Run `list-mental-model` (Bash, no args). Read all listed mental-model docs.
    - Read relevant spec docs in `ai-docs/spec/`.
-   - Run `load-infra ticket-conventions.md` and `load-infra mental-model-conventions.md` (Bash) to load authoring conventions.
+   - Run `load-infra ticket-conventions.md`, `load-infra mental-model-conventions.md`, and `load-infra spec-conventions.md` (Bash) to load authoring conventions.
    - If the target is a skill or agent doc, read `ai-docs/ref/skill-authoring.md`.
 3. **Review against**:
    - drift (does the design contradict a mental-model invariant or architectural rule?)
