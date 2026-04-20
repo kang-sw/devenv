@@ -68,8 +68,6 @@ Load `/team-lead` if not already loaded.
 
 ### 2. Spawn N pairs
 
-Before spawning, call `review-path <slug> <scope.name>` for each scope to pre-generate the report paths. Use each returned path as `<review_report_path>` in the corresponding reviewer spawn prompt below.
-
 Spawn all 2N agents in the same message (fully parallel). For each scope unit, spawn one implementer and one reviewer:
 
 **Implementer spawn template:**
@@ -123,7 +121,6 @@ Agent(
     Implementer name: implementer-<scope.name>
     Scope: <scope.name>
     Files in scope: <scope.file_set>
-    Review report path: <review_report_path>
 
     Note: implementers do not commit. To see changes, run:
       git diff HEAD -- <scope.file_set>
@@ -133,8 +130,7 @@ Agent(
     Team rules:
     - SendMessage findings directly to implementer-<scope.name> — do not route through the lead.
     - The implementer fixes and notifies you — re-review until the implementation is clean.
-    - When the implementation is clean, write the full review report to `review_report_path`.
-      Then send {"type": "review_complete", "scope": "<scope.name>", "report_path": "<review_report_path>"} to the lead.
+    - SendMessage the final clean report to the lead when done.
   """
 )
 ```
@@ -143,7 +139,7 @@ All 2N agents are spawned in one batch. Do not wait for one pair before spawning
 
 ### 3. Fan-in
 
-Wait for all N `{"type": "review_complete"}` messages from reviewers. Each message carries the path of the written review report — read it if needed; skip if only tracking completion. Implementers and reviewers remain alive — do not shut them down yet.
+Wait for all N reviewer clean reports to arrive. Implementers and reviewers remain alive — do not shut them down yet.
 
 If a reviewer reports findings, it is communicating directly with its paired implementer. Do not intervene unless an implementer escalates a file-scope conflict or a run_request arrives (handled by `## On: run_request`).
 
@@ -188,8 +184,6 @@ Wait for user approval before proceeding. If the user requests tweaks:
    2. Move ticket to the next status directory (`git mv`) if all phases are complete.
 
 ### 8. Cleanup
-
-Delete the review report directory: `rm -rf /tmp/parallel-impl-reviews/<slug>`.
 
 Send shutdown requests to all teammates (implementers and reviewers). Wait for shutdown approval from each. Call `TeamDelete` only if this invocation of `/parallel-implement` created the team.
 
