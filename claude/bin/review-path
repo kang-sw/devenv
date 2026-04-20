@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# review-path — emit a stable temp path for a review findings file
+#
+# Usage: review-path <stem>
+#   e.g. review-path impl-auth-correctness
+#
+# Creates the parent directory if absent. Outputs the full path.
+# Callers pass the path to the reviewer at spawn time; the same call
+# during cleanup yields the same path for deletion.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: review-path <stem>" >&2
+  exit 1
+fi
+
+stem="${1//[^a-zA-Z0-9_-]/-}"
+dir="/tmp/claude-reviews"
+mkdir -p "$dir"
+echo "${dir}/${stem}.md"

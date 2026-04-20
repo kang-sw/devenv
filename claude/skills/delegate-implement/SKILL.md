@@ -44,7 +44,7 @@ Target: $ARGUMENTS
 8. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
    [ ] Spawn implementer — wait for completion report
-   [ ] Spawn reviewers (partition-allocated) — parallel review → lead consolidates → implementer fixes → re-review loop until clean
+   [ ] Spawn reviewers (partition-allocated) — parallel review → lead relays file paths → implementer fixes → re-review loop until clean
    [ ] Dispatch mental-model-updater — wait for completion
    [ ] Report to user — wait for approval
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run updater (loop)
@@ -76,7 +76,7 @@ Agent(
     Team rules:
     - Verify integration tests pass before reporting completion or after each fix.
     - Report completion to the lead via SendMessage. Include test results.
-    - The lead will send you consolidated review findings — fix, re-verify tests, and report back to the lead.
+    - The lead will send you review file paths — read each file, fix all issues, re-verify tests, and report back to the lead.
     - Commit at logical checkpoints on the current branch.
   """
 )
@@ -102,6 +102,14 @@ loads its partition doc via `load-infra`:
 | Fit | `code-review-fit.md` |
 | Test | `code-review-test.md` |
 
+Before spawning, generate a write-path for each selected partition:
+
+```
+<partition>_path=$(review-path <team-name>-<partition>)
+```
+
+Pass each reviewer its path in the prompt:
+
 ```
 Agent(
   name = "reviewer-<partition>",
@@ -114,9 +122,15 @@ Agent(
 
     Lead name: <lead-name>
     Diff range: <first-commit>..<last-commit>
+    Write path: <partition_path>
 
     Team rules:
-    - SendMessage your findings report to the lead only.
+    - Write your findings report to Write path above.
+    - SendMessage the lead when done with one of:
+        "Issues found — written to <path>"
+        "Clean — <path>"
+    - The lead may send you a re-review request after fixes — repeat the
+      same process, overwrite the same file, and signal the lead again.
     - Do not contact the implementer directly.
   """
 )
@@ -124,19 +138,15 @@ Agent(
 
 Wait for all reviewers to complete.
 
-#### 3c. Consolidate and relay
+#### 3c. Relay and loop
 
-Read all reviewer reports. Produce a single consolidated findings list —
-deduplicate overlapping issues, assign final severity. SendMessage the
-consolidated list to the implementer.
-
-Wait for the implementer's fix report and integration test confirmation.
-
-#### 3d. Re-review loop
-
-If Critical or Important issues remain unresolved: re-apply
-`judge: partition-allocation` (same partitions) and spawn fresh reviewers.
-Repeat 3b–3d until no Critical or Important issues remain.
+1. If all reviewers report "Clean" → exit review loop, proceed to step 4.
+2. Otherwise: SendMessage the implementer with all review file paths — do not
+   read the files. Wait for the implementer's fix report and integration test
+   confirmation.
+3. SendMessage each reviewer to re-review. Reviewers overwrite the same files.
+   Wait for all reviewers to signal clean or issues.
+4. Repeat from 3c.1 until all reviewers report "Clean".
 
 ### 4. Docs pre-pass
 
@@ -152,7 +162,7 @@ Repeat 3b–3d until no Critical or Important issues remain.
    - Any deviations or open items
 2. Wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
-   - Re-apply `judge: partition-allocation` and spawn fresh reviewers per the step 3 pattern. Wait for consolidated findings and implementer fix report.
+   - Re-apply `judge: partition-allocation` and spawn fresh reviewers per the step 3 pattern. Wait for implementer fix report.
    - Re-run **mental-model-updater** with the new commit range. Wait for completion.
    - Re-report. Loop until user approves.
 
@@ -173,7 +183,8 @@ Implementer and reviewer remain alive throughout this loop.
 
 ### 8. Cleanup
 
-1. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
+1. Delete review temp files generated in step 3b: `rm -f /tmp/claude-reviews/<team-name>-*.md`.
+2. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
 
 ## Judgments
 
