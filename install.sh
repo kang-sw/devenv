@@ -488,13 +488,24 @@ required_marketplaces = {
 }
 required_plugins = {"ws@kang-sw-devenv": True}
 
+obsolete_marketplaces = {"ws"}
+obsolete_plugins = {"ws@ws"}
+
 marketplaces = settings.setdefault("extraKnownMarketplaces", {})
+for name in obsolete_marketplaces:
+    if name in marketplaces:
+        del marketplaces[name]
+        changed = True
 for name, cfg in required_marketplaces.items():
     if marketplaces.get(name) != cfg:
         marketplaces[name] = cfg
         changed = True
 
 plugins = settings.setdefault("enabledPlugins", {})
+for name in obsolete_plugins:
+    if name in plugins:
+        del plugins[name]
+        changed = True
 for name, val in required_plugins.items():
     if plugins.get(name) != val:
         plugins[name] = val
