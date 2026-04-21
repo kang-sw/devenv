@@ -41,7 +41,7 @@ title: <title>
 related:             # optional; map of stem → relationship note
   260301-feat-foo: prerequisite
 spec:                # optional; list of spec-stems this ticket implements
-  - skills:workflow-skills.discussion
+  - 260421-feat-example
 parent:              # optional; epic stem (e.g., 260401-epic-auth-rewrite)
 plans:               # maps phases to plan path stems under ai-docs/plans/ (without .md)
   phase-1: 2026-03/28-1430.event-serialization
