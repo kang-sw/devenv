@@ -17,7 +17,7 @@ HEADING_RE = re.compile(r"^(#{2,6})\s+(.*)")
 ANCHOR_RE = re.compile(r"\s*\{#[\w-]+\}")
 SLUG_RE = re.compile(r"\{#([\w-]+)\}")
 FRONTMATTER_DELIM = "---"
-SPEC_BASE = Path("ai-docs/spec")
+SPEC_BASE = Path(__file__).resolve().parents[2] / "ai-docs" / "spec"
 
 
 def parse_frontmatter_and_body(text: str) -> tuple[str, str]:
@@ -172,6 +172,7 @@ def process_file(path: Path) -> None:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} <spec-file.md> [...]", file=sys.stderr)
         sys.exit(1)

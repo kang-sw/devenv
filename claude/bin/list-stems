@@ -15,8 +15,6 @@ import re
 import sys
 from pathlib import Path
 
-SPEC_BASE = Path("ai-docs/spec")
-
 
 def parse_stems(path: Path) -> list[tuple[str, str]]:
     """Return [(stem_key, display_text), ...] from spec frontmatter."""
@@ -55,19 +53,6 @@ def parse_stems(path: Path) -> list[tuple[str, str]]:
     return results
 
 
-def stem_path(spec_path: Path) -> str:
-    """Compute the file-stem portion of the spec stem."""
-    resolved = spec_path.resolve()
-    base = SPEC_BASE.resolve()
-    try:
-        rel = resolved.relative_to(base)
-    except ValueError:
-        # Fallback: strip .md and use filename
-        return spec_path.stem
-    parts = rel.with_suffix("").parts
-    return "/".join(parts)
-
-
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     args = sys.argv[1:]
@@ -84,7 +69,10 @@ def main() -> None:
     stems = parse_stems(path)
 
     if not stems:
-        print("(no stems found — run spec-build-index first)", file=sys.stderr)
+        print(
+            "(no stems — add {#slug} anchors to headings then re-run spec-build-index)",
+            file=sys.stderr,
+        )
         sys.exit(0)
 
     for key, display in stems:
