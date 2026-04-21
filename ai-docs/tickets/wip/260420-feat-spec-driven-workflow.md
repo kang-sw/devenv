@@ -80,6 +80,12 @@ stems:
 - `list-stems -v ai-docs/spec/skills.md` outputs stem + heading text pairs
 - Headings without `{#slug}` are silently skipped (no error)
 
+### Result (fe2fda5) - 2026-04-21
+
+- `spec-build-index` extended: strips `{#slug}` anchors from `features:` display text; generates `stems:` YAML map keyed by canonical stem.
+- `claude/bin/list-stems` added: Python script following `list-mental-model` pattern; `-v` flag adds display text; computes spec-relative path from caller's working directory.
+- Review fix: `list-stems` was not robust to callers below repo root; `d7e3b61` adds CWD-independent path resolution.
+
 ### Phase 2: write-spec — mandatory gate and spec format change
 
 Add `judge: spec-impact` as step 0 in write-spec's on-invoke:
@@ -105,6 +111,12 @@ Depends on: Phase 1.
 - New spec sections written by write-spec include `{#slug}` anchors and no embedded ticket references
 - `spec-build-index` runs successfully after each write and `stems:` is populated
 
+### Result (fe2fda5) - 2026-04-21
+
+- `write-spec/SKILL.md`: `judge: spec-impact` added as step 0 in on-invoke; no-public-behavior path exits immediately and suggests write-ticket.
+- `{#slug}` anchor requirement added to spec-format template; embedded ticket refs removed from template.
+- `spec-conventions.md` updated: `## 🚧 Markers` section and template block reflect new bare-🚧 + `{#slug}` format (no `[ticket-stem/pN]`).
+
 ### Phase 3: /discuss — always suggest write-spec
 
 Update /discuss on-user-signals-done:
@@ -115,6 +127,10 @@ Update the Workflow Context section in discuss to reflect the canonical chain: `
 
 **Acceptance criteria:**
 - /discuss always offers write-spec as the next step regardless of topic type
+
+### Result (fe2fda5) - 2026-04-21
+
+- `discuss/SKILL.md`: on-user-signals-done now unconditionally suggests `/write-spec`; Workflow Context section updated to `discuss → write-spec → write-ticket`.
 
 ### Phase 4: Ticket and commit spec-stem convention
 
@@ -154,6 +170,13 @@ Depends on: Phase 1.
 - Ticket frontmatter template includes optional `spec:` field
 - write-ticket prompts for spec-stems at the appropriate step
 
+### Result (fe2fda5) - 2026-04-21
+
+- `claude/skills/bootstrap/CLAUDE.template.md`: `## Spec` section added to commit convention; rename convention added; v0023 migration checklist item added.
+- `claude/infra/ticket-conventions.md`: optional `spec:` field added to frontmatter template (after `related:`, before `parent:`).
+- `claude/skills/write-ticket/SKILL.md`: prompts for spec-stem references when ticket implements a spec feature.
+- Deviation: survey identified `claude/CLAUDE.md` as target; corrected to `claude/skills/bootstrap/CLAUDE.template.md` per user directive (downstream projects adopt via `/bootstrap`, not directly from the thinking-doctrine CLAUDE.md).
+
 ### Phase 5: spec-updater protocol
 
 Update spec-updater's 🚧 verification protocol:
@@ -168,6 +191,10 @@ Depends on: Phase 1, Phase 2.
 **Acceptance criteria:**
 - spec-updater identifies implemented features via commit history grep without requiring ticket links
 - spec-updater does not flag bare 🚧 markers as anomalies
+
+### Result (fe2fda5) - 2026-04-21
+
+- `claude/agents/spec-updater.md`: verification protocol rewritten to grep commit history for spec-stem in `## Spec` sections; `### Untracked 🚧` output category removed; bare 🚧 markers no longer flagged as anomalies.
 
 ### Phase 6: Canonical flow docs and spec migration
 
