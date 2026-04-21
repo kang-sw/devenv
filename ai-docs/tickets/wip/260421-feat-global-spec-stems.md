@@ -7,6 +7,7 @@ plans:
   phase-2: 2026-04/260421-1259.global-spec-stems-p1-4.survey
   phase-3: 2026-04/260421-1259.global-spec-stems-p1-4.survey
   phase-4: 2026-04/260421-1259.global-spec-stems-p1-4.survey
+started: 2026-04-21
 ---
 
 # Global Unique Spec Stems — Design Pivot
@@ -82,6 +83,10 @@ New Python command (`claude/bin/generate-spec-stem`) following the `list-mental-
 - `generate-spec-stem a b c` outputs three stems in one call
 - Collision on same date+slug appends `-2`
 
+### Result (cab9b24) - 2026-04-21
+
+`claude/bin/generate-spec-stem` created. Scans `ai-docs/spec/` via `Path(__file__).resolve().parents[2]` (CWD-independent). Collision handling appends `-2`, `-3`, etc. Multi-slug deduplication runs in-memory within a single call.
+
 ### Phase 2: `list-stems` rewrite
 
 Replace frontmatter-reading logic with grep-based + markdown parsing.
@@ -97,6 +102,10 @@ Replace frontmatter-reading logic with grep-based + markdown parsing.
 - `list-stems -v ai-docs/spec/skills.md` adds display labels
 - `list-stems` (no arg) outputs all stems across spec directory, flat
 
+### Result (cab9b24) - 2026-04-21
+
+`claude/bin/list-stems` fully rewritten. No-arg mode: flat grep scan across `ai-docs/spec/`. File-arg mode: markdown heading stack parser; H1 excluded; heading-level stems at depth-proportional indent; body-level stems one level deeper than current heading. `-v` flag: tab-separated stem + label; emits stderr warning in no-arg mode instead of silently ignoring.
+
 ### Phase 3: Tooling cleanup — `spec-build-index`
 
 Remove `update_stems` / `build_stems_block` logic and the `stems:` frontmatter block update from `spec-build-index`. The `features:` update and anchor-stripping behavior remain unchanged.
@@ -104,6 +113,10 @@ Remove `update_stems` / `build_stems_block` logic and the `stems:` frontmatter b
 **Acceptance criteria:**
 - `spec-build-index ai-docs/spec/skills.md` updates `features:` only; no `stems:` block written or left behind
 - Existing `stems:` blocks in any spec file are removed on next `spec-build-index` run (or left as inert — decide at implementation time)
+
+### Result (cab9b24) - 2026-04-21
+
+`stems:` generation fully removed from `spec-build-index` (`extract_stems`, `update_stems`, `build_stems_block` deleted). `_replace_or_insert_block` extended: when `new_field_lines` is empty, removes existing block rather than no-op. `remove_stems()` added; `process_file()` now actively clears stale `stems:` blocks on every run.
 
 ### Phase 4: Convention documents
 
@@ -119,6 +132,10 @@ Update `claude/skills/write-spec/SKILL.md`:
 **Acceptance criteria:**
 - `spec-conventions.md` stem format and placement conventions match new design
 - `write-spec/SKILL.md` instructs use of `generate-spec-stem`
+
+### Result (cab9b24) - 2026-04-21
+
+`spec-conventions.md` updated: `{#YYMMDD-slug}` format throughout, anchors placeable anywhere (not heading-only), `generate-spec-stem` as the authoring tool, `stems:` frontmatter references removed. `write-spec/SKILL.md` updated: `judge: spec-impact` as step 0; step 3 split into 3b-3e covering generate stem → insert anchor → add/remove markers → run spec-build-index; body-line anchor example added to templates. Structural review found two issues post-implementation (spec-updater grep using compound stem, ticket-conventions.md example in old format); both fixed in `cab9b24`.
 
 ### Phase 5: Spec file migration (deferred — see Phase 6 of `260420`)
 
