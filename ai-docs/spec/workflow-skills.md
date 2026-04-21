@@ -153,13 +153,13 @@ Review partitions:
 - **Correctness** — logic, error paths, contracts, security.
 - **Fit** — conventions, naming, reuse, patterns.
 
-Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. {#260421-delegate-implement-feature-branch-mode}
+Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260421-delegate-implement-feature-branch-mode}
 
 ### `/parallel-implement` {#260421-parallel-implement}
 
 Parallel implementation across N disjoint scope units. Spawns one implementer+reviewer pair per scope; lead serializes all build and test execution requests; lead commits each scope sequentially after all reviewers report clean.
 
-Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate after all scopes are committed; **feature-branch mode** (invoked from any other branch) skips the gate and merges directly. The feature → main merge remains the user's responsibility in feature-branch mode.
+Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate after all scopes are committed; **feature-branch mode** (invoked from any other branch) skips the gate and merges directly. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names.
 
 Requires disjoint file sets — overlapping scopes cause merge conflicts.
 

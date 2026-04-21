@@ -166,7 +166,7 @@ Wait for all reviewers to complete.
    - Review result (from reviewer report)
    - Test status
    - Any deviations or open items
-2. Wait for user approval. If the user requests tweaks:
+2. **Main-branch mode only** — wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
    - Re-apply `judge: partition-allocation` and spawn fresh reviewers per the step 3 pattern. Wait for implementer fix report.
    - Re-run **mental-model-updater** with the new commit range. Wait for completion.

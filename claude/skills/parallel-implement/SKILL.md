@@ -68,7 +68,7 @@ Load `/team-lead` if not already loaded.
    ```
 9. Register tasks via TaskCreate. One task per scope (carries the scope manifest in its description), plus one task per workflow phase. All are mandatory — do not skip or reorder:
    - Scope tasks (one per scope): `implement-<scope.name>` — description includes file_set + test_command + brief.
-   - Phase tasks: fan-in all reviewer reports / collect and commit per scope / report to user / merge to original branch / doc pipeline / cleanup.
+   - Phase tasks: fan-in all reviewer reports / collect and commit per scope / report to user (approval wait — main-branch mode only) / merge to original branch / doc pipeline / cleanup.
 
 ### 2. Spawn N pairs
 
@@ -164,16 +164,15 @@ Do not batch scopes into a single commit. One commit per scope preserves attribu
 
 > **Feature-branch mode**: emit the report below, then proceed directly to step 6 (Merge) — do not wait for user approval.
 
-Report to the user:
-- Per-scope: what was implemented, reviewer verdict, test result
-- Any deviations or open items across all scopes
-
-Wait for user approval before proceeding. If the user requests tweaks:
-1. Identify which scope(s) are affected.
-2. SendMessage the fix directive to the relevant implementer(s).
-3. Implementer fixes → requests execution approval via run_request gate → reviewer re-reviews.
-4. Re-run collect+commit for affected scope(s) only (new commit per CLAUDE.md rules).
-5. Re-report. Loop until user approves.
+1. Report to the user:
+   - Per-scope: what was implemented, reviewer verdict, test result
+   - Any deviations or open items across all scopes
+2. **Main-branch mode only** — wait for user approval before proceeding. If the user requests tweaks:
+   1. Identify which scope(s) are affected.
+   2. SendMessage the fix directive to the relevant implementer(s).
+   3. Implementer fixes → requests execution approval via run_request gate → reviewer re-reviews.
+   4. Re-run collect+commit for affected scope(s) only (new commit per CLAUDE.md rules).
+   5. Re-report. Loop until user approves.
 
 ### 6. Merge
 
