@@ -157,7 +157,9 @@ Two invocation modes based on the current branch: **main-branch mode** (invoked 
 
 ### `/parallel-implement` {#260421-parallel-implement}
 
-Parallel implementation across N disjoint scope units. Spawns one implementer+reviewer pair per scope; lead serializes all build and test execution requests; lead commits each scope sequentially after all reviewers report clean; aggregate report goes to the user before the doc pipeline runs.
+Parallel implementation across N disjoint scope units. Spawns one implementer+reviewer pair per scope; lead serializes all build and test execution requests; lead commits each scope sequentially after all reviewers report clean.
+
+Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate after all scopes are committed; **feature-branch mode** (invoked from any other branch) skips the gate and merges directly. The feature → main merge remains the user's responsibility in feature-branch mode.
 
 Requires disjoint file sets — overlapping scopes cause merge conflicts.
 

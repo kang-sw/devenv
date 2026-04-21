@@ -4,7 +4,7 @@ description: >
   Parallel implementation across N disjoint scope units. Spawns one
   implementer-reviewer pair per scope, serializes build commands through
   the lead, and commits one scope at a time.
-argument-hint: "<ticket-path, plan-path, or inline scope description>"
+argument-hint: "<ticket-path, plan-path, or inline scope description> [--main-branch <name>]"
 ---
 
 # Parallel Implementation
@@ -20,7 +20,8 @@ Target: $ARGUMENTS
 - Implementers never commit — the lead commits all scopes sequentially in partition order after all reviewer clean reports arrive.
 - Each scope gets its own implementer+reviewer pair running concurrently — not a single shared reviewer.
 - All run_requests are serialized by the lead — only one build/test command executes at a time across all implementers.
-- User approves the aggregate report before the lead proceeds to the doc pipeline.
+- **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the aggregate report before the lead proceeds to the doc pipeline.
+- **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead proceeds directly to merge after clean review. The feature → main merge remains the user's responsibility.
 - Teammates stay alive until cleanup — do not shut down before doc pipeline completes.
 - Task list is registered via TaskCreate at pre-flight and tracked to completion — one task per scope plus one per workflow phase; no task may be skipped or reordered.
 - `/team-lead` skill must be loaded before any team operations.
@@ -57,7 +58,10 @@ Load `/team-lead` if not already loaded.
 4. Verify skeleton coverage: confirm stubs exist for every scope (grep for `todo!()` / `unimplemented!()` / `NotImplementedError` in each scope's `file_set`). If absent, stop — route through `/write-skeleton` first to guarantee compilability during parallel work.
 5. If scope boundaries are ambiguous at any point during inference, stop and ask the user before proceeding. Bias toward escalation — it is never correct to guess scope boundaries.
 6. Derive a `<slug>` from the ticket or brief (lowercase, hyphenated, e.g. `parallel-impl-auth`).
-7. Record current branch as `<original-branch>`. Create `parallel-impl/<slug>` branch.
+7. Record current branch as `<original-branch>`. Detect **invocation mode**:
+   - `<original-branch>` matches `main`, `master`, `trunk`, or the value of `--main-branch <name>` → **main-branch mode** (approval gate active).
+   - Otherwise → **feature-branch mode** (approval gate skipped; proceed directly to merge after clean review).
+   Create `parallel-impl/<slug>` branch.
 8. Create the team:
    ```
    TeamCreate(team_name = "parallel-impl-<slug>", description = "<brief scope description>")
@@ -157,6 +161,8 @@ Each commit message must include an AI Context section describing that scope's i
 Do not batch scopes into a single commit. One commit per scope preserves attribution and makes the history bisectable.
 
 ### 5. Report and approval
+
+> **Feature-branch mode**: skip this step — proceed directly to step 6 (Merge).
 
 Report to the user:
 - Per-scope: what was implemented, reviewer verdict, test result
