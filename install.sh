@@ -482,11 +482,11 @@ for event, entries in required_hooks.items():
 
 # ── blueprint plugin registration ────────────────────────────────────────────
 required_marketplaces = {
-    "ws": {
+    "kang-sw-devenv": {
         "source": {"source": "directory", "path": repo_dir}
     }
 }
-required_plugins = {"ws@ws": True}
+required_plugins = {"ws@kang-sw-devenv": True}
 
 marketplaces = settings.setdefault("extraKnownMarketplaces", {})
 for name, cfg in required_marketplaces.items():
@@ -534,7 +534,7 @@ else:
     print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
-# ── ws plugin install (cache copy; run `claude plugin update ws@ws` after changes)
+# ── ws plugin install (cache copy; run `claude plugin update ws@kang-sw-devenv` after changes)
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it
 # before Claude Code has had a chance to process extraKnownMarketplaces itself.
 mkdir -p "$HOME/.claude/plugins"
@@ -550,26 +550,26 @@ entry = {
     "installLocation": repo_dir,
     "lastUpdated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z"
 }
-if km.get("ws") == entry:
-    print("  \033[90m  ✔ ws marketplace already registered\033[0m")
+if km.get("kang-sw-devenv") == entry:
+    print("  \033[90m  ✔ kang-sw-devenv marketplace already registered\033[0m")
 else:
-    km["ws"] = entry
+    km["kang-sw-devenv"] = entry
     with open(km_path, "w") as f:
         json.dump(km, f, indent=2)
         f.write("\n")
-    print("  \033[1;32m  ✔ ws marketplace registered\033[0m")
+    print("  \033[1;32m  ✔ kang-sw-devenv marketplace registered\033[0m")
 PYEOF
 
 if has claude; then
   INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
-  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if 'ws@ws' in d.get('plugins',{}) else 1)" "$INSTALLED_PLUGINS" 2>/dev/null; then
+  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if 'ws@kang-sw-devenv' in d.get('plugins',{}) else 1)" "$INSTALLED_PLUGINS" 2>/dev/null; then
     muted "ws plugin already installed"
   else
     info "Installing ws plugin..."
-    claude plugin install ws@ws && success "ws plugin installed" || warn "ws plugin install failed — run manually: claude plugin install ws@ws"
+    claude plugin install ws@kang-sw-devenv && success "ws plugin installed" || warn "ws plugin install failed — run manually: claude plugin install ws@kang-sw-devenv"
   fi
 else
-  warn "claude not found — run manually after install: claude plugin install ws@ws"
+  warn "claude not found — run manually after install: claude plugin install ws@kang-sw-devenv"
 fi
 
 # Clean up dead symlinks (skills and agents)
