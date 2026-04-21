@@ -147,13 +147,13 @@ After implementation, runs the doc pipeline (ticket status update, `_index.md` r
 
 ### `/delegate-implement` {#260421-delegate-implement}
 
-Delegated implementation cycle: an implementer subagent writes code; two review-partition subagents (correctness + fit) review in parallel; lead approves or requests revision; lead merges. Suited for cold sessions or wide-scope work.
+Delegated implementation cycle: an implementer subagent writes code; two review-partition subagents (correctness + fit) review in parallel; the lead merges and runs the doc pipeline. Suited for cold sessions or wide-scope work.
 
 Review partitions:
 - **Correctness** — logic, error paths, contracts, security.
 - **Fit** — conventions, naming, reuse, patterns.
 
-After a clean review, lead merges, runs the doc pipeline, and emits a report.
+Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. {#260421-delegate-implement-feature-branch-mode}
 
 ### `/parallel-implement` {#260421-parallel-implement}
 

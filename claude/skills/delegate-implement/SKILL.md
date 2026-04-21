@@ -4,7 +4,7 @@ description: >
   Delegated single-scope implementation cycle. An implementer-reviewer pair
   work behind locked contracts; the lead coordinates, merges, and updates
   docs.
-argument-hint: "<plan-path or inline brief> [--ticket <ticket-stem>]"
+argument-hint: "<plan-path or inline brief> [--ticket <ticket-stem>] [--main-branch <name>]"
 ---
 
 # Delegated Implementation
@@ -16,7 +16,8 @@ Target: $ARGUMENTS
 - This skill delegates — the lead does not read source code or write implementation.
 - When skeleton exists, its stubs and integration tests are the acceptance criteria.
 - Reviewers report to the lead only — never directly to the implementer. The lead consolidates findings and sends a single list to the implementer.
-- User approves the report before merge — no code reaches the target branch without user confirmation.
+- **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the report before merge — no code reaches the target branch without user confirmation.
+- **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead auto-merges after clean review. The feature → main merge remains the user's responsibility.
 - Teammates (implementer, reviewer) stay alive until after doc pipeline completes; cleanup is the final step.
 - One delegation cycle per invocation.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
@@ -36,7 +37,10 @@ Target: $ARGUMENTS
 3. If brief-driven: the brief is the full specification.
 4. Verify skeleton exists: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests that reference the target contracts. If absent, stop and suggest `/write-skeleton`.
 5. Collect integration test context: identify test file paths and the command to run them. This flows into the implementer spawn prompt.
-6. Record current branch as `<original-branch>`. Create `implement/<scope>` branch.
+6. Record current branch as `<original-branch>`. Detect **invocation mode**:
+   - `<original-branch>` matches `main`, `master`, `trunk`, or the value of `--main-branch <name>` → **main-branch mode** (approval gate active).
+   - Otherwise → **feature-branch mode** (approval gate skipped; auto-merge after clean review).
+   Create `implement/<scope>` branch.
 7. If already in a team context, use the existing team. Otherwise create one:
    ```
    TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
@@ -46,7 +50,7 @@ Target: $ARGUMENTS
    [ ] Spawn implementer — wait for completion report
    [ ] Spawn reviewers (partition-allocated) — parallel review → lead relays file paths → implementer fixes → re-review loop until clean
    [ ] Dispatch mental-model-updater — wait for completion
-   [ ] Report to user — wait for approval
+   [ ] Report to user — wait for approval  ← main-branch mode only
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run updater (loop)
    [ ] Merge to original branch
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
@@ -154,6 +158,8 @@ Wait for all reviewers to complete.
    Provide the commit range from the implementation branch. Always dispatch — the agent determines impact. **Wait for completion before proceeding** — the report step should reflect the final doc state.
 
 ### 5. Report and approval
+
+> **Feature-branch mode**: skip this step — proceed directly to step 6 (Merge).
 
 1. Report to the user:
    - What was implemented (from implementer report)
