@@ -162,7 +162,7 @@ Do not batch scopes into a single commit. One commit per scope preserves attribu
 
 ### 5. Report and approval
 
-> **Feature-branch mode**: skip this step — proceed directly to step 6 (Merge).
+> **Feature-branch mode**: emit the report below, then proceed directly to step 6 (Merge) — do not wait for user approval.
 
 Report to the user:
 - Per-scope: what was implemented, reviewer verdict, test result

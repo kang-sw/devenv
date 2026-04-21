@@ -159,7 +159,7 @@ Wait for all reviewers to complete.
 
 ### 5. Report and approval
 
-> **Feature-branch mode**: skip this step — proceed directly to step 6 (Merge).
+> **Feature-branch mode**: emit the report below, then proceed directly to step 6 (Merge) — do not wait for user approval.
 
 1. Report to the user:
    - What was implemented (from implementer report)
