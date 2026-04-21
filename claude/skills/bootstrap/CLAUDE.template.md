@@ -220,6 +220,14 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          Format: `- <spec-stem>  # one per affected spec feature; omit section if none`.
          Also add rename convention: "When a spec heading's {#slug} changes, include
          `renamed-spec: <old-stem> → <new-stem>` in the commit message."
+- v0024: If spec documents under `ai-docs/spec/` contain `[!note] Constraints` callouts,
+         audit each one and reclassify:
+         (a) Permanent behavioral invariants → move to body prose.
+         (b) Known-but-unscheduled implementation gaps → convert to
+             `[!note] Implementation Gap · <YYYY-MM-DD>` (use the date of migration).
+         (c) Planned features with an existing `todo/`-or-higher ticket → convert to
+             `### 🚧 <Feature Name>` heading.
+         Remove the `[!note] Constraints` form after reclassifying all items in a file.
 -->
 
-<!-- Template Version: v0023 -->
+<!-- Template Version: v0024 -->

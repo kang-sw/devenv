@@ -28,6 +28,17 @@ description, abstract it further.
 - No `🚧` means implemented — verify each such feature actually exists before committing.
 - `🚧` entries — heading form or `> [!note] Planned 🚧` callout — require the feature to have a `todo/`-or-higher ticket. Idea-only tickets (`idea/`) do not qualify. Defer spec entry until the ticket is promoted to `todo/`.
 
+## Implementation Gap Callout
+
+Use `> [!note] Implementation Gap · YYYY-MM-DD` for known-but-unscheduled incomplete behavior — the intended behavior is understood but not yet built, and no ticket exists.
+
+- The date records when the gap was first noted; use today's date when first authoring.
+- No ticket required — this distinguishes it from `🚧` entries, which must have a `todo/`-or-higher ticket.
+- Resolution path: at the next spec review, either create a ticket and convert to `🚧`, or accept the behavior and absorb into body prose.
+- Discuss sessions surface a staleness warning for entries older than 90 days.
+
+Permanent behavioral invariants belong in body prose, not in any callout. Write them directly in the body — they are facts about the system, not exceptions worth flagging.
+
 ## Anchors
 
 - Every named feature carries a `{#YYMMDD-slug}` anchor — authored once, stable forever.
@@ -65,8 +76,8 @@ Behavioral description. Pseudo-code where it aids clarity.
 
 A specific sub-concept within a section can also carry an anchor. {#260421-sub-concept}
 
-> [!note] Constraints
-> - Intentional limitation or out-of-scope boundary.
+> [!note] Implementation Gap · YYYY-MM-DD
+> Known-but-unscheduled incomplete behavior. No ticket yet.
 
 > [!note] Planned 🚧
 > Will gain X capability. Current behavior unchanged until implemented.

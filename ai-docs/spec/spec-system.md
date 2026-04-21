@@ -9,6 +9,7 @@ features:
   - Authoring Conventions
     - Anchor Format
     - `🚧` Marker Protocol
+    - Implementation Gap Callout
     - Anchor Placement
     - File Location
   - `/write-spec` Integration
@@ -36,9 +37,8 @@ generate-spec-stem <slug> [<slug>…]
 
 One `YYMMDD-slug` is printed per line, where `YYMMDD` is today's date. Before emitting each stem, the tool scans all `*.md` files under `ai-docs/spec/` for existing `{#YYMMDD-*}` anchors. If the candidate stem is taken, it appends `-2`, `-3`, etc. until clear. Multiple slugs in one call are registered in sequence — stems generated earlier in the same call count as existing for later slugs.
 
-> [!note] Constraints
-> - Zero-arg invocation exits with code 1 and prints usage to stderr.
-> - Unreadable spec files are silently skipped during collision detection.
+- Zero-arg invocation exits with code 1 and prints usage to stderr.
+- Unreadable spec files are silently skipped during collision detection.
 
 ### `list-stems` {#260421-list-stems-tool}
 
@@ -50,8 +50,7 @@ Lists `{#YYMMDD-slug}` anchors found in spec files.
 
 **`-v` flag**: appends a tab-separated display label (heading text with `{#slug}` stripped) after each stem. In flat-scan mode, emits a stderr warning that labels are unavailable and continues.
 
-> [!note] Constraints
-> - When no stems are found, prints a hint to stderr and exits with code 0.
+When no stems are found, the tool prints a hint to stderr and exits with code 0.
 
 ### `spec-build-index` {#260421-spec-build-index-tool}
 
@@ -70,11 +69,10 @@ For each file, the tool:
 
 `title` and `summary` frontmatter fields pass through unchanged.
 
-> [!note] Constraints
-> - Files with no `##`+ headings are skipped without modification; skip notice goes to stdout.
-> - Unclosed frontmatter (`---` with no closing `---`) is an error; the file is left unmodified.
-> - Files without frontmatter are handled: the tool synthesizes an empty frontmatter block.
-> - Never edit the `features:` block manually — `spec-build-index` owns it.
+- Files with no `##`+ headings are skipped without modification; skip notice goes to stdout.
+- Unclosed frontmatter (`---` with no closing `---`) is an error; the file is left unmodified.
+- Files without frontmatter are handled: the tool synthesizes an empty frontmatter block.
+- Never edit the `features:` block manually — `spec-build-index` owns it.
 
 ## Authoring Conventions
 
@@ -102,6 +100,14 @@ Two marker forms:
   ```
 
 No `🚧` means the feature is implemented and verified. Never include ticket references inside a `🚧` marker — implementation traceability flows through commit `## Spec` sections that reference the spec-stem.
+
+### Implementation Gap Callout {#260421-implementation-gap-callout}
+
+`> [!note] Implementation Gap · YYYY-MM-DD` marks known-but-unscheduled incomplete behavior — the intended behavior is understood, not yet built, and no ticket exists.
+
+The date records when the gap was first noted. Discuss sessions surface a staleness warning for entries older than 90 days, prompting either ticket creation (converting to `🚧`) or body absorption.
+
+Permanent behavioral invariants belong in body prose, not in any callout.
 
 ### Anchor Placement {#260421-spec-anchor-placement}
 
@@ -132,7 +138,7 @@ Two structural judgments govern file layout:
 
 **`judge: split-trigger`** — applied after writing. Fires when any one condition is true:
 - A section has its own `🚧` markers with a distinct ticket lifecycle from the parent.
-- More than one `[!note] Constraints` block is present.
+- More than one `[!note] Implementation Gap` block is present.
 - A section has a distinct caller audience from the parent document.
 
 When the trigger fires, the section is extracted to a child file (`<area>/<section>.md`) and the original location is replaced with a `See <area>/<section>.md` link.
