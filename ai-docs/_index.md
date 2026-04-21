@@ -39,7 +39,7 @@ claude/agents/
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
-  spec-updater.md         — strip completed 🚧 markers; flag spec/implementation drift
+  spec-updater.md         — strip 🚧 markers when spec-stems appear in merged commits
 ```
 
 ## Infra Layout
@@ -48,7 +48,8 @@ claude/agents/
 claude/infra/                 — docs only; accessed via load-infra
   impl-playbook.md            — subagent-safe implementation discipline
   mental-model-conventions.md — mental-model doc format and invariants
-  ticket-conventions.md       — ticket format, status directories, stem convention
+  ticket-conventions.md       — ticket format, status directories, stem convention; optional spec: field
+  spec-conventions.md         — spec doc format, 🚧 marker rules, {#slug} anchor protocol
   subagent-rules.md           — exploration, branches, general rules
   implementer.md              — code implementer role; spawn as general-purpose + read first
   code-review-correctness.md  — Correctness review partition: logic, error paths, contracts, security
@@ -57,10 +58,11 @@ claude/infra/                 — docs only; accessed via load-infra
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess
-  spec-build-index            — rebuild features: frontmatter in spec docs
+  spec-build-index            — rebuild features: and stems: frontmatter in spec docs
+  list-stems                  — read stems: frontmatter from a spec file; -v adds heading text
   merge-branch                — branch merge with strategy selection (squash or --no-ff)
   list-mental-model           — enumerate mental-model docs relevant to target paths
-  load-infra             — cat any infra doc by name (agent Bash tool context)
+  load-infra                  — cat any infra doc by name (agent Bash tool context)
 ```
 
 ## Skill Inventory
@@ -88,7 +90,7 @@ claude/skills/
 ## Canonical Flows
 
 ```
-Full ceremony:  /discuss → /write-ticket → /write-skeleton → /implement (warm) or /delegate-implement (cold)
+Full ceremony:  /discuss → /write-spec → /write-ticket → /write-skeleton → /implement (warm) or /delegate-implement (cold)
 Direct:         /implement <description>
 Parallel:       /parallel-implement (disjoint file sets on shared branch)
 Auto-route:     /proceed <ticket-path>    — pipeline selection via warmth + scope judges
