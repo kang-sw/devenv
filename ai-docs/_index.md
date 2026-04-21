@@ -112,6 +112,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260420-feat-spec-driven-workflow` | wip | Spec-driven workflow infrastructure (phases 1-5 done; phase 6 pending) |
 | `260421-feat-global-spec-stems` | wip | Global unique YYMMDD-slug stems (phases 1-4 done; phase 5 migration pending) |
 | `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
+| `260421-feat-delegate-implement-feature-branch` | done | /delegate-implement feature-branch auto-merge mode; all phases complete |
 
 ## Session Notes
 

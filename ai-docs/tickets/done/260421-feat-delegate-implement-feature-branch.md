@@ -35,3 +35,7 @@ Success criteria:
 - Invoking `/delegate-implement` from a feature branch completes without pausing for user approval.
 - Invoking from `main`/`master`/`trunk` still presents the approval gate.
 - Doc pipeline runs and completes after auto-merge in both modes.
+
+### Result (c6ea74d) - 2026-04-21
+
+Implemented as specified. Mode detection added at step 1 (Prepare); step 5 skip note added for feature-branch mode; invariants updated to document both modes; `--main-branch <name>` override flag documented. No deviations from the plan.
