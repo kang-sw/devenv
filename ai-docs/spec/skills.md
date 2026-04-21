@@ -16,21 +16,6 @@ features:
     - Mental Model
     - Spec Maintenance
     - Bootstrap
-stems:
-  skills:workflow-skills: "Workflow Skills"
-  skills:workflow-skills.session-bootstrap: "Session Bootstrap"
-  skills:workflow-skills.discussion: "Discussion"
-  skills:workflow-skills.ticket-authoring: "Ticket Authoring"
-  skills:workflow-skills.spec-authoring: "Spec Authoring"
-  skills:workflow-skills.skeleton-authoring: "Skeleton Authoring"
-  skills:workflow-skills.planning: "Planning"
-  skills:workflow-skills.implementation: "Implementation"
-  skills:workflow-skills.parallel-implementation: "Parallel Implementation"
-  skills:workflow-skills.auto-routing: "Auto-Routing"
-  skills:maintenance-skills: "Maintenance Skills"
-  skills:maintenance-skills.mental-model: "Mental Model"
-  skills:maintenance-skills.spec-maintenance: "Spec Maintenance"
-  skills:maintenance-skills.bootstrap: "Bootstrap"
 ---
 
 # Skill System

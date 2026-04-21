@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Generate globally unique spec stems.
+
+Usage:
+  generate-spec-stem <slug> [<slug2> ...]
+
+For each slug, outputs a stem of the form YYMMDD-slug (one per line).
+If a collision exists in ai-docs/spec/, appends -2, -3, etc.
+"""
+
+import datetime
+import re
+import sys
+from pathlib import Path
+
+
+SPEC_DIR = Path(__file__).resolve().parents[2] / "ai-docs" / "spec"
+STEM_RE = re.compile(r"\{#(\d{6}-[\w-]+)\}")
+
+
+def collect_existing_stems() -> set[str]:
+    stems: set[str] = set()
+    if not SPEC_DIR.is_dir():
+        return stems
+    for md_file in SPEC_DIR.rglob("*.md"):
+        try:
+            text = md_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for match in STEM_RE.finditer(text):
+            stems.add(match.group(1))
+    return stems
+
+
+def generate_stem(slug: str, date_prefix: str, existing: set[str]) -> str:
+    candidate = f"{date_prefix}-{slug}"
+    if candidate not in existing:
+        return candidate
+    n = 2
+    while True:
+        candidate = f"{date_prefix}-{slug}-{n}"
+        if candidate not in existing:
+            return candidate
+        n += 1
+
+
+def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
+    slugs = sys.argv[1:]
+    if not slugs:
+        print(f"Usage: {sys.argv[0]} <slug> [<slug2> ...]", file=sys.stderr)
+        sys.exit(1)
+
+    date_prefix = datetime.date.today().strftime("%y%m%d")
+    existing = collect_existing_stems()
+
+    for slug in slugs:
+        stem = generate_stem(slug, date_prefix, existing)
+        existing.add(stem)
+        print(stem)
+
+
+if __name__ == "__main__":
+    main()
