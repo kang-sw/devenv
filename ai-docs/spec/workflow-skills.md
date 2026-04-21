@@ -1,0 +1,220 @@
+---
+title: Workflow Skills
+summary: User-invocable /commands that orchestrate AI-assisted development workflows in downstream projects.
+features:
+  - Canonical Workflow Chain
+  - Session Skills
+    - Session Bootstrap — `/enter-session`
+    - Session Sealing — `/exit-session`
+  - Planning Skills
+    - `/discuss`
+    - `/write-ticket`
+    - `/write-spec`
+    - `/write-skeleton`
+    - `/write-plan`
+    - `/write-mental-model`
+  - Implementation Skills
+    - `/implement`
+    - `/delegate-implement`
+    - `/parallel-implement`
+    - `/proceed`
+  - Reconstruction
+    - `/forge-spec`
+  - Utility Skills
+    - `/ship`
+    - `/team-lead`
+    - `/bootstrap`
+---
+
+# Workflow Skills
+
+The `ws` plugin provides a set of user-invocable `/commands` covering the full development workflow: session bootstrap, planning, spec authoring, implementation, and release. Skills suggest chaining but never auto-chain — each step requires explicit user invocation or the `/proceed` auto-router.
+
+## Canonical Workflow Chain {#260421-workflow-chain}
+
+The standard pipeline runs in this order:
+
+```
+/discuss → /write-ticket → /implement
+     ↓ (optional)               ↓ (optional deeper steps)
+ /write-spec          /write-skeleton → /write-plan → /delegate-implement
+                                                     → /parallel-implement
+```
+
+Each skill recommends the next step at completion. `/proceed` selects and chains the correct sequence automatically based on existing artifacts and session context.
+
+> [!note] Constraints
+> - Skills do not auto-chain — user invocation or `/proceed` is always required.
+> - `/write-spec` is optional: the `judge: spec-impact` gate inside it exits early when no public behavior is affected.
+> - `/write-skeleton` is optional: required only when public contracts need crystallization before implementation.
+> - `/write-plan` is optional: `/proceed` skips it when the scope is small or the session is warm.
+
+## Session Skills
+
+### Session Bootstrap — `/enter-session` {#260421-enter-session}
+
+Bootstraps main-agent context at session start and emits a structured `## Briefing` containing:
+- `### Context` — branch name, recent work summary, active ticket, and open threads.
+- `### Recommended next` — a backtick-quoted skill invocation with a one-line reason.
+
+Two paths: **fast-path** when `ai-docs/_continue.local.md` matches the current HEAD (reads the continuation file directly); **bootstrap** otherwise (forks a `clerk` subagent to synthesize context from git log and active tickets).
+
+> [!note] Constraints
+> - Produces no source edits or file writes — context synthesis only.
+
+### Session Sealing — `/exit-session` {#260421-exit-session}
+
+Seals the session by writing compressed working memory to `ai-docs/_continue.local.md` with a HEAD hash header. The payload covers four sections: mental state, next concrete step, open threads, and pending user directives. Optionally creates a WIP auto-commit for uncommitted changes.
+
+The file is consumed by `/enter-session`'s fast-path on the next session start.
+
+> [!note] Constraints
+> - Overwrites `_continue.local.md` — previous continuation is discarded.
+> - `.local.md` is gitignored; continuation state is machine-local.
+
+## Planning Skills
+
+### `/discuss` {#260421-discuss}
+
+Facilitates exploratory discussion of approach or direction. Reads spec, mental-model, and ticket files on demand; dispatches Explore subagents for codebase questions. Produces no source edits.
+
+At the end of a discussion turn, always suggests `/write-spec` as the next step. Also offers `/write-ticket` to capture decisions as a ticket and `/write-mental-model` to record new architectural understanding.
+
+> [!note] Constraints
+> - No source files are created or modified during a `/discuss` session.
+
+### `/write-ticket` {#260421-write-ticket}
+
+Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/write-spec` after authoring.
+
+Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). Ticket stem format: `YYMMDD-type-slug`.
+
+> [!note] Constraints
+> - Does not advance a ticket's status directory — status changes happen via `git mv` during implementation.
+
+### `/write-spec` {#260421-write-spec}
+
+Creates or updates a spec file under `ai-docs/spec/` describing caller-visible behavior with anchor-keyed entries. Entry format: `## Feature Name {#YYMMDD-slug}` for implemented features; `## 🚧 Feature Name {#YYMMDD-slug}` for planned ones.
+
+A `judge: spec-impact` gate fires first: if the topic has no caller-visible behavioral change, the skill exits immediately without writing anything.
+
+After writing, runs `spec-build-index` to rebuild the `features:` frontmatter index. Applies a `judge: directory-vs-flat` to decide between a flat file and a directory structure.
+
+> [!note] Constraints
+> - Never includes ticket references in `🚧` markers — implementation traceability flows through commit `## Spec` sections referencing the spec-stem.
+> - Never edits the `features:` frontmatter block manually — `spec-build-index` owns it.
+
+### `/write-skeleton` {#260421-write-skeleton}
+
+Crystallizes public contracts as interface stubs and integration tests before implementation begins. The lead identifies contract directives (type signatures, API shapes, invariants), delegates writing to a subagent, reviews, and commits. Updates the ticket `skeletons:` frontmatter with the commit hash.
+
+Suggests `/implement`, `/delegate-implement`, or `/parallel-implement` as the next step based on scope width and session warmth — does not auto-invoke.
+
+> [!note] Constraints
+> - Stub files must compile; integration tests are written but not required to pass (implementation is absent).
+> - The lead does not write skeleton code directly — subagent delegation only.
+
+### `/write-plan` {#260421-write-plan}
+
+Researches the codebase and produces a committed plan file at `ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md`. Three modes:
+
+- **Warm** — lead drafts from session context, reading source as needed.
+- **Survey** — a survey-writer subagent explores the codebase; lead drafts from the output.
+- **Deep** — a plan-writer subagent handles full exploration and drafting; lead reviews and accepts or rejects.
+
+Updates the ticket `plans:` frontmatter with the plan path. `/proceed` passes the plan path directly to the next implementation skill.
+
+### `/write-mental-model` {#260421-write-mental-model}
+
+Rebuilds or updates `ai-docs/mental-model/` with operational knowledge for modifying the codebase. Delegates all source exploration to subagents. After writing, updates `ai-docs/mental-model.md` (the index) and `ai-docs/_index.md`.
+
+Also dispatched automatically at the end of the doc pipeline by `/implement`, `/delegate-implement`, and `/parallel-implement`.
+
+> [!note] Constraints
+> - Describes operational knowledge for code modifiers, not behavior for end users — contents are not caller-visible spec material.
+
+## Implementation Skills
+
+### `/implement` {#260421-implement}
+
+Owner-direct single-scope implementation: the main agent reads source, makes edits, verifies via build and test commands, and commits — no subagent delegation for the implementation itself. Best suited for warm sessions with well-understood, narrow scope.
+
+After implementation, runs the doc pipeline (ticket status update, `_index.md` refresh, mental-model-updater dispatch) and emits a completion report.
+
+> [!note] Constraints
+> - Escalates to `/delegate-implement` when scope grows beyond direct-edit bounds.
+> - Suggests `/write-skeleton` when none exist and scope warrants them, but does not auto-invoke it.
+
+### `/delegate-implement` {#260421-delegate-implement}
+
+Delegated implementation cycle: an implementer subagent writes code; two review-partition subagents (correctness + fit) review in parallel; lead approves or requests revision; lead merges. Suited for cold sessions or wide-scope work.
+
+Review partitions:
+- **Correctness** — logic, error paths, contracts, security.
+- **Fit** — conventions, naming, reuse, patterns.
+
+After a clean review, lead merges, runs the doc pipeline, and emits a report.
+
+### `/parallel-implement` {#260421-parallel-implement}
+
+Parallel implementation across N disjoint scope units. Spawns one implementer+reviewer pair per scope; lead serializes all build and test execution requests; lead commits each scope sequentially after all reviewers report clean; aggregate report goes to the user before the doc pipeline runs.
+
+Requires disjoint file sets — overlapping scopes cause merge conflicts.
+
+> [!note] Constraints
+> - Only one build/test command runs at a time (lead-serialized) — concurrent implementers share the working tree.
+
+### `/proceed` {#260421-proceed}
+
+Auto-router: assesses an implementation target and chains to the correct pipeline without executing implementation steps itself. Judges:
+
+- **Context warmth** — warm session routes to `/implement`; cold routes to `/delegate-implement`.
+- **Existing artifacts** — skips `/write-skeleton` and `/write-plan` if already present.
+- **Scope width** — wide or parallelizable scope routes to `/parallel-implement`.
+- **Direct-edit** — trivial changes skip the full pipeline and route directly to `/implement`.
+
+Announces the chosen path before invoking the first skill.
+
+> [!note] Constraints
+> - Stops and asks for clarification when scope is too vague to route.
+
+## Reconstruction
+
+### `/forge-spec` {#260421-forge-spec}
+
+From-scratch spec reconstruction for a project. The skill:
+1. Archives existing `ai-docs/spec/` to `ai-docs/ref/old-spec/YYMMDD/` — requires explicit user confirmation.
+2. Surveys the codebase with four parallel Sonnet subagents (structure, tickets, old spec, commits).
+3. Presents domain candidates to the user; confirmed list locks into `TaskCreate` tasks for resumability.
+4. Per domain: surveys again with four parallel subagents; presents a behavior brief; asks the user to classify each behavior (caller-visible? implemented or planned?); authors spec entries only after explicit confirmation.
+5. Runs `spec-build-index` after each file write.
+
+> [!note] Constraints
+> - No spec entry is written without explicit user classification of caller-visible status and implementation status.
+> - Uses `TaskCreate` with `forge-spec-<domain>` prefix for cross-compact resume detection — renaming tasks breaks resume.
+
+## Utility Skills
+
+### `/ship` {#260421-ship}
+
+Release workflow: reads a project config from `ai-docs/ship/<proj>.md` (`.local.md` overlay for private targets); bumps the version, creates a git tag, builds, and publishes. Blocked on user confirmation before the publish step.
+
+On first invocation with no config present, creates a template for the user to fill in.
+
+> [!note] Constraints
+> - `.local.md` config takes precedence over `.md` and is gitignored — for private deploy targets only.
+
+### `/team-lead` {#260421-team-lead}
+
+Team orchestration mode: creates and manages a named team via `TeamCreate`/`TeamDelete`; spawns subagents into the team; coordinates inter-agent communication; shuts the team down cleanly at session end.
+
+Loaded automatically by `/delegate-implement` and `/parallel-implement` before any team operation. Can also be invoked directly for manual team management.
+
+> [!note] Constraints
+> - Team state is session-scoped — no persistence across sessions.
+
+### `/bootstrap` {#260421-bootstrap}
+
+Scaffolds a new project (`fresh` mode) or upgrades an existing one (`upgrade` / `adopt` modes) to the canonical `CLAUDE.md` template structure. Performs a surgical merge: never overwrites project-specific sections; marks unresolvable conflicts inline with `<!-- CONFLICT: ... -->`.
+
+Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`, `plans/`, `ref/`) and a `.gitignore` entry for `.local.md` files.
