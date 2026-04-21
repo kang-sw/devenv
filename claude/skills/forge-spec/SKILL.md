@@ -294,7 +294,45 @@ Collect the confirmed list before writing anything.
 5. Run `spec-build-index <spec-file>`.
 6. Apply `judge: directory-vs-flat` — if the written file warrants a directory split, note it as a split candidate for a follow-up `/write-spec` invocation. Do not perform the split inline.
 
-### 6. Complete domain
+### 6. Associate stems with tickets
+
+1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, skip to step 7.
+2. Dispatch one `clerk` agent (model override: sonnet) covering all collected tickets in a single prompt:
+
+```
+Agent(
+  name = "clerk-ticket-association",
+  description = "Associate spec stems with wip/todo tickets for domain: <domain>",
+  subagent_type = "ws:clerk",
+  model = "sonnet",
+  prompt = """
+    Associate spec stems with tickets and check convention compliance.
+
+    Run first:
+    ```bash
+    load-infra ticket-conventions.md
+    ```
+
+    Spec stems generated for this domain:
+    <list: {#YYMMDD-slug} — feature name, one per line>
+
+    Tickets to update (wip/todo only):
+    <list: ai-docs/tickets/<status>/<stem>.md — one-line description>
+
+    For each ticket:
+    1. Read the ticket file.
+    2. Add or update the `spec:` frontmatter field with the stems relevant to
+       this ticket. Merge with any existing `spec:` entries — never overwrite.
+    3. Check the ticket body against loaded conventions. Fix any issues in place.
+    4. Do not commit — the caller handles all git operations.
+  """
+)
+```
+
+3. Review the `## Clerk report`. Resolve any open questions with the user before committing.
+4. Commit all domain changes in one commit: spec file + ticket association updates.
+
+### 7. Complete domain
 
 1. Call `TaskUpdate` to set the domain task status to `completed`.
 2. If more domain tasks remain, continue with the next incomplete task from step 1 of **On: per-domain**.
