@@ -18,11 +18,10 @@ Target: $ARGUMENTS
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Run `generate-spec-stem <descriptive-slug>` before every anchor insertion.
-- Verify each spec file has at least one `##`-or-deeper heading before calling `spec-build-index` — the tool skips files without headings and prints an error to stderr.
+- Verify each spec file has at least one `##`-or-deeper heading before calling `spec-build-index` — the tool prints a skip notice to stdout and returns without modifying the file (forge-spec creates files from scratch, so this check is required here).
 - Run `spec-build-index <file>` after every spec file write or update.
 - Domain task names use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
 - All survey subagents for a phase are dispatched in a single response turn (parallel).
-- Do not categorize a behavior as caller-visible or internal without asking the user when uncertain.
 
 ## On: invoke
 
@@ -35,8 +34,7 @@ Target: $ARGUMENTS
 ### 1. Archive gate
 
 1. List files currently under `ai-docs/spec/`. If the directory is empty or absent, skip to step 2.
-2. Present the file list to the user. State:
-   > "The following spec files will be moved to `ai-docs/ref/old-spec/YYMMDD/` (today's date) and used as reference only — not as a base to extend. Proceed?"
+2. Present the file list to the user and state that these files will be moved to `ai-docs/ref/old-spec/YYMMDD/` (today's date) and used as reference only — not as a base to extend. Ask the user to confirm before proceeding.
 3. Wait for explicit user confirmation. Do not proceed on ambiguity.
 4. On confirmation, execute:
    ```bash
@@ -142,9 +140,7 @@ Combine the four survey returns:
 
 ### 4. User domain confirmation
 
-Present the candidate domains to the user in a numbered list. State:
-
-> "These are the proposed spec domains, in draft order. You may reorder, merge, split, rename, or drop entries before I proceed."
+Present the candidate domains to the user in a numbered list. Tell the user they may reorder, merge, split, rename, or drop entries before proceeding.
 
 Wait for user response. Apply any adjustments. Do not proceed until the user explicitly confirms the final list.
 
@@ -296,6 +292,7 @@ Collect the confirmed list before writing anything.
    c. Place `🚧` prefix on the `##` heading if planned; omit if implemented.
 4. After writing the file, verify it contains at least one `##` heading. If not, add a placeholder section and note it to the user.
 5. Run `spec-build-index <spec-file>`.
+6. Apply `judge: directory-vs-flat` — if the written file warrants a directory split, note it as a split candidate for a follow-up `/write-spec` invocation. Do not perform the split inline.
 
 ### 6. Complete domain
 
@@ -339,10 +336,10 @@ Total stems generated: <count>
 
 | Decision | When |
 |----------|------|
-| Flat file `ai-docs/spec/<area>.md` | Single, self-contained surface with no expected sub-sections |
-| Directory `ai-docs/spec/<area>/index.md` | Area has or will have multiple distinct sub-sections (different audiences, distinct ticket lifecycles, or more than one `[!note] Constraints` block) |
+| Flat file `ai-docs/spec/<area>.md` | Single, self-contained surface — none of the split conditions below apply |
+| Directory `ai-docs/spec/<area>/index.md` | Any one split condition is met: (1) a section has its own 🚧 markers with a distinct ticket lifecycle; (2) more than one `[!note] Constraints` block is present; (3) a section has a distinct audience from the parent doc |
 
-When uncertain, start flat. Convert to directory when a sub-section warrants its own file.
+When uncertain, start flat. Re-evaluate after writing — if a split condition fires, note the file for a follow-up `/write-spec` invocation.
 
 ## Templates
 
@@ -385,12 +382,8 @@ TaskCreate(
 
 ## Doctrine
 
-Forge-spec optimizes for **user-confirmed behavioral coverage** — every entry
-in the produced spec reflects an explicit user decision about caller-visibility
-and implementation status, not an AI inference. Survey subagents do the
-investigative legwork so the user is never asked "how does this component work?"
-— only "does this belong in spec, and is it implemented or planned?" The
-TaskCreate-backed domain checklist persists this coverage across compact
-boundaries so the skill is always resumable. When a rule is ambiguous, apply
-whichever interpretation more reliably requires explicit user confirmation
-before any spec content is written.
+Forge-spec optimizes for **confirmed spec entries per domain** — every entry
+in the produced spec reflects an explicit user decision on caller-visibility
+and implementation status. When a rule is ambiguous, apply whichever
+interpretation more reliably requires explicit user confirmation before any
+spec content is written.
