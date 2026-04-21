@@ -1,0 +1,18 @@
+# Mental Model Index
+
+Cross-domain patterns and shared conventions for the devenv workflow system.
+
+## Domains
+
+| Domain | File | Scope |
+|--------|------|-------|
+| spec-system | `mental-model/spec-system.md` | Spec stems, anchors, frontmatter tools |
+
+## Shared Conventions
+
+**Stem format:** `{#YYMMDD-slug}` — six-digit date prefix, hyphen, lowercase slug.
+This regex (`\{#\d{6}-[\w-]+\}`) is the shared protocol between `generate-spec-stem`,
+`list-stems`, and `spec-build-index`. A format change requires updating all three.
+
+**Stem storage:** anchors live in spec document body text only — never in frontmatter.
+Any code that looks for stems must grep document content, not parse YAML.

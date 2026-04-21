@@ -58,8 +58,8 @@ claude/infra/                 — docs only; accessed via load-infra
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess
-  spec-build-index            — rebuild features: and stems: frontmatter in spec docs
-  list-stems                  — read stems: frontmatter from a spec file; -v adds heading text
+  spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
+  list-stems                  — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
   merge-branch                — branch merge with strategy selection (squash or --no-ff)
   list-mental-model           — enumerate mental-model docs relevant to target paths
   load-infra                  — cat any infra doc by name (agent Bash tool context)
