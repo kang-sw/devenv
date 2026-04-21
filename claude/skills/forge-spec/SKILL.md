@@ -18,7 +18,7 @@ Target: $ARGUMENTS
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Run `generate-spec-stem <descriptive-slug>` before every anchor insertion.
-- Verify each spec file has at least one `##`-or-deeper heading before calling `spec-build-index` — the tool prints a skip notice to stdout and returns without modifying the file (forge-spec creates files from scratch, so this check is required here).
+- Verify each spec file has at least one `##`-or-deeper heading before calling `spec-build-index` — the tool prints a skip notice to stdout and returns without modifying the file.
 - Run `spec-build-index <file>` after every spec file write or update.
 - Domain task names use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
 - All survey subagents for a phase are dispatched in a single response turn (parallel).
