@@ -300,6 +300,18 @@ if [[ -f "$_ZSH_SYNTAX" ]]; then
     source "$_ZSH_SYNTAX"
 fi
 
+# ── starship: disable git on Windows mounts ──────────────────────────────────
+_starship_select_config() {
+  if [[ "$PWD" == /mnt/[a-z]/* ]]; then
+    export STARSHIP_CONFIG="$HOME/.config/starship-no-git.toml"
+  else
+    unset STARSHIP_CONFIG
+  fi
+}
+autoload -U add-zsh-hook
+add-zsh-hook chpwd _starship_select_config
+_starship_select_config
+
 # ── starship prompt (must be after syntax-highlighting) ──────────────────────
 if command -v starship &>/dev/null; then
     eval "$(starship init zsh)"
@@ -384,6 +396,13 @@ link "$REPO_DIR/shell/.tmux.conf" "$HOME/.tmux.conf"
 link "$REPO_DIR/shell/.wezterm.lua" "$HOME/.wezterm.lua"
 link "$REPO_DIR/shell/.vscode-neovim.lua" "$HOME/.vscode-neovim.lua"
 link "$REPO_DIR/shell/starship.toml" "$HOME/.config/starship.toml"
+
+# Generated: no-git variant for /mnt/ paths (re-created on every install/update)
+{
+  cat "$REPO_DIR/shell/starship.toml"
+  printf '\n[git_branch]\ndisabled = true\n\n[git_status]\ndisabled = true\n'
+} > "$HOME/.config/starship-no-git.toml"
+muted "starship-no-git.toml generated"
 link "$REPO_DIR/shell/lfrc" "$HOME/.config/lf/lfrc"
 
 # Scripts (single directory symlink)
