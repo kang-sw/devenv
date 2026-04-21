@@ -85,6 +85,7 @@ claude/skills/
   manual-think/        — manual chain-of-thought when native thinking unavailable
   write-mental-model/  — mental-model document format, inclusion test, rebuild
   bootstrap/           — scaffold new project or upgrade existing to canonical template
+  forge-spec/          — from-scratch spec reconstruction; archive-first, domain-by-domain, cross-compact via TaskCreate
 ```
 
 ## Canonical Flows
@@ -106,6 +107,9 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260419-chore-blueprint-plugin-extraction` | done | Package claude/ as a Claude Code plugin (now named "ws"); all phases complete and validated |
+| `260420-feat-spec-driven-workflow` | wip | Spec-driven workflow infrastructure (phases 1-5 done; phase 6 pending) |
+| `260421-feat-global-spec-stems` | wip | Global unique YYMMDD-slug stems (phases 1-4 done; phase 5 migration pending) |
+| `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
 
 ## Session Notes
 

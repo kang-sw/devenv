@@ -7,6 +7,8 @@ plans:
   phase-1: 2026-04/260421-1500.forge-spec-p1-3.survey
   phase-2: 2026-04/260421-1500.forge-spec-p1-3.survey
   phase-3: 2026-04/260421-1500.forge-spec-p1-3.survey
+started: 2026-04-21
+completed: 2026-04-21
 ---
 
 # New Skill: /forge-spec — From-Scratch Spec Reconstruction
@@ -77,6 +79,12 @@ Check `TaskList` for existing domain tasks scoped to this project. If found, ski
 - Domain list is user-confirmed before task list is locked.
 - Resume: task list read at invocation start; completed domains skipped automatically.
 
+### Result (fee9bbc) - 2026-04-21
+
+Implemented as specified. All acceptance criteria met. Key deviations from plan: none.
+Review found 8 issues across 2 rounds (wording, judge criteria alignment, post-write split check, conventions). All resolved before merge.
+Mental-model updated: forge-spec entry added to spec-system domain with confirmation gate contract, resume-detection contract, and rebuild-from-scratch recipe.
+
 ### Phase 2: Per-domain spec authoring loop
 
 For each domain (in task order, skipping completed tasks):
@@ -105,6 +113,10 @@ For each domain (in task order, skipping completed tasks):
 - `spec-build-index` run after every spec file modification.
 - Domain task marked done after user confirms spec entries are complete.
 
+### Result (fee9bbc) - 2026-04-21
+
+Implemented as specified. Per-domain loop includes 4-way parallel survey subagents, behavior brief synthesis, user classification loop, spec-entry authoring with generate-spec-stem + spec-build-index, and post-write split-check (flags candidates without interrupting the loop).
+
 ### Phase 3: Wrap-up
 
 After all domain tasks are complete:
@@ -122,3 +134,7 @@ After all domain tasks are complete:
 - All domain tasks marked done before wrap-up runs.
 - Summary includes stem count and 🚧 count.
 - `spec-updater` suggestion included in output.
+
+### Result (fee9bbc) - 2026-04-21
+
+Implemented as specified. Wrap-up runs final spec-build-index safety pass, emits domain/stem/🚧 summary, and suggests invoking the spec-updater agent (correctly identified as claude/agents/spec-updater.md, not a bin command).
