@@ -399,18 +399,17 @@ link "$REPO_DIR/shell/starship.toml" "$HOME/.config/starship.toml"
 
 # Generated: no-git variant for /mnt/ paths (re-created on every install/update)
 # On WSL, also swaps the Apple icon (U+E711) → Windows icon (U+E62A)
-{
-  if [[ "$PLATFORM" == "wsl" ]]; then
-    python3 -c "
-import sys
-content = open(sys.argv[1]).read()
-print(content.replace('', ''), end='')
-" "$REPO_DIR/shell/starship.toml"
-  else
-    cat "$REPO_DIR/shell/starship.toml"
-  fi
-  printf '\n[git_branch]\ndisabled = true\n\n[git_status]\ndisabled = true\n'
-} > "$HOME/.config/starship-no-git.toml"
+python3 - "$REPO_DIR/shell/starship.toml" "$PLATFORM" "$HOME/.config/starship-no-git.toml" <<'PYEOF2'
+import re, sys
+src, platform, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+content = open(src).read()
+if platform == 'wsl':
+    content = content.replace('', '')
+content = re.sub(r'(\[git_branch\]\n)', r'\1disabled = true\n', content)
+content = re.sub(r'(\[git_status\]\n)', r'\1disabled = true\n', content)
+with open(dst, 'w') as f:
+    f.write(content)
+PYEOF2
 muted "starship-no-git.toml generated"
 link "$REPO_DIR/shell/lfrc" "$HOME/.config/lf/lfrc"
 
