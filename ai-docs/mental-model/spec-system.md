@@ -4,6 +4,7 @@ description: "Spec authoring tools, stem format, anchor protocol, and frontmatte
 sources:
   - claude/bin/
   - claude/infra/
+  - claude/skills/forge-spec/
 ---
 
 # Spec System
@@ -17,6 +18,7 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 - `claude/infra/spec-conventions.md` — canonical stem format, anchor rules, frontmatter protocol.
 - `claude/bin/generate-spec-stem` — collision-safe stem minting.
 - `claude/bin/spec-build-index` — frontmatter regeneration; entry point for understanding what it writes and removes.
+- `claude/skills/forge-spec/SKILL.md` — from-scratch spec reconstruction workflow; entry point when rebuilding an entire spec.
 
 ## Module Contracts
 
@@ -27,6 +29,12 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
   the current heading structure, and any `stems:` block is removed. It does not write stems anywhere.
 - `list-stems` (no file arg) guarantees: a flat list of every `{#YYMMDD-slug}` found by
   grepping `ai-docs/spec/`. Hierarchy and display labels require a file argument.
+- `forge-spec` guarantees: no spec file is written and no archive `git mv` executes without explicit
+  user confirmation. Resume detection runs at every invocation via `TaskList` — tasks prefixed
+  `forge-spec-<domain>` are the persistence mechanism across compact boundaries.
+- `spec-updater` identifies a spec-stem for git lookup as the bare slug extracted from the
+  `{#slug}` anchor (e.g., `260421-feature-name`). It does not use a compound `file-path:slug` form.
+  `git log --all --grep="<slug>"` is the lookup mechanism.
 
 ## Coupling
 
@@ -34,6 +42,12 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
   `{#YYMMDD-slug}` regex as the stem format. A format change breaks all three.
 - Anchors live in document body text (any line), not in frontmatter. Every tool
   that reads stems must grep document body — not parse frontmatter.
+- `forge-spec` ↔ `TaskCreate` / `TaskList` / `TaskUpdate`: forge-spec registers one task per
+  domain (`forge-spec-<domain>`) for cross-compact persistence. Clearing or renaming these tasks
+  destroys resume state.
+- `forge-spec` → `spec-updater`: forge-spec suggests invoking the `spec-updater` agent at
+  wrap-up to strip `🚧` markers. The two tools are independent — forge-spec does not call
+  spec-updater directly.
 
 ## Extension Points & Change Recipes
 
@@ -44,6 +58,9 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
   Do not look in frontmatter; `stems:` blocks no longer exist.
 - **Change the stem format**: update the `STEM_RE` constant in all three tools
   (`generate-spec-stem`, `list-stems`, `spec-build-index`) and update `spec-conventions.md`.
+- **Rebuild spec from scratch**: invoke `/forge-spec`. It archives existing spec files,
+  surveys the codebase via parallel Sonnet subagents, confirms domain list and per-behavior
+  classification with the user, then writes spec entries domain by domain.
 
 ## Common Mistakes
 
