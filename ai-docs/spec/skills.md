@@ -26,11 +26,11 @@ to each other but do not auto-chain without user approval.
 
 Skills are authored in this repo and symlinked into downstream projects via `~/.claude/skills/`.
 
-## Workflow Skills
+## Workflow Skills {#workflow-skills}
 
 Used in sequence as a ticket moves through its lifecycle.
 
-### Session Bootstrap
+### Session Bootstrap {#session-bootstrap}
 
 `/enter-session [optional context]` — Synthesizes recent work, active tickets, and session
 state into a compact briefing. Invoke at session start or after context loss.
@@ -44,41 +44,44 @@ Two execution paths:
 - **Bootstrap** — forks a clerk subagent to scan git log and active tickets; emits a
   fresh briefing.
 
-### Discussion
+### Discussion {#discussion}
 
 `/discuss [topic, ticket path, or question]` — Iterative brainstorming over approach or
 direction. Reads spec docs and mental-model docs on-demand as topics emerge. Concludes by
-offering to persist conclusions via `/write-ticket` or `/write-mental-model`.
+always suggesting `/write-spec` (write-spec's judge decides relevance), then offering to
+persist conclusions via `/write-ticket` or `/write-mental-model`.
 
 No source edits during discussion. Implementation details are researched via subagents,
 not direct source reads. The Project Map (tickets + spec inventory) is injected at entry.
 
-### Ticket Authoring
+### Ticket Authoring {#ticket-authoring}
 
 `/write-ticket [topic or existing ticket path]` — Creates or edits a ticket under
 `ai-docs/tickets/`. Each ticket captures the full decision context for its phases: goals,
 constraints, rationale, rejected alternatives, suggested approaches (pseudo-code, data
 shapes). Codebase-derived details stay in plans, not tickets.
 
-After authoring, prompts whether a spec update is warranted for public-facing changes.
-Delegates routine status moves and cross-ticket inspection to a clerk subagent.
+After authoring, includes a `spec:` frontmatter field listing affected spec-stems when the
+ticket implements spec features. Suggests `/write-spec` unconditionally as the next step.
 
-### Spec Authoring
+### Spec Authoring {#spec-authoring}
 
 `/write-spec [area name or spec file path]` — Creates or updates external-perspective spec
 documents under `ai-docs/spec/`. Describes what the system does from a caller's viewpoint,
 not how it is built.
 
-Key annotation conventions:
-- `### 🚧 Feature [ticket-stem/pN]` — unimplemented; linked to the tracking ticket phase.
-- `> [!note] Planned 🚧 [ticket-stem/pN]` — planned change to an existing feature.
+Key conventions:
+- `judge: spec-impact` gate at entry — exits immediately if no public behavior is affected.
+- `## 🚧 Feature {#feature-slug}` — unimplemented named feature with stable anchor.
+- `> [!note] Planned 🚧` — planned change to an existing feature.
 - No `🚧` marker — implemented and verified against the codebase.
+- No ticket references in markers — traceability is via commits with `## Spec` sections.
 
 Directory structure: one directory per area when multiple sub-docs are needed;
 flat file for self-contained surfaces. `spec-build-index` regenerates the `features:`
 frontmatter after every write.
 
-### Skeleton Authoring
+### Skeleton Authoring {#skeleton-authoring}
 
 `/write-skeleton [ticket-path]` — Writes public interface stubs and integration tests
 before any implementation code. Establishes locked contracts that plan and implementation
@@ -86,7 +89,7 @@ must satisfy. Stub tests fail by design — do not run before implementation.
 
 The skeleton commit is the acceptance-criteria baseline for the subsequent implementation.
 
-### Planning
+### Planning {#planning}
 
 `/write-plan [ticket-path or description]` — Researches the codebase and produces
 implementation guidance. Two modes:
@@ -99,7 +102,7 @@ implementation guidance. Two modes:
 Plan file is committed before implementation begins. Lead never reads source directly —
 all exploration is subagent-delegated.
 
-### Implementation
+### Implementation {#implementation}
 
 `/implement <plan-path or inline brief> [--ticket <stem>]` — Delegates a single-scope
 implementation cycle to an implementer+reviewer pair. Lead does not read source or write
@@ -108,7 +111,7 @@ implementation code.
 Acceptance criteria: skeleton stubs compile and integration tests pass. User approves the
 reviewer's report before merge. A mental-model update runs automatically after approval.
 
-### Parallel Implementation
+### Parallel Implementation {#parallel-implementation}
 
 `/parallel-implement <ticket/plan/scope description>` — Runs multiple implementer+reviewer
 pairs concurrently across disjoint scopes. Scopes must share no modified files. Lead
@@ -116,7 +119,7 @@ serializes commits after all pairs report; user approves the aggregate report be
 
 Use when the skeleton defines two or more independent scopes with separate test paths.
 
-### Auto-Routing
+### Auto-Routing {#auto-routing}
 
 `/proceed <ticket or description>` — Assesses available artifacts and routes through
 the canonical pipeline automatically. Announces the chosen path before executing.
@@ -124,11 +127,11 @@ the canonical pipeline automatically. Announces the chosen path before executing
 Pipeline order: skeleton → (optional) plan → implement or parallel-implement.
 Stops and prompts if the scope is too vague for routing. Does not read source directly.
 
-## Maintenance Skills
+## Maintenance Skills {#maintenance-skills}
 
 Invoked reactively when project state needs to be updated.
 
-### Mental Model
+### Mental Model {#mental-model}
 
 `/write-mental-model [domain or "rebuild"]` — Rebuilds or updates internal architecture
 documentation under `ai-docs/mental-model/`. Applies the inclusion test from
@@ -137,15 +140,16 @@ in parallel.
 
 Invoke after implementation changes that affect architecture, coupling, or extension points.
 
-### Spec Maintenance
+### Spec Maintenance {#spec-maintenance}
 
 `/write-spec` (see above) also handles spec updates post-implementation: remove `🚧` from
 confirmed-implemented features, add `Planned` callouts for newly-planned changes.
 
-The `spec-updater` agent (spawned from write-ticket or manually) strips `🚧` markers
-when their linked ticket phases complete and flags bare `🚧` entries with no ticket link.
+The `spec-updater` agent strips `🚧` markers when commits referencing the spec-stem appear
+in history. It uses the `{#slug}` anchor to derive the stem, then greps `git log` for
+`## Spec` entries. Headings without `{#slug}` are flagged as missing anchors.
 
-### Bootstrap
+### Bootstrap {#bootstrap}
 
 `/bootstrap [fresh | upgrade]` — Scaffolds a new project or upgrades an existing one
 to match the canonical `CLAUDE.template.md`. Auto-detects mode:

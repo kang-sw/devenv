@@ -42,19 +42,24 @@ Topic: $ARGUMENTS
 
 ## On: user signals done
 
-1. Offer persistence options only if conclusions warrant it:
+1. Always suggest `/write-spec` as the next step — write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
+2. Then offer ticket persistence:
    - **New ticket** — invoke `ws:write-ticket`.
    - **Ticket update** — invoke `ws:write-ticket`, then append design notes to an existing ticket phase.
    - **Mental-model update** — if discussion surfaced new architectural understanding, suggest `/write-mental-model` for the update. Do not edit mental-model docs directly.
-2. Apply **judge: needs-integration-tests** to ticket writes.
-3. Write only what the user approves. No artifact needed for exploratory discussions.
+3. Apply **judge: needs-integration-tests** to ticket writes.
+4. Write only what the user approves. No artifact needed for exploratory discussions.
 
 ## Workflow Context
 
 Interface and scope decisions made in discussion become downstream inputs:
+- Approach direction → spec update (`/write-spec` — always the next step after discuss)
 - Scope, phases, acceptance criteria → ticket structure (`/write-ticket`)
 - Type shapes, module boundaries, public API → skeleton contract directives (`/write-skeleton`)
 - Approach choices, architectural trade-offs → plan directives (`/write-plan`)
+
+The canonical chain is: `/discuss` → `/write-spec` → `/write-ticket` → `/write-skeleton` → `/implement`.
+Write-spec's judge handles the no-op case; the chain is uniform regardless of topic type.
 
 When discussion converges on a decision in any of these categories, frame
 the conclusion in terms its downstream consumer can directly act on.

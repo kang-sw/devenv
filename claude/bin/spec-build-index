@@ -4,8 +4,9 @@
 Usage: spec-build-index <spec-file.md> [<spec-file2.md> ...]
 
 Parses ## and deeper headings from the markdown body, builds an indented
-feature tree, and writes it into the YAML frontmatter `features:` field.
-The `#` heading is treated as the document title and excluded.
+feature tree into `features:` in frontmatter. Removes any stale `stems:`
+block. The `#` heading is treated as the document title and excluded.
+Anchor syntax `{#slug}` is stripped from features display text.
 """
 
 import re
@@ -17,23 +18,29 @@ FRONTMATTER_DELIM = "---"
 
 
 def parse_frontmatter_and_body(text: str) -> tuple[str, str]:
-    """Split text into (frontmatter, body). Returns ('', text) if no frontmatter."""
+    """Split text into (frontmatter, body). Returns ('', text) if no frontmatter.
+
+    Raises ValueError if opening --- has no closing ---.
+    """
     if not text.startswith(FRONTMATTER_DELIM):
         return "", text
-    end = text.index(FRONTMATTER_DELIM, len(FRONTMATTER_DELIM))
+    try:
+        end = text.index(FRONTMATTER_DELIM, len(FRONTMATTER_DELIM))
+    except ValueError:
+        raise ValueError("frontmatter opened with --- but no closing --- found")
     fm = text[len(FRONTMATTER_DELIM) : end].strip()
     body = text[end + len(FRONTMATTER_DELIM) :]
     return fm, body
 
 
 def extract_features(body: str) -> list[tuple[int, str]]:
-    """Extract (depth, title) pairs from headings. ## = depth 0."""
+    """Extract (depth, title) pairs from headings. ## = depth 0. Anchors stripped."""
     features = []
     for line in body.splitlines():
         m = HEADING_RE.match(line)
         if m:
             depth = len(m.group(1)) - 2  # ## = 0, ### = 1, ...
-            title = m.group(2).strip()
+            title = re.sub(r"\s*\{#[\w-]+\}", "", m.group(2).strip())
             features.append((depth, title))
     return features
 
@@ -47,18 +54,16 @@ def build_tree_text(features: list[tuple[int, str]]) -> str:
     return "\n".join(lines)
 
 
-def update_frontmatter(fm: str, features_text: str) -> str:
-    """Replace or insert the features: field in frontmatter."""
-    lines = fm.splitlines() if fm else []
-    new_field = f"features:\n{_indent_block(features_text)}"
+def _replace_or_insert_block(lines: list[str], key: str, new_field_lines: list[str]) -> list[str]:
+    """Replace or insert a YAML block identified by its key line.
 
-    # Find existing features: block and replace it
+    When new_field_lines is empty, removes the existing block if present.
+    """
     start = None
     end = None
     for i, line in enumerate(lines):
-        if line.startswith("features:"):
+        if line.startswith(f"{key}:"):
             start = i
-            # Find the end of the block (next non-indented line or EOF)
             for j in range(i + 1, len(lines)):
                 if lines[j] and not lines[j][0].isspace():
                     end = j
@@ -68,12 +73,27 @@ def update_frontmatter(fm: str, features_text: str) -> str:
             break
 
     if start is not None:
-        lines[start:end] = new_field.splitlines()
-    else:
+        lines[start:end] = new_field_lines
+    elif new_field_lines:
         if lines and lines[-1]:
             lines.append("")
-        lines.extend(new_field.splitlines())
+        lines.extend(new_field_lines)
 
+    return lines
+
+
+def update_frontmatter(fm: str, features_text: str) -> str:
+    """Replace or insert the features: field in frontmatter."""
+    lines = fm.splitlines() if fm else []
+    new_field = f"features:\n{_indent_block(features_text)}"
+    lines = _replace_or_insert_block(lines, "features", new_field.splitlines())
+    return "\n".join(lines)
+
+
+def remove_stems(fm: str) -> str:
+    """Remove the stems: block from frontmatter if present."""
+    lines = fm.splitlines() if fm else []
+    lines = _replace_or_insert_block(lines, "stems", [])
     return "\n".join(lines)
 
 
@@ -83,8 +103,18 @@ def _indent_block(text: str, indent: str = "  ") -> str:
 
 
 def process_file(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
-    fm, body = parse_frontmatter_and_body(text)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"  error: {path}: {e}", file=sys.stderr)
+        return
+
+    try:
+        fm, body = parse_frontmatter_and_body(text)
+    except ValueError as e:
+        print(f"  error: {path}: {e}", file=sys.stderr)
+        return
+
     features = extract_features(body)
 
     if not features:
@@ -93,12 +123,19 @@ def process_file(path: Path) -> None:
 
     tree = build_tree_text(features)
     new_fm = update_frontmatter(fm, tree)
+    new_fm = remove_stems(new_fm)
+
     output = f"{FRONTMATTER_DELIM}\n{new_fm}\n{FRONTMATTER_DELIM}{body}"
-    path.write_text(output, encoding="utf-8")
+    try:
+        path.write_text(output, encoding="utf-8")
+    except OSError as e:
+        print(f"  error: {path}: {e}", file=sys.stderr)
+        return
     print(f"  done: {path} ({len(features)} features)")
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} <spec-file.md> [...]", file=sys.stderr)
         sys.exit(1)

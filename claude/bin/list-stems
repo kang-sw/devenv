@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""List spec stems from ai-docs/spec/ or a specific spec file.
+
+Usage:
+  list-stems [-v] [<spec-file>]
+
+  No file arg : output flat list of all stems found under ai-docs/spec/.
+                -v emits a warning — display labels require heading context.
+  With file   : output stems with hierarchical heading context.
+  -v          : include display label after stem (tab-separated).
+
+Stems match the pattern {#YYMMDD-slug} (6-digit date prefix required).
+H1 title lines are skipped (document title, not a feature anchor).
+"""
+
+import re
+import sys
+from pathlib import Path
+
+
+# __file__-anchored so the script works when called from any CWD, not just project root.
+SPEC_DIR = Path(__file__).resolve().parents[2] / "ai-docs" / "spec"
+HEADING_RE = re.compile(r"^(#{2,6})\s+(.*)")
+H1_RE = re.compile(r"^#\s")
+STEM_RE = re.compile(r"\{#(\d{6}-[\w-]+)\}")
+ANCHOR_STRIP_RE = re.compile(r"\s*\{#[\w-]+\}")
+
+
+def list_all_stems(verbose: bool) -> None:
+    if not SPEC_DIR.is_dir():
+        print(f"(no {SPEC_DIR} found)", file=sys.stderr)
+        sys.exit(1)
+
+    if verbose:
+        print("(-v ignored in flat scan — display labels require file-arg mode)", file=sys.stderr)
+
+    stems: list[str] = []
+    for md_file in sorted(SPEC_DIR.rglob("*.md")):
+        try:
+            text = md_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for match in STEM_RE.finditer(text):
+            stems.append(match.group(1))
+
+    if not stems:
+        print("(no stems — add {#YYMMDD-slug} anchors then re-run)", file=sys.stderr)
+        sys.exit(0)
+
+    for stem in stems:
+        print(stem)
+
+
+def list_file_stems(path: Path, verbose: bool) -> None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    lines = text.splitlines()
+    results: list[tuple[str, str, int]] = []  # (stem, display, indent_level)
+
+    current_heading_depth = 0  # H2=0, H3=1, H4=2, ...
+
+    for line in lines:
+        if H1_RE.match(line):
+            continue  # H1 is the document title — excluded, same as spec-build-index
+        hm = HEADING_RE.match(line)
+        if hm:
+            depth = len(hm.group(1)) - 2  # H2=0, H3=1, ...
+            raw_title = hm.group(2).strip()
+            sm = STEM_RE.search(raw_title)
+            current_heading_depth = depth
+            if sm:
+                stem = sm.group(1)
+                display = ANCHOR_STRIP_RE.sub("", raw_title).strip()
+                results.append((stem, display, depth))
+        else:
+            sm = STEM_RE.search(line)
+            if sm:
+                stem = sm.group(1)
+                display = ANCHOR_STRIP_RE.sub("", line).strip()
+                results.append((stem, display, current_heading_depth + 1))
+
+    if not results:
+        print("(no stems — add {#YYMMDD-slug} anchors to the file)", file=sys.stderr)
+        sys.exit(0)
+
+    for stem, display, indent_level in results:
+        prefix = "  " * indent_level
+        if verbose:
+            print(f"{prefix}{stem}\t{display}")
+        else:
+            print(f"{prefix}{stem}")
+
+
+def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
+    args = sys.argv[1:]
+    verbose = False
+    if args and args[0] == "-v":
+        verbose = True
+        args = args[1:]
+
+    if not args:
+        list_all_stems(verbose)
+    else:
+        list_file_stems(Path(args[0]), verbose)
+
+
+if __name__ == "__main__":
+    main()

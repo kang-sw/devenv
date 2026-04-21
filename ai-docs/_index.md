@@ -10,6 +10,8 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
 
+**Plugin:** `ws@0.3.0` — see `claude/.claude-plugin/plugin.json`.
+
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
 - After any change to `claude/`, run `claude plugin update ws@ws` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
@@ -39,7 +41,7 @@ claude/agents/
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
-  spec-updater.md         — strip completed 🚧 markers; flag spec/implementation drift
+  spec-updater.md         — strip 🚧 markers when spec-stems appear in merged commits
 ```
 
 ## Infra Layout
@@ -48,7 +50,8 @@ claude/agents/
 claude/infra/                 — docs only; accessed via load-infra
   impl-playbook.md            — subagent-safe implementation discipline
   mental-model-conventions.md — mental-model doc format and invariants
-  ticket-conventions.md       — ticket format, status directories, stem convention
+  ticket-conventions.md       — ticket format, status directories, stem convention; optional spec: field
+  spec-conventions.md         — spec doc format, 🚧 marker rules, {#slug} anchor protocol
   subagent-rules.md           — exploration, branches, general rules
   implementer.md              — code implementer role; spawn as general-purpose + read first
   code-review-correctness.md  — Correctness review partition: logic, error paths, contracts, security
@@ -57,10 +60,11 @@ claude/infra/                 — docs only; accessed via load-infra
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess
-  spec-build-index            — rebuild features: frontmatter in spec docs
+  spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
+  list-stems                  — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
   merge-branch                — branch merge with strategy selection (squash or --no-ff)
   list-mental-model           — enumerate mental-model docs relevant to target paths
-  load-infra             — cat any infra doc by name (agent Bash tool context)
+  load-infra                  — cat any infra doc by name (agent Bash tool context)
 ```
 
 ## Skill Inventory
@@ -83,12 +87,13 @@ claude/skills/
   manual-think/        — manual chain-of-thought when native thinking unavailable
   write-mental-model/  — mental-model document format, inclusion test, rebuild
   bootstrap/           — scaffold new project or upgrade existing to canonical template
+  forge-spec/          — from-scratch spec reconstruction; archive-first, domain-by-domain, cross-compact via TaskCreate
 ```
 
 ## Canonical Flows
 
 ```
-Full ceremony:  /discuss → /write-ticket → /write-skeleton → /implement (warm) or /delegate-implement (cold)
+Full ceremony:  /discuss → /write-spec → /write-ticket → /write-skeleton → /implement (warm) or /delegate-implement (cold)
 Direct:         /implement <description>
 Parallel:       /parallel-implement (disjoint file sets on shared branch)
 Auto-route:     /proceed <ticket-path>    — pipeline selection via warmth + scope judges
@@ -104,6 +109,9 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260419-chore-blueprint-plugin-extraction` | done | Package claude/ as a Claude Code plugin (now named "ws"); all phases complete and validated |
+| `260420-feat-spec-driven-workflow` | wip | Spec-driven workflow infrastructure (phases 1-5 done; phase 6 pending) |
+| `260421-feat-global-spec-stems` | wip | Global unique YYMMDD-slug stems (phases 1-4 done; phase 5 migration pending) |
+| `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
 
 ## Session Notes
 
