@@ -40,7 +40,7 @@ Topic: $ARGUMENTS
 3. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 4. Continue until the user signals done.
 
-## On: Ticket Status Move
+## On: Ticket Status Transition
 
 Triggers when the user requests a ticket status change — promoting an idea ticket to `todo/`, or dropping a ticket to `dropped/`.
 
@@ -50,8 +50,8 @@ Triggers when the user requests a ticket status change — promoting an idea tic
    b. Invoke `/write-spec` to add a `🚧` entry for each caller-visible behavior in the ticket.
 3. **Drop (→ dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
-   b. Solo-covered stem → invoke `/write-spec` to remove the `🚧` entry.
-   c. Multi-covered or ambiguous → ask the user before removing.
+   b. No other ticket references this stem → invoke `/write-spec` to remove the `🚧` entry.
+   c. Other tickets also reference this stem, or coverage is ambiguous → ask the user before removing.
    d. Perform `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/dropped/<stem>.md`.
 4. Create one commit covering the `git mv` and any spec changes together.
 

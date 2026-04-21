@@ -62,7 +62,7 @@ Canonical flows. The owner routes to one of these in the briefing's `Recommended
 Mechanical routing:
 
 - No active ticket, user exploring direction → `/discuss`
-- Spec-relevant ticket status move pending (idea→todo promotion or drop) → `/discuss`
+- Pending spec-relevant ticket transition (idea→todo promotion or drop) → `/discuss`
 - Direction clear, no ticket yet → `/write-ticket`
 - Ticket exists, no skeleton → `/write-skeleton`
 - Skeleton exists, scope is research-heavy (see `judge: scope-complexity`) → `/write-plan`
@@ -90,7 +90,7 @@ Mechanical routing:
 - Active ticket stem and purpose
 - Open threads or unresolved questions
 - Queue depth and top stems
-- Spec-relevant pending status moves (idea→todo promotions or drops with linked spec entries not yet reflected in spec) — recommend `/discuss` to handle
+- Pending ticket transitions with spec impact (idea→todo promotions or drops with linked spec entries not yet updated) — recommend `/discuss` to handle
 
 **Recommended next** stays rigid: backtick-quoted skill name followed by a one-line reason.
 
