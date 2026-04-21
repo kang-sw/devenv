@@ -2,6 +2,11 @@
 title: "Global Unique Spec Stems — Design Pivot"
 related:
   260420-feat-spec-driven-workflow: supersedes-tooling
+plans:
+  phase-1: 2026-04/260421-1259.global-spec-stems-p1-4.survey
+  phase-2: 2026-04/260421-1259.global-spec-stems-p1-4.survey
+  phase-3: 2026-04/260421-1259.global-spec-stems-p1-4.survey
+  phase-4: 2026-04/260421-1259.global-spec-stems-p1-4.survey
 ---
 
 # Global Unique Spec Stems — Design Pivot
