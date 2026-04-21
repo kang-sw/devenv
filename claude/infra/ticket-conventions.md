@@ -13,6 +13,9 @@ Canonical reference for ticket structure, naming, and lifecycle.
 - Status is directory-based only: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). Never duplicate status in frontmatter.
 - Move tickets with `git mv`; no cross-link updates needed.
 - Add `started:` date on move to `wip/`, `completed:` date on move to `done/`.
+- `idea/` tickets may not have `spec:` entries — spec linkage begins at `todo/` or higher.
+- Promoting `idea/` → `todo/` for a ticket with spec-relevant behaviors: route through `/discuss` → `/write-spec` adds the `🚧` entry before or after the move.
+- Dropping a ticket with linked spec entries: route through `/discuss` → `/write-spec` removes orphaned `🚧` entries before the move.
 
 ## Phases
 
