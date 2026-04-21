@@ -26,14 +26,14 @@ Target: $ARGUMENTS
 1. Identify the target from `$ARGUMENTS` — area name, file path, or description.
 2. If creating a new spec:
    a. Apply `judge: directory-vs-flat` to choose the file structure.
-   b. Write the spec body following the `spec-format` template.
+   b. Write the spec body following the `spec-format` template. Apply `judge: idea-level` before inserting any `🚧` entries.
    c. Run `spec-build-index` on the new file.
    d. Add the spec to the listing in `ai-docs/_index.md`.
 3. If updating an existing spec:
    a. Read the target file first.
    b. For each new anchor: run `generate-spec-stem <descriptive-slug>` to get a collision-free `{#YYMMDD-slug}`.
    c. Insert the anchor — on a heading line or anywhere in body text (not heading-only).
-   d. Add 🚧 Planned callouts or remove 🚧 from confirmed-implemented features as needed.
+   d. Apply `judge: idea-level` before adding any `🚧` Planned callouts. Remove 🚧 from confirmed-implemented features as needed.
    e. Run `spec-build-index` to regenerate the `features:` frontmatter field.
 4. Apply `judge: split-trigger` after writing — if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
 5. Accuracy check — confirm every heading without 🚧 exists in the codebase. Use an Explore agent if uncertain. Never remove 🚧 without confirmation.
@@ -43,6 +43,10 @@ Target: $ARGUMENTS
 ### judge: spec-impact
 
 Evaluate whether the work introduces or modifies behavior a caller can observe from outside the implementation. Internal restructuring, refactors that preserve external behavior, or tooling changes with no public-facing surface are not spec-relevant. Any addition to or change of a callable interface, user-visible output, or documented convention qualifies.
+
+### judge: idea-level
+
+When about to write a `🚧` entry: check whether the only ticket basis is an `idea/`-status ticket. If yes, or if basis is ambiguous — ask the user whether to defer the entry until the ticket is promoted to `todo/`. Exit the `🚧` write on confirmed deferral. Proceed if the user confirms the entry should be written.
 
 ### judge: directory-vs-flat
 

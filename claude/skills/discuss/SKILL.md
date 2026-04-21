@@ -40,6 +40,21 @@ Topic: $ARGUMENTS
 3. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 4. Continue until the user signals done.
 
+## On: Ticket Status Move
+
+Triggers when the user requests a ticket status change — promoting an idea ticket to `todo/`, or dropping a ticket to `dropped/`.
+
+1. Read the ticket file. Extract any `spec:` frontmatter field and body references to `{#YYMMDD-slug}` anchors.
+2. **Promotion (idea/ → todo/)**:
+   a. Perform `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
+   b. Invoke `/write-spec` to add a `🚧` entry for each caller-visible behavior in the ticket.
+3. **Drop (→ dropped/)**:
+   a. For each linked spec stem: check whether any other non-dropped ticket also references it.
+   b. Solo-covered stem → invoke `/write-spec` to remove the `🚧` entry.
+   c. Multi-covered or ambiguous → ask the user before removing.
+   d. Perform `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/dropped/<stem>.md`.
+4. Create one commit covering the `git mv` and any spec changes together.
+
 ## On: user signals done
 
 1. Always suggest `/write-spec` as the next step — write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
