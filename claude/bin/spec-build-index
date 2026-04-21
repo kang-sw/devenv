@@ -36,7 +36,13 @@ def parse_frontmatter_and_body(text: str) -> tuple[str, str]:
 def extract_features(body: str) -> list[tuple[int, str]]:
     """Extract (depth, title) pairs from headings. ## = depth 0. Anchors stripped."""
     features = []
+    in_fence = False
     for line in body.splitlines():
+        if line.startswith("```") or line.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         m = HEADING_RE.match(line)
         if m:
             depth = len(m.group(1)) - 2  # ## = 0, ### = 1, ...
