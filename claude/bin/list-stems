@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""List spec-stems from a spec file's frontmatter.
+
+Usage:
+  list-stems [-v] <spec-file>
+
+  No flags : output stem keys only.
+  -v       : output stem key + heading display text pairs.
+
+Stems are read from the `stems:` YAML map in spec frontmatter.
+Run `spec-build-index` first to ensure the map is current.
+"""
+
+import re
+import sys
+from pathlib import Path
+
+SPEC_BASE = Path("ai-docs/spec")
+
+
+def parse_stems(path: Path) -> list[tuple[str, str]]:
+    """Return [(stem_key, display_text), ...] from spec frontmatter."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not text.startswith("---"):
+        return []
+
+    lines = text.splitlines()
+    end = next(
+        (i for i, ln in enumerate(lines[1:], 1) if ln.rstrip() == "---"),
+        None,
+    )
+    if end is None:
+        return []
+
+    in_stems = False
+    results: list[tuple[str, str]] = []
+    for line in lines[1:end]:
+        if not in_stems:
+            if re.match(r"^stems:\s*$", line):
+                in_stems = True
+        else:
+            if line and not line[0].isspace():
+                break
+            m = re.match(r"^\s+([\w:.\-/]+):\s+(.*)", line)
+            if m:
+                key = m.group(1).strip()
+                val = m.group(2).strip().strip('"\'')
+                results.append((key, val))
+
+    return results
+
+
+def stem_path(spec_path: Path) -> str:
+    """Compute the file-stem portion of the spec stem."""
+    resolved = spec_path.resolve()
+    base = SPEC_BASE.resolve()
+    try:
+        rel = resolved.relative_to(base)
+    except ValueError:
+        # Fallback: strip .md and use filename
+        return spec_path.stem
+    parts = rel.with_suffix("").parts
+    return "/".join(parts)
+
+
+def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
+    args = sys.argv[1:]
+    verbose = False
+    if args and args[0] == "-v":
+        verbose = True
+        args = args[1:]
+
+    if not args:
+        print(f"Usage: {sys.argv[0]} [-v] <spec-file>", file=sys.stderr)
+        sys.exit(1)
+
+    path = Path(args[0])
+    stems = parse_stems(path)
+
+    if not stems:
+        print("(no stems found — run spec-build-index first)", file=sys.stderr)
+        sys.exit(0)
+
+    for key, display in stems:
+        if verbose:
+            print(f"{key}\t{display}")
+        else:
+            print(key)
+
+
+if __name__ == "__main__":
+    main()

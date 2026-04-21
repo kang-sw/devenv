@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Build the frontmatter feature index from spec document headings.
+"""Build the frontmatter feature index and stem map from spec document headings.
 
 Usage: spec-build-index <spec-file.md> [<spec-file2.md> ...]
 
 Parses ## and deeper headings from the markdown body, builds an indented
-feature tree, and writes it into the YAML frontmatter `features:` field.
+feature tree into `features:` and a stem map into `stems:` in frontmatter.
 The `#` heading is treated as the document title and excluded.
+Anchor syntax `{#slug}` is stripped from features display text.
 """
 
 import re
@@ -13,7 +14,10 @@ import sys
 from pathlib import Path
 
 HEADING_RE = re.compile(r"^(#{2,6})\s+(.*)")
+ANCHOR_RE = re.compile(r"\s*\{#[\w-]+\}")
+SLUG_RE = re.compile(r"\{#([\w-]+)\}")
 FRONTMATTER_DELIM = "---"
+SPEC_BASE = Path("ai-docs/spec")
 
 
 def parse_frontmatter_and_body(text: str) -> tuple[str, str]:
@@ -27,15 +31,66 @@ def parse_frontmatter_and_body(text: str) -> tuple[str, str]:
 
 
 def extract_features(body: str) -> list[tuple[int, str]]:
-    """Extract (depth, title) pairs from headings. ## = depth 0."""
+    """Extract (depth, title) pairs from headings. ## = depth 0. Anchors stripped."""
     features = []
     for line in body.splitlines():
         m = HEADING_RE.match(line)
         if m:
             depth = len(m.group(1)) - 2  # ## = 0, ### = 1, ...
-            title = m.group(2).strip()
+            title = re.sub(r"\s*\{#[\w-]+\}", "", m.group(2).strip())
             features.append((depth, title))
     return features
+
+
+def extract_stems(body: str, file_path: Path) -> list[tuple[str, str]]:
+    """Extract (stem_key, display_title) pairs from anchored headings."""
+    try:
+        resolved = file_path.resolve()
+        base = SPEC_BASE.resolve()
+        rel = resolved.relative_to(base)
+        file_stem = "/".join(rel.with_suffix("").parts)
+    except ValueError:
+        file_stem = file_path.stem
+
+    stems: list[tuple[str, str]] = []
+    parent_slugs: dict[int, str] = {}  # depth -> slug for current ancestry chain
+
+    for line in body.splitlines():
+        m = HEADING_RE.match(line)
+        if not m:
+            continue
+        depth = len(m.group(1)) - 2  # ## = 0, ### = 1, ...
+        raw_title = m.group(2).strip()
+        slug_m = SLUG_RE.search(raw_title)
+        if not slug_m:
+            # Headings without anchors are skipped for stems
+            # Clear deeper parent slugs since this heading breaks the chain
+            for d in list(parent_slugs.keys()):
+                if d >= depth:
+                    del parent_slugs[d]
+            continue
+
+        slug = slug_m.group(1)
+        display = re.sub(r"\s*\{#[\w-]+\}", "", raw_title)
+
+        # Build dotted stem from parent chain
+        parent_parts = [parent_slugs[d] for d in sorted(parent_slugs) if d < depth]
+        if parent_parts:
+            full_slug = ".".join(parent_parts) + "." + slug
+        else:
+            full_slug = slug
+
+        stem_key = f"{file_stem}:{full_slug}"
+        stems.append((stem_key, display))
+
+        # Update parent chain for this depth
+        parent_slugs[depth] = slug
+        # Clear deeper entries
+        for d in list(parent_slugs.keys()):
+            if d > depth:
+                del parent_slugs[d]
+
+    return stems
 
 
 def build_tree_text(features: list[tuple[int, str]]) -> str:
@@ -47,18 +102,13 @@ def build_tree_text(features: list[tuple[int, str]]) -> str:
     return "\n".join(lines)
 
 
-def update_frontmatter(fm: str, features_text: str) -> str:
-    """Replace or insert the features: field in frontmatter."""
-    lines = fm.splitlines() if fm else []
-    new_field = f"features:\n{_indent_block(features_text)}"
-
-    # Find existing features: block and replace it
+def _replace_or_insert_block(lines: list[str], key: str, new_field_lines: list[str]) -> list[str]:
+    """Replace or insert a YAML block identified by its key line."""
     start = None
     end = None
     for i, line in enumerate(lines):
-        if line.startswith("features:"):
+        if line.startswith(f"{key}:"):
             start = i
-            # Find the end of the block (next non-indented line or EOF)
             for j in range(i + 1, len(lines)):
                 if lines[j] and not lines[j][0].isspace():
                     end = j
@@ -68,12 +118,31 @@ def update_frontmatter(fm: str, features_text: str) -> str:
             break
 
     if start is not None:
-        lines[start:end] = new_field.splitlines()
+        lines[start:end] = new_field_lines
     else:
         if lines and lines[-1]:
             lines.append("")
-        lines.extend(new_field.splitlines())
+        lines.extend(new_field_lines)
 
+    return lines
+
+
+def update_frontmatter(fm: str, features_text: str) -> str:
+    """Replace or insert the features: field in frontmatter."""
+    lines = fm.splitlines() if fm else []
+    new_field = f"features:\n{_indent_block(features_text)}"
+    lines = _replace_or_insert_block(lines, "features", new_field.splitlines())
+    return "\n".join(lines)
+
+
+def update_stems(fm: str, stems: list[tuple[str, str]]) -> str:
+    """Replace or insert the stems: field in frontmatter."""
+    lines = fm.splitlines() if fm else []
+    if stems:
+        stem_lines = ["stems:"] + [f'  {k}: "{v}"' for k, v in stems]
+    else:
+        stem_lines = ["stems:"]
+    lines = _replace_or_insert_block(lines, "stems", stem_lines)
     return "\n".join(lines)
 
 
@@ -93,9 +162,13 @@ def process_file(path: Path) -> None:
 
     tree = build_tree_text(features)
     new_fm = update_frontmatter(fm, tree)
+
+    stems = extract_stems(body, path)
+    new_fm = update_stems(new_fm, stems)
+
     output = f"{FRONTMATTER_DELIM}\n{new_fm}\n{FRONTMATTER_DELIM}{body}"
     path.write_text(output, encoding="utf-8")
-    print(f"  done: {path} ({len(features)} features)")
+    print(f"  done: {path} ({len(features)} features, {len(stems)} stems)")
 
 
 def main() -> None:

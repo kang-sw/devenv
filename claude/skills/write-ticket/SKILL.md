@@ -34,7 +34,11 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec check** — if any phase adds or changes user-visible behavior, prompt: "Did this phase introduce or modify public-facing behavior? If yes, invoke `/write-spec` to update the relevant spec."
+6. **Spec-stem check** — if any phase implements a spec feature:
+   a. Run `list-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
+   b. Add a `spec:` field to the ticket frontmatter listing the affected stem(s).
+   c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
+7. **Spec write prompt** — always suggest `/write-spec` as the next step after ticket authoring; write-spec's judge handles relevance.
 
 ## Judgments
 

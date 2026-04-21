@@ -67,7 +67,12 @@ alternatives considered, and trade-offs — focus on _why_ this approach was cho
 ## Ticket Updates                          # optional — only when ticket-driven
 - <ticket-stem>[: <optional-label>]
   > Forward: <what future phases must know>
+
+## Spec                                    # optional — one per affected spec feature; omit if none
+- <spec-stem>
 ```
+
+When a spec heading's `{#slug}` changes, include `renamed-spec: <old-stem> → <new-stem>` in the commit message body.
 
 ### Context Window Discipline
 
@@ -211,6 +216,10 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          areas with multiple sub-docs into directories: `ai-docs/spec/<area>/index.md`
          plus child files. Run `/write-spec` to rebuild the `features:` frontmatter
          via `spec-build-index` for all spec files after reorganization.
+- v0023: If Commit Rules lack a `## Spec` section, add it after `## Ticket Updates`.
+         Format: `- <spec-stem>  # one per affected spec feature; omit section if none`.
+         Also add rename convention: "When a spec heading's {#slug} changes, include
+         `renamed-spec: <old-stem> → <new-stem>` in the commit message."
 -->
 
-<!-- Template Version: v0022 -->
+<!-- Template Version: v0023 -->
