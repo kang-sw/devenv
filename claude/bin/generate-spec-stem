@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 
+# __file__-anchored so the script works when called from any CWD, not just project root.
 SPEC_DIR = Path(__file__).resolve().parents[2] / "ai-docs" / "spec"
 STEM_RE = re.compile(r"\{#(\d{6}-[\w-]+)\}")
 

@@ -18,10 +18,16 @@ FRONTMATTER_DELIM = "---"
 
 
 def parse_frontmatter_and_body(text: str) -> tuple[str, str]:
-    """Split text into (frontmatter, body). Returns ('', text) if no frontmatter."""
+    """Split text into (frontmatter, body). Returns ('', text) if no frontmatter.
+
+    Raises ValueError if opening --- has no closing ---.
+    """
     if not text.startswith(FRONTMATTER_DELIM):
         return "", text
-    end = text.index(FRONTMATTER_DELIM, len(FRONTMATTER_DELIM))
+    try:
+        end = text.index(FRONTMATTER_DELIM, len(FRONTMATTER_DELIM))
+    except ValueError:
+        raise ValueError("frontmatter opened with --- but no closing --- found")
     fm = text[len(FRONTMATTER_DELIM) : end].strip()
     body = text[end + len(FRONTMATTER_DELIM) :]
     return fm, body
@@ -97,8 +103,18 @@ def _indent_block(text: str, indent: str = "  ") -> str:
 
 
 def process_file(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
-    fm, body = parse_frontmatter_and_body(text)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"  error: {path}: {e}", file=sys.stderr)
+        return
+
+    try:
+        fm, body = parse_frontmatter_and_body(text)
+    except ValueError as e:
+        print(f"  error: {path}: {e}", file=sys.stderr)
+        return
+
     features = extract_features(body)
 
     if not features:
@@ -110,7 +126,11 @@ def process_file(path: Path) -> None:
     new_fm = remove_stems(new_fm)
 
     output = f"{FRONTMATTER_DELIM}\n{new_fm}\n{FRONTMATTER_DELIM}{body}"
-    path.write_text(output, encoding="utf-8")
+    try:
+        path.write_text(output, encoding="utf-8")
+    except OSError as e:
+        print(f"  error: {path}: {e}", file=sys.stderr)
+        return
     print(f"  done: {path} ({len(features)} features)")
 
 

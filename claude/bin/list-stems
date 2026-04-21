@@ -5,10 +5,12 @@ Usage:
   list-stems [-v] [<spec-file>]
 
   No file arg : output flat list of all stems found under ai-docs/spec/.
+                -v emits a warning — display labels require heading context.
   With file   : output stems with hierarchical heading context.
   -v          : include display label after stem (tab-separated).
 
 Stems match the pattern {#YYMMDD-slug} (6-digit date prefix required).
+H1 title lines are skipped (document title, not a feature anchor).
 """
 
 import re
@@ -16,8 +18,10 @@ import sys
 from pathlib import Path
 
 
+# __file__-anchored so the script works when called from any CWD, not just project root.
 SPEC_DIR = Path(__file__).resolve().parents[2] / "ai-docs" / "spec"
 HEADING_RE = re.compile(r"^(#{2,6})\s+(.*)")
+H1_RE = re.compile(r"^#\s")
 STEM_RE = re.compile(r"\{#(\d{6}-[\w-]+)\}")
 ANCHOR_STRIP_RE = re.compile(r"\s*\{#[\w-]+\}")
 
@@ -27,20 +31,23 @@ def list_all_stems(verbose: bool) -> None:
         print(f"(no {SPEC_DIR} found)", file=sys.stderr)
         sys.exit(1)
 
-    stems: list[tuple[str, str]] = []
+    if verbose:
+        print("(-v ignored in flat scan — display labels require file-arg mode)", file=sys.stderr)
+
+    stems: list[str] = []
     for md_file in sorted(SPEC_DIR.rglob("*.md")):
         try:
             text = md_file.read_text(encoding="utf-8")
         except OSError:
             continue
         for match in STEM_RE.finditer(text):
-            stems.append((match.group(1), ""))
+            stems.append(match.group(1))
 
     if not stems:
         print("(no stems — add {#YYMMDD-slug} anchors then re-run)", file=sys.stderr)
         sys.exit(0)
 
-    for stem, _ in stems:
+    for stem in stems:
         print(stem)
 
 
@@ -57,6 +64,8 @@ def list_file_stems(path: Path, verbose: bool) -> None:
     current_heading_depth = 0  # H2=0, H3=1, H4=2, ...
 
     for line in lines:
+        if H1_RE.match(line):
+            continue  # H1 is the document title — excluded, same as spec-build-index
         hm = HEADING_RE.match(line)
         if hm:
             depth = len(hm.group(1)) - 2  # H2=0, H3=1, ...
