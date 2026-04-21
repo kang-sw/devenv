@@ -398,8 +398,17 @@ link "$REPO_DIR/shell/.vscode-neovim.lua" "$HOME/.vscode-neovim.lua"
 link "$REPO_DIR/shell/starship.toml" "$HOME/.config/starship.toml"
 
 # Generated: no-git variant for /mnt/ paths (re-created on every install/update)
+# On WSL, also swaps the Apple icon (U+E711) → Windows icon (U+E62A)
 {
-  cat "$REPO_DIR/shell/starship.toml"
+  if [[ "$PLATFORM" == "wsl" ]]; then
+    python3 -c "
+import sys
+content = open(sys.argv[1]).read()
+print(content.replace('', ''), end='')
+" "$REPO_DIR/shell/starship.toml"
+  else
+    cat "$REPO_DIR/shell/starship.toml"
+  fi
   printf '\n[git_branch]\ndisabled = true\n\n[git_status]\ndisabled = true\n'
 } > "$HOME/.config/starship-no-git.toml"
 muted "starship-no-git.toml generated"
