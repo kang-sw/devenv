@@ -26,7 +26,8 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
   currently present under `ai-docs/spec/`. Uniqueness holds within a single invocation
   (multiple slugs passed at once are deduplicated against each other too).
 - `spec-build-index` guarantees: after each run, the `features:` frontmatter block reflects
-  the current heading structure, and any `stems:` block is removed. It does not write stems anywhere.
+  the current heading structure (headings inside ` ``` ` or `~~~` fenced blocks are excluded),
+  and any `stems:` block is removed. It does not write stems anywhere.
 - `list-stems` (no file arg) guarantees: a flat list of every `{#YYMMDD-slug}` found by
   grepping `ai-docs/spec/`. Hierarchy and display labels require a file argument.
 - `forge-spec` guarantees: no spec file is written and no archive `git mv` executes without explicit
