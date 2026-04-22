@@ -14,7 +14,7 @@ features:
     - `/write-plan`
     - `/write-mental-model`
   - Implementation Skills
-    - `/implement`
+    - `/edit`
     - `/delegate-implement`
     - `/parallel-implement`
     - `/proceed`
@@ -37,7 +37,7 @@ The standard pipeline runs in this order:
 ```
 /discuss → /write-spec → /write-ticket → /proceed
                                              ↓
-                   /write-skeleton? → /write-plan? → /implement
+                   /write-skeleton? → /write-plan? → /edit
                                                   → /delegate-implement
                                                   → /parallel-implement
 ```
@@ -112,7 +112,7 @@ Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). 
 
 Crystallizes public contracts as interface stubs and integration tests before implementation begins. The lead identifies contract directives (type signatures, API shapes, invariants), delegates writing to a subagent, reviews, and commits. Updates the ticket `skeletons:` frontmatter with the commit hash.
 
-Suggests `/implement`, `/delegate-implement`, or `/parallel-implement` as the next step based on scope width and session warmth — does not auto-invoke.
+Suggests `/edit`, `/delegate-implement`, or `/parallel-implement` as the next step based on scope width and session warmth — does not auto-invoke.
 
 > [!note] Constraints
 > - Stub files must compile; integration tests are written but not required to pass (implementation is absent).
@@ -132,14 +132,14 @@ Updates the ticket `plans:` frontmatter with the plan path. `/proceed` passes th
 
 Rebuilds or updates `ai-docs/mental-model/` with operational knowledge for modifying the codebase. Delegates all source exploration to subagents. After writing, updates `ai-docs/mental-model.md` (the index) and `ai-docs/_index.md`.
 
-Also dispatched automatically at the end of the doc pipeline by `/implement`, `/delegate-implement`, and `/parallel-implement`.
+Also dispatched automatically at the end of the doc pipeline by `/edit`, `/delegate-implement`, and `/parallel-implement`.
 
 > [!note] Constraints
 > - Describes operational knowledge for code modifiers, not behavior for end users — contents are not caller-visible spec material.
 
 ## Implementation Skills
 
-### `/implement` {#260421-implement}
+### `/edit` {#260422-edit-skill}
 
 Owner-direct single-scope implementation: the main agent reads source, makes edits, verifies via build and test commands, and commits — no subagent delegation for the implementation itself. Best suited for warm sessions with well-understood, narrow scope.
 
@@ -174,10 +174,10 @@ Requires disjoint file sets — overlapping scopes cause merge conflicts.
 
 Auto-router: assesses an implementation target and chains to the correct pipeline without executing implementation steps itself. Judges:
 
-- **Context warmth** — warm session routes to `/implement`; cold routes to `/delegate-implement`.
+- **Context warmth** — warm session routes to `/edit`; cold routes to `/delegate-implement`.
 - **Existing artifacts** — skips `/write-skeleton` and `/write-plan` if already present.
 - **Scope width** — wide or parallelizable scope routes to `/parallel-implement`.
-- **Direct-edit** — trivial changes skip the full pipeline and route directly to `/implement`.
+- **Direct-edit** — trivial changes skip the full pipeline and route directly to `/edit`.
 
 Announces the chosen path before invoking the first skill.
 
