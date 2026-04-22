@@ -57,10 +57,10 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 ## Common Mistakes
 
 - Adding conditional logic in `/proceed` to decide whether to invoke `/write-spec` — the
-  contract is unconditional invocation; spec-impact gating belongs in write-spec.
+  contract is unconditional invocation. Spec-impact gating belongs in write-spec.
 - Invoking `/write-ticket` from a skill without reading the `Ticket:` completion line — the
   produced ticket path is not inferrable from arguments alone (status directory is chosen by
   write-ticket's `judge: initial-status`).
 - Assuming a new prefix stage should mirror the implementation pipeline judges (returning
-  yes/no to proceed) — prefix stages delegate fully; proceed does not inspect their return
+  yes/no to proceed) — prefix stages delegate fully. Proceed does not inspect their return
   value beyond the ticket-path artifact.
