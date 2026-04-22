@@ -79,7 +79,7 @@ claude/skills/
   write-skeleton/      — public interface stubs + integration tests
   write-plan/          — deep codebase research → implementation plan
   edit/                — main-agent-direct single-scope cycle (warm sessions, owner edits)
-  delegate-implement/  — delegated implementer + reviewer cycle (cold sessions or wide scope)
+  implement/           — delegated implementer + reviewer cycle (cold sessions or wide scope)
   parallel-implement/  — multiple implementer pairs, disjoint file sets on shared branch
   proceed/             — auto-route through the canonical pipeline
   ship/                — release: version bump, tag, build, publish per project config
@@ -96,7 +96,7 @@ claude/skills/
 Full ceremony:  /discuss → /write-spec → /write-ticket → /proceed
                                                              ↓
                            /write-skeleton? → /write-plan? → /edit (warm)
-                                                           → /delegate-implement (cold)
+                                                           → /implement (cold)
                                                            → /parallel-implement (disjoint)
 Direct:         /edit <description>
 Auto-route:     /proceed <ticket-path>    — routes via warmth + scope judges
@@ -115,11 +115,12 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260420-feat-spec-driven-workflow` | wip | Spec-driven workflow infrastructure (phases 1-5 done; phase 6 pending) |
 | `260421-feat-global-spec-stems` | wip | Global unique YYMMDD-slug stems (phases 1-4 done; phase 5 migration pending) |
 | `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
-| `260421-feat-delegate-implement-feature-branch` | done | /delegate-implement feature-branch auto-merge mode; all phases complete |
+| `260421-feat-delegate-implement-feature-branch` | done | /implement feature-branch auto-merge mode; all phases complete |
 | `260422-chore-write-ticket-workflow-drift` | done | Fix stale /write-spec suggestion in write-ticket + workflow-skills.md chain drift |
 | `260422-chore-workflow-chain-drift` | done | Fix remaining chain drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md |
 | `260422-feat-write-ticket-review` | done | Add mandatory document-reviewer step to write-ticket after intent review |
 | `260422-chore-rename-implement-to-edit` | done | Rename /implement skill to /edit; phase 1 of two-phase skill rename |
+| `260422-implement-skill` | done | Rename delegate-implement skill to /implement; phase 2 of skill rename |
 
 ## Session Notes
 

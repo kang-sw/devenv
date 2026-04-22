@@ -24,7 +24,7 @@ Target: $ARGUMENTS
 - When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
 - If the target is too vague to route (no ticket, no actionable description), stop and suggest `/write-ticket` or `/discuss`.
 - Never skip announce — the user must see the routing decision before anything proceeds.
-- Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/delegate-implement` and `/parallel-implement`, and merge.
+- Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement` and `/parallel-implement`, and merge.
 
 ## On: invoke
 
@@ -57,12 +57,12 @@ Build the pipeline from the results. Skeleton always precedes plan — the plan 
 
 | needs-skeleton | needs-plan | execution-mode | Pipeline |
 |----------------|------------|----------------|----------|
-| no | no | single | `ws:delegate-implement` |
+| no | no | single | `ws:implement` |
 | no | no | parallel | `ws:parallel-implement` |
-| no | yes | single | `ws:write-plan` then `ws:delegate-implement` |
-| yes | no | single | `ws:write-skeleton` then `ws:delegate-implement` |
+| no | yes | single | `ws:write-plan` then `ws:implement` |
+| yes | no | single | `ws:write-skeleton` then `ws:implement` |
 | yes | no | parallel | `ws:write-skeleton` then `ws:parallel-implement` |
-| yes | yes | single | `ws:write-skeleton` then `ws:write-plan` then `ws:delegate-implement` |
+| yes | yes | single | `ws:write-skeleton` then `ws:write-plan` then `ws:implement` |
 
 ### 3. Announce
 
@@ -87,7 +87,7 @@ For a pipeline verdict, announce:
 - **Warmth**: <warm | cold> — <evidence from conversation state>
 - **Plan**: <skip (reason) | /write-plan (reason)>
 - **Skeleton**: <skip (reason) | /write-skeleton (reason)>
-- **Execution**: </delegate-implement | /parallel-implement> — <reason>
+- **Execution**: </implement | /parallel-implement> — <reason>
 
 Proceeding.
 ```
@@ -101,7 +101,7 @@ For a direct-edit verdict, invoke `ws:edit` via the Skill tool with the target a
 For a pipeline verdict, invoke each stage sequentially via the Skill tool, passing the target as arguments.
 
 - After each stage, verify it completed (check for committed artifacts).
-- Pass downstream context: if `/write-plan` produces a plan path, pass it to `/delegate-implement`.
+- Pass downstream context: if `/write-plan` produces a plan path, pass it to `/implement`.
 - If a stage fails or the user interrupts, stop — do not continue the pipeline.
 
 ## Judgments
@@ -113,7 +113,7 @@ For a pipeline verdict, invoke each stage sequentially via the Skill tool, passi
 | Direct edit (skip pipeline) | Change is confined to a single file AND purely internal (no callers affected, no new public symbols, no new test files needed) AND user has not explicitly requested delegation |
 | Engage pipeline | Any condition above is unmet — including any cross-file touch, new public contract, or new test file |
 
-Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth improves briefing quality for delegation — it does not exempt a change from delegation. When the main agent is warm, produce a richer brief for `/delegate-implement` rather than editing directly.
+Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth improves briefing quality for delegation — it does not exempt a change from delegation. When the main agent is warm, produce a richer brief for `/implement` rather than editing directly.
 
 ### judge: needs-ticket
 
@@ -149,7 +149,7 @@ If `needs-plan = yes`, execution-mode is locked to single — do not evaluate pa
 
 | Decision | When |
 |----------|------|
-| Single (`/delegate-implement`) | Default — one cohesive scope |
+| Single (`/implement`) | Default — one cohesive scope |
 | Parallel (`/parallel-implement`) | 2+ scopes with no shared files and no shared interfaces, each independently testable. Structural isolation (separate directory trees) is sufficient signal without a skeleton; file-level isolation within a shared directory requires a skeleton to confirm disjointness mechanically. |
 
 ## Doctrine

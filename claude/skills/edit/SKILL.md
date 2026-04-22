@@ -18,7 +18,7 @@ Target: $ARGUMENTS
 - Load relevant mental-model docs before editing — run `list-mental-model <target-paths>` and read every listed file.
 - When skeleton exists for the target scope, its stubs and integration tests are the acceptance criteria.
 - Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
-- Escalate to `/delegate-implement` or `/proceed` if scope grows beyond single-scope direct-edit capacity.
+- Escalate to `/implement` or `/proceed` if scope grows beyond single-scope direct-edit capacity.
 - When `judge: needs-review` fires, spawn a one-shot reviewer — no team, fresh context per iteration.
 - Doc pipeline (mental-model-updater, `ai-docs/_index.md`, ticket status) runs before reporting to the user.
 - Report completion to the user — commit range, test status, deviations.
@@ -99,7 +99,7 @@ Report to the user:
 | Decision | When |
 |----------|------|
 | Proceed with /edit | Main agent is warm on the target area; change is small (single file or tightly coupled pair, or clear cross-module changes with established pattern); verifiable with focused tests |
-| Escalate to /delegate-implement | Cross-module without clear pattern, or main agent cannot hold full context while editing, or scope exceeds 3+ files with new public API |
+| Escalate to /implement | Cross-module without clear pattern, or main agent cannot hold full context while editing, or scope exceeds 3+ files with new public API |
 | Escalate to /proceed | Upstream artifact missing (ticket, skeleton, or plan) |
 
 ### judge: skeleton-check
@@ -116,7 +116,7 @@ Report to the user:
 | Skip | Single file, no public contract changes, follows established patterns |
 | Review | 2+ files, or public API modification, or new pattern introduced |
 
-Scope exceeding 3+ files with new public API or architectural change is already out of `/edit` capacity — `judge: scope-bound` escalates to `/delegate-implement` before review fires.
+Scope exceeding 3+ files with new public API or architectural change is already out of `/edit` capacity — `judge: scope-bound` escalates to `/implement` before review fires.
 
 ## Doctrine
 

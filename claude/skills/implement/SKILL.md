@@ -1,5 +1,5 @@
 ---
-name: delegate-implement
+name: implement
 description: >
   Delegated single-scope implementation cycle. An implementer-reviewer pair
   work behind locked contracts; the lead coordinates, merges, and updates
