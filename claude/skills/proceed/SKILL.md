@@ -14,16 +14,18 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- This skill routes — it does not implement, plan, or write skeletons itself.
+- This skill routes. It does not implement, plan, or write skeletons itself.
 - Every routing decision is announced with rationale before execution begins.
 - Each pipeline sub-skill is invoked via the Skill tool with the appropriate arguments.
-- Pipeline order is fixed: skeleton → plan → implementation. Skeleton establishes locked contracts that the plan consumes.
-- `/parallel-implement` is never preceded by `/write-plan` — if a plan is needed, execution-mode is locked to single.
-- Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only — do not read source code during assessment.
+- Pipeline order is fixed: skeleton → plan → implementation.
+- `/parallel-implement` is never preceded by `/write-plan`. If a plan is needed, execution-mode is locked to single.
+- Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only. Do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
-- If the target is too vague to route (no ticket, no actionable description), stop and suggest `/write-ticket` or `/discuss`.
-- Never skip announce — the user must see the routing decision before anything proceeds.
+- If the target is a vague idea with no clear scope, auto-invoke `/write-ticket` and continue.
+- If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
+- Never skip announce.
+- Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement` and `/parallel-implement`, and merge.
 
 ## On: invoke
@@ -39,19 +41,27 @@ Gather the facts needed for routing. Do not read source code — read only artif
    - **Skeleton exists?** — check ticket frontmatter `skeletons:` field, or grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs in relevant paths.
 4. If inline description (no ticket): assess from the description alone.
 5. Assess context warmth: has this session already engaged with relevant code (prior turns read files in the target scope, or user explicitly signaled direct authorship like "let me draft it" or "I'll do it directly")? Signal is observable from conversation state alone — do not read source to decide.
+6. Assess whether the target is exploratory vs. actionable: does the conversation have clear scope and direction, or is the user still weighing approaches? This signal feeds `judge: needs-ticket`.
 
 ### 2. Route
 
-First check whether the pipeline should be skipped entirely:
+Before the pipeline judges, two prefix judges fire in order:
+
+**judge: needs-spec (always fires first)** — always invoke `/write-spec`. Continue to `judge: needs-ticket` regardless of outcome.
+
+**judge: needs-ticket (fires second)** — see judgment table below.
+
+Then apply the existing pipeline judges: direct-edit → needs-plan → needs-skeleton → execution-mode.
+
+After prefix judges complete, check whether the implementation pipeline should be skipped entirely:
 
 **judge: direct-edit** — if the verdict is direct-edit, skip the pipeline judges and announce direct-edit in step 3.
 
 Otherwise, apply the pipeline judgments in order. Each produces a yes/no that builds the pipeline.
 
-1. **judge: needs-ticket** — Is the target actionable as-is?
-2. **judge: needs-plan** — Does this need codebase research before implementation?
-3. **judge: needs-skeleton** — Does this need contract stubs before implementation?
-4. **judge: execution-mode** — Single-scope or parallel?
+1. **judge: needs-plan** — Does this need codebase research before implementation?
+2. **judge: needs-skeleton** — Does this need contract stubs before implementation?
+3. **judge: execution-mode** — Single-scope or parallel?
 
 Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs. When warmth is warm, `/write-plan` internally selects warm mode; proceed does not pass a mode flag — it only decides whether `/write-plan` is invoked at all.
 
@@ -92,6 +102,11 @@ For a pipeline verdict, announce:
 Proceeding.
 ```
 
+When prefix stages fire, prefix them in the pipeline line:
+- Spec fires + ticket fires: `## Pipeline: /write-spec → /write-ticket → <implementation stages>`
+- Spec fires only: `## Pipeline: /write-spec → <implementation stages>`
+- Direct-edit: use existing direct-edit format unchanged
+
 Do not ask for confirmation — announce and proceed. The user can interrupt if the routing is wrong.
 
 ### 4. Execute
@@ -103,6 +118,7 @@ For a pipeline verdict, invoke each stage sequentially via the Skill tool, passi
 - After each stage, verify it completed (check for committed artifacts).
 - Pass downstream context: if `/write-plan` produces a plan path, pass it to `/implement`.
 - If a stage fails or the user interrupts, stop — do not continue the pipeline.
+- After `judge: needs-ticket` auto-invoke: capture the ticket path from `/write-ticket`'s output. Use it as the target for all downstream stages (skeleton, plan, implementation).
 
 ## Judgments
 
@@ -119,7 +135,7 @@ Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth im
 
 | Decision | When |
 |----------|------|
-| Stop, suggest `/write-ticket` | Target is a vague idea with no clear scope or acceptance criteria |
+| Auto-invoke `/write-ticket`, capture ticket path, continue | Target is a vague idea with no clear scope — auto-invokes `/write-ticket` rather than stopping; captures the produced ticket path from its output for downstream stages |
 | Stop, suggest `/discuss` | Target is exploratory — user is weighing approaches, not requesting implementation |
 | Proceed | Target is a ticket path, or an inline description with clear scope and deliverables |
 
@@ -154,12 +170,11 @@ If `needs-plan = yes`, execution-mode is locked to single — do not evaluate pa
 
 ## Doctrine
 
-Proceed optimizes for **routing accuracy under session-warmth awareness** —
-gather just enough signal from conversation state and artifacts to pick the
-right path, announce the decision for user visibility, then delegate to the
-chosen sub-skills. Delegation is the default; direct edit is the exception
-for trivially local single-file changes with no external impact. Warmth is
-the axis that improves briefing precision for delegation — a warm agent
-writes sharper directives and a richer brief, not fewer delegation steps.
-When a rule is ambiguous, apply whichever interpretation better preserves
-the user's ability to intervene while keeping delegation as the baseline.
+Proceed optimizes for **full-pipeline routing accuracy** — spanning spec,
+ticket, and implementation stages. The signal available from conversation
+state and artifacts is the finite resource: use it to select the right
+sub-skill at each stage, not to replicate logic already owned by that
+sub-skill's gate. Warmth improves briefing precision — a warm session
+writes sharper directives, not fewer delegation steps. When a rule is
+ambiguous, apply whichever interpretation better preserves the user's
+ability to intervene at any pipeline stage.

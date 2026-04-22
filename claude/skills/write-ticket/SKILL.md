@@ -45,6 +45,8 @@ Target: $ARGUMENTS
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
 8. **Proceed prompt** — suggest `/proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 7. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
+   Emit the created ticket path as a completion artifact on its own line at the end of output, in the form `Ticket: ai-docs/tickets/<status>/<stem>.md`. This allows callers (e.g. `/proceed`) to capture the path when invoking `/write-ticket` as a prefix stage.
+
 ## Judgments
 
 ### judge: initial-status
