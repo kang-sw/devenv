@@ -17,14 +17,14 @@ Target: $ARGUMENTS
 - This skill routes — it does not implement, plan, or write skeletons itself.
 - Every routing decision is announced with rationale before execution begins.
 - Each pipeline sub-skill is invoked via the Skill tool with the appropriate arguments.
-- Pipeline order is fixed: skeleton → plan → implementation. Skeleton establishes locked contracts that the plan consumes.
+- Pipeline order is fixed: skeleton → plan → implementation.
 - `/parallel-implement` is never preceded by `/write-plan` — if a plan is needed, execution-mode is locked to single.
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only — do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
-- If the target is a vague idea with no clear scope, auto-invoke `/write-ticket` and continue — `judge: needs-ticket` captures the produced ticket path for downstream stages.
+- If the target is a vague idea with no clear scope, auto-invoke `/write-ticket` and continue.
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
-- Never skip announce — the user must see the routing decision before anything proceeds.
+- Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes — include prefix stages in the pipeline line even when their gates exit without writing.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement` and `/parallel-implement`, and merge.
 
@@ -105,8 +105,6 @@ Proceeding.
 When prefix stages fire, prefix them in the pipeline line:
 - Spec fires + ticket fires: `## Pipeline: /write-spec → /write-ticket → <implementation stages>`
 - Spec fires only: `## Pipeline: /write-spec → <implementation stages>`
-- Ticket fires only: `## Pipeline: /write-ticket → <implementation stages>`
-- Neither fires: use existing format unchanged
 - Direct-edit: use existing direct-edit format unchanged
 
 Do not ask for confirmation — announce and proceed. The user can interrupt if the routing is wrong.
