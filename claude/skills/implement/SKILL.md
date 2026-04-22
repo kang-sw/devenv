@@ -49,9 +49,9 @@ Target: $ARGUMENTS
    ```
    [ ] Spawn implementer — wait for completion report
    [ ] Spawn reviewers (partition-allocated) — parallel review → lead relays file paths → implementer fixes → re-review loop until clean
-   [ ] Dispatch mental-model-updater — wait for completion
+   [ ] Dispatch mental-model-updater + spec-updater in parallel — wait for both; surface ambiguous stems
    [ ] Report to user — wait for approval  ← main-branch mode only
-     > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run updater (loop)
+     > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run both updaters (loop)
    [ ] Merge to original branch
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
    [ ] Cleanup — shut down teammates, delete team
@@ -154,8 +154,8 @@ Wait for all reviewers to complete.
 
 ### 4. Docs pre-pass
 
-1. Dispatch **mental-model-updater** with changed files and implementation summary.
-   Provide the commit range from the implementation branch. Always dispatch — the agent determines impact. **Wait for completion before proceeding** — the report step should reflect the final doc state.
+1. Dispatch **mental-model-updater** and **spec-updater** in parallel with the commit range and implementation summary. Always dispatch both — the agents determine impact. **Wait for both before proceeding** — the report step should reflect the final doc state.
+2. If **spec-updater** reports ambiguous stems, include them in the step 5 report for user resolution.
 
 ### 5. Report and approval
 
@@ -169,7 +169,7 @@ Wait for all reviewers to complete.
 2. **Main-branch mode only** — wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
    - Re-apply `judge: partition-allocation` and spawn fresh reviewers per the step 3 pattern. Wait for implementer fix report.
-   - Re-run **mental-model-updater** with the new commit range. Wait for completion.
+   - Re-run **mental-model-updater** and **spec-updater** with the new commit range. Wait for both.
    - Re-report. Loop until user approves.
 
 Implementer and reviewer remain alive throughout this loop.

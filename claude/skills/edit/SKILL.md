@@ -20,7 +20,7 @@ Target: $ARGUMENTS
 - Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
 - Escalate to `/implement` or `/proceed` if scope grows beyond single-scope direct-edit capacity.
 - When `judge: needs-review` fires, spawn a one-shot reviewer — no team, fresh context per iteration.
-- Doc pipeline (mental-model-updater, `ai-docs/_index.md`, ticket status) runs before reporting to the user.
+- Doc pipeline (mental-model-updater + spec-updater in parallel, `ai-docs/_index.md`, ticket status) runs before reporting to the user.
 - Report completion to the user — commit range, test status, deviations.
 
 ## On: invoke
@@ -78,7 +78,7 @@ Loop until no Critical/Important issues remain.
 
 ### 5. Doc pipeline
 
-1. Dispatch **mental-model-updater** with the commit range and a brief implementation summary. Wait for completion.
+1. Dispatch **mental-model-updater** and **spec-updater** in parallel with the commit range and implementation summary. Wait for both. If **spec-updater** reports ambiguous stems, surface them to the user.
 2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
 3. If ticket-driven:
    1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase. Content: what was implemented, deviations from plan, key findings for future phases. Short hash = last implementation commit.
