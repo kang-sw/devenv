@@ -25,7 +25,7 @@ Target: $ARGUMENTS
 - If the target is a vague idea with no clear scope, auto-invoke `/write-ticket` and continue.
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
 - Never skip announce.
-- Announce reflects routing decisions, not post-hoc outcomes — include prefix stages in the pipeline line even when their gates exit without writing.
+- Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement` and `/parallel-implement`, and merge.
 
 ## On: invoke
