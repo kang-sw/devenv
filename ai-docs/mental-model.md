@@ -7,6 +7,7 @@ Cross-domain patterns and shared conventions for the devenv workflow system.
 | Domain | File | Scope |
 |--------|------|-------|
 | spec-system | `mental-model/spec-system.md` | Spec stems, anchors, frontmatter tools |
+| workflow-routing | `mental-model/workflow-routing.md` | /proceed routing contracts, prefix-stage delegation, write-ticket artifact protocol |
 
 ## Shared Conventions
 
