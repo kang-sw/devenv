@@ -52,3 +52,11 @@ Drifted locations:
 
 Success: write-ticket/SKILL.md and workflow-skills.md accurately describe the
 discuss→write-spec→write-ticket chain with no stale /write-spec suggestion.
+
+### Result (1cded01) - 2026-04-22
+
+Fixed all targeted drift locations. write-ticket step 7 now suggests `/proceed`;
+`judge: missing-spec-entry` extracted as named judgment per skill-authoring.md conventions.
+workflow-skills.md chain diagram redrawn, Planning Skills section reordered, spec entry updated.
+Remaining drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md tracked
+in 260422-chore-workflow-chain-drift.

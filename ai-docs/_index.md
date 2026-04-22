@@ -93,10 +93,13 @@ claude/skills/
 ## Canonical Flows
 
 ```
-Full ceremony:  /discuss → /write-spec → /write-ticket → /write-skeleton → /implement (warm) or /delegate-implement (cold)
+Full ceremony:  /discuss → /write-spec → /write-ticket → /proceed
+                                                             ↓
+                           /write-skeleton? → /write-plan? → /implement (warm)
+                                                           → /delegate-implement (cold)
+                                                           → /parallel-implement (disjoint)
 Direct:         /implement <description>
-Parallel:       /parallel-implement (disjoint file sets on shared branch)
-Auto-route:     /proceed <ticket-path>    — pipeline selection via warmth + scope judges
+Auto-route:     /proceed <ticket-path>    — routes via warmth + scope judges
 ```
 
 Agent suggests next step at each point; user decides. `/proceed` is the explicit opt-in for auto-chaining through the pipeline.
@@ -113,6 +116,9 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260421-feat-global-spec-stems` | wip | Global unique YYMMDD-slug stems (phases 1-4 done; phase 5 migration pending) |
 | `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
 | `260421-feat-delegate-implement-feature-branch` | done | /delegate-implement feature-branch auto-merge mode; all phases complete |
+| `260422-chore-write-ticket-workflow-drift` | done | Fix stale /write-spec suggestion in write-ticket + workflow-skills.md chain drift |
+| `260422-chore-workflow-chain-drift` | todo | Fix remaining chain drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md |
+| `260422-feat-write-ticket-review` | idea | Add document-reviewer invocation to write-ticket (deferred pending chain stabilization) |
 
 ## Session Notes
 
