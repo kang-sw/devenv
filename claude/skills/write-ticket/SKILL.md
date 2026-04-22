@@ -34,11 +34,7 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Document review** — Spawn `document-reviewer` on the current ticket file. Use Opus by
-   default; use Sonnet only when the ticket is single-phase, has no design decisions, and is
-   purely mechanical (typo, config-only, or doc-only). Present findings to the user. If any
-   finding is rated Critical or Important: fix in-place and re-review. Proceed when the
-   reviewer reports clean.
+6. **Document review(only on user request)** — Spawn `document-reviewer` on the current ticket file. Use Opus by default; use Sonnet only when the ticket is single-phase, has no design decisions, and is purely mechanical (typo, config-only, or doc-only). Present findings to the user. If any finding is rated Critical or Important: fix in-place and re-review. Proceed when the reviewer reports clean.
 7. **Spec-stem check** — confirm ticket↔spec linkage:
    a. Run `list-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
    b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
