@@ -78,7 +78,7 @@ claude/skills/
   write-spec/          — create/update external-perspective spec docs in ai-docs/spec/
   write-skeleton/      — public interface stubs + integration tests
   write-plan/          — deep codebase research → implementation plan
-  implement/           — main-agent-direct single-scope cycle (warm sessions, owner edits)
+  edit/                — main-agent-direct single-scope cycle (warm sessions, owner edits)
   delegate-implement/  — delegated implementer + reviewer cycle (cold sessions or wide scope)
   parallel-implement/  — multiple implementer pairs, disjoint file sets on shared branch
   proceed/             — auto-route through the canonical pipeline
@@ -95,10 +95,10 @@ claude/skills/
 ```
 Full ceremony:  /discuss → /write-spec → /write-ticket → /proceed
                                                              ↓
-                           /write-skeleton? → /write-plan? → /implement (warm)
+                           /write-skeleton? → /write-plan? → /edit (warm)
                                                            → /delegate-implement (cold)
                                                            → /parallel-implement (disjoint)
-Direct:         /implement <description>
+Direct:         /edit <description>
 Auto-route:     /proceed <ticket-path>    — routes via warmth + scope judges
 ```
 

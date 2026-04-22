@@ -1,5 +1,5 @@
 ---
-name: implement
+name: edit
 description: >
   Main-agent-direct single-scope implementation. The main agent reads,
   edits, verifies, and commits directly — no subagent delegation for the
@@ -7,7 +7,7 @@ description: >
 argument-hint: "[ticket-path or inline brief] [--plan <plan-path>]"
 ---
 
-# Implement
+# Edit
 
 Target: $ARGUMENTS
 
@@ -56,7 +56,7 @@ Apply `judge: needs-review`.
 
 ```
 Agent(
-  description = "Review /implement diff",
+  description = "Review /edit diff",
   subagent_type = "ws:code-reviewer",
   model = "sonnet",
   prompt = """
@@ -98,7 +98,7 @@ Report to the user:
 
 | Decision | When |
 |----------|------|
-| Proceed with /implement | Main agent is warm on the target area; change is small (single file or tightly coupled pair, or clear cross-module changes with established pattern); verifiable with focused tests |
+| Proceed with /edit | Main agent is warm on the target area; change is small (single file or tightly coupled pair, or clear cross-module changes with established pattern); verifiable with focused tests |
 | Escalate to /delegate-implement | Cross-module without clear pattern, or main agent cannot hold full context while editing, or scope exceeds 3+ files with new public API |
 | Escalate to /proceed | Upstream artifact missing (ticket, skeleton, or plan) |
 
@@ -116,11 +116,11 @@ Report to the user:
 | Skip | Single file, no public contract changes, follows established patterns |
 | Review | 2+ files, or public API modification, or new pattern introduced |
 
-Scope exceeding 3+ files with new public API or architectural change is already out of `/implement` capacity — `judge: scope-bound` escalates to `/delegate-implement` before review fires.
+Scope exceeding 3+ files with new public API or architectural change is already out of `/edit` capacity — `judge: scope-bound` escalates to `/delegate-implement` before review fires.
 
 ## Doctrine
 
-Implement optimizes for **session-context preservation during code
+Edit optimizes for **session-context preservation during code
 changes** — the main agent retains its accumulated understanding of
 the task through editing rather than forking that context to a
 subagent and reconstructing it across the boundary. When review fires,

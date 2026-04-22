@@ -21,7 +21,7 @@ Target: $ARGUMENTS
 - `/parallel-implement` is never preceded by `/write-plan` — if a plan is needed, execution-mode is locked to single.
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only — do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
-- When direct-edit verdict fires, announce and invoke `ws:implement` via the Skill tool.
+- When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
 - If the target is too vague to route (no ticket, no actionable description), stop and suggest `/write-ticket` or `/discuss`.
 - Never skip announce — the user must see the routing decision before anything proceeds.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/delegate-implement` and `/parallel-implement`, and merge.
@@ -69,13 +69,13 @@ Build the pipeline from the results. Skeleton always precedes plan — the plan 
 For a direct-edit verdict, announce:
 
 ```
-## Direct edit → /implement
+## Direct edit → /edit
 
 - **Target**: <ticket path or brief summary>
 - **Warmth**: warm — <what the main agent already knows>
 - **Reason**: <why pipeline is overkill for this change>
 
-Invoking `/implement`.
+Invoking `/edit`.
 ```
 
 For a pipeline verdict, announce:
@@ -96,7 +96,7 @@ Do not ask for confirmation — announce and proceed. The user can interrupt if 
 
 ### 4. Execute
 
-For a direct-edit verdict, invoke `ws:implement` via the Skill tool with the target as arguments.
+For a direct-edit verdict, invoke `ws:edit` via the Skill tool with the target as arguments.
 
 For a pipeline verdict, invoke each stage sequentially via the Skill tool, passing the target as arguments.
 
@@ -113,7 +113,7 @@ For a pipeline verdict, invoke each stage sequentially via the Skill tool, passi
 | Direct edit (skip pipeline) | Change is confined to a single file AND purely internal (no callers affected, no new public symbols, no new test files needed) AND user has not explicitly requested delegation |
 | Engage pipeline | Any condition above is unmet — including any cross-file touch, new public contract, or new test file |
 
-Direct edit invokes `/implement`. This is the exception, not the fast path. Warmth improves briefing quality for delegation — it does not exempt a change from delegation. When the main agent is warm, produce a richer brief for `/delegate-implement` rather than editing directly.
+Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth improves briefing quality for delegation — it does not exempt a change from delegation. When the main agent is warm, produce a richer brief for `/delegate-implement` rather than editing directly.
 
 ### judge: needs-ticket
 
