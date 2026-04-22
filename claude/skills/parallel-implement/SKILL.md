@@ -68,7 +68,7 @@ Load `/team-lead` if not already loaded.
    ```
 9. Register tasks via TaskCreate. One task per scope (carries the scope manifest in its description), plus one task per workflow phase. All are mandatory — do not skip or reorder:
    - Scope tasks (one per scope): `implement-<scope.name>` — description includes file_set + test_command + brief.
-   - Phase tasks: fan-in all reviewer reports / collect and commit per scope / report to user (approval wait — main-branch mode only) / merge to original branch / doc pipeline / cleanup.
+   - Phase tasks: fan-in all reviewer reports / collect and commit per scope / docs pre-pass (mental-model-updater + spec-updater) / report to user (approval wait — main-branch mode only) / merge to original branch / doc pipeline / cleanup.
 
 ### 2. Spawn N pairs
 
@@ -160,9 +160,14 @@ Each commit message must include an AI Context section describing that scope's i
 
 Do not batch scopes into a single commit. One commit per scope preserves attribution and makes the history bisectable.
 
-### 5. Report and approval
+### 5. Docs pre-pass
 
-> **Feature-branch mode**: emit the report below, then proceed directly to step 6 (Merge) — do not wait for user approval.
+1. Dispatch **mental-model-updater** and **spec-updater** in parallel with the full commit range covering all scope commits. Wait for both before proceeding to the report step.
+2. If **spec-updater** reports ambiguous stems, include them in the step 6 report for user resolution.
+
+### 6. Report and approval
+
+> **Feature-branch mode**: emit the report below, then proceed directly to step 7 (Merge) — do not wait for user approval.
 
 1. Report to the user:
    - Per-scope: what was implemented, reviewer verdict, test result
@@ -172,23 +177,23 @@ Do not batch scopes into a single commit. One commit per scope preserves attribu
    2. SendMessage the fix directive to the relevant implementer(s).
    3. Implementer fixes → requests execution approval via run_request gate → reviewer re-reviews.
    4. Re-run collect+commit for affected scope(s) only (new commit per CLAUDE.md rules).
-   5. Re-report. Loop until user approves.
+   5. Re-run **mental-model-updater** and **spec-updater** with the new commit range. Wait for both.
+   6. Re-report. Loop until user approves.
 
-### 6. Merge
+### 7. Merge
 
 1. Run `merge-branch <original-branch> parallel-impl-<slug> "<commit-message>"`.
    The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
    Compose the commit message per CLAUDE.md commit rules summarizing all scopes.
 
-### 7. Doc pipeline
+### 8. Doc pipeline
 
-1. Dispatch **mental-model-updater** with the full commit range covering all scope commits. Wait for completion before proceeding.
-2. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
-3. If ticket-driven:
+1. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
+2. If ticket-driven:
    1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase. Content: what was implemented, deviations from plan, key findings for future phases. Short hash = merge commit.
    2. Move ticket to the next status directory (`git mv`) if all phases are complete.
 
-### 8. Cleanup
+### 9. Cleanup
 
 Send shutdown requests to all teammates (implementers and reviewers). Wait for shutdown approval from each. Call `TeamDelete` only if this invocation of `/parallel-implement` created the team.
 
