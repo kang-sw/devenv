@@ -65,7 +65,7 @@ Agent(
 
 Based on implementation complexity and session warmth on the target:
 - **Wide** (multiple independent modules): suggest `/parallel-implement`.
-- **Narrow + warm** (single module, main agent already engaged the code): suggest `/implement`.
+- **Narrow + warm** (single module, main agent already engaged the code): suggest `/edit`.
 - **Narrow + cold** (single module, main agent is cold on the target): suggest `/delegate-implement`.
 
 Warmth is a property of the current session — has the main agent read files in the target scope this session, or did the user explicitly signal direct authorship? If ambiguous, suggest `/proceed` and let its routing judges decide.
