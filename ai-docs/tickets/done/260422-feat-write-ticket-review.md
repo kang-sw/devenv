@@ -62,3 +62,10 @@ and purely mechanical (typo, config-only, doc-only update).
 
 Success: write-ticket/SKILL.md has the new step and judgment; all step
 references within the file are consistent.
+
+### Result (212310c) - 2026-04-22
+
+New step 6 "Document review" inserted between intent review and spec-stem check.
+Model selection inlined (not a named judgment) per skill-authoring.md convention.
+Step renamed to "Document review" to disambiguate from step 5 "Intent review".
+Former steps 6→7 and 7→8 renumbered; step 8 cross-reference to judge: missing-spec-entry updated.
