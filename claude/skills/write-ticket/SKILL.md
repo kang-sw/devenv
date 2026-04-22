@@ -34,11 +34,11 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** — if any phase implements a spec feature:
+6. **Spec-stem check** — confirm ticket↔spec linkage:
    a. Run `list-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
-   b. Add a `spec:` field to the ticket frontmatter listing the affected stem(s).
+   b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
-7. **Spec write prompt** — always suggest `/write-spec` as the next step after ticket authoring; write-spec's judge handles relevance.
+7. **Proceed prompt** — suggest `/proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
 ## Judgments
 
@@ -53,6 +53,10 @@ Over ~200 lines is a soft signal; over 300 lines, act. First, prune plan-level d
 ### judge: phase-need
 
 Prefer more phases over fewer. An overly granular ticket is cheaper to merge than an oversized phase that stalls mid-implementation. Single-component, single-concern work may be one phase.
+
+### judge: missing-spec-entry
+
+Fires when a phase implements caller-visible behavior with no entry in any spec file. Stop the authoring flow, tell the user which phase surfaces un-specced behavior, and suggest `/write-spec` before continuing. Skipping this loses traceability for the new behavior and bypasses the canonical chain's spec-impact gate.
 
 ## Doctrine
 
