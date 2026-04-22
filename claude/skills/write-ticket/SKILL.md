@@ -34,9 +34,11 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Review** — `judge: review-model`. Spawn `document-reviewer` on the current ticket file.
-   Present findings to the user. If any finding is rated Critical or Important: fix in-place
-   and re-review. Proceed when the reviewer reports clean.
+6. **Document review** — Spawn `document-reviewer` on the current ticket file. Use Opus by
+   default; use Sonnet only when the ticket is single-phase, has no design decisions, and is
+   purely mechanical (typo, config-only, or doc-only). Present findings to the user. If any
+   finding is rated Critical or Important: fix in-place and re-review. Proceed when the
+   reviewer reports clean.
 7. **Spec-stem check** — confirm ticket↔spec linkage:
    a. Run `list-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
    b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
@@ -60,13 +62,6 @@ Prefer more phases over fewer. An overly granular ticket is cheaper to merge tha
 ### judge: missing-spec-entry
 
 Fires when a phase implements caller-visible behavior with no entry in any spec file. Stop the authoring flow, tell the user which phase surfaces un-specced behavior, and suggest `/write-spec` before continuing. Skipping this loses traceability for the new behavior and bypasses the canonical chain's spec-impact gate.
-
-### judge: review-model
-
-| Decision | When |
-|----------|------|
-| Opus | Default — any ticket with design decisions, multiple phases, or behavioral changes |
-| Sonnet | Single-phase ticket, no design decisions, purely mechanical change (typo, config-only, doc-only update) |
 
 ## Doctrine
 
