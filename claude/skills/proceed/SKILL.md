@@ -122,10 +122,6 @@ For a pipeline verdict, invoke each stage sequentially via the Skill tool, passi
 
 ## Judgments
 
-### judge: needs-spec
-
-Always fires. Invoke `/write-spec` and continue to `judge: needs-ticket` regardless of outcome.
-
 ### judge: direct-edit
 
 | Decision | When |
