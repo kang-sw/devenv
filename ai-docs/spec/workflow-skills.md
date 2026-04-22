@@ -15,7 +15,7 @@ features:
     - `/write-mental-model`
   - Implementation Skills
     - `/edit`
-    - `/delegate-implement`
+    - `/implement`
     - `/parallel-implement`
     - `/proceed`
   - Reconstruction
@@ -38,7 +38,7 @@ The standard pipeline runs in this order:
 /discuss → /write-spec → /write-ticket → /proceed
                                              ↓
                    /write-skeleton? → /write-plan? → /edit
-                                                  → /delegate-implement
+                                                  → /implement
                                                   → /parallel-implement
 ```
 
@@ -112,7 +112,7 @@ Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). 
 
 Crystallizes public contracts as interface stubs and integration tests before implementation begins. The lead identifies contract directives (type signatures, API shapes, invariants), delegates writing to a subagent, reviews, and commits. Updates the ticket `skeletons:` frontmatter with the commit hash.
 
-Suggests `/edit`, `/delegate-implement`, or `/parallel-implement` as the next step based on scope width and session warmth — does not auto-invoke.
+Suggests `/edit`, `/implement`, or `/parallel-implement` as the next step based on scope width and session warmth — does not auto-invoke.
 
 > [!note] Constraints
 > - Stub files must compile; integration tests are written but not required to pass (implementation is absent).
@@ -132,7 +132,7 @@ Updates the ticket `plans:` frontmatter with the plan path. `/proceed` passes th
 
 Rebuilds or updates `ai-docs/mental-model/` with operational knowledge for modifying the codebase. Delegates all source exploration to subagents. After writing, updates `ai-docs/mental-model.md` (the index) and `ai-docs/_index.md`.
 
-Also dispatched automatically at the end of the doc pipeline by `/edit`, `/delegate-implement`, and `/parallel-implement`.
+Also dispatched automatically at the end of the doc pipeline by `/edit`, `/implement`, and `/parallel-implement`.
 
 > [!note] Constraints
 > - Describes operational knowledge for code modifiers, not behavior for end users — contents are not caller-visible spec material.
@@ -146,10 +146,10 @@ Owner-direct single-scope implementation: the main agent reads source, makes edi
 After implementation, runs the doc pipeline (ticket status update, `_index.md` refresh, mental-model-updater dispatch) and emits a completion report.
 
 > [!note] Constraints
-> - Escalates to `/delegate-implement` when scope grows beyond direct-edit bounds.
+> - Escalates to `/implement` when scope grows beyond direct-edit bounds.
 > - Suggests `/write-skeleton` when none exist and scope warrants them, but does not auto-invoke it.
 
-### `/delegate-implement` {#260421-delegate-implement}
+### `/implement` {#260422-implement-skill}
 
 Delegated implementation cycle: an implementer subagent writes code; two review-partition subagents (correctness + fit) review in parallel; the lead merges and runs the doc pipeline. Suited for cold sessions or wide-scope work.
 
@@ -157,7 +157,7 @@ Review partitions:
 - **Correctness** — logic, error paths, contracts, security.
 - **Fit** — conventions, naming, reuse, patterns.
 
-Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260421-delegate-implement-feature-branch-mode}
+Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260422-implement-feature-branch-mode}
 
 ### `/parallel-implement` {#260421-parallel-implement}
 
@@ -174,7 +174,7 @@ Requires disjoint file sets — overlapping scopes cause merge conflicts.
 
 Auto-router: assesses an implementation target and chains to the correct pipeline without executing implementation steps itself. Judges:
 
-- **Context warmth** — warm session routes to `/edit`; cold routes to `/delegate-implement`.
+- **Context warmth** — warm session routes to `/edit`; cold routes to `/implement`.
 - **Existing artifacts** — skips `/write-skeleton` and `/write-plan` if already present.
 - **Scope width** — wide or parallelizable scope routes to `/parallel-implement`.
 - **Direct-edit** — trivial changes skip the full pipeline and route directly to `/edit`.
@@ -214,7 +214,7 @@ On first invocation with no config present, creates a template for the user to f
 
 Team orchestration mode: creates and manages a named team via `TeamCreate`/`TeamDelete`; spawns subagents into the team; coordinates inter-agent communication; shuts the team down cleanly at session end.
 
-Loaded automatically by `/delegate-implement` and `/parallel-implement` before any team operation. Can also be invoked directly for manual team management.
+Loaded automatically by `/implement` and `/parallel-implement` before any team operation. Can also be invoked directly for manual team management.
 
 > [!note] Constraints
 > - Team state is session-scoped — no persistence across sessions.
