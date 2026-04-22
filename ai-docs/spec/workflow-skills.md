@@ -8,8 +8,8 @@ features:
     - Session Sealing — `/exit-session`
   - Planning Skills
     - `/discuss`
-    - `/write-ticket`
     - `/write-spec`
+    - `/write-ticket`
     - `/write-skeleton`
     - `/write-plan`
     - `/write-mental-model`
@@ -84,15 +84,6 @@ At the end of a discussion turn, always suggests `/write-spec` as the next step.
 > [!note] Constraints
 > - No source files are created or modified during a `/discuss` session.
 
-### `/write-ticket` {#260421-write-ticket}
-
-Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/proceed` after authoring, which auto-routes to skeleton, plan, or implementation.
-
-Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). Ticket stem format: `YYMMDD-type-slug`.
-
-> [!note] Constraints
-> - Does not advance a ticket's status directory — status changes happen via `git mv` during implementation.
-
 ### `/write-spec` {#260421-write-spec}
 
 Creates or updates a spec file under `ai-docs/spec/` describing caller-visible behavior with anchor-keyed entries. Entry format: `## Feature Name {#YYMMDD-slug}` for implemented features; `## 🚧 Feature Name {#YYMMDD-slug}` for planned ones.
@@ -104,6 +95,15 @@ After writing, runs `spec-build-index` to rebuild the `features:` frontmatter in
 > [!note] Constraints
 > - Never includes ticket references in `🚧` markers — implementation traceability flows through commit `## Spec` sections referencing the spec-stem.
 > - Never edits the `features:` frontmatter block manually — `spec-build-index` owns it.
+
+### `/write-ticket` {#260421-write-ticket}
+
+Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/proceed` after authoring, which auto-routes to skeleton, plan, or implementation.
+
+Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). Ticket stem format: `YYMMDD-type-slug`.
+
+> [!note] Constraints
+> - Does not advance a ticket's status directory — status changes happen via `git mv` during implementation.
 
 ### `/write-skeleton` {#260421-write-skeleton}
 
