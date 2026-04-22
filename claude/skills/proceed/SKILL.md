@@ -25,6 +25,7 @@ Target: $ARGUMENTS
 - If the target is a vague idea with no clear scope, auto-invoke `/write-ticket` and continue — `judge: needs-ticket` captures the produced ticket path for downstream stages.
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
 - Never skip announce — the user must see the routing decision before anything proceeds.
+- Announce reflects routing decisions, not post-hoc outcomes — include prefix stages in the pipeline line even when their gates exit without writing.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement` and `/parallel-implement`, and merge.
 
 ## On: invoke
@@ -46,13 +47,13 @@ Gather the facts needed for routing. Do not read source code — read only artif
 
 Before the pipeline judges, two prefix judges fire in order:
 
-**judge: needs-spec (always fires first)** — always invoke `/write-spec`; its own `judge: spec-impact` handles the no-op exit. Continue to `judge: needs-ticket` regardless of outcome.
+**judge: needs-spec (always fires first)** — always invoke `/write-spec`. Continue to `judge: needs-ticket` regardless of outcome.
 
-**judge: needs-ticket (fires second)** — behavior updated; see judgment table below.
+**judge: needs-ticket (fires second)** — see judgment table below.
 
 Then apply the existing pipeline judges: direct-edit → needs-plan → needs-skeleton → execution-mode.
 
-First check whether the pipeline should be skipped entirely:
+After prefix judges complete, check whether the implementation pipeline should be skipped entirely:
 
 **judge: direct-edit** — if the verdict is direct-edit, skip the pipeline judges and announce direct-edit in step 3.
 
@@ -108,8 +109,6 @@ When prefix stages fire, prefix them in the pipeline line:
 - Neither fires: use existing format unchanged
 - Direct-edit: use existing direct-edit format unchanged
 
-The pipeline line reflects /proceed's routing decision, not post-hoc outcome — show `/write-spec` even when its gate exits without writing.
-
 Do not ask for confirmation — announce and proceed. The user can interrupt if the routing is wrong.
 
 ### 4. Execute
@@ -121,7 +120,7 @@ For a pipeline verdict, invoke each stage sequentially via the Skill tool, passi
 - After each stage, verify it completed (check for committed artifacts).
 - Pass downstream context: if `/write-plan` produces a plan path, pass it to `/implement`.
 - If a stage fails or the user interrupts, stop — do not continue the pipeline.
-- After `judge: needs-ticket` auto-invoke: capture the ticket path from `/write-ticket`'s output. Use it as the target for all downstream stages (skeleton, plan, implementation) — the same pattern as plan-path capture ("if `/write-plan` produces a plan path, pass it to `/implement`").
+- After `judge: needs-ticket` auto-invoke: capture the ticket path from `/write-ticket`'s output. Use it as the target for all downstream stages (skeleton, plan, implementation).
 
 ## Judgments
 
@@ -173,16 +172,11 @@ If `needs-plan = yes`, execution-mode is locked to single — do not evaluate pa
 
 ## Doctrine
 
-Proceed is a **universal router spanning the full canonical chain** — from
-spec authoring through ticket creation to implementation. Prefix judges
-(`needs-spec`, `needs-ticket`) fire before the implementation pipeline judges,
-collapsing `/discuss → /write-spec → /write-ticket → /proceed` to
-`/discuss → /proceed`. Each prefix invocation delegates to the sub-skill's
-own gate; proceed does not pre-judge their outcome. After prefix stages
-complete, the implementation pipeline judges fire as before. The
-"announce → delegate" invariant applies at every stage: the user sees the
-full pipeline before execution begins. Warmth improves briefing quality for
-delegation — a warm session writes sharper directives, not fewer delegation
-steps. When a rule is ambiguous, apply whichever interpretation better
-preserves the user's ability to intervene while keeping delegation as the
-baseline.
+Proceed optimizes for **full-pipeline routing accuracy** — spanning spec,
+ticket, and implementation stages. The signal available from conversation
+state and artifacts is the finite resource: use it to select the right
+sub-skill at each stage, not to replicate logic already owned by that
+sub-skill's gate. Warmth improves briefing precision — a warm session
+writes sharper directives, not fewer delegation steps. When a rule is
+ambiguous, apply whichever interpretation better preserves the user's
+ability to intervene at any pipeline stage.
