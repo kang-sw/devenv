@@ -134,7 +134,7 @@ Updates the ticket `plans:` frontmatter with the plan path. `/proceed` passes th
 
 Rebuilds or updates `ai-docs/mental-model/` with operational knowledge for modifying the codebase. Delegates all source exploration to subagents. After writing, updates `ai-docs/mental-model.md` (the index) and `ai-docs/_index.md`.
 
-Also dispatched automatically at the end of the doc pipeline by `/edit`, `/implement`, and `/parallel-implement`.
+Also dispatched automatically during the doc pipeline by `/edit`, `/implement`, and `/parallel-implement`, in parallel with `spec-updater`.
 
 > [!note] Constraints
 > - Describes operational knowledge for code modifiers, not behavior for end users — contents are not caller-visible spec material.
@@ -145,7 +145,7 @@ Also dispatched automatically at the end of the doc pipeline by `/edit`, `/imple
 
 Owner-direct single-scope implementation: the main agent reads source, makes edits, verifies via build and test commands, and commits — no subagent delegation for the implementation itself. Best suited for warm sessions with well-understood, narrow scope.
 
-After implementation, runs the doc pipeline (ticket status update, `_index.md` refresh, mental-model-updater dispatch) and emits a completion report.
+After implementation, dispatches `mental-model-updater` and `spec-updater` in parallel with the commit range and waits for both. If `spec-updater` reports ambiguous stems, surfaces them to the user. Then updates ticket status and `_index.md`, and emits a completion report. {#260423-doc-pipeline-spec-updater}
 
 > [!note] Constraints
 > - Escalates to `/implement` when scope grows beyond direct-edit bounds.
@@ -161,6 +161,8 @@ Review partitions:
 
 Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260422-implement-feature-branch-mode}
 
+Pre-merge, dispatches `mental-model-updater` and `spec-updater` in parallel with the implementation commit range. Ambiguous stems from `spec-updater` are surfaced at the report/approval gate before merge proceeds.
+
 ### `/parallel-implement` {#260421-parallel-implement}
 
 Parallel implementation across N disjoint scope units. Spawns one implementer+reviewer pair per scope; lead serializes all build and test execution requests; lead commits each scope sequentially after all reviewers report clean.
@@ -168,6 +170,8 @@ Parallel implementation across N disjoint scope units. Spawns one implementer+re
 Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate after all scopes are committed; **feature-branch mode** (invoked from any other branch) skips the gate and merges directly. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names.
 
 Requires disjoint file sets — overlapping scopes cause merge conflicts.
+
+Pre-merge (before the report/approval gate), dispatches `mental-model-updater` and `spec-updater` in parallel with the full commit range covering all scopes. Ambiguous stems are surfaced at the report/approval gate before merge. After merge, the doc pipeline retains only `_index.md` refresh and ticket status update.
 
 > [!note] Constraints
 > - Only one build/test command runs at a time (lead-serialized) — concurrent implementers share the working tree.
