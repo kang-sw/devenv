@@ -35,13 +35,14 @@ The `ws` plugin provides a set of user-invocable `/commands` covering the full d
 The standard pipeline runs in this order:
 
 ```
-/discuss → /write-ticket → /implement
-     ↓ (optional)               ↓ (optional deeper steps)
- /write-spec          /write-skeleton → /write-plan → /delegate-implement
-                                                     → /parallel-implement
+/discuss → /write-spec → /write-ticket → /proceed
+                                             ↓
+                   /write-skeleton? → /write-plan? → /implement
+                                                  → /delegate-implement
+                                                  → /parallel-implement
 ```
 
-Each skill recommends the next step at completion. `/proceed` selects and chains the correct sequence automatically based on existing artifacts and session context.
+Each skill recommends the next step at completion. `/proceed` is the auto-router invoked after `/write-ticket`; it selects and chains skeleton, plan, and implementation stages based on existing artifacts and session context.
 
 > [!note] Constraints
 > - Skills do not auto-chain — user invocation or `/proceed` is always required.
@@ -85,7 +86,7 @@ At the end of a discussion turn, always suggests `/write-spec` as the next step.
 
 ### `/write-ticket` {#260421-write-ticket}
 
-Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/write-spec` after authoring.
+Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/proceed` after authoring, which auto-routes to skeleton, plan, or implementation.
 
 Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). Ticket stem format: `YYMMDD-type-slug`.
 

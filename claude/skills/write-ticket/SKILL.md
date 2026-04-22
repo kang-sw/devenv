@@ -34,11 +34,11 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** — if any phase implements a spec feature:
+6. **Spec-stem check** — confirm ticket↔spec linkage (write-spec runs before write-ticket on the canonical chain, so the spec entry usually exists already):
    a. Run `list-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
-   b. Add a `spec:` field to the ticket frontmatter listing the affected stem(s).
+   b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems; if a phase implements behavior with no spec entry, tell the user and suggest `/write-spec` before proceeding.
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
-7. **Spec write prompt** — always suggest `/write-spec` as the next step after ticket authoring; write-spec's judge handles relevance.
+7. **Proceed prompt** — always suggest `/proceed` as the next step after ticket authoring; proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
 ## Judgments
 
