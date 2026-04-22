@@ -60,3 +60,11 @@ or `/parallel-implement`, or prose mentioning the old name as historical context
 ```
 grep -rE '/implement([^-]|$)' claude/ ai-docs/_index.md CLAUDE.md
 ```
+
+### Result (0577f75) - 2026-04-22
+
+Rename completed as specified. All 5 skill files updated; directory renamed via
+git mv. plugin.json uses auto-discovery — no manual update needed. Correctness
+review clean; grep verification passed. Global ~/.claude/CLAUDE.md contained
+no `/implement` references. Phase 2 (`/delegate-implement` → `/implement`) proceeds
+as a separate ticket.
