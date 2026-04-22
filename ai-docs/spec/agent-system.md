@@ -97,7 +97,7 @@ When spawned with a partition doc pre-loaded via `load-infra`, the reviewer rest
 
 Each partition doc explicitly names what it excludes. When a partition is active, findings outside that partition are not reported.
 
-`/delegate-implement` spawns Correctness and Fit reviewers in parallel and consolidates findings before sending to the implementer.
+`/implement` spawns Correctness and Fit reviewers in parallel and consolidates findings before sending to the implementer.
 
 ### `document-reviewer` {#260421-document-reviewer-agent}
 
