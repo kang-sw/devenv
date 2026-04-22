@@ -35,7 +35,9 @@ The `ws` plugin provides a set of user-invocable `/commands` covering the full d
 The standard pipeline runs in this order:
 
 ```
-/discuss → /write-spec → /write-ticket → /proceed
+/discuss → /proceed
+               ↓
+/write-spec → /write-ticket
                                              ↓
                    /write-skeleton? → /write-plan? → /edit
                                                   → /implement
@@ -49,9 +51,6 @@ Each skill recommends the next step at completion. `/proceed` is the auto-router
 > - `/write-spec` is optional: the `judge: spec-impact` gate inside it exits early when no public behavior is affected.
 > - `/write-skeleton` is optional: required only when public contracts need crystallization before implementation.
 > - `/write-plan` is optional: `/proceed` skips it when the scope is small or the session is warm.
-
-> [!note] Planned 🚧
-> The chain will simplify to `/discuss → /proceed`. `/proceed` will handle spec and ticket stages via new full-pipeline routing judges, making explicit `/write-spec` and `/write-ticket` steps before `/proceed` no longer required. Both skills remain directly invocable.
 
 ## Session Skills
 
@@ -187,14 +186,12 @@ Announces the chosen path before invoking the first skill.
 > [!note] Constraints
 > - Stops and asks for clarification when scope is too vague to route.
 
-> [!note] Planned 🚧
-> Will extend to cover the full pipeline, including spec and ticket stages. {#260422-proceed-full-pipeline-routing}
+> [!note] Extended behavior — full-pipeline routing {#260422-proceed-full-pipeline-routing}
+> Two prefix judges fire before the existing pipeline judges:
+> - **`judge: needs-spec`** — always invokes `/write-spec`; its own `judge: spec-impact` gate exits without writing if no spec work is needed.
+> - **`judge: needs-ticket`** — if no actionable ticket exists, auto-invokes `/write-ticket` rather than stopping. Exception: "exploratory" discussions (no clear scope or direction) still stop and route back to `/discuss`.
 >
-> Two new judges fire before the existing pipeline judges:
-> - **Spec needed** — if the topic has caller-visible behavioral impact and no spec entry exists, routes to `/write-spec` first.
-> - **Ticket needed** — if no actionable ticket exists, auto-invokes `/write-ticket` rather than stopping. Exception: "exploratory" discussions (no clear scope or direction) still stop and route back to `/discuss`.
->
-> With this change, `/proceed` becomes a valid entry point from any conversation state, including immediately after `/discuss` or mid-discussion with no ticket path argument.
+> With this change, `/proceed` is a valid entry point from any conversation state, including immediately after `/discuss` or mid-discussion with no ticket path argument.
 
 ## Reconstruction
 
