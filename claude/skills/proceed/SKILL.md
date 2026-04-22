@@ -14,12 +14,12 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- This skill routes — it does not implement, plan, or write skeletons itself.
+- This skill routes. It does not implement, plan, or write skeletons itself.
 - Every routing decision is announced with rationale before execution begins.
 - Each pipeline sub-skill is invoked via the Skill tool with the appropriate arguments.
 - Pipeline order is fixed: skeleton → plan → implementation.
-- `/parallel-implement` is never preceded by `/write-plan` — if a plan is needed, execution-mode is locked to single.
-- Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only — do not read source code during assessment.
+- `/parallel-implement` is never preceded by `/write-plan`. If a plan is needed, execution-mode is locked to single.
+- Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only. Do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
 - If the target is a vague idea with no clear scope, auto-invoke `/write-ticket` and continue.
