@@ -10,7 +10,7 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
 
-**Plugin:** `ws@0.3.0` — see `claude/.claude-plugin/plugin.json`.
+**Plugin:** `ws@0.3.3` — see `claude/.claude-plugin/plugin.json`.
 
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
@@ -119,7 +119,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260422-chore-write-ticket-workflow-drift` | done | Fix stale /write-spec suggestion in write-ticket + workflow-skills.md chain drift |
 | `260422-chore-workflow-chain-drift` | done | Fix remaining chain drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md |
 | `260422-feat-write-ticket-review` | done | Add mandatory document-reviewer step to write-ticket after intent review |
-| `260422-feat-proceed-full-pipeline` | todo | Extend /proceed to full-pipeline routing — add judge: needs-spec and auto-invoke judge: needs-ticket |
+| `260422-feat-proceed-full-pipeline` | done | Extend /proceed to full-pipeline routing — add judge: needs-spec and auto-invoke judge: needs-ticket |
 | `260422-chore-rename-implement-to-edit` | done | Rename /implement skill to /edit; phase 1 of two-phase skill rename |
 | `260422-chore-rename-delegate-implement-to-implement` | done | Rename /delegate-implement skill to /implement; phase 2 of skill rename |
 

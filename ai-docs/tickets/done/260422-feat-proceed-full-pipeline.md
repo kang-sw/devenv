@@ -54,6 +54,12 @@ branching in the downstream table.
 
 ### Phase 1: Update proceed/SKILL.md and chain references
 
+### Result (2e92011) - 2026-04-22
+
+All four target files updated. `/proceed` now fires `judge: needs-spec` unconditionally before `judge: needs-ticket`, collapsing the canonical chain to `/discuss → /proceed`. `write-ticket` step 8 emits `Ticket:` completion artifact. `_index.md` and `workflow-skills.md` updated to reflect the simplified chain. `workflow-routing.md` mental-model domain added. CLAUDE.md architecture rule added requiring skill-authoring.md compliance on all plugin document edits.
+
+Deviations: implementation required multiple fix rounds for skill-authoring.md compliance (prose rules, judge placement, invariant rationale removal). The `judge: needs-spec` Judgments entry was added then removed — unconditional judges belong in the Route handler only, not Judgments.
+
 **Changes to `claude/skills/proceed/SKILL.md`:**
 
 1. In the **Assess** step, extend fact-gathering to include:
