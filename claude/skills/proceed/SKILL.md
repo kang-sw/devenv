@@ -22,7 +22,8 @@ Target: $ARGUMENTS
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only — do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
-- If the target is too vague to route (no ticket, no actionable description), stop and suggest `/write-ticket` or `/discuss`.
+- If the target is a vague idea with no clear scope, auto-invoke `/write-ticket` and continue — `judge: needs-ticket` captures the produced ticket path for downstream stages.
+- If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
 - Never skip announce — the user must see the routing decision before anything proceeds.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement` and `/parallel-implement`, and merge.
 
@@ -57,10 +58,9 @@ First check whether the pipeline should be skipped entirely:
 
 Otherwise, apply the pipeline judgments in order. Each produces a yes/no that builds the pipeline.
 
-1. **judge: needs-ticket** — Is the target actionable as-is?
-2. **judge: needs-plan** — Does this need codebase research before implementation?
-3. **judge: needs-skeleton** — Does this need contract stubs before implementation?
-4. **judge: execution-mode** — Single-scope or parallel?
+1. **judge: needs-plan** — Does this need codebase research before implementation?
+2. **judge: needs-skeleton** — Does this need contract stubs before implementation?
+3. **judge: execution-mode** — Single-scope or parallel?
 
 Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs. When warmth is warm, `/write-plan` internally selects warm mode; proceed does not pass a mode flag — it only decides whether `/write-plan` is invoked at all.
 
