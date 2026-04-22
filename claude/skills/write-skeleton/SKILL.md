@@ -1,9 +1,9 @@
 ---
 name: write-skeleton
 description: >
-  After /write-ticket, before /implement or /delegate-implement.
-  Crystallize public contracts as interface stubs and integration tests.
-  Suggest this when a ticket is ready and code changes haven't started.
+  Invoked by /proceed after /write-ticket. Crystallize public contracts
+  as interface stubs and integration tests. Suggest this when a ticket
+  is ready and code changes haven't started.
 argument-hint: [ticket-path]
 ---
 
