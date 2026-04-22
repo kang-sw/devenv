@@ -65,3 +65,11 @@ Success: no `/write-skeleton → /implement` direct chain in the file; `/proceed
 Keep descriptions concise — frontmatter description fields are brief (1–2 lines).
 
 Success: neither description implies the old chain order; `/proceed`'s role is visible.
+
+### Result (282af7e) - 2026-04-22
+
+All phases complete. discuss/SKILL.md Workflow Context now shows correct chain with /proceed
+and optional markers. write-spec/SKILL.md description reflects pre-write-ticket position.
+write-skeleton/SKILL.md description names /proceed as invoker in active voice.
+Two fit-review cycles required: passive voice fix, then nominalization fix (crystallization →
+to crystallize). No remaining known chain drift across workflow skill docs.

@@ -117,7 +117,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
 | `260421-feat-delegate-implement-feature-branch` | done | /delegate-implement feature-branch auto-merge mode; all phases complete |
 | `260422-chore-write-ticket-workflow-drift` | done | Fix stale /write-spec suggestion in write-ticket + workflow-skills.md chain drift |
-| `260422-chore-workflow-chain-drift` | todo | Fix remaining chain drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md |
+| `260422-chore-workflow-chain-drift` | done | Fix remaining chain drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md |
 | `260422-feat-write-ticket-review` | idea | Add document-reviewer invocation to write-ticket (deferred pending chain stabilization) |
 
 ## Session Notes
