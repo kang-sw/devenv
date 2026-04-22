@@ -105,6 +105,9 @@ Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). 
 > [!note] Constraints
 > - Does not advance a ticket's status directory — status changes happen via `git mv` during implementation.
 
+> [!note] Planned 🚧
+> After intent review, will spawn a `document-reviewer` to check for architectural drift, spec conflicts, and reuse gaps. {#260422-write-ticket-document-review} Findings rated Critical or Important are fixed in-place before continuing; the review is mandatory and cannot be skipped. Model: Opus by default; Sonnet only for single-phase, purely mechanical tickets with no design decisions.
+
 ### `/write-skeleton` {#260421-write-skeleton}
 
 Crystallizes public contracts as interface stubs and integration tests before implementation begins. The lead identifies contract directives (type signatures, API shapes, invariants), delegates writing to a subagent, reviews, and commits. Updates the ticket `skeletons:` frontmatter with the commit hash.
