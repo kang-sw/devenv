@@ -62,3 +62,13 @@ the moment this ticket lands.
 
 The implementation commit's `## Spec` section should reference both
 `260422-implement-skill` and `260422-implement-feature-branch-mode`.
+
+### Result (e29ae63) - 2026-04-22
+
+Merged to `main` in two commits (`4f1b23f`, `e6c5a76`, merge `e29ae63`).
+
+All 10 cross-reference files updated. Both success greps return zero results.
+
+Deviation: `ai-docs/spec/agent-system.md:100` retained the old name because the success grep was scoped to `claude/ ai-docs/_index.md CLAUDE.md` and did not cover `ai-docs/spec/`. Fixed in second commit `e6c5a76`. Future rename tickets should include `ai-docs/spec/` in the grep scope.
+
+Mental-model docs were already clean — no updates needed.

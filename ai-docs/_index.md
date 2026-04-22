@@ -120,7 +120,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260422-chore-workflow-chain-drift` | done | Fix remaining chain drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md |
 | `260422-feat-write-ticket-review` | done | Add mandatory document-reviewer step to write-ticket after intent review |
 | `260422-chore-rename-implement-to-edit` | done | Rename /implement skill to /edit; phase 1 of two-phase skill rename |
-| `260422-implement-skill` | done | Rename delegate-implement skill to /implement; phase 2 of skill rename |
+| `260422-chore-rename-delegate-implement-to-implement` | done | Rename /delegate-implement skill to /implement; phase 2 of skill rename |
 
 ## Session Notes
 
