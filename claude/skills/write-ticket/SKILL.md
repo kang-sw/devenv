@@ -34,11 +34,16 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** — confirm ticket↔spec linkage:
+6. **Document review** — Spawn `document-reviewer` on the current ticket file. Use Opus by
+   default; use Sonnet only when the ticket is single-phase, has no design decisions, and is
+   purely mechanical (typo, config-only, or doc-only). Present findings to the user. If any
+   finding is rated Critical or Important: fix in-place and re-review. Proceed when the
+   reviewer reports clean.
+7. **Spec-stem check** — confirm ticket↔spec linkage:
    a. Run `list-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
    b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
-7. **Proceed prompt** — suggest `/proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
+8. **Proceed prompt** — suggest `/proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 7. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
 ## Judgments
 
