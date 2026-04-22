@@ -165,7 +165,7 @@ affected sections (warm) if structural problems persist.
 1. If the plan implements a ticket phase, update the ticket's `plans:` frontmatter.
 2. Commit the plan file.
 3. Return the plan path to the caller — include it in the completion summary so
-   the caller can pass it directly to `/delegate-implement`.
+   the caller can pass it directly to `/implement`.
 
 ## Judgments
 
