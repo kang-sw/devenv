@@ -188,10 +188,7 @@ Do not batch scopes into a single commit. One commit per scope preserves attribu
 
 ### 8. Doc pipeline
 
-1. Refresh `ai-docs/_index.md` — update inventory, descriptions, and layout to reflect current state.
-2. If ticket-driven:
-   1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase. Content: what was implemented, deviations from plan, key findings for future phases. Short hash = merge commit.
-   2. Move ticket to the next status directory (`git mv`) if all phases are complete.
+Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update. Pass the full commit range covering all scopes.
 
 ### 9. Cleanup
 
