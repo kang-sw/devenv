@@ -10,6 +10,7 @@ features:
     - Anchor Format
     - `🚧` Marker Protocol
     - Implementation Gap Callout
+    - 🚧 Feature Removal Convention
     - Anchor Placement
     - File Location
   - `/write-spec` Integration
@@ -17,6 +18,7 @@ features:
     - Directory and Split Judgments
   - `spec-updater` Agent
     - Commit-Based `🚧` Stripping
+    - 🚧 Pending-Removal Report
     - Missing-Anchor Report
     - Report Format
 ---
@@ -109,6 +111,10 @@ The date records when the gap was first noted. Discuss sessions surface a stalen
 
 Permanent behavioral invariants belong in body prose, not in any callout.
 
+### 🚧 Feature Removal Convention {#260423-spec-removal-commit-convention}
+
+When a commit removes a feature from the codebase, the commit's `## Spec` section includes a `removed: <spec-stem>` line for each deleted feature. The spec-updater detects this line and adds the corresponding spec entry to the `### Pending removal` report section rather than auto-deleting it. The caller then removes the spec entry manually after confirming the removal report.
+
 ### Anchor Placement {#260421-spec-anchor-placement}
 
 Anchors may appear on any line — heading or body text — not heading-only. A sub-concept within a section can carry its own anchor inline in a body paragraph. `{#YYMMDD-slug}` text is stripped from display output by all tooling.
@@ -158,13 +164,19 @@ For each `🚧` occurrence, the agent:
 
 The agent can target a single stem or scan all files under `ai-docs/spec/`.
 
+### 🚧 Pending-Removal Report {#260423-spec-updater-pending-removal}
+
+When a commit's `## Spec` section contains a `removed: <spec-stem>` line, the spec-updater detects the removal intent and adds the corresponding spec entry to a `### Pending removal` report section rather than deleting it automatically. The entry is not touched in the file — the report surfaces it for human confirmation.
+
+Removal confirmation is out of scope for the agent: the caller reads the `### Pending removal` section and deletes the spec entry manually.
+
 ### Missing-Anchor Report {#260421-spec-updater-missing-anchor}
 
 `🚧` headings with no `{#slug}` anchor cannot be confirmed via commit history. The agent reports them in a `### Missing anchors` section and does not attempt to strip them.
 
 ### Report Format {#260421-spec-updater-report}
 
-After each run, the agent emits a structured report with three sections — empty sections are omitted:
+After each run, the agent emits a structured report with sections — empty sections are omitted:
 
 ```
 ### Stripped
@@ -175,4 +187,7 @@ After each run, the agent emits a structured report with three sections — empt
 
 ### Missing anchors
 <list of 🚧 headings with no {#slug} anchor>
+
+### Pending removal
+<list of spec entries flagged by `removed: <stem>` in commit history — requires human confirmation before deletion>
 ```

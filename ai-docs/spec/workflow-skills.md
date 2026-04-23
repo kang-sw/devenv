@@ -86,6 +86,9 @@ At the end of a discussion turn, always suggests `/write-spec` as the next step.
 > [!note] Constraints
 > - No source files are created or modified during a `/discuss` session.
 
+> [!note] Planned 🚧
+> When a mental-model domain file is read during a discuss session, the skill checks its last commit date via `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the date is more than 90 days ago, the skill surfaces a staleness warning for that domain — mirroring the spec Implementation Gap 90-day callout rule. No frontmatter field is needed; git history is the source. {#260423-discuss-mental-model-staleness-warning}
+
 ### `/write-spec` {#260421-write-spec}
 
 Creates or updates a spec file under `ai-docs/spec/` describing caller-visible behavior with anchor-keyed entries. Entry format: `## Feature Name {#YYMMDD-slug}` for implemented features; `## 🚧 Feature Name {#YYMMDD-slug}` for planned ones.
