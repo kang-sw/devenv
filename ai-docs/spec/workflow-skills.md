@@ -17,6 +17,7 @@ features:
     - `/edit`
     - `/implement`
     - `/parallel-implement`
+    - 🚧 Pre-invocation Context Survey — `project-survey`
     - `/proceed`
   - Reconstruction
     - `/forge-spec`
@@ -183,6 +184,21 @@ Pre-merge (before the report/approval gate), dispatches `spec-updater` first and
 
 > [!note] Constraints
 > - Only one build/test command runs at a time (lead-serialized) — concurrent implementers share the working tree.
+
+### 🚧 Pre-invocation Context Survey — `project-survey` {#260424-project-survey-auto-invoke}
+
+At the start of each run, `/edit`, `/implement`, `/parallel-implement`, and `/discuss` auto-invoke the `project-survey` agent with the implementation brief or query. The agent returns a `[Must|Maybe]`-tiered reference list of relevant documentation the implementer should read before starting work.
+
+- **`[Must]`** — spec entries, mental-model sections, or active tickets directly covering behavior, patterns, or constraints required before starting.
+- **`[Maybe]`** — tangentially related documents; useful when uncertain.
+
+Search scope is limited to `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket directories (`idea/`, `todo/`, `wip/`). Source code references are out of scope — `/write-plan` survey-mode covers that gap.
+
+The survey fires transparently — no additional caller invocation is required.
+
+> [!note] Constraints
+> - `done/` and `dropped/` ticket directories are excluded from the search scope.
+> - Source code file references are not produced by this agent.
 
 ### `/proceed` {#260421-proceed}
 
