@@ -232,6 +232,14 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          Remove the `[!note] Constraints` form after reclassifying all items in a file.
 - v0025: If `ai-docs/_continue.local.md` exists, delete it. This file was written by
          the now-removed `exit-session` skill and has no remaining consumer.
+- v0026: If `ai-docs/spec/` contains files but none contain a `{#YYMMDD-slug}` stem anchor
+         (check: `grep -r '{#[0-9]\{6\}-' ai-docs/spec/ | head -1`), the spec predates
+         stem-based management. Suggest running `/forge-spec` to rebuild with canonical
+         stem-anchored entries. Output-only — do not modify spec files automatically.
+- v0027: If `ai-docs/mental-model/` contains domain files but none embed a spec stem
+         (check: `grep -r '{#[0-9]\{6\}-' ai-docs/mental-model/ | head -1`), the mental-model
+         predates spec cross-references. Suggest running `/forge-mental-model` to rebuild
+         with spec-stem embedding. Output-only — do not modify mental-model files automatically.
 -->
 
-<!-- Template Version: v0025 -->
+<!-- Template Version: v0027 -->
