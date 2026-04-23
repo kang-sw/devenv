@@ -4,6 +4,7 @@ description: >
   From-scratch spec reconstruction. Surveys the codebase, identifies
   behavioral domains, and guides a user-confirmed authoring loop that
   produces a complete, anchor-keyed spec under ai-docs/spec/.
+disable-model-invocation: true
 argument-hint: "[optional: starting domain name]"
 ---
 
