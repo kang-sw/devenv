@@ -228,6 +228,8 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          (c) Planned features with an existing `todo/`-or-higher ticket → convert to
              `### 🚧 <Feature Name>` heading.
          Remove the `[!note] Constraints` form after reclassifying all items in a file.
+- v0025: If `ai-docs/_continue.local.md` exists, delete it. This file was written by
+         the now-removed `exit-session` skill and has no remaining consumer.
 -->
 
-<!-- Template Version: v0024 -->
+<!-- Template Version: v0025 -->
