@@ -10,11 +10,12 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
 
-**Plugin:** `ws@0.3.4` — see `claude/.claude-plugin/plugin.json`.
+**Plugin:** `ws@0.3.7` — see `claude/.claude-plugin/plugin.json`.
 
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
 - After any change to `claude/`, run `claude plugin update ws@ws` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
+- **Any skill, agent, or infra change must include a `plugin.json` version bump** — bump `0.3.X` patch for behavior changes, minor for new skills.
 - `claude/CLAUDE.md` is symlinked to `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
 - External install: `/plugin marketplace add kang-sw/devenv` → `/plugin install ws@ws`.
 
