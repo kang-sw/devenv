@@ -1,7 +1,8 @@
 ---
 domain: spec-system
-description: "Spec authoring tools, stem format, anchor protocol, and frontmatter contracts."
+description: "Spec authoring tools, stem format, anchor protocol, frontmatter contracts, and feature removal protocol."
 sources:
+  - claude/agents/
   - claude/bin/
   - claude/infra/
   - claude/skills/forge-spec/
@@ -36,6 +37,10 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 - `spec-updater` identifies a spec-stem for git lookup as the bare slug extracted from the
   `{#slug}` anchor (e.g., `260421-feature-name`). It does not use a compound `file-path:slug` form.
   `git log --all --grep="<slug>"` is the lookup mechanism.
+- `spec-updater` additionally scans all commits for lines matching `removed: <spec-stem>` in the
+  commit message body. For each matched stem, it locates the corresponding implemented spec heading
+  (no `🚧` prefix) and adds it to the `### Pending removal` report section. It never removes or
+  modifies spec entries automatically — all removals require human confirmation.
 
 ## Coupling
 
@@ -62,6 +67,11 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 - **Rebuild spec from scratch**: invoke `/forge-spec`. It archives existing spec files,
   surveys the codebase via parallel Sonnet subagents, confirms domain list and per-behavior
   classification with the user, then writes spec entries domain by domain.
+- **Remove a feature from the codebase**: include `removed: <spec-stem>` in the commit's
+  `## Spec` section (one line per stem). The `spec-updater` agent detects this on its next
+  run and adds the spec entry to the `### Pending removal` report. Remove the spec entry
+  from the file manually after confirming the report. On the ticket side, declare
+  `spec-remove: <stem>` in ticket frontmatter so the stem is recorded before the commit.
 
 ## Common Mistakes
 
@@ -73,3 +83,6 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
   reconstruct heading context; `-v` emits a warning and flat output only.
 - Searching for stems in the `stems:` frontmatter field of spec files — that field
   no longer exists. All stem lookup must grep document body for `{#\d{6}-[\w-]+}`.
+- Deleting a spec entry directly without a `removed: <stem>` commit — skips the
+  `spec-updater` detection step and leaves no audit trail. Always commit the removal
+  signal first; let `spec-updater` surface it in the report before deleting.
