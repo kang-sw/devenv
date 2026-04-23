@@ -6,7 +6,7 @@ sources:
   - claude/skills/write-ticket/
   - claude/skills/write-spec/
 related:
-  spec-system: "/write-spec's judge: spec-impact gate is owned by write-spec, not pre-evaluated by /proceed."
+  spec-system: "/write-spec's judge: spec-impact gate is owned by write-spec, not pre-evaluated by /proceed. /write-ticket's judge: spec-gate (step 0, CREATE path only) may redirect to /write-spec before any ticket is authored."
 ---
 
 # Workflow Routing
@@ -38,6 +38,11 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - `/write-ticket` guarantees: step 8 emits a `Ticket:` completion artifact on its own line,
   in the form `Ticket: ai-docs/tickets/<status>/<stem>.md`. This line is the handoff protocol
   for any caller that needs to chain downstream on the produced ticket.
+- `/write-ticket` guarantees: on the CREATE path, `judge: spec-gate` (step 0) runs before any
+  authoring begins. If no relevant spec file exists or no entry covers the behavior,
+  write-ticket stops and redirects to `/write-spec`. The `Ticket:` artifact at step 8 is only
+  emitted when spec-gate passes. Callers that chain on the `Ticket:` line must account for the
+  possibility that spec-gate stops write-ticket before the artifact is produced.
 
 ## Coupling
 
@@ -46,6 +51,9 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - `/proceed` ↔ `/write-ticket`: proceed invokes write-ticket and reads back the `Ticket:` line
   to capture the path. Write-ticket's step 8 format is a contract with proceed. Changing the
   line prefix or path format breaks proceed's path-capture logic.
+- `/write-ticket` → `/write-spec`: unidirectional redirect (not invocation). `judge: spec-gate`
+  at step 0 may stop write-ticket and suggest `/write-spec`. This is write-ticket's own gate;
+  it is independent of `/proceed`'s unconditional delegation to `/write-spec`.
 
 ## Extension Points & Change Recipes
 
@@ -72,3 +80,6 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - Treating a clear-scope inline description as equivalent to a ticket path and skipping
   `/write-ticket`. Any actionable target that is not a file path must go through
   `/write-ticket`. Exploratory targets stop before `/write-ticket` is invoked.
+- Assuming `/write-ticket` always emits the `Ticket:` completion artifact. On the CREATE path,
+  `judge: spec-gate` at step 0 may stop write-ticket before step 8 is reached. When no spec
+  coverage exists, no artifact is emitted and the caller must handle the missing line.
