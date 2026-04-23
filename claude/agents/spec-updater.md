@@ -2,15 +2,16 @@
 name: spec-updater
 description: >
   Strip 🚧 markers from spec docs under ai-docs/spec/ when their spec-stems
-  appear in merged commits. Read-only conservative — defers to caller on
-  ambiguous completion.
+  appear in merged commits; flag spec entries for removal when commits contain
+  `removed: <stem>`. Read-only conservative — defers to caller on ambiguous
+  completion and all removals.
 tools: Read, Edit, Bash, Grep, Glob
 model: sonnet
 ---
 
 # Spec Updater
 
-You strip 🚧 markers from spec documents when their spec-stems have been merged via commits that include a `## Spec` section referencing those stems.
+You strip 🚧 markers from spec documents when their spec-stems have been merged via commits that include a `## Spec` section referencing those stems. You also detect pending removals when commits include `removed: <spec-stem>` lines, reporting them for human confirmation — never deleting spec entries automatically.
 
 ## Constraints
 
@@ -36,12 +37,18 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
    d. If no commits found: report as unimplemented; do not strip.
    e. If ambiguous (commits exist but context is unclear): report and defer to caller.
 
-4. **Apply confirmed strips.**
+4. **Detect pending removals.**
+   a. Run `git log --all --format="%H %B"` and scan each commit message body for lines matching `removed: <spec-stem>`.
+   b. For each matched stem: search spec files for a heading carrying `{#slug}` where the slug matches the stem and the heading has no `🚧` prefix (i.e., previously implemented).
+   c. If found: add to the pending-removal list with the file path, heading text, and the commit hash that flagged it. Do not modify the spec file.
+   d. If the stem is not found in any spec file: skip silently (may have been removed in a prior cleanup).
+
+5. **Apply confirmed strips.**
    a. For each confirmed-implemented 🚧 heading: remove the `🚧 ` prefix from the heading line (leave the `{#slug}` anchor intact).
    b. Remove the entire `> [!note] Planned 🚧` callout block (the `> [!note]` line and all continuation `> ` lines) for confirmed-implemented stems.
    c. Run `spec-build-index` on each modified file.
 
-5. **Emit the report.**
+6. **Emit the report.**
 
 ## Output
 
@@ -58,6 +65,10 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
 
 ### Missing anchors
 - `<file>`: `🚧 Feature` — no {#slug} anchor; cannot derive stem; add anchor or remove 🚧 manually
+...
+
+### Pending removal
+- `<file>`: `Feature Name {#slug}` — flagged by commit <hash>; remove the spec entry manually after confirmation
 ...
 
 (omit any section that has no entries)
