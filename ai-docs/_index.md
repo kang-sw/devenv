@@ -124,6 +124,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260422-feat-proceed-full-pipeline` | done | Extend /proceed to full-pipeline routing — add judge: needs-spec and auto-invoke judge: needs-ticket |
 | `260422-chore-rename-implement-to-edit` | done | Rename /implement skill to /edit; phase 1 of two-phase skill rename |
 | `260422-chore-rename-delegate-implement-to-implement` | done | Rename /delegate-implement skill to /implement; phase 2 of skill rename |
+| `260423-feat-proceed-mandatory-ticket` | done | Tighten /proceed judge: needs-ticket — always invoke /write-ticket for inline descriptions |
 
 ## Session Notes
 

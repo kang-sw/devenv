@@ -202,7 +202,7 @@ Announces the chosen path before invoking the first skill.
 > [!note] Extended behavior — full-pipeline routing {#260422-proceed-full-pipeline-routing}
 > Two prefix judges fire before the existing pipeline judges:
 > - **`judge: needs-spec`** — always invokes `/write-spec`; its own `judge: spec-impact` gate exits without writing if no spec work is needed.
-> - **`judge: needs-ticket`** — if no actionable ticket exists, auto-invokes `/write-ticket` rather than stopping. Exception: "exploratory" discussions (no clear scope or direction) still stop and route back to `/discuss`.
+> - **`judge: needs-ticket`** — auto-invokes `/write-ticket` when the target is a vague inline description with no clear scope. Clear-scope inline descriptions currently bypass `/write-ticket` and proceed directly to implementation. Exception: exploratory targets stop and route back to `/discuss`.
 >
 > With this change, `/proceed` is a valid entry point from any conversation state, including immediately after `/discuss` or mid-discussion with no ticket path argument.
 
