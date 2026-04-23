@@ -27,6 +27,7 @@ Read before authoring or modifying skills, agents, or infra:
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
 | `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `load-infra impl-playbook.md`. |
 | `claude/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `load-infra subagent-rules.md`. |
+| `claude/infra/executor-wrapup.md` | Shared post-implementation wrapup: _index.md refresh, doc-commit gate, ticket update. Access via `load-infra executor-wrapup.md`. |
 
 ## Native Agents
 
@@ -57,6 +58,7 @@ claude/infra/                 — docs only; accessed via load-infra
   code-review-correctness.md  — Correctness review partition: logic, error paths, contracts, security
   code-review-fit.md          — Fit review partition: conventions, naming, reuse, patterns
   code-review-test.md         — Test review partition: assertion validity, coverage, mock integrity
+  executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess
