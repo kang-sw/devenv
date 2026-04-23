@@ -44,6 +44,10 @@ Files: `claude/infra/spec-conventions.md`, `claude/infra/mental-model-convention
 
 Success: convention docs fully describe the removal and cross-reference protocols with no agent changes needed to understand them.
 
+### Result (0fa28cb) - 2026-04-23
+
+All three convention doc changes landed as planned. spec-conventions.md got Feature Removal section and rename-constraint bullet. mental-model-conventions.md got Spec Cross-References section. ticket-conventions.md got spec-remove: frontmatter field. No deviations.
+
 ### Phase 2: spec-updater agent — Pending removal detection
 
 File: `claude/agents/spec-updater.md`
@@ -58,6 +62,10 @@ Extend the process:
 
 Success: running spec-updater after a removal commit reports the pending-removal entries without touching spec files.
 
+### Result (ad91ce7) - 2026-04-23
+
+Step 4 (Detect pending removals) added between classification and strip steps. Output updated with `### Pending removal` section. Description and intro updated to mention removal detection. Step numbering corrected (old step 5 became step 6). No deviations.
+
 ### Phase 3: mental-model-updater agent — spec diff interpretation
 
 File: `claude/agents/mental-model-updater.md`
@@ -71,6 +79,10 @@ Rationale: when spec-updater strips 🚧 (confirming implementation landed), men
 
 Success: mental-model-updater's domain assessment list includes domains inferred from spec file changes, not only from code changes.
 
+### Result (f145c72) - 2026-04-23
+
+Step 1 extended with spec diff paragraph. Additive framing made explicit in the paragraph text. mental-model-updater subagent subsequently updated spec-system.md mental-model domain to reflect spec-updater's new pending-removal contracts. No deviations.
+
 ### Phase 4: discuss skill — 90-day mental-model staleness warning
 
 File: `claude/skills/discuss/SKILL.md`
@@ -81,3 +93,7 @@ In the `On: discussion loop` process, when a mental-model domain file is read:
 - Mirror the spec Implementation Gap 90-day staleness rule exactly.
 
 Success: discuss sessions surface a one-line staleness warning for any mental-model domain not updated in 90 days. No false positives for recently updated domains.
+
+### Result (1fc126b) - 2026-04-23
+
+Staleness warning added inline to discussion loop step 2. git log -1 command and 90-day threshold match spec Implementation Gap callout rule exactly. No deviations. spec-updater during doc pipeline also stripped the pre-existing `260422-write-ticket-document-review` 🚧 callout (unrelated, confirmed implemented).

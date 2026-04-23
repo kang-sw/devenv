@@ -10,7 +10,7 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
 
-**Plugin:** `ws@0.3.7` — see `claude/.claude-plugin/plugin.json`.
+**Plugin:** `ws@0.3.9` — see `claude/.claude-plugin/plugin.json`.
 
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
@@ -43,7 +43,7 @@ claude/agents/
   worker.md               — general-purpose non-code tasks
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
-  spec-updater.md         — strip 🚧 markers when spec-stems appear in merged commits
+  spec-updater.md         — strip 🚧 markers when spec-stems appear in merged commits; flag entries for removal when commits contain `removed: <stem>`
 ```
 
 ## Infra Layout
@@ -52,7 +52,7 @@ claude/agents/
 claude/infra/                 — docs only; accessed via load-infra
   impl-playbook.md            — subagent-safe implementation discipline
   mental-model-conventions.md — mental-model doc format and invariants
-  ticket-conventions.md       — ticket format, status directories, stem convention; optional spec: field
+  ticket-conventions.md       — ticket format, status directories, stem convention; optional spec: and spec-remove: fields
   spec-conventions.md         — spec doc format, 🚧 marker rules, {#slug} anchor protocol
   subagent-rules.md           — exploration, branches, general rules
   implementer.md              — code implementer role; spawn as general-purpose + read first
@@ -126,6 +126,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260422-chore-rename-implement-to-edit` | done | Rename /implement skill to /edit; phase 1 of two-phase skill rename |
 | `260422-chore-rename-delegate-implement-to-implement` | done | Rename /delegate-implement skill to /implement; phase 2 of skill rename |
 | `260423-feat-proceed-mandatory-ticket` | done | Tighten /proceed judge: needs-ticket — always invoke /write-ticket for inline descriptions |
+| `260423-feat-doc-system-gap-fixes` | done | Documentation system gap fixes — feature removal protocol, spec diff signal, discuss staleness warning, cross-reference convention |
 
 ## Session Notes
 
