@@ -8,6 +8,7 @@ Cross-domain patterns and shared conventions for the devenv workflow system.
 |--------|------|-------|
 | spec-system | `mental-model/spec-system.md` | Spec stems, anchors, frontmatter tools |
 | workflow-routing | `mental-model/workflow-routing.md` | /proceed routing contracts, prefix-stage delegation, write-ticket artifact protocol |
+| executor-wrapup | `mental-model/executor-wrapup.md` | Shared wrapup playbook for executor-series skills: doc pipeline, commit gate, ticket update |
 
 ## Shared Conventions
 
