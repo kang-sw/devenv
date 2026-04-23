@@ -6,6 +6,8 @@ sources:
   - claude/bin/
   - claude/infra/
   - claude/skills/forge-spec/
+related:
+  doc-tooling: "forge-mental-model calls list-stems (no args) to embed spec stems into domain drafts when ai-docs/spec/ is present. A stem format change breaks forge-mental-model's embedding step."
 ---
 
 # Spec System
@@ -34,6 +36,8 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 - `forge-spec` guarantees: no spec file is written and no archive `git mv` executes without explicit
   user confirmation. Resume detection runs at every invocation via `TaskList` — tasks prefixed
   `forge-spec-<domain>` are the persistence mechanism across compact boundaries.
+- `forge-spec` has `disable-model-invocation: true`. It cannot be dispatched programmatically from
+  another skill. Only slash-command invocation (`/forge-spec`) works.
 - `spec-updater` identifies a spec-stem for git lookup as the bare slug extracted from the
   `{#slug}` anchor (e.g., `260421-feature-name`). It does not use a compound `file-path:slug` form.
   `git log --all --grep="<slug>"` is the lookup mechanism.
