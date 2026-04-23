@@ -12,11 +12,15 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Ticket conventions: run `load-infra ticket-conventions.md` — path format, status flow, phase rules, stem rules, templates.
+- Ticket conventions: Run `load-infra ticket-conventions.md` (Bash) — path format, status flow, phase rules, stem rules, templates.
 - Never `Read` a ticket file other than the current target — delegate any other ticket inspection to an Explore subagent.
 
 ## On: invoke
 
+0. **judge: spec-gate** (CREATE path only):
+   a. Identify the relevant spec file for this topic.
+   b. Confirm spec coverage: run `list-stems <spec-file>` if a spec file is identifiable.
+   c. If no relevant spec file exists, or no entry covers this behavior → stop. Name the uncovered behavior; suggest `/write-spec` before continuing.
 1. If `$ARGUMENTS` references an existing ticket, read it.
 2. **Create** (new ticket):
    a. Determine category from the topic.
