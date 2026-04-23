@@ -26,10 +26,15 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - `/proceed` guarantees: `judge: needs-spec` fires on **every** invocation. It is unconditional.
   `/proceed` does not pre-evaluate whether a spec is needed. It always delegates to `/write-spec`,
   which handles the no-op exit via its own `judge: spec-impact` gate.
-- `/proceed` guarantees: after a `judge: needs-ticket` auto-invoke, the ticket path captured
-  from `/write-ticket`'s output becomes the target for all downstream stages (skeleton, plan,
-  implementation). Proceed does not generate or assume a ticket path. It reads the captured
-  artifact.
+- `/proceed` guarantees: `judge: needs-ticket` invokes `/write-ticket` for any actionable
+  inline description, regardless of scope clarity. Only an existing ticket path skips this
+  step. The distinction between "vague" and "clear-scope" inline descriptions is not
+  evaluated at the routing level. Both delegate to `/write-ticket`, which handles scope
+  classification internally via `judge: initial-status`. An exploratory target, where the
+  user is weighing approaches rather than requesting implementation, stops before
+  `/write-ticket` and suggests `/discuss`. After the auto-invoke, the ticket path captured
+  from `/write-ticket`'s `Ticket:` output becomes the target for all downstream stages.
+  Proceed does not generate or assume a ticket path. It reads the captured artifact.
 - `/write-ticket` guarantees: step 8 emits a `Ticket:` completion artifact on its own line,
   in the form `Ticket: ai-docs/tickets/<status>/<stem>.md`. This line is the handoff protocol
   for any caller that needs to chain downstream on the produced ticket.
@@ -64,3 +69,6 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - Assuming a new prefix stage should mirror the implementation pipeline judges (returning
   yes/no to proceed). Prefix stages delegate fully. Proceed does not inspect their return
   value beyond the ticket-path artifact.
+- Treating a clear-scope inline description as equivalent to a ticket path and skipping
+  `/write-ticket`. Any actionable target that is not a file path must go through
+  `/write-ticket`. Exploratory targets stop before `/write-ticket` is invoked.
