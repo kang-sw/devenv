@@ -37,6 +37,7 @@ Topic: $ARGUMENTS
 
 1. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
 2. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
+   When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date> — consider `/write-mental-model`."
 3. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 4. Continue until the user signals done.
 
