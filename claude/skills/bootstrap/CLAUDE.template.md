@@ -209,8 +209,10 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          See `claude/skills/discuss/list-active.py` for canonical parser.
 - v0021: If `ai-docs/mental-model/overview.md` exists, promote it to the
          top-level index: `git mv ai-docs/mental-model/overview.md ai-docs/mental-model.md`.
-         Then run `/write-mental-model` to add frontmatter (`domain`, `description`,
-         `sources`, `related`) to all existing domain docs that lack it.
+         Then dispatch the `mental-model-updater` agent to add frontmatter (`domain`,
+         `description`, `sources`, `related`) to all existing domain docs that lack it.
+         Caller note: if no `(mental-model-updated)` checkpoint exists in git history,
+         pass the repository's initial commit as the base commit to the agent.
          Commit all changes with `(mental-model-updated)` in the message body.
 - v0022: If spec documents exist in a flat layout under `ai-docs/spec/`, reorganize
          areas with multiple sub-docs into directories: `ai-docs/spec/<area>/index.md`

@@ -22,7 +22,7 @@ Topic: $ARGUMENTS
 - Read mental-model docs on-demand as topics emerge.
 - Read spec docs in `ai-docs/spec/` on-demand as topics emerge — the Project Map above lists available specs.
 - Dispatch Explore agents for implementation details beyond mental-model docs — never read source directly.
-- When docs are stale or insufficient, say so and suggest `/write-mental-model` — do not speculate.
+- When docs are stale or insufficient, say so — do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 - Evaluate each claim independently — call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
@@ -37,7 +37,7 @@ Topic: $ARGUMENTS
 
 1. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
 2. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
-   When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date> — consider `/write-mental-model`."
+   When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."
 3. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 4. Continue until the user signals done.
 
@@ -62,7 +62,6 @@ Triggers when the user requests a ticket status change — promoting an idea tic
 2. Then offer ticket persistence:
    - **New ticket** — invoke `ws:write-ticket`.
    - **Ticket update** — invoke `ws:write-ticket`, then append design notes to an existing ticket phase.
-   - **Mental-model update** — if discussion surfaced new architectural understanding, suggest `/write-mental-model` for the update. Do not edit mental-model docs directly.
 3. Apply **judge: needs-integration-tests** to ticket writes.
 4. Write only what the user approves. No artifact needed for exploratory discussions.
 
