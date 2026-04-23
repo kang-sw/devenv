@@ -19,6 +19,8 @@ Identify affected domains and apply minimal, accurate updates.
 
 1. **Determine changes**: Locate the last checkpoint via `git log --grep="mental-model-updated" -1 --format="%H"`. Use that as the base commit. If no stamp is found, use the caller-provided base commit. Run `git diff <base-commit> HEAD --stat` for overview, then full diff for details.
 
+   Also run `git diff <base-commit> HEAD -- ai-docs/spec/` to check for spec file changes since the checkpoint. For each changed spec entry (heading added, modified, or had `🚧` stripped), identify the behavioral domain it belongs to by topic and filename. Add those domains to the assessment target list in step 3 — they may need contract or coupling updates to reflect newly-implemented behavior. Spec diff assessment is additive: it supplements code diff assessment, never replaces it.
+
 2. **Read all mental-model docs**: Read `ai-docs/mental-model.md` (index), then every file in `ai-docs/mental-model/`
    to understand the full project architecture, contracts, and coupling before
    assessing impact. Map changed files to domains. A single file may affect
