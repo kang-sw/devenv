@@ -52,6 +52,8 @@ plans:               # maps phases to plan path stems under ai-docs/plans/ (with
   phase-1: 2026-03/28-1430.event-serialization
 skeletons:           # maps phases to skeleton commit hashes
   phase-1: abc1234
+related-mental-model:  # optional; mental-model stems (filename without .md) consulted
+  - workflow-routing   #   during ticket authoring — recovery hint for future sessions
 started:             # YYYY-MM-DD, added on move to wip/
 completed:           # YYYY-MM-DD, added on move to done/
 ---

@@ -22,7 +22,7 @@ Target: $ARGUMENTS
 2. **Create** (new ticket):
    a. Determine category from the topic.
    b. Choose initial status directory (`idea/` for vague, `todo/` for actionable — see `judge: initial-status`).
-   c. Write the ticket using the **frontmatter template** and a clear problem/goal statement.
+   c. Write the ticket using the **frontmatter template** and a clear problem/goal statement. Populate `related-mental-model` with the mental-model stems (filename without `.md`) that were consulted or arose during the current session — recovery hint for future sessions, not a validated link. Omit if no mental-model docs were relevant.
    d. If category is `epic`: body defines scope and decomposition (not implementation spec); list child ticket stems; completion means child work is done.
    e. If multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
    f. After drafting, verify scope — see `judge: ticket-scope`.
@@ -40,7 +40,9 @@ Target: $ARGUMENTS
    a. Run `list-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
    b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
-8. **Proceed prompt** — suggest `/proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 7. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
+8. **Commit** — in a single Bash command, stage the ticket file (if `git mv` was used, `git add <new-path>` is sufficient) then commit:
+   `git add <file> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
+9. **Proceed prompt** — suggest `/proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 7. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
    Emit the created ticket path as a completion artifact on its own line at the end of output, in the form `Ticket: ai-docs/tickets/<status>/<stem>.md`. This allows callers (e.g. `/proceed`) to capture the path when invoking `/write-ticket` as a prefix stage.
 

@@ -36,6 +36,8 @@ Target: $ARGUMENTS
    e. Run `spec-build-index` to regenerate the `features:` frontmatter field.
 4. Apply `judge: split-trigger` after writing — if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
 5. Accuracy check — confirm every heading without 🚧 exists in the codebase. Use an Explore agent if uncertain. Never remove 🚧 without confirmation.
+6. **Commit** — in a single Bash command, stage the spec file(s) updated in this run (and `ai-docs/_index.md` if the listing changed) then commit:
+   `git add <file(s)> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
 
 ## Judgments
 
