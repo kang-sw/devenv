@@ -147,6 +147,9 @@ Owner-direct single-scope implementation: the main agent reads source, makes edi
 
 After implementation, dispatches `mental-model-updater` and `spec-updater` in parallel with the commit range and waits for both. If `spec-updater` reports ambiguous stems, surfaces them to the user. Then updates ticket status and `_index.md`, and emits a completion report. {#260423-doc-pipeline-spec-updater}
 
+> [!note] Implementation Gap · 2026-04-23
+> Doc pipeline output (spec-updater, mental-model-updater changes, `_index.md` refresh, ticket status update) is dispatched and awaited, but the resulting file changes are not guaranteed to be committed before the skill exits.
+
 > [!note] Constraints
 > - Escalates to `/implement` when scope grows beyond direct-edit bounds.
 > - Suggests `/write-skeleton` when none exist and scope warrants them, but does not auto-invoke it.
@@ -163,6 +166,9 @@ Two invocation modes based on the current branch: **main-branch mode** (invoked 
 
 Pre-merge, dispatches `mental-model-updater` and `spec-updater` in parallel with the implementation commit range. Ambiguous stems from `spec-updater` are surfaced at the report/approval gate before merge proceeds.
 
+> [!note] Implementation Gap · 2026-04-23
+> Pre-merge doc pipeline output (spec-updater and mental-model-updater file changes) is not guaranteed to be committed before the merge step runs.
+
 ### `/parallel-implement` {#260421-parallel-implement}
 
 Parallel implementation across N disjoint scope units. Spawns one implementer+reviewer pair per scope; lead serializes all build and test execution requests; lead commits each scope sequentially after all reviewers report clean.
@@ -172,6 +178,9 @@ Two invocation modes based on the current branch: **main-branch mode** (invoked 
 Requires disjoint file sets — overlapping scopes cause merge conflicts.
 
 Pre-merge (before the report/approval gate), dispatches `mental-model-updater` and `spec-updater` in parallel with the full commit range covering all scopes. Ambiguous stems are surfaced at the report/approval gate before merge. After merge, the doc pipeline retains only `_index.md` refresh and ticket status update.
+
+> [!note] Implementation Gap · 2026-04-23
+> Both pre-merge doc pipeline output (spec-updater, mental-model-updater changes) and post-merge output (`_index.md` refresh, ticket status update) are not guaranteed to be committed before the skill exits.
 
 > [!note] Constraints
 > - Only one build/test command runs at a time (lead-serialized) — concurrent implementers share the working tree.
