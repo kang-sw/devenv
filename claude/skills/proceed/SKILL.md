@@ -22,7 +22,7 @@ Target: $ARGUMENTS
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only. Do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
-- If the target is a vague idea with no clear scope, auto-invoke `/write-ticket` and continue.
+- If the target is an inline description (any scope), auto-invoke `/write-ticket` and continue. If the target is an existing ticket path, skip `/write-ticket`.
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
 - Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
@@ -135,9 +135,9 @@ Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth im
 
 | Decision | When |
 |----------|------|
-| Auto-invoke `/write-ticket`, capture ticket path, continue | Target is a vague idea with no clear scope — auto-invokes `/write-ticket` rather than stopping; captures the produced ticket path from its output for downstream stages |
 | Stop, suggest `/discuss` | Target is exploratory — user is weighing approaches, not requesting implementation |
-| Proceed | Target is a ticket path, or an inline description with clear scope and deliverables |
+| Proceed | Target is an existing ticket path |
+| Invoke `/write-ticket`, capture `Ticket:` output, continue | Target is an inline description — any scope |
 
 ### judge: needs-plan
 
