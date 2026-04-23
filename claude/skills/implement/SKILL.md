@@ -32,6 +32,7 @@ Target: $ARGUMENTS
 
 ### 1. Prepare
 
+0. Context survey: spawn `project-survey` with the plan path or inline brief. Capture the returned `[Must|Maybe]` reference list — include it in the implementer spawn prompt at step 2.
 1. Parse arguments: extract plan path or inline brief, and optional ticket stem.
 2. If plan-driven: verify the plan file exists. Read it to extract scope and branch name hint.
 3. If brief-driven: the brief is the full specification.

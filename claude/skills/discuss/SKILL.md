@@ -30,6 +30,7 @@ Topic: $ARGUMENTS
 
 ## On: invoke
 
+0. Context survey: spawn `project-survey` with `$ARGUMENTS` as the brief. Use the returned `[Must|Maybe]` reference list as the initial reading queue for the discussion session.
 1. If `$ARGUMENTS` references a ticket, read it.
 2. Enter discussion loop.
 

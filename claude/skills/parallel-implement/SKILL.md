@@ -48,6 +48,7 @@ Load `/team-lead` if not already loaded.
 
 ### 1. Pre-flight manifest
 
+0. Context survey: spawn `project-survey` with the ticket path or inline brief. Capture the returned `[Must|Maybe]` reference list — include it in each worker's spawn prompt at step 2.
 1. Parse arguments: ticket path, plan path, or inline scope description.
 2. Read the source. Infer N disjoint scope units. Each unit carries:
    - `name`: short identifier used in agent names and commit messages (lowercase, hyphenated, e.g. `auth-api`).

@@ -27,6 +27,7 @@ Target: $ARGUMENTS
 
 ### 1. Prepare
 
+0. Context survey: spawn `project-survey` with the implementation brief or ticket path. Use the returned `[Must|Maybe]` reference list to guide reads in the steps below.
 1. Parse arguments: ticket path, inline brief, or `--plan` path.
 2. If plan-driven: read the plan file. Note binding decisions and Skeleton Amendments.
 3. If ticket-driven: read the ticket; collect skeleton and plan references from frontmatter.
