@@ -166,9 +166,12 @@ The agent can target a single stem or scan all files under `ai-docs/spec/`.
 
 ### 🚧 Pending-Removal Report {#260423-spec-updater-pending-removal}
 
-When a commit's `## Spec` section contains a `removed: <spec-stem>` line, the spec-updater detects the removal intent and adds the corresponding spec entry to a `### Pending removal` report section rather than deleting it automatically. The entry is not touched in the file — the report surfaces it for human confirmation.
+When a commit's `## Spec` section contains a `removed: <spec-stem>` line, the spec-updater detects the removal intent and routes the corresponding spec entry to one of two report sections — never deleting automatically:
 
-Removal confirmation is out of scope for the agent: the caller reads the `### Pending removal` section and deletes the spec entry manually.
+- **`### Pending removal`** — the entry exists and has no `🚧` prefix (implemented feature being removed). The caller deletes the spec entry manually after confirmation.
+- **`### Planned entry dropped`** — the entry exists and carries a `🚧` prefix (planned feature dropped before implementation). The caller deletes the `🚧` entry manually after confirmation.
+
+If the stem is not found in any spec file, the agent skips silently (already cleaned up).
 
 ### Missing-Anchor Report {#260421-spec-updater-missing-anchor}
 
