@@ -145,7 +145,7 @@ Also dispatched automatically during the doc pipeline by `/edit`, `/implement`, 
 
 Owner-direct single-scope implementation: the main agent reads source, makes edits, verifies via build and test commands, and commits — no subagent delegation for the implementation itself. Best suited for warm sessions with well-understood, narrow scope.
 
-After implementation, dispatches `mental-model-updater` and `spec-updater` in parallel with the commit range and waits for both. If `spec-updater` reports ambiguous stems, surfaces them to the user. Then updates ticket status and `_index.md`, and emits a completion report. {#260423-doc-pipeline-spec-updater}
+After implementation, dispatches `spec-updater` first and waits for it to commit, then dispatches `mental-model-updater` and waits. The sequential order ensures `mental-model-updater`'s spec-diff check captures any 🚧 strips committed by `spec-updater`. If `spec-updater` reports ambiguous stems, surfaces them to the user. Then updates ticket status and `_index.md`, and emits a completion report. {#260423-doc-pipeline-spec-updater}
 
 > [!note] Implementation Gap · 2026-04-23
 > Doc pipeline output (spec-updater, mental-model-updater changes, `_index.md` refresh, ticket status update) is dispatched and awaited, but the resulting file changes are not guaranteed to be committed before the skill exits.
@@ -164,7 +164,7 @@ Review partitions:
 
 Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260422-implement-feature-branch-mode}
 
-Pre-merge, dispatches `mental-model-updater` and `spec-updater` in parallel with the implementation commit range. Ambiguous stems from `spec-updater` are surfaced at the report/approval gate before merge proceeds.
+Pre-merge, dispatches `spec-updater` first and waits for it to commit, then dispatches `mental-model-updater` and waits. Ambiguous stems from `spec-updater` are surfaced at the report/approval gate before merge proceeds.
 
 > [!note] Implementation Gap · 2026-04-23
 > Pre-merge doc pipeline output (spec-updater and mental-model-updater file changes) is not guaranteed to be committed before the merge step runs.
@@ -177,7 +177,7 @@ Two invocation modes based on the current branch: **main-branch mode** (invoked 
 
 Requires disjoint file sets — overlapping scopes cause merge conflicts.
 
-Pre-merge (before the report/approval gate), dispatches `mental-model-updater` and `spec-updater` in parallel with the full commit range covering all scopes. Ambiguous stems are surfaced at the report/approval gate before merge. After merge, the doc pipeline retains only `_index.md` refresh and ticket status update.
+Pre-merge (before the report/approval gate), dispatches `spec-updater` first and waits for it to commit, then dispatches `mental-model-updater` and waits. Ambiguous stems are surfaced at the report/approval gate before merge. After merge, the doc pipeline retains only `_index.md` refresh and ticket status update.
 
 > [!note] Implementation Gap · 2026-04-23
 > Both pre-merge doc pipeline output (spec-updater, mental-model-updater changes) and post-merge output (`_index.md` refresh, ticket status update) are not guaranteed to be committed before the skill exits.

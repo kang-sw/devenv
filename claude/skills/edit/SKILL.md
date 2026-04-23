@@ -78,8 +78,9 @@ Loop until no Critical/Important issues remain.
 
 ### 5. Doc pipeline
 
-1. Dispatch **ws:spec-updater** and **ws:mental-model-updater** in parallel with the implementation commit range. Wait for both. If **spec-updater** reports ambiguous stems, surface them to the user.
-2. Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update.
+1. Dispatch **ws:spec-updater** with the implementation commit range. Wait for it to complete. If **spec-updater** reports ambiguous stems, surface them to the user.
+2. Dispatch **ws:mental-model-updater**. Wait for it to complete. Running spec-updater first ensures mental-model-updater's spec-diff check captures any 🚧 strips committed by spec-updater.
+3. Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update.
 
 ### 6. Report
 

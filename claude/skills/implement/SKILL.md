@@ -154,8 +154,8 @@ Wait for all reviewers to complete.
 
 ### 4. Docs pre-pass
 
-1. Dispatch **mental-model-updater** and **spec-updater** in parallel with the commit range and implementation summary. Always dispatch both — the agents determine impact. **Wait for both before proceeding** — the report step should reflect the final doc state.
-2. If **spec-updater** reports ambiguous stems, include them in the step 5 report for user resolution.
+1. Dispatch **spec-updater** with the commit range. Wait for it to complete. If **spec-updater** reports ambiguous stems, note them for step 5.
+2. Dispatch **mental-model-updater**. Wait for it to complete. Running spec-updater first ensures mental-model-updater's spec-diff check captures any 🚧 strips committed by spec-updater.
 
 ### 5. Report and approval
 
@@ -169,7 +169,7 @@ Wait for all reviewers to complete.
 2. **Main-branch mode only** — wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
    - Re-apply `judge: partition-allocation` and spawn fresh reviewers per the step 3 pattern. Wait for implementer fix report.
-   - Re-run **mental-model-updater** and **spec-updater** with the new commit range. Wait for both.
+   - Re-run **spec-updater** with the new commit range. Wait. Then re-run **mental-model-updater**. Wait.
    - Re-report. Loop until user approves.
 
 Implementer and reviewer remain alive throughout this loop.

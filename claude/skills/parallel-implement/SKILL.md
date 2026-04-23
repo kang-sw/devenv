@@ -162,8 +162,8 @@ Do not batch scopes into a single commit. One commit per scope preserves attribu
 
 ### 5. Docs pre-pass
 
-1. Dispatch **mental-model-updater** and **spec-updater** in parallel with the full commit range covering all scope commits. Wait for both before proceeding to the report step.
-2. If **spec-updater** reports ambiguous stems, include them in the step 6 report for user resolution.
+1. Dispatch **spec-updater** with the full commit range covering all scope commits. Wait for it to complete. If **spec-updater** reports ambiguous stems, note them for step 6.
+2. Dispatch **mental-model-updater**. Wait for it to complete. Running spec-updater first ensures mental-model-updater's spec-diff check captures any 🚧 strips committed by spec-updater.
 
 ### 6. Report and approval
 
@@ -177,7 +177,7 @@ Do not batch scopes into a single commit. One commit per scope preserves attribu
    2. SendMessage the fix directive to the relevant implementer(s).
    3. Implementer fixes → requests execution approval via run_request gate → reviewer re-reviews.
    4. Re-run collect+commit for affected scope(s) only (new commit per CLAUDE.md rules).
-   5. Re-run **mental-model-updater** and **spec-updater** with the new commit range. Wait for both.
+   5. Re-run **spec-updater** with the new commit range. Wait. Then re-run **mental-model-updater**. Wait.
    6. Re-report. Loop until user approves.
 
 ### 7. Merge
