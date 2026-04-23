@@ -46,7 +46,12 @@ Permanent behavioral invariants belong in body prose, not in any callout. Write 
 - Anchors may appear on any line (heading or body text), not heading-only.
 - Slugs are clean identifiers: lowercase, hyphens, no spaces.
 - When a slug changes, the commit message must include `renamed-spec: <old-stem> → <new-stem>`.
+- When a slug changes and mental-model files reference `{#old-stem}`, those files must be updated in the same commit.
 - Headings without `{#YYMMDD-slug}` are treated as organizational — they appear in `features:` only.
+
+## Feature Removal
+
+When a commit removes a feature from the codebase, include `removed: <spec-stem>` in the commit's `## Spec` section — one line per removed stem. The spec-updater detects this and adds the corresponding spec entry to the `### Pending removal` report section. Remove the spec entry manually after confirming the report.
 
 ## Frontmatter
 

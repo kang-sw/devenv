@@ -45,6 +45,13 @@ related:
 - `sources`: directory-level patterns only — no file paths. The updater maintains this field.
 - `related`: optional map of domain name → one-line coupling/contract note. Omit unrelated domains.
 
+## Spec Cross-References
+
+When a mental-model domain covers behavior that has a corresponding spec entry, reference the spec stem inline in body text (e.g., `{#260421-spec-stem}`). This makes the spec entry discoverable from the domain doc.
+
+- Grep for `{#stem}` across `ai-docs/mental-model/` to find which domain documents a given spec entry. No back-reference in spec files is needed — one-directional reduces dual-maintenance risk.
+- When a spec stem is renamed (`renamed-spec: old → new` commit convention), any mental-model file referencing the old stem must be updated in the same commit.
+
 ## Commit Stamp
 
 Every commit that updates mental-model documents must include `(mental-model-updated)` in
