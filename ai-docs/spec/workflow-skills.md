@@ -20,6 +20,7 @@ features:
     - `/proceed`
   - Reconstruction
     - `/forge-spec`
+    - `/forge-mental-model`
   - Utility Skills
     - `/ship`
     - `/team-lead`
@@ -81,13 +82,12 @@ The file is consumed by `/enter-session`'s fast-path on the next session start.
 
 Facilitates exploratory discussion of approach or direction. Reads spec, mental-model, and ticket files on demand; dispatches Explore subagents for codebase questions. Produces no source edits.
 
-At the end of a discussion turn, always suggests `/write-spec` as the next step. Also offers `/write-ticket` to capture decisions as a ticket and `/write-mental-model` to record new architectural understanding.
+At the end of a discussion turn, always suggests `/write-spec` as the next step. Also offers `/write-ticket` to capture decisions as a ticket.
+
+When a mental-model domain file is read, the skill checks its last commit date via `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the date is more than 90 days ago, the skill surfaces a staleness warning for that domain. No frontmatter field is needed; git history is the source. {#260423-discuss-mental-model-staleness-warning}
 
 > [!note] Constraints
 > - No source files are created or modified during a `/discuss` session.
-
-> [!note] Planned 🚧
-> When a mental-model domain file is read during a discuss session, the skill checks its last commit date via `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the date is more than 90 days ago, the skill surfaces a staleness warning for that domain — mirroring the spec Implementation Gap 90-day callout rule. No frontmatter field is needed; git history is the source. {#260423-discuss-mental-model-staleness-warning}
 
 ### `/write-spec` {#260421-write-spec}
 
@@ -134,10 +134,9 @@ Updates the ticket `plans:` frontmatter with the plan path. `/proceed` passes th
 
 Rebuilds or updates `ai-docs/mental-model/` with operational knowledge for modifying the codebase. Delegates all source exploration to subagents. After writing, updates `ai-docs/mental-model.md` (the index) and `ai-docs/_index.md`.
 
-Also dispatched automatically during the doc pipeline by `/edit`, `/implement`, and `/parallel-implement`, in parallel with `spec-updater`.
-
 > [!note] Constraints
 > - Describes operational knowledge for code modifiers, not behavior for end users — contents are not caller-visible spec material.
+
 
 ## Implementation Skills
 
@@ -221,6 +220,25 @@ From-scratch spec reconstruction for a project. The skill:
 > - No spec entry is written without explicit user classification of caller-visible status and implementation status.
 > - Uses `TaskCreate` with `forge-spec-<domain>` prefix for cross-compact resume detection — renaming tasks breaks resume.
 
+
+### `/forge-mental-model` {#260423-forge-mental-model-skill}
+
+From-scratch mental-model construction for a project. Mirrors the `/forge-spec` pattern:
+1. Surveys the codebase with parallel subagents to identify domain candidates.
+2. Presents the domain list to the user; confirmed list locks into `TaskCreate` tasks for resumability.
+3. Per domain: surveys internals, drafts operational knowledge, authors the domain file.
+4. If `ai-docs/spec/` exists, embeds relevant spec stems inline per mental-model conventions.
+5. Updates `ai-docs/mental-model.md` index after all domains complete.
+
+`disable-model-invocation: true` — hidden from the model's skill palette; user-triggered only.
+
+A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cross-references will be absent but proceeds without blocking.
+
+> [!note] Constraints
+> - No domain file is written without completing the survey step for that domain.
+> - Uses `TaskCreate` with `forge-mental-model-<domain>` prefix for cross-compact resume detection — renaming tasks breaks resume.
+> - Replaces `/write-mental-model` for from-scratch use cases.
+
 ## Utility Skills
 
 ### `/ship` {#260421-ship}
@@ -246,3 +264,5 @@ Loaded automatically by `/implement` and `/parallel-implement` before any team o
 Scaffolds a new project (`fresh` mode) or upgrades an existing one (`upgrade` / `adopt` modes) to the canonical `CLAUDE.md` template structure. Performs a surgical merge: never overwrites project-specific sections; marks unresolvable conflicts inline with `<!-- CONFLICT: ... -->`.
 
 Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`, `plans/`, `ref/`) and a `.gitignore` entry for `.local.md` files.
+
+Legacy project detection: when `ai-docs/spec/` or `ai-docs/mental-model/` is absent after bootstrapping, the skill suggests running `/forge-spec` followed by `/forge-mental-model` to establish the documentation baseline. {#260423-bootstrap-legacy-forge-routing}

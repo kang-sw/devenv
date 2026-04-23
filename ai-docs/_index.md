@@ -88,9 +88,9 @@ claude/skills/
   ship/                — release: version bump, tag, build, publish per project config
   team-lead/           — team orchestration mode (TeamCreate, coordination, shutdown)
   manual-think/        — manual chain-of-thought when native thinking unavailable
-  write-mental-model/  — mental-model document format, inclusion test, rebuild
   bootstrap/           — scaffold new project or upgrade existing to canonical template
-  forge-spec/          — from-scratch spec reconstruction; archive-first, domain-by-domain, cross-compact via TaskCreate
+  forge-spec/          — from-scratch spec reconstruction; archive-first, domain-by-domain, cross-compact via TaskCreate (disable-model-invocation)
+  forge-mental-model/  — from-scratch mental-model construction; survey → user confirm → per-domain verify cycle (disable-model-invocation)
 ```
 
 ## Canonical Flows
@@ -127,6 +127,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260422-chore-rename-delegate-implement-to-implement` | done | Rename /delegate-implement skill to /implement; phase 2 of skill rename |
 | `260423-feat-proceed-mandatory-ticket` | done | Tighten /proceed judge: needs-ticket — always invoke /write-ticket for inline descriptions |
 | `260423-feat-doc-system-gap-fixes` | done | Documentation system gap fixes — feature removal protocol, spec diff signal, discuss staleness warning, cross-reference convention |
+| `260423-feat-doc-tooling-restructure` | done | Doc tooling restructure — forge-mental-model new skill, write-mental-model removal, forge-spec palette flag, bootstrap legacy detection |
 
 ## Session Notes
 
