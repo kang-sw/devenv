@@ -43,6 +43,10 @@ Mode: $ARGUMENTS
 4. Add `ai-docs/_index.local.md` to `.gitignore` if not present.
 5. Set `<!-- Template Version: vNNNN -->` to latest version from template.
 6. Commit.
+7. **Legacy detection**: check for absent documentation baselines and suggest forge skills as needed (output-only — do not invoke).
+   - `ai-docs/spec/` absent → suggest `/forge-spec` to build the spec baseline.
+   - `ai-docs/mental-model/` absent → suggest `/forge-mental-model` to build the mental-model baseline.
+   - Both absent → suggest `/forge-spec` first, then `/forge-mental-model`.
 
 ## On: upgrade
 
@@ -63,6 +67,7 @@ Mode: $ARGUMENTS
 3. Add `<!-- Template Version: vNNNN -->` at bottom of CLAUDE.md set to latest.
 4. Proceed to **upgrade** handler for any remaining sync.
 5. Commit.
+6. **Legacy detection**: same as On: fresh step 7 — check for absent `ai-docs/spec/` and `ai-docs/mental-model/`; suggest forge skills as needed (output-only).
 
 ## Judgments
 
