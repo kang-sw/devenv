@@ -17,10 +17,7 @@ Target: $ARGUMENTS
 
 ## On: invoke
 
-0. **judge: spec-gate** (CREATE path only):
-   a. Identify the relevant spec file for this topic.
-   b. Confirm spec coverage: run `list-stems <spec-file>` if a spec file is identifiable.
-   c. If no relevant spec file exists, or no entry covers this behavior → stop. Name the uncovered behavior; suggest `/write-spec` before continuing.
+0. Apply **judge: spec-gate** (CREATE path only).
 1. If `$ARGUMENTS` references an existing ticket, read it.
 2. **Create** (new ticket):
    a. Determine category from the topic.
@@ -48,6 +45,12 @@ Target: $ARGUMENTS
    Emit the created ticket path as a completion artifact on its own line at the end of output, in the form `Ticket: ai-docs/tickets/<status>/<stem>.md`. This allows callers (e.g. `/proceed`) to capture the path when invoking `/write-ticket` as a prefix stage.
 
 ## Judgments
+
+### judge: spec-gate
+
+Fires on CREATE path only. Identify the relevant spec file for the topic.
+Run `list-stems <spec-file>` (Bash) if a spec file is identifiable.
+If no relevant spec file exists, or no entry covers this behavior → stop. Name the uncovered behavior; suggest `/write-spec` before continuing.
 
 ### judge: initial-status
 
