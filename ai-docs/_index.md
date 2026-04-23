@@ -10,7 +10,7 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
 
-**Plugin:** `ws@0.4.0` — see `claude/.claude-plugin/plugin.json`.
+**Plugin:** `ws@0.5.0` — see `claude/.claude-plugin/plugin.json`.
 
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
@@ -44,6 +44,7 @@ claude/agents/
   clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
   spec-updater.md         — strip 🚧 markers when spec-stems appear in merged commits; flag entries for removal when commits contain `removed: <stem>`
+  project-survey.md       — pre-invocation context survey; returns [Must|Maybe]-tiered spec/mental-model/ticket reference list for a given brief
 ```
 
 ## Infra Layout
@@ -128,6 +129,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260423-feat-proceed-mandatory-ticket` | done | Tighten /proceed judge: needs-ticket — always invoke /write-ticket for inline descriptions |
 | `260423-feat-doc-system-gap-fixes` | done | Documentation system gap fixes — feature removal protocol, spec diff signal, discuss staleness warning, cross-reference convention |
 | `260423-feat-doc-tooling-restructure` | done | Doc tooling restructure — forge-mental-model new skill, write-mental-model removal, forge-spec palette flag, bootstrap legacy detection |
+| `260424-feat-project-survey-agent` | done | project-survey Haiku agent + auto-invoke integration into edit/implement/parallel-implement/discuss |
 
 ## Session Notes
 

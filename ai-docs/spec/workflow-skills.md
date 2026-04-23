@@ -17,7 +17,7 @@ features:
     - `/edit`
     - `/implement`
     - `/parallel-implement`
-    - 🚧 Pre-invocation Context Survey — `project-survey`
+    - Pre-invocation Context Survey — `project-survey`
     - `/proceed`
   - Reconstruction
     - `/forge-spec`
@@ -185,7 +185,7 @@ Pre-merge (before the report/approval gate), dispatches `spec-updater` first and
 > [!note] Constraints
 > - Only one build/test command runs at a time (lead-serialized) — concurrent implementers share the working tree.
 
-### 🚧 Pre-invocation Context Survey — `project-survey` {#260424-project-survey-auto-invoke}
+### Pre-invocation Context Survey — `project-survey` {#260424-project-survey-auto-invoke}
 
 At the start of each run, `/edit`, `/implement`, `/parallel-implement`, and `/discuss` auto-invoke the `project-survey` agent with the implementation brief or query. The agent returns a `[Must|Maybe]`-tiered reference list of relevant documentation the implementer should read before starting work.
 

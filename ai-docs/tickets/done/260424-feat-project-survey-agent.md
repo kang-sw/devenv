@@ -60,6 +60,10 @@ The agent definition must specify:
 
 **Success criteria**: agent definition passes `ai-docs/ref/skill-authoring.md` invariant checklist; Haiku produces correct tiered output for a test brief.
 
+### Result (bc4fa7a) - 2026-04-24
+
+Agent written at `claude/agents/project-survey.md`. Invariant checklist passed. Model: haiku. Constraints: explicit Bash listing before reads (prevents inferential path selection), source code excluded, done/dropped excluded.
+
 ### Phase 2: Skill integrations
 
 Add a `project-survey` dispatch step to four skills:
@@ -74,3 +78,7 @@ Integration pattern for each skill: spawn `project-survey` agent with the implem
 Depends on Phase 1 (agent must exist before skills reference it).
 
 **Success criteria**: all four skills contain the project-survey dispatch step; `implement` and `parallel-implement` inject the reference list into their delegate prompts.
+
+### Result (b630195) - 2026-04-24
+
+Step 0 added to On: invoke Prepare in all four skills. implement and parallel-implement carry the captured list forward into delegate prompts. discuss uses it as initial reading queue. All changes are single-line insertions following the established step-numbering pattern.
