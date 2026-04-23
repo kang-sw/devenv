@@ -38,10 +38,11 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
    e. If ambiguous (commits exist but context is unclear): report and defer to caller.
 
 4. **Detect pending removals.**
-   a. Run `git log --all --format="%H %B"` and scan each commit message body for lines matching `removed: <spec-stem>`.
-   b. For each matched stem: search spec files for a heading carrying `{#slug}` where the slug matches the stem and the heading has no `🚧` prefix (i.e., previously implemented).
-   c. If found: add to the pending-removal list with the file path, heading text, and the commit hash that flagged it. Do not modify the spec file.
-   d. If the stem is not found in any spec file: skip silently (may have been removed in a prior cleanup).
+   a. Run `git log --all --grep="^removed:" --format="%H %B"` to limit output to commits whose body contains a `removed:` line. Scan each result for lines of the form `removed: <spec-stem>`. Collect all stems found; deduplicate by stem (same stem in multiple commits → one entry).
+   b. For each unique stem: search spec files for a heading carrying `{#slug}` where the slug matches the stem.
+      - Heading has **no** `🚧` prefix (implemented feature) → add to the pending-removal list with file path, heading text, and commit hash. Do not modify the spec file.
+      - Heading has a `🚧` prefix (planned, never implemented) → add to the planned-entry-dropped list with file path, heading text, and commit hash. Do not modify the spec file.
+   c. If the stem is not found in any spec file: skip silently (already cleaned up in a prior pass).
 
 5. **Apply confirmed strips.**
    a. For each confirmed-implemented 🚧 heading: remove the `🚧 ` prefix from the heading line (leave the `{#slug}` anchor intact).
@@ -69,6 +70,10 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
 
 ### Pending removal
 - `<file>`: `Feature Name {#slug}` — flagged by commit <hash>; remove the spec entry manually after confirmation
+...
+
+### Planned entry dropped
+- `<file>`: `🚧 Feature Name {#slug}` — `removed:` signal found but feature was never implemented; delete the 🚧 entry manually after confirmation
 ...
 
 (omit any section that has no entries)
