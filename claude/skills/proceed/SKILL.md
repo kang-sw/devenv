@@ -22,7 +22,8 @@ Target: $ARGUMENTS
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only. Do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
-- If the target is an inline description (any scope), auto-invoke `/write-ticket` and continue. If the target is an existing ticket path, skip `/write-ticket`.
+- If the target is an actionable inline description, auto-invoke `/write-ticket` and continue.
+- If the target is an existing ticket path, skip `/write-ticket`.
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
 - Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
