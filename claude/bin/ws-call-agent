@@ -12,6 +12,7 @@ MODEL="$1"
 shift
 
 ARGS=(-p --dangerously-skip-permissions --output-format json --model "$MODEL")
+HAS_AGENT=0
 
 while [[ $# -gt 1 ]]; do
   case "$1" in
@@ -24,6 +25,7 @@ while [[ $# -gt 1 ]]; do
       else
         ARGS+=(--session-id "$UUID")
       fi
+      HAS_AGENT=1
       shift 2
       ;;
     --session-id)
@@ -68,12 +70,14 @@ esac
 CONTEXT_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens + .usage.cache_read_input_tokens' "$TMPFILE")
 CONTEXT_PCT=$(python3 -c "print(round($CONTEXT_TOKENS / $CONTEXT_LIMIT * 100))")
 
-if [[ "$CONTEXT_PCT" -ge 70 ]]; then
-  echo "[warn] Context window: ${CONTEXT_PCT}% filled — recommended to refresh this agent"
-else
-  echo "[info] Context window: ${CONTEXT_PCT}% filled"
+if [[ "$HAS_AGENT" -eq 1 && "$CONTEXT_PCT" -ge 50 ]]; then
+  if [[ "$CONTEXT_PCT" -ge 70 ]]; then
+    echo "[warn] Context window: ${CONTEXT_PCT}% filled — recommended to refresh this agent"
+  else
+    echo "[info] Context window: ${CONTEXT_PCT}% filled"
+  fi
+  echo ""
 fi
-echo ""
 
 jq -r '.result' "$TMPFILE"
 

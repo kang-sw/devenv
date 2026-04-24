@@ -33,7 +33,7 @@ Wraps `claude -p` with permission bypass and JSON output.
 
 The info line is always first. A blank line separates it from the agent output. Exit code is 1 when the underlying call reports `is_error`.
 
-Context window percentage: `(input + cache_creation + cache_read) / 150K`. Prefix is `[info]` below 70%, `[warn]` at ≥70% (~105K tokens).
+Context window percentage: `(input + cache_creation + cache_read) / 150K`. Shown only when `--agent` is used and fill ≥50%. Prefix is `[info]` at 50–69%, `[warn]` at ≥70% (~105K tokens).
 
 ## ws-agent
 
