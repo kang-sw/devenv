@@ -31,6 +31,7 @@ doc-pipeline step. It handles three responsibilities:
 - `executor-wrapup` guarantees: the doc-commit gate always runs, even when no doc changes are expected. Prior steps may have dirtied `ai-docs/` without the executor knowing.
 - `executor-wrapup` guarantees: it does **not** dispatch `ws:spec-updater` or `ws:mental-model-updater`. Updater dispatch is the caller's responsibility, following the pattern for that executor series.
 - The doc-commit gate uses `git status --porcelain ai-docs/` as the trigger. A non-empty result mandates a commit; an empty result is a no-op.
+- `executor-wrapup §Ancestor Loading` invariant: when a skill loads a sub-domain mental-model doc (`mental-model/<domain>/<sub>.md`), it must also load `mental-model/<domain>/index.md` first. `list-mental-model` auto-emits the parent `index.md` alongside any direct-child sub-domain — callers using it need no manual action. Callers using manual paths must read the parent before the child. Subagent spawn prompts must include the ancestor loading rule verbatim so the subagent observes it inside its own read ordering.
 
 ## Coupling
 
@@ -43,6 +44,7 @@ doc-pipeline step. It handles three responsibilities:
   - Edit-like (single implementation commit, no merge): dispatch updaters explicitly before calling executor-wrapup.
   - Implement-like (multi-branch with merge): dispatch updaters in the pre-merge pre-pass, then call executor-wrapup post-merge.
   Mixing the patterns — calling executor-wrapup before updaters finish, or dispatching updaters inside executor-wrapup — breaks the commit-gate capture guarantee.
+  Include the ancestor loading rule in any implementer spawn prompt when that implementer may read sub-domain mental-model docs. Use `list-mental-model` rather than manual paths where possible — it handles ancestor emission automatically.
 - **Change wrapup responsibilities**: edit `claude/infra/executor-wrapup.md` only. Do not duplicate wrapup logic in individual skill files.
 
 ## Common Mistakes
