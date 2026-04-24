@@ -20,12 +20,8 @@ Target: $ARGUMENTS
 
 - Never modify existing rule content — this skill only appends new rules. Correcting or editing a stale rule is the user's responsibility via manual edit.
 - Never write the same rule to both `CLAUDE.md` and a mental-model doc in one invocation.
-- Ancestor loading: when a candidate target is a sub-domain doc (`mental-model/<domain>/<sub>.md`), read `mental-model/<domain>/index.md` first before writing — inherited `## Domain Rules` may already cover the rule.
-- One invocation writes to exactly one target file. Cross-cutting writes go to `CLAUDE.md ## Architecture Rules`; domain-scoped writes go to a single `ai-docs/mental-model/<domain>.md ## Domain Rules` section (or the parent `index.md` when the rule applies across sub-domains).
-- When classification is unambiguous and the target doc already has a `## Domain Rules` or `## Architecture Rules` section, state the target and write without waiting for confirmation.
-- When classification is ambiguous, or multiple domain candidates match, stop and prompt the user.
-- When no matching domain doc exists, propose creating one and wait for user confirmation before writing.
-- All written rules are in English regardless of conversation language. Preserve the user's original phrasing where possible; tighten only grammar and voice.
+- One invocation writes to exactly one target file.
+- All written rules are in English regardless of conversation language.
 - Commit the change at the end following CLAUDE.md commit rules. Include `## AI Context` recording the classification decision.
 
 ## On: invoke
@@ -35,6 +31,7 @@ Target: $ARGUMENTS
 1. Parse the rule from `$ARGUMENTS`. If `$ARGUMENTS` is empty, ask the user for the rule description and wait.
 2. Read `CLAUDE.md` to see current `## Architecture Rules` entries and avoid near-duplicates.
 3. Read the output of `list-mental-model` (rendered above) for the current domain catalog and hierarchy.
+4. For domain-scoped candidates: if any candidate target is a sub-domain doc (`mental-model/<domain>/<sub>.md`), read its parent `mental-model/<domain>/index.md` first — inherited `## Domain Rules` may already cover the rule.
 
 ### 2. Classify
 
@@ -68,7 +65,9 @@ For domain-scoped rules, `judge: domain-match` yields one of:
 ### 5. Write
 
 1. Open the target doc.
-2. Locate the target section (`## Architecture Rules` or `## Domain Rules`). If the section is missing in a mental-model doc, add the heading immediately after the frontmatter body.
+2. Locate the target section (`## Architecture Rules` or `## Domain Rules`). If the section is absent:
+   - In a mental-model doc: add the `## Domain Rules` heading immediately after the frontmatter body.
+   - In `CLAUDE.md`: add the `## Architecture Rules` heading after `## Code Standards`, or at end-of-file if that section is absent.
 3. Append the rule as a new bullet under the section, preserving the existing formatting convention.
 4. Do not reorder, rewrap, or edit any existing bullet.
 
@@ -179,4 +178,4 @@ the classification is unambiguous and paused on ambiguity; it never
 modifies existing rule content, so every write is purely additive and
 git-history recoverable. When a rule is ambiguous, apply whichever
 interpretation better preserves classification accuracy — ask the user
-when in doubt, never guess.
+when in doubt, never guess. Preserve the user's original phrasing — tighten only grammar and active voice.

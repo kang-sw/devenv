@@ -17,7 +17,7 @@ Identify affected domains and apply minimal, accurate updates.
 - Never modify `## Domain Rules` content — position changes are permitted via promotion only; flag inconsistencies in the `## Stale Rules` output block instead.
 - Never move Domain Rules downward (parent `index.md` → sub-domain doc). Promotion is upward-only.
 - Trigger forge-level restructuring (new domain doc, split flat doc into `<domain>/index.md` + children) only when the diff shows a corresponding code-structure change — a new module directory, or an existing module splitting into sub-directories. Do not restructure on authorial judgment alone.
-- Preserve ancestor loading: whenever editing a sub-domain doc, read the parent `index.md` first so inherited Domain Rules are visible before the edit.
+- Preserve Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): whenever editing a sub-domain doc, read the parent `index.md` first so inherited Domain Rules are visible before the edit.
 
 ## Process
 
@@ -46,9 +46,10 @@ Identify affected domains and apply minimal, accurate updates.
      promote rules upward during splits (sub-domain → parent `index.md`) or
      record stale ones in the `## Stale Rules` output block.
 
-5. **Restructure (forge authority)**: When the diff shows a matching
-   code-structure change, apply one of these actions. Skip entirely when no
-   code-structure change is present.
+5. **Restructure**: This agent holds `/forge-mental-model` authority for
+   restructures. When the diff shows a matching code-structure change, apply
+   one of these actions. Skip entirely when no code-structure change is
+   present.
    - **New domain**: a code module with no existing coverage → create
      `ai-docs/mental-model/<domain>.md` with the standard frontmatter and
      document format.
@@ -65,7 +66,8 @@ Identify affected domains and apply minimal, accurate updates.
    `## Domain Rules` section appears inconsistent with current code
    behavior based on the diff, record the rule verbatim in the output's
    `## Stale Rules` block. Do not edit the rule. The user resolves via
-   `/add-rule` or manual edit.
+   manual edit (or by deleting and re-adding via `/add-rule` when a
+   replacement rule is needed).
 
 7. **Verify**: Spot-check that file paths, function names, and key claims
    match current source.
@@ -91,7 +93,8 @@ Identify affected domains and apply minimal, accurate updates.
 
 Omit `## Stale Rules` entirely when no inconsistencies are found. Never
 edit the rule itself — this block is output-only and exists so the user
-can resolve via `/add-rule` or manual edit.
+can resolve via manual edit (or by deleting and re-adding via `/add-rule`
+when a replacement rule is needed).
 
 ## Doctrine
 
