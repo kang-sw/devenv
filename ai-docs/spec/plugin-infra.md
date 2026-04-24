@@ -79,6 +79,9 @@ review-path <stem>
 
 Prints `/tmp/claude-reviews/<stem>.md`. Creates the parent directory if absent. Spaces in `<stem>` are converted to hyphens. Reviewer agents use this to write structured findings to a file instead of transmitting large `SendMessage` payloads.
 
+> [!note] Planned 🚧
+> Will switch to non-deterministic paths incorporating a pwd hash and a per-call run ID: `/tmp/claude-reviews/<pwd-hash>-<run-id>-<stem>.md`. Multi-stem support added: callers pass all stems in one invocation and receive one path per line sharing the same run ID. Contract change: paths are no longer reproducible across calls — the caller must capture all output paths from a single Bash invocation and hold them as literals in agent context for the duration of the run. {#260424-review-path-non-deterministic}
+
 ### `subquery` {#260421-subquery-tool}
 
 Spawns a headless `claude -p` subprocess with a structured-report system prompt.

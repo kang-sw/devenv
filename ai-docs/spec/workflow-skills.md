@@ -172,6 +172,8 @@ Pre-merge, dispatches `spec-updater` first and waits for it to commit, then disp
 > [!note] Implementation Gap · 2026-04-23
 > Pre-merge doc pipeline output (spec-updater and mental-model-updater file changes) is not guaranteed to be committed before the merge step runs.
 
+> [!note] Planned 🚧
+> Review loop redesign: reviewers write full findings to allocated `review-path` files; stdout returns only a summary line (`[clean|non-clean]: <brief>`). The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. Lead allocates all review-path slots in the Prepare step via a single Bash call; captured paths are held as literals in lead context through cleanup. `claude/infra/implementer.md` gains filtering guidance: reviewer criteria are strict; not all findings require action. {#260424-implement-file-based-review}
 
 ### Pre-invocation Context Survey — `project-survey` {#260424-project-survey-auto-invoke}
 
