@@ -23,7 +23,7 @@ features:
     - `/forge-spec`
     - `/forge-mental-model`
   - Utility Skills
-    - 🚧 `/add-rule`
+    - `/add-rule`
     - `/ship`
     - `/team-lead`
     - `/bootstrap`
@@ -258,7 +258,7 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 
 ## Utility Skills
 
-### 🚧 `/add-rule` {#260424-add-rule-skill}
+### `/add-rule` {#260424-add-rule-skill}
 
 Rule authoring skill. Accepts a natural-language rule description, classifies it as cross-cutting or domain-scoped, and writes it to the appropriate document:
 
@@ -296,6 +296,3 @@ Scaffolds a new project (`fresh` mode) or upgrades an existing one (`upgrade` / 
 Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`, `plans/`, `ref/`) and a `.gitignore` entry for `.local.md` files.
 
 Legacy project detection: when `ai-docs/spec/` or `ai-docs/mental-model/` is absent after bootstrapping, the skill suggests running `/forge-spec` followed by `/forge-mental-model` to establish the documentation baseline. {#260423-bootstrap-legacy-forge-routing}
-
-> [!note] Planned 🚧
-> Migration item added to `CLAUDE.template.md` checklist: prompts existing downstream project owners to re-evaluate entries in `## Architecture Rules` (CLAUDE.md) and architectural conventions in `_index.md`, reclassifying domain-scoped rules into `ai-docs/mental-model/<domain>.md` via `/add-rule`. Applied on the next `/bootstrap upgrade` run. {#260424-bootstrap-architecture-rules-migration}
