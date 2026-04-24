@@ -116,7 +116,7 @@ High effort means:
 
 ## On: before spawn
 
-Spawn = any tool call that creates a new agent context (Agent, Task, TeamCreate, SendMessage to a new recipient).
+Spawn = any tool call that creates a new agent context (Agent, Task, ws-call-agent).
 
 1. `> [thinking]` — what the spawn needs to accomplish.
 2. Prepend the preamble below to the spawn prompt, before the task brief.
