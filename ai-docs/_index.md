@@ -141,6 +141,9 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260424-feat-project-survey-agent` | done | project-survey Haiku agent + auto-invoke integration into edit/implement/parallel-implement/discuss |
 | `260424-feat-domain-rules-layering` | done | Architecture Rules split + /add-rule skill; domain rules in mental-model docs |
 | `260424-feat-polish-plugin-docs` | done | /polish-plugin-docs local skill + polish-writer agent + ws-call-agent context-fill hotfix |
+| `260424-refactor-proceed-gate-suppression` | done | judge:idea-level demoted to reminder + /proceed gate-suppression context in prefix-stage invocations |
+| `260424-feat-infra-path-portability` | todo | --system-prompt bare-path fix (use load-infra) + /skill-lint portability scanner |
+| `260424-feat-discuss-on-demand-survey` | todo | /discuss on-demand project-survey + enriched output (spec summaries, ticket phase titles) |
 
 ## Session Notes
 

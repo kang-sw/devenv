@@ -58,6 +58,12 @@ No change to `spec-conventions.md` — the rule (todo/-or-higher ticket required
 
 Success: `write-spec` writes `🚧` entries without pausing for user confirmation.
 
+### Result (59ecda9) - 2026-04-24
+
+`judge: idea-level` body replaced with write-and-remind pattern. No gating, no
+deferral question — entry is written unconditionally and a session reminder is
+emitted. No change to spec-conventions.md.
+
 ### Phase 2: Add gate-suppression context to /proceed prefix-stage invocations
 
 Modify `proceed/SKILL.md`: add an invariant — when invoking prefix stages via the
@@ -74,3 +80,12 @@ behavior.
 
 Success: `/proceed` → `/write-spec` → `/write-ticket` completes without prompting
 the user for confirmation at any prefix stage.
+
+### Result (c98f110) - 2026-04-24
+
+Gate-suppression block added to Route step 2 (after judge:needs-ticket, before
+pipeline judges table), with "applies in all routing paths" qualifier. Per-skill
+arg copy includes corrected language ("without asking", "will still emit",
+explicit spec-impact early-exit description). Gate suppression bullet added to
+both announce templates (pipeline + direct-edit). Four review rounds resolved
+structural placement and language precision issues.
