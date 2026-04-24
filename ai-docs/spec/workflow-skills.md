@@ -25,12 +25,13 @@ features:
     - `ws-call-agent`
     - `ws-agent`
     - `ws-declare-agent`
+    - `ws-infra-path`
+    - `ws-proj-tree`
     - `review-path`
   - Utility Skills
     - `/add-rule`
     - `/ship`
     - `/bootstrap`
-    - 🚧 `/skill-lint`
 ---
 
 # Workflow Skills
@@ -86,6 +87,8 @@ The file is consumed by `/enter-session`'s fast-path on the next session start.
 ### `/discuss` {#260421-discuss}
 
 Facilitates exploratory discussion of approach or direction. Reads spec, mental-model, and ticket files on demand; dispatches Explore subagents for codebase questions. Produces no source edits.
+
+Pre-injects a project map via `ws-proj-tree` at skill start — a rendered view of `ai-docs/` structure, spec stats, and active tickets. {#260425-discuss-proj-tree}
 
 At the end of a discussion turn, always suggests `/write-spec` as the next step. Also offers `/write-ticket` to capture decisions as a ticket.
 
@@ -160,11 +163,14 @@ After implementation, dispatches `spec-updater` first and waits for it to commit
 
 ### `/implement` {#260422-implement-skill}
 
-Delegated implementation cycle: an implementer subagent writes code; two review-partition subagents (correctness + fit) review in parallel; the lead merges and runs the doc pipeline. Suited for cold sessions or wide-scope work.
+Delegated implementation cycle: an implementer subagent writes code; three review-partition subagents review in parallel; the lead merges and runs the doc pipeline. Suited for cold sessions or wide-scope work.
 
-Review partitions:
+Review partitions: {#260424-implement-file-based-review}
 - **Correctness** — logic, error paths, contracts, security.
 - **Fit** — conventions, naming, reuse, patterns.
+- **Test** — test file quality, coverage of new code paths, assertion validity.
+
+Reviewers write full findings to `review-path`-allocated files; stdout returns only a `[clean|non-clean]: <brief>` summary line. The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. The implementer applies judgment: correctness, contract, and security findings are addressed; style findings conflicting with established patterns may be deprioritized. `review-path` files are deleted in the Cleanup step.
 
 Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260422-implement-feature-branch-mode}
 
@@ -173,26 +179,25 @@ Pre-merge, dispatches `spec-updater` first and waits for it to commit, then disp
 > [!note] Implementation Gap · 2026-04-23
 > Pre-merge doc pipeline output (spec-updater and mental-model-updater file changes) is not guaranteed to be committed before the merge step runs.
 
-> [!note] Planned 🚧
-> Review loop redesign: reviewers write full findings to allocated `review-path` files; stdout returns only a summary line (`[clean|non-clean]: <brief>`). The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. Lead allocates all review-path slots in the Prepare step via a single Bash call; captured paths are held as literals in lead context through cleanup. `claude/infra/implementer.md` gains filtering guidance: reviewer criteria are strict; not all findings require action. {#260424-implement-file-based-review}
-
 ### Pre-invocation Context Survey — `project-survey` {#260424-project-survey-auto-invoke}
 
-At the start of each run, `/edit`, `/implement`, and `/discuss` auto-invoke the `project-survey` agent with the implementation brief or query. The agent returns a `[Must|Maybe]`-tiered reference list of relevant documentation the implementer should read before starting work.
+At the start of each `/edit` and `/implement` run, the `project-survey` agent is auto-invoked with the implementation brief. In `/discuss`, the model triggers it on-demand via `judge: needs-survey` when the topic references components not yet read this session or the discussion shifts to a new domain. {#260424-discuss-on-demand-survey}
 
-- **`[Must]`** — spec entries, mental-model sections, or active tickets directly covering behavior, patterns, or constraints required before starting.
-- **`[Maybe]`** — tangentially related documents; useful when uncertain.
+The agent returns a `[Must|Maybe]`-tiered reference list. Output per tier:
+- **Spec entries** — stem, entry title, and one-line summary from the spec body.
+- **Mental-model entries** — path and a one-line relevance note.
+- **Ticket entries** — stem, ticket title, and unresolved phase titles.
 
-Search scope is limited to `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket directories (`idea/`, `todo/`, `wip/`). Source code references are out of scope — `/write-plan` survey-mode covers that gap.
+Tiers:
+- **`[Must]`** — directly covers behavior, patterns, or constraints required before starting.
+- **`[Maybe]`** — tangentially related; useful when uncertain.
 
-The survey fires transparently — no additional caller invocation is required.
+Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket directories (`idea/`, `todo/`, `wip/`). Source code references are out of scope.
 
 > [!note] Constraints
 > - `done/` and `dropped/` ticket directories are excluded from the search scope.
 > - Source code file references are not produced by this agent.
-
-> [!note] Planned 🚧
-> In `/discuss`, the survey moves from auto-fire on every invoke to on-demand: the model triggers it when it detects broad topic scope or a direction shift. The output will be enriched to include spec entry summaries and active ticket phase titles alongside stems. {#260424-discuss-on-demand-survey}
+> - In `/discuss`, the survey does not fire for session-continuity queries — those draw from session state or git log.
 
 ### `/proceed` {#260421-proceed}
 
@@ -262,16 +267,13 @@ Flags:
 - `--agent <name>` — computes a deterministic UUID from repo root + git branch + name via `ws-agent`, then auto-routes: creates a new session (`--session-id`) if no session file exists, resumes (`--resume`) if one does.
 - `--session-id <uuid>` — force-creates a new session with the given UUID.
 - `--uuid <uuid>` — force-resumes an existing session.
-- `--system-prompt <path>` — reads the file and injects its contents as the system prompt.
+- `--system-prompt <path>` — reads the file at `<path>` and injects its contents as the system prompt. Use `$(ws-infra-path <docname>)` for infra docs to ensure portability across downstream projects. {#260424-infra-path-portability}
 
 Model routing: `claude*`, `sonnet`, `haiku`, `opus` → `claude` CLI. `gemini*` → stub (not yet implemented).
 
 > [!note] Constraints
 > - Output is formatted text (info line + agent response). No JSON is exposed to callers.
 > - Exit code is 1 when the underlying call reports an error.
-
-> [!note] Planned 🚧
-> `--system-prompt` paths must be resolved via `$(load-infra <docname>)` rather than hardcoded `claude/infra/` relative paths, so callers in downstream projects work regardless of working directory. Existing callers using bare relative paths will be updated. {#260424-infra-path-portability}
 
 ### `ws-agent` {#260424-ws-agent}
 
@@ -285,14 +287,35 @@ UUID is derived from repo root + current git branch + name. Same name on the sam
 
 Lead calls this at skill start for all agents it will use, ensuring stale sessions from prior runs do not carry over.
 
+### `ws-infra-path` {#260425-ws-infra-path}
+
+`ws-infra-path <docname>` → prints the absolute path to a named infra doc, resolved from the plugin's own `infra/` directory regardless of CWD.
+
+Use in `--system-prompt` arguments so callers work in downstream projects:
+
+```bash
+ws-call-agent sonnet --system-prompt "$(ws-infra-path implementer.md)" "<prompt>"
+```
+
+> [!note] Constraints
+> - Bare `claude/infra/<name>` paths in `--system-prompt` break in downstream projects where `claude/infra/` does not exist relative to CWD.
+> - Exits non-zero when the named doc is not found.
+
+### `ws-proj-tree` {#260425-ws-proj-tree}
+
+`ws-proj-tree` — prints a structured project map to stdout: the `ai-docs/` directory tree (excluding `tickets/` and `spec/`), spec file stats (feature count, `🚧` count, ticket refs), and active tickets grouped by status (`wip` → `todo` → `idea`).
+
+Used by `/discuss` as pre-injected project context at skill start.
+
 ### `review-path` {#260425-review-path}
 
-`review-path <stem>` — prints a file path under `/tmp/claude-reviews/` for use as a review-findings sink. Creates the directory if absent.
+`review-path <stem1> [<stem2> ...]` — prints one path per stem under `/tmp/claude-reviews/`, for use as review-findings sinks. Creates the directory if absent. {#260425-review-path-non-deterministic}
 
-Current path format: `/tmp/claude-reviews/<stem>.md` — deterministic, based on stem only.
+Path format: `/tmp/claude-reviews/<pwd-hash>-<run-id>-<stem>.md`. `pwd_hash` is the first 8 chars of `shasum "$PWD"` — scopes paths to the current project. `run_id` is 8 random alphanumeric chars generated once per call — prevents collisions across concurrent invocations.
 
-> [!note] Planned 🚧
-> Multi-stem, non-deterministic paths: `review-path <stem1> [<stem2> ...]` accepts one or more stems in a single call. Computes a `pwd_hash` (first 8 chars of `shasum` of `$PWD`) and a per-invocation `run_id` (8 random alphanumeric chars). Prints one path per stem: `/tmp/claude-reviews/<pwd-hash>-<run-id>-<stem>.md`. Caller must capture all output lines from a single invocation and hold them as literals — paths are not reproducible after the call returns. {#260425-review-path-non-deterministic}
+> [!note] Constraints
+> - Caller must capture all output lines from a single invocation and hold them as literals — paths are not reproducible after the call returns.
+> - Always pass all stems in one call; separate calls produce different `run_id`s and break co-invocation grouping.
 
 ## Utility Skills
 
@@ -327,6 +350,3 @@ Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`
 
 Legacy project detection: when `ai-docs/spec/` or `ai-docs/mental-model/` is absent after bootstrapping, the skill suggests running `/forge-spec` followed by `/forge-mental-model` to establish the documentation baseline. {#260423-bootstrap-legacy-forge-routing}
 
-### 🚧 `/skill-lint` {#260424-skill-linter}
-
-Scans skill and infra documents for portability issues that would cause failures in downstream projects. Checks: `--system-prompt` arguments using bare `claude/infra/` relative paths (must use `$(load-infra <docname>)` instead); other path patterns hard-coded to the devenv root. Reports findings with file and line references.
