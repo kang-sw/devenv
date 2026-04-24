@@ -136,8 +136,16 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
 -->
 
 <!-- Inclusion test: if breaking this rule makes a skill produce
-     wrong results, it belongs here. Everything else goes in
-     _index.md (context) or skills (process). -->
+     wrong results AND the rule applies everywhere in the codebase
+     regardless of which area is being worked in, it belongs here.
+
+     Domain-scoped rules — rules that only apply when working in a
+     specific domain area — do NOT belong here. Use `/add-rule` to
+     classify the rule and route domain-scoped ones to
+     `ai-docs/mental-model/<domain>.md ## Domain Rules`.
+
+     Everything else (context) goes in `_index.md`; everything else
+     (process) goes in skills. -->
 
 <!-- MIGRATION CHECKLIST
      This block is template-internal tooling. NEVER copy it into a
@@ -240,6 +248,11 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          (check: `grep -r '{#[0-9]\{6\}-' ai-docs/mental-model/ | head -1`), the mental-model
          predates spec cross-references. Suggest running `/forge-mental-model` to rebuild
          with spec-stem embedding. Output-only — do not modify mental-model files automatically.
+- v0028: Re-evaluate entries in `## Architecture Rules` (CLAUDE.md) and architectural
+         conventions in `_index.md`. Rules that apply only in a specific domain area
+         are domain-scoped, not cross-cutting. Reclassify them into
+         `ai-docs/mental-model/<domain>.md ## Domain Rules` via `/add-rule`.
+         Applied on the next `/bootstrap upgrade` run.
 -->
 
-<!-- Template Version: v0027 -->
+<!-- Template Version: v0028 -->
