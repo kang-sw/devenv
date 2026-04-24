@@ -23,6 +23,7 @@ features:
     - `/forge-spec`
     - `/forge-mental-model`
   - Utility Skills
+    - 🚧 `/add-rule`
     - `/ship`
     - `/team-lead`
     - `/bootstrap`
@@ -257,6 +258,19 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 
 ## Utility Skills
 
+### 🚧 `/add-rule` {#260424-add-rule-skill}
+
+Rule authoring skill. Accepts a natural-language rule description, classifies it as cross-cutting or domain-scoped, and writes it to the appropriate document:
+
+- **Cross-cutting** (applies across the entire codebase, regardless of which area is being worked in) → appended to `## Architecture Rules` in `CLAUDE.md`.
+- **Domain-scoped** (applies when working in a specific domain area) → written to `## Domain Rules` in the relevant `ai-docs/mental-model/<domain>.md`.
+
+**Routing behavior:** when classification is unambiguous, the skill states the proposed target and writes without waiting for confirmation. When ambiguous (cross-cutting vs domain-scoped, or uncertain which domain), it presents candidates and asks the user to choose. When no matching domain doc exists, it proposes creating one with appropriate frontmatter.
+
+**Refusals:**
+- Does not modify existing rule content — adds new rules only.
+- Does not write the same rule to both `CLAUDE.md` and a mental-model doc simultaneously.
+
 ### `/ship` {#260421-ship}
 
 Release workflow: reads a project config from `ai-docs/ship/<proj>.md` (`.local.md` overlay for private targets); bumps the version, creates a git tag, builds, and publishes. Blocked on user confirmation before the publish step.
@@ -282,3 +296,6 @@ Scaffolds a new project (`fresh` mode) or upgrades an existing one (`upgrade` / 
 Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`, `plans/`, `ref/`) and a `.gitignore` entry for `.local.md` files.
 
 Legacy project detection: when `ai-docs/spec/` or `ai-docs/mental-model/` is absent after bootstrapping, the skill suggests running `/forge-spec` followed by `/forge-mental-model` to establish the documentation baseline. {#260423-bootstrap-legacy-forge-routing}
+
+> [!note] Planned 🚧
+> Migration item added to `CLAUDE.template.md` checklist: prompts existing downstream project owners to re-evaluate entries in `## Architecture Rules` (CLAUDE.md) and architectural conventions in `_index.md`, reclassifying domain-scoped rules into `ai-docs/mental-model/<domain>.md` via `/add-rule`. Applied on the next `/bootstrap upgrade` run. {#260424-bootstrap-architecture-rules-migration}
