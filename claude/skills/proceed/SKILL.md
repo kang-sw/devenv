@@ -62,7 +62,7 @@ Otherwise, apply the pipeline judgments in order. Each produces a yes/no that bu
 
 1. **judge: needs-plan** — Does this need codebase research before implementation?
 2. **judge: needs-skeleton** — Does this need contract stubs before implementation?
-3. **judge: execution-mode** — Single-scope or parallel?
+3. **judge: execution-mode** — Single-scope.
 
 Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs. When warmth is warm, `/write-plan` internally selects warm mode; proceed does not pass a mode flag — it only decides whether `/write-plan` is invoked at all.
 

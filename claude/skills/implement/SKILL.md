@@ -19,7 +19,7 @@ Target: $ARGUMENTS
 - Reviewers report to the lead only — never directly to the implementer. The lead consolidates findings and sends a single list to the implementer.
 - **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the report before merge — no code reaches the target branch without user confirmation.
 - **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead auto-merges after clean review. The feature → main merge remains the user's responsibility.
-- Teammates (implementer, reviewer) stay alive until after doc pipeline completes; cleanup is the final step.
+- Implementer and reviewer sessions persist via `ws-call-agent --agent` auto-resume throughout the review loop; `ws-declare-agent` scopes them to the run.
 - One delegation cycle per invocation.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
 - Task list is created at prepare and tracked to completion — no task may be skipped or reordered.
@@ -55,7 +55,7 @@ Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-call-agent`, `ws-ag
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run both updaters (loop)
    [ ] Merge to original branch
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
-   [ ] Cleanup — delete any temp review files
+   [ ] Cleanup — session files are scoped by ws-declare-agent; no explicit teardown needed
    ```
 
 ### 2. Spawn implementer
@@ -145,7 +145,7 @@ Instructions:
 2. Otherwise: relay findings to the implementer — consolidate all review outputs into a single list:
    ```bash
    ws-call-agent sonnet --agent implementer \
-     "Fix these issues:\n<consolidated findings from all reviewers>" | jq -r '.result'
+     "Fix these issues: <consolidated findings from all reviewers>" | jq -r '.result'
    ```
    Wait for the implementer's fix report and integration test confirmation.
 3. Re-review (parallel — issue multiple Bash calls in the same response):
@@ -177,7 +177,7 @@ Instructions:
    - Direct the implementer to fix:
      ```bash
      ws-call-agent sonnet --agent implementer \
-       "Fix these issues:\n<tweak requests>" | jq -r '.result'
+       "Fix these issues: <tweak requests>" | jq -r '.result'
      ```
      Implementer verifies integration tests and reports.
    - Re-apply `judge: partition-allocation` and re-review per the step 3 pattern.
@@ -198,10 +198,7 @@ Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, a
 
 ### 8. Cleanup
 
-```bash
-# No team cleanup needed — session files are scoped via ws-declare-agent at skill start.
-rm -f /tmp/claude-reviews/<scope>-*.md
-```
+Session files are scoped via `ws-declare-agent` at skill start — no explicit teardown needed.
 
 ## Judgments
 
