@@ -28,7 +28,7 @@ Target: $ARGUMENTS
 - Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement`, and merge.
-- When invoking prefix stages (`/write-spec`, `/write-ticket`) via the Skill tool, include natural-language gate-suppression context in the args. For `/write-spec`: append "Chained from /proceed — write any 🚧 entries without asking to defer (judge: idea-level is suppressed)." For `/write-ticket`: append "Chained from /proceed — if /write-spec already ran (even as a no-op), treat spec coverage as satisfied and do not stop on judge: spec-gate."
+- When invoking prefix stages (`/write-spec`, `/write-ticket`) via the Skill tool, include gate-suppression context in the args.
 
 ## On: invoke
 
@@ -84,6 +84,7 @@ For a direct-edit verdict, announce:
 - **Target**: <ticket path or brief summary>
 - **Warmth**: warm — <what the main agent already knows>
 - **Reason**: <why pipeline is overkill for this change>
+- **Gate suppression**: prefix stages receive override context — interactive confirmation gates are suppressed.
 
 Invoking `/edit`.
 ```
@@ -115,6 +116,10 @@ Do not ask for confirmation — announce and proceed. The user can interrupt if 
 For a direct-edit verdict, invoke `ws:edit` via the Skill tool with the target as arguments.
 
 For a pipeline verdict, invoke each stage sequentially via the Skill tool, passing the target as arguments.
+
+**Prefix-stage gate-suppression context:**
+- For `/write-spec`: append to args — "Chained from /proceed — write any 🚧 entries without asking; the session reminder may still emit (this is not a standalone invocation)."
+- For `/write-ticket`: append to args — "Chained from /proceed — treat spec coverage as satisfied regardless of whether /write-spec wrote anything or exited early at judge: spec-impact."
 
 - After each stage, verify it completed (check for committed artifacts).
 - Pass downstream context: if `/write-plan` produces a plan path, pass it to `/implement`.
