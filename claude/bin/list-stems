@@ -18,8 +18,7 @@ import sys
 from pathlib import Path
 
 
-# __file__-anchored so the script works when called from any CWD, not just project root.
-SPEC_DIR = Path(__file__).resolve().parents[2] / "ai-docs" / "spec"
+SPEC_DIR = Path.cwd() / "ai-docs" / "spec"
 HEADING_RE = re.compile(r"^(#{2,6})\s+(.*)")
 H1_RE = re.compile(r"^#\s")
 STEM_RE = re.compile(r"\{#(\d{6}-[\w-]+)\}")
