@@ -22,8 +22,75 @@ source-paraphrasing descriptions, information already in `_index.md`.
 ## Structure
 
 - Index: `ai-docs/mental-model.md` — cross-domain patterns, crate graph, shared conventions. No frontmatter.
-- Domain docs: `ai-docs/mental-model/<domain>.md` — flat directory, one file per cross-cutting concern.
+- Domain docs: `ai-docs/mental-model/<domain>.md` — flat file for a single-concern domain.
+- Sub-domain docs: `ai-docs/mental-model/<domain>/index.md` + `ai-docs/mental-model/<domain>/<sub>.md` — directory layout for a domain covering multiple sub-concerns.
 - Target 60–120 lines per domain. Split past 150; merge thin documents that are always read together.
+
+## Directory Hierarchy
+
+When a domain grows to multiple distinct sub-concerns, promote the flat
+`<domain>.md` to a directory: `<domain>/index.md` carries cross-cutting
+context and inherited `## Domain Rules`; each `<domain>/<sub>.md` covers
+one sub-concern. This mirrors the `ai-docs/spec/<area>/` layout introduced
+in template v0022.
+
+Example:
+
+```
+ai-docs/mental-model/
+  spec-system.md              # flat — single-concern domain
+  workflow-routing.md
+  doc-tooling/
+    index.md                  # parent — cross-cutting context + promoted Domain Rules
+    mental-model-updater.md   # sub-concern
+    forge-mental-model.md     # sub-concern
+```
+
+Promotion from flat to directory is driven by code-structure change, not
+authorial preference — the `mental-model-updater` agent splits a flat doc
+when the diff shows the underlying module splitting into sub-directories.
+
+### Ancestor loading (invariant)
+
+Any agent loading `mental-model/<domain>/<sub>.md` MUST also load
+`mental-model/<domain>/index.md` before starting work. Ancestor docs are
+loaded first, so inherited `## Domain Rules` are visible before any edit
+or reasoning begins. A load that skips the ancestor violates this contract.
+
+The hierarchy is encoded in the file path — no frontmatter `parent:` link
+is maintained. `list-mental-model` renders sub-domains indented under their
+parent to surface the relationship to callers.
+
+## Domain Rules
+
+A domain doc may carry a `## Domain Rules` section containing user-authored
+prescriptions for AI agents working in that domain. Rules describe patterns
+the agent must follow when implementing code in this domain — analogous to
+`## Architecture Rules` in `CLAUDE.md`, but scoped to the domain the doc
+covers.
+
+Authoring and modification invariants:
+
+- Rules are authored via `/add-rule` or manual user edit.
+- No agent modifies rule content autonomously.
+- `mental-model-updater` may **promote** rules upward during splits
+  (sub-domain → parent `index.md`) — position changes only, never content
+  changes, and never downward.
+- When a rule appears inconsistent with current code behavior,
+  `mental-model-updater` flags it in a `## Stale Rules` output block — it
+  does not edit the rule. The user resolves via `/add-rule` or manual edit.
+- Ancestor `index.md` rules apply transitively to every sub-domain beneath
+  it. Loading a sub-domain doc without the ancestor would miss inherited
+  rules; see Ancestor loading invariant above.
+
+Example:
+
+```markdown
+## Domain Rules
+
+- All auth flows go through `AuthService.login` — no direct token issuance.
+- New storage backends register via `StorageRegistry.register(name, impl)`.
+```
 
 ## Frontmatter
 

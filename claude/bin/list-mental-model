@@ -8,10 +8,14 @@ Usage:
   With args: list docs whose 'sources' frontmatter patterns overlap
              with any of the provided paths (directory-level matching).
 
-Output (stdout): YAML map keyed by domain name.
+Output (stdout): YAML map keyed by domain name, preceded by a tree
+  header comment showing the directory hierarchy.
   All paths are relative to ai-docs/mental-model/.
   overview is always included when it exists.
   Docs with no 'sources' frontmatter are omitted from filtered results.
+  When a sub-domain doc (<domain>/<sub>.md) is included, its parent
+  <domain>/index.md is also included — ancestor loading is a mental-model
+  invariant, and the lister surfaces ancestors so callers cannot miss them.
 """
 
 import re
@@ -120,7 +124,7 @@ def qs(s: str) -> str:
 
 
 def render_domain(domain: str, fm: dict, doc_name: str) -> None:
-    print(f'{domain}:')
+    print(f'{qs(domain)}:')
     print(f'  path: {qs(doc_name)}')
 
     desc = (fm.get('description') or '').strip()
@@ -145,6 +149,64 @@ def render_domain(domain: str, fm: dict, doc_name: str) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def discover_docs(mental_model_dir: Path) -> tuple[list[Path], dict[str, list[Path]]]:
+    """Return (flat_docs, parent_to_children) for ai-docs/mental-model/.
+
+    flat_docs: top-level `<domain>.md` files plus parent `<domain>/index.md`
+               files, representing domains that appear at the top of the tree.
+    parent_to_children: for each parent directory `<domain>/`, the list of
+                        child `<domain>/<sub>.md` files (excluding index.md).
+    """
+    flat_docs: list[Path] = sorted(mental_model_dir.glob('*.md'))
+    parent_to_children: dict[str, list[Path]] = {}
+
+    for sub_dir in sorted(p for p in mental_model_dir.iterdir() if p.is_dir()):
+        index_md = sub_dir / 'index.md'
+        if not index_md.exists():
+            # Directory without an index.md is not a domain root — skip.
+            continue
+        flat_docs.append(index_md)
+        children = sorted(c for c in sub_dir.glob('*.md') if c.name != 'index.md')
+        if children:
+            parent_to_children[sub_dir.name] = children
+
+    # Re-sort flat_docs by display path so directory indexes interleave
+    # with flat siblings alphabetically.
+    flat_docs.sort(key=lambda p: p.relative_to(mental_model_dir).as_posix())
+    return flat_docs, parent_to_children
+
+
+def domain_key(mental_model_dir: Path, doc: Path) -> str:
+    """Domain key used in YAML output and tree header.
+
+    - <domain>.md          → "<domain>"
+    - <domain>/index.md    → "<domain>"
+    - <domain>/<sub>.md    → "<domain>/<sub>"
+    """
+    rel = doc.relative_to(mental_model_dir)
+    if rel.name == 'index.md':
+        return rel.parent.as_posix()
+    if rel.parent == Path('.'):
+        return rel.stem
+    return f'{rel.parent.as_posix()}/{rel.stem}'
+
+
+def doc_path_display(mental_model_dir: Path, doc: Path) -> str:
+    """Path string emitted in YAML output, relative to ai-docs/mental-model/."""
+    return doc.relative_to(mental_model_dir).as_posix()
+
+
+def include_doc(doc: Path, targets: list[str]) -> bool:
+    """True when the doc should be included under the current source filter."""
+    if not targets:
+        return True
+    fm = parse_frontmatter(doc)
+    sources = fm.get('sources')
+    if not isinstance(sources, list) or not sources:
+        return False
+    return overlaps(sources, targets)
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding='utf-8')
     mental_model_dir = Path('ai-docs/mental-model')
@@ -153,10 +215,75 @@ def main() -> None:
         sys.exit(1)
 
     targets = sys.argv[1:]
+    flat_docs, parent_to_children = discover_docs(mental_model_dir)
 
+    # ---------------------------------------------------------------------
+    # Filter: decide which docs to emit.
+    # ---------------------------------------------------------------------
+    selected: list[Path] = []
+    for doc in flat_docs:
+        if include_doc(doc, targets):
+            selected.append(doc)
+
+    selected_set = {doc.resolve() for doc in selected}
+
+    for parent_dir, children in parent_to_children.items():
+        index_md = mental_model_dir / parent_dir / 'index.md'
+        parent_included = index_md.resolve() in selected_set
+
+        matching_children: list[Path] = []
+        for child in children:
+            if include_doc(child, targets):
+                matching_children.append(child)
+
+        if matching_children and not parent_included:
+            # Ancestor loading: any sub-domain match pulls in its parent index.
+            selected.append(index_md)
+            selected_set.add(index_md.resolve())
+
+        selected.extend(matching_children)
+
+    # Preserve a stable ordering: by relative path.
+    selected.sort(key=lambda p: p.relative_to(mental_model_dir).as_posix())
+
+    # ---------------------------------------------------------------------
+    # Tree header — human-readable hierarchy preview.
+    # ---------------------------------------------------------------------
     print('# Mental-model docs — paths relative to ai-docs/mental-model/ (overview: ../mental-model.md)')
+    print('#')
+    print('# Tree:')
+    print('#   overview (../mental-model.md)')
 
-    # mental-model.md — index, always included, no frontmatter
+    # Collect parent → children from the *selected* set for display.
+    display_roots: list[Path] = []
+    display_children: dict[str, list[Path]] = {}
+    for doc in selected:
+        rel = doc.relative_to(mental_model_dir)
+        if rel.parent == Path('.'):
+            display_roots.append(doc)  # flat domain
+        elif rel.name == 'index.md':
+            display_roots.append(doc)  # parent index
+        else:
+            display_children.setdefault(rel.parent.as_posix(), []).append(doc)
+
+    display_roots.sort(key=lambda p: p.relative_to(mental_model_dir).as_posix())
+
+    for root in display_roots:
+        key = domain_key(mental_model_dir, root)
+        path_str = doc_path_display(mental_model_dir, root)
+        print(f'#   {key} ({path_str})')
+        children = display_children.get(key, [])
+        for i, child in enumerate(sorted(children, key=lambda p: p.name)):
+            prefix = '└─' if i == len(children) - 1 else '├─'
+            child_key = domain_key(mental_model_dir, child)
+            child_path = doc_path_display(mental_model_dir, child)
+            print(f'#     {prefix} {child_key} ({child_path})')
+
+    print()
+
+    # ---------------------------------------------------------------------
+    # YAML body.
+    # ---------------------------------------------------------------------
     overview = Path('ai-docs/mental-model.md')
     if overview.exists():
         desc = extract_first_line(overview)
@@ -165,18 +292,15 @@ def main() -> None:
             fm_ov['description'] = desc
         render_domain('overview', fm_ov, '../mental-model.md')
 
-    for doc in sorted(mental_model_dir.glob('*.md')):
+    for doc in selected:
         fm = parse_frontmatter(doc)
-        domain = (fm.get('domain') or doc.stem).strip()
-
-        if targets:
-            sources = fm.get('sources')
-            if not isinstance(sources, list) or not sources:
-                continue
-            if not overlaps(sources, targets):
-                continue
-
-        render_domain(domain, fm, doc.name)
+        key = domain_key(mental_model_dir, doc)
+        # Respect an explicit `domain:` only for flat top-level docs — hierarchical
+        # keys carry their parent path and must not collapse to the bare stem.
+        rel = doc.relative_to(mental_model_dir)
+        if rel.parent == Path('.') and fm.get('domain'):
+            key = str(fm['domain']).strip() or key
+        render_domain(key, fm, doc_path_display(mental_model_dir, doc))
 
 
 if __name__ == '__main__':
