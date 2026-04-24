@@ -14,6 +14,7 @@ Target: $ARGUMENTS
 ## Invariants
 
 - The pre-flight manifest is mandatory — every invocation builds a scope manifest with `name`, `file_set`, `description`, and `test_command` per scope before any agent is spawned.
+- Ancestor loading: each implementer that reads `mental-model/<domain>/<sub>.md` reads `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before work begins. The lead propagates this rule through every implementer spawn prompt. See `load-infra executor-wrapup.md §Ancestor Loading`.
 - Scopes must be disjoint — no two implementers may touch the same file; verify this before spawning.
 - Every scope's `test_command` must be scope-specific — e.g., `cargo test auth::` not `cargo test`. Crate-wide test commands compile the whole project and will pick up another scope's in-progress stubs, breaking isolation even with run_request serialization.
 - Scope-specific test commands are only safe because `/write-skeleton` ensures all stubs compile (see `/write-skeleton` step 3). If no skeleton exists for the target scopes, stop and route through `/write-skeleton` first.
@@ -92,6 +93,12 @@ Agent(
     Allowed files: <scope.file_set — one per line or comma-separated>
     Task: <scope.description>
     Scope-specific test command: <scope.test_command>
+
+    Mental-model ancestor loading:
+    - When you read `ai-docs/mental-model/<domain>/<sub>.md`, read
+      `ai-docs/mental-model/<domain>/index.md` first so inherited
+      `## Domain Rules` are visible before any edit. `list-mental-model`
+      already emits ancestors alongside matching children.
 
     Team rules:
     - Use ONLY the scope-specific test command above to verify your work.
