@@ -106,9 +106,9 @@ calls in the same response turn. Each reviewer loads its partition doc via
 
 | Partition | System prompt |
 |-----------|---------------|
-| Correctness | `claude/infra/code-review-correctness.md` |
-| Fit | `claude/infra/code-review-fit.md` |
-| Test | `claude/infra/code-review-test.md` |
+| Correctness | `$(ws-infra-path code-review-correctness.md)` |
+| Fit | `$(ws-infra-path code-review-fit.md)` |
+| Test | `$(ws-infra-path code-review-test.md)` |
 
 ```bash
 ws-call-agent sonnet --agent reviewer-correctness \

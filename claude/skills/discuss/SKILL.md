@@ -13,7 +13,7 @@ Topic: $ARGUMENTS
 
 ## Project Map
 
-!`python3 "${CLAUDE_SKILL_DIR}/list-active.py"`
+!`list-active.py`
 
 ## Invariants
 
@@ -82,13 +82,15 @@ the conclusion in terms its downstream consumer can directly act on.
 
 ## Judgments
 
-**judge: needs-survey** — Spawn `project-survey` when any of the following hold:
+### judge: needs-survey
+Spawn `project-survey` when any of the following hold:
 - The topic references components, specs, or tickets the model has not read this session and cannot confidently assess scope from session context alone.
 - The discussion direction shifts to a new domain mid-session.
 
 Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") — those draw from session state or git log.
 
-**judge: needs-integration-tests** — Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.
+### judge: needs-integration-tests
+Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.
 
 ## Doctrine
 
