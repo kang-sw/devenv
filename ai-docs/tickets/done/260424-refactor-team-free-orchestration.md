@@ -76,6 +76,14 @@ Replace all `TeamCreate`/`SendMessage`/`TeamDelete` machinery with `ws-call-agen
 
 **Acceptance criteria:** SKILL.md contains no references to `TeamCreate`, `TeamDelete`, `SendMessage`, or `/team-lead`. All agent interactions route through `ws-call-agent`.
 
+### Result (77effb0) - 2026-04-24
+
+SKILL.md rewritten. All Team machinery replaced with ws-call-agent/ws-declare-agent. Stale references also cleaned in proceed, discuss, write-skeleton, manual-think skills (part of deletion commit a45ce1a).
+
+Deviations:
+- ws-* scripts were in `claude/infra/` but not on PATH — added bin/ symlinks (942ffac) then moved to actual files in bin/ per user direction (3241b58). `ws-orchestration.md` description updated accordingly.
+- Post-review fix pass (cf66b43) cleaned stale "Teammates stay alive" invariant, orphaned `/tmp/claude-reviews/` rm, and `\n` literal in shell strings.
+
 ### Phase 2: Delete ws:parallel-implement and ws:team-lead
 
 1. `git rm -r claude/skills/parallel-implement/`
@@ -90,3 +98,10 @@ Replace all `TeamCreate`/`SendMessage`/`TeamDelete` machinery with `ws-call-agen
 Phase 2 has no dependency on Phase 1 ordering — both phases can be committed in either order. Phase 2 is mechanical; no logic changes.
 
 **Acceptance criteria:** `grep -r "TeamCreate\|SendMessage\|TeamDelete\|team-lead\|parallel-implement" claude/skills/` returns no results.
+
+### Result (a45ce1a) - 2026-04-24
+
+Deleted `claude/skills/parallel-implement/` and `claude/skills/team-lead/`. Also cleaned stale references to deleted skills in proceed, discuss, write-skeleton, and manual-think SKILL.md files.
+
+Deviations:
+- Ticket step 3 (`git rm claude/infra/parallel-implementer.md`) was incorrect — that file lived inside `claude/skills/parallel-implement/` and was removed by step 1's `git rm -r`. No separate infra removal was needed.

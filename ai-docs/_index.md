@@ -85,10 +85,8 @@ claude/skills/
   add-rule/            — classify and route a new rule to CLAUDE.md (cross-cutting) or mental-model Domain Rules (domain-scoped)
   edit/                — main-agent-direct single-scope cycle (warm sessions, owner edits)
   implement/           — delegated implementer + reviewer cycle (cold sessions or wide scope)
-  parallel-implement/  — multiple implementer pairs, disjoint file sets on shared branch
   proceed/             — auto-route through the canonical pipeline
   ship/                — release: version bump, tag, build, publish per project config
-  team-lead/           — team orchestration mode (TeamCreate, coordination, shutdown)
   manual-think/        — manual chain-of-thought when native thinking unavailable
   bootstrap/           — scaffold new project or upgrade existing to canonical template
   forge-spec/          — from-scratch spec reconstruction; archive-first, domain-by-domain, cross-compact via TaskCreate (disable-model-invocation)
@@ -102,7 +100,6 @@ Full ceremony:  /discuss → /proceed
                                                              ↓
                            /write-skeleton? → /write-plan? → /edit (warm)
                                                            → /implement (cold)
-                                                           → /parallel-implement (disjoint)
 Direct:         /edit <description>
 Auto-route:     /proceed <ticket-path>    — routes via warmth + scope judges
 ```
