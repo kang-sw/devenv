@@ -23,13 +23,12 @@ Target: $ARGUMENTS
 - One delegation cycle per invocation.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
 - Task list is created at prepare and tracked to completion — no task may be skipped or reordered.
-- `/team-lead` skill must be loaded before any team operations.
 
 ## On: invoke
 
-### 0. Prerequisites
+### 0. Orient on orchestration primitives
 
-1. Load `/team-lead` skill if not already loaded.
+Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-call-agent`, `ws-agent`, and `ws-declare-agent` before orchestrating.
 
 ### 1. Prepare
 
@@ -43,59 +42,50 @@ Target: $ARGUMENTS
    - `<original-branch>` matches `main`, `master`, `trunk`, or the value of `--main-branch <name>` → **main-branch mode** (approval gate active).
    - Otherwise → **feature-branch mode** (approval gate skipped; auto-merge after clean review).
    Create `implement/<scope>` branch.
-7. If already in a team context, use the existing team. Otherwise create one:
-   ```
-   TeamCreate(team_name = "impl-<scope>", description = "<brief scope>")
+7. Declare all agent slots upfront:
+   ```bash
+   ws-declare-agent implementer reviewer-correctness reviewer-fit reviewer-test
    ```
 8. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
-   [ ] Spawn implementer — wait for completion report
-   [ ] Spawn reviewers (partition-allocated) — parallel review → lead relays file paths → implementer fixes → re-review loop until clean
+   [ ] Spawn implementer — result arrives synchronously via ws-call-agent pipe
+   [ ] Spawn reviewers (partition-allocated) — parallel ws-call-agent calls → lead consolidates findings → implementer fixes → re-review loop until clean
    [ ] Dispatch mental-model-updater + spec-updater in parallel — wait for both; surface ambiguous stems
    [ ] Report to user — wait for approval  ← main-branch mode only
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run both updaters (loop)
    [ ] Merge to original branch
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
-   [ ] Cleanup — shut down teammates, delete team
+   [ ] Cleanup — delete any temp review files
    ```
 
 ### 2. Spawn implementer
 
-```
-Agent(
-  name = "implementer",
-  description = "Implement plan on branch",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  team_name = "impl-<scope>",
-  prompt = """
-    Run `load-infra implementer.md` first.
+```bash
+ws-call-agent sonnet --agent implementer \
+  --system-prompt claude/infra/implementer.md \
+  "Run \`load-infra implementer.md\` first.
 
-    Lead name: <lead-name>
-    Mode: <A: plan-driven | B: inline brief>
-    <Plan path | Brief text>
+Mode: <A: plan-driven | B: inline brief>
+<Plan path | Brief text>
 
-    Acceptance criteria: skeleton integration tests must pass.
-    - Test files: <integration test paths>
-    - Run: <command to execute them>
+Acceptance criteria: skeleton integration tests must pass.
+- Test files: <integration test paths>
+- Run: <command to execute them>
 
-    Mental-model ancestor loading (one-level hierarchies —
-    `<domain>/<sub>.md` only):
-    - When you read `ai-docs/mental-model/<domain>/<sub>.md`, read
-      `ai-docs/mental-model/<domain>/index.md` first so inherited
-      `## Domain Rules` are visible before any edit. `list-mental-model`
-      already emits ancestors alongside direct-child sub-domain docs.
+Mental-model ancestor loading (one-level hierarchies —
+\`<domain>/<sub>.md\` only):
+- When you read \`ai-docs/mental-model/<domain>/<sub>.md\`, read
+  \`ai-docs/mental-model/<domain>/index.md\` first so inherited
+  \`## Domain Rules\` are visible before any edit.
 
-    Team rules:
-    - Verify integration tests pass before reporting completion or after each fix.
-    - Report completion to the lead via SendMessage. Include test results.
-    - The lead will send you review file paths — read each file, fix all issues, re-verify tests, and report back to the lead.
-    - Commit at logical checkpoints on the current branch.
-  """
-)
+Instructions:
+- Verify integration tests pass before reporting completion or after each fix.
+- Report completion in plain text. Include test results.
+- For fix cycles, a follow-up call will arrive with review findings — fix and report back via your next response.
+- Commit at logical checkpoints on the current branch." | jq -r '.result'
 ```
 
-Wait for the implementer's completion report. Note the commit range.
+Note the commit range from the implementer's report.
 
 ### 3. Review
 
@@ -106,59 +96,67 @@ based on the implementer's report and the nature of the changes.
 
 #### 3b. Spawn reviewers
 
-Spawn one reviewer per selected partition in parallel. Each reviewer
-loads its partition doc via `load-infra`:
+Spawn one reviewer per selected partition in parallel — issue multiple Bash
+calls in the same response turn. Each reviewer loads its partition doc via
+`--system-prompt`:
 
-| Partition | Infra doc |
-|-----------|-----------|
-| Correctness | `code-review-correctness.md` |
-| Fit | `code-review-fit.md` |
-| Test | `code-review-test.md` |
+| Partition | System prompt |
+|-----------|---------------|
+| Correctness | `claude/infra/code-review-correctness.md` |
+| Fit | `claude/infra/code-review-fit.md` |
+| Test | `claude/infra/code-review-test.md` |
 
-Before spawning, generate a write-path for each selected partition:
+```bash
+ws-call-agent sonnet --agent reviewer-correctness \
+  --system-prompt claude/infra/code-review-correctness.md \
+  "Diff range: <first-commit>..<last-commit>
 
-```
-<partition>_path=$(review-path <team-name>-<partition>)
-```
-
-Pass each reviewer its path in the prompt:
-
-```
-Agent(
-  name = "reviewer-<partition>",
-  description = "Review implementation — <Partition> partition",
-  subagent_type = "ws:code-reviewer",
-  model = "sonnet",
-  team_name = "impl-<scope>",
-  prompt = """
-    Run `load-infra code-review-<partition>.md` first.
-
-    Lead name: <lead-name>
-    Diff range: <first-commit>..<last-commit>
-    Write path: <partition_path>
-
-    Team rules:
-    - Write your findings report to Write path above.
-    - SendMessage the lead when done with one of:
-        "Issues found — written to <path>"
-        "Clean — <path>"
-    - The lead may send you a re-review request after fixes — repeat the
-      same process, overwrite the same file, and signal the lead again.
-    - Do not contact the implementer directly.
-  """
-)
+Instructions:
+- Report findings in plain text.
+- The lead will relay a re-review request if fixes are needed — re-examine
+  the updated diff and respond." | jq -r '.result'
 ```
 
-Wait for all reviewers to complete.
+```bash
+ws-call-agent sonnet --agent reviewer-fit \
+  --system-prompt claude/infra/code-review-fit.md \
+  "Diff range: <first-commit>..<last-commit>
+
+Instructions:
+- Report findings in plain text.
+- The lead will relay a re-review request if fixes are needed — re-examine
+  the updated diff and respond." | jq -r '.result'
+```
+
+```bash
+ws-call-agent sonnet --agent reviewer-test \
+  --system-prompt claude/infra/code-review-test.md \
+  "Diff range: <first-commit>..<last-commit>
+
+Instructions:
+- Report findings in plain text.
+- The lead will relay a re-review request if fixes are needed — re-examine
+  the updated diff and respond." | jq -r '.result'
+```
 
 #### 3c. Relay and loop
 
 1. If all reviewers report "Clean" → exit review loop, proceed to step 4.
-2. Otherwise: SendMessage the implementer with all review file paths — do not
-   read the files. Wait for the implementer's fix report and integration test
-   confirmation.
-3. SendMessage each reviewer to re-review. Reviewers overwrite the same files.
-   Wait for all reviewers to signal clean or issues.
+2. Otherwise: relay findings to the implementer — consolidate all review outputs into a single list:
+   ```bash
+   ws-call-agent sonnet --agent implementer \
+     "Fix these issues:\n<consolidated findings from all reviewers>" | jq -r '.result'
+   ```
+   Wait for the implementer's fix report and integration test confirmation.
+3. Re-review (parallel — issue multiple Bash calls in the same response):
+   ```bash
+   ws-call-agent sonnet --agent reviewer-correctness \
+     "Re-review. Updated diff: <diff>" | jq -r '.result'
+   ws-call-agent sonnet --agent reviewer-fit \
+     "Re-review. Updated diff: <diff>" | jq -r '.result'
+   ws-call-agent sonnet --agent reviewer-test \
+     "Re-review. Updated diff: <diff>" | jq -r '.result'
+   ```
 4. Repeat from 3c.1 until all reviewers report "Clean".
 
 ### 4. Docs pre-pass
@@ -176,12 +174,17 @@ Wait for all reviewers to complete.
    - Test status
    - Any deviations or open items
 2. **Main-branch mode only** — wait for user approval. If the user requests tweaks:
-   - Direct the implementer to fix via `SendMessage`. Implementer verifies integration tests and reports.
-   - Re-apply `judge: partition-allocation` and spawn fresh reviewers per the step 3 pattern. Wait for implementer fix report.
+   - Direct the implementer to fix:
+     ```bash
+     ws-call-agent sonnet --agent implementer \
+       "Fix these issues:\n<tweak requests>" | jq -r '.result'
+     ```
+     Implementer verifies integration tests and reports.
+   - Re-apply `judge: partition-allocation` and re-review per the step 3 pattern.
    - Re-run **spec-updater** with the new commit range. Wait. Then re-run **mental-model-updater**. Wait.
    - Re-report. Loop until user approves.
 
-Implementer and reviewer remain alive throughout this loop.
+Implementer and reviewer sessions remain available throughout this loop via `--agent` auto-resume.
 
 ### 6. Merge
 
@@ -195,8 +198,10 @@ Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, a
 
 ### 8. Cleanup
 
-1. Delete review temp files generated in step 3b: `rm -f /tmp/claude-reviews/<team-name>-*.md`.
-2. Shut down teammates. Delete the team (`TeamDelete`) only if this invocation created it.
+```bash
+# No team cleanup needed — session files are scoped via ws-declare-agent at skill start.
+rm -f /tmp/claude-reviews/<scope>-*.md
+```
 
 ## Judgments
 
