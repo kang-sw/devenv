@@ -6,6 +6,7 @@ plans:
   phase-3: 2026-04/21-1040.spec-driven-workflow-p1-5.survey
   phase-4: 2026-04/21-1040.spec-driven-workflow-p1-5.survey
   phase-5: 2026-04/21-1040.spec-driven-workflow-p1-5.survey
+completed: 2026-04-24
 ---
 
 # Spec-Driven Workflow: Spec-Stem System and Mandatory Gate
@@ -218,3 +219,7 @@ Depends on: Phases 2–5 complete.
 - All headings in `ai-docs/spec/` that represent named features carry `{#slug}` anchors
 - No `[ticket-stem/pN]` references remain in any spec file
 - `stems:` frontmatter is populated in all spec files after migration
+
+### Result — cancelled 2026-04-24
+
+Canonical flows already current; spec migration not required. Closed unimplemented.

@@ -8,6 +8,7 @@ plans:
   phase-3: 2026-04/260421-1259.global-spec-stems-p1-4.survey
   phase-4: 2026-04/260421-1259.global-spec-stems-p1-4.survey
 started: 2026-04-21
+completed: 2026-04-24
 ---
 
 # Global Unique Spec Stems — Design Pivot
@@ -146,3 +147,7 @@ Existing spec files currently have either no stems or legacy `{#slug}` anchors (
 - Run `spec-build-index` to refresh `features:`.
 
 This phase is intentionally deferred: no spec file currently has `stems:` in production (phases 1–5 are on an unmerged branch), so there is no live migration urgency.
+
+### Result — cancelled 2026-04-24
+
+Migration not required for current usage. Closed unimplemented.

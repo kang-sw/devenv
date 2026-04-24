@@ -1,6 +1,7 @@
 ---
 title: "Marathon skill improvements — reuse heuristics, checkpoint model, persistent reviewers"
 related: []
+dropped: 2026-04-24
 ---
 
 # Marathon Skill Improvements
