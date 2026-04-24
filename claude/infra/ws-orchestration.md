@@ -64,12 +64,12 @@ ws-declare-agent implementer reviewer-corr reviewer-fit
 
 # 2. Start sessions — --agent creates fresh after declare
 ws-call-agent sonnet --agent implementer \
-  --system-prompt claude/infra/implementer.md \
+  --system-prompt $(ws-infra-path implementer.md) \
   "Implement X"
 
 # 3. Parallel reviewers — issue multiple Bash calls in the same response
 ws-call-agent sonnet --agent reviewer-corr \
-  --system-prompt claude/infra/code-review-correctness.md \
+  --system-prompt $(ws-infra-path code-review-correctness.md) \
   "$(git diff HEAD~1)"
 
 # 4. Fix loop — --agent auto-resumes the existing session

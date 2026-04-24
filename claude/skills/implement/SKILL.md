@@ -67,7 +67,7 @@ Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-call-agent`, `ws-ag
 
 ```bash
 ws-call-agent sonnet --agent implementer \
-  --system-prompt claude/infra/implementer.md \
+  --system-prompt $(ws-infra-path implementer.md) \
   "Run \`load-infra implementer.md\` first.
 
 Mode: <A: plan-driven | B: inline brief>
@@ -112,7 +112,7 @@ calls in the same response turn. Each reviewer loads its partition doc via
 
 ```bash
 ws-call-agent sonnet --agent reviewer-correctness \
-  --system-prompt claude/infra/code-review-correctness.md \
+  --system-prompt $(ws-infra-path code-review-correctness.md) \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
@@ -124,7 +124,7 @@ Instructions:
 
 ```bash
 ws-call-agent sonnet --agent reviewer-fit \
-  --system-prompt claude/infra/code-review-fit.md \
+  --system-prompt $(ws-infra-path code-review-fit.md) \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
@@ -136,7 +136,7 @@ Instructions:
 
 ```bash
 ws-call-agent sonnet --agent reviewer-test \
-  --system-prompt claude/infra/code-review-test.md \
+  --system-prompt $(ws-infra-path code-review-test.md) \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
