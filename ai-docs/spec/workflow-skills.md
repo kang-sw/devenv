@@ -25,6 +25,7 @@ features:
     - `ws-call-agent`
     - `ws-agent`
     - `ws-declare-agent`
+    - `review-path`
   - Utility Skills
     - `/add-rule`
     - `/ship`
@@ -283,6 +284,15 @@ UUID is derived from repo root + current git branch + name. Same name on the sam
 `ws-declare-agent <name> [<name2> ...]` — clears session files for one or more agent names. Idempotent: no-op when no session file exists.
 
 Lead calls this at skill start for all agents it will use, ensuring stale sessions from prior runs do not carry over.
+
+### `review-path` {#260425-review-path}
+
+`review-path <stem>` — prints a file path under `/tmp/claude-reviews/` for use as a review-findings sink. Creates the directory if absent.
+
+Current path format: `/tmp/claude-reviews/<stem>.md` — deterministic, based on stem only.
+
+> [!note] Planned 🚧
+> Multi-stem, non-deterministic paths: `review-path <stem1> [<stem2> ...]` accepts one or more stems in a single call. Computes a `pwd_hash` (first 8 chars of `shasum` of `$PWD`) and a per-invocation `run_id` (8 random alphanumeric chars). Prints one path per stem: `/tmp/claude-reviews/<pwd-hash>-<run-id>-<stem>.md`. Caller must capture all output lines from a single invocation and hold them as literals — paths are not reproducible after the call returns. {#260425-review-path-non-deterministic}
 
 ## Utility Skills
 
