@@ -117,8 +117,8 @@ For a direct-edit verdict, invoke `ws:edit` via the Skill tool with the target a
 
 For a pipeline verdict, invoke each stage sequentially via the Skill tool, passing the target as arguments.
 
-**Prefix-stage gate-suppression context:**
-- For `/write-spec`: append to args — "Chained from /proceed — write any 🚧 entries without asking; the session reminder may still emit (this is not a standalone invocation)."
+Prefix-stage gate-suppression context applies in all routing paths (direct-edit and pipeline):
+- For `/write-spec`: append to args — "Chained from /proceed — write any 🚧 entries without asking; the session reminder will still emit (this is not a standalone invocation)."
 - For `/write-ticket`: append to args — "Chained from /proceed — treat spec coverage as satisfied regardless of whether /write-spec wrote anything or exited early at judge: spec-impact."
 
 - After each stage, verify it completed (check for committed artifacts).
