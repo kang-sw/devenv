@@ -82,8 +82,7 @@ Instructions:
 - Verify integration tests pass before reporting completion or after each fix.
 - Report completion in plain text. Include test results.
 - For fix cycles, a follow-up call will arrive with review findings — fix and report back via your next response.
-- Commit at logical checkpoints on the current branch." | jq -r '.result'
-```
+- Commit at logical checkpoints on the current branch."```
 
 Note the commit range from the implementer's report.
 
@@ -114,8 +113,7 @@ ws-call-agent sonnet --agent reviewer-correctness \
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
-  the updated diff and respond." | jq -r '.result'
-```
+  the updated diff and respond."```
 
 ```bash
 ws-call-agent sonnet --agent reviewer-fit \
@@ -125,8 +123,7 @@ ws-call-agent sonnet --agent reviewer-fit \
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
-  the updated diff and respond." | jq -r '.result'
-```
+  the updated diff and respond."```
 
 ```bash
 ws-call-agent sonnet --agent reviewer-test \
@@ -136,8 +133,7 @@ ws-call-agent sonnet --agent reviewer-test \
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
-  the updated diff and respond." | jq -r '.result'
-```
+  the updated diff and respond."```
 
 #### 3c. Relay and loop
 
@@ -145,18 +141,14 @@ Instructions:
 2. Otherwise: relay findings to the implementer — consolidate all review outputs into a single list:
    ```bash
    ws-call-agent sonnet --agent implementer \
-     "Fix these issues: <consolidated findings from all reviewers>" | jq -r '.result'
-   ```
+     "Fix these issues: <consolidated findings from all reviewers>"   ```
    Wait for the implementer's fix report and integration test confirmation.
 3. Re-review (parallel — issue multiple Bash calls in the same response):
    ```bash
    ws-call-agent sonnet --agent reviewer-correctness \
-     "Re-review. Updated diff: <diff>" | jq -r '.result'
-   ws-call-agent sonnet --agent reviewer-fit \
-     "Re-review. Updated diff: <diff>" | jq -r '.result'
-   ws-call-agent sonnet --agent reviewer-test \
-     "Re-review. Updated diff: <diff>" | jq -r '.result'
-   ```
+     "Re-review. Updated diff: <diff>"   ws-call-agent sonnet --agent reviewer-fit \
+     "Re-review. Updated diff: <diff>"   ws-call-agent sonnet --agent reviewer-test \
+     "Re-review. Updated diff: <diff>"   ```
 4. Repeat from 3c.1 until all reviewers report "Clean".
 
 ### 4. Docs pre-pass
@@ -177,8 +169,7 @@ Instructions:
    - Direct the implementer to fix:
      ```bash
      ws-call-agent sonnet --agent implementer \
-       "Fix these issues: <tweak requests>" | jq -r '.result'
-     ```
+       "Fix these issues: <tweak requests>"     ```
      Implementer verifies integration tests and reports.
    - Re-apply `judge: partition-allocation` and re-review per the step 3 pattern.
    - Re-run **spec-updater** with the new commit range. Wait. Then re-run **mental-model-updater**. Wait.

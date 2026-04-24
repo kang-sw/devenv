@@ -260,8 +260,8 @@ Flags:
 Model routing: `claude*`, `sonnet`, `haiku`, `opus` → `claude` CLI. `gemini*` → stub (not yet implemented).
 
 > [!note] Constraints
-> - `$(ws-call-agent ...)` command substitution corrupts multi-byte characters in the result field. Safe patterns: pipe directly (`| jq -r '.result'`) or write to a temp file and parse from it.
-> - UUID fields (`session_id`) are ASCII-only and safe to capture via `$()`.
+> - Output is formatted text (info line + agent response). No JSON is exposed to callers.
+> - Exit code is 1 when the underlying call reports an error.
 
 ### `ws-agent` {#260424-ws-agent}
 
