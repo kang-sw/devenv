@@ -28,6 +28,7 @@ Target: $ARGUMENTS
 - Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement`, and merge.
+- When invoking prefix stages (`/write-spec`, `/write-ticket`) via the Skill tool, include natural-language gate-suppression context in the args. For `/write-spec`: append "Chained from /proceed — write any 🚧 entries without asking to defer (judge: idea-level is suppressed)." For `/write-ticket`: append "Chained from /proceed — if /write-spec already ran (even as a no-op), treat spec coverage as satisfied and do not stop on judge: spec-gate."
 
 ## On: invoke
 
@@ -97,6 +98,7 @@ For a pipeline verdict, announce:
 - **Plan**: <skip (reason) | /write-plan (reason)>
 - **Skeleton**: <skip (reason) | /write-skeleton (reason)>
 - **Execution**: /implement — <reason>
+- **Gate suppression**: prefix stages receive override context — interactive confirmation gates are suppressed.
 
 Proceeding.
 ```
