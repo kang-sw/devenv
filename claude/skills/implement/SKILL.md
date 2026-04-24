@@ -152,7 +152,7 @@ Instructions:
 2. Otherwise: relay file paths to the implementer:
    ```bash
    ws-call-agent sonnet --agent implementer \
-     "Fix issues in these review reports: <correctness-path>, <fit-path>. Read each file directly."   ```
+     "Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly."   ```
    Wait for the implementer's fix report and integration test confirmation.
 3. Re-review (parallel — issue multiple Bash calls in the same response, same paths — reviewers overwrite):
    ```bash
