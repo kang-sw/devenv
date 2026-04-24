@@ -14,6 +14,10 @@ Identify affected domains and apply minimal, accurate updates.
 ## Constraints
 
 - Apply the inclusion test and document format from `load-infra mental-model-conventions.md` to every edit.
+- Never modify `## Domain Rules` content — position changes are permitted via promotion only; flag inconsistencies in the `## Stale Rules` output block instead.
+- Never move Domain Rules downward (parent `index.md` → sub-domain doc). Promotion is upward-only.
+- Trigger forge-level restructuring (new domain doc, split flat doc into `<domain>/index.md` + children) only when the diff shows a corresponding code-structure change — a new module directory, or an existing module splitting into sub-directories. Do not restructure on authorial judgment alone.
+- Preserve ancestor loading: whenever editing a sub-domain doc, read the parent `index.md` first so inherited Domain Rules are visible before the edit.
 
 ## Process
 
@@ -38,14 +42,38 @@ Identify affected domains and apply minimal, accurate updates.
    - Remove sections not in the document format (Overview, Relevant Source Files).
    - Update frontmatter: `sources` (directory patterns) and `related` (cross-domain coupling notes).
    - Leave unaffected sections alone.
+   - Leave every `## Domain Rules` entry content untouched. You may only
+     promote rules upward during splits (sub-domain → parent `index.md`) or
+     record stale ones in the `## Stale Rules` output block.
 
-5. **Verify**: Spot-check that file paths, function names, and key claims
+5. **Restructure (forge authority)**: When the diff shows a matching
+   code-structure change, apply one of these actions. Skip entirely when no
+   code-structure change is present.
+   - **New domain**: a code module with no existing coverage → create
+     `ai-docs/mental-model/<domain>.md` with the standard frontmatter and
+     document format.
+   - **Split**: a flat `<domain>.md` whose underlying module has split into
+     sub-directories → promote it to `<domain>/index.md` + one child file
+     per sub-directory. Move any `## Domain Rules` entries from the source
+     doc to the new parent `index.md` verbatim (promotion-only; never move
+     rules into sub-domain docs and never modify rule content). Partition
+     the remaining content by sub-concern into the child files.
+   - **No other restructuring**: do not merge, rename, or reshape docs
+     when code structure has not moved. Bloat cleanup stays in step 4.
+
+6. **Stale rule detection**: When a rule in any touched domain's
+   `## Domain Rules` section appears inconsistent with current code
+   behavior based on the diff, record the rule verbatim in the output's
+   `## Stale Rules` block. Do not edit the rule. The user resolves via
+   `/add-rule` or manual edit.
+
+7. **Verify**: Spot-check that file paths, function names, and key claims
    match current source.
 
-6. **Update `ai-docs/mental-model.md`** if cross-domain patterns, the crate graph, or shared
+8. **Update `ai-docs/mental-model.md`** if cross-domain patterns, the crate graph, or shared
    conventions changed.
 
-7. **Commit**: Commit all updated documents. Include `(mental-model-updated)` in the
+9. **Commit**: Commit all updated documents. Include `(mental-model-updated)` in the
    commit message body to mark the new checkpoint.
 
 ## Output
@@ -55,7 +83,15 @@ Identify affected domains and apply minimal, accurate updates.
 - combat.md: updated tick ordering contract, removed type field listing (bloat)
 - networking.md: no changes needed
 - (new) crafting.md: created — new domain with non-obvious coupling to inventory
+- (split) inventory.md → inventory/index.md + inventory/storage.md + inventory/transfer.md: underlying module split into sub-directories; promoted 2 Domain Rules to parent index.md
+
+## Stale Rules
+- <domain>.md / "<rule text>": <observed inconsistency between rule and current code>
 ```
+
+Omit `## Stale Rules` entirely when no inconsistencies are found. Never
+edit the rule itself — this block is output-only and exists so the user
+can resolve via `/add-rule` or manual edit.
 
 ## Doctrine
 
