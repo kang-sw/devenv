@@ -26,6 +26,10 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - `/proceed` guarantees: `judge: needs-spec` fires on **every** invocation. It is unconditional.
   `/proceed` does not pre-evaluate whether a spec is needed. It always delegates to `/write-spec`,
   which handles the no-op exit via its own `judge: spec-impact` gate.
+- `/proceed` guarantees: when invoking prefix stages (`/write-spec`, `/write-ticket`) via the Skill
+  tool, it passes gate-suppression context as args. This suppresses interactive confirmation gates
+  inside the prefix stage so the chain does not pause for user input. The announce template surfaces
+  a "Gate suppression" bullet on every routing path so the user knows suppression is active.
 - `/proceed` guarantees: `judge: needs-ticket` invokes `/write-ticket` for any actionable
   inline description, regardless of scope clarity. Only an existing ticket path skips this
   step. The distinction between "vague" and "clear-scope" inline descriptions is not
@@ -47,7 +51,9 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 ## Coupling
 
 - `/proceed` → `/write-spec`: unidirectional invocation, always fires. Gate logic lives
-  entirely inside `/write-spec`. Proceed never checks `judge: spec-impact` itself.
+  entirely inside `/write-spec`. Proceed never checks `judge: spec-impact` itself. Proceed
+  passes gate-suppression context via args, so a `/write-spec` invoked from the chain behaves
+  differently from a standalone invocation — interactive confirmation gates are suppressed.
 - `/proceed` ↔ `/write-ticket`: proceed invokes write-ticket and reads back the `Ticket:` line
   to capture the path. Write-ticket's step 8 format is a contract with proceed. Changing the
   line prefix or path format breaks proceed's path-capture logic.
@@ -59,7 +65,9 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 
 - **Add a new prefix stage to `/proceed`**: implement the gate logic inside the new sub-skill,
   not inside proceed. Proceed should always fire the sub-skill unconditionally and let the
-  sub-skill decide whether to act. Mirroring `needs-spec`'s pattern is correct.
+  sub-skill decide whether to act. Pass gate-suppression context in the Skill tool args so the
+  new stage does not pause the chain with interactive confirmation gates. Mirroring `needs-spec`'s
+  pattern — including the suppression context — is correct.
 - **Change `/write-ticket`'s completion artifact format**: update the `Ticket:` line prefix or
   path shape in write-ticket step 8, then update proceed's capture logic in step 4 (`Execute`)
   to match. Both files must change together.
@@ -83,3 +91,7 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - Assuming `/write-ticket` always emits the `Ticket:` completion artifact. On the CREATE path,
   `judge: spec-gate` at step 0 may stop write-ticket before step 8 is reached. When no spec
   coverage exists, no artifact is emitted and the caller must handle the missing line.
+- Invoking a prefix stage without passing gate-suppression context. The stage will present
+  interactive confirmation gates that pause the chain and break the no-pause invariant.
+  Gate-suppression context must be included in the Skill tool args for every prefix-stage
+  invocation from `/proceed`.

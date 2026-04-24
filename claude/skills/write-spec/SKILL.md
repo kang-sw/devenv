@@ -47,7 +47,7 @@ Evaluate whether the work introduces or modifies behavior a caller can observe f
 
 ### judge: idea-level
 
-When about to write a `🚧` entry: check whether all supporting tickets are in `idea/` status (no `todo/`-or-higher ticket covers this feature). If so, or if ticket status is unclear — ask the user whether to defer the entry until the ticket is promoted to `todo/`. Skip the `🚧` entry if the user confirms deferral. Proceed if the user confirms the entry should be written now.
+When about to write a `🚧` entry: write it. Then emit this session reminder: "Session reminder: a `todo/`-or-higher ticket must be created before this session ends for this `🚧` entry to be valid per spec-conventions." Do not ask the user whether to defer — write the entry and remind.
 
 ### judge: directory-vs-flat
 

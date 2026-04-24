@@ -28,6 +28,7 @@ Target: $ARGUMENTS
 - Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
 - Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement`, and merge.
+- When invoking prefix stages (`/write-spec`, `/write-ticket`) via the Skill tool, include gate-suppression context in the args.
 
 ## On: invoke
 
@@ -51,6 +52,10 @@ Before the pipeline judges, two prefix judges fire in order:
 **judge: needs-spec (always fires first)** — always invoke `/write-spec`. Continue to `judge: needs-ticket` regardless of outcome.
 
 **judge: needs-ticket (fires second)** — see judgment table below.
+
+Prefix-stage gate-suppression context applies in all routing paths (direct-edit and pipeline):
+- For `/write-spec`: append to args — "Chained from /proceed — write any 🚧 entries without asking; the session reminder will still emit (this is not a standalone invocation)."
+- For `/write-ticket`: append to args — "Chained from /proceed — treat spec coverage as satisfied regardless of whether /write-spec wrote anything or exited early at judge: spec-impact."
 
 Then apply the existing pipeline judges: direct-edit → needs-plan → needs-skeleton → execution-mode.
 
@@ -83,6 +88,7 @@ For a direct-edit verdict, announce:
 - **Target**: <ticket path or brief summary>
 - **Warmth**: warm — <what the main agent already knows>
 - **Reason**: <why pipeline is overkill for this change>
+- **Gate suppression**: prefix stages receive override context — interactive confirmation gates are suppressed.
 
 Invoking `/edit`.
 ```
@@ -97,6 +103,7 @@ For a pipeline verdict, announce:
 - **Plan**: <skip (reason) | /write-plan (reason)>
 - **Skeleton**: <skip (reason) | /write-skeleton (reason)>
 - **Execution**: /implement — <reason>
+- **Gate suppression**: prefix stages receive override context — interactive confirmation gates are suppressed.
 
 Proceeding.
 ```

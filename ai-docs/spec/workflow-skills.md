@@ -105,9 +105,6 @@ After writing, runs `spec-build-index` to rebuild the `features:` frontmatter in
 > - Never includes ticket references in `🚧` markers — implementation traceability flows through commit `## Spec` sections referencing the spec-stem.
 > - Never edits the `features:` frontmatter block manually — `spec-build-index` owns it.
 
-> [!note] Planned 🚧
-> `judge: idea-level` will change from a blocking confirmation gate to a non-blocking reminder: the skill writes the `🚧` entry and appends a session reminder to create a `todo/`-or-higher ticket before the session ends. {#260424-write-spec-idea-level-nonblocking}
-
 ### `/write-ticket` {#260421-write-ticket}
 
 Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/proceed` after authoring, which auto-routes to skeleton, plan, or implementation.
@@ -213,9 +210,6 @@ Announces the chosen path before invoking the first skill.
 > - **`judge: needs-ticket`** — auto-invokes `/write-ticket` when the target is a vague inline description with no clear scope. Clear-scope inline descriptions currently bypass `/write-ticket` and proceed directly to implementation. Exception: exploratory targets stop and route back to `/discuss`.
 >
 > With this change, `/proceed` is a valid entry point from any conversation state, including immediately after `/discuss` or mid-discussion with no ticket path argument.
-
-> [!note] Planned 🚧
-> When invoking prefix stages (`/write-spec`, `/write-ticket`), `/proceed` will pass natural-language override context in the Skill invocation args to suppress interactive confirmation gates (`judge: idea-level`, `judge: spec-gate`). Sub-skills receiving this context use automatic defaults rather than prompting the user. {#260424-proceed-chain-gate-suppression}
 
 ## Reconstruction
 
