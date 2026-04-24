@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: ws-call-agent <model> [--uuid <session-id>] [--system-prompt <path>] <prompt>" >&2
+  echo "Usage: ws-call-agent <model> [--session-id <uuid>] [--uuid <session-id>] [--system-prompt <path>] <prompt>" >&2
   exit 1
 fi
 
@@ -13,6 +13,10 @@ ARGS=(-p --dangerously-skip-permissions --output-format json --model "$MODEL")
 
 while [[ $# -gt 1 ]]; do
   case "$1" in
+    --session-id)
+      ARGS+=(--session-id "$2")
+      shift 2
+      ;;
     --uuid)
       ARGS+=(--resume "$2")
       shift 2
