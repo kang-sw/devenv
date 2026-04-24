@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.0 — 2026-04-24
+
+### Added
+- `ws-call-agent` — `claude -p` wrapper with permission bypass; `--agent` flag for deterministic UUID sessions (create-or-resume), `--session-id`, `--uuid`, `--system-prompt`
+- `ws-agent` — deterministic UUID v5 from repo-root + branch + name
+- `ws-declare-agent` — clears session files to scope agent slots to a run
+- `ws-call-agent` formatted output: `[info]`/`[warn]` context window line (shown when `--agent` used and fill ≥50%; warn at ≥70% of 150K)
+
+### Changed
+- `ws:implement` internal orchestration rewritten — `TeamCreate`/`SendMessage`/`TeamDelete` replaced with `ws-call-agent`/`ws-declare-agent`
+- `ws-*` scripts moved from `claude/infra/` to `claude/bin/` (PATH-accessible)
+
+### Removed
+- `/parallel-implement` skill — split-scope work now handled via split tickets + `/implement`
+- `/team-lead` skill — no longer needed without `TeamCreate` machinery
+
 ## v0.6.0 — 2026-04-24
 
 ### Added
