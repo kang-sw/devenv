@@ -106,6 +106,17 @@ Auto-route:     /proceed <ticket-path>    — routes via warmth + scope judges
 
 Agent suggests next step at each point; user decides. `/proceed` is the explicit opt-in for auto-chaining through the pipeline.
 
+## Specs
+
+| File | Title | Summary |
+|------|-------|---------|
+| `ai-docs/spec/agent-system.md` | Agent System | Spawnable agents in claude/agents/ |
+| `ai-docs/spec/personal-devenv.md` | Personal Dev Environment | install.sh, shell, dotfiles, Claude Code config |
+| `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery, ws-call-agent primitives |
+| `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude/skills/ tools for ws plugin maintenance |
+| `ai-docs/spec/spec-system.md` | Spec System | Spec authoring, 🚧 markers, anchor protocol |
+| `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship |
+
 ## Tickets
 
 Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
