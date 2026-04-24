@@ -53,6 +53,10 @@ Before the pipeline judges, two prefix judges fire in order:
 
 **judge: needs-ticket (fires second)** — see judgment table below.
 
+Prefix-stage gate-suppression context applies in all routing paths (direct-edit and pipeline):
+- For `/write-spec`: append to args — "Chained from /proceed — write any 🚧 entries without asking; the session reminder will still emit (this is not a standalone invocation)."
+- For `/write-ticket`: append to args — "Chained from /proceed — treat spec coverage as satisfied regardless of whether /write-spec wrote anything or exited early at judge: spec-impact."
+
 Then apply the existing pipeline judges: direct-edit → needs-plan → needs-skeleton → execution-mode.
 
 After prefix judges complete, check whether the implementation pipeline should be skipped entirely:
@@ -116,10 +120,6 @@ Do not ask for confirmation — announce and proceed. The user can interrupt if 
 For a direct-edit verdict, invoke `ws:edit` via the Skill tool with the target as arguments.
 
 For a pipeline verdict, invoke each stage sequentially via the Skill tool, passing the target as arguments.
-
-Prefix-stage gate-suppression context applies in all routing paths (direct-edit and pipeline):
-- For `/write-spec`: append to args — "Chained from /proceed — write any 🚧 entries without asking; the session reminder will still emit (this is not a standalone invocation)."
-- For `/write-ticket`: append to args — "Chained from /proceed — treat spec coverage as satisfied regardless of whether /write-spec wrote anything or exited early at judge: spec-impact."
 
 - After each stage, verify it completed (check for committed artifacts).
 - Pass downstream context: if `/write-plan` produces a plan path, pass it to `/implement`.
