@@ -100,6 +100,10 @@ Depends on: nothing.
 - Ancestor loading rule is stated as an invariant, not a recommendation.
 - `list-mental-model` output indents sub-domain docs under their parent domain.
 
+### Result (8298a65) - 2026-04-24
+
+Implemented as specified. `mental-model-conventions.md` extended with `## Directory Hierarchy`, ancestor loading invariant, and `## Domain Rules` sections. `ai-docs/mental-model.md` updated. `list-mental-model` rewritten with tree output (`├─`/`└─`) and ancestor `index.md` auto-emit in filtered mode. Ancestor loading bounded to 1-level hierarchies (`<domain>/<sub>.md` only) — no depth overclaim.
+
 ### Phase 2: mental-model-updater extension
 
 Update `claude/agents/mental-model-updater.md` to:
@@ -118,6 +122,10 @@ Depends on: Phase 1 (conventions must be defined before the agent references the
 - `## Stale Rules` section is defined in the output template.
 - Agent instructions explicitly prohibit modifying Domain Rules content.
 
+### Result (8298a65) - 2026-04-24
+
+Implemented as specified. `mental-model-updater.md` updated with 3 Domain Rules Constraints, Step 5 Restructure with `/forge-mental-model` authority (create / split / no other), Step 6 Stale rule detection, and `## Stale Rules` output block. Domain Rules promotion-only (upward during splits, never downward, never content-modified). Stale rules flagged in output only — user resolves via manual edit or `/add-rule` replacement.
+
 ### Phase 3: Executor ancestor loading
 
 Update executor skill docs (`ws:edit`, `ws:implement`, `ws:parallel-implement`) to
@@ -132,6 +140,10 @@ Depends on: Phase 1 (hierarchy must be defined first).
 **Acceptance criteria:**
 - Each executor skill doc references the ancestor-loading contract.
 - `executor-wrapup.md` states the contract as a shared invariant.
+
+### Result (8298a65) - 2026-04-24
+
+Implemented as specified. `executor-wrapup.md` gains ancestor loading Invariant bullet and `## §Ancestor Loading` procedural section (3 numbered steps). `edit/SKILL.md`, `implement/SKILL.md`, `parallel-implement/SKILL.md` each have the ancestor-loading Invariant bullet and spawn-prompt propagation with "(one-level hierarchies — `<domain>/<sub>.md` only)" bound. Depth bound added during review round 2.
 
 ### Phase 4: /add-rule skill
 
@@ -159,6 +171,10 @@ Depends on: Phase 1 (Domain Rules section must be defined).
 - Skill proposes creating a new doc when no domain matches.
 - Skill refuses to modify existing rules.
 
+### Result (8298a65) - 2026-04-24
+
+Implemented as specified. `claude/skills/add-rule/SKILL.md` created new. 5 Invariants (append-only, single target, no dual-write, English-only, AI Context in commit). Handler: Read → Classify → Route → Propose/Prompt → Write → Commit → Report. `judge: classification` signal table; `judge: domain-match` single/multiple/none routing. §5 Write handles both mental-model doc and CLAUDE.md missing-section cases. Doctrine: "Preserve user's original phrasing — tighten only grammar and active voice." Routing conditionals removed from Invariants in review round 2.
+
 ### Phase 5: CLAUDE.template.md — Architecture Rules refinement and migration item
 
 Update `claude/skills/bootstrap/CLAUDE.template.md`:
@@ -176,3 +192,7 @@ Depends on: nothing (template change is independent).
 - Architecture Rules comment distinguishes cross-cutting from domain-scoped.
 - v0028 migration item is present in the checklist.
 - Template version tag updated to v0028.
+
+### Result (8298a65) - 2026-04-24
+
+Implemented as specified. `CLAUDE.template.md` inclusion test comment updated to explicitly exclude domain-scoped rules and direct authors to `/add-rule`. v0028 migration item added: re-evaluate existing Architecture Rules and move domain-scoped entries to mental-model Domain Rules via `/add-rule`. Template version tag updated to `v0028`.

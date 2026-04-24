@@ -10,12 +10,11 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
 
-**Plugin:** `ws@0.5.0` — see `claude/.claude-plugin/plugin.json`.
+**Plugin:** `ws@0.6.0` — see `claude/.claude-plugin/plugin.json`.
 
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
 - After any change to `claude/`, run `claude plugin update ws@ws` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
-- **Any skill, agent, or infra change must include a `plugin.json` version bump** — bump `0.3.X` patch for behavior changes, minor for new skills.
 - `claude/CLAUDE.md` is symlinked to `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
 - External install: `/plugin marketplace add kang-sw/devenv` → `/plugin install ws@ws`.
 
@@ -82,6 +81,7 @@ claude/skills/
   write-spec/          — create/update external-perspective spec docs in ai-docs/spec/
   write-skeleton/      — public interface stubs + integration tests
   write-plan/          — deep codebase research → implementation plan
+  add-rule/            — classify and route a new rule to CLAUDE.md (cross-cutting) or mental-model Domain Rules (domain-scoped)
   edit/                — main-agent-direct single-scope cycle (warm sessions, owner edits)
   implement/           — delegated implementer + reviewer cycle (cold sessions or wide scope)
   parallel-implement/  — multiple implementer pairs, disjoint file sets on shared branch
@@ -130,7 +130,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260423-feat-doc-system-gap-fixes` | done | Documentation system gap fixes — feature removal protocol, spec diff signal, discuss staleness warning, cross-reference convention |
 | `260423-feat-doc-tooling-restructure` | done | Doc tooling restructure — forge-mental-model new skill, write-mental-model removal, forge-spec palette flag, bootstrap legacy detection |
 | `260424-feat-project-survey-agent` | done | project-survey Haiku agent + auto-invoke integration into edit/implement/parallel-implement/discuss |
-| `260424-feat-domain-rules-layering` | todo | Architecture Rules split + /add-rule skill; domain rules in mental-model docs |
+| `260424-feat-domain-rules-layering` | done | Architecture Rules split + /add-rule skill; domain rules in mental-model docs |
 
 ## Session Notes
 
