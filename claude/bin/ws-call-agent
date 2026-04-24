@@ -46,7 +46,7 @@ while [[ $# -gt 1 ]]; do
 done
 
 PROMPT="$1"
-CONTEXT_LIMIT=120000
+CONTEXT_LIMIT=150000
 
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
@@ -68,8 +68,8 @@ esac
 CONTEXT_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens + .usage.cache_read_input_tokens' "$TMPFILE")
 CONTEXT_PCT=$(python3 -c "print(round($CONTEXT_TOKENS / $CONTEXT_LIMIT * 100))")
 
-if [[ "$CONTEXT_PCT" -ge 60 ]]; then
-  echo "[info] Context window: ${CONTEXT_PCT}% filled — recommended to refresh this agent"
+if [[ "$CONTEXT_PCT" -ge 70 ]]; then
+  echo "[warn] Context window: ${CONTEXT_PCT}% filled — recommended to refresh this agent"
 else
   echo "[info] Context window: ${CONTEXT_PCT}% filled"
 fi
