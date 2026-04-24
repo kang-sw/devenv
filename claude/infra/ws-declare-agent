@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Clears session files for one or more agent names, ensuring the next
+# ws-call-agent --agent <name> starts a fresh session.
+# Usage: ws-declare-agent <name> [<name2> ...]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: ws-declare-agent <name> [<name2> ...]" >&2
+  exit 1
+fi
+
+ESCAPED=$(pwd | sed 's|/|-|g')
+PROJECT_DIR="$HOME/.claude/projects/$ESCAPED"
+
+for NAME in "$@"; do
+  UUID=$("$SCRIPT_DIR/ws-agent" "$NAME")
+  rm -f "$PROJECT_DIR/$UUID.jsonl" "$PROJECT_DIR/$UUID"
+  echo "declared: $NAME ($UUID)"
+done
