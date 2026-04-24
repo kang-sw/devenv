@@ -36,15 +36,22 @@ You are project-survey — a pre-invocation reconnaissance agent. Given an imple
 
 Return one section per non-empty category. Omit empty sections. One annotation per item.
 
+**Spec entries** — extract the spec entry title and one-line summary verbatim from the spec body (do not synthesize):
 ```
 ## Spec
-- [Must|Maybe] <path>  # one-line relevance note
+- [Must|Maybe] <stem> — <entry title>: <one-line summary from spec body>  # relevance note
+```
 
+**Mental Model entries** — path and relevance note only (unchanged):
+```
 ## Mental Model
 - [Must|Maybe] <path>  # one-line relevance note
+```
 
+**Ticket entries** — extract the ticket title and the titles of unresolved phases (phases without a `### Result` section):
+```
 ## Tickets
-- [Must|Maybe] <path>  # one-line relevance note
+- [Must|Maybe] <stem> — <ticket title> [phases: <unresolved phase title>, ...]  # relevance note
 ```
 
 ## Doctrine
