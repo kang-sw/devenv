@@ -87,6 +87,10 @@ Extend `claude/infra/mental-model-conventions.md` to define:
 Update `ai-docs/mental-model.md` (index) to describe the directory hierarchy and
 Domain Rules section.
 
+Update `claude/bin/list-mental-model` to produce hierarchy-aware output: when
+`<domain>/index.md` + child files exist, display the domain as a tree with the
+parent on one line and children indented beneath it. Flat domains remain unchanged.
+
 Depends on: nothing.
 
 **Acceptance criteria:**
@@ -94,6 +98,7 @@ Depends on: nothing.
   and modification invariants.
 - Conventions doc defines directory hierarchy with example layout.
 - Ancestor loading rule is stated as an invariant, not a recommendation.
+- `list-mental-model` output indents sub-domain docs under their parent domain.
 
 ### Phase 2: mental-model-updater extension
 
