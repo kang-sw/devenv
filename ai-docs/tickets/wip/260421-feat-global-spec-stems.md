@@ -29,10 +29,10 @@ A spec commitment is not always heading-level. A paragraph, a bullet, or a note 
 **`generate-spec-stem <slug> [<slug>...]` — new command**
 Greps `ai-docs/spec/` for all existing `{#YYMMDD-*}` anchors to check for collisions. Outputs valid stems with today's date prefix. If a collision is found (same date + slug), appends `-2`, `-3`, etc. Multiple slugs can be generated in one call.
 
-**`list-stems [<file>]`— grep-based rewrite with markdown context**
+**`list-spec-stems [<file>]`— grep-based rewrite with markdown context**
 Greps spec file(s) for `{#YYMMDD-*}` anchors. When a file is specified, uses the markdown heading stack at each anchor's position to display stems in hierarchical context. Heading-level stems are displayed as section roots; body-level stems are displayed under their nearest parent heading.
 
-Example output (`list-stems -v ai-docs/spec/skills.md`):
+Example output (`list-spec-stems -v ai-docs/spec/skills.md`):
 ```
 260421-workflow-skills      ## Workflow Skills
   260421-discussion         ### Discussion
@@ -54,7 +54,7 @@ The phases 1–5 implementation provides infrastructure that partially carries o
 |---|---|
 | `spec-build-index` features: generation + anchor strip | Keep as-is |
 | `spec-build-index` stems: generation | Remove |
-| `list-stems` | Rewrite (frontmatter → grep + markdown parsing) |
+| `list-spec-stems` | Rewrite (frontmatter → grep + markdown parsing) |
 | `generate-spec-stem` | New |
 | `write-spec/SKILL.md` judge: spec-impact gate | Keep as-is |
 | `write-spec/SKILL.md` stem authoring instructions | Update: use `generate-spec-stem` |
@@ -71,7 +71,7 @@ The main work is in the tooling layer (commands) and convention documents. The w
 
 ### Phase 1: `generate-spec-stem` command
 
-New Python command (`claude/bin/generate-spec-stem`) following the `list-mental-model` / `list-stems` pattern.
+New Python command (`claude/bin/generate-spec-stem`) following the `list-mental-model` / `list-spec-stems` pattern.
 
 - Accepts one or more slug arguments.
 - Greps `ai-docs/spec/` recursively for `{#YYMMDD-*}` to collect existing stems.
@@ -87,7 +87,7 @@ New Python command (`claude/bin/generate-spec-stem`) following the `list-mental-
 
 `claude/bin/generate-spec-stem` created. Scans `ai-docs/spec/` via `Path(__file__).resolve().parents[2]` (CWD-independent). Collision handling appends `-2`, `-3`, etc. Multi-slug deduplication runs in-memory within a single call.
 
-### Phase 2: `list-stems` rewrite
+### Phase 2: `list-spec-stems` rewrite
 
 Replace frontmatter-reading logic with grep-based + markdown parsing.
 
@@ -98,13 +98,13 @@ Replace frontmatter-reading logic with grep-based + markdown parsing.
 - Body-level stem: displayed indented under nearest parent heading, label from surrounding text (best-effort: first non-empty text after the anchor on the same line, or heading text of parent).
 
 **Acceptance criteria:**
-- `list-stems ai-docs/spec/skills.md` outputs stems in document order with heading context
-- `list-stems -v ai-docs/spec/skills.md` adds display labels
-- `list-stems` (no arg) outputs all stems across spec directory, flat
+- `list-spec-stems ai-docs/spec/skills.md` outputs stems in document order with heading context
+- `list-spec-stems -v ai-docs/spec/skills.md` adds display labels
+- `list-spec-stems` (no arg) outputs all stems across spec directory, flat
 
 ### Result (cab9b24) - 2026-04-21
 
-`claude/bin/list-stems` fully rewritten. No-arg mode: flat grep scan across `ai-docs/spec/`. File-arg mode: markdown heading stack parser; H1 excluded; heading-level stems at depth-proportional indent; body-level stems one level deeper than current heading. `-v` flag: tab-separated stem + label; emits stderr warning in no-arg mode instead of silently ignoring.
+`claude/bin/list-spec-stems` fully rewritten. No-arg mode: flat grep scan across `ai-docs/spec/`. File-arg mode: markdown heading stack parser; H1 excluded; heading-level stems at depth-proportional indent; body-level stems one level deeper than current heading. `-v` flag: tab-separated stem + label; emits stderr warning in no-arg mode instead of silently ignoring.
 
 ### Phase 3: Tooling cleanup — `spec-build-index`
 

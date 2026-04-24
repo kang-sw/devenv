@@ -23,7 +23,7 @@ This ticket implements the structural changes needed to realize that model:
 Tickets reference spec-stems. Spec items do not reference tickets. This keeps spec independent of task management and enables multiple tickets to address the same spec feature.
 
 **Auto-derived stems, not manually assigned:**
-Stems are derived from file path + heading hierarchy. No authoring overhead. Agents use `list-stems` to query canonical stems before writing tickets or commits. Manual assignment was rejected: it adds cognitive overhead with no payoff given that heading renames are rare in practice.
+Stems are derived from file path + heading hierarchy. No authoring overhead. Agents use `list-spec-stems` to query canonical stems before writing tickets or commits. Manual assignment was rejected: it adds cognitive overhead with no payoff given that heading renames are rare in practice.
 
 **Stem format `path/to/file:heading.subheading`:**
 `:` separates file path from heading hierarchy. `.` separates heading levels within the hierarchy. `/` within the file path component follows directory structure. `index.md` files are treated mechanically (`dir/index:heading`, no special-casing). This guarantees uniqueness across subdirectory-expanded spec structures.
@@ -41,7 +41,7 @@ Mental model documents describe current internal state only. No 🚧 markers. Th
 
 ### Phase 1: Spec-stem tooling
 
-Extend `spec-build-index` to generate a `stems:` field in spec frontmatter alongside the existing `features:` field. Add a `list-stems` bin command that reads this frontmatter and outputs canonical stem → heading-text pairs.
+Extend `spec-build-index` to generate a `stems:` field in spec frontmatter alongside the existing `features:` field. Add a `list-spec-stems` bin command that reads this frontmatter and outputs canonical stem → heading-text pairs.
 
 **Stem derivation rules:**
 - Normalize heading text: lowercase, spaces → hyphens, strip non-alphanumeric characters (including 🚧, parentheses)
@@ -60,7 +60,7 @@ stems:
 
 **Acceptance criteria:**
 - `spec-build-index <file>` regenerates both `features:` and `stems:` without losing existing frontmatter fields
-- `list-stems <spec-file>` outputs the stems map
+- `list-spec-stems <spec-file>` outputs the stems map
 - Headings containing 🚧 and special characters produce valid, non-empty slug stems
 
 ### Phase 2: write-spec — mandatory gate and spec format change
@@ -80,7 +80,7 @@ Remove ticket references from spec item format. Spec items carry only:
 
 Update the spec-format template in write-spec to reflect this.
 
-Depends on: Phase 1 (agents can call `list-stems` when writing new spec sections).
+Depends on: Phase 1 (agents can call `list-spec-stems` when writing new spec sections).
 
 **Acceptance criteria:**
 - write-spec invoked on an internal-only change exits with "No public behavior affected" and suggests write-ticket
@@ -119,7 +119,7 @@ Update write-ticket to prompt for spec-stem references when the ticket implement
 
 Also add rename convention to commit rules: when a spec heading is renamed, the commit message must include `renamed-spec: <old-stem> → <new-stem>`. This is the only traceability mechanism for rename events (no alias machinery needed since renames are rare).
 
-Depends on: Phase 1 (canonical stems available via list-stems).
+Depends on: Phase 1 (canonical stems available via list-spec-stems).
 
 **Acceptance criteria:**
 - Ticket frontmatter template includes optional `spec:` field

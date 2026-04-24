@@ -105,7 +105,7 @@ With path args: filters to docs whose `sources:` frontmatter field overlaps with
 
 ### Spec Tooling
 
-`generate-spec-stem`, `list-stems`, and `spec-build-index` are also part of the bin suite. Full behavioral specs are in [Spec System](spec-system.md) under Stem Tooling.
+`generate-spec-stem`, `list-spec-stems`, and `spec-build-index` are also part of the bin suite. Full behavioral specs are in [Spec System](spec-system.md) under Stem Tooling.
 
 ## Hooks
 

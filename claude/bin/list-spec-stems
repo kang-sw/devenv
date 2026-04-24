@@ -2,7 +2,7 @@
 """List spec stems from ai-docs/spec/ or a specific spec file.
 
 Usage:
-  list-stems [-v] [<spec-file>]
+  list-spec-stems [-v] [<spec-file>]
 
   No file arg : output flat list of all stems found under ai-docs/spec/.
                 -v emits a warning — display labels require heading context.

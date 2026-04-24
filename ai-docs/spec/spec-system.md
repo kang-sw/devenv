@@ -4,7 +4,7 @@ summary: Tooling, conventions, and agents for authoring and maintaining caller-v
 features:
   - Stem Tooling
     - `generate-spec-stem`
-    - `list-stems`
+    - `list-spec-stems`
     - `spec-build-index`
   - Authoring Conventions
     - Anchor Format
@@ -42,7 +42,7 @@ One `YYMMDD-slug` is printed per line, where `YYMMDD` is today's date. Before em
 - Zero-arg invocation exits with code 1 and prints usage to stderr.
 - Unreadable spec files are silently skipped during collision detection.
 
-### `list-stems` {#260421-list-stems-tool}
+### `list-spec-stems` {#260421-list-spec-stems-tool}
 
 Lists `{#YYMMDD-slug}` anchors found in spec files.
 

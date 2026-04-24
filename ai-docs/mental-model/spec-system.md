@@ -7,14 +7,14 @@ sources:
   - claude/infra/
   - claude/skills/forge-spec/
 related:
-  doc-tooling: "forge-mental-model calls list-stems (no args) to embed spec stems into domain drafts when ai-docs/spec/ is present. A stem format change breaks forge-mental-model's embedding step."
+  doc-tooling: "forge-mental-model calls list-spec-stems (no args) to embed spec stems into domain drafts when ai-docs/spec/ is present. A stem format change breaks forge-mental-model's embedding step."
 ---
 
 # Spec System
 
 Spec documents live under `ai-docs/spec/` and use a stem-and-anchor system for
 stable feature identity. Three tools cooperate: `generate-spec-stem`,
-`list-stems`, and `spec-build-index`.
+`list-spec-stems`, and `spec-build-index`.
 
 ## Entry Points
 
@@ -31,7 +31,7 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 - `spec-build-index` guarantees: after each run, the `features:` frontmatter block reflects
   the current heading structure (headings inside ` ``` ` or `~~~` fenced blocks are excluded),
   and any `stems:` block is removed. It does not write stems anywhere.
-- `list-stems` (no file arg) guarantees: a flat list of every `{#YYMMDD-slug}` found by
+- `list-spec-stems` (no file arg) guarantees: a flat list of every `{#YYMMDD-slug}` found by
   grepping `ai-docs/spec/`. Hierarchy and display labels require a file argument.
 - `forge-spec` guarantees: no spec file is written and no archive `git mv` executes without explicit
   user confirmation. Resume detection runs at every invocation via `TaskList` — tasks prefixed
@@ -48,7 +48,7 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 
 ## Coupling
 
-- `generate-spec-stem` ↔ `list-stems` ↔ `spec-build-index`: all three share the
+- `generate-spec-stem` ↔ `list-spec-stems` ↔ `spec-build-index`: all three share the
   `{#YYMMDD-slug}` regex as the stem format. A format change breaks all three.
 - Anchors live in document body text (any line), not in frontmatter. Every tool
   that reads stems must grep document body — not parse frontmatter.
@@ -64,10 +64,10 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 - **Add a new stem to a spec**: run `generate-spec-stem <descriptive-slug>` first,
   insert the returned `{#YYMMDD-slug}` on a heading line or any body line,
   then run `spec-build-index <file>`. The anchor can appear anywhere in the document.
-- **Find all stems in the repo**: run `list-stems` (no args) — greps all files.
+- **Find all stems in the repo**: run `list-spec-stems` (no args) — greps all files.
   Do not look in frontmatter; `stems:` blocks no longer exist.
 - **Change the stem format**: update the `STEM_RE` constant in all three tools
-  (`generate-spec-stem`, `list-stems`, `spec-build-index`) and update `spec-conventions.md`.
+  (`generate-spec-stem`, `list-spec-stems`, `spec-build-index`) and update `spec-conventions.md`.
 - **Rebuild spec from scratch**: invoke `/forge-spec`. It archives existing spec files,
   surveys the codebase via parallel Sonnet subagents, confirms domain list and per-behavior
   classification with the user, then writes spec entries domain by domain.
@@ -83,7 +83,7 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
   on next run. Stems are anchors in document body text only.
 - Inserting a `{#YYMMDD-slug}` without running `generate-spec-stem` first — the stem
   may collide with an existing anchor in another file.
-- Expecting `list-stems -v` (no file arg) to return display labels — flat mode cannot
+- Expecting `list-spec-stems -v` (no file arg) to return display labels — flat mode cannot
   reconstruct heading context; `-v` emits a warning and flat output only.
 - Searching for stems in the `stems:` frontmatter field of spec files — that field
   no longer exists. All stem lookup must grep document body for `{#\d{6}-[\w-]+}`.

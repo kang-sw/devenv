@@ -31,7 +31,7 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
    c. Collect `> [!note] Planned 🚧` callouts — associate each with the nearest preceding anchored heading to derive its spec-stem.
 
 3. **Check implementation via commit history for each spec-stem.**
-   a. Extract the bare slug from the `{#slug}` anchor (e.g., `260421-feature-name`). This is the spec-stem. Optionally run `list-stems <spec-file>` to confirm the slug is registered in the file.
+   a. Extract the bare slug from the `{#slug}` anchor (e.g., `260421-feature-name`). This is the spec-stem. Optionally run `list-spec-stems <spec-file>` to confirm the slug is registered in the file.
    b. Run `git log --all --grep="<spec-stem>" --oneline` to find commits referencing the stem in `## Spec` sections.
    c. If matching commits exist: mark for strip — implementation is recorded in history.
    d. If no commits found: report as unimplemented; do not strip.

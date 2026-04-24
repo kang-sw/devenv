@@ -45,7 +45,7 @@ Mental model documents describe current internal state only — no 🚧 markers.
 
 ### Phase 1: Spec-stem tooling
 
-Extend `spec-build-index` to generate a `stems:` field in spec frontmatter alongside the existing `features:` field. Add a `list-stems` bin command that reads this frontmatter and outputs canonical stems.
+Extend `spec-build-index` to generate a `stems:` field in spec frontmatter alongside the existing `features:` field. Add a `list-spec-stems` bin command that reads this frontmatter and outputs canonical stems.
 
 **Heading anchor convention:**
 
@@ -69,22 +69,22 @@ stems:
   skills:workflow-skills.discussion.discussion-loop: "### Discussion Loop"
 ```
 
-**`list-stems` command:**
+**`list-spec-stems` command:**
 
-- `list-stems <spec-file>` — outputs stem keys only (for referencing in tickets/commits)
-- `list-stems -v <spec-file>` — outputs stem + heading display text
+- `list-spec-stems <spec-file>` — outputs stem keys only (for referencing in tickets/commits)
+- `list-spec-stems -v <spec-file>` — outputs stem + heading display text
 
 **Acceptance criteria:**
 - `spec-build-index <file>` regenerates both `features:` and `stems:` without losing existing frontmatter fields
-- `list-stems ai-docs/spec/skills.md` outputs stem keys
-- `list-stems -v ai-docs/spec/skills.md` outputs stem + heading text pairs
+- `list-spec-stems ai-docs/spec/skills.md` outputs stem keys
+- `list-spec-stems -v ai-docs/spec/skills.md` outputs stem + heading text pairs
 - Headings without `{#slug}` are silently skipped (no error)
 
 ### Result (fe2fda5) - 2026-04-21
 
 - `spec-build-index` extended: strips `{#slug}` anchors from `features:` display text; generates `stems:` YAML map keyed by canonical stem.
-- `claude/bin/list-stems` added: Python script following `list-mental-model` pattern; `-v` flag adds display text; computes spec-relative path from caller's working directory.
-- Review fix: `list-stems` was not robust to callers below repo root; `d7e3b61` adds CWD-independent path resolution.
+- `claude/bin/list-spec-stems` added: Python script following `list-mental-model` pattern; `-v` flag adds display text; computes spec-relative path from caller's working directory.
+- Review fix: `list-spec-stems` was not robust to callers below repo root; `d7e3b61` adds CWD-independent path resolution.
 
 ### Phase 2: write-spec — mandatory gate and spec format change
 
@@ -160,7 +160,7 @@ Add a migration checklist item to `CLAUDE.template.md` so existing downstream pr
          `renamed-spec: <old-stem> → <new-stem>` in the commit message."
 ```
 
-Update write-ticket to prompt for spec-stem references when the ticket implements a spec feature (use `list-stems` to confirm canonical stems before writing).
+Update write-ticket to prompt for spec-stem references when the ticket implements a spec feature (use `list-spec-stems` to confirm canonical stems before writing).
 
 Depends on: Phase 1.
 

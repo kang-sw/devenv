@@ -193,7 +193,7 @@ Wait for the subagent to return.
 
 If spec is available (recorded in cold-start step 1):
 
-1. Run `list-stems` (no args) to get all spec stems in the repo.
+1. Run `list-spec-stems` (no args) to get all spec stems in the repo.
 2. For each section in the domain draft: identify spec stems whose behavior corresponds to the section's topic. Embed the stem inline in the relevant body text (e.g., `{#260421-feature-name}`).
 
 Skip if no spec exists.
