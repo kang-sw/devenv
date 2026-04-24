@@ -28,6 +28,8 @@ The infra primitives (`ws-call-agent`, `ws-agent`, `ws-declare-agent`) replacing
 - **Deterministic UUID scope.** `ws-agent <name>` derives UUID v5 from repo-root + git-branch + name. Same name on the same branch always maps to the same UUID. `ws-declare-agent` clears the session file before each run to prevent stale-session collisions.
 - **`--session-id` is create-only.** It errors if the UUID already exists. `ws-declare-agent` + `ws-call-agent --agent <name>` handles the create-or-resume lifecycle automatically.
 - **Session file path.** `~/.claude/projects/<escaped-cwd>/<uuid>.jsonl` where `/` in CWD is replaced with `-`.
+- **Plugin-distributed reference.** `ai-docs/spec/` is project-local and does not ship with the plugin. Interface documentation for the orchestration primitives lives at `claude/infra/ws-orchestration.md` (already committed). Skills load it via `load-infra ws-orchestration.md`. Phase 1's rewritten SKILL.md should include this load at the start of On: invoke.
+- **`load-infra` discoverability.** `load-infra` with no arguments now lists all available infra docs and bin scripts. Implementer may call it to orient.
 
 ## Constraints
 
