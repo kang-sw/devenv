@@ -116,8 +116,8 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260419-chore-blueprint-plugin-extraction` | done | Package claude/ as a Claude Code plugin (now named "ws"); all phases complete and validated |
-| `260420-feat-spec-driven-workflow` | wip | Spec-driven workflow infrastructure (phases 1-5 done; phase 6 pending) |
-| `260421-feat-global-spec-stems` | wip | Global unique YYMMDD-slug stems (phases 1-4 done; phase 5 migration pending) |
+| `260420-feat-spec-driven-workflow` | done | Spec-driven workflow infrastructure; all phases done (phase 6 migration cancelled) |
+| `260421-feat-global-spec-stems` | done | Global unique YYMMDD-slug stems; all phases done (phase 5 migration cancelled) |
 | `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
 | `260421-feat-delegate-implement-feature-branch` | done | /implement feature-branch auto-merge mode; all phases complete |
 | `260422-chore-write-ticket-workflow-drift` | done | Fix stale /write-spec suggestion in write-ticket + workflow-skills.md chain drift |
@@ -130,6 +130,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260423-feat-doc-system-gap-fixes` | done | Documentation system gap fixes — feature removal protocol, spec diff signal, discuss staleness warning, cross-reference convention |
 | `260423-feat-doc-tooling-restructure` | done | Doc tooling restructure — forge-mental-model new skill, write-mental-model removal, forge-spec palette flag, bootstrap legacy detection |
 | `260424-feat-project-survey-agent` | done | project-survey Haiku agent + auto-invoke integration into edit/implement/parallel-implement/discuss |
+| `260424-feat-domain-rules-layering` | todo | Architecture Rules split + /add-rule skill; domain rules in mental-model docs |
 
 ## Session Notes
 
