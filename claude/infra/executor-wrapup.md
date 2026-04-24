@@ -1,6 +1,6 @@
 # Executor Wrapup
 
-Shared wrapup procedure for all executor-series skills (ws:edit, ws:implement, ws:parallel-implement).
+Shared wrapup procedure for all executor-series skills (ws:edit, ws:implement).
 Load and follow after the implementation commit is made and any merge step is done.
 
 ## Invariants

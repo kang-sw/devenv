@@ -64,7 +64,7 @@ Agent(
 ### 5. Suggest next step
 
 Based on implementation complexity and session warmth on the target:
-- **Wide** (multiple independent modules): suggest `/parallel-implement`.
+- **Wide** (multiple independent modules): suggest `/implement` (one scope at a time) or ask the user to split into separate tickets.
 - **Narrow + warm** (single module, main agent already engaged the code): suggest `/edit`.
 - **Narrow + cold** (single module, main agent is cold on the target): suggest `/implement`.
 

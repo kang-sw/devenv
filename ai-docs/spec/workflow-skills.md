@@ -16,7 +16,6 @@ features:
   - Implementation Skills
     - `/edit`
     - `/implement`
-    - `/parallel-implement`
     - Pre-invocation Context Survey — `project-survey`
     - `/proceed`
   - Reconstruction
@@ -29,7 +28,6 @@ features:
   - Utility Skills
     - `/add-rule`
     - `/ship`
-    - `/team-lead`
     - `/bootstrap`
 ---
 
@@ -48,7 +46,6 @@ The standard pipeline runs in this order:
                                              ↓
                    /write-skeleton? → /write-plan? → /edit
                                                   → /implement
-                                                  → /parallel-implement
 ```
 
 Each skill recommends the next step at completion. `/proceed` is the auto-router invoked after `/write-ticket`; it selects and chains skeleton, plan, and implementation stages based on existing artifacts and session context.
@@ -120,7 +117,7 @@ Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). 
 
 Crystallizes public contracts as interface stubs and integration tests before implementation begins. The lead identifies contract directives (type signatures, API shapes, invariants), delegates writing to a subagent, reviews, and commits. Updates the ticket `skeletons:` frontmatter with the commit hash.
 
-Suggests `/edit`, `/implement`, or `/parallel-implement` as the next step based on scope width and session warmth — does not auto-invoke.
+Suggests `/edit` or `/implement` as the next step based on scope and session warmth — does not auto-invoke.
 
 > [!note] Constraints
 > - Stub files must compile; integration tests are written but not required to pass (implementation is absent).
@@ -174,25 +171,10 @@ Pre-merge, dispatches `spec-updater` first and waits for it to commit, then disp
 > [!note] Implementation Gap · 2026-04-23
 > Pre-merge doc pipeline output (spec-updater and mental-model-updater file changes) is not guaranteed to be committed before the merge step runs.
 
-### `/parallel-implement` {#260421-parallel-implement}
-
-Parallel implementation across N disjoint scope units. Spawns one implementer+reviewer pair per scope; lead serializes all build and test execution requests; lead commits each scope sequentially after all reviewers report clean.
-
-Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate after all scopes are committed; **feature-branch mode** (invoked from any other branch) skips the gate and merges directly. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names.
-
-Requires disjoint file sets — overlapping scopes cause merge conflicts.
-
-Pre-merge (before the report/approval gate), dispatches `spec-updater` first and waits for it to commit, then dispatches `mental-model-updater` and waits. Ambiguous stems are surfaced at the report/approval gate before merge. After merge, the doc pipeline retains only `_index.md` refresh and ticket status update.
-
-> [!note] Implementation Gap · 2026-04-23
-> Both pre-merge doc pipeline output (spec-updater, mental-model-updater changes) and post-merge output (`_index.md` refresh, ticket status update) are not guaranteed to be committed before the skill exits.
-
-> [!note] Constraints
-> - Only one build/test command runs at a time (lead-serialized) — concurrent implementers share the working tree.
 
 ### Pre-invocation Context Survey — `project-survey` {#260424-project-survey-auto-invoke}
 
-At the start of each run, `/edit`, `/implement`, `/parallel-implement`, and `/discuss` auto-invoke the `project-survey` agent with the implementation brief or query. The agent returns a `[Must|Maybe]`-tiered reference list of relevant documentation the implementer should read before starting work.
+At the start of each run, `/edit`, `/implement`, and `/discuss` auto-invoke the `project-survey` agent with the implementation brief or query. The agent returns a `[Must|Maybe]`-tiered reference list of relevant documentation the implementer should read before starting work.
 
 - **`[Must]`** — spec entries, mental-model sections, or active tickets directly covering behavior, patterns, or constraints required before starting.
 - **`[Maybe]`** — tangentially related documents; useful when uncertain.
@@ -211,7 +193,6 @@ Auto-router: assesses an implementation target and chains to the correct pipelin
 
 - **Context warmth** — warm session routes to `/edit`; cold routes to `/implement`.
 - **Existing artifacts** — skips `/write-skeleton` and `/write-plan` if already present.
-- **Scope width** — wide or parallelizable scope routes to `/parallel-implement`.
 - **Direct-edit** — trivial changes skip the full pipeline and route directly to `/edit`.
 
 Announces the chosen path before invoking the first skill.
@@ -279,8 +260,8 @@ Flags:
 Model routing: `claude*`, `sonnet`, `haiku`, `opus` → `claude` CLI. `gemini*` → stub (not yet implemented).
 
 > [!note] Constraints
-> - `$(ws-call-agent ...)` command substitution corrupts multi-byte characters in the result field. Safe patterns: pipe directly (`| jq -r '.result'`) or write to a temp file and parse from it.
-> - UUID fields (`session_id`) are ASCII-only and safe to capture via `$()`.
+> - Output is formatted text (info line + agent response). No JSON is exposed to callers.
+> - Exit code is 1 when the underlying call reports an error.
 
 ### `ws-agent` {#260424-ws-agent}
 
@@ -318,14 +299,6 @@ On first invocation with no config present, creates a template for the user to f
 > [!note] Constraints
 > - `.local.md` config takes precedence over `.md` and is gitignored — for private deploy targets only.
 
-### `/team-lead` {#260421-team-lead}
-
-Team orchestration mode: creates and manages a named team via `TeamCreate`/`TeamDelete`; spawns subagents into the team; coordinates inter-agent communication; shuts the team down cleanly at session end.
-
-Loaded automatically by `/implement` and `/parallel-implement` before any team operation. Can also be invoked directly for manual team management.
-
-> [!note] Constraints
-> - Team state is session-scoped — no persistence across sessions.
 
 ### `/bootstrap` {#260421-bootstrap}
 

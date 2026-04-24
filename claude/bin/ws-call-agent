@@ -12,6 +12,7 @@ MODEL="$1"
 shift
 
 ARGS=(-p --dangerously-skip-permissions --output-format json --model "$MODEL")
+HAS_AGENT=0
 
 while [[ $# -gt 1 ]]; do
   case "$1" in
@@ -24,6 +25,7 @@ while [[ $# -gt 1 ]]; do
       else
         ARGS+=(--session-id "$UUID")
       fi
+      HAS_AGENT=1
       shift 2
       ;;
     --session-id)
@@ -46,17 +48,39 @@ while [[ $# -gt 1 ]]; do
 done
 
 PROMPT="$1"
+CONTEXT_LIMIT=150000
+
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
 
 case "$MODEL" in
   claude*|sonnet|haiku|opus)
-    claude "${ARGS[@]}" "$PROMPT"
+    claude "${ARGS[@]}" "$PROMPT" > "$TMPFILE"
     ;;
   gemini*)
-    printf '{"type":"result","is_error":true,"result":"gemini routing not yet implemented"}\n' >&2
+    echo "gemini routing not yet implemented" >&2
     exit 1
     ;;
   *)
-    printf '{"type":"result","is_error":true,"result":"Unknown model: %s"}\n' "$MODEL" >&2
+    echo "Unknown model: $MODEL" >&2
     exit 1
     ;;
 esac
+
+CONTEXT_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens + .usage.cache_read_input_tokens' "$TMPFILE")
+CONTEXT_PCT=$(python3 -c "print(round($CONTEXT_TOKENS / $CONTEXT_LIMIT * 100))")
+
+if [[ "$HAS_AGENT" -eq 1 && "$CONTEXT_PCT" -ge 50 ]]; then
+  if [[ "$CONTEXT_PCT" -ge 70 ]]; then
+    echo "[warn] Context window: ${CONTEXT_PCT}% filled — recommended to refresh this agent"
+  else
+    echo "[info] Context window: ${CONTEXT_PCT}% filled"
+  fi
+  echo ""
+fi
+
+jq -r '.result' "$TMPFILE"
+
+if [[ "$(jq -r '.is_error' "$TMPFILE")" == "true" ]]; then
+  exit 1
+fi

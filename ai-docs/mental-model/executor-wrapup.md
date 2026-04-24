@@ -5,7 +5,6 @@ sources:
   - claude/infra/
   - claude/skills/edit/
   - claude/skills/implement/
-  - claude/skills/parallel-implement/
 related:
   workflow-routing: "Executor skills are the implementation-phase targets that /proceed routes to; wrapup runs after their implementation commits."
 ---
@@ -13,7 +12,7 @@ related:
 # Executor Wrapup
 
 `executor-wrapup.md` is a shared infra playbook loaded by all executor-series
-skills (`ws:edit`, `ws:implement`, `ws:parallel-implement`) at the end of their
+skills (`ws:edit`, `ws:implement`) at the end of their
 doc-pipeline step. It handles three responsibilities:
 
 - `§Doc Pipeline` — refresh `ai-docs/_index.md`.
@@ -36,7 +35,7 @@ doc-pipeline step. It handles three responsibilities:
 ## Coupling
 
 - `ws:edit` → `ws:spec-updater` + `ws:mental-model-updater` → `executor-wrapup`: edit dispatches both updaters in parallel first, waits for them, then calls executor-wrapup. The updaters run before the commit gate so their outputs are captured by the gate.
-- `ws:implement` / `ws:parallel-implement` → `executor-wrapup`: these skills dispatch updaters in their pre-merge pre-pass (before the merge commit). After merging, they call executor-wrapup directly. The commit gate captures any post-merge doc changes.
+- `ws:implement` → `executor-wrapup`: this skill dispatches updaters in its pre-merge pre-pass (before the merge commit). After merging, it calls executor-wrapup directly. The commit gate captures any post-merge doc changes.
 
 ## Extension Points & Change Recipes
 
@@ -49,6 +48,6 @@ doc-pipeline step. It handles three responsibilities:
 
 ## Common Mistakes
 
-- Dispatching `ws:spec-updater` or `ws:mental-model-updater` inside executor-wrapup — the playbook intentionally excludes updater dispatch. Adding it there causes double-dispatch for `ws:implement` and `ws:parallel-implement` whose updaters already ran pre-merge.
+- Dispatching `ws:spec-updater` or `ws:mental-model-updater` inside executor-wrapup — the playbook intentionally excludes updater dispatch. Adding it there causes double-dispatch for `ws:implement`, whose updaters already ran pre-merge.
 - Calling executor-wrapup before updaters finish in an edit-like skill — the commit gate fires before updater outputs exist, leaving ai-docs/ changes uncommitted.
 - Assuming the commit gate is a no-op when no doc changes were planned — prior steps such as updater agents always produce at least a checkpoint commit that touches `ai-docs/`.

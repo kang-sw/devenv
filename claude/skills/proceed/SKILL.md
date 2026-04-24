@@ -18,7 +18,7 @@ Target: $ARGUMENTS
 - Every routing decision is announced with rationale before execution begins.
 - Each pipeline sub-skill is invoked via the Skill tool with the appropriate arguments.
 - Pipeline order is fixed: skeleton → plan → implementation.
-- `/parallel-implement` is never preceded by `/write-plan`. If a plan is needed, execution-mode is locked to single.
+- Execution mode is always single. Split multi-scope work into separate tickets; parallel execution is not available.
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only. Do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
@@ -27,7 +27,7 @@ Target: $ARGUMENTS
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
 - Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
-- Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement` and `/parallel-implement`, and merge.
+- Chain pipeline stages without pausing for user confirmation between stages. The only stopping points are explicit gates defined in sub-skills — report-and-approval in `/implement`, and merge.
 
 ## On: invoke
 
@@ -62,18 +62,16 @@ Otherwise, apply the pipeline judgments in order. Each produces a yes/no that bu
 
 1. **judge: needs-plan** — Does this need codebase research before implementation?
 2. **judge: needs-skeleton** — Does this need contract stubs before implementation?
-3. **judge: execution-mode** — Single-scope or parallel?
+3. **judge: execution-mode** — Single-scope.
 
 Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs. When warmth is warm, `/write-plan` internally selects warm mode; proceed does not pass a mode flag — it only decides whether `/write-plan` is invoked at all.
 
-| needs-skeleton | needs-plan | execution-mode | Pipeline |
-|----------------|------------|----------------|----------|
-| no | no | single | `ws:implement` |
-| no | no | parallel | `ws:parallel-implement` |
-| no | yes | single | `ws:write-plan` then `ws:implement` |
-| yes | no | single | `ws:write-skeleton` then `ws:implement` |
-| yes | no | parallel | `ws:write-skeleton` then `ws:parallel-implement` |
-| yes | yes | single | `ws:write-skeleton` then `ws:write-plan` then `ws:implement` |
+| needs-skeleton | needs-plan | Pipeline |
+|----------------|------------|----------|
+| no | no | `ws:implement` |
+| no | yes | `ws:write-plan` then `ws:implement` |
+| yes | no | `ws:write-skeleton` then `ws:implement` |
+| yes | yes | `ws:write-skeleton` then `ws:write-plan` then `ws:implement` |
 
 ### 3. Announce
 
@@ -98,7 +96,7 @@ For a pipeline verdict, announce:
 - **Warmth**: <warm | cold> — <evidence from conversation state>
 - **Plan**: <skip (reason) | /write-plan (reason)>
 - **Skeleton**: <skip (reason) | /write-skeleton (reason)>
-- **Execution**: </implement | /parallel-implement> — <reason>
+- **Execution**: /implement — <reason>
 
 Proceeding.
 ```
@@ -162,12 +160,11 @@ When plan fires with a warm main agent, `/write-plan` internally selects warm mo
 
 ### judge: execution-mode
 
-If `needs-plan = yes`, execution-mode is locked to single — do not evaluate parallel.
+Execution mode is always single. Split multi-scope work into separate tickets.
 
 | Decision | When |
 |----------|------|
-| Single (`/implement`) | Default — one cohesive scope |
-| Parallel (`/parallel-implement`) | 2+ scopes with no shared files and no shared interfaces, each independently testable. Structural isolation (separate directory trees) is sufficient signal without a skeleton; file-level isolation within a shared directory requires a skeleton to confirm disjointness mechanically. |
+| Single (`/implement`) | Always |
 
 ## Doctrine
 

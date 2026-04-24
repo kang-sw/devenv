@@ -1,6 +1,6 @@
 # WS Orchestration Primitives
 
-Bash-callable scripts at `claude/infra/` for Team-free subagent coordination.
+Bash-callable scripts at `claude/bin/` for Team-free subagent coordination.
 All scripts are on `$PATH` via `claude/bin/`.
 
 ## ws-call-agent
@@ -23,24 +23,17 @@ Wraps `claude -p` with permission bypass and JSON output.
 
 **Model routing:** `claude*` / `sonnet` / `haiku` / `opus` → `claude` CLI. `gemini*` → not yet implemented.
 
-**Output:** JSON object to stdout.
+**Output:** Formatted text to stdout.
 
-```json
-{ "session_id": "...", "result": "...", "is_error": false, ... }
+```
+[info] Context window: N% filled [— recommended to refresh this agent]
+
+<agent response text>
 ```
 
-**Safe parsing patterns:**
+The info line is always first. A blank line separates it from the agent output. Exit code is 1 when the underlying call reports `is_error`.
 
-```bash
-# Pipe-direct — always safe
-ws-call-agent sonnet --agent impl "..." | jq -r '.result'
-
-# UUID extraction — ASCII-only, safe via $()
-UUID=$(ws-call-agent sonnet --agent impl "..." | jq -r '.session_id')
-```
-
-> `$(ws-call-agent ...)` captured to a variable corrupts multi-byte characters
-> in `.result`. Use pipe-direct when reading the response text.
+Context window percentage: `(input + cache_creation + cache_read) / 150K`. Shown only when `--agent` is used and fill ≥50%. Prefix is `[info]` at 50–69%, `[warn]` at ≥70% (~105K tokens).
 
 ## ws-agent
 
@@ -72,17 +65,17 @@ ws-declare-agent implementer reviewer-corr reviewer-fit
 # 2. Start sessions — --agent creates fresh after declare
 ws-call-agent sonnet --agent implementer \
   --system-prompt claude/infra/implementer.md \
-  "Implement X" | jq -r '.result'
+  "Implement X"
 
 # 3. Parallel reviewers — issue multiple Bash calls in the same response
 ws-call-agent sonnet --agent reviewer-corr \
   --system-prompt claude/infra/code-review-correctness.md \
-  "$(git diff HEAD~1)" | jq -r '.result'
+  "$(git diff HEAD~1)"
 
 # 4. Fix loop — --agent auto-resumes the existing session
 ws-call-agent sonnet --agent implementer \
-  "Fix these issues: ..." | jq -r '.result'
+  "Fix these issues: ..."
 
 ws-call-agent sonnet --agent reviewer-corr \
-  "Re-review. Updated diff: ..." | jq -r '.result'
+  "Re-review. Updated diff: ..."
 ```
