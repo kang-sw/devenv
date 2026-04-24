@@ -11,9 +11,9 @@ features:
     - `mental-model-updater`
     - `spec-updater`
   - `worker`
-  - 🚧 Mental-Model Document System
-    - 🚧 Domain Rules Section
-    - 🚧 Ancestor Loading Contract
+  - Mental-Model Document System
+    - Domain Rules Section
+    - Ancestor Loading Contract
 ---
 
 # Agent System
@@ -138,15 +138,6 @@ Produces git commits with `(mental-model-updated)` in the commit body.
 - No expansion beyond domains affected by the commits since the base commit.
 - No content that fails the inclusion test (defined in `claude/infra/mental-model-conventions.md`).
 
-> [!note] Planned 🚧
-> Forge-level restructuring authority: creates new domain docs when code introduces a domain with no existing coverage; splits existing docs when code sub-structure diverges from a flat layout (e.g., a module directory splits into sub-directories). Split trigger is code-structure change observed in the diff — not autonomous LLM judgment. {#260424-mental-model-updater-forge-authority}
-
-> [!note] Planned 🚧
-> Domain Rules promotion: during domain splits, moves `## Domain Rules` entries from the source doc to the parent `index.md`. Rules only move upward in the hierarchy — never down to sub-domain docs. Rule content is never modified autonomously; only position changes. {#260424-mental-model-domain-rules-promotion-only}
-
-> [!note] Planned 🚧
-> `## Stale Rules` output: when a Domain Rule appears inconsistent with current code behavior, appends a `## Stale Rules` section to the `## Mental-Model Updates` output, listing the rule and the observed inconsistency. No autonomous modification of rule content; user resolves via `/add-rule` or manual edit. {#260424-mental-model-domain-rules-stale-output}
-
 ### `spec-updater` {#260421-spec-updater-agent}
 
 Strips `🚧` markers from spec entries whose implementations have landed in commit history. Conservative: defers to caller on ambiguous matches, never strips speculatively.
@@ -165,16 +156,16 @@ General-purpose non-code task agent. Accepts any task description in the spawn p
 > [!note] Constraints
 > - `worker` is intentionally open-ended — task scope and output format are caller-defined. Use more specific agents (clerk, code-reviewer, document-reviewer, mental-model-updater) when the task fits their contracts.
 
-## 🚧 Mental-Model Document System {#260424-mental-model-directory-hierarchy}
+## Mental-Model Document System {#260424-mental-model-directory-hierarchy}
 
 Structural conventions for `ai-docs/mental-model/` that agents observe when reading and writing mental-model docs.
 
-### 🚧 Domain Rules Section {#260424-domain-rules-section}
+### Domain Rules Section {#260424-domain-rules-section}
 
 Each mental-model domain doc may carry a `## Domain Rules` section containing user-authored prescriptions for AI agents working in that domain. These rules describe patterns the agent must follow when implementing code in this domain — analogous to `## Architecture Rules` in `CLAUDE.md` but scoped to a specific domain.
 
 Rules in this section are authored via `/add-rule` or manual edit. No agent modifies their content autonomously.
 
-### 🚧 Ancestor Loading Contract {#260424-executor-ancestor-load}
+### Ancestor Loading Contract {#260424-executor-ancestor-load}
 
 When a skill loads a sub-domain mental-model doc (`mental-model/<domain>/<sub>.md`), it also loads all ancestor `index.md` files (`mental-model/<domain>/index.md`). Ancestor docs are loaded before the sub-domain doc so that inherited `## Domain Rules` are visible to the agent before work begins.

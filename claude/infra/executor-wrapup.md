@@ -8,6 +8,15 @@ Load and follow after the implementation commit is made and any merge step is do
 - Wait for _index.md refresh and any ticket updates to complete before running the doc-commit gate.
 - Doc-commit gate always runs — even when no changes are expected, prior steps may have dirtied ai-docs/.
 - Commit message for doc updates follows CLAUDE.md commit rules; type is `docs`.
+- Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): any agent that reads `ai-docs/mental-model/<domain>/<sub>.md` must read `ai-docs/mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible. Executor skills propagate this rule via §Ancestor Loading.
+
+## §Ancestor Loading
+
+Propagation procedure for the Ancestor loading invariant above:
+
+1. Callers using `list-mental-model` need no manual action — the lister auto-emits a matching parent `<domain>/index.md` alongside any direct-child sub-domain.
+2. Callers using manual paths must apply the rule themselves — read the parent before the child.
+3. Subagent delegations: include the rule verbatim in the spawn prompt so the subagent observes it inside its own read ordering.
 
 ## §Doc Pipeline
 

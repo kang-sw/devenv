@@ -15,6 +15,7 @@ Target: $ARGUMENTS
 
 - This skill delegates — the lead does not read source code or write implementation.
 - When skeleton exists, its stubs and integration tests are the acceptance criteria.
+- Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): whenever the implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before work begins. The lead propagates this rule through the implementer spawn prompt. See `load-infra executor-wrapup.md §Ancestor Loading`.
 - Reviewers report to the lead only — never directly to the implementer. The lead consolidates findings and sends a single list to the implementer.
 - **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the report before merge — no code reaches the target branch without user confirmation.
 - **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead auto-merges after clean review. The feature → main merge remains the user's responsibility.
@@ -77,6 +78,13 @@ Agent(
     Acceptance criteria: skeleton integration tests must pass.
     - Test files: <integration test paths>
     - Run: <command to execute them>
+
+    Mental-model ancestor loading (one-level hierarchies —
+    `<domain>/<sub>.md` only):
+    - When you read `ai-docs/mental-model/<domain>/<sub>.md`, read
+      `ai-docs/mental-model/<domain>/index.md` first so inherited
+      `## Domain Rules` are visible before any edit. `list-mental-model`
+      already emits ancestors alongside direct-child sub-domain docs.
 
     Team rules:
     - Verify integration tests pass before reporting completion or after each fix.
