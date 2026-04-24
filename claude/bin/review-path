@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
-# review-path — emit a stable temp path for a review findings file
+# review-path — emit temp paths for review findings files
 #
-# Usage: review-path <stem>
-#   e.g. review-path impl-auth-correctness
+# Usage: review-path <stem> [<stem> ...]
+#   e.g. review-path correctness fit test
 #
-# Creates the parent directory if absent. Outputs the full path.
-# Callers pass the path to the reviewer at spawn time; the same call
-# during cleanup yields the same path for deletion.
+# Generates a pwd-scoped, per-call run-id so concurrent invocations
+# across projects do not collide. Creates the parent directory if absent.
+# Caller must capture all output lines from a single invocation —
+# paths are not reproducible after the call returns.
 
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: review-path <stem>" >&2
+if [[ $# -lt 1 ]]; then
+  echo "Usage: review-path <stem> [<stem> ...]" >&2
   exit 1
 fi
 
-stem="${1//[^a-zA-Z0-9_-]/-}"
+pwd_hash=$(printf '%s' "$PWD" | shasum | cut -c1-8)
+run_id=$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c8)
 dir="/tmp/claude-reviews"
 mkdir -p "$dir"
-echo "${dir}/${stem}.md"
+
+for stem in "$@"; do
+  safe_stem="${stem//[^a-zA-Z0-9_-]/-}"
+  echo "${dir}/${pwd_hash}-${run_id}-${safe_stem}.md"
+done
