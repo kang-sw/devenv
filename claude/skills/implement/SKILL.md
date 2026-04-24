@@ -16,7 +16,7 @@ Target: $ARGUMENTS
 - This skill delegates — the lead does not read source code or write implementation.
 - When skeleton exists, its stubs and integration tests are the acceptance criteria.
 - Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): whenever the implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before work begins. The lead propagates this rule through the implementer spawn prompt. See `load-infra executor-wrapup.md §Ancestor Loading`.
-- Reviewers report to the lead only — never directly to the implementer. The lead consolidates findings and sends a single list to the implementer.
+- Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
 - **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the report before merge — no code reaches the target branch without user confirmation.
 - **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead auto-merges after clean review. The feature → main merge remains the user's responsibility.
 - Implementer and reviewer sessions persist via `ws-call-agent --agent` auto-resume throughout the review loop; `ws-declare-agent` scopes them to the run.
@@ -46,10 +46,15 @@ Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-call-agent`, `ws-ag
    ```bash
    ws-declare-agent implementer reviewer-correctness reviewer-fit reviewer-test
    ```
-8. Create task list. All tasks are mandatory — do not skip or reorder.
+8. Allocate review-path slots — single Bash call, capture all output lines in lead context:
+   ```bash
+   review-path correctness fit test   # or partition-allocated subset from judge: partition-allocation
+   ```
+   Store the returned paths as literals named `correctness-path`, `fit-path`, `test-path`; reference them by name throughout subsequent steps.
+9. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
    [ ] Spawn implementer — result arrives synchronously via ws-call-agent pipe
-   [ ] Spawn reviewers (partition-allocated) — parallel ws-call-agent calls → lead consolidates findings → implementer fixes → re-review loop until clean
+   [ ] Spawn reviewers (partition-allocated) — parallel ws-call-agent calls; reviewers write to files; lead reads summaries; implementer reads files directly when non-clean → re-review loop until clean
    [ ] Dispatch mental-model-updater + spec-updater in parallel — wait for both; surface ambiguous stems
    [ ] Report to user — wait for approval  ← main-branch mode only
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run both updaters (loop)
@@ -62,7 +67,7 @@ Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-call-agent`, `ws-ag
 
 ```bash
 ws-call-agent sonnet --agent implementer \
-  --system-prompt claude/infra/implementer.md \
+  --system-prompt $(ws-infra-path implementer.md) \
   "Run \`load-infra implementer.md\` first.
 
 Mode: <A: plan-driven | B: inline brief>
@@ -101,55 +106,61 @@ calls in the same response turn. Each reviewer loads its partition doc via
 
 | Partition | System prompt |
 |-----------|---------------|
-| Correctness | `claude/infra/code-review-correctness.md` |
-| Fit | `claude/infra/code-review-fit.md` |
-| Test | `claude/infra/code-review-test.md` |
+| Correctness | `$(ws-infra-path code-review-correctness.md)` |
+| Fit | `$(ws-infra-path code-review-fit.md)` |
+| Test | `$(ws-infra-path code-review-test.md)` |
 
 ```bash
 ws-call-agent sonnet --agent reviewer-correctness \
-  --system-prompt claude/infra/code-review-correctness.md \
+  --system-prompt $(ws-infra-path code-review-correctness.md) \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
-  the updated diff and respond."```
+  the updated diff and respond.
+- Write your full findings to: <correctness-path>
+- Return only: [clean|non-clean]: <one-line characterization of most significant issues>"```
 
 ```bash
 ws-call-agent sonnet --agent reviewer-fit \
-  --system-prompt claude/infra/code-review-fit.md \
+  --system-prompt $(ws-infra-path code-review-fit.md) \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
-  the updated diff and respond."```
+  the updated diff and respond.
+- Write your full findings to: <fit-path>
+- Return only: [clean|non-clean]: <one-line characterization of most significant issues>"```
 
 ```bash
 ws-call-agent sonnet --agent reviewer-test \
-  --system-prompt claude/infra/code-review-test.md \
+  --system-prompt $(ws-infra-path code-review-test.md) \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
-  the updated diff and respond."```
+  the updated diff and respond.
+- Write your full findings to: <test-path>
+- Return only: [clean|non-clean]: <one-line characterization of most significant issues>"```
 
 #### 3c. Relay and loop
 
-1. If all reviewers report "Clean" → exit review loop, proceed to step 4.
-2. Otherwise: relay findings to the implementer — consolidate all review outputs into a single list:
+1. If all reviewers return a `[clean]` summary → exit review loop, proceed to step 4.
+2. Otherwise: relay file paths to the implementer:
    ```bash
    ws-call-agent sonnet --agent implementer \
-     "Fix these issues: <consolidated findings from all reviewers>"   ```
+     "Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly."   ```
    Wait for the implementer's fix report and integration test confirmation.
-3. Re-review (parallel — issue multiple Bash calls in the same response):
+3. Re-review (parallel — issue multiple Bash calls in the same response, same paths — reviewers overwrite):
    ```bash
    ws-call-agent sonnet --agent reviewer-correctness \
      "Re-review. Updated diff: <diff>"   ws-call-agent sonnet --agent reviewer-fit \
      "Re-review. Updated diff: <diff>"   ws-call-agent sonnet --agent reviewer-test \
      "Re-review. Updated diff: <diff>"   ```
-4. Repeat from 3c.1 until all reviewers report "Clean".
+4. Repeat from 3c.1 until all reviewers return `[clean]`.
 
 ### 4. Docs pre-pass
 
@@ -189,7 +200,8 @@ Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, a
 
 ### 8. Cleanup
 
-Session files are scoped via `ws-declare-agent` at skill start — no explicit teardown needed.
+1. `rm -f <correctness-path> <fit-path> <test-path>  # literal paths from lead context`
+2. Session files are scoped via `ws-declare-agent` at skill start — no explicit teardown needed.
 
 ## Judgments
 

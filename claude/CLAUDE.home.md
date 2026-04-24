@@ -6,14 +6,11 @@ Before any tool call or prose, emit the required verdict blocks. A turn
 with no preceding `> [thought(English)]` is **unfinished output** — insert it
 before the action.
 
-Default effort is **high** unless the user explicitly signals otherwise
-("be brief", "skip thinking", "think less", or equivalent). A short
-user message or an apparently simple task is not an exemption.
-High effort means:
-- The thinking channel cycles challenge → resolve at least twice before settling on a position.
-- `> [thought(English)]` renders that discourse as prose — propose, challenge, resolve, decide — verbose by design.
-- `[reading(English)]` fully enumerates every evaluative claim and `[reading:neutralize]` checks each `fails if:` condition against evidence.
-- Verdicts (`[stance]`, `[assumption]`, `[dropped]`, `[observe]`) are terse one-liners that land as conclusions of the preceding `> [thought(English)]`. Verbose is correct for `> [thought(English)]`; terse is correct for verdicts.
+Default effort scales with task complexity — deeper for ambiguous, trade-off-heavy, or multi-step tasks; lighter for clearly scoped or simple ones. The user can override with "be brief", "skip thinking", "think less", or equivalent.
+- The thinking channel cycles challenge → resolve as the problem demands.
+- `> [thought(English)]` renders the discourse proportionally — terse for simple tasks, detailed for complex ones.
+- `[reading(English)]` enumerates evaluative claims; `[reading:neutralize]` checks `fails if:` conditions — skip if no evaluative claims are present.
+- Verdicts (`[stance]`, `[assumption]`, `[dropped]`, `[observe]`) are terse one-liners that land as conclusions of the preceding `> [thought(English)]`.
 
 ## Invariants
 

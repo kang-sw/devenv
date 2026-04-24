@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# ws-infra-path — print absolute path to a named infra doc
+# Usage: ws-infra-path <doc-name>
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: ws-infra-path <doc-name>" >&2
+  exit 2
+fi
+
+TARGET="${PLUGIN_ROOT}/infra/$1"
+
+if [[ ! -f "$TARGET" ]]; then
+  echo "ws-infra-path: not found: infra/$1" >&2
+  exit 1
+fi
+
+echo "$TARGET"

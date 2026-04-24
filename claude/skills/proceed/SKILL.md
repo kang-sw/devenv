@@ -49,7 +49,7 @@ Gather the facts needed for routing. Do not read source code — read only artif
 
 Before the pipeline judges, two prefix judges fire in order:
 
-**judge: needs-spec (always fires first)** — always invoke `/write-spec`. Continue to `judge: needs-ticket` regardless of outcome.
+**Prefix (always):** Invoke `/write-spec`. Continue to `judge: needs-ticket` regardless of outcome.
 
 **judge: needs-ticket (fires second)** — see judgment table below.
 
