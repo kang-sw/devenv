@@ -99,7 +99,7 @@ Agent(
     - When you read `ai-docs/mental-model/<domain>/<sub>.md`, read
       `ai-docs/mental-model/<domain>/index.md` first so inherited
       `## Domain Rules` are visible before any edit. `list-mental-model`
-      already emits ancestors alongside matching children.
+      already emits ancestors alongside direct-child sub-domain docs.
 
     Team rules:
     - Use ONLY the scope-specific test command above to verify your work.

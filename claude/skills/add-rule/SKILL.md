@@ -31,7 +31,7 @@ Target: $ARGUMENTS
 1. Parse the rule from `$ARGUMENTS`. If `$ARGUMENTS` is empty, ask the user for the rule description and wait.
 2. Read `CLAUDE.md` to see current `## Architecture Rules` entries and avoid near-duplicates.
 3. Read the output of `list-mental-model` (rendered above) for the current domain catalog and hierarchy.
-4. For domain-scoped candidates: if any candidate target is a sub-domain doc (`mental-model/<domain>/<sub>.md`), read its parent `mental-model/<domain>/index.md` first — inherited `## Domain Rules` may already cover the rule.
+4. Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): for domain-scoped candidates, if any candidate target is a direct-child sub-domain doc (`mental-model/<domain>/<sub>.md`), read its parent `mental-model/<domain>/index.md` first — inherited `## Domain Rules` may already cover the rule.
 
 ### 2. Classify
 
