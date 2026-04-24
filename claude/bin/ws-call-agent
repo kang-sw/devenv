@@ -67,7 +67,7 @@ case "$MODEL" in
     ;;
 esac
 
-CONTEXT_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens + .usage.cache_read_input_tokens' "$TMPFILE")
+CONTEXT_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens' "$TMPFILE")
 CONTEXT_PCT=$(python3 -c "print(round($CONTEXT_TOKENS / $CONTEXT_LIMIT * 100))")
 
 if [[ "$HAS_AGENT" -eq 1 && "$CONTEXT_PCT" -ge 50 ]]; then

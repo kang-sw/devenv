@@ -43,6 +43,10 @@ Create `.claude/skills/polish-plugin-docs/SKILL.md`. Implement:
 
 Success criterion: skill file passes `skill-authoring.md` invariant checklist; initial reviewer produces a findings report.
 
+### Result (cc7494e) - 2026-04-24
+
+SKILL.md created at `.claude/skills/polish-plugin-docs/SKILL.md` (lead-authored directly; `.claude/` is gitignored, so not in git). Also applied a hotfix to `claude/bin/ws-call-agent` (cc7494e) to exclude `cache_read_input_tokens` from context fill calculation. Initial reviewer agent slot `reviewer-resume` declared via `ws-declare-agent`.
+
 ### Phase 2: Writer loop (per-file + commit)
 
 Implement the writer step inside the review loop:
@@ -56,6 +60,10 @@ Writer system prompt (`claude/infra/polish-writer.md`) must include:
 
 Success criterion: writer produces per-file edits; commit is created after each round.
 
+### Result (b11eb75) - 2026-04-24
+
+`claude/infra/polish-writer.md` created with `skill-authoring.md` embedded verbatim. Multiple fix commits (b11eb75–d397660) resolved authoring compliance issues: Output section added, Doctrine heading collision resolved, redundant return directives removed, Identity trimmed to one sentence. Writer receives findings and file content per-call; no session reuse across files.
+
 ### Phase 3: Dual-reviewer loop + exit
 
 Implement the loop condition and dual-reviewer step:
@@ -66,3 +74,7 @@ Implement the loop condition and dual-reviewer step:
 5. Skill outputs a summary: rounds completed, final reviewer reports, branch name, merge instruction (`git merge --no-ff docs/polish-plugin-docs`).
 
 Success criterion: loop exits cleanly on dual Final report or round limit; skill emits merge instruction.
+
+### Result (d397660) - 2026-04-24
+
+SKILL.md completed with dual-reviewer logic (fresh opus + resumed opus), `ROUND_BASE` capture for stable diffs, brace-grouped commit guard, write-guard for empty output, Glob-based file collection. Three review rounds resolved all Critical/Important findings. Both reviewers reached Phase 2 (clean). Deviations: `find`/`grep` replaced with Glob per CLAUDE.md; git diff reference uses `$ROUND_BASE` instead of `HEAD~1`.
