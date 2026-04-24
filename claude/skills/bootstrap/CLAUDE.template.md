@@ -214,7 +214,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          convert to map format (`stem: comment`) across all tickets in
          `ai-docs/tickets/` (all statuses). Empty lists (`related: []`)
          may be removed or left as-is — the map script handles both.
-         See the `list-active.py` bin script for canonical parser.
+         See the `ws-proj-tree` bin script for canonical parser.
 - v0021: If `ai-docs/mental-model/overview.md` exists, promote it to the
          top-level index: `git mv ai-docs/mental-model/overview.md ai-docs/mental-model.md`.
          Then dispatch the `mental-model-updater` agent to add frontmatter (`domain`,

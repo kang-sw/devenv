@@ -13,7 +13,7 @@ Topic: $ARGUMENTS
 
 ## Project Map
 
-!`list-active.py`
+!`ws-proj-tree`
 
 ## Invariants
 
