@@ -61,7 +61,6 @@ claude/infra/                 — docs only; accessed via load-infra
   code-review-fit.md          — Fit review partition: conventions, naming, reuse, patterns
   code-review-test.md         — Test review partition: assertion validity, coverage, mock integrity
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
-  polish-writer.md            — Document simplifier agent system prompt; skill-authoring.md embedded verbatim
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess
