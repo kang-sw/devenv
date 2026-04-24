@@ -365,7 +365,7 @@ Total stems generated: <count>
 
 ### 3. Suggested next steps
 
-- Invoke `/ws:spec-updater` to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
+- Spawn `ws:spec-updater` agent to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
 - Review `🚧` entries with open tickets — confirm each has an active wip/todo ticket or drop the marker.
 - Run `/write-spec` for any domain surfaces discovered after wrap-up.
 
