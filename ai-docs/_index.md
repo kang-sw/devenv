@@ -65,10 +65,17 @@ claude/infra/                 — docs only; accessed via load-infra
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess
   spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
-  list-spec-stems                  — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
+  generate-spec-stem          — emit a new {#YYMMDD-slug} anchor for a given descriptive slug
+  list-spec-stems             — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
   merge-branch                — branch merge with strategy selection (squash or --no-ff)
   list-mental-model           — enumerate mental-model docs relevant to target paths
   load-infra                  — cat any infra doc by name (agent Bash tool context)
+  ws-infra-path               — return absolute path to an infra doc (for --system-prompt args)
+  ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
+  review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
+  ws-call-agent               — spawn or resume a named agent session via headless claude subprocess
+  ws-agent                    — alias for ws-call-agent (backward compat)
+  ws-declare-agent            — declare agent name slots for the current run (scoped cleanup)
 ```
 
 ## Skill Inventory
@@ -142,8 +149,9 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260424-feat-domain-rules-layering` | done | Architecture Rules split + /add-rule skill; domain rules in mental-model docs |
 | `260424-feat-polish-plugin-docs` | done | /polish-plugin-docs local skill + polish-writer agent + ws-call-agent context-fill hotfix |
 | `260424-refactor-proceed-gate-suppression` | done | judge:idea-level demoted to reminder + /proceed gate-suppression context in prefix-stage invocations |
-| `260424-feat-infra-path-portability` | todo | --system-prompt bare-path fix (use load-infra) + /skill-lint portability scanner |
-| `260424-feat-discuss-on-demand-survey` | todo | /discuss on-demand project-survey + enriched output (spec summaries, ticket phase titles) |
+| `260424-feat-infra-path-portability` | done | ws-infra-path portability script; all bare claude/infra/ paths replaced with $(ws-infra-path) |
+| `260424-feat-discuss-on-demand-survey` | done | /discuss on-demand survey via judge:needs-survey; project-survey enriched output (titles + summaries) |
+| `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to review-path files, implementer reads directly |
 
 ## Session Notes
 
