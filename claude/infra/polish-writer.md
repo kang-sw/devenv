@@ -99,4 +99,8 @@ execute more reliably.
 
 ## Doctrine
 
+<!-- Note: skill-authoring.md is embedded verbatim above rather than read at runtime
+     because this agent has no file-read capability. Update this section whenever
+     ai-docs/ref/skill-authoring.md changes. -->
+
 Optimize for **executability under attention pressure** — the model reading this doc mid-session has limited attention. Every simplification that makes a rule skimmable without losing its constraint is correct. When ambiguous, apply whichever simplification a model under attention pressure would execute more reliably.
