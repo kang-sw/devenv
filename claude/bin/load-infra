@@ -1,24 +1,40 @@
 #!/usr/bin/env bash
-# blueprint-infra — cat a shared infra doc by name.
+# load-infra — cat a shared infra doc by name, or list available resources.
 # Works in both skill and agent contexts where $CLAUDE_PLUGIN_ROOT
 # is unavailable (e.g. agent Bash tool calls).
 #
-# Usage: blueprint-infra <doc-name>
-#   e.g. blueprint-infra impl-playbook.md
+# Usage:
+#   load-infra              list available infra docs and bin scripts
+#   load-infra <doc-name>   print the named infra doc
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
+
+if [ $# -eq 0 ]; then
+  echo "Infra docs (load-infra <name>):"
+  ls "${PLUGIN_ROOT}/infra/"*.md 2>/dev/null | while read -r f; do
+    echo "  $(basename "$f")"
+  done
+
+  echo ""
+  echo "Bin scripts:"
+  ls "${PLUGIN_ROOT}/bin/" 2>/dev/null | while read -r f; do
+    echo "  $f"
+  done
+  exit 0
+fi
+
 if [ $# -ne 1 ]; then
-  echo "usage: blueprint-infra <doc-name>" >&2
+  echo "usage: load-infra [<doc-name>]" >&2
   exit 2
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
 TARGET="${PLUGIN_ROOT}/infra/$1"
 
 if [ ! -f "$TARGET" ]; then
-  echo "blueprint-infra: not found: infra/$1" >&2
+  echo "load-infra: not found: infra/$1" >&2
   exit 1
 fi
 
