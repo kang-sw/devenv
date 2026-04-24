@@ -48,3 +48,10 @@ or brief is the single source of truth, and every implementation choice
 stays within its boundaries. When a rule is ambiguous, apply whichever
 interpretation more reliably preserves fidelity to the plan's contracts
 and decisions.
+
+> Reviewer criteria are strict by design. When review findings arrive as a file path:
+> read the file, then apply judgment:
+> - Address correctness, contract, and security findings.
+> - Deprioritize style or naming feedback that conflicts with established patterns in the
+>   surrounding codebase.
+> - Never apply a finding without understanding why it matters for this specific change.
