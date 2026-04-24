@@ -420,7 +420,7 @@ link "$REPO_DIR/shell/scripts" "$HOME/.devenv-scripts"
 link "$REPO_DIR/nvim" "$HOME/.config/nvim"
 
 # Claude Code CLAUDE.md — global instructions
-link "$REPO_DIR/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+link "$REPO_DIR/claude/CLAUDE.home.md" "$HOME/.claude/CLAUDE.md"
 
 # Claude Code blueprint plugin — clean up old per-file symlinks we created
 # (skills/agents/infra were previously symlinked individually; now the plugin handles them).
