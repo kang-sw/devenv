@@ -1,6 +1,6 @@
 {
   "name": "ws",
-  "version": "1.0.0",
+  "version": "0.7.0",
   "description": "Structured AI-assisted development workflow: ticket-driven, contract-first, multi-agent.",
   "author": {
     "name": "kang-sw"

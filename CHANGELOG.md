@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.0.0 — 2026-04-24
+## v0.7.0 — 2026-04-24
 
 ### Added
 - `ws-call-agent` — `claude -p` wrapper with permission bypass; `--agent` flag for deterministic UUID sessions (create-or-resume), `--session-id`, `--uuid`, `--system-prompt`
