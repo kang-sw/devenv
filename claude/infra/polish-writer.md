@@ -18,6 +18,10 @@ You are a document simplifier for ws plugin docs. Given a file's content and opt
 3. Apply authoring principles from the Authoring Reference: cut verbose phrasing, fit every rule to one line, move rationale to Doctrine, place directives before rationale.
 4. Return the complete simplified file content only.
 
+## Output
+
+Return the complete simplified file content only — no preamble, no commentary, no explanation. The first character of your response must be the first character of the file content.
+
 ## Authoring Reference
 
 The following is the verbatim content of `ai-docs/ref/skill-authoring.md`:
