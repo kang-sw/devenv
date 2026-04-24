@@ -29,6 +29,7 @@ features:
     - `/add-rule`
     - `/ship`
     - `/bootstrap`
+    - 🚧 `/skill-lint`
 ---
 
 # Workflow Skills
@@ -103,6 +104,9 @@ After writing, runs `spec-build-index` to rebuild the `features:` frontmatter in
 > [!note] Constraints
 > - Never includes ticket references in `🚧` markers — implementation traceability flows through commit `## Spec` sections referencing the spec-stem.
 > - Never edits the `features:` frontmatter block manually — `spec-build-index` owns it.
+
+> [!note] Planned 🚧
+> `judge: idea-level` will change from a blocking confirmation gate to a non-blocking reminder: the skill writes the `🚧` entry and appends a session reminder to create a `todo/`-or-higher ticket before the session ends. {#260424-write-spec-idea-level-nonblocking}
 
 ### `/write-ticket` {#260421-write-ticket}
 
@@ -187,6 +191,9 @@ The survey fires transparently — no additional caller invocation is required.
 > - `done/` and `dropped/` ticket directories are excluded from the search scope.
 > - Source code file references are not produced by this agent.
 
+> [!note] Planned 🚧
+> In `/discuss`, the survey moves from auto-fire on every invoke to on-demand: the model triggers it when it detects broad topic scope or a direction shift. The output will be enriched to include spec entry summaries and active ticket phase titles alongside stems. {#260424-discuss-on-demand-survey}
+
 ### `/proceed` {#260421-proceed}
 
 Auto-router: assesses an implementation target and chains to the correct pipeline without executing implementation steps itself. Judges:
@@ -206,6 +213,9 @@ Announces the chosen path before invoking the first skill.
 > - **`judge: needs-ticket`** — auto-invokes `/write-ticket` when the target is a vague inline description with no clear scope. Clear-scope inline descriptions currently bypass `/write-ticket` and proceed directly to implementation. Exception: exploratory targets stop and route back to `/discuss`.
 >
 > With this change, `/proceed` is a valid entry point from any conversation state, including immediately after `/discuss` or mid-discussion with no ticket path argument.
+
+> [!note] Planned 🚧
+> When invoking prefix stages (`/write-spec`, `/write-ticket`), `/proceed` will pass natural-language override context in the Skill invocation args to suppress interactive confirmation gates (`judge: idea-level`, `judge: spec-gate`). Sub-skills receiving this context use automatic defaults rather than prompting the user. {#260424-proceed-chain-gate-suppression}
 
 ## Reconstruction
 
@@ -263,6 +273,9 @@ Model routing: `claude*`, `sonnet`, `haiku`, `opus` → `claude` CLI. `gemini*` 
 > - Output is formatted text (info line + agent response). No JSON is exposed to callers.
 > - Exit code is 1 when the underlying call reports an error.
 
+> [!note] Planned 🚧
+> `--system-prompt` paths must be resolved via `$(load-infra <docname>)` rather than hardcoded `claude/infra/` relative paths, so callers in downstream projects work regardless of working directory. Existing callers using bare relative paths will be updated. {#260424-infra-path-portability}
+
 ### `ws-agent` {#260424-ws-agent}
 
 `ws-agent <name>` → prints a deterministic UUID v5.
@@ -307,3 +320,7 @@ Scaffolds a new project (`fresh` mode) or upgrades an existing one (`upgrade` / 
 Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`, `plans/`, `ref/`) and a `.gitignore` entry for `.local.md` files.
 
 Legacy project detection: when `ai-docs/spec/` or `ai-docs/mental-model/` is absent after bootstrapping, the skill suggests running `/forge-spec` followed by `/forge-mental-model` to establish the documentation baseline. {#260423-bootstrap-legacy-forge-routing}
+
+### 🚧 `/skill-lint` {#260424-skill-linter}
+
+Scans skill and infra documents for portability issues that would cause failures in downstream projects. Checks: `--system-prompt` arguments using bare `claude/infra/` relative paths (must use `$(load-infra <docname>)` instead); other path patterns hard-coded to the devenv root. Reports findings with file and line references.
