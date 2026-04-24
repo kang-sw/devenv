@@ -30,17 +30,17 @@ Topic: $ARGUMENTS
 
 ## On: invoke
 
-0. Context survey: spawn `project-survey` with `$ARGUMENTS` as the brief. Use the returned `[Must|Maybe]` reference list as the initial reading queue for the discussion session.
 1. If `$ARGUMENTS` references a ticket, read it.
 2. Enter discussion loop.
 
 ## On: discussion loop
 
-1. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-2. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
+1. Apply **judge: needs-survey** — if the current turn's topic warrants it, spawn `project-survey` with the topic as the brief and incorporate the returned reference list into the current turn's reasoning before responding.
+2. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
+3. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
    When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."
-3. When discussion changes unimplemented ticket phases, update them in place with user agreement.
-4. Continue until the user signals done.
+4. When discussion changes unimplemented ticket phases, update them in place with user agreement.
+5. Continue until the user signals done.
 
 ## On: Ticket Status Transition
 
@@ -81,6 +81,12 @@ When discussion converges on a decision in any of these categories, frame
 the conclusion in terms its downstream consumer can directly act on.
 
 ## Judgments
+
+**judge: needs-survey** — Spawn `project-survey` when any of the following hold:
+- The topic references components, specs, or tickets the model has not read this session and cannot confidently assess scope from session context alone.
+- The discussion direction shifts to a new domain mid-session.
+
+Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") — those draw from session state or git log.
 
 **judge: needs-integration-tests** — Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.
 
