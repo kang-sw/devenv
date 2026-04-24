@@ -25,6 +25,7 @@ Read before authoring or modifying skills, agents, or infra:
 | Document | Purpose |
 |----------|---------|
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
+| `ai-docs/ship/ws.md` | Ship config for the `ws` plugin: version strategy, changelog, tag, push |
 | `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `load-infra impl-playbook.md`. |
 | `claude/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `load-infra subagent-rules.md`. |
 | `claude/infra/executor-wrapup.md` | Shared post-implementation wrapup: _index.md refresh, doc-commit gate, ticket update. Access via `load-infra executor-wrapup.md`. |
