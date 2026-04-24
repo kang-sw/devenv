@@ -1,6 +1,6 @@
 # WS Orchestration Primitives
 
-Bash-callable scripts at `claude/infra/` for Team-free subagent coordination.
+Bash-callable scripts at `claude/bin/` for Team-free subagent coordination.
 All scripts are on `$PATH` via `claude/bin/`.
 
 ## ws-call-agent
