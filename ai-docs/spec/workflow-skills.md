@@ -22,6 +22,10 @@ features:
   - Reconstruction
     - `/forge-spec`
     - `/forge-mental-model`
+  - Agent Orchestration Primitives
+    - `ws-call-agent`
+    - `ws-agent`
+    - `ws-declare-agent`
   - Utility Skills
     - `/add-rule`
     - `/ship`
@@ -255,6 +259,40 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 > - No domain file is written without completing the survey step for that domain.
 > - Uses `TaskCreate` with `forge-mental-model-<domain>` prefix for cross-compact resume detection — renaming tasks breaks resume.
 > - Replaces `/write-mental-model` for from-scratch use cases.
+
+## Agent Orchestration Primitives
+
+Bash-callable infra scripts at `claude/infra/` that replace `TeamCreate`/`SendMessage`/`TeamDelete` for subagent coordination. Skill leads invoke these directly via the `Bash` tool.
+
+### `ws-call-agent` {#260424-ws-call-agent}
+
+`ws-call-agent <model> [--agent <name>] [--session-id <uuid>] [--uuid <uuid>] [--system-prompt <path>] "<prompt>"`
+
+Wraps `claude -p` with permissions bypass and JSON output. Returns a JSON object to stdout containing `session_id`, `result`, and `is_error`.
+
+Flags:
+- `--agent <name>` — computes a deterministic UUID from repo root + git branch + name via `ws-agent`, then auto-routes: creates a new session (`--session-id`) if no session file exists, resumes (`--resume`) if one does.
+- `--session-id <uuid>` — force-creates a new session with the given UUID.
+- `--uuid <uuid>` — force-resumes an existing session.
+- `--system-prompt <path>` — reads the file and injects its contents as the system prompt.
+
+Model routing: `claude*`, `sonnet`, `haiku`, `opus` → `claude` CLI. `gemini*` → stub (not yet implemented).
+
+> [!note] Constraints
+> - `$(ws-call-agent ...)` command substitution corrupts multi-byte characters in the result field. Safe patterns: pipe directly (`| jq -r '.result'`) or write to a temp file and parse from it.
+> - UUID fields (`session_id`) are ASCII-only and safe to capture via `$()`.
+
+### `ws-agent` {#260424-ws-agent}
+
+`ws-agent <name>` → prints a deterministic UUID v5.
+
+UUID is derived from repo root + current git branch + name. Same name on the same branch always produces the same UUID. Safe to use in `$()` substitution (ASCII output only).
+
+### `ws-declare-agent` {#260424-ws-declare-agent}
+
+`ws-declare-agent <name> [<name2> ...]` — clears session files for one or more agent names. Idempotent: no-op when no session file exists.
+
+Lead calls this at skill start for all agents it will use, ensuring stale sessions from prior runs do not carry over.
 
 ## Utility Skills
 
