@@ -74,7 +74,7 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
   invoke, it emits a one-line note pointing to `/sprint`. There is no invocation or delegation;
   the hint does not alter discuss behavior.
 - `/sprint` is independent of `/proceed`: sprint manages its own routing table (`judge: delegate`)
-  and calls `ws:spec-updater` + `ws:mental-model-updater` + executor-wrapup directly at wrap-up.
+  and runs a spec-update loop + `ws:mental-model-updater` + executor-wrapup at wrap-up.
   Changing `/proceed`'s prefix-stage pipeline does not affect `/sprint`.
 
 ## Extension Points & Change Recipes
