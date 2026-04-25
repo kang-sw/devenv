@@ -6,6 +6,7 @@ spec:
   - 260425-discuss-promotion-handler-order
 related-mental-model:
   - spec-system
+completed: 2026-04-25
 ---
 
 # Repurpose ws-spec-build-index: strip frontmatter redundancy and add spec health checks
