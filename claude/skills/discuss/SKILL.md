@@ -30,8 +30,9 @@ Topic: $ARGUMENTS
 
 ## On: invoke
 
-1. If `$ARGUMENTS` references a ticket, read it.
-2. Enter discussion loop.
+1. Run `git branch --show-current`. If the result starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected — `/sprint` provides session continuity."
+2. If `$ARGUMENTS` references a ticket, read it.
+3. Enter discussion loop.
 
 ## On: discussion loop
 
