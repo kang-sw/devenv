@@ -3,6 +3,7 @@ title: Move mental-model.md to mental-model/index.md
 related-mental-model:
   - doc-tooling
   - workflow-routing
+completed: 2026-04-25
 ---
 
 # Move mental-model.md to mental-model/index.md
@@ -49,6 +50,14 @@ Move the file and fix the Python script logic:
 Success criteria: `ws-list-mental-model` runs without error; the root overview
 renders as `"overview"` domain, not as a flat domain doc.
 
+### Result (62b3328) - 2026-04-25
+
+Completed as planned. Five script changes applied to `ws-list-mental-model`:
+excluded `index.md` from `flat_docs` via list comprehension, updated the
+overview path, tree header comment, and `render_domain` doc_name arg. A missed
+hardcoded line (`#   overview (../mental-model.md)` in the tree section) was
+found during verify and fixed before commit.
+
 ### Phase 2: Documentation path reference updates
 
 Mechanical path substitution in 9 files. Every occurrence of `ai-docs/mental-model.md`
@@ -71,3 +80,11 @@ index at `ai-docs/mental-model/index.md` from the start.
 
 Success criteria: `grep -r "mental-model\.md" claude/ ai-docs/mental-model/` returns
 no matches outside of historical ticket/plan files.
+
+### Result (00f1872) - 2026-04-25
+
+10 files updated (9 planned + `ai-docs/spec/workflow-skills.md` discovered during
+the final grep verification). Bootstrap template: standalone `mental-model.md`
+directory listing line removed; unified into the `mental-model/` line. Post-implementation
+review (b573f5c) fixed two minor issues: tree header overview guard and a redundant
+OR clause in forge-mental-model's commit-stamp invariant.
