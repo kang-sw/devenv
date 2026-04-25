@@ -197,7 +197,7 @@ At session start, and on demand when the domain shifts mid-session, sprint dispa
 Triggered by an explicit user done signal. The hardcoded wrap-up procedure:
 
 1. Reads the full branch diff (`git diff parent..HEAD`).
-2. Spec-update loop (max 2 iterations): registers `ws:spec-updater` with active-edit instructions (strip 🚧, add new entries, remove dropped entries) and the full commit list. Lead reviews `git diff ai-docs/spec/` after each iteration and accepts or rejects. Sonnet first; escalates to Opus on iteration 2. Force-accepted at iteration 2 to guarantee termination.
+2. Spec-update pass: registers `ws:spec-updater` in Suggestion mode with the full commit list. Spec-updater returns `### Proposed strips` and any pending-removal entries without editing files. The lead applies proposed strips directly, surfaces pending-removal entries to the user, and runs `ws-spec-build-index`.
 3. Dispatches `ws:mental-model-updater` with a note that docs may be stale — explore thoroughly.
 4. Runs `executor-wrapup` (existing tickets only — sets `## Result` and advances state; no new ticket creation).
 5. Emits a post-hoc report to the user (entries added, stripped, or removed).

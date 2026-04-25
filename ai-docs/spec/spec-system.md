@@ -162,6 +162,12 @@ If the stem is not found in any spec file, the agent skips silently (already cle
 
 `🚧` headings with no `{#slug}` anchor cannot be confirmed via commit history. The agent reports them in a `### Missing anchors` section and does not attempt to strip them.
 
+### Suggestion Mode {#260425-spec-updater-suggestion-mode}
+
+When the call prompt begins with `Suggestion mode:`, the agent skips the apply step and emits proposals in place of edits. The `### Stripped` section in the report is replaced with `### Proposed strips` — same entry format, no files modified. All other report sections are identical.
+
+Callers in Suggestion mode (e.g. `/sprint` wrap-up) read the proposals and apply them directly, acting as the quality gate instead of the agent's own conservative apply step.
+
 ### Report Format {#260421-spec-updater-report}
 
 After each run, the agent emits a structured report with sections — empty sections are omitted:
