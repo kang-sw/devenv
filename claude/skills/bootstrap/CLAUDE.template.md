@@ -252,6 +252,13 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          are domain-scoped, not cross-cutting. Reclassify them into
          `ai-docs/mental-model/<domain>.md ## Domain Rules` via `/add-rule`.
          Applied on the next `/bootstrap upgrade` run.
+- v0029: If `ai-docs/mental-model.md` exists (the intermediate convention introduced
+         before v0021 completed the overview.md → top-level-index promotion), move it
+         into the directory: `git mv ai-docs/mental-model.md ai-docs/mental-model/index.md`.
+         Update any project-local references to `ai-docs/mental-model.md` (CLAUDE.md,
+         _index.md, tickets, plans). The ws plugin's `ws-list-mental-model` tool is
+         already updated — no plugin changes needed. Commit with `(mental-model-updated)`
+         in the message body.
 -->
 
-<!-- Template Version: v0028 -->
+<!-- Template Version: v0029 -->
