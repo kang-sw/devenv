@@ -42,7 +42,10 @@ cleanup() {
 trap cleanup EXIT
 
 # Build base args for the main call
-ARGS=(-p --dangerously-skip-permissions --output-format json --model "$MODEL")
+ARGS=(-p --dangerously-skip-permissions --output-format json)
+if [[ -n "$MODEL" ]]; then
+  ARGS+=(--model "$MODEL")
+fi
 if [[ -n "$AGENT_TYPE" ]]; then
   ARGS+=(--agent "$AGENT_TYPE")
 fi
@@ -85,7 +88,10 @@ if [[ "$NEW_TOKENS" -gt 100000 && "$SKIP_COMPRESSION" -eq 0 ]]; then
 
   # Step b: Inject compression prompt into existing agent (forced resume)
   COMPRESSION_PROMPT=$(cat "$(ws-infra-path agent-compression.md)")
-  COMP_ARGS=(-p --dangerously-skip-permissions --output-format json --model "$MODEL")
+  COMP_ARGS=(-p --dangerously-skip-permissions --output-format json)
+  if [[ -n "$MODEL" ]]; then
+    COMP_ARGS+=(--model "$MODEL")
+  fi
   if [[ -n "$AGENT_TYPE" ]]; then
     COMP_ARGS+=(--agent "$AGENT_TYPE")
   fi
@@ -100,7 +106,10 @@ if [[ "$NEW_TOKENS" -gt 100000 && "$SKIP_COMPRESSION" -eq 0 ]]; then
   COMPRESSION_DOC=$(jq -r '.result' "$COMP_FILE")
 
   # Step c: Spawn new agent with same config
-  NEW_AGENT_ARGS=("$AGENT_NAME" --model "$MODEL")
+  NEW_AGENT_ARGS=("$AGENT_NAME")
+  if [[ -n "$MODEL" ]]; then
+    NEW_AGENT_ARGS+=(--model "$MODEL")
+  fi
   if [[ -n "$AGENT_TYPE" ]]; then
     NEW_AGENT_ARGS+=(--agent "$AGENT_TYPE")
   fi
@@ -126,7 +135,10 @@ ${INTENT_SUMMARY}
 
 ${PROMPT}"
 
-  HANDOFF_ARGS=(-p --dangerously-skip-permissions --output-format json --model "$MODEL")
+  HANDOFF_ARGS=(-p --dangerously-skip-permissions --output-format json)
+  if [[ -n "$MODEL" ]]; then
+    HANDOFF_ARGS+=(--model "$MODEL")
+  fi
   if [[ -n "$AGENT_TYPE" ]]; then
     HANDOFF_ARGS+=(--agent "$AGENT_TYPE")
   fi

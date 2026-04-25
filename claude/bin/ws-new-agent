@@ -11,7 +11,8 @@ shift
 
 AGENT_TYPE=""
 SYSTEM_PROMPT_PATH=""
-MODEL="sonnet"
+MODEL=""
+MODEL_EXPLICIT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -25,6 +26,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --model)
       MODEL="$2"
+      MODEL_EXPLICIT=1
       shift 2
       ;;
     *)
@@ -33,6 +35,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Default to sonnet only when no agent type is driving the model
+if [[ "$MODEL_EXPLICIT" -eq 0 && -z "$AGENT_TYPE" ]]; then
+  MODEL="sonnet"
+fi
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 REPO_DIR_NAME=$(basename "$REPO_ROOT")
