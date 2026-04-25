@@ -8,6 +8,7 @@ sources:
   - claude/skills/forge-spec/
 related:
   doc-tooling: "forge-mental-model calls ws-list-spec-stems (no args) to embed spec stems into domain drafts when ai-docs/spec/ is present. A stem format change breaks forge-mental-model's embedding step."
+  mental-model-domain: "ws-spec-build-index reads ai-docs/mental-model/ to verify anchor integrity. Renaming or removing a spec stem without updating mental-model refs produces [warn] output on the next run."
 ---
 
 # Spec System
@@ -62,6 +63,11 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
 - `forge-spec` → `spec-updater`: forge-spec suggests invoking the `spec-updater` agent at
   wrap-up to strip `🚧` markers. The two tools are independent — forge-spec does not call
   spec-updater directly.
+- `ws-spec-build-index` → `ai-docs/mental-model/`: the anchor integrity check reads every
+  `*.md` under `ai-docs/mental-model/` and matches each `{#YYMMDD-slug}` ref against the
+  spec registry. Renaming or deleting a spec stem without updating mental-model refs produces
+  a `[warn]` on the next run. The dependency is one-way: mental-model docs reference spec
+  stems; the spec corpus does not reference mental-model anchors.
 
 ## Extension Points & Change Recipes
 
