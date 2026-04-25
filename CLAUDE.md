@@ -31,6 +31,10 @@ Skill and agent documents follow `ai-docs/ref/skill-authoring.md` — read it be
 
 **Architecture rule — skill/agent compliance:** Before committing any write to `claude/skills/`, `claude/agents/`, or `claude/infra/`, run `ai-docs/ref/skill-authoring.md`'s invariant checklist against every Invariants/Constraints line added or modified, verify the Doctrine names a finite resource with a generator clause, and confirm no rationale is interleaved in handler or process steps. Applies to implementers and the lead alike.
 
+## Architecture Rules
+
+- Shell state does not persist between Bash tool calls; any value a later call needs from an earlier call must be read from tool output into conversation context and interpolated as a literal in the subsequent call — never via shell variables.
+
 ## Workflow
 
 ### Approval Protocol

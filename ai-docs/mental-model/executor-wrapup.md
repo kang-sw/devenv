@@ -58,10 +58,6 @@ doc-pipeline step. It handles three responsibilities:
   Include the ancestor loading rule in any implementer spawn prompt when that implementer may read sub-domain mental-model docs. Use `list-mental-model` rather than manual paths where possible — it handles ancestor emission automatically.
 - **Change wrapup responsibilities**: edit `claude/infra/executor-wrapup.md` only. Do not duplicate wrapup logic in individual skill files.
 
-## Domain Rules
-
-- Shell variables do not persist between Bash tool calls; scripts that output allocation values (such as `review-path`) must be invoked once in a dedicated Bash call and their stdout captured into lead conversation context, then interpolated as literals into all subsequent calls.
-
 ## Common Mistakes
 
 - Dispatching `ws:spec-updater` or `ws:mental-model-updater` inside executor-wrapup — the playbook intentionally excludes updater dispatch. Adding it there causes double-dispatch for `ws:implement`, whose updaters already ran pre-merge.
