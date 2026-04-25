@@ -20,7 +20,7 @@ Target: $ARGUMENTS
 - Domain list must be explicitly confirmed by the user before any file is written.
 - Domain task names use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Renaming tasks breaks cross-compact resume detection.
 - All survey subagents for a phase are dispatched in a single response turn (parallel).
-- Every commit touching `ai-docs/mental-model/` must include `(mental-model-updated)` in the message body.
+- Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
 
@@ -250,7 +250,7 @@ Write the verified draft to `ai-docs/mental-model/<domain>.md`. Commit with `(me
 
 ### 1. Update mental-model index
 
-Update `ai-docs/mental-model/index.md`:
+Update `ai-docs/mental-model.md`:
 - Add a row to the domains table for each newly created domain file.
 - Update shared conventions if new cross-domain patterns emerged.
 

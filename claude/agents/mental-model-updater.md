@@ -25,7 +25,7 @@ Identify affected domains and apply minimal, accurate updates.
 
    Also run `git diff <base-commit> -- ai-docs/spec/` to check for spec file changes since the checkpoint, including uncommitted changes from spec-updater that may not yet be committed. For each hunk that adds, removes, or changes a line beginning with `#` or containing `🚧`, identify the behavioral domain it belongs to by topic and filename. Add those domains to the assessment target list in step 3 — they may need contract or coupling updates to reflect newly-implemented behavior. Spec diff assessment is additive: it supplements code diff assessment, never replaces it.
 
-2. **Read all mental-model docs**: Read `ai-docs/mental-model/index.md` (index), then every file in `ai-docs/mental-model/`
+2. **Read all mental-model docs**: Read `ai-docs/mental-model.md` (index), then every file in `ai-docs/mental-model/`
    to understand the full project architecture, contracts, and coupling before
    assessing impact. Map changed files to domains. A single file may affect
    multiple domains. Consider whether new domains are warranted.
@@ -72,7 +72,7 @@ Identify affected domains and apply minimal, accurate updates.
 7. **Verify**: Spot-check that file paths, function names, and key claims
    match current source.
 
-8. **Update `ai-docs/mental-model/index.md`** if cross-domain patterns, the crate graph, or shared
+8. **Update `ai-docs/mental-model.md`** if cross-domain patterns, the crate graph, or shared
    conventions changed.
 
 9. **Commit**: Commit all updated documents. Include `(mental-model-updated)` in the

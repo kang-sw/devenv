@@ -109,7 +109,8 @@ When a spec heading's `{#slug}` changes, include `renamed-spec: <old-stem> → <
 ai-docs/
   _index.md          — single session-start read; project context
   _index.local.md    — local memory (free-form, .gitignored)
-  mental-model/      — index.md is the cross-domain overview; domain docs cover contracts, coupling, architectural narrative
+  mental-model.md    — overview file for overall mental model documents.
+  mental-model/      — project map: contracts, coupling, architectural narrative
   spec/              — external-perspective specs (area/ directories for multi-section areas)
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
@@ -215,7 +216,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          may be removed or left as-is — the map script handles both.
          See the `ws-proj-tree` bin script for canonical parser.
 - v0021: If `ai-docs/mental-model/overview.md` exists, promote it to the
-         top-level index: `git mv ai-docs/mental-model/overview.md ai-docs/mental-model/index.md`.
+         top-level index: `git mv ai-docs/mental-model/overview.md ai-docs/mental-model.md`.
          Then dispatch the `mental-model-updater` agent to add frontmatter (`domain`,
          `description`, `sources`, `related`) to all existing domain docs that lack it.
          Caller note: if no `(mental-model-updated)` checkpoint exists in git history,
@@ -252,10 +253,6 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          are domain-scoped, not cross-cutting. Reclassify them into
          `ai-docs/mental-model/<domain>.md ## Domain Rules` via `/add-rule`.
          Applied on the next `/bootstrap upgrade` run.
-- v0029: If `ai-docs/mental-model.md` exists, move it into the directory:
-         `git mv ai-docs/mental-model.md ai-docs/mental-model/index.md`.
-         Update project-local references to the old path. Commit with
-         `(mental-model-updated)` in the message body.
 -->
 
-<!-- Template Version: v0029 -->
+<!-- Template Version: v0028 -->

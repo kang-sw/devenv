@@ -20,7 +20,7 @@ You are NOT planning the implementation — the implementer owns that.
 ### 1. Understand
 
 1. Read the ticket at the path given in the spawn prompt.
-2. Read `ai-docs/mental-model/index.md`, then load relevant files in `ai-docs/mental-model/` via Glob.
+2. Read `ai-docs/mental-model.md`, then load relevant files in `ai-docs/mental-model/` via Glob.
 3. If skeleton contracts are listed, read the stub and test files.
 
 ### 2. Survey

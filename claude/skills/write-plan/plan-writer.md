@@ -20,7 +20,7 @@ and skeleton contract paths (if any).
 
 1. Read the ticket at the path given in the spawn prompt.
 2. If prior phases exist, read their linked plans and check `git log --grep=<ticket-stem>` for `## Ticket Updates` with phase forwards.
-3. Read `ai-docs/mental-model/index.md`, then load relevant files in `ai-docs/mental-model/` via Glob.
+3. Read `ai-docs/mental-model.md`, then load relevant files in `ai-docs/mental-model/` via Glob.
 4. If skeleton contracts are listed, read the stub and test files — these are locked interfaces.
 
 ### 2. Research
