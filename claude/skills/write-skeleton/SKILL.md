@@ -19,6 +19,7 @@ Target: $ARGUMENTS
 - Contract directives = lead's judgment on points the delegate cannot derive from ticket + code alone.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
 - The delegate does not commit — lead reviews and commits.
+- Register the skeleton-writer agent once per invocation via `ws-new-agent`; resume via `ws-call-agent` for amendment rounds.
 
 ## On: invoke
 
@@ -28,22 +29,22 @@ Target: $ARGUMENTS
 2. Skim relevant mental-model docs only if needed to resolve those ambiguities.
 3. Formulate **contract directives**: 2–5 binding decisions. Not a full design — just fences and choices the delegate must follow.
 
-### 2. Delegate to opus subagent
+### 2. Delegate
 
+**Register (one Bash call):**
+
+```bash
+ws-new-agent skeleton-writer --model opus --system-prompt "$(ws-infra-path skeleton-writer.md)"
 ```
-Agent(
-  description = "write skeleton stubs and tests",
-  subagent_type = "general-purpose",
-  model = "opus",
-  prompt = """
-    Read `${CLAUDE_SKILL_DIR}/skeleton-writer.md` first.
 
-    Ticket: <ticket-path>
+**Spawn (one Bash call):**
 
-    ## Contract directives
-    - <binding decisions only — things not derivable from ticket + codebase>
-  """
-)
+```bash
+ws-call-agent skeleton-writer \
+  "Ticket: <ticket-path>
+
+## Contract directives
+- <binding decisions only — things not derivable from ticket + codebase>"
 ```
 
 ### 3. Review
@@ -51,7 +52,13 @@ Agent(
 1. Run `git diff HEAD` and `git status --short` to review the skeleton output. Read specific files only if a reported deviation warrants deeper inspection.
 2. Verify contracts match the ticket intent and honor the directives.
 3. Run build to confirm compilation. Do not run tests — tests will fail by design because stubs are unimplemented. Passing tests is the implementor's responsibility, not the skeleton's.
-4. If issues found, either fix directly (minor) or re-delegate with amended directives (structural).
+4. If issues found:
+   - **Minor** — fix directly.
+   - **Structural** — relay amended directives via a follow-up call (session resumes with full context):
+     ```bash
+     ws-call-agent skeleton-writer "Amend: <issues and revised directives>"
+     ```
+     Re-review after each round.
 
 ### 4. Commit
 

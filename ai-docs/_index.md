@@ -62,6 +62,7 @@ claude/infra/                 — docs only; accessed via load-infra
   code-review-test.md         — Test review partition: assertion validity, coverage, mock integrity
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
   agent-compression.md        — compression handoff prompt injected into agents approaching the 100K token threshold
+  skeleton-writer.md          — skeleton-writer agent role: codebase exploration, stub + test authoring, build verification
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess
