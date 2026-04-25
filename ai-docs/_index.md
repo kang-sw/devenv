@@ -61,7 +61,7 @@ claude/infra/                 — docs only; accessed via ws-print-infra
   code-review-fit.md          — Fit review partition: conventions, naming, reuse, patterns
   code-review-test.md         — Test review partition: assertion validity, coverage, mock integrity
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
-  agent-compression.md        — compression handoff prompt injected into agents approaching the 100K token threshold
+  agent-compression.md        — compression handoff prompt injected into agents approaching the 120K token threshold
   skeleton-writer.md          — skeleton-writer agent role: codebase exploration, stub + test authoring, build verification
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
@@ -76,7 +76,7 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
   ws-new-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
-  ws-call-agent               — call a registered named agent; tracks context; auto-compresses at 100K tokens
+  ws-call-agent               — call a registered named agent; tracks context; auto-compresses at 120K tokens
 ```
 
 ## Skill Inventory
