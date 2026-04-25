@@ -50,12 +50,15 @@ Goals:
 - `write-ticket/SKILL.md` `judge: spec-gate`: change trigger from "CREATE path only" to
   "any action that results in `todo/`-or-higher status" — covers both direct `todo/` creation
   and `idea/` → `todo/` promotion moves. `idea/` creation remains ungated.
+- `discuss/SKILL.md` "On: Ticket Status Transition" promotion handler: reverse step order from
+  "git mv → write-spec" to "write-spec → git mv". Spec must exist before the promotion move so
+  that the new spec-gate can enforce correctly.
 
 Depends on: nothing. Must precede Phase 5 (convention doc updates).
 
 Success: an agent can write a `🚧` spec entry before the ticket exists; promoting an `idea/`
-ticket to `todo/` without a spec entry is blocked; direct `todo/` creation without a spec entry
-remains blocked.
+ticket to `todo/` without a spec entry is blocked at the move step; direct `todo/` creation
+without a spec entry remains blocked; the discuss promotion handler runs write-spec before git mv.
 
 ### Phase 1: Strip features: from spec files and update tool core
 
