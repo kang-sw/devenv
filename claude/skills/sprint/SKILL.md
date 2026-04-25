@@ -91,16 +91,24 @@ $(ws-proj-tree)"
 
 ### Delegation Cycle
 
+Bash shell state does not persist between tool calls. Each step below is a
+separate Bash call. Path values from Step 1 are read into lead context as
+literals and interpolated into subsequent calls — never relied on as shell
+variables.
+
+**Step 1 — Declare agents and allocate paths (one Bash call)**
+
 ```bash
-# Re-scope agents for this task (clears prior session state)
 ws-declare-agent implementer reviewer-correctness reviewer-fit
+review-path correctness fit
+```
 
-# Allocate review paths — single call, capture both lines
-PATHS=$(review-path correctness fit)
-CORRECTNESS_PATH=$(echo "$PATHS" | head -1)
-FIT_PATH=$(echo "$PATHS" | tail -1)
+Read the two output lines. Store as `<correctness-path>` and `<fit-path>` in
+context.
 
-# Spawn implementer
+**Step 2 — Spawn implementer (one Bash call)**
+
+```bash
 ws-call-agent sonnet --agent implementer \
   --system-prompt "$(ws-infra-path implementer.md)" \
   "Run \`load-infra implementer.md\` first.
@@ -108,27 +116,35 @@ Mode: B (inline brief)
 <task description — goals, constraints; no doc pipeline required>
 No skeleton — implement to spec.
 Commit on current branch."
+```
 
-# Note commit range from implementer report as <first>..<last>
+Note commit range from implementer report as `<first>..<last>`.
 
-# Spawn reviewers in parallel (two Bash calls in the same response turn)
+**Step 3 — Spawn reviewers in parallel (two Bash calls in the same response turn)**
+
+```bash
 ws-call-agent sonnet --agent reviewer-correctness \
   --system-prompt "$(ws-infra-path code-review-correctness.md)" \
   "Diff range: <first>..<last>
-Write full findings to: $CORRECTNESS_PATH
+Write full findings to: <correctness-path>
 Return only: [clean|non-clean]: <one-line summary>"
+```
 
+```bash
 ws-call-agent sonnet --agent reviewer-fit \
   --system-prompt "$(ws-infra-path code-review-fit.md)" \
   "Diff range: <first>..<last>
-Write full findings to: $FIT_PATH
+Write full findings to: <fit-path>
 Return only: [clean|non-clean]: <one-line summary>"
+```
 
-# Review loop: if non-clean, relay file paths (not content) to implementer
-# then re-review (reviewers overwrite paths) until both return [clean]
+Review loop: if non-clean, relay file paths (not content) to implementer;
+re-review (reviewers overwrite paths) until both return `[clean]`.
 
-# Cleanup
-rm -f "$CORRECTNESS_PATH" "$FIT_PATH"
+**Cleanup (one Bash call)**
+
+```bash
+rm -f <correctness-path> <fit-path>
 ```
 
 ## Doctrine
