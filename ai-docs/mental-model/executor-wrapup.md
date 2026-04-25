@@ -6,6 +6,7 @@ sources:
   - claude/bin/
   - claude/skills/edit/
   - claude/skills/implement/
+  - claude/skills/sprint/
 related:
   workflow-routing: "Executor skills are the implementation-phase targets that /proceed routes to; wrapup runs after their implementation commits."
 ---
@@ -25,6 +26,7 @@ doc-pipeline step. It handles three responsibilities:
 - `claude/infra/executor-wrapup.md` — the canonical playbook; the single source of truth for all three responsibilities above.
 - `claude/skills/edit/SKILL.md` §Step 5 — shows how `ws:edit` dispatches updaters before calling executor-wrapup.
 - `claude/skills/implement/SKILL.md` §Step 7 — shows how `ws:implement` calls executor-wrapup directly post-merge.
+- `claude/skills/sprint/SKILL.md` §On:wrap-up — shows how `ws:sprint` defers the doc pipeline to a single session-end wrap-up and calls executor-wrapup after spec/mental-model updaters complete.
 
 ## Module Contracts
 
@@ -37,17 +39,21 @@ doc-pipeline step. It handles three responsibilities:
 - `review-path` cleanup: `ws:implement` step 8 issues `rm -f <correctness-path> <fit-path> <test-path>` using the literal paths stored from the single allocation call. Cleanup is mandatory; paths are in `/tmp/claude-reviews/`.
 - `ws-infra-path` portability: all `--system-prompt` arguments referencing infra docs use `$(ws-infra-path <doc-name>)`, never bare `claude/infra/<doc-name>` literals. `ws-infra-path` resolves to the absolute path regardless of CWD. It exits 1 if the named doc does not exist under `claude/infra/`.
 - `implementer.md` review findings guidance: when review findings arrive as a file path, the implementer reads the file then applies judgment — address correctness, contract, and security findings; deprioritize style or naming feedback that conflicts with established codebase patterns; never apply a finding without understanding why it matters for the specific change.
+- `ws:sprint` Delegation Cycle uses two reviewers only (`reviewer-correctness` and `reviewer-fit`). There is no `reviewer-test` partition in sprint sessions. The review-path allocation call is `review-path correctness fit` (two paths, not three). The cleanup step removes the two allocated paths after each task.
+- `ws:sprint` doc-pipeline deferral: doc pipeline (`ws:spec-updater`, `ws:mental-model-updater`) does not run after individual tasks. It runs once at `On:wrap-up`, ordered spec-updater first then mental-model-updater (so mental-model captures any 🚧 strips). executor-wrapup runs after both complete.
 
 ## Coupling
 
 - `ws:edit` → `ws:spec-updater` + `ws:mental-model-updater` → `executor-wrapup`: edit dispatches both updaters in parallel first, waits for them, then calls executor-wrapup. The updaters run before the commit gate so their outputs are captured by the gate.
 - `ws:implement` → `executor-wrapup`: this skill dispatches updaters in its pre-merge pre-pass (before the merge commit). After merging, it calls executor-wrapup directly. The commit gate captures any post-merge doc changes.
+- `ws:sprint` → `ws:spec-updater` → `ws:mental-model-updater` → `executor-wrapup`: the session suppresses per-task doc pipeline. At wrap-up, sprint dispatches spec-updater first (ordered, not parallel), then mental-model-updater, then calls executor-wrapup. The merge into main is suggested after executor-wrapup completes, not before.
 
 ## Extension Points & Change Recipes
 
 - **Add a new executor skill**: decide which pattern to follow:
   - Edit-like (single implementation commit, no merge): dispatch updaters explicitly before calling executor-wrapup.
   - Implement-like (multi-branch with merge): dispatch updaters in the pre-merge pre-pass, then call executor-wrapup post-merge.
+  - Sprint-like (session container, feature branch): suppress per-task doc pipeline; dispatch updaters sequentially at session end (spec-updater before mental-model-updater), then call executor-wrapup. Suggest merge after executor-wrapup.
   Mixing the patterns — calling executor-wrapup before updaters finish, or dispatching updaters inside executor-wrapup — breaks the commit-gate capture guarantee.
   Include the ancestor loading rule in any implementer spawn prompt when that implementer may read sub-domain mental-model docs. Use `list-mental-model` rather than manual paths where possible — it handles ancestor emission automatically.
 - **Change wrapup responsibilities**: edit `claude/infra/executor-wrapup.md` only. Do not duplicate wrapup logic in individual skill files.
@@ -61,3 +67,5 @@ doc-pipeline step. It handles three responsibilities:
 - Using bare `claude/infra/<doc>` as a `--system-prompt` value — this path is relative to the plugin repo and fails in downstream projects. Always use `$(ws-infra-path <doc>)`.
 - Relaying reviewer file contents to the implementer instead of file paths — the protocol sends paths. The implementer reads files directly. Sending content bypasses the file-based protocol and inflates lead context unnecessarily.
 - Omitting the `rm -f` cleanup at step 8 — review files persist in `/tmp/claude-reviews/` across runs if not deleted, potentially leaking findings from a prior review cycle.
+- Running doc pipeline per task inside a `ws:sprint` session — the session's invariant defers all doc pipeline to wrap-up. Dispatching `ws:spec-updater` or `ws:mental-model-updater` mid-session creates partial checkpoints that confuse the wrap-up updater run.
+- Allocating three review paths (`review-path correctness fit test`) in a sprint Delegation Cycle — sprint uses two reviewers only; there is no `reviewer-test` agent declared by `ws-declare-agent` in the sprint session.

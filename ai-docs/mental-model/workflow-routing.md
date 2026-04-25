@@ -5,6 +5,8 @@ sources:
   - claude/skills/proceed/
   - claude/skills/write-ticket/
   - claude/skills/write-spec/
+  - claude/skills/sprint/
+  - claude/skills/discuss/
 related:
   spec-system: "/write-spec's judge: spec-impact gate is owned by write-spec, not pre-evaluated by /proceed. /write-ticket's judge: spec-gate (step 0, CREATE path only) may redirect to /write-spec before any ticket is authored."
 ---
@@ -20,6 +22,7 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - `claude/skills/proceed/SKILL.md` — full routing logic, judgment tables, invariants, doctrine.
 - `claude/skills/write-ticket/SKILL.md` — ticket authoring protocol, including the completion artifact at step 8.
 - `claude/skills/write-spec/SKILL.md` — `judge: spec-impact` gate definition.
+- `claude/skills/sprint/SKILL.md` — session-container entry point for feature-branch work; independent of `/proceed`.
 
 ## Module Contracts
 
@@ -47,6 +50,13 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
   write-ticket stops and redirects to `/write-spec`. The `Ticket:` artifact at step 8 is only
   emitted when spec-gate passes. Callers that chain on the `Ticket:` line must account for the
   possibility that spec-gate stops write-ticket before the artifact is produced.
+- `/sprint` guarantees: it operates only on `sprint/`-prefixed branches. On invoke it detects
+  the current branch: if on a `sprint/` branch it presents continue/wrap-up/abandon options; if
+  not, it creates a new `sprint/<name>` branch. `/sprint` is not routed through `/proceed`. It is
+  a standalone session container and does not invoke the `/proceed` prefix pipeline.
+- `/discuss` guarantees: when invoked on a `sprint/`-prefixed branch, step 1 emits a hint
+  directing the user to `/sprint` for session continuity. This hint is informational only — it
+  does not prevent `/discuss` from continuing.
 
 ## Coupling
 
@@ -60,6 +70,12 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - `/write-ticket` → `/write-spec`: unidirectional redirect (not invocation). `judge: spec-gate`
   at step 0 may stop write-ticket and suggest `/write-spec`. This is write-ticket's own gate;
   it is independent of `/proceed`'s unconditional delegation to `/write-spec`.
+- `/discuss` → `/sprint` (hint only): when `/discuss` detects a `sprint/`-prefixed branch at
+  invoke, it emits a one-line note pointing to `/sprint`. There is no invocation or delegation;
+  the hint does not alter discuss behavior.
+- `/sprint` is independent of `/proceed`: sprint manages its own routing table (`judge: delegate`)
+  and calls `ws:spec-updater` + `ws:mental-model-updater` + executor-wrapup directly at wrap-up.
+  Changing `/proceed`'s prefix-stage pipeline does not affect `/sprint`.
 
 ## Extension Points & Change Recipes
 
@@ -77,6 +93,9 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 
 ## Common Mistakes
 
+- Routing sprint sessions through `/proceed` — `/sprint` is a standalone entry point. It manages
+  its own routing loop, branch state, and wrap-up sequence. Invoking `/proceed` inside a sprint
+  session bypasses sprint's doc-deferral invariant.
 - Adding conditional logic in `/proceed` to decide whether to invoke `/write-spec`. The
   contract is unconditional invocation. Spec-impact gating belongs in write-spec.
 - Invoking `/write-ticket` from a skill without reading the `Ticket:` completion line. The
