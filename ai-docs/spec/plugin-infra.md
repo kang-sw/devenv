@@ -71,16 +71,17 @@ Deletes `<impl-branch>` after a successful merge.
 
 ### `ws-review-path` {#260421-ws-review-path-tool}
 
-Returns a deterministic, stable temp path for a review findings file.
+Returns temp paths for review findings files.
 
 ```
-ws-review-path <stem>
+ws-review-path <stem1> [<stem2> ...]
 ```
 
-Prints `/tmp/claude-reviews/<stem>.md`. Creates the parent directory if absent. Spaces in `<stem>` are converted to hyphens. Reviewer agents use this to write structured findings to a file instead of transmitting large `SendMessage` payloads.
+Prints one path per stem under `/tmp/claude-reviews/`. Creates the parent directory if absent. Path format: `/tmp/claude-reviews/<pwd-hash>-<run-id>-<stem>.md`. `pwd_hash` scopes paths to the current project; `run_id` prevents collisions across concurrent invocations. {#260424-ws-review-path-non-deterministic}
 
-> [!note] Planned 🚧
-> Will switch to non-deterministic paths incorporating a pwd hash and a per-call run ID: `/tmp/claude-reviews/<pwd-hash>-<run-id>-<stem>.md`. Multi-stem support added: callers pass all stems in one invocation and receive one path per line sharing the same run ID. Contract change: paths are no longer reproducible across calls — the caller must capture all output paths from a single Bash invocation and hold them as literals in agent context for the duration of the run. {#260424-ws-review-path-non-deterministic}
+> [!note] Constraints
+> - Caller must capture all output lines from a single invocation — paths are not reproducible after the call returns.
+> - Always pass all stems in one call; separate calls produce different `run_id`s and break co-invocation grouping.
 
 ### `ws-subquery` {#260421-ws-subquery-tool}
 

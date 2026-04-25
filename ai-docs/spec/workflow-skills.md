@@ -12,7 +12,6 @@ features:
     - `/write-ticket`
     - `/write-skeleton`
     - `/write-plan`
-    - `/write-mental-model`
   - Implementation Skills
     - `/edit`
     - `/implement`
@@ -144,13 +143,6 @@ Researches the codebase and produces a committed plan file at `ai-docs/plans/YYY
 
 Updates the ticket `plans:` frontmatter with the plan path. `/proceed` passes the plan path directly to the next implementation skill.
 
-### `/write-mental-model` {#260421-write-mental-model}
-
-Rebuilds or updates `ai-docs/mental-model/` with operational knowledge for modifying the codebase. Delegates all source exploration to subagents. After writing, updates `ai-docs/mental-model.md` (the index) and `ai-docs/_index.md`.
-
-> [!note] Constraints
-> - Describes operational knowledge for code modifiers, not behavior for end users — contents are not caller-visible spec material.
-
 
 ## Implementation Skills
 
@@ -258,12 +250,13 @@ At session start, and on demand when the domain shifts mid-session, sprint dispa
 Triggered by an explicit user done signal. The hardcoded wrap-up procedure:
 
 1. Reads the full branch diff (`git diff parent..HEAD`).
-2. Dispatches `ws:spec-updater`, waits for completion.
-3. Dispatches `ws:mental-model-updater`, waits for completion.
-4. Runs `executor-wrapup` (doc-commit gate + ticket update).
-5. Suggests branch merge or deletion.
+2. Spec-update loop (max 2 iterations): registers `ws:spec-updater` with active-edit instructions (strip 🚧, add new entries, remove dropped entries) and the full commit list. Lead reviews `git diff ai-docs/spec/` after each iteration and accepts or rejects. Sonnet first; escalates to Opus on iteration 2. Force-accepted at iteration 2 to guarantee termination.
+3. Dispatches `ws:mental-model-updater` with a note that docs may be stale — explore thoroughly.
+4. Runs `executor-wrapup` (existing tickets only — sets `## Result` and advances state; no new ticket creation).
+5. Emits a post-hoc report to the user (entries added, stripped, or removed).
+6. Suggests branch merge or deletion.
 
-Sequential dispatch order mirrors the `/edit` doc-pipeline pattern so that `ws:mental-model-updater` sees any 🚧 strips committed by `ws:spec-updater`.
+The sequential spec → mental-model order ensures `ws:mental-model-updater` sees any 🚧 strips committed by the spec-update loop.
 
 > [!note] Constraints
 > - Wrap-up runs once per sprint, not per task.
@@ -305,7 +298,6 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 > [!note] Constraints
 > - No domain file is written without completing the survey step for that domain.
 > - Uses `TaskCreate` with `forge-mental-model-<domain>` prefix for cross-compact resume detection — renaming tasks breaks resume.
-> - Replaces `/write-mental-model` for from-scratch use cases.
 
 ## Agent Orchestration Primitives
 
@@ -331,25 +323,22 @@ Overwrites the file if already present. Callers must not clobber a live session.
 
 ### `ws-call-agent` {#260424-ws-call-agent}
 
-`ws-call-agent <model> [--agent <name>] [--session-id <uuid>] [--uuid <uuid>] [--system-prompt <path>] "<prompt>"`
+`ws-call-agent <agent-name> "<prompt>"`
 
-Wraps `claude -p` with permissions bypass and JSON output. Returns a JSON object to stdout containing `session_id`, `result`, and `is_error`.
+Calls a registered agent by name and delivers its plain-text response to stdout. Agent configuration (model, agent type, system prompt) is read from the registry entry created by `ws-new-agent`. Auto-creates a new session or resumes the existing one based on whether a session file exists in `~/.claude/projects/`.
 
-Flags:
-- `--agent <name>` — computes a deterministic UUID from repo root + git branch + name via `ws-agent`, then auto-routes: creates a new session (`--session-id`) if no session file exists, resumes (`--resume`) if one does.
-- `--session-id <uuid>` — force-creates a new session with the given UUID.
-- `--uuid <uuid>` — force-resumes an existing session.
-- `--system-prompt <path>` — reads the file at `<path>` and injects its contents as the system prompt. Use `$(ws-infra-path <docname>)` for infra docs to ensure portability across downstream projects. {#260424-infra-path-portability}
+Use `$(ws-infra-path <docname>)` in `ws-new-agent --system-prompt` to ensure portability across downstream projects. {#260424-infra-path-portability}
 
-Model routing: `claude*`, `sonnet`, `haiku`, `opus` → `claude` CLI. `gemini*` → stub (not yet implemented).
+Auto-compression is transparent: when cumulative token usage for the session exceeds 120K, `ws-call-agent` extracts the original intent (one-shot Haiku call), injects `agent-compression.md` into the current session to produce a structured handoff document, re-registers the agent with a fresh UUID, and replays the original prompt to the new session. The caller receives the fresh agent's response without any visible interruption. {#260425-ws-call-agent-auto-compression}
 
 > [!note] Constraints
-> - Output is formatted text (info line + agent response). No JSON is exposed to callers.
+> - Output is the agent's plain-text response. No JSON is exposed to callers.
 > - Exit code is 1 when the underlying call reports an error.
+> - Compression is skipped for one call immediately after a handoff to prevent cascade triggering.
 
 ### `agent-compression.md` {#260425-agent-compression-doc}
 
-Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-agent` as the next user turn into an agent approaching the 100K token threshold.
+Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-agent` as the next user turn into an agent approaching the 120K token threshold.
 
 Instructs the agent to produce a structured handoff document without reading any new files:
 - Original purpose and action plan.
