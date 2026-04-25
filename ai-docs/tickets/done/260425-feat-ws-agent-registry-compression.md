@@ -4,6 +4,7 @@ spec:
   - 260424-ws-call-agent
 spec-remove:
   - 260424-ws-agent
+completed: 2026-04-25
 related-mental-model:
   - workflow-routing
   - executor-wrapup
@@ -66,6 +67,12 @@ The haiku intent-extraction framing is NOT in this document — it is hardcoded 
 **Success criteria:** The document, when injected into a live agent session, produces a
 self-contained handoff that a fresh agent can use without reading any additional files.
 
+### Result (7a58ed3) - 2026-04-25
+
+Created `claude/infra/agent-compression.md`. Five-section structure: original purpose,
+work summary, skills, docs, execution log. Leads with "Ignore your current task. Do not
+read any new files." No haiku framing included (hardcoded in ws-call-agent per design).
+
 ### Phase 2: ws-new-agent script
 
 Create `claude/bin/ws-new-agent`.
@@ -98,6 +105,12 @@ overwrites it (caller is responsible for not clobbering a live session).
 
 **Success criteria:** File written to correct path; claude session file detection works for
 the written UUID on subsequent `ws-call-agent` calls.
+
+### Result (7a58ed3) - 2026-04-25
+
+Created `claude/bin/ws-new-agent`. Uses Python for JSON generation to handle multi-line
+system_prompt safely. REPO_DIR_NAME uses `basename` of repo root. Smoke test confirmed:
+correct JSON schema written, "Agent registered" output.
 
 ### Phase 3: ws-call-agent rewrite
 
@@ -153,6 +166,13 @@ already handles this, but recursive invocation makes the control flow harder to 
   original.
 - `ws-call-agent nonexistent "prompt"` fails with a clear message.
 
+### Result (c374a31) - 2026-04-25
+
+Rewrote `claude/bin/ws-call-agent`. Key deviations from plan:
+- TMPFILE created before CLEANUP_FILES array (not after) to avoid `set -u` empty-array error.
+- CONTEXT_LIMIT set to 200K (full Claude window) rather than leaving unspecified.
+All three acceptance criteria confirmed via smoke tests.
+
 ### Phase 4: ws-agent removal + spec update
 
 1. Delete `claude/bin/ws-agent`.
@@ -166,3 +186,10 @@ already handles this, but recursive invocation makes the control flow harder to 
 
 **Success criteria:** No references to the old `ws-call-agent <model> [--agent ...]` signature
 remain in docs or skill files. `ws-agent` is deleted with no dead references.
+
+### Result (96640f4) - 2026-04-25
+
+Deleted `claude/bin/ws-agent`. Updated ws-orchestration.md (full rewrite), implement/SKILL.md,
+sprint/SKILL.md (delegation cycle split into two steps: register + allocate-paths), and
+ws-infra-path example in workflow-skills.md spec. grep confirmed zero stale references.
+ws-declare-agent preserved — still useful for orphaned session cleanup without re-registration.

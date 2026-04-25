@@ -61,6 +61,7 @@ claude/infra/                 — docs only; accessed via load-infra
   code-review-fit.md          — Fit review partition: conventions, naming, reuse, patterns
   code-review-test.md         — Test review partition: assertion validity, coverage, mock integrity
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
+  agent-compression.md        — compression handoff prompt injected into agents approaching the 100K token threshold
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   subquery                    — scoped sub-query via headless claude subprocess
@@ -73,9 +74,9 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-infra-path               — return absolute path to an infra doc (for --system-prompt args)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
-  ws-call-agent               — spawn or resume a named agent session via headless claude subprocess
-  ws-agent                    — alias for ws-call-agent (backward compat)
-  ws-declare-agent            — declare agent name slots for the current run (scoped cleanup)
+  ws-new-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
+  ws-call-agent               — call a registered named agent; tracks context; auto-compresses at 100K tokens
+  ws-declare-agent            — clear orphaned session files for named agents
 ```
 
 ## Skill Inventory
@@ -154,6 +155,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260424-feat-discuss-on-demand-survey` | done | /discuss on-demand survey via judge:needs-survey; project-survey enriched output (titles + summaries) |
 | `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to review-path files, implementer reads directly |
 | `260425-feat-sprint-skill` | done | /sprint session-container skill — branch-as-state persistence, deferred doc pipeline, sprint-aware survey, 2-reviewer delegation |
+| `260425-feat-ws-agent-registry-compression` | done | ws-call-agent redesign: named agent registry (ws-new-agent) + auto-compression at 100K tokens |
 
 ## Session Notes
 
