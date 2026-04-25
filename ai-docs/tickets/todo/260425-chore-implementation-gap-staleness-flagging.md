@@ -1,5 +1,5 @@
 ---
-title: Add Implementation Gap staleness flagging to survey and implement skills
+title: Add doc-staleness reactive reporting to agent prompts
 spec:
   - 260421-implementation-gap-callout
 related-mental-model:
@@ -7,60 +7,78 @@ related-mental-model:
   - workflow-routing
 ---
 
-# Add Implementation Gap staleness flagging to survey and implement skills
+# Add doc-staleness reactive reporting to agent prompts
 
 ## Background
 
-The spec-system now defines two forms of Implementation Gap callout: missing behavior
+The spec-system defines two forms of Implementation Gap callout: missing behavior
 (intended but not yet built) and unexposed capability (built but not caller-exposed).
-Both are known-but-unscheduled gaps with no ticket.
+A generic staleness-reporting guideline was added to spec-conventions.md and
+spec-system.md during the initial design pass.
 
-The spec-conventions guideline now reads: "A survey agent or implementer encountering
-a callout whose referenced item is not found in code should flag it as potentially
-stale in their report."
+That guideline is wrong in two ways:
 
-Without explicit instruction in skill docs, agents silently ignore stale callouts —
-leaving false positives that could mislead future survey passes into treating
-non-existent capabilities as planned features or known gaps.
+1. **Wrong audience**: spec-conventions.md is writer-facing, not agent-facing.
+   Agents do not read it.
+2. **Wrong framing**: a proactive "scan callouts and cross-reference code" instruction
+   allocates too much overhead for a small gap. The two callout forms also have
+   opposite staleness semantics — "missing behavior" has expected absence from code;
+   "unexposed capability" has expected presence — so a single symmetric rule misfires
+   on one form or the other.
+
+The correct framing is reactive: if a spec or doc entry leads an agent to a wrong
+assumption that is only discovered by checking code, the agent should report the
+discrepancy. This fires exactly when drift causes real cost, adds one line per agent
+doc, and covers all doc types, not just Implementation Gap callouts.
 
 ## Decisions
 
-**Automation rejected**: staleness detection via automation (stems on callouts,
-spec-updater stripping, cron review) was considered and rejected. Intent-based
-classification — "is this item planned for exposure, or intentionally private?" —
-cannot be inferred from code signals or commit history. Any automated mechanism
-requires developer discipline to reference stems in commits; projects with that
-discipline already create tickets at registration time, making the gap rare.
+**Proactive scan rejected**: form-specific search logic (scan callout → parse item →
+search code → compare) is disproportionate overhead for a gap that surfaces rarely
+and only when an agent actually touches the relevant area.
 
-**Piggyback on existing workflow**: flagging staleness at the moment agents already
-read spec adds no new tooling or markers. The error-mode asymmetry justifies this:
-a stale callout that triggers a search is better than no callout, which produces
-silent duplication.
+**Reactive reporting chosen**: the instruction fires at the moment of actual
+discrepancy during normal work — no additional search loop, no callout parsing,
+no form-specific branching.
 
-**Scope**: guideline-text additions to write-plan and implement/edit skill docs only.
-No spec format changes, no new markers, no stem additions to callouts.
+**Spec-conventions removal**: the misplaced generic guideline is removed from both
+spec-conventions.md and spec-system.md. Agent-facing rules live in agent prompts.
+
+**Correctness reviewer included**: the correctness partition checks spec-vs-diff
+alignment and is the natural home for doc-staleness reporting on the review side.
+Fit and test partitions are out of scope.
 
 ## Phases
 
-### Phase 1: write-plan survey step
+### Phase 1: Remove misplaced guideline
 
-In the survey step of the write-plan skill: when scanning spec files for context,
-if an Implementation Gap callout references an item that cannot be found in the
-codebase, include a note in the survey report:
+Remove the staleness-reporting sentence from:
 
-> Implementation Gap callout for `<item>` — referenced item not found in code;
-> potentially stale.
+- `claude/infra/spec-conventions.md` — the bullet: "A survey agent or implementer
+  encountering a callout whose referenced item is not found in code should flag it
+  as potentially stale in their report."
+- `ai-docs/spec/spec-system.md` — the corresponding sentence in the Implementation
+  Gap Callout section.
 
-The flag is informational — it must not block or redirect the survey.
+Success: neither file contains any instruction directed at agents about staleness
+reporting.
 
-Success: a write-plan survey run against a spec containing a stale Implementation
-Gap callout produces a report that explicitly names it as potentially stale.
+### Phase 2: Add reactive one-liner to agent prompts
 
-### Phase 2: implement and edit pre-read step
+Add one sentence to the report/output section of each of the following:
 
-In the implement and edit skills, whichever has a "read spec before implementation"
-step: same instruction — flag stale Implementation Gap callouts encountered during
-spec read, before implementation begins.
+- `claude/infra/impl-playbook.md`
+- `claude/skills/write-plan/survey-writer.md`
+- `claude/skills/write-plan/plan-writer.md`
+- `claude/infra/code-review-correctness.md`
 
-Success: an implement or edit run against a spec with a stale callout surfaces the
-flag in the pre-read output before any code change is made.
+Wording (adapt to fit surrounding prose):
+
+> If a spec or doc entry led to a wrong assumption that you only discovered by
+> checking code, include the discrepancy in your report.
+
+The instruction is informational — it must not block or redirect the agent's
+primary task.
+
+Success: each of the four files contains a one-line reactive reporting instruction
+in its output/report section.
