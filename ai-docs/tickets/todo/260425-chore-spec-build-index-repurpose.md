@@ -1,5 +1,9 @@
 ---
 title: "Repurpose ws-spec-build-index: strip frontmatter redundancy and add spec health checks"
+spec:
+  - 260421-ws-spec-build-index-tool
+  - 260425-write-ticket-spec-gate-promotion
+  - 260425-discuss-promotion-handler-order
 related-mental-model:
   - spec-system
 ---
@@ -59,6 +63,12 @@ Depends on: nothing. Must precede Phase 5 (convention doc updates).
 Success: an agent can write a `🚧` spec entry before the ticket exists; promoting an `idea/`
 ticket to `todo/` without a spec entry is blocked at the move step; direct `todo/` creation
 without a spec entry remains blocked; the discuss promotion handler runs write-spec before git mv.
+
+### Result (a89abc2) - 2026-04-25
+
+Implemented all three changes in a single commit. spec-conventions.md: removed "Defer spec entry"
+sentence. write-ticket spec-gate: extended trigger to cover idea/→todo/ promotion. discuss
+promotion handler: reversed to write-spec before git mv. No deviations from plan.
 
 ### Phase 1: Strip features: from spec files and update tool core
 
