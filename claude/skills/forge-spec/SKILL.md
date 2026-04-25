@@ -19,8 +19,7 @@ Target: $ARGUMENTS
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Run `ws-generate-spec-stem <descriptive-slug>` before every anchor insertion.
-- Verify each spec file has at least one `##`-or-deeper heading before calling `ws-spec-build-index` — the tool prints a skip notice to stdout and returns without modifying the file.
-- Run `ws-spec-build-index <file>` after every spec file write or update.
+- Run `ws-spec-build-index` (no args) after every spec file write or update.
 - Domain task names use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
 - All survey subagents for a phase are dispatched in a single response turn (parallel).
 
@@ -292,7 +291,7 @@ Collect the confirmed list before writing anything.
    b. Write the spec entry using the `spec-format` template from `spec-conventions.md`.
    c. Place `🚧` prefix on the `##` heading if planned; omit if implemented.
 4. After writing the file, verify it contains at least one `##` heading. If not, add a placeholder section and note it to the user.
-5. Run `ws-spec-build-index <spec-file>`.
+5. Run `ws-spec-build-index` (no args).
 6. Apply `judge: directory-vs-flat` — if the written file warrants a directory split, note it as a split candidate for a follow-up `/write-spec` invocation. Do not perform the split inline.
 
 ### 6. Associate stems with tickets
@@ -343,10 +342,10 @@ Agent(
 
 ### 1. Final index pass
 
-Run `ws-spec-build-index` on every spec file created during this session (idempotent safety pass):
+Run `ws-spec-build-index` (no args) as an idempotent safety pass over all spec files:
 
 ```bash
-ws-spec-build-index ai-docs/spec/<file1>.md ai-docs/spec/<file2>.md ...
+ws-spec-build-index
 ```
 
 ### 2. Summary report
@@ -401,10 +400,10 @@ All four survey agents per phase share a single response turn. Wait for all befo
 ### ws-spec-build-index call
 
 ```bash
-# Verify ## heading exists first:
-grep -q '^##' <spec-file.md> || echo "WARNING: no ## heading in <spec-file.md>"
-ws-spec-build-index <spec-file.md>
+ws-spec-build-index
 ```
+
+No file arguments. Scans `ai-docs/spec/**/*.md` automatically. Run once after any spec write or update in this session.
 
 ### Task registration
 

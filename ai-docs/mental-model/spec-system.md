@@ -20,7 +20,7 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
 
 - `claude/infra/spec-conventions.md` — canonical stem format, anchor rules, frontmatter protocol.
 - `claude/bin/ws-generate-spec-stem` — collision-safe stem minting.
-- `claude/bin/ws-spec-build-index` — frontmatter regeneration; entry point for understanding what it writes and removes.
+- `claude/bin/ws-spec-build-index` — frontmatter cleanup; strips `features:` and `stems:` blocks; no file arguments; scans `ai-docs/spec/` automatically.
 - `claude/skills/forge-spec/SKILL.md` — from-scratch spec reconstruction workflow; entry point when rebuilding an entire spec.
 
 ## Module Contracts
@@ -28,9 +28,11 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
 - `ws-generate-spec-stem` guarantees: output stem is globally unique across all `{#YYMMDD-slug}` anchors
   currently present under `ai-docs/spec/`. Uniqueness holds within a single invocation
   (multiple slugs passed at once are deduplicated against each other too).
-- `ws-spec-build-index` guarantees: after each run, the `features:` frontmatter block reflects
-  the current heading structure (headings inside ` ``` ` or `~~~` fenced blocks are excluded),
-  and any `stems:` block is removed. It does not write stems anywhere.
+- `ws-spec-build-index` guarantees: after each run, both the `features:` and `stems:` frontmatter
+  blocks are removed from every `*.md` file under `ai-docs/spec/`. Accepts no file arguments;
+  always repo-wide. Output: `[fix] features: removed — <path>` when a `features:` block was
+  stripped; `[error]` on read/write failure; silent when the file was already clean or when only
+  `stems:` was removed.
 - `ws-list-spec-stems` (no file arg) guarantees: a flat list of every `{#YYMMDD-slug}` found by
   grepping `ai-docs/spec/`. Hierarchy and display labels require a file argument.
 - `forge-spec` guarantees: no spec file is written and no archive `git mv` executes without explicit
@@ -63,7 +65,8 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
 
 - **Add a new stem to a spec**: run `ws-generate-spec-stem <descriptive-slug>` first,
   insert the returned `{#YYMMDD-slug}` on a heading line or any body line,
-  then run `ws-spec-build-index <file>`. The anchor can appear anywhere in the document.
+  then run `ws-spec-build-index` (no args) for cleanup and verification.
+  The anchor can appear anywhere in the document.
 - **Find all stems in the repo**: run `ws-list-spec-stems` (no args) — greps all files.
   Do not look in frontmatter; `stems:` blocks no longer exist.
 - **Change the stem format**: update the `STEM_RE` constant in all three tools
