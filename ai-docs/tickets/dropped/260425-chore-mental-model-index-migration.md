@@ -3,6 +3,7 @@ title: Move mental-model.md to mental-model/index.md
 related-mental-model:
   - doc-tooling
   - workflow-routing
+completed: 2026-04-25
 ---
 
 # Move mental-model.md to mental-model/index.md
@@ -32,6 +33,15 @@ hierarchy fully consistent: at every level, the index of a directory is
 - **Bootstrap template** (`CLAUDE.template.md`) references the old path and
   includes a `git mv ... mental-model.md` migration instruction. Both must be
   updated to reflect the new canonical layout.
+
+## Dropped
+
+Implementation was completed and reverted (101aa20). Root cause: the root
+mental-model index has no frontmatter — a property explicitly defined in
+mental-model-conventions.md. Domain `index.md` files all carry YAML frontmatter.
+Moving the root index into the directory as `index.md` implied structural parity
+with domain indexes that does not exist. `ai-docs/mental-model.md` is a better
+location because the flat path signals its special status.
 
 ## Phases
 
