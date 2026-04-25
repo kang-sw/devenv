@@ -26,7 +26,7 @@ description, abstract it further.
   callout beneath the existing feature body. Current behavior description stays unchanged.
 - No ticket reference in the marker — implementation traceability flows through commits that include `## Spec` sections referencing the spec-stem.
 - No `🚧` means implemented — verify each such feature actually exists before committing.
-- `🚧` entries — heading form or `> [!note] Planned 🚧` callout — require the feature to have a `todo/`-or-higher ticket. Idea-only tickets (`idea/`) do not qualify. Defer spec entry until the ticket is promoted to `todo/`.
+- `🚧` entries — heading form or `> [!note] Planned 🚧` callout — require the feature to have a `todo/`-or-higher ticket. Idea-only tickets (`idea/`) do not qualify.
 
 ## Implementation Gap Callout
 

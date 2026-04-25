@@ -50,7 +50,9 @@ Target: $ARGUMENTS
 
 ### judge: spec-gate
 
-Fires on CREATE path only. Identify the relevant spec file for the topic.
+Fires on any action that results in `todo/`-or-higher status: direct `todo/` creation and `idea/` → `todo/` promotion moves. `idea/` creation is ungated.
+
+Identify the relevant spec file for the topic.
 Run `ws-list-spec-stems <spec-file>` (Bash) if a spec file is identifiable.
 If no relevant spec file exists, or no entry covers this behavior → stop. Name the uncovered behavior; suggest `/write-spec` before continuing.
 
