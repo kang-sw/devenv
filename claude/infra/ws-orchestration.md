@@ -33,6 +33,8 @@ are compressed and handed off without caller involvement.
 
 **Output:** agent response text to stdout. Exit code 1 on error.
 
+**Bash tool timeout:** Always pass `timeout: 600000` (the 10-minute max) when calling `ws-call-agent` via the Bash tool. Agent tasks routinely exceed the 120s default, which causes silent background detachment.
+
 ## ws-infra-path
 
 ```
