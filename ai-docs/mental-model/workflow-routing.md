@@ -8,7 +8,7 @@ sources:
   - claude/skills/sprint/
   - claude/skills/discuss/
 related:
-  spec-system: "/write-spec's judge: spec-impact gate is owned by write-spec, not pre-evaluated by /proceed. /write-ticket's judge: spec-gate (step 0, CREATE path only) may redirect to /write-spec before any ticket is authored."
+  spec-system: "/write-spec's judge: spec-impact gate is owned by write-spec, not pre-evaluated by /proceed. /write-ticket's judge: spec-gate fires on any action resulting in todo/-or-higher status (direct creation and idea/→todo/ promotion) and may redirect to /write-spec. /discuss's promotion handler runs /write-spec before git mv so a 🚧 entry exists before the ticket reaches todo/ status."
 ---
 
 # Workflow Routing
@@ -45,11 +45,16 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - `/write-ticket` guarantees: step 8 emits a `Ticket:` completion artifact on its own line,
   in the form `Ticket: ai-docs/tickets/<status>/<stem>.md`. This line is the handoff protocol
   for any caller that needs to chain downstream on the produced ticket.
-- `/write-ticket` guarantees: on the CREATE path, `judge: spec-gate` (step 0) runs before any
-  authoring begins. If no relevant spec file exists or no entry covers the behavior,
+- `/write-ticket` guarantees: `judge: spec-gate` fires on any action that results in
+  `todo/`-or-higher status — direct `todo/` creation and `idea/` → `todo/` promotion moves.
+  `idea/` creation is ungated. If no relevant spec file exists or no entry covers the behavior,
   write-ticket stops and redirects to `/write-spec`. The `Ticket:` artifact at step 8 is only
   emitted when spec-gate passes. Callers that chain on the `Ticket:` line must account for the
   possibility that spec-gate stops write-ticket before the artifact is produced.
+- `/discuss` guarantees: when handling an `idea/` → `todo/` promotion, the handler runs
+  `/write-spec` to add a `🚧` entry before executing `git mv`. This ordering ensures a spec
+  entry exists before the ticket reaches `todo/` status, satisfying write-ticket's spec-gate
+  when the ticket is subsequently opened or referenced.
 - `/sprint` guarantees: it operates only on `sprint/`-prefixed branches. On invoke it detects
   the current branch: if on a `sprint/` branch it presents continue/wrap-up/abandon options; if
   not, it creates a new `sprint/<name>` branch. `/sprint` is not routed through `/proceed`. It is
@@ -68,8 +73,11 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
   to capture the path. Write-ticket's step 8 format is a contract with proceed. Changing the
   line prefix or path format breaks proceed's path-capture logic.
 - `/write-ticket` → `/write-spec`: unidirectional redirect (not invocation). `judge: spec-gate`
-  at step 0 may stop write-ticket and suggest `/write-spec`. This is write-ticket's own gate;
-  it is independent of `/proceed`'s unconditional delegation to `/write-spec`.
+  may stop write-ticket and suggest `/write-spec`. This gate fires on any todo/-or-higher
+  status action and is independent of `/proceed`'s unconditional delegation to `/write-spec`.
+- `/discuss` → `/write-spec` (promotion only): when promoting `idea/` → `todo/`, discuss
+  invokes `/write-spec` first, then `git mv`. This is ordered coupling — spec entry must
+  precede the directory move.
 - `/discuss` → `/sprint` (hint only): when `/discuss` detects a `sprint/`-prefixed branch at
   invoke, it emits a one-line note pointing to `/sprint`. There is no invocation or delegation;
   the hint does not alter discuss behavior.
@@ -107,9 +115,10 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 - Treating a clear-scope inline description as equivalent to a ticket path and skipping
   `/write-ticket`. Any actionable target that is not a file path must go through
   `/write-ticket`. Exploratory targets stop before `/write-ticket` is invoked.
-- Assuming `/write-ticket` always emits the `Ticket:` completion artifact. On the CREATE path,
-  `judge: spec-gate` at step 0 may stop write-ticket before step 8 is reached. When no spec
-  coverage exists, no artifact is emitted and the caller must handle the missing line.
+- Assuming `/write-ticket` always emits the `Ticket:` completion artifact. `judge: spec-gate`
+  fires on any todo/-or-higher status action (direct creation and idea/→todo/ promotion) and
+  may stop write-ticket before step 8 is reached. When no spec coverage exists, no artifact
+  is emitted and the caller must handle the missing line.
 - Invoking a prefix stage without passing gate-suppression context. The stage will present
   interactive confirmation gates that pause the chain and break the no-pause invariant.
   Gate-suppression context must be included in the Skill tool args for every prefix-stage
