@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: ws-new-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]" >&2
+  exit 1
+fi
+
+AGENT_NAME="$1"
+shift
+
+AGENT_TYPE=""
+SYSTEM_PROMPT_PATH=""
+MODEL="sonnet"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --agent)
+      AGENT_TYPE="$2"
+      shift 2
+      ;;
+    --system-prompt)
+      SYSTEM_PROMPT_PATH="$2"
+      shift 2
+      ;;
+    --model)
+      MODEL="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown flag: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+REPO_DIR_NAME=$(basename "$REPO_ROOT")
+REGISTRY_DIR="$REPO_ROOT/.git/ws@$REPO_DIR_NAME/agents"
+mkdir -p "$REGISTRY_DIR"
+
+python3 - "$AGENT_NAME" "$MODEL" "$AGENT_TYPE" "$SYSTEM_PROMPT_PATH" "$REGISTRY_DIR" <<'PYEOF'
+import json, uuid, sys, os
+
+agent_name, model, agent_type, sp_path, registry_dir = sys.argv[1:]
+
+system_prompt = open(sp_path).read() if sp_path else ""
+
+data = {
+    "uuid": str(uuid.uuid4()),
+    "model": model,
+    "agent_type": agent_type,
+    "system_prompt": system_prompt,
+    "token_count": 0,
+    "compressed_at": False,
+}
+
+with open(os.path.join(registry_dir, agent_name + ".json"), "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+
+echo "Agent '$AGENT_NAME' registered"
