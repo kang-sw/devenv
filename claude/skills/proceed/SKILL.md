@@ -150,7 +150,8 @@ Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth im
 | Decision | When |
 |----------|------|
 | Skip | Plan already exists for this scope (found in ticket frontmatter or plans directory) |
-| Skip | Implementation path is derivable from existing code — main agent is warm on the area, or the pattern is established and a cold implementer can orient during brief planning |
+| Skip | Implementation path is derivable from existing code — main agent is warm on the area, or the pattern is established and the domain has already been surveyed this session |
+| Plan | Established pattern but domain not yet surveyed this session — survey confirms reuse opportunities and non-obvious constraints before coding starts |
 | Plan | Multiple viable architectural approaches with non-obvious trade-offs that must be resolved before coding starts |
 | Plan | Changes requiring coordination across 3+ modules with no existing pattern to follow |
 | Plan | User explicitly requests deep research, or main agent wants to lock decisions as a committed artifact before implementation |
