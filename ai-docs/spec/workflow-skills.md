@@ -101,8 +101,6 @@ When a mental-model domain file is read, the skill checks its last commit date v
 
 When the user requests a ticket status transition (promoting `idea/` → `todo/`, or dropping a ticket), the skill performs the `git mv`, invokes `/write-spec` to add or remove `🚧` entries for caller-visible behaviors, and commits both changes together.
 
-> [!note] Planned 🚧
-> The promotion handler will run `/write-spec` **before** `git mv`, ensuring a spec entry exists before the ticket reaches `todo/` status. This aligns with write-ticket's spec-gate, which blocks `todo/`-or-higher status when no spec entry exists. {#260425-discuss-promotion-handler-order}
 
 > [!note] Constraints
 > - No source files are created or modified during a `/discuss` session.
@@ -127,8 +125,6 @@ Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). 
 
 A `judge: spec-gate` blocks creation of `todo/`-or-higher tickets when no spec entry covers the topic, and suggests `/write-spec` first. `idea/` creation is ungated.
 
-> [!note] Planned 🚧
-> `judge: spec-gate` will also fire on `idea/` → `todo/` promotion moves, not only on direct `todo/` creation. {#260425-write-ticket-spec-gate-promotion}
 
 > [!note] Constraints
 > - Does not advance a ticket's status directory — status changes happen via `git mv` during implementation.
