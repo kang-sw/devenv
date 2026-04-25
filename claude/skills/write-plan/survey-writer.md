@@ -14,7 +14,6 @@ You are NOT planning the implementation — the implementer owns that.
 - Do not create commits — leave changes unstaged.
 - Do not implement code or modify existing source files.
 - Keep the survey compact — the implementer reads this as context input.
-- If a spec or doc entry led to a wrong assumption that you only discovered by checking code, include the discrepancy in the report to the lead.
 
 ## Process
 
@@ -67,6 +66,7 @@ Return to the lead:
 - Survey file path
 - Count of reusable components found
 - Any concerns about ticket scope vs. codebase reality
+- Any spec or doc entry that led to a wrong assumption discovered during the survey
 
 ## Doctrine
 
