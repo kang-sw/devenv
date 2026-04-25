@@ -15,7 +15,7 @@ Target: $ARGUMENTS
 
 - This skill delegates — the lead does not read source code or write implementation.
 - When skeleton exists, its stubs and integration tests are the acceptance criteria.
-- Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): whenever the implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before work begins. The lead propagates this rule through the implementer spawn prompt. See `load-infra executor-wrapup.md §Ancestor Loading`.
+- Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): whenever the implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before work begins. The lead propagates this rule through the implementer spawn prompt. See `ws-print-infra executor-wrapup.md §Ancestor Loading`.
 - Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
 - **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the report before merge — no code reaches the target branch without user confirmation.
 - **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead auto-merges after clean review. The feature → main merge remains the user's responsibility.
@@ -28,7 +28,7 @@ Target: $ARGUMENTS
 
 ### 0. Orient on orchestration primitives
 
-Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and `ws-call-agent` before orchestrating.
+Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and `ws-call-agent` before orchestrating.
 
 ### 1. Prepare
 
@@ -49,9 +49,9 @@ Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and `ws-
    ws-new-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
    ws-new-agent reviewer-test --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-test.md)"
    ```
-8. Allocate review-path slots — separate Bash call, capture all output lines in lead context:
+8. Allocate ws-review-path slots — separate Bash call, capture all output lines in lead context:
    ```bash
-   review-path correctness fit test   # or partition-allocated subset from judge: partition-allocation
+   ws-review-path correctness fit test   # or partition-allocated subset from judge: partition-allocation
    ```
    Store the returned paths as literals named `correctness-path`, `fit-path`, `test-path`; reference them by name throughout subsequent steps.
 9. Create task list. All tasks are mandatory — do not skip or reorder.
@@ -70,7 +70,7 @@ Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and `ws-
 
 ```bash
 ws-call-agent implementer \
-  "Run \`load-infra implementer.md\` first.
+  "Run \`ws-print-infra implementer.md\` first.
 
 Mode: <A: plan-driven | B: inline brief>
 <Plan path | Brief text>
@@ -190,13 +190,13 @@ Implementer and reviewer sessions remain available throughout this loop via `ws-
 
 ### 6. Merge
 
-1. Run `merge-branch <original-branch> <branch> "<commit-message>"`.
+1. Run `ws-merge-branch <original-branch> <branch> "<commit-message>"`.
    The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
    Compose the commit message per CLAUDE.md commit rules.
 
 ### 7. Doc pipeline
 
-Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update. Pass the merge commit range.
+Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update. Pass the merge commit range.
 
 ### 8. Cleanup
 

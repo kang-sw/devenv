@@ -13,7 +13,7 @@ Identify affected domains and apply minimal, accurate updates.
 
 ## Constraints
 
-- Apply the inclusion test and document format from `load-infra mental-model-conventions.md` to every edit.
+- Apply the inclusion test and document format from `ws-print-infra mental-model-conventions.md` to every edit.
 - Never modify `## Domain Rules` content — position changes are permitted via promotion only; flag inconsistencies in the `## Stale Rules` output block instead.
 - Never move Domain Rules downward (parent `index.md` → sub-domain doc). Promotion is upward-only.
 - Trigger forge-level restructuring (new domain doc, split flat doc into `<domain>/index.md` + children) only when the diff shows a corresponding code-structure change — a new module directory, or an existing module splitting into sub-directories. Do not restructure on authorial judgment alone.

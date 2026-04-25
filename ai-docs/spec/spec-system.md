@@ -3,9 +3,9 @@ title: Spec System
 summary: Tooling, conventions, and agents for authoring and maintaining caller-visible spec documents under ai-docs/spec/.
 features:
   - Stem Tooling
-    - `generate-spec-stem`
-    - `list-spec-stems`
-    - `spec-build-index`
+    - `ws-generate-spec-stem`
+    - `ws-list-spec-stems`
+    - `ws-spec-build-index`
   - Authoring Conventions
     - Anchor Format
     - `🚧` Marker Protocol
@@ -25,16 +25,16 @@ features:
 
 # Spec System
 
-The spec system provides bin tools, authoring conventions (via `load-infra spec-conventions.md`), and a maintenance agent for creating and keeping up-to-date the behavioral spec documents under `ai-docs/spec/`.
+The spec system provides bin tools, authoring conventions (via `ws-print-infra spec-conventions.md`), and a maintenance agent for creating and keeping up-to-date the behavioral spec documents under `ai-docs/spec/`.
 
 ## Stem Tooling
 
-### `generate-spec-stem` {#260421-generate-spec-stem-tool}
+### `ws-generate-spec-stem` {#260421-ws-generate-spec-stem-tool}
 
 Generates collision-free `YYMMDD-slug` spec stems from descriptive slug arguments.
 
 ```
-generate-spec-stem <slug> [<slug>…]
+ws-generate-spec-stem <slug> [<slug>…]
 ```
 
 One `YYMMDD-slug` is printed per line, where `YYMMDD` is today's date. Before emitting each stem, the tool scans all `*.md` files under `ai-docs/spec/` for existing `{#YYMMDD-*}` anchors. If the candidate stem is taken, it appends `-2`, `-3`, etc. until clear. Multiple slugs in one call are registered in sequence — stems generated earlier in the same call count as existing for later slugs.
@@ -42,7 +42,7 @@ One `YYMMDD-slug` is printed per line, where `YYMMDD` is today's date. Before em
 - Zero-arg invocation exits with code 1 and prints usage to stderr.
 - Unreadable spec files are silently skipped during collision detection.
 
-### `list-spec-stems` {#260421-list-spec-stems-tool}
+### `ws-list-spec-stems` {#260421-ws-list-spec-stems-tool}
 
 Lists `{#YYMMDD-slug}` anchors found in spec files.
 
@@ -54,12 +54,12 @@ Lists `{#YYMMDD-slug}` anchors found in spec files.
 
 When no stems are found, the tool prints a hint to stderr and exits with code 0.
 
-### `spec-build-index` {#260421-spec-build-index-tool}
+### `ws-spec-build-index` {#260421-ws-spec-build-index-tool}
 
 Rebuilds the `features:` frontmatter block of one or more spec files from their heading structure.
 
 ```
-spec-build-index <spec-file.md> [<spec-file.md>…]
+ws-spec-build-index <spec-file.md> [<spec-file.md>…]
 ```
 
 For each file, the tool:
@@ -74,17 +74,17 @@ For each file, the tool:
 - Files with no `##`+ headings are skipped without modification; skip notice goes to stdout.
 - Unclosed frontmatter (`---` with no closing `---`) is an error; the file is left unmodified.
 - Files without frontmatter are handled: the tool synthesizes an empty frontmatter block.
-- Never edit the `features:` block manually — `spec-build-index` owns it.
+- Never edit the `features:` block manually — `ws-spec-build-index` owns it.
 
 ## Authoring Conventions
 
-These rules apply to every file under `ai-docs/spec/`. They are published as `claude/infra/spec-conventions.md` and loaded at authoring time via `load-infra spec-conventions.md`.
+These rules apply to every file under `ai-docs/spec/`. They are published as `claude/infra/spec-conventions.md` and loaded at authoring time via `ws-print-infra spec-conventions.md`.
 
 ### Anchor Format {#260421-spec-anchor-format}
 
 Every named feature carries a `{#YYMMDD-slug}` anchor — datestamped, globally unique, stable after creation.
 
-- Obtain via `generate-spec-stem <descriptive-slug>` before inserting.
+- Obtain via `ws-generate-spec-stem <descriptive-slug>` before inserting.
 - Slugs are lowercase with hyphens, no spaces.
 - When a slug must change, the commit message includes `renamed-spec: <old-stem> → <new-stem>`.
 
@@ -159,7 +159,7 @@ For each `🚧` occurrence, the agent:
 1. Extracts the `{#YYMMDD-slug}` anchor from the heading or nearby body text.
 2. Runs `git log --all --grep="<slug>" --oneline` to check for matching commits.
 3. If matching commits exist and context is unambiguous: strips `🚧 ` from the heading prefix **and** removes the entire `> [!note] Planned 🚧` callout block (all continuation `> ` lines).
-4. Runs `spec-build-index` on each modified file.
+4. Runs `ws-spec-build-index` on each modified file.
 5. Defers to caller on ambiguous matches — does not strip.
 
 The agent can target a single stem or scan all files under `ai-docs/spec/`.

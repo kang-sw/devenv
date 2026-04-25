@@ -28,32 +28,10 @@ Calls the registered agent. Reads config from the registry entry; exits 1 with a
 clear error if `ws-new-agent` has not been called for this name.
 
 Auto-routes the session: `--resume` if a session file exists in `~/.claude/projects/`,
-`--session-id` otherwise.
-
-**Token tracking:** writes `input_tokens + cache_creation_input_tokens` to `token_count`
-in the registry after each call. Emits a context fill line to stderr when fill ≥ 25%:
-
-```
-[info] Context: N% filled (M tokens)
-```
-
-**Auto-compression:** when `token_count > 100K`, compresses the existing session via
-`agent-compression.md` and hands off to a fresh agent (3-call flow). The immediate
-next call is the handoff; re-compression is suppressed on that call.
+`--session-id` otherwise. Context length is managed transparently — long sessions
+are compressed and handed off without caller involvement.
 
 **Output:** agent response text to stdout. Exit code 1 on error.
-
-## ws-declare-agent
-
-```
-ws-declare-agent <name> [<name2> ...]
-```
-
-Clears session files for the given names. Idempotent — no-op when no session file exists.
-
-`ws-new-agent` already resets the session by issuing a new UUID. Use `ws-declare-agent`
-only when explicitly cleaning up orphaned session files from prior runs without
-re-registering.
 
 ## Usage Pattern
 

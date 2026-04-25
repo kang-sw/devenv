@@ -78,7 +78,7 @@ Key conventions:
 - No ticket references in markers — traceability is via commits with `## Spec` sections.
 
 Directory structure: one directory per area when multiple sub-docs are needed;
-flat file for self-contained surfaces. `spec-build-index` regenerates the `features:`
+flat file for self-contained surfaces. `ws-spec-build-index` regenerates the `features:`
 frontmatter after every write.
 
 ### Skeleton Authoring {#skeleton-authoring}

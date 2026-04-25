@@ -12,7 +12,7 @@ You are **read-only** — report findings, never edit documents.
 
 ## Constraints
 
-- Do not read source code files directly. Use `subquery "<question>"` (Bash) for any code questions.
+- Do not read source code files directly. Use `ws-subquery "<question>"` (Bash) for any code questions.
 - Do not edit documents or make commits.
 - All output in English regardless of input language.
 
@@ -20,9 +20,9 @@ You are **read-only** — report findings, never edit documents.
 
 1. **Read the target**: Read the ticket, spec, or design doc provided.
 2. **Load context**:
-   - Run `list-mental-model` (Bash, no args). Read all listed mental-model docs.
+   - Run `ws-list-mental-model` (Bash, no args). Read all listed mental-model docs.
    - Read relevant spec docs in `ai-docs/spec/`.
-   - Run `load-infra ticket-conventions.md`, `load-infra mental-model-conventions.md`, and `load-infra spec-conventions.md` (Bash) to load authoring conventions.
+   - Run `ws-print-infra ticket-conventions.md`, `ws-print-infra mental-model-conventions.md`, and `ws-print-infra spec-conventions.md` (Bash) to load authoring conventions.
    - If the target is a skill or agent doc, read `ai-docs/ref/skill-authoring.md`.
 3. **Review against**:
    - drift (does the design contradict a mental-model invariant or architectural rule?)
@@ -30,7 +30,7 @@ You are **read-only** — report findings, never edit documents.
    - conceptual realism (is the approach technically achievable, or does it rest on unrealistic assumptions?)
    - reuse gaps (does the design ignore existing patterns, extension points, or components documented in mental-model?)
    - convention compliance (does the document follow its authoring conventions — ticket format, mental-model structure, skill/agent doc rules?)
-4. **Code questions**: If clarification about existing code is needed, run `subquery "<question>"` — do not read source files directly.
+4. **Code questions**: If clarification about existing code is needed, run `ws-subquery "<question>"` — do not read source files directly.
 5. **Produce findings**: Classify each issue by severity. Format findings using the output template below.
 
 ## Heuristics

@@ -2,7 +2,7 @@
 
 ## Invariants
 
-- Before implementing, load relevant mental-model docs: `list-mental-model <target-paths>`; read the listed files.
+- Before implementing, load relevant mental-model docs: `ws-list-mental-model <target-paths>`; read the listed files.
 - Claim "pass" only after reading full test/build output — never "should pass" or "looks correct."
 - Diagnose blame (test vs implementation) before fixing any failure.
 - Structural deviations → escalate before proceeding. Cosmetic → adapt silently, note in report.
@@ -54,9 +54,8 @@ Delegation prompt must include: (1) before/after example, (2) target file list, 
 
 | Method | When |
 |---|---|
-| **sed / replace_all** | Pure text substitution expressible as regex |
-| **Cheap subprocess** | Fixed pattern, no ambiguity, no judgment needed |
-| **Capable subprocess** | Structural understanding or any ambiguity |
+| **sed / replace_all=true** | Pure text substitution expressible as regex |
+| **Direct edit loop** | File-by-file judgment needed (Read → Edit per file) |
 
 On failure: `git checkout -- <files>`, report.
 

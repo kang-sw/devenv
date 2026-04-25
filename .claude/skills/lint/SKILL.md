@@ -1,9 +1,8 @@
 ---
 name: lint
 description: >
-  Comprehensive workflow audit. Finds portability bugs, broken cross-file
-  references, structural non-compliance, undefined judgment refs, and
-  cross-file logic errors across all plugin skill, agent, and infra docs.
+  Three-partition parallel review of claude/ plugin documents and ai-docs/.
+  Checks logical consistency, broken references, and downstream portability.
 argument-hint: "[no args — scans full plugin + project docs]"
 ---
 
@@ -12,160 +11,124 @@ argument-hint: "[no args — scans full plugin + project docs]"
 ## Invariants
 
 - Read-only. Never edit any file.
-- Locate plugin root via `which load-infra` before any scan — never assume CWD equals plugin root.
-- Run all five mechanical checks before spawning the semantic agent.
-- Report every finding; never suppress or silently group.
-- Omit a check category from the report only when it has zero findings.
+- Spawn all three reviewer agents in a single response turn — do not wait between spawns.
+- Pass concrete repo-root paths in each agent prompt — never assume agent CWD.
+- Aggregate all findings into one consolidated report after all three return.
 
 ## On: invoke
 
 ### 1. Orient
 
 ```bash
-PLUGIN_ROOT="$(dirname "$(dirname "$(which load-infra)")")"
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+git rev-parse --show-toplevel
 ```
 
-Collect file lists:
-```bash
-SKILL_FILES=$(find "$PLUGIN_ROOT/claude/skills" -name "SKILL.md")
-AGENT_FILES=$(find "$PLUGIN_ROOT/claude/agents" -name "*.md")
-INFRA_FILES=$(find "$PLUGIN_ROOT/claude/infra" -name "*.md")
-SPEC_FILES=$(find "$PROJECT_ROOT/ai-docs/spec" -name "*.md" 2>/dev/null)
-TICKET_FILES=$(find "$PROJECT_ROOT/ai-docs/tickets/todo" "$PROJECT_ROOT/ai-docs/tickets/wip" \
-  -name "*.md" 2>/dev/null)
-```
+Store result as `<repo-root>`. Plugin docs live at `<repo-root>/claude/`. Project
+docs live at `<repo-root>/ai-docs/`.
 
-### 2. Mechanical checks
+### 2. Spawn (one Agent call each — all three in a single response turn)
 
-Run each check. Accumulate findings labeled by check letter.
+**Reviewer 1 — Logical Consistency** (`ws:document-reviewer`, sonnet)
 
-**A — Portability: bare plugin-relative paths**
-
-Skill, agent, and infra docs must not reference plugin-internal filesystem paths as literals.
-These paths resolve correctly inside the plugin repo but fail in every downstream project.
-
-Scan for the offending patterns:
-```bash
-grep -rn -F 'claude/infra/'  $SKILL_FILES $AGENT_FILES $INFRA_FILES
-grep -rn -F 'claude/skills/' $SKILL_FILES $AGENT_FILES $INFRA_FILES
-grep -rn -F 'claude/agents/' $SKILL_FILES $AGENT_FILES $INFRA_FILES
-grep -rn -F 'claude/bin/'    $SKILL_FILES $AGENT_FILES $INFRA_FILES
-```
-
-For each hit: inspect whether the containing code block carries a `# Before`, `# Bad`, or `# Wrong`
-comment — if so, annotate as "(intentional negative example)" and do not count as a finding.
-
-Fix hints by pattern:
-- `--system-prompt claude/infra/<name>` → `--system-prompt $(ws-infra-path <name>)`
-- `claude/bin/<script>` used as a path → bare `<script>` name (in PATH after plugin install)
-- Any other `claude/<dir>/` literal → obtain the path via the appropriate bin script
-
-**B — load-infra misuse (content where a path is expected)**
-
-`load-infra` outputs file content. Passing its output to any argument that expects a file path is wrong.
-
-```bash
-grep -rn 'system-prompt.*$(load-infra\|$(load-infra.*system-prompt' \
-  $SKILL_FILES $AGENT_FILES $INFRA_FILES
-```
-
-Fix: `--system-prompt $(ws-infra-path <name>)`.
-
-**C — Structural compliance per skill-authoring.md**
-
-Each `SKILL.md` must contain both `## Invariants` and `## Doctrine`:
-```bash
-for f in $SKILL_FILES; do
-  grep -qF '## Invariants' "$f" || echo "$f: missing ## Invariants"
-  grep -qF '## Doctrine'   "$f" || echo "$f: missing ## Doctrine"
-done
-```
-
-Each agent `*.md` must contain `## Constraints`, `## Process`, `## Output`, and `## Doctrine`:
-```bash
-for f in $AGENT_FILES; do
-  for sec in '## Constraints' '## Process' '## Output' '## Doctrine'; do
-    grep -qF "$sec" "$f" || echo "$f: missing $sec"
-  done
-done
-```
-
-**D — Undefined judgment references**
-
-For each `SKILL.md`: every `judge: <name>` call must resolve to a `### judge: <name>` definition
-within the same file.
-
-```bash
-for f in $SKILL_FILES; do
-  grep -o 'judge: [a-z-]*' "$f" | sed 's/judge: //' | sort -u | while read name; do
-    grep -qF "### judge: $name" "$f" \
-      || echo "$f: 'judge: $name' called but not defined in this file"
-  done
-done
-```
-
-**E — Missing infra doc targets**
-
-For every `load-infra <doc>` and `ws-infra-path <doc>` call, verify the named doc exists
-under `$PLUGIN_ROOT/claude/infra/`.
-
-```bash
-grep -rn 'load-infra [a-zA-Z._-]*\|ws-infra-path [a-zA-Z._-]*' \
-  $SKILL_FILES $AGENT_FILES $INFRA_FILES \
-  | while IFS=: read file line rest; do
-      doc=$(echo "$rest" | grep -o '\(load-infra\|ws-infra-path\) [a-zA-Z._-]*' | awk '{print $2}')
-      [[ -z "$doc" || -f "$PLUGIN_ROOT/claude/infra/$doc" ]] \
-        || echo "$file:$line: references non-existent infra/$doc"
-    done
-```
-
-### 3. Semantic check
-
-Spawn an Explore agent. Provide:
-- All file paths collected in step 1 (plugin + project docs).
-- The plugin root path.
-
-Instruct it to read every file and report findings in three sub-categories:
-
-1. **Anchor cross-references** — `{#YYMMDD-slug}` tokens in ticket files that do not appear
-   in any spec file. Report: `<ticket-file>: references {#<slug>} not found in any spec`.
-
-2. **Step numbering** — `On:` handler sections in SKILL.md files where the numbered step
-   list has gaps, duplicates, or a step that references a step number that does not exist
-   in the same handler.
-
-3. **Named cross-file references** — one file references a named section, doc, or script
-   that does not exist (e.g., `load-infra executor-wrapup.md` where `executor-wrapup.md`
-   is absent from infra/). Exclude findings already covered by Check E.
-
-### 4. Report
+Scope: `claude/skills/`, `claude/infra/`, `claude/agents/`
 
 ```
-## A — Portability
-<file>:<line>: <offending pattern> → <fix hint>
+Repo root: <repo-root>
 
-## B — load-infra misuse
-<file>:<line>: <offending call> → use $(ws-infra-path <name>)
+Review all SKILL.md files under <repo-root>/claude/skills/, all .md files under
+<repo-root>/claude/infra/, and all .md files under <repo-root>/claude/agents/.
 
-## C — Structural compliance
-<file>: missing <section>
+Check logical consistency only:
+- Invariants or procedure steps that contradict each other across files
+- A procedure step that references an artifact created later in the same procedure
+- Agent spawn prompts that reference a mandate or behavior not defined in the target
+  agent doc (cross-check with claude/agents/)
+- The same tool described with conflicting signatures or behavior in different docs
+  (e.g., two files disagree on ws-call-agent argument order)
+- Judge names called in a handler (judge: <name>) but not defined in the same file
+  (### judge: <name>)
 
-## D — Undefined judgments
-<file>: 'judge: <name>' called but not defined
-
-## E — Missing infra targets
-<file>:<line>: references non-existent infra/<doc>
-
-## F — Semantic (cross-file integrity)
-<finding>
+Return findings as: [Critical|Important|Minor] <file>: <description>
+Do not flag broken file references or portability issues — those belong elsewhere.
 ```
 
-End with: `N total finding(s) across K categories.` or `No issues found.`
+**Reviewer 2 — Broken References** (`ws:document-reviewer`, sonnet)
+
+Scope: `claude/skills/`, `claude/infra/`, `claude/agents/`, `ai-docs/`
+
+```
+Repo root: <repo-root>
+
+Review all .md files under <repo-root>/claude/skills/, <repo-root>/claude/infra/,
+<repo-root>/claude/agents/, and <repo-root>/ai-docs/.
+
+Check broken references only — use Bash/Glob to verify existence on disk:
+- Files mentioned or linked that do not exist
+- Commands named in bash blocks not present in <repo-root>/claude/bin/ and not in
+  standard PATH
+- ws-print-infra or ws-infra-path arguments that name infra docs not present under
+  <repo-root>/claude/infra/
+- Spec anchors ({#YYMMDD-slug}) referenced in tickets or docs that do not appear in
+  any spec file under <repo-root>/ai-docs/spec/
+- Mental-model or spec files listed in ai-docs/_index.md that do not exist on disk
+
+Return findings as: [Critical|Important|Minor] <file>: <description>
+Do not flag logical consistency issues or portability issues.
+```
+
+**Reviewer 3 — Downstream Portability** (`ws:code-reviewer`, sonnet)
+
+Scope: all of `claude/` (skills/, agents/, infra/, bin/)
+
+```
+Repo root: <repo-root>
+
+Review all files under <repo-root>/claude/.
+
+This plugin is installed into downstream projects where <repo-root>/claude/ is not
+present on the filesystem. Check for patterns that will fail outside this repository:
+
+- Bare `claude/infra/<doc>` used as a --system-prompt value instead of
+  `$(ws-infra-path <doc>)` — the bare path only resolves inside the plugin repo
+- Hardcoded absolute paths (e.g., /Users/..., /home/...) in scripts or docs
+- Relative path assumptions that only hold when CWD is the repo root
+- Commands referenced in bash blocks that are not in claude/bin/ and not reliably in
+  downstream PATH
+- Shell scripts in claude/bin/ missing a shebang line or using a shebang tool not
+  guaranteed in downstream environments
+- References to tools that have been renamed or deleted; known cases include:
+  load-infra (→ ws-print-infra), review-path (→ ws-review-path),
+  list-mental-model (→ ws-list-mental-model), list-spec-stems (→ ws-list-spec-stems),
+  spec-build-index (→ ws-spec-build-index), generate-spec-stem (→ ws-generate-spec-stem),
+  merge-branch (→ ws-merge-branch), subquery (→ ws-subquery),
+  ws-agent (deleted), ws-declare-agent (deleted)
+
+Return findings as: [Critical|Important|Minor] <file>:<line>: <description>
+```
+
+### 3. Aggregate
+
+After all three return, produce one consolidated report:
+
+```
+## Findings
+
+[Critical] [consistency|references|portability] <file>: <description>
+...
+[Important] [consistency|references|portability] <file>: <description>
+...
+[Minor] [consistency|references|portability] <file>: <description>
+...
+
+N total finding(s).
+```
+
+Group by severity (Critical first). Tag each finding with its partition.
+End with total count or `No issues found.`
 
 ## Doctrine
 
-Lint optimizes for **finding coverage per run** — every detectable issue across
-the full scanned scope must appear in the report with enough location context for
-the reader to fix it directly. When a check result is ambiguous, report with a
-confidence qualifier rather than suppress.
+Lint optimizes for **finding coverage per partition** — three focused, non-overlapping
+reviewer mandates prevent duplicate findings and keep each reviewer's context narrow.
+When a mandate boundary is ambiguous, assign the finding to the partition whose mandate
+most closely describes the root cause.

@@ -14,14 +14,14 @@ Target: $ARGUMENTS
 ## Invariants
 
 - The main agent edits directly — no subagent delegation for the edit itself.
-- Follow impl-playbook — run `load-infra impl-playbook.md` for test strategy, verify, failure diagnosis, deviation protocol, and mechanical-edit criteria.
-- Load relevant mental-model docs before editing — run `list-mental-model <target-paths>` and read every listed file.
-- Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): when a read touches `mental-model/<domain>/<sub>.md`, load `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before editing. See `load-infra executor-wrapup.md §Ancestor Loading`.
+- Follow impl-playbook — run `ws-print-infra impl-playbook.md` for test strategy, verify, failure diagnosis, deviation protocol, and mechanical-edit criteria.
+- Load relevant mental-model docs before editing — run `ws-list-mental-model <target-paths>` and read every listed file.
+- Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): when a read touches `mental-model/<domain>/<sub>.md`, load `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before editing. See `ws-print-infra executor-wrapup.md §Ancestor Loading`.
 - When skeleton exists for the target scope, its stubs and integration tests are the acceptance criteria.
 - Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
 - Escalate to `/implement` or `/proceed` if scope grows beyond single-scope direct-edit capacity.
 - When `judge: needs-review` fires, spawn a one-shot reviewer — no team, fresh context per iteration.
-- Doc pipeline delegates to `load-infra executor-wrapup.md`.
+- Doc pipeline delegates to `ws-print-infra executor-wrapup.md`.
 - Report completion to the user — commit range, test status, deviations.
 
 ## On: invoke
@@ -33,8 +33,8 @@ Target: $ARGUMENTS
 2. If plan-driven: read the plan file. Note binding decisions and Skeleton Amendments.
 3. If ticket-driven: read the ticket; collect skeleton and plan references from frontmatter.
 4. Verify skeleton coverage when public contracts are touched: grep for stubs. If `judge: skeleton-check` requires a skeleton and none exists, stop and suggest `/write-skeleton`.
-5. Load mental-model docs: `list-mental-model <target-paths>`; read every listed file. `list-mental-model` already emits ancestor `index.md` entries when a direct-child sub-domain matches; read ancestors before their children so inherited `## Domain Rules` are visible first.
-6. Run `load-infra impl-playbook.md`.
+5. Load mental-model docs: `ws-list-mental-model <target-paths>`; read every listed file. `ws-list-mental-model` already emits ancestor `index.md` entries when a direct-child sub-domain matches; read ancestors before their children so inherited `## Domain Rules` are visible first.
+6. Run `ws-print-infra impl-playbook.md`.
 7. Identify integration test file paths and the command to run them.
 
 ### 2. Edit
@@ -82,7 +82,7 @@ Loop until no Critical/Important issues remain.
 
 1. Dispatch **ws:spec-updater** with the implementation commit range. Wait for it to complete. If **spec-updater** reports ambiguous stems, surface them to the user.
 2. Dispatch **ws:mental-model-updater**. Wait for it to complete. Running spec-updater first ensures mental-model-updater's spec-diff check captures any 🚧 strips committed by spec-updater.
-3. Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update.
+3. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update.
 
 ### 6. Report
 

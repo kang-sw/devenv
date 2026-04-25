@@ -39,8 +39,8 @@ during splits, or flag them as stale in its output.
 ## Shared Conventions
 
 **Stem format:** `{#YYMMDD-slug}` — six-digit date prefix, hyphen, lowercase slug.
-This regex (`\{#\d{6}-[\w-]+\}`) is the shared protocol between `generate-spec-stem`,
-`list-spec-stems`, and `spec-build-index`. A format change requires updating all three.
+This regex (`\{#\d{6}-[\w-]+\}`) is the shared protocol between `ws-generate-spec-stem`,
+`ws-list-spec-stems`, and `ws-spec-build-index`. A format change requires updating all three.
 
 **Stem storage:** anchors live in spec document body text only — never in frontmatter.
 Any code that looks for stems must grep document content, not parse YAML.

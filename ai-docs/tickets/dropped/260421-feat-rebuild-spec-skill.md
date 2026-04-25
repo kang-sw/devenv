@@ -27,7 +27,7 @@ The main agent does not read source directly. All codebase exploration is delega
 
 4. **User interaction loop** — surface ambiguous cases: behaviors found in code but not in any ticket, drift between spec and code, conflicts between ticket intent and current implementation. User decides authoritative intent for each.
 
-5. **Spec authoring** — write spec files per the spec-stem convention. Implemented features get `{#slug}` anchors; planned features (from wip/todo tickets) get 🚧 markers. Run `spec-build-index` on each file.
+5. **Spec authoring** — write spec files per the spec-stem convention. Implemented features get `{#slug}` anchors; planned features (from wip/todo tickets) get 🚧 markers. Run `ws-spec-build-index` on each file.
 
 **Likely very heavy:** expect multiple rounds of explore agents and multiple user-interaction checkpoints. Not a one-shot operation.
 

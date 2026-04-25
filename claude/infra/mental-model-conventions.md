@@ -58,7 +58,7 @@ loaded first, so inherited `## Domain Rules` are visible before any edit
 or reasoning begins. A load that skips the ancestor violates this contract.
 
 The hierarchy is encoded in the file path — no frontmatter `parent:` link
-is maintained. `list-mental-model` renders sub-domains indented under their
+is maintained. `ws-list-mental-model` renders sub-domains indented under their
 parent to surface the relationship to callers.
 
 ## Domain Rules

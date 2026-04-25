@@ -12,7 +12,6 @@ features:
     - `/write-ticket`
     - `/write-skeleton`
     - `/write-plan`
-    - `/write-mental-model`
   - Implementation Skills
     - `/edit`
     - `/implement`
@@ -31,10 +30,9 @@ features:
     - `ws-new-agent`
     - `ws-call-agent`
     - `agent-compression.md`
-    - `ws-declare-agent`
     - `ws-infra-path`
     - `ws-proj-tree`
-    - `review-path`
+    - `ws-review-path`
   - Utility Skills
     - `/add-rule`
     - `/ship`
@@ -110,11 +108,11 @@ Creates or updates a spec file under `ai-docs/spec/` describing caller-visible b
 
 A `judge: spec-impact` gate fires first: if the topic has no caller-visible behavioral change, the skill exits immediately without writing anything.
 
-After writing, runs `spec-build-index` to rebuild the `features:` frontmatter index. Applies a `judge: directory-vs-flat` to decide between a flat file and a directory structure.
+After writing, runs `ws-spec-build-index` to rebuild the `features:` frontmatter index. Applies a `judge: directory-vs-flat` to decide between a flat file and a directory structure.
 
 > [!note] Constraints
 > - Never includes ticket references in `🚧` markers — implementation traceability flows through commit `## Spec` sections referencing the spec-stem.
-> - Never edits the `features:` frontmatter block manually — `spec-build-index` owns it.
+> - Never edits the `features:` frontmatter block manually — `ws-spec-build-index` owns it.
 
 ### `/write-ticket` {#260421-write-ticket}
 
@@ -145,13 +143,6 @@ Researches the codebase and produces a committed plan file at `ai-docs/plans/YYY
 
 Updates the ticket `plans:` frontmatter with the plan path. `/proceed` passes the plan path directly to the next implementation skill.
 
-### `/write-mental-model` {#260421-write-mental-model}
-
-Rebuilds or updates `ai-docs/mental-model/` with operational knowledge for modifying the codebase. Delegates all source exploration to subagents. After writing, updates `ai-docs/mental-model.md` (the index) and `ai-docs/_index.md`.
-
-> [!note] Constraints
-> - Describes operational knowledge for code modifiers, not behavior for end users — contents are not caller-visible spec material.
-
 
 ## Implementation Skills
 
@@ -177,7 +168,7 @@ Review partitions: {#260424-implement-file-based-review}
 - **Fit** — conventions, naming, reuse, patterns.
 - **Test** — test file quality, coverage of new code paths, assertion validity.
 
-Reviewers write full findings to `review-path`-allocated files; stdout returns only a `[clean|non-clean]: <brief>` summary line. The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. The implementer applies judgment: correctness, contract, and security findings are addressed; style findings conflicting with established patterns may be deprioritized. `review-path` files are deleted in the Cleanup step.
+Reviewers write full findings to `ws-review-path`-allocated files; stdout returns only a `[clean|non-clean]: <brief>` summary line. The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. The implementer applies judgment: correctness, contract, and security findings are addressed; style findings conflicting with established patterns may be deprioritized. `ws-review-path` files are deleted in the Cleanup step.
 
 Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260422-implement-feature-branch-mode}
 
@@ -259,12 +250,13 @@ At session start, and on demand when the domain shifts mid-session, sprint dispa
 Triggered by an explicit user done signal. The hardcoded wrap-up procedure:
 
 1. Reads the full branch diff (`git diff parent..HEAD`).
-2. Dispatches `ws:spec-updater`, waits for completion.
-3. Dispatches `ws:mental-model-updater`, waits for completion.
-4. Runs `executor-wrapup` (doc-commit gate + ticket update).
-5. Suggests branch merge or deletion.
+2. Spec-update loop (max 2 iterations): registers `ws:spec-updater` with active-edit instructions (strip 🚧, add new entries, remove dropped entries) and the full commit list. Lead reviews `git diff ai-docs/spec/` after each iteration and accepts or rejects. Sonnet first; escalates to Opus on iteration 2. Force-accepted at iteration 2 to guarantee termination.
+3. Dispatches `ws:mental-model-updater` with a note that docs may be stale — explore thoroughly.
+4. Runs `executor-wrapup` (existing tickets only — sets `## Result` and advances state; no new ticket creation).
+5. Emits a post-hoc report to the user (entries added, stripped, or removed).
+6. Suggests branch merge or deletion.
 
-Sequential dispatch order mirrors the `/edit` doc-pipeline pattern so that `ws:mental-model-updater` sees any 🚧 strips committed by `ws:spec-updater`.
+The sequential spec → mental-model order ensures `ws:mental-model-updater` sees any 🚧 strips committed by the spec-update loop.
 
 > [!note] Constraints
 > - Wrap-up runs once per sprint, not per task.
@@ -272,7 +264,7 @@ Sequential dispatch order mirrors the `/edit` doc-pipeline pattern so that `ws:m
 
 #### Sprint Implementation Delegation {#260425-sprint-implementation-delegation}
 
-Delegated implementation within a sprint uses `ws-call-agent` with two review partitions in parallel: **Correctness** (logic, error paths, contracts, security) and **Fit** (conventions, naming, reuse, patterns). The Test partition is omitted. Reviewers write full findings to `review-path`-allocated files; the lead reads summaries only. When non-clean, the lead relays file paths to the implementer, which reads them directly.
+Delegated implementation within a sprint uses `ws-call-agent` with two review partitions in parallel: **Correctness** (logic, error paths, contracts, security) and **Fit** (conventions, naming, reuse, patterns). The Test partition is omitted. Reviewers write full findings to `ws-review-path`-allocated files; the lead reads summaries only. When non-clean, the lead relays file paths to the implementer, which reads them directly.
 
 ## Reconstruction
 
@@ -283,7 +275,7 @@ From-scratch spec reconstruction for a project. The skill:
 2. Surveys the codebase with four parallel Sonnet subagents (structure, tickets, old spec, commits).
 3. Presents domain candidates to the user; confirmed list locks into `TaskCreate` tasks for resumability.
 4. Per domain: surveys again with four parallel subagents; presents a behavior brief; asks the user to classify each behavior (caller-visible? implemented or planned?); authors spec entries only after explicit confirmation.
-5. Runs `spec-build-index` after each file write.
+5. Runs `ws-spec-build-index` after each file write.
 
 > [!note] Constraints
 > - No spec entry is written without explicit user classification of caller-visible status and implementation status.
@@ -306,7 +298,6 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 > [!note] Constraints
 > - No domain file is written without completing the survey step for that domain.
 > - Uses `TaskCreate` with `forge-mental-model-<domain>` prefix for cross-compact resume detection — renaming tasks breaks resume.
-> - Replaces `/write-mental-model` for from-scratch use cases.
 
 ## Agent Orchestration Primitives
 
@@ -332,25 +323,22 @@ Overwrites the file if already present. Callers must not clobber a live session.
 
 ### `ws-call-agent` {#260424-ws-call-agent}
 
-`ws-call-agent <model> [--agent <name>] [--session-id <uuid>] [--uuid <uuid>] [--system-prompt <path>] "<prompt>"`
+`ws-call-agent <agent-name> "<prompt>"`
 
-Wraps `claude -p` with permissions bypass and JSON output. Returns a JSON object to stdout containing `session_id`, `result`, and `is_error`.
+Calls a registered agent by name and delivers its plain-text response to stdout. Agent configuration (model, agent type, system prompt) is read from the registry entry created by `ws-new-agent`. Auto-creates a new session or resumes the existing one based on whether a session file exists in `~/.claude/projects/`.
 
-Flags:
-- `--agent <name>` — computes a deterministic UUID from repo root + git branch + name via `ws-agent`, then auto-routes: creates a new session (`--session-id`) if no session file exists, resumes (`--resume`) if one does.
-- `--session-id <uuid>` — force-creates a new session with the given UUID.
-- `--uuid <uuid>` — force-resumes an existing session.
-- `--system-prompt <path>` — reads the file at `<path>` and injects its contents as the system prompt. Use `$(ws-infra-path <docname>)` for infra docs to ensure portability across downstream projects. {#260424-infra-path-portability}
+Use `$(ws-infra-path <docname>)` in `ws-new-agent --system-prompt` to ensure portability across downstream projects. {#260424-infra-path-portability}
 
-Model routing: `claude*`, `sonnet`, `haiku`, `opus` → `claude` CLI. `gemini*` → stub (not yet implemented).
+Auto-compression is transparent: when cumulative token usage for the session exceeds 120K, `ws-call-agent` extracts the original intent (one-shot Haiku call), injects `agent-compression.md` into the current session to produce a structured handoff document, re-registers the agent with a fresh UUID, and replays the original prompt to the new session. The caller receives the fresh agent's response without any visible interruption. {#260425-ws-call-agent-auto-compression}
 
 > [!note] Constraints
-> - Output is formatted text (info line + agent response). No JSON is exposed to callers.
+> - Output is the agent's plain-text response. No JSON is exposed to callers.
 > - Exit code is 1 when the underlying call reports an error.
+> - Compression is skipped for one call immediately after a handoff to prevent cascade triggering.
 
 ### `agent-compression.md` {#260425-agent-compression-doc}
 
-Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-agent` as the next user turn into an agent approaching the 100K token threshold.
+Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-agent` as the next user turn into an agent approaching the 120K token threshold.
 
 Instructs the agent to produce a structured handoff document without reading any new files:
 - Original purpose and action plan.
@@ -358,12 +346,6 @@ Instructs the agent to produce a structured handoff document without reading any
 - `[Must]` / `[Maybe]` skills for the next agent.
 - `[Must]` / `[Maybe]` docs for the next agent.
 - Execution log of concrete actions relevant to the forwarded intent.
-
-### `ws-declare-agent` {#260424-ws-declare-agent}
-
-`ws-declare-agent <name> [<name2> ...]` — clears session files for one or more agent names. Idempotent: no-op when no session file exists.
-
-Lead calls this at skill start for all agents it will use, ensuring stale sessions from prior runs do not carry over.
 
 ### `ws-infra-path` {#260425-ws-infra-path}
 
@@ -386,9 +368,9 @@ ws-call-agent implementer "<prompt>"
 
 Used by `/discuss` as pre-injected project context at skill start.
 
-### `review-path` {#260425-review-path}
+### `ws-review-path` {#260425-ws-review-path}
 
-`review-path <stem1> [<stem2> ...]` — prints one path per stem under `/tmp/claude-reviews/`, for use as review-findings sinks. Creates the directory if absent. {#260425-review-path-non-deterministic}
+`ws-review-path <stem1> [<stem2> ...]` — prints one path per stem under `/tmp/claude-reviews/`, for use as review-findings sinks. Creates the directory if absent. {#260425-ws-review-path-non-deterministic}
 
 Path format: `/tmp/claude-reviews/<pwd-hash>-<run-id>-<stem>.md`. `pwd_hash` is the first 8 chars of `shasum "$PWD"` — scopes paths to the current project. `run_id` is 8 random alphanumeric chars generated once per call — prevents collisions across concurrent invocations.
 
