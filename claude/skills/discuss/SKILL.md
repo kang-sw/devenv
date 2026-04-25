@@ -36,7 +36,7 @@ Topic: $ARGUMENTS
 
 ## On: discussion loop
 
-1. Apply **judge: needs-survey** — if the current turn's topic warrants it, spawn `project-survey` with the topic as the brief and incorporate the returned reference list into the current turn's reasoning before responding.
+1. Apply **judge: needs-survey** — identify every named component, skill, agent, spec, or ticket the current question touches. For each: was its doc loaded this session? If any was not, spawn `project-survey` with the topic as the brief and incorporate the returned reference list before responding.
 2. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
 3. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
    When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."
@@ -86,8 +86,8 @@ the conclusion in terms its downstream consumer can directly act on.
 
 ### judge: needs-survey
 Spawn `project-survey` when any of the following hold:
-- The topic references components, specs, or tickets the model has not read this session and cannot confidently assess scope from session context alone.
-- The discussion direction shifts to a new domain mid-session.
+- The current question names a component, skill, agent, spec, or ticket whose doc has NOT been loaded in this session — regardless of whether the model feels confident it knows the answer.
+- The discussion direction shifts to a domain no doc for which has been loaded this session.
 
 Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") — those draw from session state or git log.
 
