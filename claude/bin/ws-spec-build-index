@@ -8,15 +8,18 @@ Scans all *.md files under ai-docs/spec/ recursively. Removes the
 cross-file health checks on the cleaned corpus.
 
 Output:
-  [fix] features: removed — <path>   (when features: block was found and removed)
+  [fix] features: removed — <path>
   [warn] duplicate stem <stem> — found in <file1>, <file2>
-  [error] <path>: <message>          (on read/parse/write failure)
+  [warn] Implementation Gap (<date>) in <file> — <N> days old
+  [warn] {#<stem>} in mental-model/<file> — no matching anchor in spec/
+  [error] <path>: <message>
   (silent when file is already clean and passes all checks)
 """
 
 import re
 import sys
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 
@@ -141,6 +144,54 @@ def check_duplicate_stems(registry: dict[str, list[Path]]) -> None:
             print(f"[warn] duplicate stem {stem} — found in {locations}")
 
 
+IMPL_GAP_RE = re.compile(r'> \[!note\] Implementation Gap · (\d{4}-\d{2}-\d{2})')
+STALENESS_DAYS = 90
+
+
+def check_implementation_gaps(paths: list[Path]) -> None:
+    today = date.today()
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        in_fence = False
+        for line in text.splitlines():
+            if line.strip().startswith("```"):
+                in_fence = not in_fence
+            if in_fence:
+                continue
+            m = IMPL_GAP_RE.search(line)
+            if not m:
+                continue
+            try:
+                gap_date = date.fromisoformat(m.group(1))
+            except ValueError:
+                continue
+            age = (today - gap_date).days
+            if age > STALENESS_DAYS:
+                print(f"[warn] Implementation Gap ({m.group(1)}) in {path} — {age} days old")
+
+
+def check_mental_model_refs(spec_registry: set[str], mental_model_dir: Path) -> None:
+    if not mental_model_dir.is_dir():
+        return
+    for path in sorted(mental_model_dir.rglob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        in_fence = False
+        for line in text.splitlines():
+            if line.strip().startswith("```"):
+                in_fence = not in_fence
+            if in_fence:
+                continue
+            for stem in STEM_RE.findall(line):
+                if stem not in spec_registry:
+                    print(f"[warn] {{#{stem}}} in {path} — no matching anchor in spec/")
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     if len(sys.argv) > 1:
@@ -168,6 +219,8 @@ def main() -> None:
             stem_registry[stem].append(path)
 
     check_duplicate_stems(stem_registry)
+    check_implementation_gaps(paths)
+    check_mental_model_refs(set(stem_registry.keys()), Path("ai-docs/mental-model"))
 
 
 if __name__ == "__main__":
