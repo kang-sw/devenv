@@ -89,6 +89,13 @@ Suggested approach:
 Success: all spec files have no `features:` block; tool accepts no arguments; calling with an
 argument exits with a usage error.
 
+### Result (fa21a79) - 2026-04-25
+
+Rewrote tool: removed write path (extract_features, build_tree_text, update_frontmatter,
+_indent_block), added remove_features() mirroring remove_stems() pattern. main() now
+glob-discovers ai-docs/spec/**/*.md and rejects argv args. Ran migration: 6 spec files cleaned.
+Idempotency and arg-rejection verified. No deviations.
+
 ### Phase 2: Add cross-file duplicate stem detection
 
 Goals:
