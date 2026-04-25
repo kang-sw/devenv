@@ -1,7 +1,5 @@
 ---
 title: "Repurpose ws-spec-build-index: strip frontmatter redundancy and add spec health checks"
-spec:
-  - 260421-ws-spec-build-index-tool
 related-mental-model:
   - spec-system
 ---
