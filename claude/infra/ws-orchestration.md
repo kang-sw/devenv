@@ -3,10 +3,10 @@
 Bash-callable scripts at `claude/bin/` for Team-free subagent coordination.
 All scripts are on `$PATH` via `claude/bin/`.
 
-## ws-new-agent
+## ws-new-named-agent
 
 ```
-ws-new-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]
+ws-new-named-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]
 ```
 
 Creates a named agent registry entry at `.git/ws@<repo-dir>/agents/<name>.json`.
@@ -18,14 +18,14 @@ Creates a named agent registry entry at `.git/ws@<repo-dir>/agents/<name>.json`.
 Call at skill start for each agent slot. Overwrites any prior registry entry for
 that name, which resets the session.
 
-## ws-call-agent
+## ws-call-named-agent
 
 ```
-ws-call-agent <agent-name> <prompt>
+ws-call-named-agent <agent-name> <prompt>
 ```
 
 Calls the registered agent. Reads config from the registry entry; exits 1 with a
-clear error if `ws-new-agent` has not been called for this name.
+clear error if `ws-new-named-agent` has not been called for this name.
 
 Auto-routes the session: `--resume` if a session file exists in `~/.claude/projects/`,
 `--session-id` otherwise. Context length is managed transparently — long sessions
@@ -33,7 +33,7 @@ are compressed and handed off without caller involvement.
 
 **Output:** agent response text to stdout. Exit code 1 on error.
 
-**Bash tool timeout:** Always pass `timeout: 600000` (the 10-minute max) when calling `ws-call-agent` via the Bash tool. Agent tasks routinely exceed the 120s default, which causes silent background detachment.
+**Bash tool timeout:** Always pass `timeout: 600000` (the 10-minute max) when calling `ws-call-named-agent` via the Bash tool. Agent tasks routinely exceed the 120s default, which causes silent background detachment.
 
 ## ws-infra-path
 
@@ -45,7 +45,7 @@ Returns the absolute path to an infra doc. Use for `--system-prompt` arguments w
 a path string is required rather than file content.
 
 ```bash
-ws-new-agent implementer --system-prompt "$(ws-infra-path implementer.md)"
+ws-new-named-agent implementer --system-prompt "$(ws-infra-path implementer.md)"
 ```
 
 ## ws-review-path
@@ -69,29 +69,29 @@ This avoids token overhead from relaying review text through the lead.
 
 ```bash
 # 1. Register all agent slots upfront (creates fresh sessions; stores system prompts)
-ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-ws-new-agent reviewer-corr --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
-ws-new-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
+ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+ws-new-named-agent reviewer-corr --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
+ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
 
 # 2. Call implementer — auto-starts session on first call
-ws-call-agent implementer - <<'PROMPT'
+ws-call-named-agent implementer - <<'PROMPT'
 Implement X
 PROMPT
 
 # 3. Parallel reviewers — issue multiple Bash calls in the same response turn
 DIFF=$(git diff HEAD~1)
-ws-call-agent reviewer-corr - <<PROMPT
+ws-call-named-agent reviewer-corr - <<PROMPT
 $DIFF
 PROMPT
-ws-call-agent reviewer-fit - <<PROMPT
+ws-call-named-agent reviewer-fit - <<PROMPT
 $DIFF
 PROMPT
 
 # 4. Fix loop — auto-resumes existing sessions
-ws-call-agent implementer - <<'PROMPT'
+ws-call-named-agent implementer - <<'PROMPT'
 Fix these issues: ...
 PROMPT
-ws-call-agent reviewer-corr - <<'PROMPT'
+ws-call-named-agent reviewer-corr - <<'PROMPT'
 Re-review. Updated diff: ...
 PROMPT
 ```

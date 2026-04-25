@@ -10,10 +10,10 @@ Iterative review + simplification cycle for ws plugin documentation.
 ## Invariants
 
 - Scope: `claude/skills/`, `claude/agents/`, `claude/infra/` (`.md` files only). Never touch `claude/CLAUDE.home.md` or `claude/bin/`.
-- Call `ws-declare-agent` for all slots before any `ws-call-agent` call.
+- Call `ws-declare-agent` for all slots before any `ws-call-named-agent` call.
 - Writer system prompt: `.claude/skills/polish-plugin-docs/polish-writer.md`.
 - Commit after all per-file writer calls complete, before any reviewer call.
-- Each file gets a separate `ws-call-agent` call with no session reuse across files.
+- Each file gets a separate `ws-call-named-agent` call with no session reuse across files.
 - Exit after 3 rounds regardless of reviewer status; surface remaining findings to user.
 
 ## On: invoke
@@ -23,7 +23,7 @@ Iterative review + simplification cycle for ws plugin documentation.
 3. Collect targets using Glob: `claude/skills/**/*.md`, `claude/agents/**/*.md`, `claude/infra/**/*.md`. Exclude any path containing `CLAUDE.home.md`. Abort if list is empty.
 4. Spawn initial reviewer:
    ```bash
-   ws-call-agent opus --agent reviewer-resume \
+   ws-call-named-agent opus --agent reviewer-resume \
      --system-prompt claude/agents/document-reviewer.md \
      "Review each file below for consistency, operational breakage, and authoring-rule compliance.
    <file: path>\n<contents>\n..."
@@ -38,7 +38,7 @@ Iterative review + simplification cycle for ws plugin documentation.
 
    c. For each target file (separate call per file, no `--agent`):
       ```bash
-      ws-call-agent sonnet \
+      ws-call-named-agent sonnet \
         --system-prompt .claude/skills/polish-plugin-docs/polish-writer.md \
         "File: <path>
       Findings: <current-findings>
@@ -57,12 +57,12 @@ Iterative review + simplification cycle for ws plugin documentation.
    e. Spawn both reviewers in parallel (two Bash calls in the same response):
       ```bash
       # fresh reviewer — new session, full re-read
-      ws-call-agent opus \
+      ws-call-named-agent opus \
         --system-prompt claude/agents/document-reviewer.md \
         "Re-review all files: <file: path>\n<contents>..."
 
       # resumed reviewer — diff only
-      ws-call-agent opus --agent reviewer-resume \
+      ws-call-named-agent opus --agent reviewer-resume \
         "Re-review. Diff since last round:
       $(git diff "$ROUND_BASE")"
       ```

@@ -44,7 +44,7 @@ Check logical consistency only:
 - Agent spawn prompts that reference a mandate or behavior not defined in the target
   agent doc (cross-check with claude/agents/)
 - The same tool described with conflicting signatures or behavior in different docs
-  (e.g., two files disagree on ws-call-agent argument order)
+  (e.g., two files disagree on ws-call-named-agent argument order)
 - Judge names called in a handler (judge: <name>) but not defined in the same file
   (### judge: <name>)
 

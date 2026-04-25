@@ -63,7 +63,7 @@ claude/infra/                 — docs only; accessed via ws-print-infra
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
   agent-compression.md        — compression handoff prompt injected into agents approaching the 120K token threshold
   skeleton-writer.md          — skeleton-writer agent role: codebase exploration, stub + test authoring, build verification
-  ws-orchestration.md         — ws-new-agent / ws-call-agent coordination primitives for subagent orchestration
+  ws-orchestration.md         — ws-new-named-agent / ws-call-named-agent coordination primitives for subagent orchestration
   sprint-survey.md            — sprint-survey agent role: identifies relevant spec/mental-model docs for sprint wrap-up
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
@@ -77,8 +77,8 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-infra-path               — return absolute path to an infra doc (for --system-prompt args)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
-  ws-new-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
-  ws-call-agent               — call a registered named agent; tracks context; auto-compresses at 120K tokens
+  ws-new-named-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
+  ws-call-named-agent               — call a registered named agent; tracks context; auto-compresses at 120K tokens
 ```
 
 ## Skill Inventory
@@ -121,7 +121,7 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 |------|-------|---------|
 | `ai-docs/spec/agent-system.md` | Agent System | Spawnable agents in claude/agents/ |
 | `ai-docs/spec/personal-devenv.md` | Personal Dev Environment | install.sh, shell, dotfiles, Claude Code config |
-| `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery, ws-call-agent primitives |
+| `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery, ws-call-named-agent primitives |
 | `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude/skills/ tools for ws plugin maintenance |
 | `ai-docs/spec/spec-system.md` | Spec System | Spec authoring, 🚧 markers, anchor protocol |
 | `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship |
@@ -149,13 +149,13 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260423-feat-doc-tooling-restructure` | done | Doc tooling restructure — forge-mental-model new skill, write-mental-model removal, forge-spec palette flag, bootstrap legacy detection |
 | `260424-feat-project-survey-agent` | done | project-survey Haiku agent + auto-invoke integration into edit/implement/parallel-implement/discuss |
 | `260424-feat-domain-rules-layering` | done | Architecture Rules split + /add-rule skill; domain rules in mental-model docs |
-| `260424-feat-polish-plugin-docs` | done | /polish-plugin-docs local skill + polish-writer agent + ws-call-agent context-fill hotfix |
+| `260424-feat-polish-plugin-docs` | done | /polish-plugin-docs local skill + polish-writer agent + ws-call-named-agent context-fill hotfix |
 | `260424-refactor-proceed-gate-suppression` | done | judge:idea-level demoted to reminder + /proceed gate-suppression context in prefix-stage invocations |
 | `260424-feat-infra-path-portability` | done | ws-infra-path portability script; all bare claude/infra/ paths replaced with $(ws-infra-path) |
 | `260424-feat-discuss-on-demand-survey` | done | /discuss on-demand survey via judge:needs-survey; project-survey enriched output (titles + summaries) |
 | `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to ws-review-path files, implementer reads directly |
 | `260425-feat-sprint-skill` | done | /sprint session-container skill — branch-as-state persistence, deferred doc pipeline, sprint-aware survey, 2-reviewer delegation |
-| `260425-feat-ws-agent-registry-compression` | done | ws-call-agent redesign: named agent registry (ws-new-agent) + auto-compression at 100K tokens |
+| `260425-feat-ws-agent-registry-compression` | done | ws-call-named-agent redesign: named agent registry (ws-new-named-agent) + auto-compression at 100K tokens |
 | `260425-chore-implementation-gap-staleness-flagging` | done | Reactive doc-staleness reporting — removed misplaced guideline from spec-conventions + spec-system; reactive one-liner added to impl-playbook, survey-writer, plan-writer, code-review-correctness |
 
 ## Session Notes

@@ -211,7 +211,7 @@ The sequential spec → mental-model order ensures `ws:mental-model-updater` see
 
 #### Sprint Implementation Delegation {#260425-sprint-implementation-delegation}
 
-Delegated implementation within a sprint uses `ws-call-agent` with two review partitions in parallel: **Correctness** (logic, error paths, contracts, security) and **Fit** (conventions, naming, reuse, patterns). The Test partition is omitted. Reviewers write full findings to `ws-review-path`-allocated files; the lead reads summaries only. When non-clean, the lead relays file paths to the implementer, which reads them directly.
+Delegated implementation within a sprint uses `ws-call-named-agent` with two review partitions in parallel: **Correctness** (logic, error paths, contracts, security) and **Fit** (conventions, naming, reuse, patterns). The Test partition is omitted. Reviewers write full findings to `ws-review-path`-allocated files; the lead reads summaries only. When non-clean, the lead relays file paths to the implementer, which reads them directly.
 
 ## Reconstruction
 
@@ -250,9 +250,9 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 
 Bash-callable infra scripts at `claude/infra/` that replace `TeamCreate`/`SendMessage`/`TeamDelete` for subagent coordination. Skill leads invoke these directly via the `Bash` tool.
 
-### `ws-new-agent` {#260425-ws-new-agent}
+### `ws-new-named-agent` {#260425-ws-new-named-agent}
 
-`ws-new-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]`
+`ws-new-named-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]`
 
 Creates a named agent registry entry at `.git/ws@<repo-dir-name>/agents/<agent-name>.json`.
 
@@ -263,20 +263,20 @@ Creates a named agent registry entry at `.git/ws@<repo-dir-name>/agents/<agent-n
 Registry JSON fields:
 - `uuid` — fresh random UUID v4. Not deterministic; enables compression-triggered refresh without branch or name changes.
 - `model`, `agent_type`, `system_prompt` — agent configuration, restored on compression handoff.
-- `token_count` — cumulative input tokens tracked by `ws-call-agent`; reset to `0` on creation.
+- `token_count` — cumulative input tokens tracked by `ws-call-named-agent`; reset to `0` on creation.
 - `compressed_at` — `false` on creation; `true` immediately after a compression handoff.
 
 Overwrites the file if already present. Callers must not clobber a live session.
 
-### `ws-call-agent` {#260424-ws-call-agent}
+### `ws-call-named-agent` {#260424-ws-call-named-agent}
 
-`ws-call-agent <agent-name> "<prompt>"`
+`ws-call-named-agent <agent-name> "<prompt>"`
 
-Calls a registered agent by name and delivers its plain-text response to stdout. Agent configuration (model, agent type, system prompt) is read from the registry entry created by `ws-new-agent`. Auto-creates a new session or resumes the existing one based on whether a session file exists in `~/.claude/projects/`.
+Calls a registered agent by name and delivers its plain-text response to stdout. Agent configuration (model, agent type, system prompt) is read from the registry entry created by `ws-new-named-agent`. Auto-creates a new session or resumes the existing one based on whether a session file exists in `~/.claude/projects/`.
 
-Use `$(ws-infra-path <docname>)` in `ws-new-agent --system-prompt` to ensure portability across downstream projects. {#260424-infra-path-portability}
+Use `$(ws-infra-path <docname>)` in `ws-new-named-agent --system-prompt` to ensure portability across downstream projects. {#260424-infra-path-portability}
 
-Auto-compression is transparent: when cumulative token usage for the session exceeds 120K, `ws-call-agent` extracts the original intent (one-shot Haiku call), injects `agent-compression.md` into the current session to produce a structured handoff document, re-registers the agent with a fresh UUID, and replays the original prompt to the new session. The caller receives the fresh agent's response without any visible interruption. {#260425-ws-call-agent-auto-compression}
+Auto-compression is transparent: when cumulative token usage for the session exceeds 120K, `ws-call-named-agent` extracts the original intent (one-shot Haiku call), injects `agent-compression.md` into the current session to produce a structured handoff document, re-registers the agent with a fresh UUID, and replays the original prompt to the new session. The caller receives the fresh agent's response without any visible interruption. {#260425-ws-call-named-agent-auto-compression}
 
 > [!note] Constraints
 > - Output is the agent's plain-text response. No JSON is exposed to callers.
@@ -285,7 +285,7 @@ Auto-compression is transparent: when cumulative token usage for the session exc
 
 ### `agent-compression.md` {#260425-agent-compression-doc}
 
-Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-agent` as the next user turn into an agent approaching the 120K token threshold.
+Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-named-agent` as the next user turn into an agent approaching the 120K token threshold.
 
 Instructs the agent to produce a structured handoff document without reading any new files:
 - Original purpose and action plan.
@@ -301,8 +301,8 @@ Instructs the agent to produce a structured handoff document without reading any
 Use in `--system-prompt` arguments so callers work in downstream projects:
 
 ```bash
-ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-ws-call-agent implementer "<prompt>"
+ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+ws-call-named-agent implementer "<prompt>"
 ```
 
 > [!note] Constraints

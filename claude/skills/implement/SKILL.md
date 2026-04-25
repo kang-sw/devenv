@@ -19,7 +19,7 @@ Target: $ARGUMENTS
 - Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
 - **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the report before merge — no code reaches the target branch without user confirmation.
 - **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead auto-merges after clean review. The feature → main merge remains the user's responsibility.
-- Implementer and reviewer sessions persist via `ws-call-agent` auto-resume throughout the review loop; `ws-new-agent` at step 7 resets them to the current run.
+- Implementer and reviewer sessions persist via `ws-call-named-agent` auto-resume throughout the review loop; `ws-new-named-agent` at step 7 resets them to the current run.
 - One delegation cycle per invocation.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
 - Task list is created at prepare and tracked to completion — no task may be skipped or reordered.
@@ -28,7 +28,7 @@ Target: $ARGUMENTS
 
 ### 0. Orient on orchestration primitives
 
-Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and `ws-call-agent` before orchestrating.
+Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-named-agent` and `ws-call-named-agent` before orchestrating.
 
 ### 1. Prepare
 
@@ -44,10 +44,10 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and 
    Create `implement/<scope>` branch.
 7. Register all agent slots upfront:
    ```bash
-   ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-   ws-new-agent reviewer-correctness --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
-   ws-new-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
-   ws-new-agent reviewer-test --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-test.md)"
+   ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+   ws-new-named-agent reviewer-correctness --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
+   ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
+   ws-new-named-agent reviewer-test --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-test.md)"
    ```
 8. Allocate ws-review-path slots — separate Bash call, capture all output lines in lead context:
    ```bash
@@ -56,8 +56,8 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and 
    Store the returned paths as literals named `correctness-path`, `fit-path`, `test-path`; reference them by name throughout subsequent steps.
 9. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
-   [ ] Spawn implementer — result arrives synchronously via ws-call-agent pipe
-   [ ] Spawn reviewers (partition-allocated) — parallel ws-call-agent calls; reviewers write to files; lead reads summaries; implementer reads files directly when non-clean → re-review loop until clean
+   [ ] Spawn implementer — result arrives synchronously via ws-call-named-agent pipe
+   [ ] Spawn reviewers (partition-allocated) — parallel ws-call-named-agent calls; reviewers write to files; lead reads summaries; implementer reads files directly when non-clean → re-review loop until clean
    [ ] Dispatch mental-model-updater + spec-updater in parallel — wait for both; surface ambiguous stems
    [ ] Report to user — wait for approval  ← main-branch mode only
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run both updaters (loop)
@@ -69,7 +69,7 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and 
 ### 2. Spawn implementer
 
 ```bash
-ws-call-agent implementer - <<'PROMPT'
+ws-call-named-agent implementer - <<'PROMPT'
 Mode: <A: plan-driven | B: inline brief>
 <Plan path | Brief text>
 
@@ -113,7 +113,7 @@ calls in the same response turn. Each reviewer loads its partition doc via
 | Test | `$(ws-infra-path code-review-test.md)` |
 
 ```bash
-ws-call-agent reviewer-correctness - <<'PROMPT'
+ws-call-named-agent reviewer-correctness - <<'PROMPT'
 Diff range: <first-commit>..<last-commit>
 
 Instructions:
@@ -126,7 +126,7 @@ PROMPT
 ```
 
 ```bash
-ws-call-agent reviewer-fit - <<'PROMPT'
+ws-call-named-agent reviewer-fit - <<'PROMPT'
 Diff range: <first-commit>..<last-commit>
 
 Instructions:
@@ -139,7 +139,7 @@ PROMPT
 ```
 
 ```bash
-ws-call-agent reviewer-test - <<'PROMPT'
+ws-call-named-agent reviewer-test - <<'PROMPT'
 Diff range: <first-commit>..<last-commit>
 
 Instructions:
@@ -156,20 +156,20 @@ PROMPT
 1. If all reviewers return a `[clean]` summary → exit review loop, proceed to step 4.
 2. Otherwise: relay file paths to the implementer:
    ```bash
-   ws-call-agent implementer - <<'PROMPT'
+   ws-call-named-agent implementer - <<'PROMPT'
    Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
    PROMPT
    ```
    Wait for the implementer's fix report and integration test confirmation.
 3. Re-review (parallel — issue multiple Bash calls in the same response, same paths — reviewers overwrite):
    ```bash
-   ws-call-agent reviewer-correctness - <<'PROMPT'
+   ws-call-named-agent reviewer-correctness - <<'PROMPT'
    Re-review. Updated diff: <diff>
    PROMPT
-   ws-call-agent reviewer-fit - <<'PROMPT'
+   ws-call-named-agent reviewer-fit - <<'PROMPT'
    Re-review. Updated diff: <diff>
    PROMPT
-   ws-call-agent reviewer-test - <<'PROMPT'
+   ws-call-named-agent reviewer-test - <<'PROMPT'
    Re-review. Updated diff: <diff>
    PROMPT
    ```
@@ -192,7 +192,7 @@ PROMPT
 2. **Main-branch mode only** — wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix:
      ```bash
-     ws-call-agent implementer - <<'PROMPT'
+     ws-call-named-agent implementer - <<'PROMPT'
      Fix these issues: <tweak requests>
      PROMPT
      ```
@@ -201,7 +201,7 @@ PROMPT
    - Re-run **spec-updater** with the new commit range. Wait. Then re-run **mental-model-updater**. Wait.
    - Re-report. Loop until user approves.
 
-Implementer and reviewer sessions remain available throughout this loop via `ws-call-agent` auto-resume.
+Implementer and reviewer sessions remain available throughout this loop via `ws-call-named-agent` auto-resume.
 
 ### 6. Merge
 
@@ -216,7 +216,7 @@ Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gat
 ### 8. Cleanup
 
 1. `rm -f <correctness-path> <fit-path> <test-path>  # literal paths from lead context`
-2. Agent registry entries are created fresh per run via `ws-new-agent` — no explicit teardown needed.
+2. Agent registry entries are created fresh per run via `ws-new-named-agent` — no explicit teardown needed.
 
 ## Judgments
 

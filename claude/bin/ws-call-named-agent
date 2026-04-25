@@ -123,7 +123,7 @@ if [[ "$NEW_TOKENS" -gt 120000 && "$SKIP_COMPRESSION" -eq 0 ]]; then
     printf '%s' "$SYSTEM_PROMPT" > "$SP_FILE"
     NEW_AGENT_ARGS+=(--system-prompt "$SP_FILE")
   fi
-  "$SCRIPT_DIR/ws-new-agent" "${NEW_AGENT_ARGS[@]}"
+  "$SCRIPT_DIR/ws-new-named-agent" "${NEW_AGENT_ARGS[@]}"
 
   jq '.compressed_at = true' "$AGENT_FILE" > "${AGENT_FILE}.tmp" && mv "${AGENT_FILE}.tmp" "$AGENT_FILE"
   NEW_UUID=$(jq -r '.uuid' "$AGENT_FILE")

@@ -16,7 +16,7 @@ Target: $ARGUMENTS
 - Sprint operates only on `sprint/`-prefixed branches — do not enter the session loop or run wrap-up on any other branch.
 - Doc pipeline (`ws:spec-updater`, `ws:mental-model-updater`) is suppressed during task execution; it runs once at wrap-up only.
 - Do not invoke `/discuss`, `/edit`, or `/implement` skills from the session loop — internalize their patterns directly.
-- Before each delegation task: register agents via `ws-new-agent` and allocate `ws-review-path` slots (two separate Bash calls — see Delegation Cycle).
+- Before each delegation task: register agents via `ws-new-named-agent` and allocate `ws-review-path` slots (two separate Bash calls — see Delegation Cycle).
 - After each delegation task: `rm -f <correctness-path> <fit-path>` using the literal paths stored from allocation.
 - All written artifacts must be in English regardless of conversation language.
 
@@ -77,7 +77,7 @@ Does NOT fire for follow-up turns within an established domain, or for status / 
 ### Sprint-Aware Survey Call
 
 ```bash
-ws-new-agent sprint-survey --model sonnet --system-prompt "$(ws-infra-path sprint-survey.md)"
+ws-new-named-agent sprint-survey --model sonnet --system-prompt "$(ws-infra-path sprint-survey.md)"
 ```
 
 ```bash
@@ -85,7 +85,7 @@ PARENT=$(git merge-base HEAD main)
 COMMITS=$(git log "$PARENT"..HEAD --oneline 2>/dev/null || echo "(no commits yet)")
 BRANCH=$(git branch --show-current)
 PROJ_TREE=$(ws-proj-tree)
-ws-call-agent sprint-survey - <<PROMPT
+ws-call-named-agent sprint-survey - <<PROMPT
 Sprint: <sprint-name>
 Branch: $BRANCH
 Commit range: $PARENT..HEAD
@@ -107,9 +107,9 @@ variables.
 **Step 1 — Register agents (one Bash call)**
 
 ```bash
-ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-ws-new-agent reviewer-correctness --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
-ws-new-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
+ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+ws-new-named-agent reviewer-correctness --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
+ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
 ```
 
 **Step 2 — Allocate paths (one Bash call)**
@@ -124,7 +124,7 @@ context.
 **Step 3 — Spawn implementer (one Bash call)**
 
 ```bash
-ws-call-agent implementer - <<'PROMPT'
+ws-call-named-agent implementer - <<'PROMPT'
 Run `ws-print-infra implementer.md` first.
 Mode: B (inline brief)
 <task description — goals, constraints; no doc pipeline required>
@@ -138,7 +138,7 @@ Note commit range from implementer report as `<first>..<last>`.
 **Step 4 — Spawn reviewers in parallel (two Bash calls in the same response turn)**
 
 ```bash
-ws-call-agent reviewer-correctness - <<'PROMPT'
+ws-call-named-agent reviewer-correctness - <<'PROMPT'
 Diff range: <first>..<last>
 Write full findings to: <correctness-path>
 Return only: [clean|non-clean]: <one-line summary>
@@ -146,7 +146,7 @@ PROMPT
 ```
 
 ```bash
-ws-call-agent reviewer-fit - <<'PROMPT'
+ws-call-named-agent reviewer-fit - <<'PROMPT'
 Diff range: <first>..<last>
 Write full findings to: <fit-path>
 Return only: [clean|non-clean]: <one-line summary>

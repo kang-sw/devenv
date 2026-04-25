@@ -19,7 +19,7 @@ Target: $ARGUMENTS
 - Contract directives = lead's judgment on points the delegate cannot derive from ticket + code alone.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
 - The delegate does not commit — lead reviews and commits.
-- Register the skeleton-writer agent once per invocation via `ws-new-agent`; resume via `ws-call-agent` for amendment rounds.
+- Register the skeleton-writer agent once per invocation via `ws-new-named-agent`; resume via `ws-call-named-agent` for amendment rounds.
 
 ## On: invoke
 
@@ -34,13 +34,13 @@ Target: $ARGUMENTS
 **Register (one Bash call):**
 
 ```bash
-ws-new-agent skeleton-writer --model opus --system-prompt "$(ws-infra-path skeleton-writer.md)"
+ws-new-named-agent skeleton-writer --model opus --system-prompt "$(ws-infra-path skeleton-writer.md)"
 ```
 
 **Spawn (one Bash call):**
 
 ```bash
-ws-call-agent skeleton-writer - <<'PROMPT'
+ws-call-named-agent skeleton-writer - <<'PROMPT'
 Ticket: <ticket-path>
 
 ## Contract directives
@@ -57,7 +57,7 @@ PROMPT
    - **Minor** — fix directly.
    - **Structural** — relay amended directives via a follow-up call (session resumes with full context):
      ```bash
-     ws-call-agent skeleton-writer - <<'PROMPT'
+     ws-call-named-agent skeleton-writer - <<'PROMPT'
      Amend: <issues and revised directives>
      PROMPT
      ```
