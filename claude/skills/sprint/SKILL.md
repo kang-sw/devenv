@@ -42,10 +42,14 @@ Target: $ARGUMENTS
 Triggers on explicit user done signal ("done", "wrap up", "finish sprint", or equivalent).
 
 1. Determine parent: `PARENT=$(git merge-base HEAD main)`.
-2. Dispatch `ws:spec-updater` with commit range `$PARENT..HEAD`. Wait for completion. Surface ambiguous stems to the user before proceeding.
-3. Dispatch `ws:mental-model-updater` with the same range. Wait. (Must run after spec-updater so it captures any 🚧 strips.)
-4. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update.
-5. Suggest: `git checkout main && git merge --no-ff sprint/<name>`, or `git branch -d sprint/<name>` if no merge is needed.
+2. **Spec-update loop** (max 2 iterations — sonnet first, opus on retry). Use the **Spec-Update Override** template. After each run, read `git diff ai-docs/spec/` and judge whether the edits are coherent and grounded in the commit list:
+   - **Yes** → commit spec changes; proceed to step 3.
+   - **No, iteration 1** → `git checkout ai-docs/spec/`; retry at opus with explicit feedback on what was wrong.
+   - **No, iteration 2** → commit as-is; warn user with a list of specific concerns; proceed to step 3.
+3. Dispatch `ws:mental-model-updater` with commit range `$PARENT..HEAD`. Include a note that docs may be stale from accumulated sprint commits — explore thoroughly. Wait. (Must run after the spec-update loop so it sees the updated spec.)
+4. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline and §Doc Commit Gate. If ticket-driven, follow §Ticket Update: update existing tickets only — set `## Result` and advance state; do not create new tickets.
+5. Report to user: spec entries added, removed, and 🚧-stripped; mental model sections updated.
+6. Suggest: `git checkout main && git merge --no-ff sprint/<name>`, or `git branch -d sprint/<name>` if no merge is needed.
 
 ## Judgments
 
@@ -153,6 +157,37 @@ re-review (reviewers overwrite paths) until both return `[clean]`.
 
 ```bash
 rm -f <correctness-path> <fit-path>
+```
+
+### Spec-Update Override
+
+Register and call `ws:spec-updater` in active-editing mode. Use `sonnet` on the first iteration, `opus` on the retry.
+
+**Step 1 — Register (one Bash call)**
+
+```bash
+ws-new-agent spec-updater --agent ws:spec-updater --model <sonnet|opus>
+```
+
+**Step 2 — Call (one Bash call)**
+
+```bash
+PARENT=$(git merge-base HEAD main)
+COMMITS=$(git log "$PARENT"..HEAD --oneline)
+ws-call-agent spec-updater \
+  "SPRINT WRAP-UP — docs are likely stale from accumulated sprint commits.
+Override default conservative behavior: actively edit ai-docs/spec/ files.
+
+Commit range: $PARENT..HEAD
+Commits:
+$COMMITS
+
+Required tasks:
+1. Strip 🚧 markers from entries whose spec stems appear in the commit list.
+2. Add new spec entries for features introduced in the commits that have no existing entry.
+3. Remove spec entries for features explicitly dropped in the commits.
+
+Apply all edits directly. Do not defer or recommend — make the changes."
 ```
 
 ## Doctrine
