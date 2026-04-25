@@ -66,6 +66,7 @@ Return to the lead:
 - Survey file path
 - Count of reusable components found
 - Any concerns about ticket scope vs. codebase reality
+- Any spec or doc entry that led to a wrong assumption discovered during the survey
 
 ## Doctrine
 
