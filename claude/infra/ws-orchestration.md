@@ -72,13 +72,24 @@ ws-new-agent reviewer-corr --agent ws:code-reviewer --system-prompt "$(ws-infra-
 ws-new-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
 
 # 2. Call implementer — auto-starts session on first call
-ws-call-agent implementer "Implement X"
+ws-call-agent implementer - <<'PROMPT'
+Implement X
+PROMPT
 
 # 3. Parallel reviewers — issue multiple Bash calls in the same response turn
-ws-call-agent reviewer-corr "$(git diff HEAD~1)"
-ws-call-agent reviewer-fit "$(git diff HEAD~1)"
+DIFF=$(git diff HEAD~1)
+ws-call-agent reviewer-corr - <<PROMPT
+$DIFF
+PROMPT
+ws-call-agent reviewer-fit - <<PROMPT
+$DIFF
+PROMPT
 
 # 4. Fix loop — auto-resumes existing sessions
-ws-call-agent implementer "Fix these issues: ..."
-ws-call-agent reviewer-corr "Re-review. Updated diff: ..."
+ws-call-agent implementer - <<'PROMPT'
+Fix these issues: ...
+PROMPT
+ws-call-agent reviewer-corr - <<'PROMPT'
+Re-review. Updated diff: ...
+PROMPT
 ```

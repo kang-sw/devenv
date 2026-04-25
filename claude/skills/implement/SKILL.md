@@ -69,8 +69,8 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and 
 ### 2. Spawn implementer
 
 ```bash
-ws-call-agent implementer \
-  "Run \`ws-print-infra implementer.md\` first.
+ws-call-agent implementer - <<'PROMPT'
+Run `ws-print-infra implementer.md` first.
 
 Mode: <A: plan-driven | B: inline brief>
 <Plan path | Brief text>
@@ -80,16 +80,18 @@ Acceptance criteria: skeleton integration tests must pass.
 - Run: <command to execute them>
 
 Mental-model ancestor loading (one-level hierarchies —
-\`<domain>/<sub>.md\` only):
-- When you read \`ai-docs/mental-model/<domain>/<sub>.md\`, read
-  \`ai-docs/mental-model/<domain>/index.md\` first so inherited
-  \`## Domain Rules\` are visible before any edit.
+`<domain>/<sub>.md` only):
+- When you read `ai-docs/mental-model/<domain>/<sub>.md`, read
+  `ai-docs/mental-model/<domain>/index.md` first so inherited
+  `## Domain Rules` are visible before any edit.
 
 Instructions:
 - Verify integration tests pass before reporting completion or after each fix.
 - Report completion in plain text. Include test results.
 - For fix cycles, a follow-up call will arrive with review findings — fix and report back via your next response.
-- Commit at logical checkpoints on the current branch."```
+- Commit at logical checkpoints on the current branch.
+PROMPT
+```
 
 Note the commit range from the implementer's report.
 
@@ -113,52 +115,65 @@ calls in the same response turn. Each reviewer loads its partition doc via
 | Test | `$(ws-infra-path code-review-test.md)` |
 
 ```bash
-ws-call-agent reviewer-correctness \
-  "Diff range: <first-commit>..<last-commit>
+ws-call-agent reviewer-correctness - <<'PROMPT'
+Diff range: <first-commit>..<last-commit>
 
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
   the updated diff and respond.
 - Write your full findings to: <correctness-path>
-- Return only: [clean|non-clean]: <one-line characterization of most significant issues>"```
+- Return only: [clean|non-clean]: <one-line characterization of most significant issues>
+PROMPT
+```
 
 ```bash
-ws-call-agent reviewer-fit \
-  "Diff range: <first-commit>..<last-commit>
+ws-call-agent reviewer-fit - <<'PROMPT'
+Diff range: <first-commit>..<last-commit>
 
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
   the updated diff and respond.
 - Write your full findings to: <fit-path>
-- Return only: [clean|non-clean]: <one-line characterization of most significant issues>"```
+- Return only: [clean|non-clean]: <one-line characterization of most significant issues>
+PROMPT
+```
 
 ```bash
-ws-call-agent reviewer-test \
-  "Diff range: <first-commit>..<last-commit>
+ws-call-agent reviewer-test - <<'PROMPT'
+Diff range: <first-commit>..<last-commit>
 
 Instructions:
 - Report findings in plain text.
 - The lead will relay a re-review request if fixes are needed — re-examine
   the updated diff and respond.
 - Write your full findings to: <test-path>
-- Return only: [clean|non-clean]: <one-line characterization of most significant issues>"```
+- Return only: [clean|non-clean]: <one-line characterization of most significant issues>
+PROMPT
+```
 
 #### 3c. Relay and loop
 
 1. If all reviewers return a `[clean]` summary → exit review loop, proceed to step 4.
 2. Otherwise: relay file paths to the implementer:
    ```bash
-   ws-call-agent implementer \
-     "Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly."
+   ws-call-agent implementer - <<'PROMPT'
+   Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
+   PROMPT
    ```
    Wait for the implementer's fix report and integration test confirmation.
 3. Re-review (parallel — issue multiple Bash calls in the same response, same paths — reviewers overwrite):
    ```bash
-   ws-call-agent reviewer-correctness "Re-review. Updated diff: <diff>"
-   ws-call-agent reviewer-fit "Re-review. Updated diff: <diff>"
-   ws-call-agent reviewer-test "Re-review. Updated diff: <diff>"
+   ws-call-agent reviewer-correctness - <<'PROMPT'
+   Re-review. Updated diff: <diff>
+   PROMPT
+   ws-call-agent reviewer-fit - <<'PROMPT'
+   Re-review. Updated diff: <diff>
+   PROMPT
+   ws-call-agent reviewer-test - <<'PROMPT'
+   Re-review. Updated diff: <diff>
+   PROMPT
    ```
 4. Repeat from 3c.1 until all reviewers return `[clean]`.
 
@@ -179,7 +194,9 @@ Instructions:
 2. **Main-branch mode only** — wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix:
      ```bash
-     ws-call-agent implementer "Fix these issues: <tweak requests>"
+     ws-call-agent implementer - <<'PROMPT'
+     Fix these issues: <tweak requests>
+     PROMPT
      ```
      Implementer verifies integration tests and reports.
    - Re-apply `judge: partition-allocation` and re-review per the step 3 pattern.

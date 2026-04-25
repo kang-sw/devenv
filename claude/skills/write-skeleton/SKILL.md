@@ -40,11 +40,12 @@ ws-new-agent skeleton-writer --model opus --system-prompt "$(ws-infra-path skele
 **Spawn (one Bash call):**
 
 ```bash
-ws-call-agent skeleton-writer \
-  "Ticket: <ticket-path>
+ws-call-agent skeleton-writer - <<'PROMPT'
+Ticket: <ticket-path>
 
 ## Contract directives
-- <binding decisions only — things not derivable from ticket + codebase>"
+- <binding decisions only — things not derivable from ticket + codebase>
+PROMPT
 ```
 
 ### 3. Review
@@ -56,7 +57,9 @@ ws-call-agent skeleton-writer \
    - **Minor** — fix directly.
    - **Structural** — relay amended directives via a follow-up call (session resumes with full context):
      ```bash
-     ws-call-agent skeleton-writer "Amend: <issues and revised directives>"
+     ws-call-agent skeleton-writer - <<'PROMPT'
+     Amend: <issues and revised directives>
+     PROMPT
      ```
      Re-review after each round.
 

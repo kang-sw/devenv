@@ -8,13 +8,18 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
-if [[ $# -lt 2 ]]; then
+if [[ $# -lt 1 ]]; then
   echo "Usage: ws-call-agent <agent-name> <prompt>" >&2
+  echo "       ws-call-agent <agent-name> - <<'PROMPT' ... PROMPT" >&2
   exit 1
 fi
 
 AGENT_NAME="$1"
-PROMPT="$2"
+if [[ $# -lt 2 || "$2" == "-" ]]; then
+  PROMPT=$(cat)
+else
+  PROMPT="$2"
+fi
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 REPO_DIR_NAME=$(basename "$REPO_ROOT")

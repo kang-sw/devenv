@@ -86,15 +86,18 @@ ws-new-agent sprint-survey --model sonnet --system-prompt "$(ws-infra-path sprin
 ```bash
 PARENT=$(git merge-base HEAD main)
 COMMITS=$(git log "$PARENT"..HEAD --oneline 2>/dev/null || echo "(no commits yet)")
-ws-call-agent sprint-survey \
-  "Sprint: <sprint-name>
-Branch: $(git branch --show-current)
+BRANCH=$(git branch --show-current)
+PROJ_TREE=$(ws-proj-tree)
+ws-call-agent sprint-survey - <<PROMPT
+Sprint: <sprint-name>
+Branch: $BRANCH
 Commit range: $PARENT..HEAD
 Commits:
 $COMMITS
 
 Project map:
-$(ws-proj-tree)"
+$PROJ_TREE
+PROMPT
 ```
 
 ### Delegation Cycle
@@ -124,12 +127,13 @@ context.
 **Step 3 — Spawn implementer (one Bash call)**
 
 ```bash
-ws-call-agent implementer \
-  "Run \`ws-print-infra implementer.md\` first.
+ws-call-agent implementer - <<'PROMPT'
+Run `ws-print-infra implementer.md` first.
 Mode: B (inline brief)
 <task description — goals, constraints; no doc pipeline required>
 No skeleton — implement to spec.
-Commit on current branch."
+Commit on current branch.
+PROMPT
 ```
 
 Note commit range from implementer report as `<first>..<last>`.
@@ -137,17 +141,19 @@ Note commit range from implementer report as `<first>..<last>`.
 **Step 4 — Spawn reviewers in parallel (two Bash calls in the same response turn)**
 
 ```bash
-ws-call-agent reviewer-correctness \
-  "Diff range: <first>..<last>
+ws-call-agent reviewer-correctness - <<'PROMPT'
+Diff range: <first>..<last>
 Write full findings to: <correctness-path>
-Return only: [clean|non-clean]: <one-line summary>"
+Return only: [clean|non-clean]: <one-line summary>
+PROMPT
 ```
 
 ```bash
-ws-call-agent reviewer-fit \
-  "Diff range: <first>..<last>
+ws-call-agent reviewer-fit - <<'PROMPT'
+Diff range: <first>..<last>
 Write full findings to: <fit-path>
-Return only: [clean|non-clean]: <one-line summary>"
+Return only: [clean|non-clean]: <one-line summary>
+PROMPT
 ```
 
 Review loop: if non-clean, relay file paths (not content) to implementer;
@@ -174,8 +180,8 @@ ws-new-agent spec-updater --agent ws:spec-updater --model <sonnet|opus>
 ```bash
 PARENT=$(git merge-base HEAD main)
 COMMITS=$(git log "$PARENT"..HEAD --oneline)
-ws-call-agent spec-updater \
-  "SPRINT WRAP-UP — docs are likely stale from accumulated sprint commits.
+ws-call-agent spec-updater - <<PROMPT
+SPRINT WRAP-UP — docs are likely stale from accumulated sprint commits.
 Override default conservative behavior: actively edit ai-docs/spec/ files.
 
 Commit range: $PARENT..HEAD
@@ -187,7 +193,8 @@ Required tasks:
 2. Add new spec entries for features introduced in the commits that have no existing entry.
 3. Remove spec entries for features explicitly dropped in the commits.
 
-Apply all edits directly. Do not defer or recommend — make the changes."
+Apply all edits directly. Do not defer or recommend — make the changes.
+PROMPT
 ```
 
 ## Doctrine
