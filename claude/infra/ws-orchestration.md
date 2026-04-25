@@ -60,8 +60,8 @@ re-registering.
 ```bash
 # 1. Register all agent slots upfront (creates fresh sessions; stores system prompts)
 ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-ws-new-agent reviewer-corr --model sonnet --system-prompt "$(ws-infra-path code-review-correctness.md)"
-ws-new-agent reviewer-fit --model sonnet --system-prompt "$(ws-infra-path code-review-fit.md)"
+ws-new-agent reviewer-corr --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
+ws-new-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
 
 # 2. Call implementer — auto-starts session on first call
 ws-call-agent implementer "Implement X"

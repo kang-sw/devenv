@@ -104,8 +104,8 @@ variables.
 
 ```bash
 ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-ws-new-agent reviewer-correctness --model sonnet --system-prompt "$(ws-infra-path code-review-correctness.md)"
-ws-new-agent reviewer-fit --model sonnet --system-prompt "$(ws-infra-path code-review-fit.md)"
+ws-new-agent reviewer-correctness --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
+ws-new-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
 ```
 
 **Step 2 — Allocate paths (one Bash call)**
