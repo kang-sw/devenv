@@ -20,7 +20,7 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
 
 - `claude/infra/spec-conventions.md` — canonical stem format, anchor rules, frontmatter protocol.
 - `claude/bin/ws-generate-spec-stem` — collision-safe stem minting.
-- `claude/bin/ws-spec-build-index` — frontmatter cleanup; strips `features:` and `stems:` blocks; no file arguments; scans `ai-docs/spec/` automatically.
+- `claude/bin/ws-spec-build-index` — spec health pipeline; strips `features:` and `stems:` blocks; detects duplicate stems, stale Implementation Gap callouts (> 90 days), and broken mental-model anchor refs; no file arguments; scans `ai-docs/spec/` and `ai-docs/mental-model/` automatically.
 - `claude/skills/forge-spec/SKILL.md` — from-scratch spec reconstruction workflow; entry point when rebuilding an entire spec.
 
 ## Module Contracts
@@ -29,10 +29,12 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
   currently present under `ai-docs/spec/`. Uniqueness holds within a single invocation
   (multiple slugs passed at once are deduplicated against each other too).
 - `ws-spec-build-index` guarantees: after each run, both the `features:` and `stems:` frontmatter
-  blocks are removed from every `*.md` file under `ai-docs/spec/`. Accepts no file arguments;
-  always repo-wide. Output: `[fix] features: removed — <path>` when a `features:` block was
-  stripped; `[error]` on read/write failure; silent when the file was already clean or when only
-  `stems:` was removed.
+  blocks are removed from every `*.md` file under `ai-docs/spec/`. Health checks run after
+  cleanup: duplicate `{#YYMMDD-slug}` stems across spec files, Implementation Gap callouts older
+  than 90 days, and `{#YYMMDD-slug}` references in `ai-docs/mental-model/` that have no matching
+  anchor in `ai-docs/spec/`. Accepts no file arguments; always repo-wide. Output: `[fix]` for
+  auto-applied cleanup, `[warn]` for health findings, `[error]` on read/write failure; silent
+  when already clean and all checks pass. Always exits 0.
 - `ws-list-spec-stems` (no file arg) guarantees: a flat list of every `{#YYMMDD-slug}` found by
   grepping `ai-docs/spec/`. Hierarchy and display labels require a file argument.
 - `forge-spec` guarantees: no spec file is written and no archive `git mv` executes without explicit

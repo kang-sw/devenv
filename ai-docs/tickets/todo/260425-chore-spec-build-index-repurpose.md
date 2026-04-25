@@ -111,6 +111,13 @@ Suggested approach:
 Success: running the tool on a corpus with a manually introduced duplicate stem emits the expected
 warning; clean corpus emits nothing.
 
+### Result (a3654ad) - 2026-04-25
+
+Implemented two-pass design: cleanup loop runs first (process_file unchanged), then a second read
+pass builds stem_registry via collect_stems(). STEM_RE tightened to \d{6}-[\w-]+ to exclude
+template placeholder examples ({#YYMMDD-slug}) found in spec-system.md. Fenced-block exclusion
+applied. Clean corpus emits nothing; duplicate detection verified with synthetic registry test.
+
 ### Phase 3: Add Implementation Gap staleness warning
 
 Goals:
@@ -124,6 +131,12 @@ Suggested approach:
 
 Success: a gap callout dated more than 90 days ago triggers a warning; one dated within 90 days
 does not.
+
+### Result (61143ba) - 2026-04-25
+
+Implemented check_implementation_gaps() scanning spec files for
+`> [!note] Implementation Gap · YYYY-MM-DD` callouts; warns when age > 90 days.
+Fenced-block exclusion applied. Verified: 2025-01-01 (479 days) fires, today (0 days) silent.
 
 ### Phase 4: Add cross-doc anchor integrity check
 
@@ -139,6 +152,13 @@ Suggested approach:
 
 Success: a manually broken reference in a mental-model file triggers a warning; all current
 valid references pass silently.
+
+### Result (61143ba) - 2026-04-25
+
+Implemented check_mental_model_refs() using the spec stem registry from Phase 2.
+Scans ai-docs/mental-model/**/*.md for {#YYMMDD-slug} anchors not in the registry.
+STEM_RE shared with Phase 2 excludes template placeholders. Verified: ghost stem fires,
+valid stem silent. Combined with Phase 3 in one commit.
 
 ### Phase 5: Update convention docs
 
