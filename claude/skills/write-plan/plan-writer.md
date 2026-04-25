@@ -49,6 +49,7 @@ Return to the lead:
 - Plan file path
 - Key decisions made (beyond what the directives specified)
 - Any concerns or ambiguities that need lead judgment
+- Any spec or doc entry that led to a wrong assumption discovered during research
 
 ## Plan File Format
 

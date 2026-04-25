@@ -8,6 +8,7 @@
 - Structural deviations → escalate before proceeding. Cosmetic → adapt silently, note in report.
 - Review subprocess results before committing. Roll back on criteria failure.
 - Plan annotations (TDD/post-impl/manual) override default test strategy when present.
+- If a spec or doc entry led to a wrong assumption that you only discovered by checking code, include the discrepancy in your completion report.
 
 ## §Test Strategy
 

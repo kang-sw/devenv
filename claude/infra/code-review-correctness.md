@@ -16,6 +16,8 @@ that belong to the Fit or Test partitions.
    bypass, insecure deserialization, exposed secrets — OWASP top 10.
 5. **Edge cases** — boundary inputs (empty, zero, max), concurrent access,
    unexpected input shapes the implementation does not handle.
+6. **Spec drift** — if a spec entry claims behavior absent from both the diff
+   and the existing codebase, report it as a potentially stale spec entry.
 
 ## Out of scope
 
