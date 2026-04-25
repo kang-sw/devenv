@@ -64,7 +64,7 @@ fi
 
 claude "${ARGS[@]}" "$PROMPT" > "$TMPFILE"
 
-NEW_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens' "$TMPFILE")
+NEW_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens + .usage.output_tokens' "$TMPFILE")
 jq --argjson t "$NEW_TOKENS" '.token_count = $t | ."context-window" = $t' "$AGENT_FILE" > "${AGENT_FILE}.tmp" \
   && mv "${AGENT_FILE}.tmp" "$AGENT_FILE"
 
@@ -145,7 +145,7 @@ ${PROMPT}"
   CLEANUP_FILES+=("$HANDOFF_FILE")
   claude "${HANDOFF_ARGS[@]}" "$HANDOFF_PROMPT" > "$HANDOFF_FILE"
 
-  HANDOFF_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens' "$HANDOFF_FILE")
+  HANDOFF_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens + .usage.output_tokens' "$HANDOFF_FILE")
   jq --argjson t "$HANDOFF_TOKENS" '.token_count = $t | ."context-window" = $t' "$AGENT_FILE" > "${AGENT_FILE}.tmp" \
     && mv "${AGENT_FILE}.tmp" "$AGENT_FILE"
 
