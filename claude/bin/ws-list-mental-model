@@ -249,10 +249,13 @@ def main() -> None:
     # ---------------------------------------------------------------------
     # Tree header — human-readable hierarchy preview.
     # ---------------------------------------------------------------------
-    print('# Mental-model docs — paths relative to ai-docs/mental-model/ (overview: index.md)')
+    has_overview = Path('ai-docs/mental-model/index.md').exists()
+    overview_note = ' (overview: index.md)' if has_overview else ''
+    print(f'# Mental-model docs — paths relative to ai-docs/mental-model/{overview_note}')
     print('#')
     print('# Tree:')
-    print('#   overview (index.md)')
+    if has_overview:
+        print('#   overview (index.md)')
 
     # Collect parent → children from the *selected* set for display.
     display_roots: list[Path] = []
