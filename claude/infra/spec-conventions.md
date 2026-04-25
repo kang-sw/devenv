@@ -41,7 +41,6 @@ The callout body text identifies which form applies.
 - No ticket required — this distinguishes it from `🚧` entries, which must have a `todo/`-or-higher ticket.
 - Resolution path: at the next spec review, either create a ticket and convert to `🚧`, or accept the current state and absorb into body prose.
 - Discuss sessions surface a staleness warning for entries older than 90 days.
-- A survey agent or implementer encountering a callout whose referenced item is not found in code should flag it as potentially stale in their report.
 
 Permanent behavioral invariants belong in body prose, not in any callout. Write them directly in the body — they are facts about the system, not exceptions worth flagging.
 

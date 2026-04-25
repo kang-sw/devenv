@@ -112,7 +112,7 @@ No `🚧` means the feature is implemented and verified. Never include ticket re
 
 The callout body text identifies which form applies. Both forms share the same syntax, the same 90-day staleness mechanism, and the same resolution path: create a ticket and convert to `🚧`, or accept the current state and absorb into body prose.
 
-The date records when the gap was first noted. A survey agent or implementer encountering a callout whose referenced item is not found in code should flag it as potentially stale in their report.
+The date records when the gap was first noted.
 
 Permanent behavioral invariants belong in body prose, not in any callout.
 
