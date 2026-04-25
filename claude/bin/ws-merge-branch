@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# merge-branch.sh — conditional merge strategy for implementation skills
+# ws-merge-branch — conditional merge strategy for implementation skills
 #
-# Usage: merge-branch.sh <original-branch> <impl-branch> <commit-message>
+# Usage: ws-merge-branch <original-branch> <impl-branch> <commit-message>
 #
 # Single commit on branch  → squash merge (linear history)
 # Multiple commits         → merge --no-ff (preserve branch topology)

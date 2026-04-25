@@ -63,6 +63,8 @@ claude/infra/                 — docs only; accessed via ws-print-infra
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
   agent-compression.md        — compression handoff prompt injected into agents approaching the 120K token threshold
   skeleton-writer.md          — skeleton-writer agent role: codebase exploration, stub + test authoring, build verification
+  ws-orchestration.md         — ws-new-agent / ws-call-agent coordination primitives for subagent orchestration
+  sprint-survey.md            — sprint-survey agent role: identifies relevant spec/mental-model docs for sprint wrap-up
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-subquery                    — scoped sub-query via headless claude subprocess

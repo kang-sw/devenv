@@ -72,7 +72,7 @@ After writing or updating a spec file:
 ws-spec-build-index
 ```
 
-Scans all `*.md` files under `ai-docs/spec/` automatically. Removes any `features:` and `stems:` frontmatter blocks. No file arguments accepted. Output: `[fix] features: removed — <path>` when a `features:` block was stripped; `[error]` on failure; silent when the file was already clean.
+Scans all `*.md` files under `ai-docs/spec/` automatically. Removes any `features:` and `stems:` frontmatter blocks. No file arguments accepted. Output: `[fix]` for auto-applied cleanup (e.g. `features: removed — <path>`), `[warn]` for items needing human judgment (duplicate stems, staleness, anchor integrity). Parse failures and missing directory emit `[error]` to stderr. Always exits 0.
 
 ### spec-format
 

@@ -64,7 +64,7 @@ Run `ws-spec-build-index` (no arguments) after every spec write or update. It sc
 corpus, strips any legacy `features:` or `stems:` frontmatter blocks, and runs health checks:
 duplicate stem detection, Implementation Gap staleness (> 90 days), and mental-model anchor
 integrity. Output is `[fix]` for auto-applied cleanup, `[warn]` for items needing human
-judgment. The tool always exits 0.
+judgment. Parse failures and missing directory emit `[error]` to stderr. The tool always exits 0.
 
 ## Language
 

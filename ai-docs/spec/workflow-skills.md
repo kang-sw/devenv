@@ -28,29 +28,6 @@ Each skill recommends the next step at completion. `/proceed` is the auto-router
 > - `/write-skeleton` is optional: required only when public contracts need crystallization before implementation.
 > - `/write-plan` is optional: `/proceed` skips it when the scope is small or the session is warm.
 
-## Session Skills
-
-### Session Bootstrap — `/enter-session` {#260421-enter-session}
-
-Bootstraps main-agent context at session start and emits a structured `## Briefing` containing:
-- `### Context` — branch name, recent work summary, active ticket, and open threads.
-- `### Recommended next` — a backtick-quoted skill invocation with a one-line reason.
-
-Two paths: **fast-path** when `ai-docs/_continue.local.md` matches the current HEAD (reads the continuation file directly); **bootstrap** otherwise (forks a `clerk` subagent to synthesize context from git log and active tickets).
-
-> [!note] Constraints
-> - Produces no source edits or file writes — context synthesis only.
-
-### Session Sealing — `/exit-session` {#260421-exit-session}
-
-Seals the session by writing compressed working memory to `ai-docs/_continue.local.md` with a HEAD hash header. The payload covers four sections: mental state, next concrete step, open threads, and pending user directives. Optionally creates a WIP auto-commit for uncommitted changes.
-
-The file is consumed by `/enter-session`'s fast-path on the next session start.
-
-> [!note] Constraints
-> - Overwrites `_continue.local.md` — previous continuation is discarded.
-> - `.local.md` is gitignored; continuation state is machine-local.
-
 ## Planning Skills
 
 ### `/discuss` {#260421-discuss}
