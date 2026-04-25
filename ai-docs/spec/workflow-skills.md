@@ -18,6 +18,12 @@ features:
     - `/implement`
     - Pre-invocation Context Survey — `project-survey`
     - `/proceed`
+    - 🚧 `/sprint` — Session Container
+      - 🚧 Sprint Continue Detection
+      - 🚧 Sprint Session Loop
+      - 🚧 Sprint-Aware Project Survey
+      - 🚧 Sprint Wrap-up
+      - 🚧 Sprint Implementation Delegation
   - Reconstruction
     - `/forge-spec`
     - `/forge-mental-model`
@@ -96,6 +102,9 @@ When a mental-model domain file is read, the skill checks its last commit date v
 
 > [!note] Constraints
 > - No source files are created or modified during a `/discuss` session.
+
+> [!note] Planned 🚧
+> On invoke, when the current branch starts with `sprint/`, will emit one line suggesting `/sprint` for session continuity. Does not block or redirect — discuss proceeds normally. {#260425-sprint-discuss-hint}
 
 ### `/write-spec` {#260421-write-spec}
 
@@ -218,6 +227,54 @@ Announces the chosen path before invoking the first skill.
 > - **`judge: needs-ticket`** — auto-invokes `/write-ticket` when the target is a vague inline description with no clear scope. Clear-scope inline descriptions currently bypass `/write-ticket` and proceed directly to implementation. Exception: exploratory targets stop and route back to `/discuss`.
 >
 > With this change, `/proceed` is a valid entry point from any conversation state, including immediately after `/discuss` or mid-discussion with no ticket path argument.
+
+### 🚧 `/sprint` — Session Container {#260425-sprint}
+
+A multi-task session container that replaces the manual `/discuss` → `/proceed` chain for feature-branch work. Sprint holds the full lifecycle — routing, implementation, and wrap-up — in a single persistent session. All doc-pipeline steps are deferred to wrap-up; each task commits only source changes.
+
+> [!note] Constraints
+> - Sprint operates only on `sprint/`-prefixed branches.
+> - The doc pipeline (`ws:spec-updater`, `ws:mental-model-updater`) is suppressed during task execution and runs once at wrap-up.
+
+#### 🚧 Sprint Continue Detection {#260425-sprint-continue}
+
+On invoke, sprint checks whether the current branch starts with `sprint/`. If so, it offers three options: **continue** the session, run **wrap-up**, or **abandon**. Otherwise, it asks for a sprint name and creates a `sprint/<name>` branch.
+
+A `sprint/` branch that exists and has not been merged to main signals that wrap-up has not yet run. This is the sole persistent-state signal — no external file or TaskCreate is used.
+
+#### 🚧 Sprint Session Loop {#260425-sprint-session-loop}
+
+Accepts requests inside the sprint session and routes via `judge: delegate`:
+
+- Questions or explanations → inline answer
+- Codebase exploration → Explore agent dispatch
+- Design discussion → inline discussion loop (no `/write-spec` auto-chaining)
+- Simple edits → direct edit, no doc pipeline
+- Complex implementation → implementation delegation, no doc pipeline
+
+#### 🚧 Sprint-Aware Project Survey {#260425-sprint-aware-survey}
+
+At session start, and on demand when the domain shifts mid-session, sprint dispatches a Sonnet-overridden survey agent that reads commit messages on the `parent..HEAD` range, cross-references them against spec and mental-model files, and returns a staleness-annotated `[Must|Maybe]` tier list. Entries where recent commits suggest the doc may be out of date are annotated with `[stale?]`.
+
+#### 🚧 Sprint Wrap-up {#260425-sprint-wrapup}
+
+Triggered by an explicit user done signal. The hardcoded wrap-up procedure:
+
+1. Reads the full branch diff (`git diff parent..HEAD`).
+2. Dispatches `ws:spec-updater`, waits for completion.
+3. Dispatches `ws:mental-model-updater`, waits for completion.
+4. Runs `executor-wrapup` (doc-commit gate + ticket update).
+5. Suggests branch merge or deletion.
+
+Sequential dispatch order mirrors the `/edit` doc-pipeline pattern so that `ws:mental-model-updater` sees any 🚧 strips committed by `ws:spec-updater`.
+
+> [!note] Constraints
+> - Wrap-up runs once per sprint, not per task.
+> - Completing wrap-up and merging or deleting the sprint branch closes the sprint.
+
+#### 🚧 Sprint Implementation Delegation {#260425-sprint-implementation-delegation}
+
+Delegated implementation within a sprint uses `ws-call-agent` with two review partitions in parallel: **Correctness** (logic, error paths, contracts, security) and **Fit** (conventions, naming, reuse, patterns). The Test partition is omitted. Reviewers write full findings to `review-path`-allocated files; the lead reads summaries only. When non-clean, the lead relays file paths to the implementer, which reads them directly.
 
 ## Reconstruction
 
