@@ -20,9 +20,8 @@ produces a repo-wide health report — the tool becomes the single enforcer agen
 every spec write.
 
 Out of scope (deferred, separate discussion):
-- `🚧`/ticket coherence check (gate vs. lint model TBD)
+- `🚧`/ticket coherence check via build-index (gate vs. lint model TBD)
 - Mandating build-index at end of `write-ticket`
-- Relaxing "defer spec entry until ticket" convention in spec-conventions.md
 
 ## Decisions
 
@@ -35,6 +34,28 @@ Out of scope (deferred, separate discussion):
   items requiring human judgment. The tool always exits 0; it is a reporter, not a gate.
 
 ## Phases
+
+### Phase 0: Fix spec-ticket circular dependency in conventions and write-ticket
+
+Background: `spec-conventions.md` says "Defer spec entry until the ticket is promoted to `todo/`,"
+while `write-ticket`'s `judge: spec-gate` blocks ticket creation without a pre-existing spec entry.
+For brand-new behaviors this is a deadlock. Resolution: remove the ordering gate from the convention
+(the core constraint "🚧 requires todo/-or-higher ticket" is sufficient), and extend spec-gate to
+also enforce on `idea/` → `todo/` promotion (currently uncovered).
+
+Goals:
+- `spec-conventions.md`: remove the sentence "Defer spec entry until the ticket is promoted to
+  `todo/`." The remaining rule ("🚧 entries require a `todo/`-or-higher ticket") is declarative
+  and sufficient.
+- `write-ticket/SKILL.md` `judge: spec-gate`: change trigger from "CREATE path only" to
+  "any action that results in `todo/`-or-higher status" — covers both direct `todo/` creation
+  and `idea/` → `todo/` promotion moves. `idea/` creation remains ungated.
+
+Depends on: nothing. Must precede Phase 5 (convention doc updates).
+
+Success: an agent can write a `🚧` spec entry before the ticket exists; promoting an `idea/`
+ticket to `todo/` without a spec entry is blocked; direct `todo/` creation without a spec entry
+remains blocked.
 
 ### Phase 1: Strip features: from spec files and update tool core
 
