@@ -23,6 +23,7 @@ Target: $ARGUMENTS
 - One invocation writes to exactly one target file.
 - All written rules are in English regardless of conversation language.
 - Commit the change at the end following CLAUDE.md commit rules. Include `## AI Context` recording the classification decision.
+- Domain Rules must appear immediately after the frontmatter body. When the section is absent, create it there. When it exists elsewhere, surface its current position to the user before appending.
 
 ## On: invoke
 
@@ -65,9 +66,9 @@ For domain-scoped rules, `judge: domain-match` yields one of:
 ### 5. Write
 
 1. Open the target doc.
-2. Locate the target section (`## Architecture Rules` or `## Domain Rules`). If the section is absent:
-   - In a mental-model doc: add the `## Domain Rules` heading immediately after the frontmatter body.
-   - In `CLAUDE.md`: add the `## Architecture Rules` heading after `## Code Standards`, or at end-of-file if that section is absent.
+2. Locate the target section (`## Architecture Rules` or `## Domain Rules`).
+   - If the section is **absent**: In a mental-model doc, add the `## Domain Rules` heading immediately after the frontmatter body. In `CLAUDE.md`, add the `## Architecture Rules` heading after `## Code Standards`, or at end-of-file if that section is absent.
+   - If the section is **present**: For mental-model docs, verify it sits immediately after the frontmatter body. If it does not, report the misplacement to the user before appending — do not silently append to a misplaced section.
 3. Append the rule as a new bullet under the section, preserving the existing formatting convention.
 4. Do not reorder, rewrap, or edit any existing bullet.
 
