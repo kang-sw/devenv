@@ -54,9 +54,8 @@ Delegation prompt must include: (1) before/after example, (2) target file list, 
 
 | Method | When |
 |---|---|
-| **sed / replace_all** | Pure text substitution expressible as regex |
-| **Cheap subprocess** | Fixed pattern, no ambiguity, no judgment needed |
-| **Capable subprocess** | Structural understanding or any ambiguity |
+| **sed / replace_all=true** | Pure text substitution expressible as regex |
+| **Direct edit loop** | File-by-file judgment needed (Read → Edit per file) |
 
 On failure: `git checkout -- <files>`, report.
 
