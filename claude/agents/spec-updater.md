@@ -20,6 +20,7 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
 - Remove a `> [!note] Planned 🚧` callout only when the associated spec-stem is confirmed implemented.
 - Run `ws-spec-build-index` after every file modification to regenerate frontmatter.
 - All output must be in English.
+- When the call prompt begins with `Suggestion mode:`, skip step 5 entirely — make no file edits. Emit proposed changes under `### Proposed strips` in the report rather than applying them.
 
 ## Process
 
@@ -78,6 +79,8 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
 
 (omit any section that has no entries)
 ```
+
+**Suggestion mode** (call prompt begins with `Suggestion mode:`): replace `### Stripped` with `### Proposed strips` using the same entry format — no files are modified. All other sections are identical.
 
 ## Doctrine
 

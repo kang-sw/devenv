@@ -42,10 +42,7 @@ Target: $ARGUMENTS
 Triggers on explicit user done signal ("done", "wrap up", "finish sprint", or equivalent).
 
 1. Determine parent: `PARENT=$(git merge-base HEAD main)`.
-2. **Spec-update loop** (max 2 iterations — sonnet first, opus on retry). Use the **Spec-Update Override** template. After each run, read `git diff ai-docs/spec/` and judge whether the edits are coherent and grounded in the commit list:
-   - **Yes** → commit spec changes; proceed to step 3.
-   - **No, iteration 1** → `git checkout ai-docs/spec/`; retry at opus with explicit feedback on what was wrong.
-   - **No, iteration 2** → commit as-is; warn user with a list of specific concerns; proceed to step 3.
+2. **Spec-update pass.** Use the **Spec-Update Override** template. When spec-updater returns, apply `### Proposed strips` directly; collect `### Pending removal`, `### Planned entry dropped`, and ambiguous cases for the user report in step 5. Run `ws-spec-build-index` if any file was modified; commit spec changes.
 3. Dispatch `ws:mental-model-updater` with commit range `$PARENT..HEAD`. Include a note that docs may be stale from accumulated sprint commits — explore thoroughly. Wait. (Must run after the spec-update loop so it sees the updated spec.)
 4. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline and §Doc Commit Gate. If ticket-driven, follow §Ticket Update: update existing tickets only — set `## Result` and advance state; do not create new tickets.
 5. Report to user: spec entries added, removed, and 🚧-stripped; mental model sections updated.
@@ -167,12 +164,12 @@ rm -f <correctness-path> <fit-path>
 
 ### Spec-Update Override
 
-Register and call `ws:spec-updater` in active-editing mode. Use `sonnet` on the first iteration, `opus` on the retry.
+Register and call `ws:spec-updater` in suggestion mode, then apply the results directly.
 
 **Step 1 — Register (one Bash call)**
 
 ```bash
-ws-new-agent spec-updater --agent ws:spec-updater --model <sonnet|opus>
+ws-new-agent spec-updater --agent ws:spec-updater --model sonnet
 ```
 
 **Step 2 — Call (one Bash call)**
@@ -181,21 +178,30 @@ ws-new-agent spec-updater --agent ws:spec-updater --model <sonnet|opus>
 PARENT=$(git merge-base HEAD main)
 COMMITS=$(git log "$PARENT"..HEAD --oneline)
 ws-call-agent spec-updater - <<PROMPT
-SPRINT WRAP-UP — docs are likely stale from accumulated sprint commits.
-Override default conservative behavior: actively edit ai-docs/spec/ files.
+Suggestion mode: SPRINT WRAP-UP — analyze only, do not edit files.
 
 Commit range: $PARENT..HEAD
 Commits:
 $COMMITS
 
-Required tasks:
-1. Strip 🚧 markers from entries whose spec stems appear in the commit list.
-2. Add new spec entries for features introduced in the commits that have no existing entry.
-3. Remove spec entries for features explicitly dropped in the commits.
+Identify:
+1. 🚧 entries whose spec stems appear in the commit list — propose stripping them.
+2. Entries flagged for removal via `removed: <stem>` in the commits.
+3. Ambiguous or missing-anchor cases — note them for human review.
 
-Apply all edits directly. Do not defer or recommend — make the changes.
+Output structured proposals only. Make no file edits.
 PROMPT
 ```
+
+**Step 3 — Lead applies (direct edits)**
+
+Read the `### Proposed strips` section and apply each entry:
+- Remove `🚧 ` prefix from the heading line.
+- Remove the entire `> [!note] Planned 🚧` callout block if present.
+
+Do not auto-apply `### Pending removal` or `### Planned entry dropped` entries — surface these to the user in the step 5 report.
+
+Run `ws-spec-build-index` after all edits.
 
 ## Doctrine
 
