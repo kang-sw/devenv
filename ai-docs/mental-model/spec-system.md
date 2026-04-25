@@ -7,31 +7,31 @@ sources:
   - claude/infra/
   - claude/skills/forge-spec/
 related:
-  doc-tooling: "forge-mental-model calls list-spec-stems (no args) to embed spec stems into domain drafts when ai-docs/spec/ is present. A stem format change breaks forge-mental-model's embedding step."
+  doc-tooling: "forge-mental-model calls ws-list-spec-stems (no args) to embed spec stems into domain drafts when ai-docs/spec/ is present. A stem format change breaks forge-mental-model's embedding step."
 ---
 
 # Spec System
 
 Spec documents live under `ai-docs/spec/` and use a stem-and-anchor system for
-stable feature identity. Three tools cooperate: `generate-spec-stem`,
-`list-spec-stems`, and `spec-build-index`.
+stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
+`ws-list-spec-stems`, and `ws-spec-build-index`.
 
 ## Entry Points
 
 - `claude/infra/spec-conventions.md` — canonical stem format, anchor rules, frontmatter protocol.
-- `claude/bin/generate-spec-stem` — collision-safe stem minting.
-- `claude/bin/spec-build-index` — frontmatter regeneration; entry point for understanding what it writes and removes.
+- `claude/bin/ws-generate-spec-stem` — collision-safe stem minting.
+- `claude/bin/ws-spec-build-index` — frontmatter regeneration; entry point for understanding what it writes and removes.
 - `claude/skills/forge-spec/SKILL.md` — from-scratch spec reconstruction workflow; entry point when rebuilding an entire spec.
 
 ## Module Contracts
 
-- `generate-spec-stem` guarantees: output stem is globally unique across all `{#YYMMDD-slug}` anchors
+- `ws-generate-spec-stem` guarantees: output stem is globally unique across all `{#YYMMDD-slug}` anchors
   currently present under `ai-docs/spec/`. Uniqueness holds within a single invocation
   (multiple slugs passed at once are deduplicated against each other too).
-- `spec-build-index` guarantees: after each run, the `features:` frontmatter block reflects
+- `ws-spec-build-index` guarantees: after each run, the `features:` frontmatter block reflects
   the current heading structure (headings inside ` ``` ` or `~~~` fenced blocks are excluded),
   and any `stems:` block is removed. It does not write stems anywhere.
-- `list-spec-stems` (no file arg) guarantees: a flat list of every `{#YYMMDD-slug}` found by
+- `ws-list-spec-stems` (no file arg) guarantees: a flat list of every `{#YYMMDD-slug}` found by
   grepping `ai-docs/spec/`. Hierarchy and display labels require a file argument.
 - `forge-spec` guarantees: no spec file is written and no archive `git mv` executes without explicit
   user confirmation. Resume detection runs at every invocation via `TaskList` — tasks prefixed
@@ -48,7 +48,7 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 
 ## Coupling
 
-- `generate-spec-stem` ↔ `list-spec-stems` ↔ `spec-build-index`: all three share the
+- `ws-generate-spec-stem` ↔ `ws-list-spec-stems` ↔ `ws-spec-build-index`: all three share the
   `{#YYMMDD-slug}` regex as the stem format. A format change breaks all three.
 - Anchors live in document body text (any line), not in frontmatter. Every tool
   that reads stems must grep document body — not parse frontmatter.
@@ -61,13 +61,13 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 
 ## Extension Points & Change Recipes
 
-- **Add a new stem to a spec**: run `generate-spec-stem <descriptive-slug>` first,
+- **Add a new stem to a spec**: run `ws-generate-spec-stem <descriptive-slug>` first,
   insert the returned `{#YYMMDD-slug}` on a heading line or any body line,
-  then run `spec-build-index <file>`. The anchor can appear anywhere in the document.
-- **Find all stems in the repo**: run `list-spec-stems` (no args) — greps all files.
+  then run `ws-spec-build-index <file>`. The anchor can appear anywhere in the document.
+- **Find all stems in the repo**: run `ws-list-spec-stems` (no args) — greps all files.
   Do not look in frontmatter; `stems:` blocks no longer exist.
 - **Change the stem format**: update the `STEM_RE` constant in all three tools
-  (`generate-spec-stem`, `list-spec-stems`, `spec-build-index`) and update `spec-conventions.md`.
+  (`ws-generate-spec-stem`, `ws-list-spec-stems`, `ws-spec-build-index`) and update `spec-conventions.md`.
 - **Rebuild spec from scratch**: invoke `/forge-spec`. It archives existing spec files,
   surveys the codebase via parallel Sonnet subagents, confirms domain list and per-behavior
   classification with the user, then writes spec entries domain by domain.
@@ -79,11 +79,11 @@ stable feature identity. Three tools cooperate: `generate-spec-stem`,
 
 ## Common Mistakes
 
-- Adding `stems:` manually to spec frontmatter — `spec-build-index` removes it silently
+- Adding `stems:` manually to spec frontmatter — `ws-spec-build-index` removes it silently
   on next run. Stems are anchors in document body text only.
-- Inserting a `{#YYMMDD-slug}` without running `generate-spec-stem` first — the stem
+- Inserting a `{#YYMMDD-slug}` without running `ws-generate-spec-stem` first — the stem
   may collide with an existing anchor in another file.
-- Expecting `list-spec-stems -v` (no file arg) to return display labels — flat mode cannot
+- Expecting `ws-list-spec-stems -v` (no file arg) to return display labels — flat mode cannot
   reconstruct heading context; `-v` emits a warning and flat output only.
 - Searching for stems in the `stems:` frontmatter field of spec files — that field
   no longer exists. All stem lookup must grep document body for `{#\d{6}-[\w-]+}`.

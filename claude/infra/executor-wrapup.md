@@ -14,7 +14,7 @@ Load and follow after the implementation commit is made and any merge step is do
 
 Propagation procedure for the Ancestor loading invariant above:
 
-1. Callers using `list-mental-model` need no manual action — the lister auto-emits a matching parent `<domain>/index.md` alongside any direct-child sub-domain.
+1. Callers using `ws-list-mental-model` need no manual action — the lister auto-emits a matching parent `<domain>/index.md` alongside any direct-child sub-domain.
 2. Callers using manual paths must apply the rule themselves — read the parent before the child.
 3. Subagent delegations: include the rule verbatim in the spawn prompt so the subagent observes it inside its own read ordering.
 

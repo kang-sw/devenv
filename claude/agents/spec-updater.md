@@ -18,7 +18,7 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
 - Read spec files under `ai-docs/spec/` only — no other source reads.
 - Strip 🚧 from a feature heading only when implementation is confirmed via commit history. Never strip speculatively.
 - Remove a `> [!note] Planned 🚧` callout only when the associated spec-stem is confirmed implemented.
-- Run `spec-build-index` after every file modification to regenerate frontmatter.
+- Run `ws-spec-build-index` after every file modification to regenerate frontmatter.
 - All output must be in English.
 
 ## Process
@@ -31,7 +31,7 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
    c. Collect `> [!note] Planned 🚧` callouts — associate each with the nearest preceding anchored heading to derive its spec-stem.
 
 3. **Check implementation via commit history for each spec-stem.**
-   a. Extract the bare slug from the `{#slug}` anchor (e.g., `260421-feature-name`). This is the spec-stem. Optionally run `list-spec-stems <spec-file>` to confirm the slug is registered in the file.
+   a. Extract the bare slug from the `{#slug}` anchor (e.g., `260421-feature-name`). This is the spec-stem. Optionally run `ws-list-spec-stems <spec-file>` to confirm the slug is registered in the file.
    b. Run `git log --all --grep="<spec-stem>" --oneline` to find commits referencing the stem in `## Spec` sections.
    c. If matching commits exist: mark for strip — implementation is recorded in history.
    d. If no commits found: report as unimplemented; do not strip.
@@ -47,7 +47,7 @@ You strip 🚧 markers from spec documents when their spec-stems have been merge
 5. **Apply confirmed strips.**
    a. For each confirmed-implemented 🚧 heading: remove the `🚧 ` prefix from the heading line (leave the `{#slug}` anchor intact).
    b. Remove the entire `> [!note] Planned 🚧` callout block (the `> [!note]` line and all continuation `> ` lines) for confirmed-implemented stems.
-   c. Run `spec-build-index` on each modified file.
+   c. Run `ws-spec-build-index` on each modified file.
 
 6. **Emit the report.**
 

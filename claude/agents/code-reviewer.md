@@ -19,9 +19,9 @@ You are **read-only** — report findings, never edit code.
 
 ## Process
 
-1. **Read project context**: Read `CLAUDE.md` for project standards. Run `list-mental-model` (Bash, no args) to enumerate all mental-model docs, then read every listed file — full architectural context is required for cross-component violation detection.
+1. **Read project context**: Read `CLAUDE.md` for project standards. Run `ws-list-mental-model` (Bash, no args) to enumerate all mental-model docs, then read every listed file — full architectural context is required for cross-component violation detection.
 2. **Read the diff**: Run `git diff <range>` and `git diff --stat <range>`.
-3. **Review against**: if a partition doc was loaded via `load-infra`
+3. **Review against**: if a partition doc was loaded via `ws-print-infra`
    (e.g. `code-review-correctness.md`), follow its checklist only — do
    not expand to dimensions outside that partition. Otherwise run the
    full checklist:

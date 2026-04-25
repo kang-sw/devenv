@@ -14,7 +14,7 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- Run `load-infra mental-model-conventions.md` (Bash) before any document write — conventions are canonical there.
+- Run `ws-print-infra mental-model-conventions.md` (Bash) before any document write — conventions are canonical there.
 - Every `Agent()` dispatch carries explicit `model = "sonnet"` — never inherited.
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
@@ -185,7 +185,7 @@ Wait for the subagent to return.
 
 ### 3. Draft domain file
 
-1. Run `load-infra mental-model-conventions.md` (Bash). Read the output; apply the inclusion test to every claim before writing it.
+1. Run `ws-print-infra mental-model-conventions.md` (Bash). Read the output; apply the inclusion test to every claim before writing it.
 2. Draft the domain file content for `ai-docs/mental-model/<domain>.md` following the document format in `mental-model-conventions.md`.
 3. Set frontmatter: `domain` (filename stem), `description` (one-line scope summary), `sources` (directory patterns from task description), `related` (other domains with coupling to this one).
 
@@ -193,7 +193,7 @@ Wait for the subagent to return.
 
 If spec is available (recorded in cold-start step 1):
 
-1. Run `list-spec-stems` (no args) to get all spec stems in the repo.
+1. Run `ws-list-spec-stems` (no args) to get all spec stems in the repo.
 2. For each section in the domain draft: identify spec stems whose behavior corresponds to the section's topic. Embed the stem inline in the relevant body text (e.g., `{#260421-feature-name}`).
 
 Skip if no spec exists.

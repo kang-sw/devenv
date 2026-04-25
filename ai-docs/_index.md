@@ -26,9 +26,9 @@ Read before authoring or modifying skills, agents, or infra:
 |----------|---------|
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
 | `ai-docs/ship/ws.md` | Ship config for the `ws` plugin: version strategy, changelog, tag, push |
-| `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `load-infra impl-playbook.md`. |
-| `claude/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `load-infra subagent-rules.md`. |
-| `claude/infra/executor-wrapup.md` | Shared post-implementation wrapup: _index.md refresh, doc-commit gate, ticket update. Access via `load-infra executor-wrapup.md`. |
+| `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `ws-print-infra impl-playbook.md`. |
+| `claude/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `ws-print-infra subagent-rules.md`. |
+| `claude/infra/executor-wrapup.md` | Shared post-implementation wrapup: _index.md refresh, doc-commit gate, ticket update. Access via `ws-print-infra executor-wrapup.md`. |
 
 ## Native Agents
 
@@ -50,7 +50,7 @@ claude/agents/
 ## Infra Layout
 
 ```
-claude/infra/                 — docs only; accessed via load-infra
+claude/infra/                 — docs only; accessed via ws-print-infra
   impl-playbook.md            — subagent-safe implementation discipline
   mental-model-conventions.md — mental-model doc format and invariants
   ticket-conventions.md       — ticket format, status directories, stem convention; optional spec: and spec-remove: fields
@@ -65,16 +65,16 @@ claude/infra/                 — docs only; accessed via load-infra
   skeleton-writer.md          — skeleton-writer agent role: codebase exploration, stub + test authoring, build verification
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
-  subquery                    — scoped sub-query via headless claude subprocess
-  spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
-  generate-spec-stem          — emit a new {#YYMMDD-slug} anchor for a given descriptive slug
-  list-spec-stems             — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
-  merge-branch                — branch merge with strategy selection (squash or --no-ff)
-  list-mental-model           — enumerate mental-model docs relevant to target paths
-  load-infra                  — cat any infra doc by name (agent Bash tool context)
+  ws-subquery                    — scoped sub-query via headless claude subprocess
+  ws-spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
+  ws-generate-spec-stem          — emit a new {#YYMMDD-slug} anchor for a given descriptive slug
+  ws-list-spec-stems             — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
+  ws-merge-branch                — branch merge with strategy selection (squash or --no-ff)
+  ws-list-mental-model           — enumerate mental-model docs relevant to target paths
+  ws-print-infra                  — cat any infra doc by name (agent Bash tool context)
   ws-infra-path               — return absolute path to an infra doc (for --system-prompt args)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
-  review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
+  ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
   ws-new-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
   ws-call-agent               — call a registered named agent; tracks context; auto-compresses at 100K tokens
 ```
@@ -153,7 +153,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260424-refactor-proceed-gate-suppression` | done | judge:idea-level demoted to reminder + /proceed gate-suppression context in prefix-stage invocations |
 | `260424-feat-infra-path-portability` | done | ws-infra-path portability script; all bare claude/infra/ paths replaced with $(ws-infra-path) |
 | `260424-feat-discuss-on-demand-survey` | done | /discuss on-demand survey via judge:needs-survey; project-survey enriched output (titles + summaries) |
-| `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to review-path files, implementer reads directly |
+| `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to ws-review-path files, implementer reads directly |
 | `260425-feat-sprint-skill` | done | /sprint session-container skill — branch-as-state persistence, deferred doc pipeline, sprint-aware survey, 2-reviewer delegation |
 | `260425-feat-ws-agent-registry-compression` | done | ws-call-agent redesign: named agent registry (ws-new-agent) + auto-compression at 100K tokens |
 

@@ -33,7 +33,7 @@ features:
     - `agent-compression.md`
     - `ws-infra-path`
     - `ws-proj-tree`
-    - `review-path`
+    - `ws-review-path`
   - Utility Skills
     - `/add-rule`
     - `/ship`
@@ -109,11 +109,11 @@ Creates or updates a spec file under `ai-docs/spec/` describing caller-visible b
 
 A `judge: spec-impact` gate fires first: if the topic has no caller-visible behavioral change, the skill exits immediately without writing anything.
 
-After writing, runs `spec-build-index` to rebuild the `features:` frontmatter index. Applies a `judge: directory-vs-flat` to decide between a flat file and a directory structure.
+After writing, runs `ws-spec-build-index` to rebuild the `features:` frontmatter index. Applies a `judge: directory-vs-flat` to decide between a flat file and a directory structure.
 
 > [!note] Constraints
 > - Never includes ticket references in `🚧` markers — implementation traceability flows through commit `## Spec` sections referencing the spec-stem.
-> - Never edits the `features:` frontmatter block manually — `spec-build-index` owns it.
+> - Never edits the `features:` frontmatter block manually — `ws-spec-build-index` owns it.
 
 ### `/write-ticket` {#260421-write-ticket}
 
@@ -176,7 +176,7 @@ Review partitions: {#260424-implement-file-based-review}
 - **Fit** — conventions, naming, reuse, patterns.
 - **Test** — test file quality, coverage of new code paths, assertion validity.
 
-Reviewers write full findings to `review-path`-allocated files; stdout returns only a `[clean|non-clean]: <brief>` summary line. The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. The implementer applies judgment: correctness, contract, and security findings are addressed; style findings conflicting with established patterns may be deprioritized. `review-path` files are deleted in the Cleanup step.
+Reviewers write full findings to `ws-review-path`-allocated files; stdout returns only a `[clean|non-clean]: <brief>` summary line. The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. The implementer applies judgment: correctness, contract, and security findings are addressed; style findings conflicting with established patterns may be deprioritized. `ws-review-path` files are deleted in the Cleanup step.
 
 Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260422-implement-feature-branch-mode}
 
@@ -271,7 +271,7 @@ Sequential dispatch order mirrors the `/edit` doc-pipeline pattern so that `ws:m
 
 #### Sprint Implementation Delegation {#260425-sprint-implementation-delegation}
 
-Delegated implementation within a sprint uses `ws-call-agent` with two review partitions in parallel: **Correctness** (logic, error paths, contracts, security) and **Fit** (conventions, naming, reuse, patterns). The Test partition is omitted. Reviewers write full findings to `review-path`-allocated files; the lead reads summaries only. When non-clean, the lead relays file paths to the implementer, which reads them directly.
+Delegated implementation within a sprint uses `ws-call-agent` with two review partitions in parallel: **Correctness** (logic, error paths, contracts, security) and **Fit** (conventions, naming, reuse, patterns). The Test partition is omitted. Reviewers write full findings to `ws-review-path`-allocated files; the lead reads summaries only. When non-clean, the lead relays file paths to the implementer, which reads them directly.
 
 ## Reconstruction
 
@@ -282,7 +282,7 @@ From-scratch spec reconstruction for a project. The skill:
 2. Surveys the codebase with four parallel Sonnet subagents (structure, tickets, old spec, commits).
 3. Presents domain candidates to the user; confirmed list locks into `TaskCreate` tasks for resumability.
 4. Per domain: surveys again with four parallel subagents; presents a behavior brief; asks the user to classify each behavior (caller-visible? implemented or planned?); authors spec entries only after explicit confirmation.
-5. Runs `spec-build-index` after each file write.
+5. Runs `ws-spec-build-index` after each file write.
 
 > [!note] Constraints
 > - No spec entry is written without explicit user classification of caller-visible status and implementation status.
@@ -379,9 +379,9 @@ ws-call-agent implementer "<prompt>"
 
 Used by `/discuss` as pre-injected project context at skill start.
 
-### `review-path` {#260425-review-path}
+### `ws-review-path` {#260425-ws-review-path}
 
-`review-path <stem1> [<stem2> ...]` — prints one path per stem under `/tmp/claude-reviews/`, for use as review-findings sinks. Creates the directory if absent. {#260425-review-path-non-deterministic}
+`ws-review-path <stem1> [<stem2> ...]` — prints one path per stem under `/tmp/claude-reviews/`, for use as review-findings sinks. Creates the directory if absent. {#260425-ws-review-path-non-deterministic}
 
 Path format: `/tmp/claude-reviews/<pwd-hash>-<run-id>-<stem>.md`. `pwd_hash` is the first 8 chars of `shasum "$PWD"` — scopes paths to the current project. `run_id` is 8 random alphanumeric chars generated once per call — prevents collisions across concurrent invocations.
 

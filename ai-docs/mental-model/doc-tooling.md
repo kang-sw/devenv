@@ -8,7 +8,7 @@ sources:
   - claude/infra/
   - .claude/skills/polish-plugin-docs/
 related:
-  spec-system: "forge-mental-model calls list-spec-stems to embed spec stems when ai-docs/spec/ is present. A stem format change breaks the embedding step."
+  spec-system: "forge-mental-model calls ws-list-spec-stems to embed spec stems when ai-docs/spec/ is present. A stem format change breaks the embedding step."
 ---
 
 # Doc Tooling
@@ -41,8 +41,8 @@ construction), `mental-model-updater` (incremental update after code changes), a
 ## Coupling
 
 - `forge-mental-model` ↔ `TaskCreate` / `TaskList` / `TaskUpdate`: forge-mental-model registers one task per domain using the name prefix `forge-mental-model-<domain>`. Resume detection at invocation reads tasks by this prefix. Clearing or renaming these tasks destroys cross-compact resume state silently.
-- `forge-mental-model` → `list-spec-stems`: when `ai-docs/spec/` is present, forge-mental-model calls `list-spec-stems` (no args) to discover all spec stems, then embeds matching stems in the domain draft. This step is skipped when no spec exists. A change to the `{#YYMMDD-slug}` stem format breaks the embedding step.
-- `forge-spec` ↔ `forge-mental-model`: independent tools. forge-spec produces spec content; forge-mental-model consumes stems from that content via list-spec-stems. forge-spec does not invoke forge-mental-model and vice versa. Bootstrap suggests forge-spec first when both are absent.
+- `forge-mental-model` → `ws-list-spec-stems`: when `ai-docs/spec/` is present, forge-mental-model calls `ws-list-spec-stems` (no args) to discover all spec stems, then embeds matching stems in the domain draft. This step is skipped when no spec exists. A change to the `{#YYMMDD-slug}` stem format breaks the embedding step.
+- `forge-spec` ↔ `forge-mental-model`: independent tools. forge-spec produces spec content; forge-mental-model consumes stems from that content via ws-list-spec-stems. forge-spec does not invoke forge-mental-model and vice versa. Bootstrap suggests forge-spec first when both are absent.
 - `polish-writer` ↔ `ai-docs/ref/skill-authoring.md`: polish-writer embeds the full content of skill-authoring.md verbatim (no file-read capability). A change to skill-authoring.md requires a manual update to the embedded block in `.claude/skills/polish-plugin-docs/polish-writer.md`. The block is identified by the Doctrine comment in that file.
 
 ## Extension Points & Change Recipes

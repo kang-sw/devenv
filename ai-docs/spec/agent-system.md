@@ -90,13 +90,13 @@ Re-review is restricted to previously reported issues only — no expansion to u
 
 ### `code-reviewer` partition mode {#260421-code-reviewer-partition-mode}
 
-When spawned with a partition doc pre-loaded via `load-infra`, the reviewer restricts findings exclusively to that partition's checklist. Three partition docs are available:
+When spawned with a partition doc pre-loaded via `ws-print-infra`, the reviewer restricts findings exclusively to that partition's checklist. Three partition docs are available:
 
 | Partition | Loaded via | Covers |
 |---|---|---|
-| Correctness | `load-infra code-review-correctness.md` | Logic errors, error paths, contract compliance, security surface, edge cases |
-| Fit | `load-infra code-review-fit.md` | Conventions, code reuse, established patterns, test style |
-| Test | `load-infra code-review-test.md` | Assertion validity, unreachable paths, mock integrity, coverage, test isolation |
+| Correctness | `ws-print-infra code-review-correctness.md` | Logic errors, error paths, contract compliance, security surface, edge cases |
+| Fit | `ws-print-infra code-review-fit.md` | Conventions, code reuse, established patterns, test style |
+| Test | `ws-print-infra code-review-test.md` | Assertion validity, unreachable paths, mock integrity, coverage, test isolation |
 
 Each partition doc explicitly names what it excludes. When a partition is active, findings outside that partition are not reported.
 
@@ -114,7 +114,7 @@ Review dimensions: drift against mental-model, spec consistency, conceptual real
 
 **Refusals:**
 - Read-only — no document edits, no commits.
-- No direct source code reads — uses `subquery "<question>"` (Bash) for any code questions.
+- No direct source code reads — uses `ws-subquery "<question>"` (Bash) for any code questions.
 - No improvement suggestions for decisions already resolved in mental-model docs.
 
 ## Maintenance Agents

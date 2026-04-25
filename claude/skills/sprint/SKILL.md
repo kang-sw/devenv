@@ -16,13 +16,13 @@ Target: $ARGUMENTS
 - Sprint operates only on `sprint/`-prefixed branches — do not enter the session loop or run wrap-up on any other branch.
 - Doc pipeline (`ws:spec-updater`, `ws:mental-model-updater`) is suppressed during task execution; it runs once at wrap-up only.
 - Do not invoke `/discuss`, `/edit`, or `/implement` skills from the session loop — internalize their patterns directly.
-- Before each delegation task: register agents via `ws-new-agent` and allocate `review-path` slots (two separate Bash calls — see Delegation Cycle).
+- Before each delegation task: register agents via `ws-new-agent` and allocate `ws-review-path` slots (two separate Bash calls — see Delegation Cycle).
 - After each delegation task: `rm -f <correctness-path> <fit-path>` using the literal paths stored from allocation.
 - All written artifacts must be in English regardless of conversation language.
 
 ## On: invoke
 
-1. Run `load-infra ws-orchestration.md` (Bash).
+1. Run `ws-print-infra ws-orchestration.md` (Bash).
 2. Read `git branch --show-current`.
    - Starts with `sprint/`: detect sprint name from branch. Present options:
      - **continue** → enter **On: session loop**.
@@ -44,7 +44,7 @@ Triggers on explicit user done signal ("done", "wrap up", "finish sprint", or eq
 1. Determine parent: `PARENT=$(git merge-base HEAD main)`.
 2. Dispatch `ws:spec-updater` with commit range `$PARENT..HEAD`. Wait for completion. Surface ambiguous stems to the user before proceeding.
 3. Dispatch `ws:mental-model-updater` with the same range. Wait. (Must run after spec-updater so it captures any 🚧 strips.)
-4. Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update.
+4. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update.
 5. Suggest: `git checkout main && git merge --no-ff sprint/<name>`, or `git branch -d sprint/<name>` if no merge is needed.
 
 ## Judgments
@@ -111,7 +111,7 @@ ws-new-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-p
 **Step 2 — Allocate paths (one Bash call)**
 
 ```bash
-review-path correctness fit
+ws-review-path correctness fit
 ```
 
 Read the two output lines. Store as `<correctness-path>` and `<fit-path>` in
@@ -121,7 +121,7 @@ context.
 
 ```bash
 ws-call-agent implementer \
-  "Run \`load-infra implementer.md\` first.
+  "Run \`ws-print-infra implementer.md\` first.
 Mode: B (inline brief)
 <task description — goals, constraints; no doc pipeline required>
 No skeleton — implement to spec.
