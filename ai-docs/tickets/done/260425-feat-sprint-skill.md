@@ -11,6 +11,7 @@ spec:
 related-mental-model:
   - workflow-routing
   - executor-wrapup
+completed: 2026-04-25
 ---
 
 # Implement /sprint session-container skill
@@ -91,6 +92,10 @@ Constraints:
 - `executor-wrapup` doc-commit gate captures doc changes from both updaters
 - Wrap-up is not re-entrant; once triggered it runs to completion or fails explicitly
 
+### Result (f41d016) - 2026-04-25
+
+Phases 1-3 implemented together in `claude/skills/sprint/SKILL.md` and `claude/infra/sprint-survey.md`. Wrap-up is a dedicated `On: wrap-up` handler; delegation cycle is a Template section. `ws-declare-agent` scoped per task (not session) to give each delegation a clean reviewer state.
+
 ### Phase 4: /discuss hook integration
 
 Add the `sprint/` branch detection hint to `/discuss`. Phase 2 must be complete.
@@ -102,3 +107,7 @@ Goals:
 Constraints:
 - Change is additive only — no existing discuss behavior is modified
 - The hint must not appear when the user is not on a `sprint/` branch
+
+### Result (03148c4) - 2026-04-25
+
+Added step 1 to `On: invoke` in `claude/skills/discuss/SKILL.md`. Existing steps 1-2 renumbered to 2-3. Change is purely additive.
