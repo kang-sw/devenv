@@ -28,8 +28,10 @@ features:
     - `/forge-spec`
     - `/forge-mental-model`
   - Agent Orchestration Primitives
+    - 🚧 `ws-new-agent`
     - `ws-call-agent`
     - `ws-agent`
+    - 🚧 `agent-compression.md`
     - `ws-declare-agent`
     - `ws-infra-path`
     - `ws-proj-tree`
@@ -311,6 +313,24 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 
 Bash-callable infra scripts at `claude/infra/` that replace `TeamCreate`/`SendMessage`/`TeamDelete` for subagent coordination. Skill leads invoke these directly via the `Bash` tool.
 
+### 🚧 `ws-new-agent` {#260425-ws-new-agent}
+
+`ws-new-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]`
+
+Creates a named agent registry entry at `.git/ws@<repo-dir-name>/agents/<agent-name>.json`.
+
+- `--agent <type>` — agent type forwarded to the `claude` CLI (e.g., `Explore`, `general-purpose`).
+- `--system-prompt <path>` — reads the file at `<path>` and stores its content in the registry. Use `$(ws-infra-path <docname>)` for infra docs.
+- `--model` — model level (`opus`, `sonnet`, `haiku`). Defaults to `sonnet`.
+
+Registry JSON fields:
+- `uuid` — fresh random UUID v4. Not deterministic; enables compression-triggered refresh without branch or name changes.
+- `model`, `agent_type`, `system_prompt` — agent configuration, restored on compression handoff.
+- `token_count` — cumulative input tokens tracked by `ws-call-agent`; reset to `0` on creation.
+- `compressed_at` — `false` on creation; `true` immediately after a compression handoff.
+
+Overwrites the file if already present. Callers must not clobber a live session.
+
 ### `ws-call-agent` {#260424-ws-call-agent}
 
 `ws-call-agent <model> [--agent <name>] [--session-id <uuid>] [--uuid <uuid>] [--system-prompt <path>] "<prompt>"`
@@ -329,11 +349,31 @@ Model routing: `claude*`, `sonnet`, `haiku`, `opus` → `claude` CLI. `gemini*` 
 > - Output is formatted text (info line + agent response). No JSON is exposed to callers.
 > - Exit code is 1 when the underlying call reports an error.
 
+> [!note] Planned 🚧
+> Interface replaced by named-agent registry model. New signature: `ws-call-agent <agent-name> <prompt>`.
+> Reads model, agent type, system prompt, and session UUID from a registry file created by `ws-new-agent`.
+> Tracks `token_count` after each call; triggers auto-compression when `token_count > 100K`:
+> (1) Haiku extracts original-prompt intent with a hardcoded "summarize, do not act" system-prompt.
+> (2) `agent-compression.md` is injected as the next user turn to the existing agent → compression doc.
+> (3) A new agent is spawned via `ws-new-agent` (same config); receives compression doc + intent + original prompt.
+> `compressed_at` is set on the new registry entry and cleared before its first subsequent call to prevent re-compression.
+
 ### `ws-agent` {#260424-ws-agent}
 
 `ws-agent <name>` → prints a deterministic UUID v5.
 
 UUID is derived from repo root + current git branch + name. Same name on the same branch always produces the same UUID. Safe to use in `$()` substitution (ASCII output only).
+
+### 🚧 `agent-compression.md` {#260425-agent-compression-doc}
+
+Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-agent` as the next user turn into an agent approaching the 100K token threshold.
+
+Instructs the agent to produce a structured handoff document without reading any new files:
+- Original purpose and action plan.
+- Work summary (1–2 lines per completed item).
+- `[Must]` / `[Maybe]` skills for the next agent.
+- `[Must]` / `[Maybe]` docs for the next agent.
+- Execution log of concrete actions relevant to the forwarded intent.
 
 ### `ws-declare-agent` {#260424-ws-declare-agent}
 
