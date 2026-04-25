@@ -93,6 +93,7 @@ claude/skills/
   edit/                — main-agent-direct single-scope cycle (warm sessions, owner edits)
   implement/           — delegated implementer + reviewer cycle (cold sessions or wide scope)
   proceed/             — auto-route through the canonical pipeline
+  sprint/              — multi-task session container; branch-as-state persistence, deferred doc pipeline, 2-reviewer delegation
   ship/                — release: version bump, tag, build, publish per project config
   manual-think/        — manual chain-of-thought when native thinking unavailable
   bootstrap/           — scaffold new project or upgrade existing to canonical template
@@ -152,6 +153,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260424-feat-infra-path-portability` | done | ws-infra-path portability script; all bare claude/infra/ paths replaced with $(ws-infra-path) |
 | `260424-feat-discuss-on-demand-survey` | done | /discuss on-demand survey via judge:needs-survey; project-survey enriched output (titles + summaries) |
 | `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to review-path files, implementer reads directly |
+| `260425-feat-sprint-skill` | done | /sprint session-container skill — branch-as-state persistence, deferred doc pipeline, sprint-aware survey, 2-reviewer delegation |
 
 ## Session Notes
 
