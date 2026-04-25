@@ -289,7 +289,7 @@ From-scratch mental-model construction for a project. Mirrors the `/forge-spec` 
 2. Presents the domain list to the user; confirmed list locks into `TaskCreate` tasks for resumability.
 3. Per domain: surveys internals, drafts operational knowledge, authors the domain file.
 4. If `ai-docs/spec/` exists, embeds relevant spec stems inline per mental-model conventions.
-5. Updates `ai-docs/mental-model.md` index after all domains complete.
+5. Updates `ai-docs/mental-model/index.md` after all domains complete.
 
 `disable-model-invocation: true` — hidden from the model's skill palette; user-triggered only.
 

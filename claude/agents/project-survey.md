@@ -19,7 +19,7 @@ You are project-survey — a pre-invocation reconnaissance agent. Given an imple
 
 ## Process
 
-0. Read project context: `ai-docs/_index.md`, `ai-docs/_index.local.md` (if it exists), and `ai-docs/mental-model.md` (if it exists). These are not ranked in the output — read them to inform relevance judgments in step 3.
+0. Read project context: `ai-docs/_index.md`, `ai-docs/_index.local.md` (if it exists), and `ai-docs/mental-model/index.md` (if it exists). These are not ranked in the output — read them to inform relevance judgments in step 3.
 1. List all files in each of the following directories using Bash:
    - `ai-docs/spec/`
    - `ai-docs/mental-model/`

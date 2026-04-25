@@ -26,7 +26,7 @@ The spawn prompt provides the ticket path and contract directives.
 ### 1. Explore
 
 1. Read the ticket at the path given in the spawn prompt.
-2. Read `ai-docs/mental-model.md` and docs touching the change area.
+2. Read `ai-docs/mental-model/index.md` and docs touching the change area.
 3. Explore the codebase for: placement conventions, adjacent API signatures,
    test file layout, existing types to integrate with.
    Use `ws-subquery "<question>"` (Bash tool) for scoped lookups.

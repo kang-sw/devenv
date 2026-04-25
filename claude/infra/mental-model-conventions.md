@@ -21,7 +21,7 @@ source-paraphrasing descriptions, information already in `_index.md`.
 
 ## Structure
 
-- Index: `ai-docs/mental-model.md` — cross-domain patterns, crate graph, shared conventions. No frontmatter.
+- Index: `ai-docs/mental-model/index.md` — cross-domain patterns, crate graph, shared conventions. No frontmatter.
 - Domain docs: `ai-docs/mental-model/<domain>.md` — flat file for a single-concern domain.
 - Sub-domain docs: `ai-docs/mental-model/<domain>/index.md` + `ai-docs/mental-model/<domain>/<sub>.md` — directory layout for a domain covering multiple sub-concerns.
 - Target 60–120 lines per domain. Split past 150; merge thin documents that are always read together.
