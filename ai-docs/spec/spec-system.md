@@ -105,9 +105,14 @@ No `🚧` means the feature is implemented and verified. Never include ticket re
 
 ### Implementation Gap Callout {#260421-implementation-gap-callout}
 
-`> [!note] Implementation Gap · YYYY-MM-DD` marks known-but-unscheduled incomplete behavior — the intended behavior is understood, not yet built, and no ticket exists.
+`> [!note] Implementation Gap · YYYY-MM-DD` marks a known-but-unscheduled gap with no ticket. Two forms:
 
-The date records when the gap was first noted. Discuss sessions surface a staleness warning for entries older than 90 days, prompting either ticket creation (converting to `🚧`) or body absorption.
+- **Missing behavior**: the intended behavior is understood but not yet built.
+- **Unexposed capability**: a capability exists in code but is not yet caller-exposed, with no decision to keep it private.
+
+The callout body text identifies which form applies. Both forms share the same syntax, the same 90-day staleness mechanism, and the same resolution path: create a ticket and convert to `🚧`, or accept the current state and absorb into body prose.
+
+The date records when the gap was first noted. A survey agent or implementer encountering a callout whose referenced item is not found in code should flag it as potentially stale in their report.
 
 Permanent behavioral invariants belong in body prose, not in any callout.
 
