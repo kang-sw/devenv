@@ -70,8 +70,6 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and 
 
 ```bash
 ws-call-agent implementer - <<'PROMPT'
-Run `ws-print-infra implementer.md` first.
-
 Mode: <A: plan-driven | B: inline brief>
 <Plan path | Brief text>
 
