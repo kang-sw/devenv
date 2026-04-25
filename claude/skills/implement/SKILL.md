@@ -19,7 +19,7 @@ Target: $ARGUMENTS
 - Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
 - **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the report before merge — no code reaches the target branch without user confirmation.
 - **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead auto-merges after clean review. The feature → main merge remains the user's responsibility.
-- Implementer and reviewer sessions persist via `ws-call-agent --agent` auto-resume throughout the review loop; `ws-declare-agent` scopes them to the run.
+- Implementer and reviewer sessions persist via `ws-call-agent` auto-resume throughout the review loop; `ws-new-agent` at step 7 resets them to the current run.
 - One delegation cycle per invocation.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
 - Task list is created at prepare and tracked to completion — no task may be skipped or reordered.
@@ -28,7 +28,7 @@ Target: $ARGUMENTS
 
 ### 0. Orient on orchestration primitives
 
-Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-call-agent`, `ws-agent`, and `ws-declare-agent` before orchestrating.
+Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-new-agent` and `ws-call-agent` before orchestrating.
 
 ### 1. Prepare
 
@@ -42,11 +42,14 @@ Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-call-agent`, `ws-ag
    - `<original-branch>` matches `main`, `master`, `trunk`, or the value of `--main-branch <name>` → **main-branch mode** (approval gate active).
    - Otherwise → **feature-branch mode** (approval gate skipped; auto-merge after clean review).
    Create `implement/<scope>` branch.
-7. Declare all agent slots upfront:
+7. Register all agent slots upfront:
    ```bash
-   ws-declare-agent implementer reviewer-correctness reviewer-fit reviewer-test
+   ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+   ws-new-agent reviewer-correctness --model sonnet --system-prompt "$(ws-infra-path code-review-correctness.md)"
+   ws-new-agent reviewer-fit --model sonnet --system-prompt "$(ws-infra-path code-review-fit.md)"
+   ws-new-agent reviewer-test --model sonnet --system-prompt "$(ws-infra-path code-review-test.md)"
    ```
-8. Allocate review-path slots — single Bash call, capture all output lines in lead context:
+8. Allocate review-path slots — separate Bash call, capture all output lines in lead context:
    ```bash
    review-path correctness fit test   # or partition-allocated subset from judge: partition-allocation
    ```
@@ -60,14 +63,13 @@ Run `load-infra ws-orchestration.md` (Bash) to orient on `ws-call-agent`, `ws-ag
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run both updaters (loop)
    [ ] Merge to original branch
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
-   [ ] Cleanup — session files are scoped by ws-declare-agent; no explicit teardown needed
+   [ ] Cleanup — review files deleted; agent registry entries left in place (fresh per run)
    ```
 
 ### 2. Spawn implementer
 
 ```bash
-ws-call-agent sonnet --agent implementer \
-  --system-prompt $(ws-infra-path implementer.md) \
+ws-call-agent implementer \
   "Run \`load-infra implementer.md\` first.
 
 Mode: <A: plan-driven | B: inline brief>
@@ -111,8 +113,7 @@ calls in the same response turn. Each reviewer loads its partition doc via
 | Test | `$(ws-infra-path code-review-test.md)` |
 
 ```bash
-ws-call-agent sonnet --agent reviewer-correctness \
-  --system-prompt $(ws-infra-path code-review-correctness.md) \
+ws-call-agent reviewer-correctness \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
@@ -123,8 +124,7 @@ Instructions:
 - Return only: [clean|non-clean]: <one-line characterization of most significant issues>"```
 
 ```bash
-ws-call-agent sonnet --agent reviewer-fit \
-  --system-prompt $(ws-infra-path code-review-fit.md) \
+ws-call-agent reviewer-fit \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
@@ -135,8 +135,7 @@ Instructions:
 - Return only: [clean|non-clean]: <one-line characterization of most significant issues>"```
 
 ```bash
-ws-call-agent sonnet --agent reviewer-test \
-  --system-prompt $(ws-infra-path code-review-test.md) \
+ws-call-agent reviewer-test \
   "Diff range: <first-commit>..<last-commit>
 
 Instructions:
@@ -151,15 +150,16 @@ Instructions:
 1. If all reviewers return a `[clean]` summary → exit review loop, proceed to step 4.
 2. Otherwise: relay file paths to the implementer:
    ```bash
-   ws-call-agent sonnet --agent implementer \
-     "Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly."   ```
+   ws-call-agent implementer \
+     "Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly."
+   ```
    Wait for the implementer's fix report and integration test confirmation.
 3. Re-review (parallel — issue multiple Bash calls in the same response, same paths — reviewers overwrite):
    ```bash
-   ws-call-agent sonnet --agent reviewer-correctness \
-     "Re-review. Updated diff: <diff>"   ws-call-agent sonnet --agent reviewer-fit \
-     "Re-review. Updated diff: <diff>"   ws-call-agent sonnet --agent reviewer-test \
-     "Re-review. Updated diff: <diff>"   ```
+   ws-call-agent reviewer-correctness "Re-review. Updated diff: <diff>"
+   ws-call-agent reviewer-fit "Re-review. Updated diff: <diff>"
+   ws-call-agent reviewer-test "Re-review. Updated diff: <diff>"
+   ```
 4. Repeat from 3c.1 until all reviewers return `[clean]`.
 
 ### 4. Docs pre-pass
@@ -179,14 +179,14 @@ Instructions:
 2. **Main-branch mode only** — wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix:
      ```bash
-     ws-call-agent sonnet --agent implementer \
-       "Fix these issues: <tweak requests>"     ```
+     ws-call-agent implementer "Fix these issues: <tweak requests>"
+     ```
      Implementer verifies integration tests and reports.
    - Re-apply `judge: partition-allocation` and re-review per the step 3 pattern.
    - Re-run **spec-updater** with the new commit range. Wait. Then re-run **mental-model-updater**. Wait.
    - Re-report. Loop until user approves.
 
-Implementer and reviewer sessions remain available throughout this loop via `--agent` auto-resume.
+Implementer and reviewer sessions remain available throughout this loop via `ws-call-agent` auto-resume.
 
 ### 6. Merge
 
@@ -201,7 +201,7 @@ Run `load-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, a
 ### 8. Cleanup
 
 1. `rm -f <correctness-path> <fit-path> <test-path>  # literal paths from lead context`
-2. Session files are scoped via `ws-declare-agent` at skill start — no explicit teardown needed.
+2. Agent registry entries are created fresh per run via `ws-new-agent` — no explicit teardown needed.
 
 ## Judgments
 

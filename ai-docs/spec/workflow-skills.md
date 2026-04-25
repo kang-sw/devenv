@@ -388,7 +388,8 @@ Lead calls this at skill start for all agents it will use, ensuring stale sessio
 Use in `--system-prompt` arguments so callers work in downstream projects:
 
 ```bash
-ws-call-agent sonnet --system-prompt "$(ws-infra-path implementer.md)" "<prompt>"
+ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+ws-call-agent implementer "<prompt>"
 ```
 
 > [!note] Constraints

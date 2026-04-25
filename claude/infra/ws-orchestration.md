@@ -3,46 +3,45 @@
 Bash-callable scripts at `claude/bin/` for Team-free subagent coordination.
 All scripts are on `$PATH` via `claude/bin/`.
 
+## ws-new-agent
+
+```
+ws-new-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]
+```
+
+Creates a named agent registry entry at `.git/ws@<repo-dir>/agents/<name>.json`.
+
+- `--agent <type>` — agent type forwarded to the `claude` CLI.
+- `--system-prompt <path>` — file path; content is stored in the registry at registration time.
+- `--model` — model level (`opus`, `sonnet`, `haiku`). Defaults to `sonnet`.
+
+Call at skill start for each agent slot. Overwrites any prior registry entry for
+that name, which resets the session.
+
 ## ws-call-agent
 
 ```
-ws-call-agent <model> [--agent <name>] [--session-id <uuid>] [--uuid <uuid>]
-              [--system-prompt <path>] "<prompt>"
+ws-call-agent <agent-name> <prompt>
 ```
 
-Wraps `claude -p` with permission bypass and JSON output.
+Calls the registered agent. Reads config from the registry entry; exits 1 with a
+clear error if `ws-new-agent` has not been called for this name.
 
-**Flags:**
+Auto-routes the session: `--resume` if a session file exists in `~/.claude/projects/`,
+`--session-id` otherwise.
 
-| Flag | Maps to | Notes |
-|------|---------|-------|
-| `--agent <name>` | auto-routes | Computes deterministic UUID via `ws-agent`, then `--session-id` (no file) or `--resume` (file exists) |
-| `--session-id <uuid>` | `claude --session-id` | Create-only — errors if UUID already exists |
-| `--uuid <uuid>` | `claude --resume` | Continue-only — errors if session absent |
-| `--system-prompt <path>` | `claude --system-prompt` | Reads file, injects as system prompt |
-
-**Model routing:** `claude*` / `sonnet` / `haiku` / `opus` → `claude` CLI. `gemini*` → not yet implemented.
-
-**Output:** Formatted text to stdout.
+**Token tracking:** writes `input_tokens + cache_creation_input_tokens` to `token_count`
+in the registry after each call. Emits a context fill line to stderr when fill ≥ 25%:
 
 ```
-[info] Context window: N% filled [— recommended to refresh this agent]
-
-<agent response text>
+[info] Context: N% filled (M tokens)
 ```
 
-The info line is always first. A blank line separates it from the agent output. Exit code is 1 when the underlying call reports `is_error`.
+**Auto-compression:** when `token_count > 100K`, compresses the existing session via
+`agent-compression.md` and hands off to a fresh agent (3-call flow). The immediate
+next call is the handoff; re-compression is suppressed on that call.
 
-Context window percentage: `(input + cache_creation + cache_read) / 150K`. Shown only when `--agent` is used and fill ≥50%. Prefix is `[info]` at 50–69%, `[warn]` at ≥70% (~105K tokens).
-
-## ws-agent
-
-```
-ws-agent <name>  →  prints deterministic UUID v5
-```
-
-Derives UUID from repo root + git branch + agent name. Same name on the same
-branch always produces the same UUID. Output is ASCII-only — safe for `$()`.
+**Output:** agent response text to stdout. Exit code 1 on error.
 
 ## ws-declare-agent
 
@@ -50,32 +49,28 @@ branch always produces the same UUID. Output is ASCII-only — safe for `$()`.
 ws-declare-agent <name> [<name2> ...]
 ```
 
-Clears session files for the given names so the next `ws-call-agent --agent`
-starts a fresh session. Idempotent — no-op when no session exists.
+Clears session files for the given names. Idempotent — no-op when no session file exists.
 
-**Call at skill start** before any `ws-call-agent --agent` call, listing all
-agent slots the skill will use.
+`ws-new-agent` already resets the session by issuing a new UUID. Use `ws-declare-agent`
+only when explicitly cleaning up orphaned session files from prior runs without
+re-registering.
 
 ## Usage Pattern
 
 ```bash
-# 1. Declare all slots upfront (clears stale sessions from prior runs)
-ws-declare-agent implementer reviewer-corr reviewer-fit
+# 1. Register all agent slots upfront (creates fresh sessions; stores system prompts)
+ws-new-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+ws-new-agent reviewer-corr --model sonnet --system-prompt "$(ws-infra-path code-review-correctness.md)"
+ws-new-agent reviewer-fit --model sonnet --system-prompt "$(ws-infra-path code-review-fit.md)"
 
-# 2. Start sessions — --agent creates fresh after declare
-ws-call-agent sonnet --agent implementer \
-  --system-prompt $(ws-infra-path implementer.md) \
-  "Implement X"
+# 2. Call implementer — auto-starts session on first call
+ws-call-agent implementer "Implement X"
 
-# 3. Parallel reviewers — issue multiple Bash calls in the same response
-ws-call-agent sonnet --agent reviewer-corr \
-  --system-prompt $(ws-infra-path code-review-correctness.md) \
-  "$(git diff HEAD~1)"
+# 3. Parallel reviewers — issue multiple Bash calls in the same response turn
+ws-call-agent reviewer-corr "$(git diff HEAD~1)"
+ws-call-agent reviewer-fit "$(git diff HEAD~1)"
 
-# 4. Fix loop — --agent auto-resumes the existing session
-ws-call-agent sonnet --agent implementer \
-  "Fix these issues: ..."
-
-ws-call-agent sonnet --agent reviewer-corr \
-  "Re-review. Updated diff: ..."
+# 4. Fix loop — auto-resumes existing sessions
+ws-call-agent implementer "Fix these issues: ..."
+ws-call-agent reviewer-corr "Re-review. Updated diff: ..."
 ```
