@@ -65,16 +65,17 @@ fi
 claude "${ARGS[@]}" "$PROMPT" > "$TMPFILE"
 
 NEW_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens' "$TMPFILE")
-jq --argjson t "$NEW_TOKENS" '.token_count = $t' "$AGENT_FILE" > "${AGENT_FILE}.tmp" \
+jq --argjson t "$NEW_TOKENS" '.token_count = $t | ."context-window" = $t' "$AGENT_FILE" > "${AGENT_FILE}.tmp" \
   && mv "${AGENT_FILE}.tmp" "$AGENT_FILE"
 
 CONTEXT_LIMIT=200000
-if [[ "$NEW_TOKENS" -gt 50000 ]]; then
+if [[ "$NEW_TOKENS" -gt 10000 ]]; then
   CONTEXT_PCT=$(python3 -c "print(round($NEW_TOKENS / $CONTEXT_LIMIT * 100))")
   echo "[info] Context: ${CONTEXT_PCT}% filled (${NEW_TOKENS} tokens)" >&2
 fi
 
-if [[ "$NEW_TOKENS" -gt 100000 && "$SKIP_COMPRESSION" -eq 0 ]]; then
+# DEBUG: threshold lowered to 20K for testing (restore to 100000 after)
+if [[ "$NEW_TOKENS" -gt 20000 && "$SKIP_COMPRESSION" -eq 0 ]]; then
   echo "[info] Context threshold exceeded — compressing session..." >&2
 
   # Step a: Extract original-prompt intent via haiku (one-shot)
@@ -152,7 +153,7 @@ ${PROMPT}"
   claude "${HANDOFF_ARGS[@]}" "$HANDOFF_PROMPT" > "$HANDOFF_FILE"
 
   HANDOFF_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens' "$HANDOFF_FILE")
-  jq --argjson t "$HANDOFF_TOKENS" '.token_count = $t' "$AGENT_FILE" > "${AGENT_FILE}.tmp" \
+  jq --argjson t "$HANDOFF_TOKENS" '.token_count = $t | ."context-window" = $t' "$AGENT_FILE" > "${AGENT_FILE}.tmp" \
     && mv "${AGENT_FILE}.tmp" "$AGENT_FILE"
 
   jq -r '.result' "$HANDOFF_FILE"
