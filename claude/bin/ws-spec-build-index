@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Build the frontmatter feature index from spec document headings.
+"""Spec health tool: strip legacy frontmatter fields from spec files.
 
-Usage: spec-build-index <spec-file.md> [<spec-file2.md> ...]
+Usage: ws-spec-build-index  (no arguments)
 
-Parses ## and deeper headings from the markdown body, builds an indented
-feature tree into `features:` in frontmatter. Removes any stale `stems:`
-block. The `#` heading is treated as the document title and excluded.
-Anchor syntax `{#slug}` is stripped from features display text.
+Scans all *.md files under ai-docs/spec/ recursively and removes the
+`features:` and `stems:` frontmatter blocks if present. Both fields are
+derivative artifacts with no readers; heading anchors in the document
+body are the canonical stem source.
+
+Output:
+  [fix] features: removed — <path>   (when features: block was found and removed)
+  [error] <path>: <message>          (on read/parse/write failure)
+  (silent when file is already clean)
 """
 
-import re
 import sys
 from pathlib import Path
 
-HEADING_RE = re.compile(r"^(#{2,6})\s+(.*)")
+
 FRONTMATTER_DELIM = "---"
 
 
@@ -31,33 +35,6 @@ def parse_frontmatter_and_body(text: str) -> tuple[str, str]:
     fm = text[len(FRONTMATTER_DELIM) : end].strip()
     body = text[end + len(FRONTMATTER_DELIM) :]
     return fm, body
-
-
-def extract_features(body: str) -> list[tuple[int, str]]:
-    """Extract (depth, title) pairs from headings. ## = depth 0. Anchors stripped."""
-    features = []
-    in_fence = False
-    for line in body.splitlines():
-        if line.startswith("```") or line.startswith("~~~"):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        m = HEADING_RE.match(line)
-        if m:
-            depth = len(m.group(1)) - 2  # ## = 0, ### = 1, ...
-            title = re.sub(r"\s*\{#[\w-]+\}", "", m.group(2).strip())
-            features.append((depth, title))
-    return features
-
-
-def build_tree_text(features: list[tuple[int, str]]) -> str:
-    """Build indented list string from (depth, title) pairs."""
-    lines = []
-    for depth, title in features:
-        indent = "  " * depth
-        lines.append(f"{indent}- {title}")
-    return "\n".join(lines)
 
 
 def _replace_or_insert_block(lines: list[str], key: str, new_field_lines: list[str]) -> list[str]:
@@ -88,11 +65,10 @@ def _replace_or_insert_block(lines: list[str], key: str, new_field_lines: list[s
     return lines
 
 
-def update_frontmatter(fm: str, features_text: str) -> str:
-    """Replace or insert the features: field in frontmatter."""
+def remove_features(fm: str) -> str:
+    """Remove the features: block from frontmatter if present."""
     lines = fm.splitlines() if fm else []
-    new_field = f"features:\n{_indent_block(features_text)}"
-    lines = _replace_or_insert_block(lines, "features", new_field.splitlines())
+    lines = _replace_or_insert_block(lines, "features", [])
     return "\n".join(lines)
 
 
@@ -103,51 +79,55 @@ def remove_stems(fm: str) -> str:
     return "\n".join(lines)
 
 
-def _indent_block(text: str, indent: str = "  ") -> str:
-    """Indent every line of text."""
-    return "\n".join(indent + line for line in text.splitlines())
-
-
 def process_file(path: Path) -> None:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as e:
-        print(f"  error: {path}: {e}", file=sys.stderr)
+        print(f"[error] {path}: {e}", file=sys.stderr)
+        return
+
+    if not text.startswith(FRONTMATTER_DELIM):
         return
 
     try:
         fm, body = parse_frontmatter_and_body(text)
     except ValueError as e:
-        print(f"  error: {path}: {e}", file=sys.stderr)
+        print(f"[error] {path}: {e}", file=sys.stderr)
         return
 
-    features = extract_features(body)
+    had_features = any(line.startswith("features:") for line in fm.splitlines())
 
-    if not features:
-        print(f"  skip: no headings found in {path}")
-        return
-
-    tree = build_tree_text(features)
-    new_fm = update_frontmatter(fm, tree)
+    new_fm = remove_features(fm)
     new_fm = remove_stems(new_fm)
+    new_fm = new_fm.strip()
 
     output = f"{FRONTMATTER_DELIM}\n{new_fm}\n{FRONTMATTER_DELIM}{body}"
+    if output == text:
+        return
+
     try:
         path.write_text(output, encoding="utf-8")
     except OSError as e:
-        print(f"  error: {path}: {e}", file=sys.stderr)
+        print(f"[error] {path}: {e}", file=sys.stderr)
         return
-    print(f"  done: {path} ({len(features)} features)")
+
+    if had_features:
+        print(f"[fix] features: removed — {path}")
 
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <spec-file.md> [...]", file=sys.stderr)
+    if len(sys.argv) > 1:
+        print(f"Usage: {sys.argv[0]}  (no arguments — scans ai-docs/spec/ automatically)", file=sys.stderr)
         sys.exit(1)
 
-    for arg in sys.argv[1:]:
-        process_file(Path(arg))
+    spec_dir = Path("ai-docs/spec")
+    if not spec_dir.is_dir():
+        print(f"[error] {spec_dir} not found — run from the project root", file=sys.stderr)
+        sys.exit(1)
+
+    for path in sorted(spec_dir.rglob("*.md")):
+        process_file(path)
 
 
 if __name__ == "__main__":

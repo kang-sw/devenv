@@ -1,26 +1,6 @@
 ---
 title: Spec System
 summary: Tooling, conventions, and agents for authoring and maintaining caller-visible spec documents under ai-docs/spec/.
-features:
-  - Stem Tooling
-    - `ws-generate-spec-stem`
-    - `ws-list-spec-stems`
-    - `ws-spec-build-index`
-  - Authoring Conventions
-    - Anchor Format
-    - `🚧` Marker Protocol
-    - Implementation Gap Callout
-    - 🚧 Feature Removal Convention
-    - Anchor Placement
-    - File Location
-  - `/write-spec` Integration
-    - Spec-Impact Gate
-    - Directory and Split Judgments
-  - `spec-updater` Agent
-    - Commit-Based `🚧` Stripping
-    - 🚧 Pending-Removal Report
-    - Missing-Anchor Report
-    - Report Format
 ---
 
 # Spec System

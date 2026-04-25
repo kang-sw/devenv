@@ -1,19 +1,6 @@
 ---
 title: Plugin Infrastructure
 summary: Claude Code plugin manifest, bin tool suite, and hook provided by the `ws` plugin under `claude/`.
-features:
-  - Plugin Manifest
-    - `plugin.json`
-    - `marketplace.json`
-  - Bin Tools
-    - `ws-print-infra`
-    - `ws-merge-branch`
-    - `ws-review-path`
-    - `ws-subquery`
-    - `ws-list-mental-model`
-    - Spec Tooling
-  - Hooks
-    - `teammate-idle-token-tracker`
 ---
 
 # Plugin Infrastructure

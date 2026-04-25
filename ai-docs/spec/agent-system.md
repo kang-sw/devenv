@@ -1,19 +1,6 @@
 ---
 title: Agent System
 summary: Spawnable agents in claude/agents/ — their output contracts, refusals, and spawn contexts within ws workflow skills.
-features:
-  - `clerk`
-  - Review Agents
-    - `code-reviewer`
-    - `code-reviewer` partition mode
-    - `document-reviewer`
-  - Maintenance Agents
-    - `mental-model-updater`
-    - `spec-updater`
-  - `worker`
-  - Mental-Model Document System
-    - Domain Rules Section
-    - Ancestor Loading Contract
 ---
 
 # Agent System

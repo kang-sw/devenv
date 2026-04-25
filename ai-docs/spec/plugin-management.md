@@ -1,9 +1,6 @@
 ---
 title: Plugin Management
 summary: Local .claude/skills/ tools for maintaining and auditing the ws plugin documents and infrastructure.
-features:
-  - `/polish-plugin-docs`
-  - `/lint`
 ---
 
 # Plugin Management

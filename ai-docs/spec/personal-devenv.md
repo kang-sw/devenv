@@ -1,30 +1,6 @@
 ---
 title: Personal Dev Environment
 summary: Machine bootstrapping system that installs tooling, configures the shell, symlinks dotfiles, and registers the ws plugin on the developer's machine.
-features:
-  - Install System
-    - Full Install
-    - Update Mode
-    - Platform Support
-    - Idempotency
-  - Installed Tools
-  - Shell Environment
-    - History
-    - Completion and Key Bindings
-    - Tool Initialization
-  - tmux Scripts
-    - Claude Activity Indicator
-    - Git Status
-    - Cross-Window Navigation
-    - fzf Command Selector
-    - macOS Askpass
-  - Dotfile Configs
-    - tmux
-    - WezTerm
-    - Starship
-    - lf
-    - Neovim
-  - Claude Code Config
 ---
 
 # Personal Dev Environment

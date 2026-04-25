@@ -1,42 +1,6 @@
 ---
 title: Workflow Skills
 summary: User-invocable /commands that orchestrate AI-assisted development workflows in downstream projects.
-features:
-  - Canonical Workflow Chain
-  - Session Skills
-    - Session Bootstrap — `/enter-session`
-    - Session Sealing — `/exit-session`
-  - Planning Skills
-    - `/discuss`
-    - `/write-spec`
-    - `/write-ticket`
-    - `/write-skeleton`
-    - `/write-plan`
-  - Implementation Skills
-    - `/edit`
-    - `/implement`
-    - Pre-invocation Context Survey — `project-survey`
-    - `/proceed`
-    - `/sprint` — Session Container
-      - Sprint Continue Detection
-      - Sprint Session Loop
-      - Sprint-Aware Project Survey
-      - Sprint Wrap-up
-      - Sprint Implementation Delegation
-  - Reconstruction
-    - `/forge-spec`
-    - `/forge-mental-model`
-  - Agent Orchestration Primitives
-    - `ws-new-agent`
-    - `ws-call-agent`
-    - `agent-compression.md`
-    - `ws-infra-path`
-    - `ws-proj-tree`
-    - `ws-review-path`
-  - Utility Skills
-    - `/add-rule`
-    - `/ship`
-    - `/bootstrap`
 ---
 
 # Workflow Skills
