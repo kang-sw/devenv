@@ -1,7 +1,5 @@
 ---
 title: "delegate-implement: feature-branch auto-merge mode"
-spec:
-  - 260421-delegate-implement-feature-branch-mode
 ---
 
 # delegate-implement: feature-branch auto-merge mode

@@ -1,8 +1,5 @@
 ---
 title: Proceed prefix-stage gate suppression + write-spec judge:idea-level demotion
-spec:
-  - 260424-proceed-chain-gate-suppression
-  - 260424-write-spec-idea-level-nonblocking
 related-mental-model:
   - workflow-routing
 ---

@@ -1,7 +1,6 @@
 ---
 title: /implement file-based review loop + review-path collision resistance
 spec:
-  - 260424-review-path-non-deterministic
   - 260424-implement-file-based-review
 related-mental-model:
   - workflow-routing

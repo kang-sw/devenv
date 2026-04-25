@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # TeammateIdle hook: track per-teammate token usage as % of 150K soft limit
 # Writes to .claude/usage/<team-name>.md
 set -euo pipefail

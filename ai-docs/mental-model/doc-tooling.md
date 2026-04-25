@@ -6,7 +6,6 @@ sources:
   - claude/skills/add-rule/
   - claude/agents/
   - claude/infra/
-  - .claude/skills/polish-plugin-docs/
 related:
   spec-system: "forge-mental-model calls ws-list-spec-stems to embed spec stems when ai-docs/spec/ is present. A stem format change breaks the embedding step."
 ---

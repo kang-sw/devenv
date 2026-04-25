@@ -3,8 +3,6 @@ title: Documentation tooling restructure — forge-mental-model, write-mental-mo
 completed: 2026-04-23
 spec:
   - 260423-forge-mental-model-skill
-  - 260423-write-mental-model-removal
-  - 260423-forge-skill-disable-model-invocation
   - 260423-bootstrap-legacy-forge-routing
 spec-remove:
   - 260421-write-mental-model

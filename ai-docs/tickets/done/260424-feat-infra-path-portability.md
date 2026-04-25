@@ -2,7 +2,6 @@
 title: Infra path portability fix + /skill-lint utility
 spec:
   - 260424-infra-path-portability
-  - 260424-skill-linter
 ---
 
 # Infra path portability fix + /skill-lint utility

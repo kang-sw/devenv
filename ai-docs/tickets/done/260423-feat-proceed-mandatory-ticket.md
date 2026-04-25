@@ -1,7 +1,5 @@
 ---
 title: /proceed — mandatory ticket for inline descriptions
-spec:
-  - 260423-proceed-needs-ticket-tighten
 ---
 
 # /proceed — mandatory ticket for inline descriptions

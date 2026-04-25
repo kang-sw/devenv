@@ -33,6 +33,36 @@ are compressed and handed off without caller involvement.
 
 **Output:** agent response text to stdout. Exit code 1 on error.
 
+## ws-infra-path
+
+```
+ws-infra-path <doc-name>
+```
+
+Returns the absolute path to an infra doc. Use for `--system-prompt` arguments where
+a path string is required rather than file content.
+
+```bash
+ws-new-agent implementer --system-prompt "$(ws-infra-path implementer.md)"
+```
+
+## ws-review-path
+
+```
+ws-review-path <stem> [<stem> ...]
+```
+
+Allocates temp file paths for review findings. Generates a pwd-scoped, per-call run-id
+so concurrent invocations across projects do not collide. Paths are **not reproducible**
+after the call returns — capture all output lines in a single call.
+
+```bash
+read -r CORR FIT TEST < <(ws-review-path correctness fit test)
+```
+
+Reviewers write findings to their allocated path; the implementer reads them directly.
+This avoids token overhead from relaying review text through the lead.
+
 ## Usage Pattern
 
 ```bash

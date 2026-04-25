@@ -7,7 +7,6 @@ spec:
   - 260425-sprint-aware-survey
   - 260425-sprint-wrapup
   - 260425-sprint-implementation-delegation
-  - 260425-sprint-discuss-hint
 related-mental-model:
   - workflow-routing
   - executor-wrapup

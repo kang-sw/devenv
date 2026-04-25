@@ -8,14 +8,14 @@
 ## What This Repo Is
 
 Configuration and template repository for Claude Code workflows.
-Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects. The skill system itself has a spec at `ai-docs/spec/skills.md`.
+Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects.
 
 **Plugin:** `ws@0.7.0` — see `claude/.claude-plugin/plugin.json`.
 
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
 - After any change to `claude/`, run `claude plugin update ws@ws` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
-- `claude/CLAUDE.md` is symlinked to `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
+- `claude/CLAUDE.home.md` is the canonical copy of `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
 - External install: `/plugin marketplace add kang-sw/devenv` → `/plugin install ws@ws`.
 
 ## Reference Documents
@@ -83,8 +83,6 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
 
 ```
 claude/skills/
-  enter-session/       — session bootstrap; clerk-forked context synthesis + workflow map injection
-  exit-session/        — end-of-session handoff; seal continuation payload for next /enter-session
   discuss/             — explore approach/direction, capture as tickets
   write-ticket/        — create/edit tickets in ai-docs/tickets/
   write-spec/          — create/update external-perspective spec docs in ai-docs/spec/

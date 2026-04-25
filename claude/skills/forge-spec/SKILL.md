@@ -297,7 +297,7 @@ Collect the confirmed list before writing anything.
 
 ### 6. Associate stems with tickets
 
-1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, skip to step 7.
+1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, commit the spec file changes now (`git add ai-docs/spec/ && git commit`) and skip to step 7.
 2. Dispatch one `clerk` agent (model override: sonnet) covering all collected tickets in a single prompt:
 
 ```

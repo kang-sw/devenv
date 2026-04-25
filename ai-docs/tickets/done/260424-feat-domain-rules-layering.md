@@ -4,11 +4,7 @@ spec:
   - 260424-mental-model-directory-hierarchy
   - 260424-domain-rules-section
   - 260424-executor-ancestor-load
-  - 260424-mental-model-updater-forge-authority
-  - 260424-mental-model-domain-rules-promotion-only
-  - 260424-mental-model-domain-rules-stale-output
   - 260424-add-rule-skill
-  - 260424-bootstrap-architecture-rules-migration
 related-mental-model:
   - workflow-routing
   - executor-wrapup

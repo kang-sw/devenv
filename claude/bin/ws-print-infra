@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# load-infra — cat a shared infra doc by name, or list available resources.
+# ws-print-infra — cat a shared infra doc by name, or list available resources.
 # Works in both skill and agent contexts where $CLAUDE_PLUGIN_ROOT
 # is unavailable (e.g. agent Bash tool calls).
 #
 # Usage:
-#   load-infra              list available infra docs and bin scripts
-#   load-infra <doc-name>   print the named infra doc
+#   ws-print-infra              list available infra docs and bin scripts
+#   ws-print-infra <doc-name>   print the named infra doc
 
 set -euo pipefail
 
@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
 
 if [ $# -eq 0 ]; then
-  echo "Infra docs (load-infra <name>):"
+  echo "Infra docs (ws-print-infra <name>):"
   ls "${PLUGIN_ROOT}/infra/"*.md 2>/dev/null | while read -r f; do
     echo "  $(basename "$f")"
   done
@@ -27,14 +27,14 @@ if [ $# -eq 0 ]; then
 fi
 
 if [ $# -ne 1 ]; then
-  echo "usage: load-infra [<doc-name>]" >&2
+  echo "usage: ws-print-infra [<doc-name>]" >&2
   exit 2
 fi
 
 TARGET="${PLUGIN_ROOT}/infra/$1"
 
 if [ ! -f "$TARGET" ]; then
-  echo "load-infra: not found: infra/$1" >&2
+  echo "ws-print-infra: not found: infra/$1" >&2
   exit 1
 fi
 

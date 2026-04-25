@@ -3,6 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+if ! command -v jq &>/dev/null; then
+  echo "error: jq is required but not found in PATH" >&2
+  exit 1
+fi
+
 if [[ $# -lt 2 ]]; then
   echo "Usage: ws-call-agent <agent-name> <prompt>" >&2
   exit 1
