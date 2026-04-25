@@ -42,7 +42,7 @@ Target: $ARGUMENTS
 Triggers on explicit user done signal ("done", "wrap up", "finish sprint", or equivalent).
 
 1. Determine parent: `PARENT=$(git merge-base HEAD main)`.
-2. **Spec-update pass.** Use the **Spec-Update Override** template. When spec-updater returns, apply `### Proposed strips` directly; collect `### Pending removal`, `### Planned entry dropped`, and ambiguous cases for the user report in step 5. Run `ws-spec-build-index` if any file was modified; commit spec changes.
+2. **Spec-update pass.** Dispatch `ws:spec-updater` with the commit range in Suggestion mode — pass `$PARENT..HEAD`, the commit log, and instruct: analyze only, do not edit files; propose strips for 🚧 entries whose stems appear in the commits; flag removals. Wait. Apply `### Proposed strips` directly (strip `🚧 ` prefix, remove any `> [!note] Planned 🚧` callout block); collect `### Pending removal`, `### Planned entry dropped`, and ambiguous cases for the step 5 report. Run `ws-spec-build-index` if any file was modified; commit spec changes.
 3. Dispatch `ws:mental-model-updater` with commit range `$PARENT..HEAD`. Include a note that docs may be stale from accumulated sprint commits — explore thoroughly. Wait. (Must run after the spec-update loop so it sees the updated spec.)
 4. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline and §Doc Commit Gate. If ticket-driven, follow §Ticket Update: update existing tickets only — set `## Result` and advance state; do not create new tickets.
 5. Report to user: spec entries added, removed, and 🚧-stripped; mental model sections updated.
@@ -161,47 +161,6 @@ re-review (reviewers overwrite paths) until both return `[clean]`.
 ```bash
 rm -f <correctness-path> <fit-path>
 ```
-
-### Spec-Update Override
-
-Register and call `ws:spec-updater` in suggestion mode, then apply the results directly.
-
-**Step 1 — Register (one Bash call)**
-
-```bash
-ws-new-agent spec-updater --agent ws:spec-updater --model sonnet
-```
-
-**Step 2 — Call (one Bash call)**
-
-```bash
-PARENT=$(git merge-base HEAD main)
-COMMITS=$(git log "$PARENT"..HEAD --oneline)
-ws-call-agent spec-updater - <<PROMPT
-Suggestion mode: SPRINT WRAP-UP — analyze only, do not edit files.
-
-Commit range: $PARENT..HEAD
-Commits:
-$COMMITS
-
-Identify:
-1. 🚧 entries whose spec stems appear in the commit list — propose stripping them.
-2. Entries flagged for removal via `removed: <stem>` in the commits.
-3. Ambiguous or missing-anchor cases — note them for human review.
-
-Output structured proposals only. Make no file edits.
-PROMPT
-```
-
-**Step 3 — Lead applies (direct edits)**
-
-Read the `### Proposed strips` section and apply each entry:
-- Remove `🚧 ` prefix from the heading line.
-- Remove the entire `> [!note] Planned 🚧` callout block if present.
-
-Do not auto-apply `### Pending removal` or `### Planned entry dropped` entries — surface these to the user in the step 5 report.
-
-Run `ws-spec-build-index` after all edits.
 
 ## Doctrine
 
