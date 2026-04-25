@@ -157,7 +157,7 @@ def discover_docs(mental_model_dir: Path) -> tuple[list[Path], dict[str, list[Pa
     parent_to_children: for each parent directory `<domain>/`, the list of
                         child `<domain>/<sub>.md` files (excluding index.md).
     """
-    flat_docs: list[Path] = sorted(mental_model_dir.glob('*.md'))
+    flat_docs: list[Path] = [p for p in sorted(mental_model_dir.glob('*.md')) if p.name != 'index.md']
     parent_to_children: dict[str, list[Path]] = {}
 
     for sub_dir in sorted(p for p in mental_model_dir.iterdir() if p.is_dir()):
@@ -249,10 +249,10 @@ def main() -> None:
     # ---------------------------------------------------------------------
     # Tree header — human-readable hierarchy preview.
     # ---------------------------------------------------------------------
-    print('# Mental-model docs — paths relative to ai-docs/mental-model/ (overview: ../mental-model.md)')
+    print('# Mental-model docs — paths relative to ai-docs/mental-model/ (overview: index.md)')
     print('#')
     print('# Tree:')
-    print('#   overview (../mental-model.md)')
+    print('#   overview (index.md)')
 
     # Collect parent → children from the *selected* set for display.
     display_roots: list[Path] = []
@@ -284,13 +284,13 @@ def main() -> None:
     # ---------------------------------------------------------------------
     # YAML body.
     # ---------------------------------------------------------------------
-    overview = Path('ai-docs/mental-model.md')
+    overview = Path('ai-docs/mental-model/index.md')
     if overview.exists():
         desc = extract_first_line(overview)
         fm_ov: dict = {}
         if desc:
             fm_ov['description'] = desc
-        render_domain('overview', fm_ov, '../mental-model.md')
+        render_domain('overview', fm_ov, 'index.md')
 
     for doc in selected:
         fm = parse_frontmatter(doc)
