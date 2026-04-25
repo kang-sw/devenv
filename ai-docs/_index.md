@@ -154,6 +154,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to ws-review-path files, implementer reads directly |
 | `260425-feat-sprint-skill` | done | /sprint session-container skill — branch-as-state persistence, deferred doc pipeline, sprint-aware survey, 2-reviewer delegation |
 | `260425-feat-ws-agent-registry-compression` | done | ws-call-agent redesign: named agent registry (ws-new-agent) + auto-compression at 100K tokens |
+| `260425-chore-implementation-gap-staleness-flagging` | done | Reactive doc-staleness reporting — removed misplaced guideline from spec-conventions + spec-system; reactive one-liner added to impl-playbook, survey-writer, plan-writer, code-review-correctness |
 
 ## Session Notes
 

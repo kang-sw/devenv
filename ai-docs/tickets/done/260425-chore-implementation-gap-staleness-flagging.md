@@ -63,6 +63,11 @@ Remove the staleness-reporting sentence from:
 Success: neither file contains any instruction directed at agents about staleness
 reporting.
 
+### Result (9f49bf4) - 2026-04-25
+
+Both spec-conventions.md and spec-system.md lines removed. Neither file contains
+agent-facing staleness instructions.
+
 ### Phase 2: Add reactive one-liner to agent prompts
 
 Add one sentence to the report/output section of each of the following:
@@ -82,3 +87,12 @@ primary task.
 
 Success: each of the four files contains a one-line reactive reporting instruction
 in its output/report section.
+
+### Result (2cc4645) - 2026-04-25
+
+One-liners added to all four files. Review (ws:code-reviewer) found two Important
+issues, both fixed in 2cc4645:
+- code-review-correctness.md item 6: "absent from the existing codebase" clause
+  reinstated a proactive scan; replaced with "the code you are examining".
+- survey-writer.md: instruction moved from Rules to §4 Report (authoritative
+  output list), matching plan-writer.md pattern.
