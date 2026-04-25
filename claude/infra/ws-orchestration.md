@@ -43,18 +43,6 @@ next call is the handoff; re-compression is suppressed on that call.
 
 **Output:** agent response text to stdout. Exit code 1 on error.
 
-## ws-declare-agent
-
-```
-ws-declare-agent <name> [<name2> ...]
-```
-
-Clears session files for the given names. Idempotent — no-op when no session file exists.
-
-`ws-new-agent` already resets the session by issuing a new UUID. Use `ws-declare-agent`
-only when explicitly cleaning up orphaned session files from prior runs without
-re-registering.
-
 ## Usage Pattern
 
 ```bash

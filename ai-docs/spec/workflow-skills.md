@@ -31,7 +31,6 @@ features:
     - `ws-new-agent`
     - `ws-call-agent`
     - `agent-compression.md`
-    - `ws-declare-agent`
     - `ws-infra-path`
     - `ws-proj-tree`
     - `review-path`
@@ -358,12 +357,6 @@ Instructs the agent to produce a structured handoff document without reading any
 - `[Must]` / `[Maybe]` skills for the next agent.
 - `[Must]` / `[Maybe]` docs for the next agent.
 - Execution log of concrete actions relevant to the forwarded intent.
-
-### `ws-declare-agent` {#260424-ws-declare-agent}
-
-`ws-declare-agent <name> [<name2> ...]` — clears session files for one or more agent names. Idempotent: no-op when no session file exists.
-
-Lead calls this at skill start for all agents it will use, ensuring stale sessions from prior runs do not carry over.
 
 ### `ws-infra-path` {#260425-ws-infra-path}
 

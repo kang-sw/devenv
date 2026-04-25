@@ -76,7 +76,6 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
   ws-new-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
   ws-call-agent               — call a registered named agent; tracks context; auto-compresses at 100K tokens
-  ws-declare-agent            — clear orphaned session files for named agents
 ```
 
 ## Skill Inventory
