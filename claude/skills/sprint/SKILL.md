@@ -19,6 +19,7 @@ Target: $ARGUMENTS
 - Before each delegation task: register agents via `ws-new-named-agent` and allocate `ws-review-path` slots (two separate Bash calls — see Delegation Cycle).
 - After each delegation task: `rm -f <correctness-path> <fit-path>` using the literal paths stored from allocation.
 - All written artifacts must be in English regardless of conversation language.
+- At wrap-up, commit each doc updater's output immediately after it completes — spec-updater changes in one commit, mental-model-updater changes in the next. Do not batch both into a single deferred commit.
 
 ## On: invoke
 
@@ -28,7 +29,7 @@ Target: $ARGUMENTS
      - **continue** → enter **On: session loop**.
      - **wrap-up** → go to **On: wrap-up**.
      - **abandon** → exit.
-   - Does not start with `sprint/`: use `$ARGUMENTS` as sprint name if provided; else ask. Run `git checkout -b sprint/<name>`. Enter **On: session loop**.
+   - Does not start with `sprint/`: use `$ARGUMENTS` as sprint name if provided; else generate a random three-word name in `<adjective>-<noun>-<noun>` form (e.g., `amber-ridge-quill`) without asking. Run `git checkout -b sprint/<name>`. Enter **On: session loop**.
 
 ## On: session loop
 
