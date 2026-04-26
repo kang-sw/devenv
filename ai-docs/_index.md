@@ -124,6 +124,7 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 | `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery, ws-call-named-agent primitives |
 | `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude/skills/ tools for ws plugin maintenance |
 | `ai-docs/spec/spec-system.md` | Spec System | Spec authoring, 🚧 markers, anchor protocol |
+| `ai-docs/spec/tools.md` | Devenv Tools | Custom tools built in this repo (claude-watch TUI, future utilities) |
 | `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship |
 
 ## Tickets
