@@ -170,6 +170,13 @@ if [[ "$NEW_TOKENS" -gt 120000 && "$SKIP_COMPRESSION" -eq 0 ]]; then
   jq '.compressed_at = true' "$AGENT_FILE" > "${AGENT_FILE}.tmp" && mv "${AGENT_FILE}.tmp" "$AGENT_FILE"
   NEW_UUID=$(jq -r '.uuid' "$AGENT_FILE")
 
+  # Carry over any pending interrupts so they survive the compaction handoff
+  NEW_OUTBOX_FILE="$REGISTRY_DIR/$AGENT_NAME.outbox.txt"
+  if [[ -s "$OUTBOX_FILE" ]]; then
+    cat "$OUTBOX_FILE" >> "$NEW_OUTBOX_FILE"
+    truncate -s 0 "$OUTBOX_FILE"
+  fi
+
   # Step d: Handoff call to fresh agent
   HANDOFF_PROMPT="${COMPRESSION_DOC}
 
