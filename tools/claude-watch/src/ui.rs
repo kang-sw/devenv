@@ -1,9 +1,12 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Wrap,
+    },
+    Frame,
 };
 
 use crate::app::{App, LEFT_PANEL_PERCENT};
@@ -43,9 +46,9 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
                 Style::default().fg(Color::Green)
             } else {
                 match s.is_headless {
-                    None => Style::default().fg(Color::DarkGray),       // not yet parsed
-                    Some(true) => Style::default().fg(Color::White),    // -p / headless
-                    Some(false) => Style::default().fg(Color::Yellow),  // interactive
+                    None => Style::default().fg(Color::DarkGray), // not yet parsed
+                    Some(true) => Style::default().fg(Color::White), // -p / headless
+                    Some(false) => Style::default().fg(Color::Yellow), // interactive
                 }
             };
             let main_text = format!("{} ({})", s.label, ts);
@@ -97,6 +100,7 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
         .unwrap_or_else(|| " Content ".to_string());
 
     let block = Block::default().title(title).borders(Borders::ALL);
+    let inner = block.inner(area);
 
     if app.rendered_lines.is_empty() {
         let msg = if app.sessions.is_empty() {
@@ -124,11 +128,12 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
     frame.render_widget(p, area);
 
     if max_scroll > 0 {
-        let mut scrollbar_state = ScrollbarState::new(max_scroll)
-            .position(app.scroll_offset);
+        let mut scrollbar_state = ScrollbarState::new(max_scroll + app.content_panel_height)
+            .viewport_content_length(app.content_panel_height)
+            .position(app.scroll_offset.min(max_scroll));
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
-            area,
+            inner,
             &mut scrollbar_state,
         );
     }
