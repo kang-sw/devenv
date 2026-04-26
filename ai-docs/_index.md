@@ -125,7 +125,7 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 | `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery, ws-call-named-agent primitives |
 | `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude/skills/ tools for ws plugin maintenance |
 | `ai-docs/spec/spec-system.md` | Spec System | Spec authoring, 🚧 markers, anchor protocol |
-| `ai-docs/spec/tools.md` | Devenv Tools | Custom tools built in this repo (claude-watch TUI, future utilities) |
+| `ai-docs/spec/tools.md` | Devenv Tools | Custom tools built in this repo (claude-watch TUI, claude-dash multiplexer) |
 | `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship |
 
 ## Tickets
@@ -163,6 +163,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260426-feat-claude-watch-mouse` | done | claude-watch mouse support — scroll wheel + left-click session selection + event-drain loop perf fix |
 | `260426-perf-claude-watch-scroll-cache` | done | claude-watch scroll perf — cache total visual rows; Phase 2 (Arc clone) dropped (ratatui ownership constraint) |
 | `260426-feat-claude-watch-features` | done | claude-watch sprint — token count display, headless/-p color distinction, worktree session discovery, vertical scrollbar, on-demand background parsing; ws-orchestration output persistence + background mode |
+| `260426-feat-claude-dash` | todo | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; 4 phases |
 
 ## Session Notes
 
