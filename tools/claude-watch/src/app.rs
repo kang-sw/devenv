@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
-use unicode_width::UnicodeWidthStr;
 
 use crate::parser::parse_turns;
 use crate::process::find_active_uuids;
@@ -66,19 +65,55 @@ pub struct App {
 /// Return the number of visual rows a logical `line` occupies when rendered
 /// inside a panel of `panel_width` columns.
 ///
-/// Uses Unicode display width (via `unicode-width`) so that full-width CJK
-/// characters (2 columns) and zero-width combining characters (0 columns) are
-/// counted correctly.  The calculation is character-boundary wrapping
-/// (`⌈display_width / panel_width⌉`); ratatui's `Wrap { trim: false }` wraps
-/// at word boundaries, so this is an approximation that can undercount rows
-/// when a word boundary forces an early break.  For the purpose of
-/// scroll-to-bottom estimation the approximation is acceptable.
+/// Simulates ratatui's `WordWrapper` with `trim: false`: text is split into
+/// whitespace-delimited tokens (each token includes its trailing whitespace),
+/// and tokens that would overflow the current row are wrapped to the next row.
+/// Words longer than `panel_width` are hard-broken at the column boundary.
+/// This matches ratatui's behaviour closely enough to produce accurate
+/// scroll-to-bottom offsets.
 pub(crate) fn visual_rows(line: &Line, panel_width: usize) -> usize {
     if panel_width == 0 {
         return 1;
     }
-    let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
-    if w == 0 { 1 } else { (w + panel_width - 1) / panel_width }
+    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    if text.is_empty() {
+        return 1;
+    }
+
+    let mut rows = 1usize;
+    let mut col = 0usize;
+
+    // split_inclusive keeps the whitespace delimiter attached to the preceding
+    // token, matching the pending_whitespace + pending_word flush order in
+    // ratatui's WordWrapper (trim=false).
+    for token in text.split_inclusive(|c: char| c.is_whitespace()) {
+        let token_w: usize = token.chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum();
+        if token_w == 0 {
+            continue;
+        }
+        if col + token_w > panel_width {
+            if col == 0 {
+                // Token wider than the whole panel — hard-break inside it.
+                rows += token_w / panel_width;
+                col = token_w % panel_width;
+            } else {
+                // Normal word wrap: move token to the next row.
+                rows += 1;
+                if token_w > panel_width {
+                    rows += token_w / panel_width;
+                    col = token_w % panel_width;
+                } else {
+                    col = token_w;
+                }
+            }
+        } else {
+            col += token_w;
+        }
+    }
+
+    rows
 }
 
 impl App {
