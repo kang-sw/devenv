@@ -480,8 +480,8 @@ impl App {
     /// (via `PtySession::drop`) before the new one starts.  The exit modal
     /// is cleared on every call.
     ///
-    /// Retained for the exit-modal restart path and future callers — prefix+n
-    /// now calls `open_new_tab` instead.
+    /// Retained for potential future callers; prefix+n now calls `open_new_tab`
+    /// instead (which opens a new tab rather than restarting the current one).
     #[allow(dead_code)]
     pub fn spawn_new_claude_in_tab(&mut self) -> anyhow::Result<()> {
         let idx = self.active_tab;
@@ -521,14 +521,21 @@ impl App {
             std::env::current_dir().unwrap_or_default()
         };
 
+        // Derive tab label from the last path component, matching App::new().
+        let name = cwd
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "new".into());
+
+        // Spawn before constructing Worktree so cwd can be moved (not cloned)
+        // into the struct literal; also avoids constructing Worktree on error.
+        let session = spawn_claude(&cwd, INITIAL_SIZE, self.skip_permissions)?;
         let worktree = Worktree {
-            path: cwd.clone(),
-            name: "new".to_string(),
+            path: cwd,
+            name,
             is_active_ws: true,
             is_removed: false,
         };
-
-        let session = spawn_claude(&cwd, INITIAL_SIZE, self.skip_permissions)?;
         self.tabs.push(WorktreeTab::new(worktree, Some(session)));
         self.active_tab = self.tabs.len() - 1;
         Ok(())
