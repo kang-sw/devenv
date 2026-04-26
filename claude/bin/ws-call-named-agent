@@ -73,7 +73,22 @@ else
   ARGS+=(--session-id "$UUID")
 fi
 
-claude "${ARGS[@]}" "$PROMPT" > "$TMPFILE"
+ERRFILE=$(mktemp)
+CLEANUP_FILES+=("$ERRFILE")
+MAX_RETRIES=3
+RETRY_DELAY=3
+for _attempt in $(seq 1 $MAX_RETRIES); do
+  if claude "${ARGS[@]}" "$PROMPT" > "$TMPFILE" 2>"$ERRFILE"; then
+    break
+  fi
+  if grep -q "already in use" "$ERRFILE" && [[ $_attempt -lt $MAX_RETRIES ]]; then
+    echo "[info] Session busy, retrying in ${RETRY_DELAY}s (attempt $_attempt/$MAX_RETRIES)..." >&2
+    sleep $RETRY_DELAY
+  else
+    cat "$ERRFILE" >&2
+    exit 1
+  fi
+done
 
 NEW_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens + .usage.output_tokens' "$TMPFILE")
 jq --argjson t "$NEW_TOKENS" '.token_count = $t | ."context-window" = $t' "$AGENT_FILE" > "${AGENT_FILE}.tmp" \
