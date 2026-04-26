@@ -22,7 +22,7 @@ use crossterm::{
 use portable_pty::PtySize;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use app::{App, ExitedModal};
+use app::{App, ExitedModal, WORKTREE_POLL_SECS};
 
 /// Target frame budget in milliseconds (~100 fps, keeping PTY responsive).
 const FRAME_MS: u64 = 10;
@@ -47,8 +47,7 @@ fn main() -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let cwd = std::env::current_dir().context("get cwd")?;
-    let mut app = App::new(&cwd)?;
+    let mut app = App::new()?;
 
     let result = run_loop(&mut terminal, &mut app);
 
@@ -75,65 +74,53 @@ where
             handle_event(app, evt)?;
         }
 
-        // 2. Drain PTY output and feed into the VT screen model.
-        {
-            let mut all: Vec<u8> = Vec::new();
-            if let Some(ref s) = app.session {
-                while let Some(chunk) = s.try_recv_chunk() {
-                    all.extend_from_slice(&chunk);
-                }
-            }
-            if !all.is_empty() {
-                app.vt.feed(&all);
-            }
+        // 2. Drain PTY output for ALL tabs (background tabs keep running).
+        for tab in &mut app.tabs {
+            tab.drain_pty();
         }
 
-        // 3. Poll for child process exit.
-        if app.exited_modal.is_none() {
-            if let Some(ref mut s) = app.session {
-                if let Some(status) = s.try_wait() {
-                    app.exited_modal = Some(ExitedModal { status });
-                }
-            }
+        // 3. Poll for child process exit on ALL tabs.
+        for tab in &mut app.tabs {
+            tab.poll_exit();
         }
 
-        // 4. Resize check: compare approximate inner panel size derived from
-        //    the current terminal dimensions against the cached last draw size.
-        //    The authoritative inner dims are written by ui::draw each frame,
-        //    so one frame of lag is acceptable (plan §1.7 resize-check note).
-        {
+        // 4. Worktree polling (every WORKTREE_POLL_SECS).
+        if app.last_worktree_poll.elapsed() >= Duration::from_secs(WORKTREE_POLL_SECS) {
+            let new_list = worktree::discover_worktrees();
+            if !new_list.is_empty() {
+                app.reconcile_worktrees(new_list);
+            }
+            app.last_worktree_poll = std::time::Instant::now();
+        }
+
+        // 5. Resize check: compare approximate inner panel size (derived from
+        //    terminal dimensions) against the active tab's last-known size.
+        if !app.tabs.is_empty() {
             let (term_cols, term_rows) =
                 crossterm::terminal::size().unwrap_or((80, 24));
-            // Phase-1 layout: 1-row top bar + borders (2 rows, 2 cols).
+            // Phase-2 layout: 1-row tab bar + borders (2 rows, 2 cols).
             let panel_cols = term_cols.saturating_sub(2);
             let panel_rows = term_rows.saturating_sub(3);
-            let (last_cols, last_rows) = app.last_panel_size;
-            if panel_cols != last_cols || panel_rows != last_rows {
-                if panel_cols > 0 && panel_rows > 0 {
-                    app.vt.resize(panel_cols, panel_rows);
-                    if let Some(ref mut s) = app.session {
-                        let new_size = PtySize {
-                            rows: panel_rows,
-                            cols: panel_cols,
-                            pixel_width: 0,
-                            pixel_height: 0,
-                        };
-                        s.resize(new_size)?;
-                    }
-                    app.last_panel_size = (panel_cols, panel_rows);
+            if panel_cols > 0 && panel_rows > 0 {
+                let tab = &app.tabs[app.active_tab];
+                let (last_cols, last_rows) = tab.last_inner_size;
+                if panel_cols != last_cols || panel_rows != last_rows {
+                    let idx = app.active_tab;
+                    app.tabs[idx].maybe_resize(panel_cols, panel_rows)?;
+                    app.tabs[idx].last_inner_size = (panel_cols, panel_rows);
                 }
             }
         }
 
-        // 5. Draw.
+        // 6. Draw.
         terminal.draw(|f| ui::draw(f, app))?;
 
-        // 6. Quit check.
+        // 7. Quit check.
         if app.should_quit {
             break;
         }
 
-        // 7. Sleep for the remainder of the frame budget.
+        // 8. Sleep for the remainder of the frame budget.
         std::thread::sleep(Duration::from_millis(FRAME_MS));
     }
     Ok(())
@@ -143,31 +130,15 @@ where
 fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
     match event {
         Event::Key(key) => {
-            // --- Modal active ---
-            if app.exited_modal.is_some() {
-                match key.code {
-                    KeyCode::Char('r') | KeyCode::Char('R') => {
-                        app.exited_modal = None;
-                        let cwd = std::env::current_dir()?;
-                        let (cols, rows) = app.last_panel_size;
-                        let size = PtySize {
-                            rows,
-                            cols,
-                            pixel_width: 0,
-                            pixel_height: 0,
-                        };
-                        app.vt.resize(cols, rows);
-                        app.session = Some(pty::PtySession::spawn(&cwd, size)?);
-                    }
-                    KeyCode::Char('q') | KeyCode::Char('Q') => {
-                        app.should_quit = true;
-                    }
-                    _ => {}
+            // --- Modal active on the current tab ---
+            if let Some(tab) = app.tabs.get_mut(app.active_tab) {
+                if tab.exited_modal.is_some() {
+                    return handle_modal_key(app, key);
                 }
-                return Ok(());
             }
 
             // --- Global hotkeys (never forwarded to PTY) ---
+            // Ctrl+Q — quit app.
             if key.code == KeyCode::Char('q')
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
@@ -175,21 +146,103 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            // Phase-2 tab-cycle hotkeys (Ctrl+[ and Ctrl+]) are handled here
-            // in later phases; for now they fall through to PTY forwarding with
-            // the caveat documented in the plan (Ctrl+[ == Esc on many terminals).
+            // Ctrl+[ — previous tab.
+            if key.code == KeyCode::Char('[')
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                let new_idx = app.active_tab.saturating_sub(1);
+                app.activate_tab(new_idx);
+                return Ok(());
+            }
 
-            // --- Forward to PTY ---
+            // Ctrl+] — next tab.
+            if key.code == KeyCode::Char(']')
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                let new_idx = (app.active_tab + 1).min(app.tabs.len().saturating_sub(1));
+                app.activate_tab(new_idx);
+                return Ok(());
+            }
+
+            // Ctrl+1 — select main slot (Phase 3+; no-op in Phase 2).
+            if key.code == KeyCode::Char('1')
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                return Ok(());
+            }
+
+            // Ctrl+2–9 — select named-agent slot (Phase 3+; no-op in Phase 2).
+            if let KeyCode::Char(c) = key.code {
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && ('2'..='9').contains(&c)
+                {
+                    return Ok(());
+                }
+            }
+
+            // --- Forward remaining keys to the active tab's PTY ---
             if let Some(bytes) = pty::encode_key(key) {
-                if let Some(ref mut s) = app.session {
-                    s.write(&bytes)?;
+                if let Some(tab) = app.tabs.get_mut(app.active_tab) {
+                    if let Some(ref mut s) = tab.session {
+                        s.write(&bytes)?;
+                    }
                 }
             }
         }
 
-        // Resize events are handled in the main loop's resize-check step
-        // (step 4), not here.
+        // Resize events are handled in the main loop's resize-check step.
         Event::Resize(_, _) => {}
+
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Handle a key press while the exit modal is active on the current tab.
+fn handle_modal_key(
+    app: &mut App,
+    key: crossterm::event::KeyEvent,
+) -> anyhow::Result<()> {
+    let idx = app.active_tab;
+    let tab = &app.tabs[idx];
+    let is_removed = tab.worktree.is_removed;
+    let modal_status_owned = tab.exited_modal.as_ref().map(|_| ());
+
+    if modal_status_owned.is_none() {
+        return Ok(());
+    }
+
+    match key.code {
+        // [R] Restart — only when worktree is not removed.
+        KeyCode::Char('r') | KeyCode::Char('R') if !is_removed => {
+            let tab = &mut app.tabs[idx];
+            tab.exited_modal = None;
+            let (cols, rows) = tab.last_inner_size;
+            let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
+            let cwd = tab.worktree.path.clone();
+            tab.vt.resize(cols, rows);
+            tab.session = Some(pty::PtySession::spawn(&cwd, size)?);
+        }
+
+        // [X] Close tab — drop the tab.
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            app.tabs.remove(idx);
+            if app.tabs.is_empty() {
+                app.should_quit = true;
+            } else {
+                app.active_tab = app.active_tab.min(app.tabs.len() - 1);
+            }
+        }
+
+        // [Q] Quit app.
+        KeyCode::Char('q') | KeyCode::Char('Q') => {
+            app.should_quit = true;
+        }
+
+        // Ctrl+Q always quits regardless of modal state.
+        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.should_quit = true;
+        }
 
         _ => {}
     }
