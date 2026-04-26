@@ -59,11 +59,6 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
     // (scroll_down / scroll_page_down) use the same value on the next
     // event-loop iteration.
     let pw = area.width.saturating_sub(2) as usize;
-    // Invalidate the visual-row cache whenever the panel width changes so that
-    // scroll_to_bottom_offset_for_width recomputes with the new geometry.
-    if pw != app.right_panel_inner_width as usize {
-        app.cached_visual_rows = None;
-    }
     app.right_panel_inner_width = area.width.saturating_sub(2);
 
     // Resolve scroll-to-bottom here, where the exact ratatui layout width is
@@ -95,11 +90,10 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
     let max_scroll = app.scroll_to_bottom_offset_for_width(pw);
     let scroll = app.scroll_offset.min(max_scroll).min(u16::MAX as usize) as u16;
 
-    // Clone the pre-rendered lines into the Paragraph.  ratatui 0.30 requires
-    // an owned Vec<Line> (Into<Text>), so we dereference through the Arc and
-    // clone the inner Vec.  The content is only re-rendered when the file
-    // changes, so this O(n) allocation happens rarely.
-    let p = Paragraph::new((*app.rendered_lines).clone())
+    // Clone the pre-rendered lines into the Paragraph.  Line<'static> spans
+    // own their content as Strings so this allocates, but the session content
+    // is only re-rendered when the file changes — not every frame.
+    let p = Paragraph::new(app.rendered_lines.clone())
         .block(block)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));

@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
@@ -35,7 +34,7 @@ pub struct App {
     pub(crate) should_quit: bool,
 
     // --- content panel ---
-    pub(crate) rendered_lines: Arc<Vec<Line<'static>>>,
+    pub(crate) rendered_lines: Vec<Line<'static>>,
     /// Lines scrolled from the top of the content (usize avoids u16 overflow
     /// on sessions with > 65 535 rendered lines).
     pub(crate) scroll_offset: usize,
@@ -130,7 +129,7 @@ impl App {
             last_refresh: Instant::now(),
             should_quit: false,
 
-            rendered_lines: Arc::new(Vec::new()),
+            rendered_lines: Vec::new(),
             scroll_offset: 0,
             content_panel_height: INITIAL_PANEL_HEIGHT_GUESS,
             left_panel_width: 0, // overwritten at the top of every event-loop iteration
@@ -273,7 +272,7 @@ impl App {
 
             let turns = parse_turns(&session.path);
             let opts = RenderOptions { show_thinking: self.show_thinking };
-            self.rendered_lines = Arc::new(render_turns(&turns, &opts));
+            self.rendered_lines = render_turns(&turns, &opts);
             self.cached_visual_rows = None;
             self.loaded_uuid = Some(session.uuid);
             self.loaded_mtime = mtime;
@@ -287,7 +286,7 @@ impl App {
             if let Some(session) = self.sessions.iter().find(|s| s.uuid == uuid).cloned() {
                 let turns = parse_turns(&session.path);
                 let opts = RenderOptions { show_thinking: self.show_thinking };
-                self.rendered_lines = Arc::new(render_turns(&turns, &opts));
+                self.rendered_lines = render_turns(&turns, &opts);
                 self.cached_visual_rows = None;
             }
         }
@@ -311,7 +310,7 @@ impl App {
                 if self.loaded_mtime != Some(mtime) {
                     let turns = parse_turns(&session.path);
                     let opts = RenderOptions { show_thinking: self.show_thinking };
-                    self.rendered_lines = Arc::new(render_turns(&turns, &opts));
+                    self.rendered_lines = render_turns(&turns, &opts);
                     self.cached_visual_rows = None;
                     self.loaded_mtime = Some(mtime);
                     // Preserve scroll position on live update.
