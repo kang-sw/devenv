@@ -522,6 +522,22 @@ impl App {
         Ok(())
     }
 
+    /// Return a tab name that does not collide with any existing tab.
+    /// If `base` is already taken, appends " #2", " #3", … until unique.
+    fn unique_tab_name(&self, base: String) -> String {
+        if !self.tabs.iter().any(|t| t.worktree.name == base) {
+            return base;
+        }
+        let mut n = 2usize;
+        loop {
+            let candidate = format!("{} #{}", base, n);
+            if !self.tabs.iter().any(|t| t.worktree.name == candidate) {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+
     /// Open a new tab running `claude` in the project root (or current tab's
     /// worktree path when no git root is detected).
     ///
@@ -538,10 +554,12 @@ impl App {
         };
 
         // Derive tab label from the last path component, matching App::new().
-        let name = cwd
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "new".into());
+        // Append "#N" when a tab with the same name already exists.
+        let name = self.unique_tab_name(
+            cwd.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "new".into()),
+        );
 
         // Spawn before constructing Worktree so cwd can be moved (not cloned)
         // into the struct literal.  Swallow the error — if `claude` is missing
@@ -574,10 +592,11 @@ impl App {
             std::env::current_dir().unwrap_or_default()
         };
 
-        let name = cwd
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "new".into());
+        let name = self.unique_tab_name(
+            cwd.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "new".into()),
+        );
 
         let session = match spawn_claude_worktree(&cwd, INITIAL_SIZE, self.skip_permissions) {
             Ok(s) => s,
