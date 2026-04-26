@@ -31,10 +31,7 @@ pub fn render_turns(turns: &[Turn], opts: &RenderOptions) -> Vec<Line<'static>> 
 // ---------------------------------------------------------------------------
 
 fn separator(label: &str, style: Style) -> Line<'static> {
-    Line::from(vec![Span::styled(
-        format!("─── {} ", label),
-        style,
-    )])
+    Line::from(vec![Span::styled(format!("─── {} ", label), style)])
 }
 
 fn render_turn(turn: &Turn, opts: &RenderOptions, out: &mut Vec<Line<'static>>) {
@@ -42,7 +39,9 @@ fn render_turn(turn: &Turn, opts: &RenderOptions, out: &mut Vec<Line<'static>>) 
         Turn::User(text) => {
             out.push(separator(
                 "USER",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ));
             for line in text.lines() {
                 out.push(Line::from(vec![Span::styled(
@@ -78,11 +77,7 @@ fn render_turn(turn: &Turn, opts: &RenderOptions, out: &mut Vec<Line<'static>>) 
     }
 }
 
-fn render_content_item(
-    item: &ContentItem,
-    opts: &RenderOptions,
-    out: &mut Vec<Line<'static>>,
-) {
+fn render_content_item(item: &ContentItem, opts: &RenderOptions, out: &mut Vec<Line<'static>>) {
     match item {
         ContentItem::Text(text) => {
             out.extend(render_markdown(text));
@@ -93,7 +88,9 @@ fn render_content_item(
             if opts.show_thinking {
                 out.push(Line::from(vec![Span::styled(
                     "┌─ thinking ──────────────".to_string(),
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
                 )]));
                 for line in thinking.lines() {
                     out.push(Line::from(vec![Span::styled(
@@ -105,17 +102,24 @@ fn render_content_item(
                 }
                 out.push(Line::from(vec![Span::styled(
                     "└──────────────────────────".to_string(),
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
                 )]));
             } else {
                 out.push(Line::from(vec![Span::styled(
                     "[thinking block hidden — press t to show]".to_string(),
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
                 )]));
             }
         }
 
-        ContentItem::ToolUse { name, input_preview } => {
+        ContentItem::ToolUse {
+            name,
+            input_preview,
+        } => {
             out.push(Line::from(vec![
                 Span::styled(
                     format!("⚙ {}  ", name),
@@ -255,11 +259,7 @@ fn flush(current: &mut Vec<Span<'static>>, output: &mut Vec<Line<'static>>) {
     output.push(Line::from(std::mem::take(current)));
 }
 
-fn heading_or_inline_style(
-    heading: Option<HeadingLevel>,
-    bold: bool,
-    italic: bool,
-) -> Style {
+fn heading_or_inline_style(heading: Option<HeadingLevel>, bold: bool, italic: bool) -> Style {
     let base = Style::default();
     if let Some(level) = heading {
         return match level {
