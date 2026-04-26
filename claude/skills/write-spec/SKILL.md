@@ -19,24 +19,26 @@ Target: $ARGUMENTS
 
 ## On: invoke
 
-0. **judge: spec-impact** — does this work introduce or modify behavior a caller can observe?
-   - no  → output "No public behavior affected." Suggest `/write-ticket`. Exit.
+1. **judge: spec-impact** — does this work introduce or modify behavior a caller can observe?
+   - no  → output "No public behavior affected." 
+       - While `/proceed` → continue with appropriate next step.
+       - Otherwise → suggest `/write-ticket`. Exit.
    - yes → proceed with steps below.
-1. Identify the target from `$ARGUMENTS` — area name, file path, or description.
-2. If creating a new spec:
+2. Identify the target from `$ARGUMENTS` — area name, file path, or description.
+3. If creating a new spec:
    a. Apply `judge: directory-vs-flat` to choose the file structure.
    b. Write the spec body following the `spec-format` template. Apply `judge: idea-level` before inserting any `🚧` entries.
    c. Run `ws-spec-build-index` (no args) for cleanup and verification.
    d. Add the spec to the listing in `ai-docs/_index.md`.
-3. If updating an existing spec:
+4. If updating an existing spec:
    a. Read the target file first.
    b. For each new anchor: run `ws-generate-spec-stem <descriptive-slug>` to get a collision-free `{#YYMMDD-slug}`.
    c. Insert the anchor — on a heading line or anywhere in body text (not heading-only).
    d. Apply `judge: idea-level` before adding any `🚧` Planned callouts. Remove 🚧 from confirmed-implemented features as needed.
    e. Run `ws-spec-build-index` (no args) for cleanup and verification.
-4. Apply `judge: split-trigger` after writing — if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
-5. Accuracy check — confirm every heading without 🚧 exists in the codebase. Use an Explore agent if uncertain. Never remove 🚧 without confirmation.
-6. **Commit** — in a single Bash command, stage the spec file(s) updated in this run (and `ai-docs/_index.md` if the listing changed) then commit:
+5. Apply `judge: split-trigger` after writing — if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
+6. Accuracy check — confirm every heading without 🚧 exists in the codebase. Use an Explore agent if uncertain. Never remove 🚧 without confirmation.
+7. **Commit** — in a single Bash command, stage the spec file(s) updated in this run (and `ai-docs/_index.md` if the listing changed) then commit:
    `git add <file(s)> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
 
 ## Judgments
