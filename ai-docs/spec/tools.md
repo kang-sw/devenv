@@ -34,6 +34,11 @@ Two-panel layout:
 - **Left panel** — scrollable session list. Each entry shows the session label and last-modified timestamp.
 - **Right panel** — turn-by-turn rendering of the selected session's JSONL. Renders user messages, assistant text, thinking blocks, and tool call/result pairs with pseudo-markdown formatting (bold, code blocks, headers) adapted for terminal display.
 
+### Mouse Interaction {#260426-claude-watch-mouse-input}
+
+> [!note] Planned 🚧
+> Mouse capture is enabled on startup. Scroll wheel events scroll the right panel. Left-click on a left-panel entry selects that session.
+
 ### Live Process Indicator
 
 Polls running processes (1–2 second interval) to find `claude` processes with a `-p` flag. Extracts the UUID from `--session-id` or `--resume` arguments. Sessions with a matching active process are highlighted green in the left panel.
