@@ -16,8 +16,8 @@ use crossterm::{
 use std::io::stdout;
 use std::time::Duration;
 
-/// How often the event loop polls for terminal input.
-const EVENT_POLL_MS: u64 = 100;
+/// How long to sleep after each draw to avoid busy-spinning (~60 fps).
+const FRAME_WAIT_MS: u64 = 16;
 /// How often the session list is refreshed from disk.
 const SESSION_REFRESH_SECS: u64 = 1;
 
@@ -53,24 +53,17 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
     app.load_selected_session();
 
     loop {
-        // Resolve terminal dimensions and any pending scroll-to-bottom BEFORE
-        // draw so the draw function remains a pure read of App state.
-        match crossterm::terminal::size() {
-            Ok((w, h)) => {
-                app.update_content_height(h.saturating_sub(2) as usize);
-                app.left_panel_width =
-                    (w as u32 * LEFT_PANEL_PERCENT as u32 / 100) as u16;
-            }
-            Err(_) => {
-                // Keep previously cached dimensions on transient failure.
-                app.update_content_height(app.content_panel_height);
-            }
+        // Run background periodic tasks at their own intervals.
+        if app.last_refresh.elapsed() >= Duration::from_secs(SESSION_REFRESH_SECS) {
+            app.refresh_sessions();
+            app.maybe_reload_content();
+            app.last_refresh = std::time::Instant::now();
         }
+        app.poll_processes_if_due();
 
-        terminal.draw(|f| ui::draw(f, &app))?;
-
-        // Poll with a short timeout to allow background refresh.
-        if event::poll(Duration::from_millis(EVENT_POLL_MS))? {
+        // Drain all pending events without blocking so input is processed
+        // immediately, eliminating up to one frame of latency.
+        while event::poll(Duration::ZERO)? {
             match event::read()? {
                 Event::Key(key) => match (key.modifiers, key.code) {
                     (_, KeyCode::Char('q')) => app.should_quit = true,
@@ -96,15 +89,25 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
             break;
         }
 
-        // Refresh session list + live-tail content at ~1 s intervals.
-        if app.last_refresh.elapsed() >= Duration::from_secs(SESSION_REFRESH_SECS) {
-            app.refresh_sessions();
-            app.maybe_reload_content();
-            app.last_refresh = std::time::Instant::now();
+        // Resolve terminal dimensions BEFORE draw so the draw function remains
+        // a pure read of App state.
+        match crossterm::terminal::size() {
+            Ok((w, h)) => {
+                app.update_content_height(h.saturating_sub(2) as usize);
+                app.left_panel_width =
+                    (w as u32 * LEFT_PANEL_PERCENT as u32 / 100) as u16;
+            }
+            Err(_) => {
+                // Keep previously cached dimensions on transient failure.
+                app.update_content_height(app.content_panel_height);
+            }
         }
 
-        // Poll running processes at ~2 s intervals.
-        app.poll_processes_if_due();
+        terminal.draw(|f| ui::draw(f, &app))?;
+
+        // Short sleep-wait to avoid busy-spinning; any arriving event will
+        // be picked up at the top of the next iteration's drain loop.
+        let _ = event::poll(Duration::from_millis(FRAME_WAIT_MS));
     }
 
     Ok(())
