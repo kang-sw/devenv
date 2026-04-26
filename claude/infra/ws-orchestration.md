@@ -37,6 +37,20 @@ are compressed and handed off without caller involvement.
 
 **Background mode:** Pass `run_in_background: true` on the Bash tool call to let the lead agent continue other work while the agent runs. Output is still written to the output file; read it with `ws-print-named-agent-output` after the completion notification arrives.
 
+## ws-interrupt-named-agent
+
+```
+ws-interrupt-named-agent <agent-name> <message>
+ws-interrupt-named-agent <agent-name> - <<'MSG'
+...
+MSG
+```
+
+Queues a message into the named agent's outbox for delivery as a new user turn.
+If the agent is running, the PostToolBatch hook stops it at the next tool boundary;
+`ws-call-named-agent`'s drain loop then resumes with the message. If the agent is
+idle, the message is delivered on the next `ws-call-named-agent` call.
+
 ## ws-print-named-agent-output
 
 ```
@@ -115,4 +129,8 @@ PROMPT
 ws-call-named-agent reviewer-corr - <<'PROMPT'
 Re-review. Updated diff: ...
 PROMPT
+
+# 5. Mid-task interrupt (while implementer runs in background)
+ws-interrupt-named-agent implementer "Stop after the current file. Scope reduced to src/foo.ts only."
+ws-print-named-agent-output implementer
 ```
