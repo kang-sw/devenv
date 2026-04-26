@@ -3,36 +3,16 @@
 // - Removed `discover_sessions` and `collect_jsonl_files` (not used here;
 //   agent.rs discovers sessions via the agent registry, not by walking
 //   ~/.claude/projects/).
-// - Changed `find_agent_name` and `discover_project_dirs` from private `fn`
-//   to `pub(crate)` so `agent.rs` can call them.
+// - Removed `SessionEntry` (its producer `discover_sessions` was dropped;
+//   no caller in this crate).
+// - Removed `find_agent_name` (dead code; agent.rs implements its own
+//   agents-directory walk via `discover_named_agents`).
+// - Changed `discover_project_dirs` from private `fn` to `pub(crate)` so
+//   `agent.rs` can call it.
 // - `parse_session_metadata` was already `pub(crate)` — no change.
 
-#[cfg(not(windows))]
-use std::collections::HashMap;
-use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-
-use chrono::{DateTime, Local};
-
-/// A single discovered Claude session JSONL file.
-#[derive(Debug, Clone)]
-pub struct SessionEntry {
-    pub label: String,
-    pub uuid: String,
-    pub modified: DateTime<Local>,
-    pub path: PathBuf,
-    pub active: bool,
-    /// Total tokens (input + output) summed from assistant turns.
-    /// `None` means the file has not been parsed yet.
-    pub token_total: Option<u64>,
-    /// Whether this session was started with `-p` (headless/SDK-CLI mode).
-    /// `None` means the file has not been parsed yet.
-    pub is_headless: Option<bool>,
-    /// Whether a background parse has been enqueued for this session's current
-    /// mtime.
-    pub parse_queued: bool,
-}
 
 fn home_dir() -> PathBuf {
     #[cfg(not(windows))]
@@ -68,36 +48,6 @@ pub fn find_git_root() -> Option<PathBuf> {
             return None;
         }
     }
-}
-
-/// Search agent JSON files under `.git/ws@<repo>/agents/` for a UUID match.
-pub(crate) fn find_agent_name(uuid: &str, git_root: &Path) -> Option<String> {
-    let repo_name = git_root.file_name()?.to_string_lossy().into_owned();
-    let agents_dir = git_root
-        .join(".git")
-        .join(format!("ws@{}", repo_name))
-        .join("agents");
-
-    if !agents_dir.is_dir() {
-        return None;
-    }
-
-    for entry in fs::read_dir(&agents_dir).ok()?.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let content = fs::read_to_string(&path).unwrap_or_default();
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-            let stored = json.get("uuid").and_then(|v| v.as_str());
-            if stored == Some(uuid) {
-                if let Some(stem) = path.file_stem() {
-                    return Some(stem.to_string_lossy().into_owned());
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Return the `~/.claude/projects/<escaped-cwd>` path for the current working
@@ -195,4 +145,87 @@ pub(crate) fn parse_session_metadata(path: &Path) -> Option<(u64, bool)> {
     }
 
     Some((total_tokens, is_headless))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEMP_CTR: AtomicUsize = AtomicUsize::new(0);
+
+    fn write_temp_jsonl(data: &str) -> std::path::PathBuf {
+        let n = TEMP_CTR.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("cldash_session_test_{}.jsonl", n));
+        std::fs::write(&path, data).unwrap();
+        path
+    }
+
+    #[test]
+    fn parse_session_metadata_file_not_found() {
+        let result = parse_session_metadata(std::path::Path::new("/nonexistent/__x__.jsonl"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_session_metadata_empty_file() {
+        let p = write_temp_jsonl("");
+        let result = parse_session_metadata(&p);
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(result, Some((0, false)));
+    }
+
+    #[test]
+    fn parse_session_metadata_all_error_lines() {
+        let p = write_temp_jsonl("not json\nalso not json\n");
+        let result = parse_session_metadata(&p);
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(result, Some((0, false)));
+    }
+
+    #[test]
+    fn parse_session_metadata_token_accumulation() {
+        // Two assistant entries; tokens should be summed.
+        let data = concat!(
+            r#"{"type":"assistant","message":{"usage":{"input_tokens":10,"output_tokens":5}}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"usage":{"input_tokens":20,"output_tokens":15}}}"#,
+            "\n",
+        );
+        let p = write_temp_jsonl(data);
+        let result = parse_session_metadata(&p);
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(result, Some((50, false)));
+    }
+
+    #[test]
+    fn parse_session_metadata_headless_via_last_prompt() {
+        let data = r#"{"type":"last-prompt"}"#;
+        let p = write_temp_jsonl(data);
+        let result = parse_session_metadata(&p);
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(result, Some((0, true)));
+    }
+
+    #[test]
+    fn parse_session_metadata_headless_via_system_entrypoint() {
+        let data = r#"{"type":"system","entrypoint":"sdk-cli/0.1"}"#;
+        let p = write_temp_jsonl(data);
+        let result = parse_session_metadata(&p);
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(result, Some((0, true)));
+    }
+
+    #[test]
+    fn parse_session_metadata_not_headless_without_marker() {
+        let data = r#"{"type":"system","entrypoint":"interactive"}"#;
+        let p = write_temp_jsonl(data);
+        let result = parse_session_metadata(&p);
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(result, Some((0, false)));
+    }
 }

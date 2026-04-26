@@ -34,6 +34,12 @@ impl PtySession {
         let writer = pair.master.take_writer()?;
         let mut reader = pair.master.try_clone_reader()?;
 
+        // Drop slave BEFORE spawning the reader thread: if the child exits
+        // before the thread starts, master will see EOF only after all slave
+        // holders are gone.  Dropping here (parent's copy) ensures no
+        // slave-fd is held by this process once the thread is running.
+        drop(pair.slave);
+
         // Unbounded channel — reader thread never blocks on bursts.
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
 
@@ -51,10 +57,6 @@ impl PtySession {
                 }
             }
         });
-
-        // Drop slave: child is now the only slave-side holder, so read on
-        // master returns EOF when the child exits (WezTerm docs requirement).
-        drop(pair.slave);
 
         Ok(PtySession {
             master: pair.master,
@@ -104,6 +106,13 @@ impl Drop for PtySession {
     fn drop(&mut self) {
         // Enforce "subprocesses terminate when claude-dash exits" (ticket Decision).
         let _ = self.child.kill();
+        // Join the reader thread so it does not outlive the session.
+        // After kill(), the child's slave fd closes (child was the only remaining
+        // slave holder — we dropped our copy in spawn()), causing the master
+        // reader to receive EOF/EIO and exit cleanly.
+        if let Some(t) = self.reader_thread.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -169,5 +178,124 @@ pub fn encode_key(key: crossterm::event::KeyEvent) -> Option<Vec<u8>> {
         }),
 
         _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    fn plain(code: KeyCode) -> KeyEvent {
+        key(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        key(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    // --- Ctrl+a–z encoding ---
+
+    #[test]
+    fn encode_ctrl_a() {
+        assert_eq!(encode_key(ctrl('a')), Some(vec![0x01]));
+    }
+
+    #[test]
+    fn encode_ctrl_z() {
+        assert_eq!(encode_key(ctrl('z')), Some(vec![0x1a]));
+    }
+
+    #[test]
+    fn encode_ctrl_c() {
+        assert_eq!(encode_key(ctrl('c')), Some(vec![0x03]));
+    }
+
+    #[test]
+    fn encode_ctrl_uppercase_folds_to_lower() {
+        // 'A' and 'a' with CONTROL should produce the same byte.
+        let via_lower = encode_key(ctrl('a'));
+        let via_upper = encode_key(key(KeyCode::Char('A'), KeyModifiers::CONTROL));
+        assert_eq!(via_lower, via_upper);
+    }
+
+    // --- Plain printable chars ---
+
+    #[test]
+    fn encode_plain_char() {
+        assert_eq!(encode_key(plain(KeyCode::Char('h'))), Some(b"h".to_vec()));
+    }
+
+    #[test]
+    fn encode_plain_unicode() {
+        // '→' (U+2192) encodes to its 3-byte UTF-8 representation.
+        let bytes = encode_key(plain(KeyCode::Char('→'))).unwrap();
+        assert_eq!(bytes, "→".as_bytes().to_vec());
+    }
+
+    // --- Special keys ---
+
+    #[test]
+    fn encode_enter() {
+        assert_eq!(encode_key(plain(KeyCode::Enter)), Some(b"\r".to_vec()));
+    }
+
+    #[test]
+    fn encode_backspace() {
+        assert_eq!(encode_key(plain(KeyCode::Backspace)), Some(vec![0x7f]));
+    }
+
+    #[test]
+    fn encode_tab() {
+        assert_eq!(encode_key(plain(KeyCode::Tab)), Some(b"\t".to_vec()));
+    }
+
+    #[test]
+    fn encode_esc() {
+        assert_eq!(encode_key(plain(KeyCode::Esc)), Some(vec![0x1b]));
+    }
+
+    // --- Cursor keys ---
+
+    #[test]
+    fn encode_arrow_keys() {
+        assert_eq!(encode_key(plain(KeyCode::Up)), Some(b"\x1b[A".to_vec()));
+        assert_eq!(encode_key(plain(KeyCode::Down)), Some(b"\x1b[B".to_vec()));
+        assert_eq!(encode_key(plain(KeyCode::Right)), Some(b"\x1b[C".to_vec()));
+        assert_eq!(encode_key(plain(KeyCode::Left)), Some(b"\x1b[D".to_vec()));
+    }
+
+    #[test]
+    fn encode_page_keys() {
+        assert_eq!(
+            encode_key(plain(KeyCode::PageUp)),
+            Some(b"\x1b[5~".to_vec())
+        );
+        assert_eq!(
+            encode_key(plain(KeyCode::PageDown)),
+            Some(b"\x1b[6~".to_vec())
+        );
+    }
+
+    #[test]
+    fn encode_function_keys() {
+        assert_eq!(encode_key(plain(KeyCode::F(1))), Some(b"\x1bOP".to_vec()));
+        assert_eq!(
+            encode_key(plain(KeyCode::F(12))),
+            Some(b"\x1b[24~".to_vec())
+        );
     }
 }
