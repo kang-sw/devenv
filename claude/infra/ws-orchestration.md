@@ -37,6 +37,33 @@ are compressed and handed off without caller involvement.
 
 **Background mode:** Pass `run_in_background: true` on the Bash tool call to let the lead agent continue other work while the agent runs. Output is still written to the output file; read it with `ws-print-named-agent-output` after the completion notification arrives.
 
+## ws-interrupt-named-agent
+
+```
+ws-interrupt-named-agent <agent-name> <message>
+ws-interrupt-named-agent <agent-name> - <<'MSG'
+...
+MSG
+```
+
+Queues a message into the named agent's outbox. The message is delivered as a
+new user turn on the agent's next `--resume` call.
+
+**Delivery timing:**
+
+- **Agent running** via `ws-call-named-agent` — the PostToolBatch hook fires after
+  each tool batch, detects the non-empty outbox, and exits with code 2. This stops
+  the agent cleanly at the next tool boundary. The drain loop in `ws-call-named-agent`
+  then resumes with the queued message.
+- **Agent idle** — the message waits in the outbox. The next `ws-call-named-agent`
+  call picks it up via the same drain loop before returning.
+
+Multiple `ws-interrupt-named-agent` calls append to the outbox. The drain loop
+delivers them one at a time in order.
+
+The agent receives the message as a prompt but is not obligated to act on it. Use
+for course-correction, cancellation signals, or additional context mid-task.
+
 ## ws-print-named-agent-output
 
 ```
@@ -115,4 +142,11 @@ PROMPT
 ws-call-named-agent reviewer-corr - <<'PROMPT'
 Re-review. Updated diff: ...
 PROMPT
+
+# 5. Mid-task interrupt — queue a message while the agent is running in background
+#    (Bash tool call with run_in_background: true already issued for implementer)
+ws-interrupt-named-agent implementer "Stop after the current file. Scope reduced to src/foo.ts only."
+
+# After the background call completes, the drained message will have been delivered.
+ws-print-named-agent-output implementer
 ```
