@@ -50,6 +50,11 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
   commit message body. For each matched stem, it locates the corresponding implemented spec heading
   (no `🚧` prefix) and adds it to the `### Pending removal` report section. It never removes or
   modifies spec entries automatically — all removals require human confirmation.
+- `spec-updater` supports Suggestion mode: when the call prompt begins with `Suggestion mode:`, the
+  agent skips all file edits and emits `### Proposed strips` in the report instead of `### Stripped`.
+  The caller (e.g., `ws:sprint` wrap-up) reads the proposals and applies strips directly. All other
+  report sections (`### Pending removal`, `### Planned entry dropped`, `### Missing anchors`) are
+  identical to normal mode.
 
 ## Coupling
 

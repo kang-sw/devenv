@@ -7,7 +7,7 @@ summary: Custom tools built and maintained in this repo for local developer use.
 
 Custom utilities built from source in this repo and installed locally.
 
-## 🚧 Custom Rust Tools {#260426-claude-watch-installed}
+## Custom Rust Tools {#260426-claude-watch-installed}
 
 Tools built from source within this repo and installed via `cargo install --path <tool-dir>`. The full-install phase will gain a step to build and install these after Homebrew tools.
 
@@ -15,7 +15,7 @@ Tools built from source within this repo and installed via `cargo install --path
 |---|---|---|
 | `claude-watch` | `tools/claude-watch/` | TUI session viewer for Claude CLI subprocess history |
 
-## 🚧 Claude Session Viewer {#260426-claude-session-viewer}
+## Claude Session Viewer {#260426-claude-session-viewer}
 
 `claude-watch` — a Rust TUI binary that browses `~/.claude/projects/` session history for the current project and shows live subprocess activity.
 
