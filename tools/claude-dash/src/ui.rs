@@ -252,15 +252,15 @@ fn draw_exit_modal(frame: &mut Frame, area: Rect, is_removed: bool, status: &str
 /// in `draw()` so it appears on top of every other widget.
 fn draw_prefix_help(frame: &mut Frame, area: Rect) {
     const MODAL_W: u16 = 44;
-    const MODAL_H: u16 = 9;
+    const MODAL_H: u16 = 11;
     let modal_w = MODAL_W.min(area.width);
     let modal_x = area.x + area.width.saturating_sub(modal_w) / 2;
     let modal_y = area.y + area.height.saturating_sub(MODAL_H) / 2;
     let modal_area = Rect::new(modal_x, modal_y, modal_w, MODAL_H);
 
-    // 6 content lines fit comfortably in the 7-row inner area (9 rows − 2 borders).
+    // 7 content lines fit comfortably in the 9-row inner area (11 rows − 2 borders).
     const HELP_TEXT: &str =
-        " Ctrl+B \u{2014} prefix key\n\n 1 2 3 \u{2026}  Switch tab\n q w e \u{2026}  Switch slot\n n        New session tab\n Ctrl+B   Cancel";
+        " Ctrl+B \u{2014} prefix key\n\n 1 2 3 \u{2026}  Switch tab\n q w e \u{2026}  Switch slot\n n        New session tab\n N        New worktree tab\n Ctrl+B   Cancel";
 
     let paragraph = Paragraph::new(HELP_TEXT)
         .block(Block::default().borders(Borders::ALL).title(" Prefix commands "));

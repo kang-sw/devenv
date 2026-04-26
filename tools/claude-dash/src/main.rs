@@ -191,6 +191,10 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
                     KeyCode::Char('n') => {
                         app.open_new_tab()?;
                     }
+                    // 'N' → open a new tab running claude --worktree.
+                    KeyCode::Char('N') => {
+                        app.open_new_worktree_tab()?;
+                    }
                     // 'q'–'p' row → switch agent slot within the current tab.
                     KeyCode::Char(c) => {
                         let slot: Option<usize> = match c {

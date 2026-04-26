@@ -291,6 +291,22 @@ fn spawn_claude(
     }
 }
 
+fn spawn_claude_worktree(
+    cwd: &std::path::Path,
+    size: PtySize,
+    skip: bool,
+) -> anyhow::Result<PtySession> {
+    if skip {
+        PtySession::spawn_with_args(
+            cwd,
+            size,
+            &["--dangerously-skip-permissions", "--worktree"],
+        )
+    } else {
+        PtySession::spawn_with_args(cwd, size, &["--worktree"])
+    }
+}
+
 impl App {
     /// Build the initial app state: discover worktrees, create tabs, and
     /// auto-spawn PTYs for active ws-framework worktrees.
@@ -532,6 +548,38 @@ impl App {
         // or PTY allocation fails we simply do not open the tab (matching the
         // `activate_tab` / `reconcile_worktrees` error-handling pattern).
         let session = match spawn_claude(&cwd, INITIAL_SIZE, self.skip_permissions) {
+            Ok(s) => s,
+            Err(_) => return Ok(()),
+        };
+        let worktree = Worktree {
+            path: cwd,
+            name,
+            is_active_ws: false,
+            is_removed: false,
+        };
+        self.tabs.push(WorktreeTab::new(worktree, Some(session)));
+        self.active_tab = self.tabs.len() - 1;
+        Ok(())
+    }
+
+    /// Open a new tab running `claude --worktree` so Claude can create and
+    /// enter a new git worktree.  Analogous to `open_new_tab` but passes
+    /// `--worktree` to the spawned process.
+    pub fn open_new_worktree_tab(&mut self) -> anyhow::Result<()> {
+        let cwd = if let Some(ref root) = self.git_root {
+            root.clone()
+        } else if !self.tabs.is_empty() {
+            self.tabs[self.active_tab].worktree.path.clone()
+        } else {
+            std::env::current_dir().unwrap_or_default()
+        };
+
+        let name = cwd
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "new".into());
+
+        let session = match spawn_claude_worktree(&cwd, INITIAL_SIZE, self.skip_permissions) {
             Ok(s) => s,
             Err(_) => return Ok(()),
         };
