@@ -538,7 +538,7 @@ impl App {
         let worktree = Worktree {
             path: cwd,
             name,
-            is_active_ws: true,
+            is_active_ws: false,
             is_removed: false,
         };
         self.tabs.push(WorktreeTab::new(worktree, Some(session)));
