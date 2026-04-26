@@ -1,4 +1,6 @@
 mod app;
+mod parser;
+mod renderer;
 mod session;
 mod ui;
 
@@ -22,10 +24,13 @@ fn run_app(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
 
+    // Load the initially selected session immediately.
+    app.load_selected_session();
+
     loop {
         terminal.draw(|f| ui::draw(f, &mut app))?;
 
-        // Poll with a 100 ms timeout so we can do background refresh.
+        // Poll with a 100 ms timeout so background refresh can fire.
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match (key.modifiers, key.code) {
@@ -35,7 +40,6 @@ fn run_app(
                     (_, KeyCode::Up) => app.select_prev(),
                     (_, KeyCode::Down) => app.select_next(),
 
-                    // Phase 3 scroll / thinking
                     (_, KeyCode::Char('j')) => app.scroll_down(),
                     (_, KeyCode::Char('k')) => app.scroll_up(),
                     (_, KeyCode::PageDown) => app.scroll_page_down(),
@@ -51,9 +55,10 @@ fn run_app(
             break;
         }
 
-        // Refresh session list every ~1 second.
+        // Refresh session list + content every ~1 second.
         if app.last_refresh.elapsed() >= Duration::from_secs(1) {
             app.refresh_sessions();
+            app.maybe_reload_content();
             app.last_refresh = std::time::Instant::now();
         }
     }
