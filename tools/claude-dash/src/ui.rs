@@ -138,13 +138,14 @@ fn draw_slot_row(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Style::default()
     };
-    spans.push(Span::styled("[1:main]", main_style));
+    spans.push(Span::styled("[q:main]", main_style));
 
-    // Slots 2–9: named agents.
+    // Slots w/e/r/…: named agents.
+    const SLOT_KEYS: &[char] = &['w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'];
     for (i, agent) in tab.named_agents.iter().enumerate() {
         spans.push(Span::raw("  "));
-        let slot_num = i + 2;
-        let label = format!("[{}:{}]", slot_num, agent.name);
+        let key = SLOT_KEYS.get(i).copied().unwrap_or('?');
+        let label = format!("[{}:{}]", key, agent.name);
         let style = if active_slot_idx == i + 1 {
             Style::default().add_modifier(Modifier::REVERSED)
         } else {
