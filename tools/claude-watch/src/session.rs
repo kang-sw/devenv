@@ -1,3 +1,4 @@
+#[cfg(not(windows))]
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -37,6 +38,11 @@ fn home_dir() -> PathBuf {
                 .unwrap_or_else(|_| "C:\\Users\\default".to_string()),
         )
     }
+}
+
+/// Return the `~/.claude/projects` base directory used by the Claude CLI.
+fn claude_projects_dir() -> PathBuf {
+    home_dir().join(".claude").join("projects")
 }
 
 /// Walk up from cwd to find the nearest .git directory root.
@@ -105,10 +111,11 @@ fn scan_jsonl_in_dir(dir: &Path) -> Vec<PathBuf> {
 /// Return the `~/.claude/projects/<escaped-cwd>` path for the current working
 /// directory.  This mirrors the escape scheme used by the Claude CLI
 /// (every `/` replaced with `-`).
+#[cfg(not(windows))]
 fn cwd_project_dir() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     let escaped = cwd.to_string_lossy().replace('/', "-");
-    home_dir().join(".claude").join("projects").join(escaped)
+    claude_projects_dir().join(escaped)
 }
 
 /// Return all `~/.claude/projects/<escaped>` directories that correspond to
@@ -135,7 +142,7 @@ fn discover_project_dirs() -> Vec<PathBuf> {
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let base = home_dir().join(".claude").join("projects");
+    let base = claude_projects_dir();
 
     let dirs: Vec<PathBuf> = stdout
         .lines()
@@ -168,7 +175,7 @@ fn discover_project_dirs() -> Vec<PathBuf> {
 /// subdirectories; match UUIDs across all of them regardless of subdirectory
 /// name."
 #[cfg(not(windows))]
-pub fn collect_jsonl_files(_claude_projects: &Path) -> Vec<PathBuf> {
+pub fn collect_jsonl_files() -> Vec<PathBuf> {
     let dirs = discover_project_dirs();
     let mut seen: HashMap<String, PathBuf> = HashMap::new();
     for dir in dirs {
@@ -198,10 +205,12 @@ pub fn collect_jsonl_files(claude_projects: &Path) -> Vec<PathBuf> {
 
 /// Discover all session JSONL files for the current project.
 pub fn discover_sessions() -> Vec<SessionEntry> {
-    let claude_projects = home_dir().join(".claude").join("projects");
     let git_root = find_git_root();
 
-    let jsonl_files = collect_jsonl_files(&claude_projects);
+    #[cfg(not(windows))]
+    let jsonl_files = collect_jsonl_files();
+    #[cfg(windows)]
+    let jsonl_files = collect_jsonl_files(&claude_projects_dir());
 
     let mut sessions: Vec<SessionEntry> = jsonl_files
         .into_iter()
