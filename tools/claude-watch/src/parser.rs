@@ -193,11 +193,14 @@ pub fn parse_turns(path: &Path) -> Vec<Turn> {
 /// user-message content array — not as top-level JSONL entries — per the
 /// Claude API/CLI format.  This function extracts them and emits separate
 /// Turn::ToolResult entries so they are rendered in the content panel.
+///
+/// Items are emitted in document order: each content item produces a turn
+/// immediately as it is encountered, so a mixed array like
+/// `[text, tool_result, text]` yields `[User, ToolResult, User]` in the
+/// correct sequence.
 fn parse_user_content(content: Value, turns: &mut Vec<Turn>) {
     match content {
         Value::Array(arr) => {
-            let mut text_parts: Vec<String> = Vec::new();
-
             for item in &arr {
                 let item_obj = match item.as_object() {
                     Some(o) => o,
@@ -216,15 +219,13 @@ fn parse_user_content(content: Value, turns: &mut Vec<Turn>) {
                         if let Some(t) =
                             item_obj.get("text").and_then(|v| v.as_str())
                         {
-                            text_parts.push(t.to_string());
+                            if !t.is_empty() {
+                                turns.push(Turn::User(t.to_string()));
+                            }
                         }
                     }
                     _ => {}
                 }
-            }
-
-            if !text_parts.is_empty() {
-                turns.push(Turn::User(text_parts.join("\n")));
             }
         }
         other => {
@@ -243,7 +244,80 @@ fn parse_user_content(content: Value, turns: &mut Vec<Turn>) {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_str;
+    use super::{parse_user_content, truncate_str, Turn};
+    use serde_json::json;
+
+    // -----------------------------------------------------------------------
+    // parse_user_content — document-order tests (N-1)
+    // -----------------------------------------------------------------------
+
+    fn user_text(s: &str) -> serde_json::Value {
+        json!({"type": "text", "text": s})
+    }
+    fn tool_result(s: &str) -> serde_json::Value {
+        json!({"type": "tool_result", "tool_use_id": "x", "content": s})
+    }
+
+    fn turn_labels(turns: &[Turn]) -> Vec<&'static str> {
+        turns
+            .iter()
+            .map(|t| match t {
+                Turn::User(_) => "User",
+                Turn::ToolResult(_) => "ToolResult",
+                Turn::Assistant(_) => "Assistant",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pure_text_array_emits_user_turn() {
+        let content = json!([user_text("hello")]);
+        let mut turns = Vec::new();
+        parse_user_content(content, &mut turns);
+        assert_eq!(turn_labels(&turns), ["User"]);
+    }
+
+    #[test]
+    fn pure_tool_result_array_emits_tool_result_turn() {
+        let content = json!([tool_result("output")]);
+        let mut turns = Vec::new();
+        parse_user_content(content, &mut turns);
+        assert_eq!(turn_labels(&turns), ["ToolResult"]);
+    }
+
+    #[test]
+    fn mixed_array_preserves_document_order() {
+        // text then tool_result — User must come first.
+        let content = json!([user_text("Context:"), tool_result("output")]);
+        let mut turns = Vec::new();
+        parse_user_content(content, &mut turns);
+        assert_eq!(turn_labels(&turns), ["User", "ToolResult"]);
+    }
+
+    #[test]
+    fn text_tool_result_text_preserves_order() {
+        let content = json!([
+            user_text("before"),
+            tool_result("result"),
+            user_text("after")
+        ]);
+        let mut turns = Vec::new();
+        parse_user_content(content, &mut turns);
+        assert_eq!(turn_labels(&turns), ["User", "ToolResult", "User"]);
+    }
+
+    #[test]
+    fn tool_result_text_preserves_order() {
+        // tool_result before text — ToolResult must come first.
+        let content = json!([tool_result("output"), user_text("summary")]);
+        let mut turns = Vec::new();
+        parse_user_content(content, &mut turns);
+        assert_eq!(turn_labels(&turns), ["ToolResult", "User"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // truncate_str — boundary tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn truncate_within_limit_is_unchanged() {
