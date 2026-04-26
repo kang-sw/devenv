@@ -52,14 +52,14 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
                 }
             };
             let token_text = if let Some(n) = s.token_total {
-                format!("[{}] ", format_tokens(n))
+                format!(" [{}]", format_tokens(n))
             } else {
                 String::new()
             };
-            let main_text = format!("{} ({})", s.label, ts);
             ListItem::new(Line::from(vec![
+                Span::styled(s.label.clone(), style),
                 Span::styled(token_text, Style::default().fg(Color::Cyan)),
-                Span::styled(main_text, style),
+                Span::styled(format!(" ({})", ts), style),
             ]))
         })
         .collect();
