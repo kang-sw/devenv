@@ -14,8 +14,7 @@ pub struct SessionEntry {
     pub modified: DateTime<Local>,
     pub path: PathBuf,
     pub active: bool,
-    /// Total tokens (input + output + cache_read) summed from assistant turns.
-    /// `cache_creation_input_tokens` is excluded.
+    /// Total tokens (cache_creation + output) summed from assistant turns.
     /// `None` means the file has not been parsed yet.
     pub token_total: Option<u64>,
     /// Whether this session was started with `-p` (headless/SDK-CLI mode).
@@ -288,9 +287,8 @@ pub(crate) fn parse_session_metadata(path: &Path) -> Option<(u64, bool)> {
                 if let Some(usage) = v.get("message").and_then(|m| m.get("usage")) {
                     let get =
                         |key: &str| -> u64 { usage.get(key).and_then(|v| v.as_u64()).unwrap_or(0) };
-                    total_tokens += get("input_tokens");
+                    total_tokens += get("cache_creation_input_tokens");
                     total_tokens += get("output_tokens");
-                    total_tokens += get("cache_read_input_tokens");
                 }
             }
             "last-prompt" => {
