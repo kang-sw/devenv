@@ -152,26 +152,21 @@ impl App {
     // Scroll
     // -----------------------------------------------------------------------
 
-    /// Core reverse-walk algorithm: return the lowest logical-line offset such
-    /// that the content from that offset downward fills `content_panel_height`
-    /// visual rows when rendered in a panel of `pw` columns.
+    /// Return the visual-row scroll offset that pins the view to the bottom.
+    ///
+    /// `Paragraph::scroll((n, 0))` with `Wrap` skips `n` **visual rows**
+    /// (each wrapped portion of a long line counts as one row).  This function
+    /// returns `total_visual_rows - panel_height`, which is exactly the offset
+    /// needed to show the last `content_panel_height` visual rows.
     ///
     /// Accepts `pw` as an explicit parameter so callers with access to the
     /// actual ratatui layout rect (e.g. `ui.rs`) can pass the true inner width
     /// rather than the cached `right_panel_inner_width` approximation.
     pub fn scroll_to_bottom_offset_for_width(&self, pw: usize) -> usize {
-        let mut visual_acc: usize = 0;
-        let mut offset = self.rendered_lines.len();
-        for (i, line) in self.rendered_lines.iter().enumerate().rev() {
-            let vr = visual_rows(line, pw);
-            if visual_acc + vr > self.content_panel_height {
-                offset = i + 1;
-                break;
-            }
-            visual_acc += vr;
-            offset = i;
-        }
-        offset
+        let total_visual: usize = self.rendered_lines.iter()
+            .map(|l| visual_rows(l, pw))
+            .sum();
+        total_visual.saturating_sub(self.content_panel_height)
     }
 
     /// Convenience wrapper that uses the cached `right_panel_inner_width`.
