@@ -239,7 +239,7 @@ fn draw_exit_modal(frame: &mut Frame, area: Rect, is_removed: bool, status: &str
 /// Copied from claude-watch (private fn; cannot import across crates).
 /// A future refactor may extract a shared utility crate; for now the
 /// copy-then-share-later convention is intentional.
-fn format_tokens(n: u64) -> String {
+pub(crate) fn format_tokens(n: u64) -> String {
     if n < 1_000 {
         format!("{}", n)
     } else if n < 1_000_000 {

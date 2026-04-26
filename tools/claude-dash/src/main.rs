@@ -31,7 +31,7 @@ use portable_pty::PtySize;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use app::{AgentView, App, SlotKind, SCROLL_STEP, WORKTREE_POLL_SECS};
-use ui::PAGE_SCROLL;
+use ui::{format_tokens, PAGE_SCROLL};
 
 /// Tmux-style TUI multiplexer for Claude worktrees.
 #[derive(Parser, Debug)]
@@ -259,6 +259,18 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
                 return Ok(());
             }
 
+            // --- Row 0: tab bar click ---
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) && mouse.row == 0 {
+                handle_tab_bar_click(app, mouse.column);
+                return Ok(());
+            }
+
+            // --- Row 1: slot row click ---
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) && mouse.row == 1 {
+                handle_slot_row_click(app, mouse.column);
+                return Ok(());
+            }
+
             let is_named = app
                 .active()
                 .map(|t| matches!(t.active_slot, SlotKind::Named(_)))
@@ -365,6 +377,9 @@ fn forward_mouse_to_pty(
         MouseEventKind::Up(_) => 35,                     // release (3 + 32)
         MouseEventKind::ScrollUp => 96,                  // wheel up (64 + 32)
         MouseEventKind::ScrollDown => 97,                // wheel down (65 + 32)
+        MouseEventKind::Drag(MouseButton::Left) => 32,   // left-button drag
+        MouseEventKind::Drag(MouseButton::Middle) => 33, // middle-button drag
+        MouseEventKind::Drag(MouseButton::Right) => 34,  // right-button drag
         _ => return Ok(()),
     };
 
@@ -375,6 +390,93 @@ fn forward_mouse_to_pty(
         }
     }
     Ok(())
+}
+
+/// Handle a left-click on the tab bar (row 0).
+///
+/// Walks the tab labels left-to-right, accumulating x offsets.
+/// Each label is `" <name> "` (name.chars().count() + 2) and removed tabs
+/// append `" [removed]"` (+10).  Separators are `"|"` (1 char) between tabs.
+fn handle_tab_bar_click(app: &mut App, col: u16) {
+    let mut x: u16 = 0;
+    let mut target: Option<usize> = None;
+    for (idx, tab) in app.tabs.iter().enumerate() {
+        let name_width = tab.worktree.name.chars().count() as u16;
+        let removed_extra: u16 = if tab.worktree.is_removed {
+            " [removed]".chars().count() as u16
+        } else {
+            0
+        };
+        // ratatui Tabs pads each title with one space on each side.
+        let label_width = name_width + removed_extra + 2;
+        if col >= x && col < x + label_width {
+            target = Some(idx);
+            break;
+        }
+        x += label_width;
+        // "|" separator between tabs (not after the last).
+        if idx + 1 < app.tabs.len() {
+            x += 1;
+        }
+    }
+    if let Some(idx) = target {
+        app.activate_tab(idx);
+    }
+}
+
+/// Handle a left-click on the slot row (row 1).
+///
+/// Walks slot labels left-to-right, accumulating x offsets.
+/// Main slot label: `"[q:main]"` (8 chars).
+/// Named slots: `"[<key>:<name>]"` preceded by `"  "` (2-char separator).
+/// Token-count spans (if any) follow each named label and are skipped for
+/// hit-testing but included in the accumulator so subsequent slots are
+/// positioned correctly.
+fn handle_slot_row_click(app: &mut App, col: u16) {
+    // Read phase — determine which slot (if any) the click lands on.
+    let target_slot: Option<usize> = {
+        let tab = match app.tabs.get(app.active_tab) {
+            Some(t) => t,
+            None => return,
+        };
+
+        // Main slot: "[q:main]" — 8 chars.
+        const MAIN_LABEL: &str = "[q:main]";
+        let main_width = MAIN_LABEL.chars().count() as u16;
+        if col < main_width {
+            Some(0)
+        } else {
+            let mut x = main_width;
+            const SLOT_KEYS: &[char] = &['w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'];
+            let mut found = None;
+            for (i, agent) in tab.named_agents.iter().enumerate() {
+                let key = SLOT_KEYS.get(i).copied().unwrap_or('?');
+                let label = format!("[{}:{}]", key, agent.name);
+                let sep_width: u16 = 2; // "  " separator before each named slot
+                let label_width = label.chars().count() as u16;
+
+                x += sep_width;
+                if col >= x && col < x + label_width {
+                    found = Some(i + 1); // slot index: 0 = main, 1+ = named
+                    break;
+                }
+                x += label_width;
+
+                // Advance past the token-count span so subsequent slot
+                // positions are computed correctly.
+                if let Some(n) = agent.token_total {
+                    let token_str = format!(" {}", format_tokens(n));
+                    x += token_str.chars().count() as u16;
+                }
+            }
+            found
+        }
+    };
+
+    // Write phase — apply the slot switch.
+    if let Some(slot) = target_slot {
+        switch_agent_slot(app, slot);
+    }
 }
 
 /// Handle scroll keys while an AgentView is active.

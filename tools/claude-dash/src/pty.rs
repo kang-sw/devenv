@@ -46,7 +46,10 @@ impl PtySession {
         // Env inherits from the parent process by default.
 
         let child = pair.slave.spawn_command(cmd)?;
-        let writer = pair.master.take_writer()?;
+        let mut writer = pair.master.take_writer()?;
+        // Enable button-motion tracking so the subprocess receives drag events
+        // (e.g. claude's own TUI mouse selection).
+        let _ = writer.write_all(b"\x1b[?1002h");
         let mut reader = pair.master.try_clone_reader()?;
 
         // Drop slave BEFORE spawning the reader thread: if the child exits
