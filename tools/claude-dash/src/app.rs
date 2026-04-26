@@ -432,10 +432,22 @@ impl App {
             // This upgrades the placeholder tab opened by prefix+N to the real
             // worktree in-place, preserving the running `claude --worktree`
             // session without spawning a duplicate.
+            //
+            // Guards:
+            //   is_worktree_spawn  — only provisional tabs
+            //   !is_removed        — skip tabs being torn down
+            //   exited_modal.is_none() — skip dead sessions; claiming a tab
+            //                           whose process exited would corrupt the
+            //                           exit-modal context and the [R] restart cwd
+            //
+            // Known limitation: the claim is first-match; if an external tool adds
+            // a new worktree concurrently with prefix+N in progress, the wrong
+            // worktree may be claimed.  The 5-second poll window makes this rare
+            // and the effect is recoverable (the session continues running).
             if let Some(provisional) = self
                 .tabs
                 .iter_mut()
-                .find(|t| t.is_worktree_spawn && !t.worktree.is_removed)
+                .find(|t| t.is_worktree_spawn && !t.worktree.is_removed && t.exited_modal.is_none())
             {
                 provisional.worktree = Worktree {
                     path: new_wt.path.clone(),
@@ -549,6 +561,29 @@ impl App {
         Ok(())
     }
 
+    /// Push a new tab for `cwd` and make it active.
+    ///
+    /// Shared by `open_new_tab` and `open_new_worktree_tab` to avoid
+    /// duplicating the Worktree construction, push, and active-tab update.
+    fn push_new_tab(
+        &mut self,
+        cwd: PathBuf,
+        name: String,
+        session: PtySession,
+        is_worktree_spawn: bool,
+    ) {
+        let worktree = Worktree {
+            path: cwd,
+            name,
+            is_active_ws: false,
+            is_removed: false,
+        };
+        let mut tab = WorktreeTab::new(worktree, Some(session));
+        tab.is_worktree_spawn = is_worktree_spawn;
+        self.tabs.push(tab);
+        self.active_tab = self.tabs.len() - 1;
+    }
+
     /// Return a tab name that does not collide with any existing tab.
     /// If `base` is already taken, appends " #2", " #3", … until unique.
     fn unique_tab_name(&self, base: String) -> String {
@@ -588,22 +623,13 @@ impl App {
                 .unwrap_or_else(|| "new".into()),
         );
 
-        // Spawn before constructing Worktree so cwd can be moved (not cloned)
-        // into the struct literal.  Swallow the error — if `claude` is missing
-        // or PTY allocation fails we simply do not open the tab (matching the
-        // `activate_tab` / `reconcile_worktrees` error-handling pattern).
+        // Swallow spawn error — if `claude` is missing or PTY allocation fails
+        // we simply do not open the tab (matching activate_tab / reconcile_worktrees).
         let session = match spawn_claude(&cwd, INITIAL_SIZE, self.skip_permissions) {
             Ok(s) => s,
             Err(_) => return Ok(()),
         };
-        let worktree = Worktree {
-            path: cwd,
-            name,
-            is_active_ws: false,
-            is_removed: false,
-        };
-        self.tabs.push(WorktreeTab::new(worktree, Some(session)));
-        self.active_tab = self.tabs.len() - 1;
+        self.push_new_tab(cwd, name, session, false);
         Ok(())
     }
 
@@ -629,15 +655,7 @@ impl App {
             Ok(s) => s,
             Err(_) => return Ok(()),
         };
-        let worktree = Worktree {
-            path: cwd,
-            name,
-            is_active_ws: false,
-            is_removed: false,
-        };
-        self.tabs.push(WorktreeTab::new(worktree, Some(session)));
-        self.tabs.last_mut().unwrap().is_worktree_spawn = true;
-        self.active_tab = self.tabs.len() - 1;
+        self.push_new_tab(cwd, name, session, true);
         Ok(())
     }
 
