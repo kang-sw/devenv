@@ -3,16 +3,24 @@
 //! Each tab owns one worktree + one PTY session + one VT screen.
 //! Named-agent slots are added in Phase 3.
 
+use std::path::PathBuf;
 use std::time::Instant;
 
 use portable_pty::PtySize;
 
+use crate::agent::{discover_named_agents, file_mtime, NamedAgent};
+use crate::parser::parse_turns;
 use crate::pty::PtySession;
+use crate::renderer::{render_turns, RenderOptions};
+use crate::session::find_git_root;
 use crate::vt::VtScreen;
 use crate::worktree::{discover_worktrees, Worktree};
 
 /// How often worktree/agent lists are refreshed (seconds).
 pub const WORKTREE_POLL_SECS: u64 = 5;
+
+/// Number of scroll lines per Up/Down keypress in the agent viewer.
+pub const SCROLL_STEP: usize = 3;
 
 /// Initial PTY size before the first draw sets the authoritative dimensions.
 const INITIAL_SIZE: PtySize = PtySize {
@@ -30,8 +38,29 @@ const INITIAL_SIZE: PtySize = PtySize {
 pub struct ExitedModal {
     pub status: portable_pty::ExitStatus,
     /// True when the worktree was already removed — disables [R] Restart.
-    /// Filled in by Phase 4; always false in Phase 2.
     pub is_removed_worktree: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Named-agent slot
+// ---------------------------------------------------------------------------
+
+/// Which content the main panel shows for a tab.
+pub enum SlotKind {
+    /// The interactive PTY terminal.
+    Main,
+    /// Read-only JSONL viewer for named_agents[idx].
+    Named(usize),
+}
+
+/// State for the JSONL viewer shown in a Named slot.
+pub struct AgentView {
+    pub uuid: String,
+    pub rendered_lines: Vec<ratatui::text::Line<'static>>,
+    pub scroll_offset: usize,
+    pub loaded_mtime: Option<std::time::SystemTime>,
+    /// Cached `(total_visual_rows, panel_width)` for the scrollbar.
+    pub cached_visual_rows: Option<(usize, u16)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +78,12 @@ pub struct WorktreeTab {
     pub last_inner_size: (u16, u16),
     /// Present when the child process has exited.
     pub exited_modal: Option<ExitedModal>,
+    /// Named agents discovered for this tab's worktree.
+    pub named_agents: Vec<NamedAgent>,
+    /// Which slot (Main PTY or Named agent) is currently shown.
+    pub active_slot: SlotKind,
+    /// State for the currently open agent viewer (if active_slot == Named).
+    pub agent_view: Option<AgentView>,
 }
 
 impl WorktreeTab {
@@ -59,6 +94,9 @@ impl WorktreeTab {
             vt: VtScreen::new(INITIAL_SIZE.cols, INITIAL_SIZE.rows),
             last_inner_size: (INITIAL_SIZE.cols, INITIAL_SIZE.rows),
             exited_modal: None,
+            named_agents: Vec::new(),
+            active_slot: SlotKind::Main,
+            agent_view: None,
         }
     }
 
@@ -107,6 +145,79 @@ impl WorktreeTab {
         }
         Ok(())
     }
+
+    /// Refresh named-agent list for this tab.
+    pub fn refresh_named_agents(&mut self, git_root: &PathBuf) {
+        let new_agents = discover_named_agents(git_root);
+        // Reconcile: preserve token_total/parse_queued when uuid + mtime match.
+        let reconciled: Vec<NamedAgent> = new_agents
+            .into_iter()
+            .map(|mut new| {
+                if let Some(old) = self.named_agents.iter().find(|a| a.uuid == new.uuid) {
+                    if old.mtime == new.mtime {
+                        new.token_total = old.token_total;
+                        new.parse_queued = old.parse_queued;
+                    }
+                }
+                new
+            })
+            .collect();
+        self.named_agents = reconciled;
+    }
+
+    /// Activate the Named(idx) slot and create or refresh the AgentView.
+    pub fn open_agent_view(&mut self, idx: usize) {
+        let agent = match self.named_agents.get(idx) {
+            Some(a) => a,
+            None => return,
+        };
+        let session_path = agent.session_path.clone();
+        let uuid = agent.uuid.clone();
+
+        // Load (or reload) the session content.
+        let mtime = file_mtime(&session_path);
+        let turns = parse_turns(&session_path);
+        let opts = RenderOptions {
+            show_thinking: false,
+        };
+        let rendered_lines = render_turns(&turns, &opts);
+
+        self.agent_view = Some(AgentView {
+            uuid,
+            rendered_lines,
+            scroll_offset: 0,
+            loaded_mtime: mtime,
+            cached_visual_rows: None,
+        });
+        self.active_slot = SlotKind::Named(idx);
+    }
+
+    /// Check whether the open AgentView's mtime has changed and reload if so.
+    pub fn maybe_reload_agent_view(&mut self) {
+        let idx = match self.active_slot {
+            SlotKind::Named(i) => i,
+            _ => return,
+        };
+        let session_path = match self.named_agents.get(idx) {
+            Some(a) => a.session_path.clone(),
+            None => return,
+        };
+        let current_mtime = file_mtime(&session_path);
+        let last_mtime = self.agent_view.as_ref().and_then(|v| v.loaded_mtime);
+
+        if current_mtime != last_mtime {
+            let turns = parse_turns(&session_path);
+            let opts = RenderOptions {
+                show_thinking: false,
+            };
+            let rendered_lines = render_turns(&turns, &opts);
+            if let Some(ref mut view) = self.agent_view {
+                view.rendered_lines = rendered_lines;
+                view.loaded_mtime = current_mtime;
+                view.cached_visual_rows = None;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -119,12 +230,16 @@ pub struct App {
     pub active_tab: usize,
     pub should_quit: bool,
     pub last_worktree_poll: Instant,
+    /// Git root for the current repo (used for named-agent discovery).
+    pub git_root: Option<PathBuf>,
 }
 
 impl App {
     /// Build the initial app state: discover worktrees, create tabs, and
     /// auto-spawn PTYs for active ws-framework worktrees.
     pub fn new() -> anyhow::Result<Self> {
+        let git_root = find_git_root();
+
         let worktrees = discover_worktrees();
 
         // Fall back to cwd if no git repo or empty list.
@@ -157,7 +272,7 @@ impl App {
             tabs.push(WorktreeTab::new(wt, session));
         }
 
-        // If no tab was auto-spawned (no active_ws tabs), spawn the first one.
+        // If no tab was auto-spawned, spawn the first one.
         if tabs.iter().all(|t| t.session.is_none()) {
             if let Some(tab) = tabs.first_mut() {
                 match PtySession::spawn(&tab.worktree.path, INITIAL_SIZE) {
@@ -172,6 +287,7 @@ impl App {
             active_tab: 0,
             should_quit: false,
             last_worktree_poll: Instant::now(),
+            git_root,
         })
     }
 
@@ -192,8 +308,6 @@ impl App {
         }
         self.active_tab = idx;
 
-        // Spawn PTY on first activation if the tab's session is absent and
-        // the worktree hasn't been removed.
         let tab = &mut self.tabs[idx];
         if tab.session.is_none() && !tab.worktree.is_removed {
             let (cols, rows) = tab.last_inner_size;
@@ -209,21 +323,13 @@ impl App {
             }
         }
 
-        // Resize VT + PTY to the current panel size (may have changed while
-        // this tab was in the background).
         let (cols, rows) = self.tabs[idx].last_inner_size;
         let _ = self.tabs[idx].maybe_resize(cols, rows);
     }
 
     /// Reconcile the live tab list against a freshly discovered worktree list.
-    ///
-    /// - New paths → append tabs; auto-spawn if `is_active_ws`.
-    /// - Missing paths with live session → mark removed.
-    /// - Missing paths without session → drop immediately.
-    /// - Already-removed tabs whose session has exited → drop.
-    /// - Re-anchors `active_tab` after any drops.
     pub fn reconcile_worktrees(&mut self, new_list: Vec<Worktree>) {
-        // Step 1: add new worktrees.
+        // Add new worktrees.
         for new_wt in &new_list {
             if !self.tabs.iter().any(|t| t.worktree.path == new_wt.path) {
                 let session = if new_wt.is_active_ws {
@@ -241,34 +347,27 @@ impl App {
             }
         }
 
-        // Step 2: mark/drop tabs whose path is no longer in new_list.
+        // Mark/drop tabs whose path is no longer in new_list.
         for tab in &mut self.tabs {
             if !new_list.iter().any(|w| w.path == tab.worktree.path) {
-                if tab.session.is_some() {
-                    tab.worktree.is_removed = true;
-                } else {
-                    // Will be dropped below in the retain pass.
-                    tab.worktree.is_removed = true;
-                }
+                tab.worktree.is_removed = true;
             }
         }
 
-        // Step 3: drop removed tabs whose process has also exited.
-        // We can't call try_wait inside retain cleanly, so collect indices to remove.
+        // Drop removed tabs whose process has also exited.
         let mut to_remove: Vec<usize> = Vec::new();
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             if tab.worktree.is_removed {
                 let dead = if let Some(ref mut s) = tab.session {
                     s.try_wait().is_some()
                 } else {
-                    true // no session → remove immediately
+                    true
                 };
                 if dead {
                     to_remove.push(i);
                 }
             }
         }
-        // Remove in reverse order to preserve indices.
         for &i in to_remove.iter().rev() {
             self.tabs.remove(i);
             if self.active_tab > i {
@@ -276,11 +375,19 @@ impl App {
             }
         }
 
-        // Step 4: clamp active_tab to valid range.
         if !self.tabs.is_empty() {
             self.active_tab = self.active_tab.min(self.tabs.len() - 1);
         } else {
             self.active_tab = 0;
+        }
+    }
+
+    /// Refresh named agents for all tabs.
+    pub fn refresh_named_agents(&mut self) {
+        if let Some(ref root) = self.git_root.clone() {
+            for tab in &mut self.tabs {
+                tab.refresh_named_agents(root);
+            }
         }
     }
 }

@@ -5,7 +5,10 @@
 
 mod agent;
 mod app;
+mod parser;
 mod pty;
+mod renderer;
+mod session;
 mod ui;
 mod vt;
 mod worktree;
@@ -22,7 +25,8 @@ use crossterm::{
 use portable_pty::PtySize;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use app::{App, ExitedModal, WORKTREE_POLL_SECS};
+use app::{App, ExitedModal, SlotKind, SCROLL_STEP, WORKTREE_POLL_SECS};
+use ui::PAGE_SCROLL;
 
 /// Target frame budget in milliseconds (~100 fps, keeping PTY responsive).
 const FRAME_MS: u64 = 10;
@@ -30,8 +34,6 @@ const FRAME_MS: u64 = 10;
 const POLL_MS: u64 = 5;
 
 fn main() -> anyhow::Result<()> {
-    // Augment the default panic hook so that a panic also restores the terminal
-    // before printing the panic message.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
@@ -51,7 +53,6 @@ fn main() -> anyhow::Result<()> {
 
     let result = run_loop(&mut terminal, &mut app);
 
-    // Restore terminal on normal exit and on error.
     let _ = disable_raw_mode();
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     let _ = terminal.show_cursor();
@@ -84,23 +85,30 @@ where
             tab.poll_exit();
         }
 
-        // 4. Worktree polling (every WORKTREE_POLL_SECS).
+        // 4. Check mtime on the active Named slot (live update from agent writes).
+        if let Some(tab) = app.tabs.get_mut(app.active_tab) {
+            if matches!(tab.active_slot, SlotKind::Named(_)) {
+                tab.maybe_reload_agent_view();
+            }
+        }
+
+        // 5. Worktree + agent polling (every WORKTREE_POLL_SECS).
         if app.last_worktree_poll.elapsed() >= Duration::from_secs(WORKTREE_POLL_SECS) {
             let new_list = worktree::discover_worktrees();
             if !new_list.is_empty() {
                 app.reconcile_worktrees(new_list);
             }
+            app.refresh_named_agents();
             app.last_worktree_poll = std::time::Instant::now();
         }
 
-        // 5. Resize check: compare approximate inner panel size (derived from
-        //    terminal dimensions) against the active tab's last-known size.
+        // 6. Resize check for active tab.
         if !app.tabs.is_empty() {
             let (term_cols, term_rows) =
                 crossterm::terminal::size().unwrap_or((80, 24));
-            // Phase-2 layout: 1-row tab bar + borders (2 rows, 2 cols).
+            // Phase-3 layout: 2-row header (tab + slot) + borders (2 rows, 2 cols).
             let panel_cols = term_cols.saturating_sub(2);
-            let panel_rows = term_rows.saturating_sub(3);
+            let panel_rows = term_rows.saturating_sub(4);
             if panel_cols > 0 && panel_rows > 0 {
                 let tab = &app.tabs[app.active_tab];
                 let (last_cols, last_rows) = tab.last_inner_size;
@@ -112,15 +120,15 @@ where
             }
         }
 
-        // 6. Draw.
+        // 7. Draw.
         terminal.draw(|f| ui::draw(f, app))?;
 
-        // 7. Quit check.
+        // 8. Quit check.
         if app.should_quit {
             break;
         }
 
-        // 8. Sleep for the remainder of the frame budget.
+        // 9. Sleep for the remainder of the frame budget.
         std::thread::sleep(Duration::from_millis(FRAME_MS));
     }
     Ok(())
@@ -131,14 +139,16 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
     match event {
         Event::Key(key) => {
             // --- Modal active on the current tab ---
-            if let Some(tab) = app.tabs.get_mut(app.active_tab) {
-                if tab.exited_modal.is_some() {
-                    return handle_modal_key(app, key);
-                }
+            if app
+                .tabs
+                .get(app.active_tab)
+                .map(|t| t.exited_modal.is_some())
+                .unwrap_or(false)
+            {
+                return handle_modal_key(app, key);
             }
 
-            // --- Global hotkeys (never forwarded to PTY) ---
-            // Ctrl+Q — quit app.
+            // --- Ctrl+Q — quit app (always, regardless of slot) ---
             if key.code == KeyCode::Char('q')
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
@@ -146,7 +156,7 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            // Ctrl+[ — previous tab.
+            // --- Tab navigation (Ctrl+[ / Ctrl+]) ---
             if key.code == KeyCode::Char('[')
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
@@ -154,8 +164,6 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
                 app.activate_tab(new_idx);
                 return Ok(());
             }
-
-            // Ctrl+] — next tab.
             if key.code == KeyCode::Char(']')
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
@@ -164,23 +172,42 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            // Ctrl+1 — select main slot (Phase 3+; no-op in Phase 2).
-            if key.code == KeyCode::Char('1')
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                return Ok(());
-            }
-
-            // Ctrl+2–9 — select named-agent slot (Phase 3+; no-op in Phase 2).
-            if let KeyCode::Char(c) = key.code {
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && ('2'..='9').contains(&c)
-                {
-                    return Ok(());
+            // --- Slot selection (Ctrl+1–9) ---
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                if let KeyCode::Char(c) = key.code {
+                    if c == '1' {
+                        // Ctrl+1 → Main slot.
+                        if let Some(tab) = app.active_mut() {
+                            tab.active_slot = SlotKind::Main;
+                            tab.agent_view = None;
+                        }
+                        return Ok(());
+                    }
+                    if ('2'..='9').contains(&c) {
+                        let agent_idx = (c as usize) - ('2' as usize);
+                        if let Some(tab) = app.active_mut() {
+                            if agent_idx < tab.named_agents.len() {
+                                tab.open_agent_view(agent_idx);
+                            }
+                        }
+                        return Ok(());
+                    }
                 }
             }
 
-            // --- Forward remaining keys to the active tab's PTY ---
+            // --- Slot-specific key handling ---
+            let active_slot = app
+                .active()
+                .map(|t| matches!(t.active_slot, SlotKind::Named(_)))
+                .unwrap_or(false);
+
+            if active_slot {
+                // Named slot: consume scroll keys; ignore others (no PTY forward).
+                handle_agent_scroll(app, key);
+                return Ok(());
+            }
+
+            // --- Main slot: forward to PTY ---
             if let Some(bytes) = pty::encode_key(key) {
                 if let Some(tab) = app.tabs.get_mut(app.active_tab) {
                     if let Some(ref mut s) = tab.session {
@@ -190,12 +217,41 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
             }
         }
 
-        // Resize events are handled in the main loop's resize-check step.
         Event::Resize(_, _) => {}
-
         _ => {}
     }
     Ok(())
+}
+
+/// Handle scroll keys while an AgentView is active.
+fn handle_agent_scroll(app: &mut App, key: crossterm::event::KeyEvent) {
+    let tab = match app.tabs.get_mut(app.active_tab) {
+        Some(t) => t,
+        None => return,
+    };
+    let view = match tab.agent_view.as_mut() {
+        Some(v) => v,
+        None => return,
+    };
+    let total_lines = view.rendered_lines.len();
+    let panel_height = tab.last_inner_size.1 as usize;
+    let max_scroll = total_lines.saturating_sub(panel_height);
+
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            view.scroll_offset = view.scroll_offset.saturating_sub(SCROLL_STEP);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            view.scroll_offset = view.scroll_offset.saturating_add(SCROLL_STEP).min(max_scroll);
+        }
+        KeyCode::PageUp => {
+            view.scroll_offset = view.scroll_offset.saturating_sub(PAGE_SCROLL);
+        }
+        KeyCode::PageDown => {
+            view.scroll_offset = view.scroll_offset.saturating_add(PAGE_SCROLL).min(max_scroll);
+        }
+        _ => {}
+    }
 }
 
 /// Handle a key press while the exit modal is active on the current tab.
@@ -204,15 +260,18 @@ fn handle_modal_key(
     key: crossterm::event::KeyEvent,
 ) -> anyhow::Result<()> {
     let idx = app.active_tab;
-    let tab = &app.tabs[idx];
-    let is_removed = tab.worktree.is_removed;
-    let modal_status_owned = tab.exited_modal.as_ref().map(|_| ());
-
-    if modal_status_owned.is_none() {
+    if app.tabs.get(idx).map(|t| t.exited_modal.is_none()).unwrap_or(true) {
         return Ok(());
     }
 
+    let is_removed = app.tabs[idx].worktree.is_removed;
+
     match key.code {
+        // Ctrl+Q always quits.
+        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.should_quit = true;
+        }
+
         // [R] Restart — only when worktree is not removed.
         KeyCode::Char('r') | KeyCode::Char('R') if !is_removed => {
             let tab = &mut app.tabs[idx];
@@ -236,11 +295,6 @@ fn handle_modal_key(
 
         // [Q] Quit app.
         KeyCode::Char('q') | KeyCode::Char('Q') => {
-            app.should_quit = true;
-        }
-
-        // Ctrl+Q always quits regardless of modal state.
-        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.should_quit = true;
         }
 
