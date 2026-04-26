@@ -53,15 +53,24 @@ pub fn find_git_root() -> Option<PathBuf> {
 /// Return the `~/.claude/projects/<escaped-cwd>` path for the current working
 /// directory.
 #[cfg(not(windows))]
+fn escape_path(path: &str) -> String {
+    path.replace('/', "-")
+}
+
+#[cfg(windows)]
+fn escape_path(path: &str) -> String {
+    // Windows paths: C:\Users\foo\devenv → -Users-kang-sw-devenv (drop drive colon, replace separators)
+    path.replace('/', "-").replace('\\', "-").replace(':', "")
+}
+
 fn cwd_project_dir() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-    let escaped = cwd.to_string_lossy().replace('/', "-");
+    let escaped = escape_path(&cwd.to_string_lossy());
     claude_projects_dir().join(escaped)
 }
 
 /// Return all `~/.claude/projects/<escaped>` directories that correspond to
 /// git worktrees of the current repo.
-#[cfg(not(windows))]
 pub(crate) fn discover_project_dirs() -> Vec<PathBuf> {
     let output = std::process::Command::new("git")
         .args(["worktree", "list", "--porcelain"])
@@ -79,7 +88,7 @@ pub(crate) fn discover_project_dirs() -> Vec<PathBuf> {
         .lines()
         .filter_map(|line| {
             let path_str = line.strip_prefix("worktree ")?;
-            let escaped = path_str.replace('/', "-");
+            let escaped = escape_path(path_str);
             Some(base.join(escaped))
         })
         .filter(|p| p.is_dir())
