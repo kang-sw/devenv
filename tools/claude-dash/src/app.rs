@@ -461,6 +461,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::NamedAgent;
 
     fn make_worktree(name: &str) -> Worktree {
         Worktree {
@@ -488,10 +489,21 @@ mod tests {
         }
     }
 
+    fn make_agent(uuid: &str) -> NamedAgent {
+        NamedAgent {
+            name: uuid.to_string(),
+            uuid: uuid.to_string(),
+            session_path: std::path::PathBuf::from("/tmp/fake.jsonl"),
+            mtime: chrono::Local::now(),
+            token_total: None,
+            parse_queued: false,
+        }
+    }
+
     // --- reconcile_worktrees ---
 
     #[test]
-    fn reconcile_adds_new_worktree() {
+    fn new_worktree_path_appears_in_tabs_after_reconcile() {
         let mut app = make_app(&["main"]);
         let new = vec![make_worktree("main"), make_worktree("feature")];
         app.reconcile_worktrees(new);
@@ -500,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_marks_removed_with_no_session() {
+    fn sessionless_removed_tab_drops_immediately() {
         // A tab with no session that disappears from the list is dropped immediately.
         let mut app = make_app(&["main", "gone"]);
         let new = vec![make_worktree("main")];
@@ -511,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_active_tab_stays_in_bounds_when_last_tab_removed() {
+    fn active_tab_clamps_to_last_when_final_tab_removed() {
         let mut app = make_app(&["main", "feat"]);
         app.active_tab = 1; // active = "feat"
         let new = vec![make_worktree("main")]; // "feat" removed, no session
@@ -521,10 +533,10 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_active_tab_adjusts_when_prior_tab_removed() {
+    fn active_tab_shifts_down_when_earlier_tab_removed() {
         let mut app = make_app(&["a", "b", "c"]);
         app.active_tab = 2; // active = "c"
-                            // Remove "a" (index 0, before active).
+        // Remove "a" (index 0, before active).
         let new = vec![make_worktree("b"), make_worktree("c")];
         app.reconcile_worktrees(new);
         assert_eq!(app.tabs.len(), 2);
@@ -533,13 +545,36 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_empty_new_list_does_not_crash() {
-        let mut app = make_app(&["main"]);
-        // reconcile_worktrees with empty list: caller guards this in run_loop,
-        // but the function itself should not panic.
-        // "main" has no session → immediately dropped.
+    fn active_tab_resets_to_zero_when_all_tabs_removed() {
+        // Start with active_tab = 1 so the clamping logic is exercised.
+        // Both tabs have no session → dropped immediately.
+        let mut app = make_app(&["a", "b"]);
+        app.active_tab = 1;
         app.reconcile_worktrees(vec![]);
-        // tabs may be empty; active_tab clamped to 0.
+        // All tabs gone; active_tab must be clamped to 0.
         assert_eq!(app.active_tab, 0);
+    }
+
+    // --- drain_token_results ---
+
+    #[test]
+    fn drain_token_results_updates_matching_agent() {
+        let mut app = make_app(&["main"]);
+        app.tabs[0].named_agents.push(make_agent("uuid-001"));
+        app.token_tx.send(("uuid-001".to_string(), 42_000)).unwrap();
+        app.drain_token_results();
+        let agent = &app.tabs[0].named_agents[0];
+        assert_eq!(agent.token_total, Some(42_000));
+        assert!(!agent.parse_queued);
+    }
+
+    #[test]
+    fn drain_token_results_ignores_unknown_uuid() {
+        let mut app = make_app(&["main"]);
+        app.tabs[0].named_agents.push(make_agent("uuid-001"));
+        // Result for a different UUID must not update our agent.
+        app.token_tx.send(("unknown-uuid".to_string(), 99)).unwrap();
+        app.drain_token_results();
+        assert_eq!(app.tabs[0].named_agents[0].token_total, None);
     }
 }

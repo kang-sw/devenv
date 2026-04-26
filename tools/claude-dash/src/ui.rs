@@ -169,7 +169,9 @@ fn draw_agent_view(frame: &mut Frame, tab: &mut crate::app::WorktreeTab, area: R
     };
 
     let max_scroll = total_visual_rows.saturating_sub(panel_height);
-    let scroll = view.scroll_offset.min(max_scroll) as u16;
+    // Saturate before casting: scroll_offset is usize; as u16 would wrap silently
+    // for files with >65 535 visual rows.
+    let scroll = view.scroll_offset.min(max_scroll).min(u16::MAX as usize) as u16;
 
     let p = Paragraph::new(view.rendered_lines.clone())
         .wrap(Wrap { trim: false })
@@ -212,6 +214,8 @@ fn draw_exit_modal(frame: &mut Frame, area: Rect, is_removed: bool, status: &str
 
 /// Format a token count as a human-readable string.
 /// Copied from claude-watch (private fn; cannot import across crates).
+/// TODO(shared-crate): deduplicate once a shared `claude-jsonl` utility crate
+/// is extracted from this workspace.
 fn format_tokens(n: u64) -> String {
     if n < 1_000 {
         format!("{}", n)
@@ -233,37 +237,37 @@ mod tests {
     // --- format_tokens ---
 
     #[test]
-    fn format_tokens_zero() {
+    fn zero_tokens_formats_as_plain_zero() {
         assert_eq!(format_tokens(0), "0");
     }
 
     #[test]
-    fn format_tokens_under_thousand() {
+    fn token_count_under_1k_formats_without_suffix() {
         assert_eq!(format_tokens(999), "999");
     }
 
     #[test]
-    fn format_tokens_at_thousand() {
+    fn token_count_at_1k_formats_with_k_suffix() {
         assert_eq!(format_tokens(1_000), "1.0k");
     }
 
     #[test]
-    fn format_tokens_mid_k() {
+    fn token_count_mid_thousands_formats_with_one_decimal() {
         assert_eq!(format_tokens(12_300), "12.3k");
     }
 
     #[test]
-    fn format_tokens_under_million() {
+    fn token_count_just_under_1m_formats_as_1000k() {
         assert_eq!(format_tokens(999_999), "1000.0k");
     }
 
     #[test]
-    fn format_tokens_at_million() {
+    fn token_count_at_1m_formats_with_m_suffix() {
         assert_eq!(format_tokens(1_000_000), "1.0M");
     }
 
     #[test]
-    fn format_tokens_large() {
+    fn large_token_count_formats_with_m_suffix() {
         assert_eq!(format_tokens(4_500_000), "4.5M");
     }
 }

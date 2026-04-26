@@ -1,6 +1,6 @@
 // Copied verbatim from tools/claude-watch/src/parser.rs.
-// A future refactor may extract a shared `claude-jsonl` library; for now
-// the copy-then-share-later convention is intentional.
+// TODO(shared-crate): deduplicate with `claude-watch` once a shared
+// `claude-jsonl` utility crate is extracted from this workspace.
 
 use serde_json::Value;
 use std::fs;
@@ -231,114 +231,137 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    static TEMP_CTR: AtomicUsize = AtomicUsize::new(0);
+    // RAII wrapper: writes a temp JSONL file and removes it on drop.
+    // Guarantees cleanup even when a test panics.
+    struct TempFile(std::path::PathBuf);
 
-    fn write_temp_jsonl(data: &str) -> std::path::PathBuf {
-        let n = TEMP_CTR.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("cldash_parser_test_{}.jsonl", n));
-        std::fs::write(&path, data).unwrap();
-        path
+    impl TempFile {
+        fn write(data: &str) -> Self {
+            static CTR: AtomicUsize = AtomicUsize::new(0);
+            let n = CTR.fetch_add(1, Ordering::Relaxed);
+            let path =
+                std::env::temp_dir().join(format!("cldash_parser_test_{n}.jsonl"));
+            std::fs::write(&path, data).unwrap();
+            TempFile(path)
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
     }
 
     // --- truncate_str ---
 
     #[test]
-    fn truncate_str_within_limit() {
+    fn string_within_byte_limit_returns_unchanged() {
         assert_eq!(truncate_str("hello", 10), "hello");
     }
 
     #[test]
-    fn truncate_str_at_limit() {
+    fn string_at_exact_byte_limit_returns_unchanged() {
         assert_eq!(truncate_str("hello", 5), "hello");
     }
 
     #[test]
-    fn truncate_str_over_limit() {
-        let s = truncate_str("hello world", 5);
-        assert!(s.starts_with("hello"), "got: {s}");
-        assert!(s.contains('…'), "expected ellipsis in: {s}");
+    fn string_over_limit_truncates_with_ellipsis() {
+        // "hello world" truncated at 5 bytes → "hello" + "…"
+        assert_eq!(truncate_str("hello world", 5), "hello…");
     }
 
     #[test]
-    fn truncate_str_empty_input() {
+    fn empty_string_returns_empty() {
         assert_eq!(truncate_str("", 0), "");
         assert_eq!(truncate_str("", 10), "");
     }
 
     #[test]
-    fn truncate_str_utf8_mid_codepoint() {
+    fn truncate_retreats_to_codepoint_boundary() {
         // "日本語" — each char is 3 bytes; max=4 lands inside the second codepoint.
-        // The function must retreat to the char boundary at byte 3 ("日").
-        let s = truncate_str("日本語", 4);
-        assert!(s.starts_with('日'), "expected '日' prefix, got: {s}");
-        assert!(s.contains('…'), "expected ellipsis, got: {s}");
+        // Must retreat to byte 3 ("日"), producing "日…".
+        assert_eq!(truncate_str("日本語", 4), "日…");
     }
 
     #[test]
-    fn truncate_str_max_zero_nonempty() {
-        let s = truncate_str("abc", 0);
+    fn truncate_at_zero_returns_ellipsis_only() {
         // Retreats to boundary 0 → empty prefix + "…"
-        assert_eq!(s, "…");
+        assert_eq!(truncate_str("abc", 0), "…");
     }
 
     // --- parse_turns ---
 
     #[test]
-    fn parse_turns_file_not_found() {
+    fn missing_file_returns_no_turns() {
         let turns = parse_turns(std::path::Path::new("/nonexistent/__x__.jsonl"));
         assert!(turns.is_empty());
     }
 
     #[test]
-    fn parse_turns_empty_file() {
-        let p = write_temp_jsonl("");
-        let turns = parse_turns(&p);
-        let _ = std::fs::remove_file(&p);
-        assert!(turns.is_empty());
+    fn empty_file_returns_no_turns() {
+        let f = TempFile::write("");
+        assert!(parse_turns(f.path()).is_empty());
     }
 
     #[test]
-    fn parse_turns_blank_lines_only() {
-        let p = write_temp_jsonl("\n\n\n");
-        let turns = parse_turns(&p);
-        let _ = std::fs::remove_file(&p);
-        assert!(turns.is_empty());
+    fn blank_lines_produce_no_turns() {
+        let f = TempFile::write("\n\n\n");
+        assert!(parse_turns(f.path()).is_empty());
     }
 
     #[test]
-    fn parse_turns_invalid_json_line() {
-        let p = write_temp_jsonl("not json\n");
-        let turns = parse_turns(&p);
-        let _ = std::fs::remove_file(&p);
-        assert!(turns.is_empty());
+    fn malformed_json_line_is_skipped() {
+        let f = TempFile::write("not json\n");
+        assert!(parse_turns(f.path()).is_empty());
     }
 
     #[test]
-    fn parse_turns_non_object_json() {
-        // Valid JSON but not an object: null, array, number should all be skipped.
-        let p = write_temp_jsonl("null\n[]\n42\n");
-        let turns = parse_turns(&p);
-        let _ = std::fs::remove_file(&p);
-        assert!(turns.is_empty());
+    fn non_object_json_lines_are_skipped() {
+        // Valid JSON but not objects: null, array, number — all must be skipped.
+        let f = TempFile::write("null\n[]\n42\n");
+        assert!(parse_turns(f.path()).is_empty());
     }
 
     #[test]
-    fn parse_turns_user_string_content() {
-        let line = r#"{"type":"user","message":{"content":"hello"}}"#;
-        let p = write_temp_jsonl(line);
-        let turns = parse_turns(&p);
-        let _ = std::fs::remove_file(&p);
+    fn user_string_content_produces_user_turn() {
+        let data = r#"{"type":"user","message":{"content":"hello"}}"#;
+        let f = TempFile::write(data);
+        let turns = parse_turns(f.path());
         assert_eq!(turns.len(), 1);
         assert!(matches!(&turns[0], Turn::User(s) if s == "hello"));
     }
 
     #[test]
-    fn parse_turns_assistant_text() {
-        let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#;
-        let p = write_temp_jsonl(line);
-        let turns = parse_turns(&p);
-        let _ = std::fs::remove_file(&p);
+    fn assistant_text_array_produces_text_content_item() {
+        let data =
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#;
+        let f = TempFile::write(data);
+        let turns = parse_turns(f.path());
         assert_eq!(turns.len(), 1);
-        assert!(matches!(&turns[0], Turn::Assistant(items) if !items.is_empty()));
+        assert!(matches!(
+            &turns[0],
+            Turn::Assistant(items) if matches!(&items[0], ContentItem::Text(t) if t == "hi")
+        ));
+    }
+
+    #[test]
+    fn interleaved_user_and_assistant_turns_parse_in_order() {
+        // Two-line JSONL: user turn followed by assistant turn.
+        let data = concat!(
+            r#"{"type":"user","message":{"content":"ping"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"pong"}]}}"#,
+        );
+        let f = TempFile::write(data);
+        let turns = parse_turns(f.path());
+        assert_eq!(turns.len(), 2);
+        assert!(matches!(&turns[0], Turn::User(s) if s == "ping"));
+        assert!(matches!(
+            &turns[1],
+            Turn::Assistant(items) if matches!(&items[0], ContentItem::Text(t) if t == "pong")
+        ));
     }
 }
