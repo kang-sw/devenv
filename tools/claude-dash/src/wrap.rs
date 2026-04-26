@@ -6,8 +6,9 @@
 //! used to compute the correct `max_scroll` value for the JSONL panel
 //! scrollbar so the thumb position matches the visible content.
 //!
-//! TODO(shared-crate): deduplicate `visual_rows` with `claude-watch` once a
-//! shared `claude-jsonl` utility crate is extracted from this workspace.
+//! A future refactor may extract a shared `claude-jsonl` utility crate; at
+//! that point this function and `claude-watch::app::visual_rows` should be
+//! unified. For now the copy-then-share-later convention is intentional.
 
 use ratatui::text::Line;
 

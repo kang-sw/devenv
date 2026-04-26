@@ -560,11 +560,15 @@ mod tests {
     #[test]
     fn drain_token_results_updates_matching_agent() {
         let mut app = make_app(&["main"]);
-        app.tabs[0].named_agents.push(make_agent("uuid-001"));
+        let mut agent = make_agent("uuid-001");
+        // Simulate the in-flight state set by refresh_named_agents.
+        agent.parse_queued = true;
+        app.tabs[0].named_agents.push(agent);
         app.token_tx.send(("uuid-001".to_string(), 42_000)).unwrap();
         app.drain_token_results();
         let agent = &app.tabs[0].named_agents[0];
         assert_eq!(agent.token_total, Some(42_000));
+        // parse_queued must be cleared after the result arrives.
         assert!(!agent.parse_queued);
     }
 
@@ -576,5 +580,21 @@ mod tests {
         app.token_tx.send(("unknown-uuid".to_string(), 99)).unwrap();
         app.drain_token_results();
         assert_eq!(app.tabs[0].named_agents[0].token_total, None);
+    }
+
+    #[test]
+    fn drain_token_results_applies_result_to_correct_tab() {
+        // Agent lives in tabs[1] — drain must iterate all tabs, not only tabs[0].
+        let mut app = make_app(&["main", "feat"]);
+        let mut agent = make_agent("uuid-tab1");
+        agent.parse_queued = true;
+        app.tabs[1].named_agents.push(agent);
+        app.token_tx.send(("uuid-tab1".to_string(), 7_777)).unwrap();
+        app.drain_token_results();
+        let agent = &app.tabs[1].named_agents[0];
+        assert_eq!(agent.token_total, Some(7_777));
+        assert!(!agent.parse_queued);
+        // tabs[0] must be unaffected.
+        assert!(app.tabs[0].named_agents.is_empty());
     }
 }

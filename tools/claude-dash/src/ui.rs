@@ -214,8 +214,8 @@ fn draw_exit_modal(frame: &mut Frame, area: Rect, is_removed: bool, status: &str
 
 /// Format a token count as a human-readable string.
 /// Copied from claude-watch (private fn; cannot import across crates).
-/// TODO(shared-crate): deduplicate once a shared `claude-jsonl` utility crate
-/// is extracted from this workspace.
+/// A future refactor may extract a shared utility crate; for now the
+/// copy-then-share-later convention is intentional.
 fn format_tokens(n: u64) -> String {
     if n < 1_000 {
         format!("{}", n)

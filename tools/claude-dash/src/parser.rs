@@ -1,6 +1,6 @@
 // Copied verbatim from tools/claude-watch/src/parser.rs.
-// TODO(shared-crate): deduplicate with `claude-watch` once a shared
-// `claude-jsonl` utility crate is extracted from this workspace.
+// A future refactor may extract a shared `claude-jsonl` library; for now
+// the copy-then-share-later convention is intentional.
 
 use serde_json::Value;
 use std::fs;
