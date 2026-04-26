@@ -29,7 +29,10 @@ Target: $ARGUMENTS
      - **continue** → enter **On: session loop**.
      - **wrap-up** → go to **On: wrap-up**.
      - **abandon** → exit.
-   - Does not start with `sprint/`: use `$ARGUMENTS` as sprint name if provided; else generate a random three-word name in `<adjective>-<noun>-<noun>` form (e.g., `amber-ridge-quill`) without asking. Run `git checkout -b sprint/<name>`. Enter **On: session loop**.
+   - Does not start with `sprint/`: infer a branch name without asking.
+     - Context (preamble or conversation) gives a clear topic → derive a short kebab-case slug from it (e.g., `refactor-agent-registry`).
+     - Context is vague or absent → generate a random three-word name in `<adjective>-<noun>-<noun>` form (e.g., `amber-ridge-quill`).
+     - Run `git checkout -b sprint/<name>`. Enter **On: session loop**.
 
 ## On: session loop
 
