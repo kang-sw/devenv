@@ -6,14 +6,14 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::app::App;
+use crate::app::{App, LEFT_PANEL_PERCENT};
 
 /// Draw the full TUI layout — pure read of `App` state, no side effects.
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let chunks = Layout::horizontal([
-        Constraint::Percentage(30),
-        Constraint::Percentage(70),
+        Constraint::Percentage(LEFT_PANEL_PERCENT),
+        Constraint::Percentage(100 - LEFT_PANEL_PERCENT),
     ])
     .split(area);
 
