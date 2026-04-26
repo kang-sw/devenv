@@ -6,7 +6,14 @@ mod session;
 mod ui;
 
 use app::App;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::{
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
+        MouseEventKind,
+    },
+    execute,
+};
+use std::io::stdout;
 use std::time::Duration;
 
 /// How often the event loop polls for terminal input.
@@ -16,7 +23,12 @@ const SESSION_REFRESH_SECS: u64 = 1;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = ratatui::init();
+    execute!(stdout(), EnableMouseCapture)?;
+
     let result = run_app(&mut terminal);
+
+    // Disable mouse capture on all exit paths before restoring the terminal.
+    let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
 
     if let Err(ref e) = result {
@@ -41,8 +53,8 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
 
         // Poll with a short timeout to allow background refresh.
         if event::poll(Duration::from_millis(EVENT_POLL_MS))? {
-            if let Event::Key(key) = event::read()? {
-                match (key.modifiers, key.code) {
+            match event::read()? {
+                Event::Key(key) => match (key.modifiers, key.code) {
                     (_, KeyCode::Char('q')) => app.should_quit = true,
                     (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.should_quit = true,
 
@@ -56,7 +68,9 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
                     (_, KeyCode::Char('t')) => app.toggle_thinking(),
 
                     _ => {}
-                }
+                },
+                Event::Mouse(mouse_event) => handle_mouse_event(&mut app, mouse_event),
+                _ => {}
             }
         }
 
@@ -77,3 +91,59 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
 
     Ok(())
 }
+
+/// Handle a mouse event.
+///
+/// Scroll events (wheel up/down) delegate to the same scroll methods used by
+/// the j/k keys.  A left-click inside the left panel selects the session at
+/// that visual row, accounting for the list's current scroll offset.  Clicks
+/// outside the left panel are silently ignored.
+fn handle_mouse_event(app: &mut App, event: crossterm::event::MouseEvent) {
+    match event.kind {
+        MouseEventKind::ScrollDown => app.scroll_down(),
+        MouseEventKind::ScrollUp => app.scroll_up(),
+
+        MouseEventKind::Down(MouseButton::Left) => {
+            // Derive the left panel boundary from the current terminal size,
+            // matching the Constraint::Percentage(30) used by the layout.
+            let (term_width, term_height) = match crossterm::terminal::size() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let left_panel_width = (term_width as u32 * 30 / 100) as u16;
+
+            let col = event.column;
+            let row = event.row;
+
+            // Clicks outside the left panel are ignored.
+            if col >= left_panel_width {
+                return;
+            }
+
+            // Row 0 is the top border; row term_height-1 is the bottom border.
+            if row == 0 || row + 1 >= term_height {
+                return;
+            }
+
+            // Convert from visual row to session index, accounting for the
+            // list scroll offset that ratatui computes when `selected` is
+            // beyond the first viewport page.
+            //
+            // ratatui starts ListState at offset=0 each frame, then adjusts:
+            //   if selected >= visible_height → offset = selected - visible_height + 1
+            //   otherwise                     → offset = 0
+            let visual_index = (row - 1) as usize;
+            let visible_height = (term_height as usize).saturating_sub(2);
+            let list_offset = app.selected.saturating_sub(visible_height.saturating_sub(1));
+            let session_index = visual_index + list_offset;
+
+            if session_index < app.sessions.len() {
+                app.selected = session_index;
+                app.needs_scroll_to_bottom = true;
+            }
+        }
+
+        _ => {}
+    }
+}
+
