@@ -72,7 +72,10 @@ pub struct App {
     /// Work queue: (uuid, path, mtime-at-enqueue).  The mtime is echoed back in
     /// the result so stale results can be discarded in `poll_token_results`.
     work_tx: std::sync::mpsc::SyncSender<(String, PathBuf, DateTime<Local>)>,
-    result_rx: std::sync::mpsc::Receiver<(String, u64, bool, DateTime<Local>)>,
+    /// Result channel: `Option<u64>` and `Option<bool>` are `None` when the
+    /// parse failed (file unreadable), allowing `poll_token_results` to reset
+    /// `parse_queued` so the session can be retried.
+    result_rx: std::sync::mpsc::Receiver<(String, Option<u64>, Option<bool>, DateTime<Local>)>,
 }
 
 /// Return the number of visual rows a logical `line` occupies when rendered
@@ -137,13 +140,17 @@ impl App {
         let (work_tx, work_rx) =
             std::sync::mpsc::sync_channel::<(String, PathBuf, DateTime<Local>)>(64);
         let (result_tx, result_rx) =
-            std::sync::mpsc::channel::<(String, u64, bool, DateTime<Local>)>();
+            std::sync::mpsc::channel::<(String, Option<u64>, Option<bool>, DateTime<Local>)>();
 
         std::thread::spawn(move || {
             while let Ok((uuid, path, mtime)) = work_rx.recv() {
-                if let Some((tokens, is_headless)) = parse_session_metadata(&path) {
-                    let _ = result_tx.send((uuid, tokens, is_headless, mtime));
-                }
+                let (tokens, is_headless) = match parse_session_metadata(&path) {
+                    Some((t, h)) => (Some(t), Some(h)),
+                    // Parse failed (file unreadable); send None so the receiver
+                    // can reset parse_queued and allow a future retry.
+                    None => (None, None),
+                };
+                let _ = result_tx.send((uuid, tokens, is_headless, mtime));
             }
         });
 
@@ -247,10 +254,17 @@ impl App {
         while let Ok((uuid, tokens, is_headless, result_mtime)) = self.result_rx.try_recv() {
             if let Some(s) = self.sessions.iter_mut().find(|s| s.uuid == uuid) {
                 if s.modified == result_mtime {
-                    s.token_total = Some(tokens);
-                    s.is_headless = Some(is_headless);
+                    // Apply the parse result; `tokens`/`is_headless` are None
+                    // when the file was unreadable (parse failure).
+                    s.token_total = tokens;
+                    s.is_headless = is_headless;
+                    // Reset parse_queued so a failed parse can be retried on
+                    // the next selection or mtime-change event (F-1 fix).
+                    s.parse_queued = false;
                 }
                 // mtime mismatch → stale result from a superseded parse; discard.
+                // parse_queued is intentionally left untouched: a newer parse
+                // for the current mtime may already be in flight.
             }
         }
     }

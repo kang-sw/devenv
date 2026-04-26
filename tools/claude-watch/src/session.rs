@@ -1,9 +1,10 @@
-use chrono::{DateTime, Local};
 #[cfg(not(windows))]
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+
+use chrono::{DateTime, Local};
 
 /// A single discovered Claude session JSONL file.
 #[derive(Debug, Clone)]
@@ -13,7 +14,8 @@ pub struct SessionEntry {
     pub modified: DateTime<Local>,
     pub path: PathBuf,
     pub active: bool,
-    /// Total tokens (input + output + cache) summed from assistant turns.
+    /// Total tokens (input + output + cache_read) summed from assistant turns.
+    /// `cache_creation_input_tokens` is excluded.
     /// `None` means the file has not been parsed yet.
     pub token_total: Option<u64>,
     /// Whether this session was started with `-p` (headless/SDK-CLI mode).
@@ -285,7 +287,6 @@ pub(crate) fn parse_session_metadata(path: &Path) -> Option<(u64, bool)> {
                     total_tokens += get("input_tokens");
                     total_tokens += get("output_tokens");
                     total_tokens += get("cache_read_input_tokens");
-                    total_tokens += get("cache_creation_input_tokens");
                 }
             }
             "last-prompt" => {
