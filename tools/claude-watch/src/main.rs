@@ -1,5 +1,6 @@
 mod app;
 mod parser;
+mod process;
 mod renderer;
 mod session;
 mod ui;
@@ -61,6 +62,9 @@ fn run_app(
             app.maybe_reload_content();
             app.last_refresh = std::time::Instant::now();
         }
+
+        // Poll running processes every ~2 seconds.
+        app.poll_processes_if_due();
     }
 
     Ok(())

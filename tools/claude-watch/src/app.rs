@@ -1,7 +1,8 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use crate::session::{SessionEntry, discover_sessions};
 use crate::parser::parse_turns;
 use crate::renderer::{render_turns, RenderOptions};
+use crate::process::find_active_uuids;
 
 pub struct App {
     pub sessions: Vec<SessionEntry>,
@@ -176,6 +177,21 @@ impl App {
                     // Preserve scroll on live update.
                 }
             }
+        }
+    }
+
+    /// Poll running processes every ~1-2 seconds and mark active sessions.
+    /// Should be called from the main event loop.
+    pub fn poll_processes_if_due(&mut self) {
+        if self.last_process_poll.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.last_process_poll = Instant::now();
+        self.active_uuids = find_active_uuids();
+
+        // Re-apply active markers to sessions.
+        for s in &mut self.sessions {
+            s.active = self.active_uuids.contains(&s.uuid);
         }
     }
 }
