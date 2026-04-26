@@ -31,9 +31,30 @@ Auto-routes the session: `--resume` if a session file exists in `~/.claude/proje
 `--session-id` otherwise. Context length is managed transparently — long sessions
 are compressed and handed off without caller involvement.
 
-**Output:** agent response text to stdout. Exit code 1 on error.
+**Output:** agent response text to stdout and to `<registry-dir>/<name>.output.txt`. Exit code 1 on error.
 
 **Bash tool timeout:** Always pass `timeout: 600000` (the 10-minute max) when calling `ws-call-named-agent` via the Bash tool. Agent tasks routinely exceed the 120s default, which causes silent background detachment.
+
+**Background mode:** Pass `run_in_background: true` on the Bash tool call to let the lead agent continue other work while the agent runs. Output is still written to the output file; read it with `ws-print-named-agent-output` after the completion notification arrives.
+
+## ws-print-named-agent-output
+
+```
+ws-print-named-agent-output <agent-name>
+```
+
+Prints the last response written by the named agent. Use after a background `ws-call-named-agent` completes to read its output.
+
+```bash
+# Background spawn — lead continues other work
+# (Bash tool call with run_in_background: true)
+ws-call-named-agent implementer - <<'PROMPT'
+Implement X
+PROMPT
+
+# After completion notification:
+ws-print-named-agent-output implementer
+```
 
 ## ws-infra-path
 

@@ -25,6 +25,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 REPO_DIR_NAME=$(basename "$REPO_ROOT")
 REGISTRY_DIR="$REPO_ROOT/.git/ws@$REPO_DIR_NAME/agents"
 AGENT_FILE="$REGISTRY_DIR/$AGENT_NAME.json"
+OUTPUT_PATH="$REGISTRY_DIR/$AGENT_NAME.output.txt"
 
 if [[ ! -f "$AGENT_FILE" ]]; then
   echo "error: agent '$AGENT_NAME' not found — run ws-new-agent first" >&2
@@ -159,14 +160,14 @@ ${PROMPT}"
   jq --argjson t "$HANDOFF_TOKENS" '.token_count = $t | ."context-window" = $t' "$AGENT_FILE" > "${AGENT_FILE}.tmp" \
     && mv "${AGENT_FILE}.tmp" "$AGENT_FILE"
 
-  jq -r '.result' "$HANDOFF_FILE"
+  jq -r '.result' "$HANDOFF_FILE" | tee "$OUTPUT_PATH"
   if [[ "$(jq -r '.is_error' "$HANDOFF_FILE")" == "true" ]]; then
     exit 1
   fi
   exit 0
 fi
 
-jq -r '.result' "$TMPFILE"
+jq -r '.result' "$TMPFILE" | tee "$OUTPUT_PATH"
 if [[ "$(jq -r '.is_error' "$TMPFILE")" == "true" ]]; then
   exit 1
 fi
