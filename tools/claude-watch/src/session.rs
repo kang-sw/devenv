@@ -22,8 +22,12 @@ pub struct SessionEntry {
     /// `None` means the file has not been parsed yet.
     pub is_headless: Option<bool>,
     /// Whether a background parse has been enqueued for this session's current
-    /// mtime.  Reset to `false` whenever the file's mtime changes so the new
-    /// version is re-queued.  Only set to `true` after a successful `try_send`.
+    /// mtime.  Set to `true` only after a successful `try_send`.  Reset to
+    /// `false` on two paths:
+    /// - `poll_token_results`: when a result for the current mtime arrives
+    ///   (covers both successful parses and parse failures).
+    /// - `refresh_sessions`: when the file's mtime changes, resetting the
+    ///   entire parsing state so the new version is re-queued.
     pub parse_queued: bool,
 }
 
