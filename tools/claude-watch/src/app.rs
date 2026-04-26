@@ -56,6 +56,10 @@ pub struct App {
     pub(crate) loaded_mtime: Option<std::time::SystemTime>,
     /// Whether thinking blocks are expanded.
     pub(crate) show_thinking: bool,
+    /// Cached result of the visual-row sum over rendered_lines.
+    /// Tuple is `(total_visual_rows, panel_width_used)`.  Invalidated whenever
+    /// `rendered_lines` is reassigned or the panel width changes.
+    pub(crate) cached_visual_rows: Option<(usize, u16)>,
 
     // --- process monitor ---
     pub(crate) active_uuids: HashSet<String>,
@@ -134,6 +138,7 @@ impl App {
             loaded_uuid: None,
             loaded_mtime: None,
             show_thinking: false,
+            cached_visual_rows: None,
 
             active_uuids: HashSet::new(),
             last_process_poll: Instant::now(),
@@ -197,17 +202,24 @@ impl App {
     /// Accepts `pw` as an explicit parameter so callers with access to the
     /// actual ratatui layout rect (e.g. `ui.rs`) can pass the true inner width
     /// rather than the cached `right_panel_inner_width` approximation.
-    pub fn scroll_to_bottom_offset_for_width(&self, pw: usize) -> usize {
+    pub fn scroll_to_bottom_offset_for_width(&mut self, pw: usize) -> usize {
+        // Return the cached total when the panel width matches.
+        if let Some((total_visual, cached_pw)) = self.cached_visual_rows {
+            if cached_pw == pw as u16 {
+                return total_visual.saturating_sub(self.content_panel_height);
+            }
+        }
         let total_visual: usize = self.rendered_lines.iter()
             .map(|l| visual_rows(l, pw))
             .sum();
+        self.cached_visual_rows = Some((total_visual, pw as u16));
         total_visual.saturating_sub(self.content_panel_height)
     }
 
     /// Convenience wrapper that uses the cached `right_panel_inner_width`.
     /// Prefer `scroll_to_bottom_offset_for_width` when the exact panel rect is
     /// available.
-    pub fn scroll_to_bottom_offset(&self) -> usize {
+    pub fn scroll_to_bottom_offset(&mut self) -> usize {
         self.scroll_to_bottom_offset_for_width(self.right_panel_inner_width as usize)
     }
 
@@ -261,6 +273,7 @@ impl App {
             let turns = parse_turns(&session.path);
             let opts = RenderOptions { show_thinking: self.show_thinking };
             self.rendered_lines = render_turns(&turns, &opts);
+            self.cached_visual_rows = None;
             self.loaded_uuid = Some(session.uuid);
             self.loaded_mtime = mtime;
             self.needs_scroll_to_bottom = true;
@@ -274,6 +287,7 @@ impl App {
                 let turns = parse_turns(&session.path);
                 let opts = RenderOptions { show_thinking: self.show_thinking };
                 self.rendered_lines = render_turns(&turns, &opts);
+                self.cached_visual_rows = None;
             }
         }
     }
@@ -297,6 +311,7 @@ impl App {
                     let turns = parse_turns(&session.path);
                     let opts = RenderOptions { show_thinking: self.show_thinking };
                     self.rendered_lines = render_turns(&turns, &opts);
+                    self.cached_visual_rows = None;
                     self.loaded_mtime = Some(mtime);
                     // Preserve scroll position on live update.
                 }

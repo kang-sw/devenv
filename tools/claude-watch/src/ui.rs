@@ -59,6 +59,11 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
     // (scroll_down / scroll_page_down) use the same value on the next
     // event-loop iteration.
     let pw = area.width.saturating_sub(2) as usize;
+    // Invalidate the visual-row cache whenever the panel width changes so that
+    // scroll_to_bottom_offset_for_width recomputes with the new geometry.
+    if pw != app.right_panel_inner_width as usize {
+        app.cached_visual_rows = None;
+    }
     app.right_panel_inner_width = area.width.saturating_sub(2);
 
     // Resolve scroll-to-bottom here, where the exact ratatui layout width is
