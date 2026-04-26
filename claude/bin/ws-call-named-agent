@@ -26,6 +26,9 @@ REPO_DIR_NAME=$(basename "$REPO_ROOT")
 REGISTRY_DIR="$(git rev-parse --git-dir)/ws@$REPO_DIR_NAME/agents"
 AGENT_FILE="$REGISTRY_DIR/$AGENT_NAME.json"
 OUTPUT_PATH="$REGISTRY_DIR/$AGENT_NAME.output.txt"
+OUTBOX_FILE="$REGISTRY_DIR/$AGENT_NAME.outbox.txt"
+SETTINGS_JSON=$(jq -nc --arg cmd "$SCRIPT_DIR/ws-agent-check-mailbox" \
+  '{"hooks":{"PostToolBatch":[{"hooks":[{"type":"command","command":$cmd,"timeout":5}]}]}}')
 
 if [[ ! -f "$AGENT_FILE" ]]; then
   echo "error: agent '$AGENT_NAME' not found — run ws-new-agent first" >&2
@@ -63,6 +66,10 @@ fi
 if [[ -n "$SYSTEM_PROMPT" ]]; then
   ARGS+=(--system-prompt "$SYSTEM_PROMPT")
 fi
+ARGS+=(--settings "$SETTINGS_JSON")
+
+touch "$OUTBOX_FILE"
+export WS_AGENT_OUTBOX="$OUTBOX_FILE"
 
 # Session routing
 ESCAPED=$(echo "$REPO_ROOT" | sed 's|/|-|g')
@@ -88,6 +95,24 @@ for _attempt in $(seq 1 $MAX_RETRIES); do
     cat "$ERRFILE" >&2
     exit 1
   fi
+done
+
+# Drain outbox: PostToolBatch hook exits 2 when messages are pending,
+# stopping the agent cleanly. Resume with each pending message in turn.
+DRAIN_ARGS=(-p --dangerously-skip-permissions --output-format json)
+[[ -n "$MODEL" ]]       && DRAIN_ARGS+=(--model "$MODEL")
+[[ -n "$AGENT_TYPE" ]]  && DRAIN_ARGS+=(--agent "$AGENT_TYPE")
+[[ -n "$SYSTEM_PROMPT" ]] && DRAIN_ARGS+=(--system-prompt "$SYSTEM_PROMPT")
+DRAIN_ARGS+=(--settings "$SETTINGS_JSON")
+DRAIN_ARGS+=(--resume "$UUID")
+
+while [[ -s "$OUTBOX_FILE" ]]; do
+  PENDING=$(cat "$OUTBOX_FILE")
+  truncate -s 0 "$OUTBOX_FILE"
+  DRAIN_TMPFILE=$(mktemp)
+  CLEANUP_FILES+=("$DRAIN_TMPFILE")
+  claude "${DRAIN_ARGS[@]}" "$PENDING" > "$DRAIN_TMPFILE"
+  cp "$DRAIN_TMPFILE" "$TMPFILE"
 done
 
 NEW_TOKENS=$(jq '.usage.input_tokens + .usage.cache_creation_input_tokens + .usage.output_tokens' "$TMPFILE")
@@ -118,6 +143,7 @@ if [[ "$NEW_TOKENS" -gt 120000 && "$SKIP_COMPRESSION" -eq 0 ]]; then
   if [[ -n "$SYSTEM_PROMPT" ]]; then
     COMP_ARGS+=(--system-prompt "$SYSTEM_PROMPT")
   fi
+  COMP_ARGS+=(--settings "$SETTINGS_JSON")
   COMP_ARGS+=(--resume "$UUID")
 
   COMP_FILE=$(mktemp)
@@ -165,6 +191,7 @@ ${PROMPT}"
   if [[ -n "$SYSTEM_PROMPT" ]]; then
     HANDOFF_ARGS+=(--system-prompt "$SYSTEM_PROMPT")
   fi
+  HANDOFF_ARGS+=(--settings "$SETTINGS_JSON")
   HANDOFF_ARGS+=(--session-id "$NEW_UUID")
 
   HANDOFF_FILE=$(mktemp)

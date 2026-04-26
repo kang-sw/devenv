@@ -78,7 +78,9 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
   ws-new-named-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
-  ws-call-named-agent               — call a registered named agent; tracks context; auto-compresses at 120K tokens; persists output to file
+  ws-call-named-agent               — call a registered named agent; tracks context; auto-compresses at 120K tokens; persists output to file; drains outbox after each call
+  ws-interrupt-named-agent          — queue a message to a named agent's outbox; delivered as a new user turn at the next tool boundary or ws-call-named-agent call
+  ws-agent-check-mailbox            — PostToolBatch hook: exits 2 (stop) when WS_AGENT_OUTBOX is non-empty; used internally by ws-call-named-agent
   ws-print-named-agent-output       — print the persisted output file of a named agent
 ```
 
