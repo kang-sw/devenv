@@ -9,7 +9,7 @@ use ratatui::text::Line;
 use crate::parser::parse_turns;
 use crate::process::find_active_uuids;
 use crate::renderer::{render_turns, RenderOptions};
-use crate::session::{SessionEntry, discover_sessions, parse_session_metadata};
+use crate::session::{discover_sessions, parse_session_metadata, SessionEntry};
 
 // ---------------------------------------------------------------------------
 // Tuning constants
@@ -100,7 +100,8 @@ pub(crate) fn visual_rows(line: &Line, panel_width: usize) -> usize {
     // token, matching the pending_whitespace + pending_word flush order in
     // ratatui's WordWrapper (trim=false).
     for token in text.split_inclusive(|c: char| c.is_whitespace()) {
-        let token_w: usize = token.chars()
+        let token_w: usize = token
+            .chars()
             .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
             .sum();
         if token_w == 0 {
@@ -146,7 +147,7 @@ impl App {
             }
         });
 
-        let app = App {
+        let mut app = App {
             sessions,
             selected: 0,
             last_refresh: Instant::now(),
@@ -171,8 +172,14 @@ impl App {
         };
 
         // Queue the first 8 sessions for immediate background parsing.
-        for s in app.sessions.iter().take(8) {
-            let _ = app.work_tx.try_send((s.uuid.clone(), s.path.clone(), s.modified));
+        for i in 0..app.sessions.len().min(8) {
+            let data = {
+                let s = &app.sessions[i];
+                (s.uuid.clone(), s.path.clone(), s.modified)
+            };
+            if app.work_tx.try_send(data).is_ok() {
+                app.sessions[i].parse_queued = true;
+            }
         }
 
         app
@@ -190,25 +197,36 @@ impl App {
         let mut new_sessions = discover_sessions();
         for s in &mut new_sessions {
             s.active = self.active_uuids.contains(&s.uuid);
-            // Carry over token metadata when mtime is unchanged; otherwise keep
-            // None so the session is re-queued for parsing below.
-            if let Some(old) = self.sessions.iter().find(|old| old.uuid == s.uuid) {
-                if old.modified == s.modified {
-                    s.token_total = old.token_total;
-                    s.is_headless = old.is_headless;
+            // Carry over token metadata and parse_queued when mtime is
+            // unchanged.  On mtime change (or new session), reset parsing
+            // state so the new version is re-queued below.
+            let mtime_changed =
+                if let Some(old) = self.sessions.iter().find(|old| old.uuid == s.uuid) {
+                    if old.modified == s.modified {
+                        s.token_total = old.token_total;
+                        s.is_headless = old.is_headless;
+                        s.parse_queued = old.parse_queued;
+                        false
+                    } else {
+                        // mtime changed → fields stay at defaults (None/false)
+                        true
+                    }
+                } else {
+                    // New session
+                    true
+                };
+
+            // Enqueue only when we know the file has changed (or is new) and
+            // no parse is already in flight for this version.
+            if s.token_total.is_none() && !s.parse_queued && mtime_changed {
+                let data = (s.uuid.clone(), s.path.clone(), s.modified);
+                if self.work_tx.try_send(data).is_ok() {
+                    s.parse_queued = true;
                 }
-                // mtime changed → token_total stays None → will be re-queued.
             }
         }
 
         self.sessions = new_sessions;
-
-        // Queue any session that still needs parsing.
-        for s in &self.sessions {
-            if s.token_total.is_none() {
-                let _ = self.work_tx.try_send((s.uuid.clone(), s.path.clone(), s.modified));
-            }
-        }
 
         if let Some(uuid) = current_uuid {
             if let Some(idx) = self.sessions.iter().position(|s| s.uuid == uuid) {
@@ -237,9 +255,24 @@ impl App {
         }
     }
 
+    /// Enqueue a background token-parse for `sessions[idx]` if it has not
+    /// already been queued for its current mtime.  Sets `parse_queued = true`
+    /// only when `try_send` succeeds.
+    pub(crate) fn enqueue_if_needed(&mut self, idx: usize) {
+        if let Some(s) = self.sessions.get(idx) {
+            if s.token_total.is_none() && !s.parse_queued {
+                let data = (s.uuid.clone(), s.path.clone(), s.modified);
+                if self.work_tx.try_send(data).is_ok() {
+                    self.sessions[idx].parse_queued = true;
+                }
+            }
+        }
+    }
+
     pub fn select_prev(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
+            self.enqueue_if_needed(self.selected);
             self.needs_scroll_to_bottom = true;
         }
     }
@@ -247,6 +280,7 @@ impl App {
     pub fn select_next(&mut self) {
         if self.selected + 1 < self.sessions.len() {
             self.selected += 1;
+            self.enqueue_if_needed(self.selected);
             self.needs_scroll_to_bottom = true;
         }
     }
@@ -276,9 +310,7 @@ impl App {
                 return total_visual.saturating_sub(self.content_panel_height);
             }
         }
-        let total_visual: usize = self.rendered_lines.iter()
-            .map(|l| visual_rows(l, pw))
-            .sum();
+        let total_visual: usize = self.rendered_lines.iter().map(|l| visual_rows(l, pw)).sum();
         self.cached_visual_rows = Some((total_visual, pw as u16));
         total_visual.saturating_sub(self.content_panel_height)
     }
@@ -316,9 +348,7 @@ impl App {
     }
 
     pub fn scroll_page_up(&mut self) {
-        self.scroll_offset = self
-            .scroll_offset
-            .saturating_sub(self.content_panel_height);
+        self.scroll_offset = self.scroll_offset.saturating_sub(self.content_panel_height);
     }
 
     // -----------------------------------------------------------------------
@@ -332,13 +362,18 @@ impl App {
 
     /// Load (or reload) the selected session's turns into rendered_lines.
     pub fn load_selected_session(&mut self) {
+        // Ensure a background token-parse is enqueued for the session being
+        // loaded, covering on-demand selection of sessions beyond the initial 8.
+        self.enqueue_if_needed(self.selected);
         if let Some(session) = self.sessions.get(self.selected).cloned() {
             let mtime = std::fs::metadata(&session.path)
                 .ok()
                 .and_then(|m| m.modified().ok());
 
             let turns = parse_turns(&session.path);
-            let opts = RenderOptions { show_thinking: self.show_thinking };
+            let opts = RenderOptions {
+                show_thinking: self.show_thinking,
+            };
             self.rendered_lines = render_turns(&turns, &opts);
             self.cached_visual_rows = None;
             self.loaded_uuid = Some(session.uuid);
@@ -352,7 +387,9 @@ impl App {
         if let Some(uuid) = self.loaded_uuid.clone() {
             if let Some(session) = self.sessions.iter().find(|s| s.uuid == uuid).cloned() {
                 let turns = parse_turns(&session.path);
-                let opts = RenderOptions { show_thinking: self.show_thinking };
+                let opts = RenderOptions {
+                    show_thinking: self.show_thinking,
+                };
                 self.rendered_lines = render_turns(&turns, &opts);
                 self.cached_visual_rows = None;
             }
@@ -376,7 +413,9 @@ impl App {
             if let Ok(mtime) = meta.modified() {
                 if self.loaded_mtime != Some(mtime) {
                     let turns = parse_turns(&session.path);
-                    let opts = RenderOptions { show_thinking: self.show_thinking };
+                    let opts = RenderOptions {
+                        show_thinking: self.show_thinking,
+                    };
                     self.rendered_lines = render_turns(&turns, &opts);
                     self.cached_visual_rows = None;
                     self.loaded_mtime = Some(mtime);

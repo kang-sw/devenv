@@ -148,6 +148,7 @@ fn handle_mouse_event(app: &mut App, event: MouseEvent) {
                 app.sessions.len(),
             ) {
                 app.selected = idx;
+                app.enqueue_if_needed(idx);
                 app.needs_scroll_to_bottom = true;
             }
         }

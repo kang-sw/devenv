@@ -1,9 +1,9 @@
+use chrono::{DateTime, Local};
 #[cfg(not(windows))]
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use chrono::{DateTime, Local};
 
 /// A single discovered Claude session JSONL file.
 #[derive(Debug, Clone)]
@@ -19,6 +19,10 @@ pub struct SessionEntry {
     /// Whether this session was started with `-p` (headless/SDK-CLI mode).
     /// `None` means the file has not been parsed yet.
     pub is_headless: Option<bool>,
+    /// Whether a background parse has been enqueued for this session's current
+    /// mtime.  Reset to `false` whenever the file's mtime changes so the new
+    /// version is re-queued.  Only set to `true` after a successful `try_send`.
+    pub parse_queued: bool,
 }
 
 fn home_dir() -> PathBuf {
@@ -31,9 +35,8 @@ fn home_dir() -> PathBuf {
         PathBuf::from(
             std::env::var("USERPROFILE")
                 .or_else(|_| {
-                    std::env::var("HOMEDRIVE").and_then(|d| {
-                        std::env::var("HOMEPATH").map(|p| format!("{}{}", d, p))
-                    })
+                    std::env::var("HOMEDRIVE")
+                        .and_then(|d| std::env::var("HOMEPATH").map(|p| format!("{}{}", d, p)))
                 })
                 .unwrap_or_else(|_| "C:\\Users\\default".to_string()),
         )
@@ -234,6 +237,7 @@ pub fn discover_sessions() -> Vec<SessionEntry> {
                 active: false,
                 token_total: None,
                 is_headless: None,
+                parse_queued: false,
             })
         })
         .collect();
@@ -276,9 +280,8 @@ pub(crate) fn parse_session_metadata(path: &Path) -> Option<(u64, bool)> {
         match entry_type {
             "assistant" => {
                 if let Some(usage) = v.get("message").and_then(|m| m.get("usage")) {
-                    let get = |key: &str| -> u64 {
-                        usage.get(key).and_then(|v| v.as_u64()).unwrap_or(0)
-                    };
+                    let get =
+                        |key: &str| -> u64 { usage.get(key).and_then(|v| v.as_u64()).unwrap_or(0) };
                     total_tokens += get("input_tokens");
                     total_tokens += get("output_tokens");
                     total_tokens += get("cache_read_input_tokens");
