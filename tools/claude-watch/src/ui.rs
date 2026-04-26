@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
 use crate::app::{App, LEFT_PANEL_PERCENT};
@@ -122,4 +122,14 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
         .scroll((scroll, 0));
 
     frame.render_widget(p, area);
+
+    if max_scroll > 0 {
+        let mut scrollbar_state = ScrollbarState::new(max_scroll)
+            .position(app.scroll_offset);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut scrollbar_state,
+        );
+    }
 }
