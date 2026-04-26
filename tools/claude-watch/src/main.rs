@@ -94,9 +94,11 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
         // a pure read of App state.
         match crossterm::terminal::size() {
             Ok((w, h)) => {
+                let left_w = (w as u32 * LEFT_PANEL_PERCENT as u32 / 100) as u16;
+                let right_inner_w = (w - left_w).saturating_sub(2);
+                app.left_panel_width = left_w;
+                app.right_panel_inner_width = right_inner_w;
                 app.update_content_height(h.saturating_sub(2) as usize);
-                app.left_panel_width =
-                    (w as u32 * LEFT_PANEL_PERCENT as u32 / 100) as u16;
             }
             Err(_) => {
                 // Keep previously cached dimensions on transient failure.

@@ -44,6 +44,9 @@ pub struct App {
     /// Rendered width of the left (session list) panel in terminal columns.
     /// Updated by the event loop alongside `content_panel_height`.
     pub(crate) left_panel_width: u16,
+    /// Inner width of the right (content) panel in terminal columns,
+    /// excluding the block borders.  Updated by the event loop.
+    pub right_panel_inner_width: u16,
     /// When set, the next `update_content_height` call pins scroll to bottom.
     pub(crate) needs_scroll_to_bottom: bool,
     /// UUID of the session currently loaded in the right panel.
@@ -56,6 +59,17 @@ pub struct App {
     // --- process monitor ---
     pub(crate) active_uuids: HashSet<String>,
     pub(crate) last_process_poll: Instant,
+}
+
+/// Return the number of visual rows a logical `line` occupies when rendered
+/// inside a panel of `panel_width` columns.  Matches ratatui's word-wrap
+/// behaviour for `Wrap { trim: false }` at the character level.
+fn visual_rows(line: &Line, panel_width: usize) -> usize {
+    if panel_width == 0 {
+        return 1;
+    }
+    let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+    if w == 0 { 1 } else { (w + panel_width - 1) / panel_width }
 }
 
 impl App {
@@ -71,6 +85,7 @@ impl App {
             scroll_offset: 0,
             content_panel_height: INITIAL_PANEL_HEIGHT_GUESS,
             left_panel_width: 0, // overwritten at the top of every event-loop iteration
+            right_panel_inner_width: 0,
             needs_scroll_to_bottom: true,
             loaded_uuid: None,
             loaded_mtime: None,
@@ -128,24 +143,36 @@ impl App {
     // Scroll
     // -----------------------------------------------------------------------
 
+    /// Return the logical-line offset that pins the viewport to the bottom,
+    /// accounting for lines that wrap across multiple visual rows.
+    pub fn scroll_to_bottom_offset(&self) -> usize {
+        let pw = self.right_panel_inner_width as usize;
+        let mut visual_acc: usize = 0;
+        let mut offset = self.rendered_lines.len();
+        for (i, line) in self.rendered_lines.iter().enumerate().rev() {
+            let vr = visual_rows(line, pw);
+            if visual_acc + vr > self.content_panel_height {
+                offset = i + 1;
+                break;
+            }
+            visual_acc += vr;
+            offset = i;
+        }
+        offset
+    }
+
     /// Called by the event loop before each draw with the current inner panel
     /// height.  Resolves any pending scroll-to-bottom request.
     pub fn update_content_height(&mut self, height: usize) {
         self.content_panel_height = height;
         if self.needs_scroll_to_bottom {
             self.needs_scroll_to_bottom = false;
-            self.scroll_offset = self
-                .rendered_lines
-                .len()
-                .saturating_sub(self.content_panel_height);
+            self.scroll_offset = self.scroll_to_bottom_offset();
         }
     }
 
     pub fn scroll_down(&mut self) {
-        let max = self
-            .rendered_lines
-            .len()
-            .saturating_sub(self.content_panel_height);
+        let max = self.scroll_to_bottom_offset();
         self.scroll_offset = self.scroll_offset.saturating_add(SCROLL_STEP).min(max);
     }
 
@@ -154,10 +181,7 @@ impl App {
     }
 
     pub fn scroll_page_down(&mut self) {
-        let max = self
-            .rendered_lines
-            .len()
-            .saturating_sub(self.content_panel_height);
+        let max = self.scroll_to_bottom_offset();
         self.scroll_offset = self
             .scroll_offset
             .saturating_add(self.content_panel_height)
