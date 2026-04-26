@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, Local};
 
@@ -12,10 +13,10 @@ pub struct SessionEntry {
     pub active: bool,
     /// Total tokens (input + output + cache) summed from assistant turns.
     /// `None` means the file has not been parsed yet.
-    pub(crate) token_total: Option<u64>,
+    pub token_total: Option<u64>,
     /// Whether this session was started with `-p` (headless/SDK-CLI mode).
     /// `None` means the file has not been parsed yet.
-    pub(crate) is_headless: Option<bool>,
+    pub is_headless: Option<bool>,
 }
 
 fn home_dir() -> PathBuf {
@@ -172,4 +173,62 @@ pub fn discover_sessions() -> Vec<SessionEntry> {
     // Most recent first.
     sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
     sessions
+}
+
+/// Parse a session JSONL file and return `(total_tokens, is_headless)`.
+///
+/// Tokens are summed from every `assistant` entry's `message.usage` object.
+/// `is_headless` is set when the file contains a `last-prompt` entry or a
+/// `system` entry whose `entrypoint` field contains `"sdk-cli"`.
+///
+/// Always returns `Some`; `None` only when the file cannot be opened.
+pub(crate) fn parse_session_metadata(path: &Path) -> Option<(u64, bool)> {
+    let file = std::fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    let mut total_tokens: u64 = 0;
+    let mut is_headless = false;
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let v: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let obj = match v.as_object() {
+            Some(o) => o,
+            None => continue,
+        };
+
+        let entry_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        match entry_type {
+            "assistant" => {
+                if let Some(usage) = v.get("message").and_then(|m| m.get("usage")) {
+                    let get = |key: &str| -> u64 {
+                        usage.get(key).and_then(|v| v.as_u64()).unwrap_or(0)
+                    };
+                    total_tokens += get("input_tokens");
+                    total_tokens += get("output_tokens");
+                    total_tokens += get("cache_read_input_tokens");
+                    total_tokens += get("cache_creation_input_tokens");
+                }
+            }
+            "last-prompt" => {
+                is_headless = true;
+            }
+            "system" => {
+                let entrypoint = obj.get("entrypoint").and_then(|e| e.as_str()).unwrap_or("");
+                if entrypoint.contains("sdk-cli") {
+                    is_headless = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Some((total_tokens, is_headless))
 }

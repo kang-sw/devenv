@@ -1,14 +1,15 @@
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+use chrono::{DateTime, Local};
 
 use ratatui::text::Line;
 
 use crate::parser::parse_turns;
 use crate::process::find_active_uuids;
 use crate::renderer::{render_turns, RenderOptions};
-use crate::session::{SessionEntry, discover_sessions};
+use crate::session::{SessionEntry, discover_sessions, parse_session_metadata};
 
 // ---------------------------------------------------------------------------
 // Tuning constants
@@ -68,8 +69,10 @@ pub struct App {
     pub(crate) last_process_poll: Instant,
 
     // --- background token parser ---
-    work_tx: std::sync::mpsc::SyncSender<(String, PathBuf)>,
-    result_rx: std::sync::mpsc::Receiver<(String, u64, bool)>,
+    /// Work queue: (uuid, path, mtime-at-enqueue).  The mtime is echoed back in
+    /// the result so stale results can be discarded in `poll_token_results`.
+    work_tx: std::sync::mpsc::SyncSender<(String, PathBuf, DateTime<Local>)>,
+    result_rx: std::sync::mpsc::Receiver<(String, u64, bool, DateTime<Local>)>,
 }
 
 /// Return the number of visual rows a logical `line` occupies when rendered
@@ -126,73 +129,19 @@ pub(crate) fn visual_rows(line: &Line, panel_width: usize) -> usize {
     rows
 }
 
-/// Parse a session JSONL file and return `(total_tokens, is_headless)`.
-///
-/// Tokens are summed from every `assistant` entry's `message.usage` object.
-/// `is_headless` is set when the file contains a `last-prompt` entry or a
-/// `system` entry whose `entrypoint` field contains `"sdk-cli"`.
-fn parse_session_metadata(path: &Path) -> Option<(u64, bool)> {
-    let file = std::fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
-
-    let mut total_tokens: u64 = 0;
-    let mut is_headless = false;
-
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-        let v: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let obj = match v.as_object() {
-            Some(o) => o,
-            None => continue,
-        };
-
-        let entry_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
-        match entry_type {
-            "assistant" => {
-                if let Some(usage) = v.get("message").and_then(|m| m.get("usage")) {
-                    let get = |key: &str| -> u64 {
-                        usage.get(key).and_then(|v| v.as_u64()).unwrap_or(0)
-                    };
-                    total_tokens += get("input_tokens");
-                    total_tokens += get("output_tokens");
-                    total_tokens += get("cache_read_input_tokens");
-                    total_tokens += get("cache_creation_input_tokens");
-                }
-            }
-            "last-prompt" => {
-                is_headless = true;
-            }
-            "system" => {
-                let entrypoint = obj.get("entrypoint").and_then(|e| e.as_str()).unwrap_or("");
-                if entrypoint.contains("sdk-cli") {
-                    is_headless = true;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Some((total_tokens, is_headless))
-}
-
 impl App {
     pub fn new() -> Self {
         let sessions = discover_sessions();
 
-        let (work_tx, work_rx) = std::sync::mpsc::sync_channel::<(String, PathBuf)>(64);
-        let (result_tx, result_rx) = std::sync::mpsc::channel::<(String, u64, bool)>();
+        let (work_tx, work_rx) =
+            std::sync::mpsc::sync_channel::<(String, PathBuf, DateTime<Local>)>(64);
+        let (result_tx, result_rx) =
+            std::sync::mpsc::channel::<(String, u64, bool, DateTime<Local>)>();
 
         std::thread::spawn(move || {
-            while let Ok((uuid, path)) = work_rx.recv() {
+            while let Ok((uuid, path, mtime)) = work_rx.recv() {
                 if let Some((tokens, is_headless)) = parse_session_metadata(&path) {
-                    let _ = result_tx.send((uuid, tokens, is_headless));
+                    let _ = result_tx.send((uuid, tokens, is_headless, mtime));
                 }
             }
         });
@@ -223,7 +172,7 @@ impl App {
 
         // Queue the first 8 sessions for immediate background parsing.
         for s in app.sessions.iter().take(8) {
-            let _ = app.work_tx.try_send((s.uuid.clone(), s.path.clone()));
+            let _ = app.work_tx.try_send((s.uuid.clone(), s.path.clone(), s.modified));
         }
 
         app
@@ -257,7 +206,7 @@ impl App {
         // Queue any session that still needs parsing.
         for s in &self.sessions {
             if s.token_total.is_none() {
-                let _ = self.work_tx.try_send((s.uuid.clone(), s.path.clone()));
+                let _ = self.work_tx.try_send((s.uuid.clone(), s.path.clone(), s.modified));
             }
         }
 
@@ -271,11 +220,19 @@ impl App {
     }
 
     /// Drain background token-parse results and apply them to the session list.
+    ///
+    /// The result carries the mtime that was current when the work item was
+    /// enqueued.  If the session's mtime has since advanced the result is stale
+    /// and is discarded — a fresh work item will have been (or will be)
+    /// enqueued by `refresh_sessions`.
     pub fn poll_token_results(&mut self) {
-        while let Ok((uuid, tokens, is_headless)) = self.result_rx.try_recv() {
+        while let Ok((uuid, tokens, is_headless, result_mtime)) = self.result_rx.try_recv() {
             if let Some(s) = self.sessions.iter_mut().find(|s| s.uuid == uuid) {
-                s.token_total = Some(tokens);
-                s.is_headless = Some(is_headless);
+                if s.modified == result_mtime {
+                    s.token_total = Some(tokens);
+                    s.is_headless = Some(is_headless);
+                }
+                // mtime mismatch → stale result from a superseded parse; discard.
             }
         }
     }
