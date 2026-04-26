@@ -16,8 +16,9 @@ use crossterm::{
 use std::io::stdout;
 use std::time::Duration;
 
-/// How long to sleep after each draw to avoid busy-spinning (~60 fps).
-const FRAME_WAIT_MS: u64 = 16;
+/// Frame budget in milliseconds (~60 fps); the event loop sleeps this long
+/// after each draw to avoid busy-spinning.
+const FRAME_MS: u64 = 16;
 /// How often the session list is refreshed from disk.
 const SESSION_REFRESH_SECS: u64 = 1;
 
@@ -105,9 +106,11 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
 
         terminal.draw(|f| ui::draw(f, &app))?;
 
-        // Short sleep-wait to avoid busy-spinning; any arriving event will
-        // be picked up at the top of the next iteration's drain loop.
-        let _ = event::poll(Duration::from_millis(FRAME_WAIT_MS));
+        // Sleep for one frame budget.  We use thread::sleep rather than
+        // event::poll so the intent is unambiguous: this is a fixed-duration
+        // pause, not an event wait.  Events that arrive during this sleep are
+        // picked up at the top of the next iteration's drain loop.
+        std::thread::sleep(Duration::from_millis(FRAME_MS));
     }
 
     Ok(())
@@ -188,11 +191,12 @@ mod tests {
     use super::*;
 
     // Terminal geometry shared across tests: 80 columns × 24 rows.
-    //   left_panel_width = 80 * 30 / 100 = 24
-    //   visible_height   = 24 - 2 = 22
+    //   left_panel_width = 80 * LEFT_PANEL_PERCENT / 100 = 24
+    //   visible_height   = TH - 2 = 22
+    const TERM_W: u16 = 80;
     const TH: u16 = 24;
-    const LPW: u16 = 24; // 80 * LEFT_PANEL_PERCENT / 100
-    const VH: usize = 22; // TH - 2
+    const LPW: u16 = TERM_W * LEFT_PANEL_PERCENT / 100;
+    const VH: usize = (TH - 2) as usize;
 
     #[test]
     fn first_page_no_scroll_offset() {
