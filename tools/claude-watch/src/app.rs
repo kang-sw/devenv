@@ -44,7 +44,11 @@ pub struct App {
     /// Rendered width of the left (session list) panel in terminal columns.
     /// Updated by the event loop alongside `content_panel_height`.
     pub(crate) left_panel_width: u16,
-    /// When set, the next `update_content_height` call pins scroll to bottom.
+    /// Inner width of the right (content) panel in terminal columns,
+    /// excluding the block borders.  Updated by the event loop.
+    pub(crate) right_panel_inner_width: u16,
+    /// When set, `draw_content_panel` pins scroll to bottom on the next frame
+    /// using the exact panel width from the ratatui layout rect.
     pub(crate) needs_scroll_to_bottom: bool,
     /// UUID of the session currently loaded in the right panel.
     pub(crate) loaded_uuid: Option<String>,
@@ -56,6 +60,60 @@ pub struct App {
     // --- process monitor ---
     pub(crate) active_uuids: HashSet<String>,
     pub(crate) last_process_poll: Instant,
+}
+
+/// Return the number of visual rows a logical `line` occupies when rendered
+/// inside a panel of `panel_width` columns.
+///
+/// Simulates ratatui's `WordWrapper` with `trim: false`: text is split into
+/// whitespace-delimited tokens (each token includes its trailing whitespace),
+/// and tokens that would overflow the current row are wrapped to the next row.
+/// Words longer than `panel_width` are hard-broken at the column boundary.
+/// This matches ratatui's behaviour closely enough to produce accurate
+/// scroll-to-bottom offsets.
+pub(crate) fn visual_rows(line: &Line, panel_width: usize) -> usize {
+    if panel_width == 0 {
+        return 1;
+    }
+    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    if text.is_empty() {
+        return 1;
+    }
+
+    let mut rows = 1usize;
+    let mut col = 0usize;
+
+    // split_inclusive keeps the whitespace delimiter attached to the preceding
+    // token, matching the pending_whitespace + pending_word flush order in
+    // ratatui's WordWrapper (trim=false).
+    for token in text.split_inclusive(|c: char| c.is_whitespace()) {
+        let token_w: usize = token.chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum();
+        if token_w == 0 {
+            continue;
+        }
+        if col + token_w > panel_width {
+            if col == 0 {
+                // Token wider than the whole panel — hard-break inside it.
+                rows += token_w / panel_width;
+                col = token_w % panel_width;
+            } else {
+                // Normal word wrap: move token to the next row.
+                rows += 1;
+                if token_w > panel_width {
+                    rows += token_w / panel_width;
+                    col = token_w % panel_width;
+                } else {
+                    col = token_w;
+                }
+            }
+        } else {
+            col += token_w;
+        }
+    }
+
+    rows
 }
 
 impl App {
@@ -71,6 +129,7 @@ impl App {
             scroll_offset: 0,
             content_panel_height: INITIAL_PANEL_HEIGHT_GUESS,
             left_panel_width: 0, // overwritten at the top of every event-loop iteration
+            right_panel_inner_width: 0,
             needs_scroll_to_bottom: true,
             loaded_uuid: None,
             loaded_mtime: None,
@@ -128,24 +187,40 @@ impl App {
     // Scroll
     // -----------------------------------------------------------------------
 
+    /// Return the visual-row scroll offset that pins the view to the bottom.
+    ///
+    /// `Paragraph::scroll((n, 0))` with `Wrap` skips `n` **visual rows**
+    /// (each wrapped portion of a long line counts as one row).  This function
+    /// returns `total_visual_rows - panel_height`, which is exactly the offset
+    /// needed to show the last `content_panel_height` visual rows.
+    ///
+    /// Accepts `pw` as an explicit parameter so callers with access to the
+    /// actual ratatui layout rect (e.g. `ui.rs`) can pass the true inner width
+    /// rather than the cached `right_panel_inner_width` approximation.
+    pub fn scroll_to_bottom_offset_for_width(&self, pw: usize) -> usize {
+        let total_visual: usize = self.rendered_lines.iter()
+            .map(|l| visual_rows(l, pw))
+            .sum();
+        total_visual.saturating_sub(self.content_panel_height)
+    }
+
+    /// Convenience wrapper that uses the cached `right_panel_inner_width`.
+    /// Prefer `scroll_to_bottom_offset_for_width` when the exact panel rect is
+    /// available.
+    pub fn scroll_to_bottom_offset(&self) -> usize {
+        self.scroll_to_bottom_offset_for_width(self.right_panel_inner_width as usize)
+    }
+
     /// Called by the event loop before each draw with the current inner panel
-    /// height.  Resolves any pending scroll-to-bottom request.
+    /// height.  Updates the cached height only; `needs_scroll_to_bottom` is
+    /// resolved inside `draw_content_panel` where the exact ratatui layout
+    /// rect is available.
     pub fn update_content_height(&mut self, height: usize) {
         self.content_panel_height = height;
-        if self.needs_scroll_to_bottom {
-            self.needs_scroll_to_bottom = false;
-            self.scroll_offset = self
-                .rendered_lines
-                .len()
-                .saturating_sub(self.content_panel_height);
-        }
     }
 
     pub fn scroll_down(&mut self) {
-        let max = self
-            .rendered_lines
-            .len()
-            .saturating_sub(self.content_panel_height);
+        let max = self.scroll_to_bottom_offset();
         self.scroll_offset = self.scroll_offset.saturating_add(SCROLL_STEP).min(max);
     }
 
@@ -154,10 +229,7 @@ impl App {
     }
 
     pub fn scroll_page_down(&mut self) {
-        let max = self
-            .rendered_lines
-            .len()
-            .saturating_sub(self.content_panel_height);
+        let max = self.scroll_to_bottom_offset();
         self.scroll_offset = self
             .scroll_offset
             .saturating_add(self.content_panel_height)

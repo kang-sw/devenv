@@ -90,21 +90,29 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
             break;
         }
 
-        // Resolve terminal dimensions BEFORE draw so the draw function remains
-        // a pure read of App state.
+        // Update cached dimensions before draw.  draw_content_panel writes
+        // scroll_offset and syncs right_panel_inner_width from the actual
+        // ratatui layout rect, so the cached values here serve as a fallback
+        // for interactive scroll (scroll_down / scroll_page_down).
         match crossterm::terminal::size() {
             Ok((w, h)) => {
+                let left_w = (w as u32 * LEFT_PANEL_PERCENT as u32 / 100) as u16;
+                let right_inner_w = (w - left_w).saturating_sub(2);
+                app.left_panel_width = left_w;
+                app.right_panel_inner_width = right_inner_w;
                 app.update_content_height(h.saturating_sub(2) as usize);
-                app.left_panel_width =
-                    (w as u32 * LEFT_PANEL_PERCENT as u32 / 100) as u16;
             }
             Err(_) => {
                 // Keep previously cached dimensions on transient failure.
-                app.update_content_height(app.content_panel_height);
+                // Do NOT call update_content_height here: right_panel_inner_width
+                // may still be 0 from initialisation, and consuming
+                // needs_scroll_to_bottom with pw=0 would place the viewport
+                // at the wrong position.  The flag is resolved on the next
+                // successful size query.
             }
         }
 
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &mut app))?;
 
         // Sleep for one frame budget.  We use thread::sleep rather than
         // event::poll so the intent is unambiguous: this is a fixed-duration

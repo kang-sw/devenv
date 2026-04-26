@@ -15,3 +15,4 @@ serde_json = "1"
 sysinfo = "0.38"
 chrono = { version = "0.4", features = ["serde"] }
 pulldown-cmark = "0.13"
+unicode-width = "0.2"

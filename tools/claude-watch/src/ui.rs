@@ -8,8 +8,9 @@ use ratatui::{
 
 use crate::app::{App, LEFT_PANEL_PERCENT};
 
-/// Draw the full TUI layout — pure read of `App` state, no side effects.
-pub fn draw(frame: &mut Frame, app: &App) {
+/// Draw the full TUI layout.  Takes `&mut App` so that `draw_content_panel`
+/// can resolve `needs_scroll_to_bottom` using the exact ratatui layout width.
+pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let chunks = Layout::horizontal([
         Constraint::Percentage(LEFT_PANEL_PERCENT),
@@ -51,10 +52,21 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_content_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    // content_panel_height is maintained by the event loop via
-    // App::update_content_height — we only read it here.
-    let inner_height = app.content_panel_height;
+fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    // Use the exact inner width from the ratatui layout rect.  This is the
+    // authoritative source of truth for wrapping calculations and is written
+    // back to the cached field so that interactive scroll methods
+    // (scroll_down / scroll_page_down) use the same value on the next
+    // event-loop iteration.
+    let pw = area.width.saturating_sub(2) as usize;
+    app.right_panel_inner_width = area.width.saturating_sub(2);
+
+    // Resolve scroll-to-bottom here, where the exact ratatui layout width is
+    // known, rather than in update_content_height which uses an approximation.
+    if app.needs_scroll_to_bottom {
+        app.needs_scroll_to_bottom = false;
+        app.scroll_offset = app.scroll_to_bottom_offset_for_width(pw);
+    }
 
     let title = app
         .selected_session()
@@ -75,7 +87,7 @@ fn draw_content_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
 
     // Clamp scroll to valid range using usize arithmetic; cast only for the
     // Paragraph::scroll call which requires (u16, u16).
-    let max_scroll = app.rendered_lines.len().saturating_sub(inner_height);
+    let max_scroll = app.scroll_to_bottom_offset_for_width(pw);
     let scroll = app.scroll_offset.min(max_scroll).min(u16::MAX as usize) as u16;
 
     // Clone the pre-rendered lines into the Paragraph.  Line<'static> spans
