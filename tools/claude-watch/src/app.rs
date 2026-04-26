@@ -18,6 +18,9 @@ pub(crate) const SCROLL_STEP: usize = 3;
 const PROCESS_POLL_SECS: u64 = 2;
 /// Default panel height estimate before the first terminal-size query.
 const INITIAL_PANEL_HEIGHT_GUESS: usize = 40;
+/// Width of the left (session list) panel as a percentage of the terminal width.
+/// Referenced by both `ui.rs` (layout constraint) and `main.rs` (mouse hit-test).
+pub(crate) const LEFT_PANEL_PERCENT: u16 = 30;
 
 // ---------------------------------------------------------------------------
 // Application state
@@ -38,6 +41,9 @@ pub struct App {
     /// Inner height of the content panel (rows visible between borders).
     /// Updated by the event loop via `update_content_height` before each draw.
     pub(crate) content_panel_height: usize,
+    /// Rendered width of the left (session list) panel in terminal columns.
+    /// Updated by the event loop alongside `content_panel_height`.
+    pub(crate) left_panel_width: u16,
     /// When set, the next `update_content_height` call pins scroll to bottom.
     pub(crate) needs_scroll_to_bottom: bool,
     /// UUID of the session currently loaded in the right panel.
@@ -64,6 +70,7 @@ impl App {
             rendered_lines: Vec::new(),
             scroll_offset: 0,
             content_panel_height: INITIAL_PANEL_HEIGHT_GUESS,
+            left_panel_width: 0, // overwritten at the top of every event-loop iteration
             needs_scroll_to_bottom: true,
             loaded_uuid: None,
             loaded_mtime: None,
