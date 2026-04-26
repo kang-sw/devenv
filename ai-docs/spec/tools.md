@@ -36,8 +36,7 @@ Two-panel layout:
 
 ### Mouse Interaction {#260426-claude-watch-mouse-input}
 
-> [!note] Planned 🚧
-> Mouse capture is enabled on startup. Scroll wheel events scroll the right panel. Left-click on a left-panel entry selects that session.
+Mouse capture is enabled on startup. Scroll wheel events scroll the right panel. Left-click on a left-panel entry selects that session.
 
 ### Live Process Indicator
 
