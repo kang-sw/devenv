@@ -78,7 +78,9 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
   ws-new-named-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
-  ws-call-named-agent               — call a registered named agent; tracks context; auto-compresses at 120K tokens; persists output to file
+  ws-call-named-agent               — call a registered named agent; tracks context; auto-compresses at 120K tokens; persists output to file; drains outbox after each call
+  ws-interrupt-named-agent          — queue a message to a named agent's outbox; delivered as a new user turn at the next tool boundary or ws-call-named-agent call
+  ws-agent-check-mailbox            — PostToolBatch hook: exits 2 (stop) when WS_AGENT_OUTBOX is non-empty; used internally by ws-call-named-agent
   ws-print-named-agent-output       — print the persisted output file of a named agent
 ```
 
@@ -163,7 +165,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260426-feat-claude-watch-mouse` | done | claude-watch mouse support — scroll wheel + left-click session selection + event-drain loop perf fix |
 | `260426-perf-claude-watch-scroll-cache` | done | claude-watch scroll perf — cache total visual rows; Phase 2 (Arc clone) dropped (ratatui ownership constraint) |
 | `260426-feat-claude-watch-features` | done | claude-watch sprint — token count display, headless/-p color distinction, worktree session discovery, vertical scrollbar, on-demand background parsing; ws-orchestration output persistence + background mode |
-| `260426-feat-claude-dash` | todo | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; 4 phases |
+| `260426-feat-claude-dash` | done | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; all 4 phases complete |
 
 ## Session Notes
 

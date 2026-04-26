@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "Usage: ws-interrupt-named-agent <agent-name> <message>" >&2
+  echo "       ws-interrupt-named-agent <agent-name> - <<'MSG' ... MSG" >&2
+  exit 1
+fi
+
+AGENT_NAME="$1"
+if [[ "$2" == "-" ]]; then
+  MESSAGE=$(cat)
+else
+  MESSAGE="$2"
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+REPO_DIR_NAME=$(basename "$REPO_ROOT")
+REGISTRY_DIR="$(git rev-parse --git-dir)/ws@$REPO_DIR_NAME/agents"
+AGENT_FILE="$REGISTRY_DIR/$AGENT_NAME.json"
+OUTBOX_FILE="$REGISTRY_DIR/$AGENT_NAME.outbox.txt"
+
+if [[ ! -f "$AGENT_FILE" ]]; then
+  echo "error: agent '$AGENT_NAME' not found — run ws-new-named-agent first" >&2
+  exit 1
+fi
+
+printf '%s' "$MESSAGE" >> "$OUTBOX_FILE"
+echo "Message queued for agent '$AGENT_NAME'"

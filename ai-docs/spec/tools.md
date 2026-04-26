@@ -14,7 +14,7 @@ Tools built from source within this repo and installed via `cargo install --path
 | Tool | Source path | Purpose |
 |---|---|---|
 | `claude-watch` | `tools/claude-watch/` | TUI session viewer for Claude CLI subprocess history |
-| 🚧 `claude-dash` | `tools/claude-dash/` | Interactive worktree-scoped Claude TUI multiplexer |
+| `claude-dash` | `tools/claude-dash/` | Interactive worktree-scoped Claude TUI multiplexer |
 
 ## Claude Session Viewer {#260426-claude-session-viewer}
 
@@ -48,7 +48,7 @@ Polls running processes (1–2 second interval) to find `claude` processes with 
 > - JSONL format is an undocumented internal format of the Claude CLI. The parser treats unknown fields as pass-through and degrades gracefully on format changes.
 > - Windows native path escaping (`C:\Users\...`) differs from the Unix formula. On Windows the tool scans all `~/.claude/projects/` subdirectories and matches by UUID rather than relying on path derivation.
 
-## 🚧 Claude Dash {#260426-claude-dash}
+## Claude Dash {#260426-claude-dash}
 
 `claude-dash` — a Rust TUI binary that manages interactive Claude sessions across git worktrees within a single terminal window.
 
