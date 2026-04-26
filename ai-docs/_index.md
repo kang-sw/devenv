@@ -160,6 +160,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260425-chore-implementation-gap-staleness-flagging` | done | Reactive doc-staleness reporting — removed misplaced guideline from spec-conventions + spec-system; reactive one-liner added to impl-playbook, survey-writer, plan-writer, code-review-correctness |
 | `260426-feat-claude-watch` | done | claude-watch Rust TUI — session history browser and live subprocess monitor for Claude CLI; all 4 phases complete |
 | `260426-feat-claude-watch-mouse` | done | claude-watch mouse support — scroll wheel + left-click session selection + event-drain loop perf fix |
+| `260426-perf-claude-watch-scroll-cache` | done | claude-watch scroll perf — cache total visual rows; Phase 2 (Arc clone) dropped (ratatui ownership constraint) |
 
 ## Session Notes
 
