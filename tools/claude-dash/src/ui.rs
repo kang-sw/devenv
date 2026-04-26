@@ -31,6 +31,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     let area = frame.area();
+    // Capture before any tab borrow so the overlay call at the end can read it.
+    let prefix_active = app.prefix_active;
 
     // Phase-3 layout: tab bar (1) + slot row (1) + main panel.
     let chunks = Layout::vertical([
@@ -71,6 +73,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         let is_removed = modal.is_removed_worktree;
         let status_str = format!("{:?}", modal.status);
         draw_exit_modal(frame, area, is_removed, &status_str);
+    }
+
+    // Prefix-command help overlay — rendered last so it sits on top.
+    if prefix_active {
+        draw_prefix_help(frame, area);
     }
 }
 
@@ -234,6 +241,28 @@ fn draw_exit_modal(frame: &mut Frame, area: Rect, is_removed: bool, status: &str
 
     let paragraph =
         Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Exit "));
+
+    frame.render_widget(Clear, modal_area);
+    frame.render_widget(paragraph, modal_area);
+}
+
+/// Draw a centred prefix-key help overlay.
+///
+/// Shows all available prefix commands in a bordered modal. Rendered last
+/// in `draw()` so it appears on top of every other widget.
+fn draw_prefix_help(frame: &mut Frame, area: Rect) {
+    const MODAL_W: u16 = 44;
+    const MODAL_H: u16 = 9;
+    let modal_x = area.x + area.width.saturating_sub(MODAL_W) / 2;
+    let modal_y = area.y + area.height.saturating_sub(MODAL_H) / 2;
+    let modal_area = Rect::new(modal_x, modal_y, MODAL_W, MODAL_H);
+
+    // 6 content lines fit comfortably in the 7-row inner area (9 rows − 2 borders).
+    const HELP_TEXT: &str =
+        " Ctrl+B \u{2014} prefix key\n\n 1 2 3 \u{2026}  Switch tab\n q w e \u{2026}  Switch slot\n n        New session tab\n Ctrl+B   Cancel";
+
+    let paragraph = Paragraph::new(HELP_TEXT)
+        .block(Block::default().borders(Borders::ALL).title(" Prefix commands "));
 
     frame.render_widget(Clear, modal_area);
     frame.render_widget(paragraph, modal_area);

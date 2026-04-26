@@ -187,9 +187,9 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
                         let clamped = 9usize.min(app.tabs.len().saturating_sub(1));
                         app.activate_tab(clamped);
                     }
-                    // 'n' → spawn new claude in current tab.
+                    // 'n' → open a new tab running claude.
                     KeyCode::Char('n') => {
-                        app.spawn_new_claude_in_tab()?;
+                        app.open_new_tab()?;
                     }
                     // 'q'–'p' row → switch agent slot within the current tab.
                     KeyCode::Char(c) => {

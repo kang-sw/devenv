@@ -479,6 +479,10 @@ impl App {
     /// Always force-respawns: if a session is already running it is killed
     /// (via `PtySession::drop`) before the new one starts.  The exit modal
     /// is cleared on every call.
+    ///
+    /// Retained for the exit-modal restart path and future callers — prefix+n
+    /// now calls `open_new_tab` instead.
+    #[allow(dead_code)]
     pub fn spawn_new_claude_in_tab(&mut self) -> anyhow::Result<()> {
         let idx = self.active_tab;
         if idx >= self.tabs.len() {
@@ -499,6 +503,34 @@ impl App {
         self.tabs[idx].exited_modal = None;
         let session = spawn_claude(&cwd, size, skip)?;
         self.tabs[idx].session = Some(session);
+        Ok(())
+    }
+
+    /// Open a new tab running `claude` in the project root (or current tab's
+    /// worktree path when no git root is detected).
+    ///
+    /// The new tab is appended to the end and immediately made active.
+    pub fn open_new_tab(&mut self) -> anyhow::Result<()> {
+        // Determine working directory: prefer git_root; fall back to current tab
+        // or cwd if tabs is empty.
+        let cwd = if let Some(ref root) = self.git_root {
+            root.clone()
+        } else if !self.tabs.is_empty() {
+            self.tabs[self.active_tab].worktree.path.clone()
+        } else {
+            std::env::current_dir().unwrap_or_default()
+        };
+
+        let worktree = Worktree {
+            path: cwd.clone(),
+            name: "new".to_string(),
+            is_active_ws: true,
+            is_removed: false,
+        };
+
+        let session = spawn_claude(&cwd, INITIAL_SIZE, self.skip_permissions)?;
+        self.tabs.push(WorktreeTab::new(worktree, Some(session)));
+        self.active_tab = self.tabs.len() - 1;
         Ok(())
     }
 
