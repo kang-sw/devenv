@@ -95,6 +95,28 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     frame.render_widget(tabs, area);
+
+    // Prefix-mode indicator: rendered over the right edge of the tab bar so it
+    // is visible without disrupting the tab titles.
+    if app.prefix_active {
+        const INDICATOR: &str = " [^B]";
+        let indicator_len = INDICATOR.len() as u16;
+        if area.width >= indicator_len {
+            let indicator_area = Rect {
+                x: area.x + area.width - indicator_len,
+                y: area.y,
+                width: indicator_len,
+                height: 1,
+            };
+            let style = Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(INDICATOR, style))),
+                indicator_area,
+            );
+        }
+    }
 }
 
 fn draw_slot_row(frame: &mut Frame, app: &App, area: Rect) {

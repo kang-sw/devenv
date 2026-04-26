@@ -264,12 +264,39 @@ pub struct App {
     token_tx: mpsc::SyncSender<TokenResult>,
     /// Receiver drained each frame to update `NamedAgent::token_total`.
     token_rx: mpsc::Receiver<TokenResult>,
+    /// Whether all spawned `claude` subprocesses should receive
+    /// `--dangerously-skip-permissions` (set from the CLI flag at startup).
+    pub skip_permissions: bool,
+    /// True while the prefix key (Ctrl+B) has been pressed and we are
+    /// waiting for the next keystroke to dispatch a command.
+    pub prefix_active: bool,
+}
+
+/// Spawn a `claude` PTY, optionally appending `--dangerously-skip-permissions`.
+///
+/// Used at every spawn site so the `skip_permissions` flag propagates
+/// uniformly — both during initial construction (before `App` exists) and
+/// inside `impl App` methods where a mutable borrow of `self.tabs` may
+/// already be active, making it unsafe to call `self.spawn_session()`.
+fn spawn_claude(
+    cwd: &std::path::Path,
+    size: PtySize,
+    skip: bool,
+) -> anyhow::Result<PtySession> {
+    if skip {
+        PtySession::spawn_with_args(cwd, size, &["--dangerously-skip-permissions"])
+    } else {
+        PtySession::spawn(cwd, size)
+    }
 }
 
 impl App {
     /// Build the initial app state: discover worktrees, create tabs, and
     /// auto-spawn PTYs for active ws-framework worktrees.
-    pub fn new() -> anyhow::Result<Self> {
+    ///
+    /// `skip_permissions` controls whether every spawned `claude` process
+    /// receives `--dangerously-skip-permissions` (mirrors the CLI flag).
+    pub fn new(skip_permissions: bool) -> anyhow::Result<Self> {
         let git_root = find_git_root();
 
         let worktrees = discover_worktrees();
@@ -294,10 +321,7 @@ impl App {
         let mut tabs: Vec<WorktreeTab> = Vec::new();
         for wt in worktrees {
             let session = if wt.is_active_ws {
-                match PtySession::spawn(&wt.path, INITIAL_SIZE) {
-                    Ok(s) => Some(s),
-                    Err(_) => None,
-                }
+                spawn_claude(&wt.path, INITIAL_SIZE, skip_permissions).ok()
             } else {
                 None
             };
@@ -307,7 +331,7 @@ impl App {
         // If no tab was auto-spawned, spawn the first one.
         if tabs.iter().all(|t| t.session.is_none()) {
             if let Some(tab) = tabs.first_mut() {
-                match PtySession::spawn(&tab.worktree.path, INITIAL_SIZE) {
+                match spawn_claude(&tab.worktree.path, INITIAL_SIZE, skip_permissions) {
                     Ok(s) => tab.session = Some(s),
                     Err(_) => {}
                 }
@@ -326,6 +350,8 @@ impl App {
             git_root,
             token_tx,
             token_rx,
+            skip_permissions,
+            prefix_active: false,
         })
     }
 
@@ -346,17 +372,24 @@ impl App {
         }
         self.active_tab = idx;
 
-        let tab = &mut self.tabs[idx];
-        if tab.session.is_none() && !tab.worktree.is_removed {
-            let (cols, rows) = tab.last_inner_size;
+        // Read the fields we need before taking any mutable borrow, so that
+        // spawn_claude (which needs self.skip_permissions) does not conflict.
+        let needs_spawn = {
+            let tab = &self.tabs[idx];
+            tab.session.is_none() && !tab.worktree.is_removed
+        };
+        if needs_spawn {
+            let (cols, rows) = self.tabs[idx].last_inner_size;
             let size = PtySize {
                 rows,
                 cols,
                 pixel_width: 0,
                 pixel_height: 0,
             };
-            match PtySession::spawn(&tab.worktree.path, size) {
-                Ok(s) => tab.session = Some(s),
+            let cwd = self.tabs[idx].worktree.path.clone();
+            let skip = self.skip_permissions;
+            match spawn_claude(&cwd, size, skip) {
+                Ok(s) => self.tabs[idx].session = Some(s),
                 Err(_) => {}
             }
         }
@@ -371,7 +404,7 @@ impl App {
         for new_wt in &new_list {
             if !self.tabs.iter().any(|t| t.worktree.path == new_wt.path) {
                 let session = if new_wt.is_active_ws {
-                    PtySession::spawn(&new_wt.path, INITIAL_SIZE).ok()
+                    spawn_claude(&new_wt.path, INITIAL_SIZE, self.skip_permissions).ok()
                 } else {
                     None
                 };
@@ -426,6 +459,51 @@ impl App {
         } else {
             self.active_tab = 0;
         }
+    }
+
+    /// Spawn a `claude` PTY in `cwd` with the app's `skip_permissions` setting.
+    ///
+    /// Intended for call sites in `main.rs` (e.g. the exit-modal restart path)
+    /// that cannot call the private free function `spawn_claude`.
+    pub fn spawn_session(
+        &self,
+        cwd: &std::path::Path,
+        size: PtySize,
+    ) -> anyhow::Result<PtySession> {
+        spawn_claude(cwd, size, self.skip_permissions)
+    }
+
+    /// Spawn a new `claude` process in the current tab's worktree directory.
+    ///
+    /// - If the current tab already has a live session, does nothing.
+    /// - If the session is absent or has exited, spawns a new one and clears
+    ///   `exited_modal`.
+    pub fn spawn_new_claude_in_tab(&mut self) -> anyhow::Result<()> {
+        let idx = self.active_tab;
+        if idx >= self.tabs.len() {
+            return Ok(());
+        }
+        // Check liveness without holding a mutable borrow past the spawn call.
+        let is_alive = {
+            let tab = &self.tabs[idx];
+            tab.session.is_some() && tab.exited_modal.is_none()
+        };
+        if is_alive {
+            return Ok(());
+        }
+        let cwd = self.tabs[idx].worktree.path.clone();
+        let (cols, rows) = self.tabs[idx].last_inner_size;
+        let size = PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+        let skip = self.skip_permissions;
+        let session = spawn_claude(&cwd, size, skip)?;
+        self.tabs[idx].session = Some(session);
+        self.tabs[idx].exited_modal = None;
+        Ok(())
     }
 
     /// Refresh named agents for all tabs, spawning background token parses.
@@ -486,6 +564,8 @@ mod tests {
             git_root: None,
             token_tx,
             token_rx,
+            skip_permissions: false,
+            prefix_active: false,
         }
     }
 

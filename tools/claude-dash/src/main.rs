@@ -18,8 +18,12 @@ use std::io;
 use std::time::Duration;
 
 use anyhow::Context;
+use clap::Parser;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
+        MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -29,33 +33,45 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use app::{App, SlotKind, SCROLL_STEP, WORKTREE_POLL_SECS};
 use ui::PAGE_SCROLL;
 
+/// Tmux-style TUI multiplexer for Claude worktrees.
+#[derive(Parser, Debug)]
+#[command(name = "claude-dash", about = "Claude worktree TUI multiplexer")]
+struct Cli {
+    /// Pass `--dangerously-skip-permissions` to every spawned `claude` process.
+    #[arg(long)]
+    dangerously_skip_permissions: bool,
+}
+
 /// Target frame budget in milliseconds (~100 fps, keeping PTY responsive).
 const FRAME_MS: u64 = 10;
 /// `crossterm::event::poll` timeout per iteration.
 const POLL_MS: u64 = 5;
 
 fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let mut stderr = io::stderr();
-        let _ = execute!(stderr, LeaveAlternateScreen);
+        let _ = execute!(stderr, LeaveAlternateScreen, DisableMouseCapture);
         default_hook(info);
     }));
 
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+        .context("enter alternate screen")?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new()?;
+    let mut app = App::new(cli.dangerously_skip_permissions)?;
 
     let result = run_loop(&mut terminal, &mut app);
 
     let _ = disable_raw_mode();
-    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture);
     let _ = terminal.show_cursor();
 
     result
@@ -150,54 +166,70 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
                 return handle_modal_key(app, key);
             }
 
-            // --- Ctrl+Q — quit app (always, regardless of slot) ---
+            // --- Ctrl+Q — quit app (always, regardless of slot or prefix mode) ---
             if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 app.should_quit = true;
                 return Ok(());
             }
 
-            // --- Tab navigation (Ctrl+[ / Ctrl+]) ---
-            if key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let new_idx = app.active_tab.saturating_sub(1);
-                app.activate_tab(new_idx);
-                return Ok(());
-            }
-            if key.code == KeyCode::Char(']') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let new_idx = (app.active_tab + 1).min(app.tabs.len().saturating_sub(1));
-                app.activate_tab(new_idx);
+            // --- Prefix mode: consume the next key and dispatch a command ---
+            if app.prefix_active {
+                app.prefix_active = false;
+                match key.code {
+                    // '1'–'9' → switch worktree tab (0-indexed), clamped.
+                    KeyCode::Char(c @ '1'..='9') => {
+                        let idx = (c as usize) - ('1' as usize);
+                        let clamped = idx.min(app.tabs.len().saturating_sub(1));
+                        app.activate_tab(clamped);
+                    }
+                    // '0' → switch to tab index 9 (10th), clamped.
+                    KeyCode::Char('0') => {
+                        let clamped = 9usize.min(app.tabs.len().saturating_sub(1));
+                        app.activate_tab(clamped);
+                    }
+                    // 'n' → spawn new claude in current tab.
+                    KeyCode::Char('n') => {
+                        app.spawn_new_claude_in_tab()?;
+                    }
+                    // 'q'–'p' row → switch agent slot within the current tab.
+                    KeyCode::Char(c) => {
+                        let slot: Option<usize> = match c {
+                            'q' => Some(0),
+                            'w' => Some(1),
+                            'e' => Some(2),
+                            'r' => Some(3),
+                            't' => Some(4),
+                            'y' => Some(5),
+                            'u' => Some(6),
+                            'i' => Some(7),
+                            'o' => Some(8),
+                            'p' => Some(9),
+                            // Unrecognised char → cancel (prefix_active already reset).
+                            _ => None,
+                        };
+                        if let Some(s) = slot {
+                            switch_agent_slot(app, s);
+                        }
+                    }
+                    // Esc or any other key → cancel.
+                    _ => {}
+                }
                 return Ok(());
             }
 
-            // --- Slot selection (Ctrl+1–9) ---
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                if let KeyCode::Char(c) = key.code {
-                    if c == '1' {
-                        // Ctrl+1 → Main slot.
-                        if let Some(tab) = app.active_mut() {
-                            tab.active_slot = SlotKind::Main;
-                            tab.agent_view = None;
-                        }
-                        return Ok(());
-                    }
-                    if ('2'..='9').contains(&c) {
-                        let agent_idx = (c as usize) - ('2' as usize);
-                        if let Some(tab) = app.active_mut() {
-                            if agent_idx < tab.named_agents.len() {
-                                tab.open_agent_view(agent_idx);
-                            }
-                        }
-                        return Ok(());
-                    }
-                }
+            // --- Ctrl+B — activate prefix mode; do NOT forward to PTY ---
+            if key.code == KeyCode::Char('b') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                app.prefix_active = true;
+                return Ok(());
             }
 
             // --- Slot-specific key handling ---
-            let active_slot = app
+            let active_named = app
                 .active()
                 .map(|t| matches!(t.active_slot, SlotKind::Named(_)))
                 .unwrap_or(false);
 
-            if active_slot {
+            if active_named {
                 // Named slot: consume scroll keys; ignore others (no PTY forward).
                 handle_agent_scroll(app, key);
                 return Ok(());
@@ -213,8 +245,115 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
             }
         }
 
+        // --- Mouse events ---
+        Event::Mouse(mouse) => {
+            let is_named = app
+                .active()
+                .map(|t| matches!(t.active_slot, SlotKind::Named(_)))
+                .unwrap_or(false);
+
+            if is_named {
+                handle_agent_mouse_scroll(app, mouse);
+            } else {
+                forward_mouse_to_pty(app, mouse)?;
+            }
+        }
+
         Event::Resize(_, _) => {}
         _ => {}
+    }
+    Ok(())
+}
+
+/// Switch the active tab to the given agent `slot`.
+///
+/// Slot 0 is the main PTY; slots 1–N are named agents (0-indexed in
+/// `named_agents`).  Out-of-range slots are silently ignored.
+fn switch_agent_slot(app: &mut App, slot: usize) {
+    if let Some(tab) = app.active_mut() {
+        if slot == 0 {
+            tab.active_slot = SlotKind::Main;
+            tab.agent_view = None;
+        } else {
+            let agent_idx = slot - 1;
+            if agent_idx < tab.named_agents.len() {
+                tab.open_agent_view(agent_idx);
+            }
+        }
+    }
+}
+
+/// Handle mouse scroll events while a Named (JSONL) slot is active.
+fn handle_agent_mouse_scroll(app: &mut App, mouse: crossterm::event::MouseEvent) {
+    let tab = match app.tabs.get_mut(app.active_tab) {
+        Some(t) => t,
+        None => return,
+    };
+    let view = match tab.agent_view.as_mut() {
+        Some(v) => v,
+        None => return,
+    };
+    let total_lines = view.rendered_lines.len();
+    let panel_height = tab.last_inner_size.1 as usize;
+    let max_scroll = total_lines.saturating_sub(panel_height);
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            view.scroll_offset = view.scroll_offset.saturating_sub(SCROLL_STEP);
+        }
+        MouseEventKind::ScrollDown => {
+            view.scroll_offset = view
+                .scroll_offset
+                .saturating_add(SCROLL_STEP)
+                .min(max_scroll);
+        }
+        _ => {}
+    }
+}
+
+/// Encode a mouse event as an X10 VT sequence and write it to the active PTY.
+///
+/// Panel inner origin (fixed layout): column 1, row 3
+/// (tab bar 1 row + slot row 1 row + top border 1 row; left border 1 col).
+///
+/// X10 encoding: `ESC [ M <Cb> <Cx> <Cy>` where each byte has 32 added.
+/// Coordinates are 1-indexed; max supported coordinate is 223 (255 − 32).
+fn forward_mouse_to_pty(
+    app: &mut App,
+    mouse: crossterm::event::MouseEvent,
+) -> anyhow::Result<()> {
+    const PANEL_COL: u16 = 1;
+    const PANEL_ROW: u16 = 3;
+
+    if mouse.column < PANEL_COL || mouse.row < PANEL_ROW {
+        return Ok(());
+    }
+    let pty_x = mouse.column - PANEL_COL; // 0-indexed relative to panel inner
+    let pty_y = mouse.row - PANEL_ROW;
+
+    // X10 byte = (1-indexed coord) + 32.  Max 1-indexed coord = 255 − 32 = 223.
+    // pty_x is 0-indexed, so 1-indexed = pty_x + 1.  Bound: pty_x + 1 ≤ 223
+    // → pty_x ≤ 222.
+    if pty_x > 222 || pty_y > 222 {
+        return Ok(());
+    }
+    let cx = (pty_x + 33) as u8; // (pty_x + 1) + 32
+    let cy = (pty_y + 33) as u8;
+
+    let cb: u8 = match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => 32,   // button 0 + 32
+        MouseEventKind::Down(MouseButton::Middle) => 33, // button 1 + 32
+        MouseEventKind::Down(MouseButton::Right) => 34,  // button 2 + 32
+        MouseEventKind::Up(_) => 35,                     // release (3 + 32)
+        MouseEventKind::ScrollUp => 96,                  // wheel up (64 + 32)
+        MouseEventKind::ScrollDown => 97,                // wheel down (65 + 32)
+        _ => return Ok(()),
+    };
+
+    let bytes = [0x1b_u8, b'[', b'M', cb, cx, cy];
+    if let Some(tab) = app.tabs.get_mut(app.active_tab) {
+        if let Some(ref mut s) = tab.session {
+            s.write(&bytes)?;
+        }
     }
     Ok(())
 }
@@ -278,18 +417,21 @@ fn handle_modal_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::R
 
         // [R] Restart — only when worktree is not removed.
         KeyCode::Char('r') | KeyCode::Char('R') if !is_removed => {
-            let tab = &mut app.tabs[idx];
-            tab.exited_modal = None;
-            let (cols, rows) = tab.last_inner_size;
+            // Read fields before taking a mutable borrow so app.spawn_session
+            // (which immutably borrows self) does not conflict.
+            let (cols, rows) = app.tabs[idx].last_inner_size;
+            let cwd = app.tabs[idx].worktree.path.clone();
             let size = PtySize {
                 rows,
                 cols,
                 pixel_width: 0,
                 pixel_height: 0,
             };
-            let cwd = tab.worktree.path.clone();
+            let new_session = app.spawn_session(&cwd, size)?;
+            let tab = &mut app.tabs[idx];
+            tab.exited_modal = None;
             tab.vt.resize(cols, rows);
-            tab.session = Some(pty::PtySession::spawn(&cwd, size)?);
+            tab.session = Some(new_session);
         }
 
         // [X] Close tab — drop the tab.

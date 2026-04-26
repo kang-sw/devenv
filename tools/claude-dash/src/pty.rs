@@ -23,11 +23,26 @@ pub struct PtySession {
 impl PtySession {
     /// Spawn `claude` in `cwd` at the given PTY dimensions.
     pub fn spawn(cwd: &std::path::Path, size: PtySize) -> anyhow::Result<Self> {
+        Self::spawn_with_args(cwd, size, &[])
+    }
+
+    /// Spawn `claude` with extra command-line arguments in `cwd`.
+    ///
+    /// Use this when you need flags such as `--dangerously-skip-permissions`.
+    /// `args` is appended after the binary name in order.
+    pub fn spawn_with_args(
+        cwd: &std::path::Path,
+        size: PtySize,
+        args: &[&str],
+    ) -> anyhow::Result<Self> {
         let pty_system = portable_pty::native_pty_system();
         let pair = pty_system.openpty(size)?;
 
         let mut cmd = CommandBuilder::new("claude");
         cmd.cwd(cwd);
+        for arg in args {
+            cmd.arg(arg);
+        }
         // Env inherits from the parent process by default.
 
         let child = pair.slave.spawn_command(cmd)?;
