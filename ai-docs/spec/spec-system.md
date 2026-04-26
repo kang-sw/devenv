@@ -96,7 +96,7 @@ The date records when the gap was first noted.
 
 Permanent behavioral invariants belong in body prose, not in any callout.
 
-### 🚧 Feature Removal Convention {#260423-spec-removal-commit-convention}
+### Feature Removal Convention {#260423-spec-removal-commit-convention}
 
 When a commit removes a feature from the codebase, the commit's `## Spec` section includes a `removed: <spec-stem>` line for each deleted feature. The spec-updater detects this line and adds the corresponding spec entry to the `### Pending removal` report section rather than auto-deleting it. The caller then removes the spec entry manually after confirming the removal report.
 
@@ -149,7 +149,7 @@ For each `🚧` occurrence, the agent:
 
 The agent can target a single stem or scan all files under `ai-docs/spec/`.
 
-### 🚧 Pending-Removal Report {#260423-spec-updater-pending-removal}
+### Pending-Removal Report {#260423-spec-updater-pending-removal}
 
 When a commit's `## Spec` section contains a `removed: <spec-stem>` line, the spec-updater detects the removal intent and routes the corresponding spec entry to one of two report sections — never deleting automatically:
 
