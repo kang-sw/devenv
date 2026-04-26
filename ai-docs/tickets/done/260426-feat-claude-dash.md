@@ -84,3 +84,14 @@ Deliverable: named agents from the ws framework are browsable without leaving cl
 - **Scrollbar**: vertical scrollbar on the read-only JSONL panel, matching claude-watch's implementation.
 
 Deliverable: all lifecycle edge cases are handled; UI matches claude-watch quality.
+
+### Result (cc32964) - 2026-04-27
+
+All 4 phases implemented on `implement/claude-dash` (ad70faa–cc32964).
+
+- Phase 1 (ad70faa): PTY spawn via `portable-pty`, VT screen via `termwiz::surface::Surface` with manual Action→Change translation, ratatui Buffer rendering, alternate-screen support.
+- Phase 2 (6baf77c): worktree tab bar, per-tab PTY lifecycle, `.claude/worktrees/` auto-spawn, 5-second polling.
+- Phase 3 (2760b6e): named agent panel with read-only JSONL viewer (ported session/parser/renderer from claude-watch), agent registry discovery.
+- Phase 4 (3b26cd1): exit modal [R]/[X], `[removed]` tab indicator, token count display, precise scrollbar with `visual_rows` row cache.
+- Additional: `ws-call-named-agent` gained retry-with-backoff (7343b30); `ws-interrupt-named-agent` dead-branch fix (de9fb80).
+- 57 unit tests pass. All correctness, fit, and test reviewers clean.

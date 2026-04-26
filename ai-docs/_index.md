@@ -165,7 +165,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260426-feat-claude-watch-mouse` | done | claude-watch mouse support — scroll wheel + left-click session selection + event-drain loop perf fix |
 | `260426-perf-claude-watch-scroll-cache` | done | claude-watch scroll perf — cache total visual rows; Phase 2 (Arc clone) dropped (ratatui ownership constraint) |
 | `260426-feat-claude-watch-features` | done | claude-watch sprint — token count display, headless/-p color distinction, worktree session discovery, vertical scrollbar, on-demand background parsing; ws-orchestration output persistence + background mode |
-| `260426-feat-claude-dash` | todo | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; 4 phases |
+| `260426-feat-claude-dash` | done | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; all 4 phases complete |
 
 ## Session Notes
 
