@@ -2,12 +2,14 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::Span,
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
+
 use crate::app::App;
 
-pub fn draw(frame: &mut Frame, app: &mut App) {
+/// Draw the full TUI layout — pure read of `App` state, no side effects.
+pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let chunks = Layout::horizontal([
         Constraint::Percentage(30),
@@ -49,16 +51,10 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let inner_height = area.height.saturating_sub(2);
-    app.content_panel_height = inner_height;
-
-    // Apply scroll-to-bottom when flagged.
-    if app.needs_scroll_to_bottom {
-        app.needs_scroll_to_bottom = false;
-        let max = (app.rendered_lines.len() as u16).saturating_sub(inner_height);
-        app.scroll_offset = max;
-    }
+fn draw_content_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    // content_panel_height is maintained by the event loop via
+    // App::update_content_height — we only read it here.
+    let inner_height = app.content_panel_height;
 
     let title = app
         .selected_session()
@@ -73,16 +69,19 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
         } else {
             "Loading…"
         };
-        let p = Paragraph::new(msg).block(block);
-        frame.render_widget(p, area);
+        frame.render_widget(Paragraph::new(msg).block(block), area);
         return;
     }
 
-    let max_scroll = (app.rendered_lines.len() as u16).saturating_sub(inner_height);
-    let scroll = app.scroll_offset.min(max_scroll);
+    // Clamp scroll to valid range using usize arithmetic; cast only for the
+    // Paragraph::scroll call which requires (u16, u16).
+    let max_scroll = app.rendered_lines.len().saturating_sub(inner_height);
+    let scroll = app.scroll_offset.min(max_scroll).min(u16::MAX as usize) as u16;
 
-    let text: Vec<Line> = app.rendered_lines.clone();
-    let p = Paragraph::new(text)
+    // Clone the pre-rendered lines into the Paragraph.  Line<'static> spans
+    // own their content as Strings so this allocates, but the session content
+    // is only re-rendered when the file changes — not every frame.
+    let p = Paragraph::new(app.rendered_lines.clone())
         .block(block)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));

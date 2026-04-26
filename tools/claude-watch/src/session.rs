@@ -45,7 +45,11 @@ pub fn find_git_root() -> Option<PathBuf> {
 }
 
 /// Search agent JSON files under `.git/ws@<repo>/agents/` for a UUID match.
-/// Returns the filename stem (agent name) when found.
+///
+/// The WS framework stores the session UUID in the `"uuid"` field of each
+/// agent JSON.  Only this field is checked — a substring search on the raw
+/// file text would risk false positives from UUIDs that appear in other
+/// fields (e.g. `previous_session_id`, log messages).
 fn find_agent_name(uuid: &str, git_root: &Path) -> Option<String> {
     let repo_name = git_root.file_name()?.to_string_lossy().into_owned();
     let agents_dir = git_root
@@ -63,9 +67,14 @@ fn find_agent_name(uuid: &str, git_root: &Path) -> Option<String> {
             continue;
         }
         let content = fs::read_to_string(&path).unwrap_or_default();
-        if content.contains(uuid) {
-            if let Some(stem) = path.file_stem() {
-                return Some(stem.to_string_lossy().into_owned());
+        // Parse the JSON and check only the "uuid" field to avoid false
+        // positives from UUIDs referenced in other fields (C-4 fix).
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            let stored = json.get("uuid").and_then(|v| v.as_str());
+            if stored == Some(uuid) {
+                if let Some(stem) = path.file_stem() {
+                    return Some(stem.to_string_lossy().into_owned());
+                }
             }
         }
     }
@@ -86,21 +95,29 @@ fn scan_jsonl_in_dir(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Collect .jsonl files from the Claude projects directory.
-/// Non-Windows: derive path from CWD (replace '/' with '-').
-/// Windows: scan all subdirectories and match by UUID.
+///
+/// Non-Windows: derive the project sub-directory from CWD by replacing every
+/// `/` with `-` (matching Claude CLI's own path-escaping scheme).
+///
+/// Windows: Claude CLI's escaping differs for Windows paths (`C:\...`), so
+/// the project sub-directory cannot be reliably derived.  Instead, all
+/// `.jsonl` files from all project sub-directories are returned.  This is
+/// intentional and matches the spec: "scan all `~/.claude/projects/`
+/// subdirectories; match UUIDs across all of them regardless of subdirectory
+/// name."
 #[cfg(not(windows))]
 pub fn collect_jsonl_files(claude_projects: &Path) -> Vec<PathBuf> {
     let cwd = match std::env::current_dir() {
         Ok(d) => d,
         Err(_) => return vec![],
     };
-    // Escape: replace every '/' with '-'
     let escaped = cwd.to_string_lossy().replace('/', "-");
     scan_jsonl_in_dir(&claude_projects.join(&escaped))
 }
 
 #[cfg(windows)]
 pub fn collect_jsonl_files(claude_projects: &Path) -> Vec<PathBuf> {
+    // All sessions across all projects — intentional on Windows (see above).
     let mut results = Vec::new();
     if let Ok(entries) = fs::read_dir(claude_projects) {
         for entry in entries.flatten() {

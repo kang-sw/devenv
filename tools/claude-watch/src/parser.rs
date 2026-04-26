@@ -37,7 +37,7 @@ fn content_to_text(content: &Value) -> String {
                 let obj = item.as_object()?;
                 let ty = obj.get("type")?.as_str()?;
                 match ty {
-                    "text" => obj.get("text")?.as_str().map(str::to_string),
+                    "text" => obj.get("text").and_then(|v| v.as_str()).map(str::to_string),
                     _ => None,
                 }
             })
@@ -47,6 +47,8 @@ fn content_to_text(content: &Value) -> String {
     }
 }
 
+/// Truncate `s` to at most `max` bytes, retreating to the previous UTF-8
+/// character boundary and appending "…" when truncated.
 fn truncate_str(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -72,7 +74,13 @@ fn parse_content_items(content: &Value) -> Vec<ContentItem> {
             let ty = obj.get("type")?.as_str()?;
             match ty {
                 "text" => {
-                    let text = obj.get("text")?.as_str().unwrap_or("").to_string();
+                    // Use and_then so a missing "text" key yields "" rather than
+                    // dropping the item entirely (C-6).
+                    let text = obj
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     Some(ContentItem::Text(text))
                 }
                 "thinking" => {
@@ -149,10 +157,7 @@ pub fn parse_turns(path: &Path) -> Vec<Turn> {
             "user" => {
                 if let Some(msg) = obj.get("message") {
                     let content = msg.get("content").cloned().unwrap_or(Value::Null);
-                    let text = content_to_text(&content);
-                    if !text.is_empty() {
-                        turns.push(Turn::User(text));
-                    }
+                    parse_user_content(content, &mut turns);
                 }
             }
             "assistant" => {
@@ -164,10 +169,15 @@ pub fn parse_turns(path: &Path) -> Vec<Turn> {
                     }
                 }
             }
+            // Fallback handler for top-level tool_result entries (older format
+            // variants).  In practice, tool results appear inside user-message
+            // content arrays; see `parse_user_content`.
             "tool_result" => {
                 let content = obj.get("content").cloned().unwrap_or(Value::Null);
                 let text = extract_tool_result(&content);
-                turns.push(Turn::ToolResult(text));
+                if !text.is_empty() {
+                    turns.push(Turn::ToolResult(text));
+                }
             }
             // All unknown top-level types are silently ignored.
             _ => {}
@@ -175,4 +185,99 @@ pub fn parse_turns(path: &Path) -> Vec<Turn> {
     }
 
     turns
+}
+
+/// Dispatch user-message content.
+///
+/// Tool results arrive as `{"type":"tool_result", ...}` items inside the
+/// user-message content array — not as top-level JSONL entries — per the
+/// Claude API/CLI format.  This function extracts them and emits separate
+/// Turn::ToolResult entries so they are rendered in the content panel.
+fn parse_user_content(content: Value, turns: &mut Vec<Turn>) {
+    match content {
+        Value::Array(arr) => {
+            let mut text_parts: Vec<String> = Vec::new();
+
+            for item in &arr {
+                let item_obj = match item.as_object() {
+                    Some(o) => o,
+                    None => continue,
+                };
+                match item_obj.get("type").and_then(|v| v.as_str()) {
+                    Some("tool_result") => {
+                        let tr_content =
+                            item_obj.get("content").cloned().unwrap_or(Value::Null);
+                        let text = extract_tool_result(&tr_content);
+                        if !text.is_empty() {
+                            turns.push(Turn::ToolResult(text));
+                        }
+                    }
+                    Some("text") => {
+                        if let Some(t) =
+                            item_obj.get("text").and_then(|v| v.as_str())
+                        {
+                            text_parts.push(t.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if !text_parts.is_empty() {
+                turns.push(Turn::User(text_parts.join("\n")));
+            }
+        }
+        other => {
+            // Plain-string or other content shape — treat as user text.
+            let text = content_to_text(&other);
+            if !text.is_empty() {
+                turns.push(Turn::User(text));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_str;
+
+    #[test]
+    fn truncate_within_limit_is_unchanged() {
+        assert_eq!(truncate_str("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_exact_limit_is_unchanged() {
+        assert_eq!(truncate_str("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_one_byte_over_adds_ellipsis() {
+        assert_eq!(truncate_str("hello", 4), "hell…");
+    }
+
+    #[test]
+    fn truncate_empty_string() {
+        assert_eq!(truncate_str("", 0), "");
+        assert_eq!(truncate_str("", 5), "");
+    }
+
+    #[test]
+    fn truncate_multibyte_backs_to_char_boundary() {
+        // "é" is 2 bytes; max=2 splits inside the char, must back to index 1 ("h").
+        let s = "hé";
+        let result = truncate_str(s, 2);
+        assert_eq!(result, "h…");
+    }
+
+    #[test]
+    fn truncate_single_multibyte_char_at_max_1() {
+        // "é" is 2 bytes, max=1 → backs to index 0, empty prefix → "…"
+        let result = truncate_str("é", 1);
+        assert_eq!(result, "…");
+    }
 }

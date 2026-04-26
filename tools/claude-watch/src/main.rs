@@ -9,6 +9,11 @@ use app::App;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use std::time::Duration;
 
+/// How often the event loop polls for terminal input.
+const EVENT_POLL_MS: u64 = 100;
+/// How often the session list is refreshed from disk.
+const SESSION_REFRESH_SECS: u64 = 1;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = ratatui::init();
     let result = run_app(&mut terminal);
@@ -20,19 +25,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     result
 }
 
-fn run_app(
-    terminal: &mut ratatui::DefaultTerminal,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
-
-    // Load the initially selected session immediately.
     app.load_selected_session();
 
     loop {
-        terminal.draw(|f| ui::draw(f, &mut app))?;
+        // Resolve content height and any pending scroll-to-bottom BEFORE draw
+        // so the draw function remains a pure read of App state.
+        let panel_height = crossterm::terminal::size()
+            .map(|(_, h)| h.saturating_sub(2) as usize)
+            .unwrap_or(app.content_panel_height);
+        app.update_content_height(panel_height);
 
-        // Poll with a 100 ms timeout so background refresh can fire.
-        if event::poll(Duration::from_millis(100))? {
+        terminal.draw(|f| ui::draw(f, &app))?;
+
+        // Poll with a short timeout to allow background refresh.
+        if event::poll(Duration::from_millis(EVENT_POLL_MS))? {
             if let Event::Key(key) = event::read()? {
                 match (key.modifiers, key.code) {
                     (_, KeyCode::Char('q')) => app.should_quit = true,
@@ -56,14 +64,14 @@ fn run_app(
             break;
         }
 
-        // Refresh session list + content every ~1 second.
-        if app.last_refresh.elapsed() >= Duration::from_secs(1) {
+        // Refresh session list + live-tail content at ~1 s intervals.
+        if app.last_refresh.elapsed() >= Duration::from_secs(SESSION_REFRESH_SECS) {
             app.refresh_sessions();
             app.maybe_reload_content();
             app.last_refresh = std::time::Instant::now();
         }
 
-        // Poll running processes every ~2 seconds.
+        // Poll running processes at ~2 s intervals.
         app.poll_processes_if_due();
     }
 
