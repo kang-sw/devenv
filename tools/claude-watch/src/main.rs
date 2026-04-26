@@ -102,7 +102,11 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
             }
             Err(_) => {
                 // Keep previously cached dimensions on transient failure.
-                app.update_content_height(app.content_panel_height);
+                // Do NOT call update_content_height here: right_panel_inner_width
+                // may still be 0 from initialisation, and consuming
+                // needs_scroll_to_bottom with pw=0 would place the viewport
+                // at the wrong position.  The flag is resolved on the next
+                // successful size query.
             }
         }
 

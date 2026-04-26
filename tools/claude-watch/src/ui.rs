@@ -52,10 +52,6 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 }
 
 fn draw_content_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    // content_panel_height is maintained by the event loop via
-    // App::update_content_height — we only read it here.
-    let inner_height = app.content_panel_height;
-
     let title = app
         .selected_session()
         .map(|s| format!(" {} ", s.label))
@@ -76,25 +72,12 @@ fn draw_content_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
     // Clamp scroll to valid range using usize arithmetic; cast only for the
     // Paragraph::scroll call which requires (u16, u16).
     //
-    // max_scroll is computed via a reverse visual-row walk so that wrapped
-    // lines are accounted for: we find the lowest logical-line offset such
-    // that the content below it fills the panel.
+    // Use the actual inner width from the layout rect so that max_scroll is
+    // computed with the same panel width that ratatui uses for wrapping —
+    // avoiding the rounding divergence between main.rs's manual calculation
+    // and ratatui's layout engine.
     let pw = area.width.saturating_sub(2) as usize;
-    let max_scroll = {
-        let mut visual_acc: usize = 0;
-        let mut max = app.rendered_lines.len();
-        for (i, line) in app.rendered_lines.iter().enumerate().rev() {
-            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            let vr = if pw == 0 || w == 0 { 1 } else { (w + pw - 1) / pw };
-            if visual_acc + vr > inner_height {
-                max = i + 1;
-                break;
-            }
-            visual_acc += vr;
-            max = i;
-        }
-        max
-    };
+    let max_scroll = app.scroll_to_bottom_offset_for_width(pw);
     let scroll = app.scroll_offset.min(max_scroll).min(u16::MAX as usize) as u16;
 
     // Clone the pre-rendered lines into the Paragraph.  Line<'static> spans

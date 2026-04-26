@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
+use unicode_width::UnicodeWidthStr;
 
 use crate::parser::parse_turns;
 use crate::process::find_active_uuids;
@@ -46,7 +47,7 @@ pub struct App {
     pub(crate) left_panel_width: u16,
     /// Inner width of the right (content) panel in terminal columns,
     /// excluding the block borders.  Updated by the event loop.
-    pub right_panel_inner_width: u16,
+    pub(crate) right_panel_inner_width: u16,
     /// When set, the next `update_content_height` call pins scroll to bottom.
     pub(crate) needs_scroll_to_bottom: bool,
     /// UUID of the session currently loaded in the right panel.
@@ -62,13 +63,20 @@ pub struct App {
 }
 
 /// Return the number of visual rows a logical `line` occupies when rendered
-/// inside a panel of `panel_width` columns.  Matches ratatui's word-wrap
-/// behaviour for `Wrap { trim: false }` at the character level.
-fn visual_rows(line: &Line, panel_width: usize) -> usize {
+/// inside a panel of `panel_width` columns.
+///
+/// Uses Unicode display width (via `unicode-width`) so that full-width CJK
+/// characters (2 columns) and zero-width combining characters (0 columns) are
+/// counted correctly.  The calculation is character-boundary wrapping
+/// (`⌈display_width / panel_width⌉`); ratatui's `Wrap { trim: false }` wraps
+/// at word boundaries, so this is an approximation that can undercount rows
+/// when a word boundary forces an early break.  For the purpose of
+/// scroll-to-bottom estimation the approximation is acceptable.
+pub(crate) fn visual_rows(line: &Line, panel_width: usize) -> usize {
     if panel_width == 0 {
         return 1;
     }
-    let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+    let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
     if w == 0 { 1 } else { (w + panel_width - 1) / panel_width }
 }
 
@@ -143,10 +151,14 @@ impl App {
     // Scroll
     // -----------------------------------------------------------------------
 
-    /// Return the logical-line offset that pins the viewport to the bottom,
-    /// accounting for lines that wrap across multiple visual rows.
-    pub fn scroll_to_bottom_offset(&self) -> usize {
-        let pw = self.right_panel_inner_width as usize;
+    /// Core reverse-walk algorithm: return the lowest logical-line offset such
+    /// that the content from that offset downward fills `content_panel_height`
+    /// visual rows when rendered in a panel of `pw` columns.
+    ///
+    /// Accepts `pw` as an explicit parameter so callers with access to the
+    /// actual ratatui layout rect (e.g. `ui.rs`) can pass the true inner width
+    /// rather than the cached `right_panel_inner_width` approximation.
+    pub fn scroll_to_bottom_offset_for_width(&self, pw: usize) -> usize {
         let mut visual_acc: usize = 0;
         let mut offset = self.rendered_lines.len();
         for (i, line) in self.rendered_lines.iter().enumerate().rev() {
@@ -159,6 +171,13 @@ impl App {
             offset = i;
         }
         offset
+    }
+
+    /// Convenience wrapper that uses the cached `right_panel_inner_width`.
+    /// Prefer `scroll_to_bottom_offset_for_width` when the exact panel rect is
+    /// available.
+    pub fn scroll_to_bottom_offset(&self) -> usize {
+        self.scroll_to_bottom_offset_for_width(self.right_panel_inner_width as usize)
     }
 
     /// Called by the event loop before each draw with the current inner panel
