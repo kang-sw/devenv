@@ -1,9 +1,12 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
-    text::Span,
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    text::{Line, Span},
+    widgets::{
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Wrap,
+    },
+    Frame,
 };
 
 use crate::app::{App, LEFT_PANEL_PERCENT};
@@ -22,19 +25,42 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_content_panel(frame, app, chunks[1]);
 }
 
+/// Format a token count into a human-readable string.
+fn format_tokens(n: u64) -> String {
+    if n < 1_000 {
+        format!("{}", n)
+    } else if n < 1_000_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    }
+}
+
 fn draw_session_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let items: Vec<ListItem> = app
         .sessions
         .iter()
         .map(|s| {
             let ts = s.modified.format("%m/%d %H:%M").to_string();
-            let text = format!("{} ({})", s.label, ts);
             let style = if s.active {
                 Style::default().fg(Color::Green)
             } else {
-                Style::default()
+                match s.is_headless {
+                    None => Style::default().fg(Color::DarkGray), // not yet parsed
+                    Some(true) => Style::default().fg(Color::White), // -p / headless
+                    Some(false) => Style::default().fg(Color::Yellow), // interactive
+                }
             };
-            ListItem::new(Span::styled(text, style))
+            let token_text = if let Some(n) = s.token_total {
+                format!(" [{}]", format_tokens(n))
+            } else {
+                String::new()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(s.label.clone(), style),
+                Span::styled(token_text, Style::default().fg(Color::Cyan)),
+                Span::styled(format!(" ({})", ts), style),
+            ]))
         })
         .collect();
 
@@ -74,6 +100,7 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
         .unwrap_or_else(|| " Content ".to_string());
 
     let block = Block::default().title(title).borders(Borders::ALL);
+    let inner = block.inner(area);
 
     if app.rendered_lines.is_empty() {
         let msg = if app.sessions.is_empty() {
@@ -99,4 +126,15 @@ fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
         .scroll((scroll, 0));
 
     frame.render_widget(p, area);
+
+    if max_scroll > 0 {
+        let mut scrollbar_state = ScrollbarState::new(max_scroll + app.content_panel_height)
+            .viewport_content_length(app.content_panel_height)
+            .position(app.scroll_offset.min(max_scroll));
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            inner,
+            &mut scrollbar_state,
+        );
+    }
 }

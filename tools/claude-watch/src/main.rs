@@ -61,6 +61,7 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
             app.last_refresh = std::time::Instant::now();
         }
         app.poll_processes_if_due();
+        app.poll_token_results();
 
         // Drain all pending events without blocking so input is processed
         // immediately, eliminating up to one frame of latency.
@@ -147,6 +148,7 @@ fn handle_mouse_event(app: &mut App, event: MouseEvent) {
                 app.sessions.len(),
             ) {
                 app.selected = idx;
+                app.enqueue_if_needed(idx);
                 app.needs_scroll_to_bottom = true;
             }
         }

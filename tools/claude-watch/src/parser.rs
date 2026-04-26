@@ -1,6 +1,6 @@
+use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use serde_json::Value;
 
 /// A single content item within an assistant turn.
 #[derive(Debug, Clone)]
@@ -101,7 +101,10 @@ fn parse_content_items(content: &Value) -> Vec<ContentItem> {
                     let input = obj.get("input").cloned().unwrap_or(Value::Null);
                     let raw = serde_json::to_string(&input).unwrap_or_default();
                     let input_preview = truncate_str(&raw, 200);
-                    Some(ContentItem::ToolUse { name, input_preview })
+                    Some(ContentItem::ToolUse {
+                        name,
+                        input_preview,
+                    })
                 }
                 // Unknown content types are silently skipped.
                 _ => None,
@@ -208,17 +211,14 @@ fn parse_user_content(content: Value, turns: &mut Vec<Turn>) {
                 };
                 match item_obj.get("type").and_then(|v| v.as_str()) {
                     Some("tool_result") => {
-                        let tr_content =
-                            item_obj.get("content").cloned().unwrap_or(Value::Null);
+                        let tr_content = item_obj.get("content").cloned().unwrap_or(Value::Null);
                         let text = extract_tool_result(&tr_content);
                         if !text.is_empty() {
                             turns.push(Turn::ToolResult(text));
                         }
                     }
                     Some("text") => {
-                        if let Some(t) =
-                            item_obj.get("text").and_then(|v| v.as_str())
-                        {
+                        if let Some(t) = item_obj.get("text").and_then(|v| v.as_str()) {
                             if !t.is_empty() {
                                 turns.push(Turn::User(t.to_string()));
                             }
