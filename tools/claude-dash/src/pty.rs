@@ -140,8 +140,8 @@ impl Drop for PtySession {
 /// (e.g. lone modifier keys).
 ///
 /// Phase-1 coverage: printable chars, basic control keys, cursor keys,
-/// function keys 1–12.  App-level hotkeys (Ctrl+Q, Ctrl+[, Ctrl+], Ctrl+1–9)
-/// are filtered out by `handle_event` before this function is called.
+/// function keys 1–12.  App-level hotkeys (Ctrl+Q, Ctrl+B) are filtered
+/// out by `handle_event` before this function is called.
 pub fn encode_key(key: crossterm::event::KeyEvent) -> Option<Vec<u8>> {
     use crossterm::event::{KeyCode, KeyModifiers};
 

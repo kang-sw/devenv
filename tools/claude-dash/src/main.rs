@@ -30,7 +30,7 @@ use crossterm::{
 use portable_pty::PtySize;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use app::{App, SlotKind, SCROLL_STEP, WORKTREE_POLL_SECS};
+use app::{AgentView, App, SlotKind, SCROLL_STEP, WORKTREE_POLL_SECS};
 use ui::PAGE_SCROLL;
 
 /// Tmux-style TUI multiplexer for Claude worktrees.
@@ -247,6 +247,18 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
 
         // --- Mouse events ---
         Event::Mouse(mouse) => {
+            // Do not forward mouse to a dead PTY — writing to the master after
+            // the child has exited produces EIO, which would crash the loop
+            // while the exit modal is still displayed.
+            if app
+                .tabs
+                .get(app.active_tab)
+                .map(|t| t.exited_modal.is_some())
+                .unwrap_or(false)
+            {
+                return Ok(());
+            }
+
             let is_named = app
                 .active()
                 .map(|t| matches!(t.active_slot, SlotKind::Named(_)))
@@ -283,6 +295,22 @@ fn switch_agent_slot(app: &mut App, slot: usize) {
     }
 }
 
+/// Adjust `view.scroll_offset` by `step` lines in the given direction,
+/// clamped to `[0, max_scroll]` where `max_scroll` is derived from
+/// `view.rendered_lines.len()` and `panel_height`.
+///
+/// Shared by the keyboard handler (`handle_agent_scroll`) and the mouse
+/// handler (`handle_agent_mouse_scroll`) to avoid duplicating the
+/// max-scroll arithmetic.
+fn scroll_view(view: &mut AgentView, step: usize, up: bool, panel_height: usize) {
+    let max_scroll = view.rendered_lines.len().saturating_sub(panel_height);
+    if up {
+        view.scroll_offset = view.scroll_offset.saturating_sub(step);
+    } else {
+        view.scroll_offset = view.scroll_offset.saturating_add(step).min(max_scroll);
+    }
+}
+
 /// Handle mouse scroll events while a Named (JSONL) slot is active.
 fn handle_agent_mouse_scroll(app: &mut App, mouse: crossterm::event::MouseEvent) {
     let tab = match app.tabs.get_mut(app.active_tab) {
@@ -293,19 +321,10 @@ fn handle_agent_mouse_scroll(app: &mut App, mouse: crossterm::event::MouseEvent)
         Some(v) => v,
         None => return,
     };
-    let total_lines = view.rendered_lines.len();
     let panel_height = tab.last_inner_size.1 as usize;
-    let max_scroll = total_lines.saturating_sub(panel_height);
     match mouse.kind {
-        MouseEventKind::ScrollUp => {
-            view.scroll_offset = view.scroll_offset.saturating_sub(SCROLL_STEP);
-        }
-        MouseEventKind::ScrollDown => {
-            view.scroll_offset = view
-                .scroll_offset
-                .saturating_add(SCROLL_STEP)
-                .min(max_scroll);
-        }
+        MouseEventKind::ScrollUp => scroll_view(view, SCROLL_STEP, true, panel_height),
+        MouseEventKind::ScrollDown => scroll_view(view, SCROLL_STEP, false, panel_height),
         _ => {}
     }
 }
@@ -368,29 +387,12 @@ fn handle_agent_scroll(app: &mut App, key: crossterm::event::KeyEvent) {
         Some(v) => v,
         None => return,
     };
-    let total_lines = view.rendered_lines.len();
     let panel_height = tab.last_inner_size.1 as usize;
-    let max_scroll = total_lines.saturating_sub(panel_height);
-
     match key.code {
-        KeyCode::Up | KeyCode::Char('k') => {
-            view.scroll_offset = view.scroll_offset.saturating_sub(SCROLL_STEP);
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            view.scroll_offset = view
-                .scroll_offset
-                .saturating_add(SCROLL_STEP)
-                .min(max_scroll);
-        }
-        KeyCode::PageUp => {
-            view.scroll_offset = view.scroll_offset.saturating_sub(PAGE_SCROLL);
-        }
-        KeyCode::PageDown => {
-            view.scroll_offset = view
-                .scroll_offset
-                .saturating_add(PAGE_SCROLL)
-                .min(max_scroll);
-        }
+        KeyCode::Up | KeyCode::Char('k') => scroll_view(view, SCROLL_STEP, true, panel_height),
+        KeyCode::Down | KeyCode::Char('j') => scroll_view(view, SCROLL_STEP, false, panel_height),
+        KeyCode::PageUp => scroll_view(view, PAGE_SCROLL, true, panel_height),
+        KeyCode::PageDown => scroll_view(view, PAGE_SCROLL, false, panel_height),
         _ => {}
     }
 }
@@ -406,6 +408,12 @@ fn handle_modal_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::R
     {
         return Ok(());
     }
+
+    // Discard any pending prefix state — the process exited between Ctrl+B and
+    // its second key, so the intended command was never completed.  Clearing
+    // here prevents the first keypress after modal dismissal from being silently
+    // consumed as a stale prefix command.
+    app.prefix_active = false;
 
     let is_removed = app.tabs[idx].worktree.is_removed;
 

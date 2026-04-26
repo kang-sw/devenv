@@ -239,10 +239,11 @@ impl WorktreeTab {
                 view.rendered_lines = rendered_lines;
                 view.loaded_mtime = current_mtime;
                 view.cached_visual_rows = None;
-                // Reset scroll to avoid the scroll_offset diverging when content
-                // shrinks: the stored offset may exceed the new max_scroll,
-                // making subsequent Up/Down keypresses start from a stale value.
-                view.scroll_offset = 0;
+                // scroll_offset is intentionally preserved — the render path
+                // already clamps the displayed scroll to max_scroll, so the
+                // view stays consistent even if content shrinks.  Resetting
+                // here would scroll the user back to the top on every live
+                // refresh, which is the bug we are fixing.
             }
         }
     }
@@ -475,20 +476,12 @@ impl App {
 
     /// Spawn a new `claude` process in the current tab's worktree directory.
     ///
-    /// - If the current tab already has a live session, does nothing.
-    /// - If the session is absent or has exited, spawns a new one and clears
-    ///   `exited_modal`.
+    /// Always force-respawns: if a session is already running it is killed
+    /// (via `PtySession::drop`) before the new one starts.  The exit modal
+    /// is cleared on every call.
     pub fn spawn_new_claude_in_tab(&mut self) -> anyhow::Result<()> {
         let idx = self.active_tab;
         if idx >= self.tabs.len() {
-            return Ok(());
-        }
-        // Check liveness without holding a mutable borrow past the spawn call.
-        let is_alive = {
-            let tab = &self.tabs[idx];
-            tab.session.is_some() && tab.exited_modal.is_none()
-        };
-        if is_alive {
             return Ok(());
         }
         let cwd = self.tabs[idx].worktree.path.clone();
@@ -500,9 +493,12 @@ impl App {
             pixel_height: 0,
         };
         let skip = self.skip_permissions;
+        // Drop any existing session before spawning — PtySession::drop kills
+        // the child process and joins the reader thread.
+        let _ = self.tabs[idx].session.take();
+        self.tabs[idx].exited_modal = None;
         let session = spawn_claude(&cwd, size, skip)?;
         self.tabs[idx].session = Some(session);
-        self.tabs[idx].exited_modal = None;
         Ok(())
     }
 
