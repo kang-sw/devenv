@@ -23,7 +23,7 @@ fi
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 REPO_DIR_NAME=$(basename "$REPO_ROOT")
-REGISTRY_DIR="$REPO_ROOT/.git/ws@$REPO_DIR_NAME/agents"
+REGISTRY_DIR="$(git rev-parse --git-dir)/ws@$REPO_DIR_NAME/agents"
 AGENT_FILE="$REGISTRY_DIR/$AGENT_NAME.json"
 
 if [[ ! -f "$AGENT_FILE" ]]; then
