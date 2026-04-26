@@ -528,8 +528,13 @@ impl App {
             .unwrap_or_else(|| "new".into());
 
         // Spawn before constructing Worktree so cwd can be moved (not cloned)
-        // into the struct literal; also avoids constructing Worktree on error.
-        let session = spawn_claude(&cwd, INITIAL_SIZE, self.skip_permissions)?;
+        // into the struct literal.  Swallow the error — if `claude` is missing
+        // or PTY allocation fails we simply do not open the tab (matching the
+        // `activate_tab` / `reconcile_worktrees` error-handling pattern).
+        let session = match spawn_claude(&cwd, INITIAL_SIZE, self.skip_permissions) {
+            Ok(s) => s,
+            Err(_) => return Ok(()),
+        };
         let worktree = Worktree {
             path: cwd,
             name,
