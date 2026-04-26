@@ -67,19 +67,4 @@ with open(os.path.join(registry_dir, agent_name + ".json"), "w") as f:
     f.write("\n")
 PYEOF
 
-# Write per-agent settings file with PostToolBatch mailbox hook
-cat > "$REGISTRY_DIR/$AGENT_NAME.settings.json" <<'JSON'
-{
-  "hooks": {
-    "PostToolBatch": [{
-      "hooks": [{
-        "type": "command",
-        "command": "ws-agent-check-mailbox",
-        "timeout": 5
-      }]
-    }]
-  }
-}
-JSON
-
 echo "Agent '$AGENT_NAME' registered"

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: ws-send-message <agent-name> <message>" >&2
-  echo "       ws-send-message <agent-name> - <<'MSG' ... MSG" >&2
+  echo "Usage: ws-interrupt-named-agent <agent-name> <message>" >&2
+  echo "       ws-interrupt-named-agent <agent-name> - <<'MSG' ... MSG" >&2
   exit 1
 fi
 
