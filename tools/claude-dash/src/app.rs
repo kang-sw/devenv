@@ -88,6 +88,10 @@ pub struct WorktreeTab {
     pub active_slot: SlotKind,
     /// State for the currently open agent viewer (if active_slot == Named).
     pub agent_view: Option<AgentView>,
+    /// True when this tab was opened by prefix+N (`claude --worktree`).
+    /// `reconcile_worktrees` will claim this tab when the new worktree appears,
+    /// updating its path/name in-place instead of spawning a duplicate tab.
+    pub is_worktree_spawn: bool,
 }
 
 impl WorktreeTab {
@@ -101,6 +105,7 @@ impl WorktreeTab {
             named_agents: Vec::new(),
             active_slot: SlotKind::Main,
             agent_view: None,
+            is_worktree_spawn: false,
         }
     }
 
@@ -419,20 +424,42 @@ impl App {
     pub fn reconcile_worktrees(&mut self, new_list: Vec<Worktree>) {
         // Add new worktrees.
         for new_wt in &new_list {
-            if !self.tabs.iter().any(|t| t.worktree.path == new_wt.path) {
-                let session = if new_wt.is_active_ws {
-                    spawn_claude(&new_wt.path, INITIAL_SIZE, self.skip_permissions).ok()
-                } else {
-                    None
-                };
-                let wt = Worktree {
+            if self.tabs.iter().any(|t| t.worktree.path == new_wt.path) {
+                continue; // already tracked
+            }
+
+            // Claim a provisional worktree-spawn tab if one exists.
+            // This upgrades the placeholder tab opened by prefix+N to the real
+            // worktree in-place, preserving the running `claude --worktree`
+            // session without spawning a duplicate.
+            if let Some(provisional) = self
+                .tabs
+                .iter_mut()
+                .find(|t| t.is_worktree_spawn && !t.worktree.is_removed)
+            {
+                provisional.worktree = Worktree {
                     path: new_wt.path.clone(),
                     name: new_wt.name.clone(),
                     is_active_ws: new_wt.is_active_ws,
                     is_removed: false,
                 };
-                self.tabs.push(WorktreeTab::new(wt, session));
+                provisional.is_worktree_spawn = false;
+                continue;
             }
+
+            // No provisional tab — normal add path.
+            let session = if new_wt.is_active_ws {
+                spawn_claude(&new_wt.path, INITIAL_SIZE, self.skip_permissions).ok()
+            } else {
+                None
+            };
+            let wt = Worktree {
+                path: new_wt.path.clone(),
+                name: new_wt.name.clone(),
+                is_active_ws: new_wt.is_active_ws,
+                is_removed: false,
+            };
+            self.tabs.push(WorktreeTab::new(wt, session));
         }
 
         // Mark/drop tabs whose path is no longer in new_list.
@@ -609,6 +636,7 @@ impl App {
             is_removed: false,
         };
         self.tabs.push(WorktreeTab::new(worktree, Some(session)));
+        self.tabs.last_mut().unwrap().is_worktree_spawn = true;
         self.active_tab = self.tabs.len() - 1;
         Ok(())
     }
@@ -740,6 +768,49 @@ mod tests {
         app.reconcile_worktrees(vec![]);
         // All tabs gone; active_tab must be clamped to 0.
         assert_eq!(app.active_tab, 0);
+    }
+
+    // --- provisional worktree-spawn tab claiming ---
+
+    #[test]
+    fn reconcile_claims_provisional_tab_instead_of_adding_duplicate() {
+        // Simulate the state after prefix+N: one existing "main" tab plus a
+        // provisional "main #2" tab (is_worktree_spawn = true) at git_root.
+        let mut app = make_app(&["main"]);
+        // Manually push a provisional tab.
+        let provisional_wt = Worktree {
+            path: std::path::PathBuf::from("/tmp/wt/main"),
+            name: "main #2".to_string(),
+            is_active_ws: false,
+            is_removed: false,
+        };
+        let mut prov_tab = WorktreeTab::new(provisional_wt, None);
+        prov_tab.is_worktree_spawn = true;
+        app.tabs.push(prov_tab);
+        assert_eq!(app.tabs.len(), 2);
+
+        // Claude creates /tmp/wt/feature; reconcile sees main + feature.
+        let new_list = vec![make_worktree("main"), make_worktree("feature")];
+        app.reconcile_worktrees(new_list);
+
+        // Should still be 2 tabs — the provisional was upgraded, not duplicated.
+        assert_eq!(app.tabs.len(), 2);
+        // One tab should now be "feature" with is_worktree_spawn = false.
+        let upgraded = app.tabs.iter().find(|t| t.worktree.name == "feature");
+        assert!(upgraded.is_some(), "expected a tab named 'feature'");
+        assert!(!upgraded.unwrap().is_worktree_spawn);
+    }
+
+    #[test]
+    fn reconcile_adds_new_worktree_normally_when_no_provisional_exists() {
+        let mut app = make_app(&["main"]);
+        let new_list = vec![make_worktree("main"), make_worktree("feature")];
+        app.reconcile_worktrees(new_list);
+        assert_eq!(app.tabs.len(), 2);
+        assert!(app.tabs.iter().any(|t| t.worktree.name == "feature"));
+        // The new tab must not be marked as a worktree spawn.
+        let added = app.tabs.iter().find(|t| t.worktree.name == "feature").unwrap();
+        assert!(!added.is_worktree_spawn);
     }
 
     // --- drain_token_results ---
