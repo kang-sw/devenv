@@ -57,8 +57,11 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
   when the ticket is subsequently opened or referenced.
 - `/sprint` guarantees: it operates only on `sprint/`-prefixed branches. On invoke it detects
   the current branch: if on a `sprint/` branch it presents continue/wrap-up/abandon options; if
-  not, it creates a new `sprint/<name>` branch. `/sprint` is not routed through `/proceed`. It is
-  a standalone session container and does not invoke the `/proceed` prefix pipeline.
+  not, it creates a new `sprint/<name>` branch without prompting the user. The name is inferred
+  from context: a clear topic in the preamble or conversation yields a kebab-case slug; a vague
+  or absent context yields a random `<adjective>-<noun>-<noun>` name. `/sprint` is not routed
+  through `/proceed`. It is a standalone session container and does not invoke the `/proceed`
+  prefix pipeline.
 - `/discuss` guarantees: when invoked on a `sprint/`-prefixed branch, step 1 emits a hint
   directing the user to `/sprint` for session continuity. This hint is informational only — it
   does not prevent `/discuss` from continuing.
