@@ -152,15 +152,40 @@ fn discover_project_dirs() -> Vec<PathBuf> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let base = claude_projects_dir();
 
-    let dirs: Vec<PathBuf> = stdout
+    // Collect worktree paths; track the first (main worktree) for prefix scan.
+    let worktree_paths: Vec<&str> = stdout
         .lines()
-        .filter_map(|line| {
-            let path_str = line.strip_prefix("worktree ")?;
-            let escaped = path_str.replace('/', "-");
-            Some(base.join(escaped))
-        })
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .collect();
+
+    let escaped_root: Option<String> = worktree_paths.first().map(|p| p.replace('/', "-"));
+
+    let mut dirs: Vec<PathBuf> = worktree_paths
+        .iter()
+        .map(|path_str| base.join(path_str.replace('/', "-")))
         .filter(|p| p.is_dir())
         .collect();
+
+    // Also include any ~/.claude/projects/ subdirectory whose name starts with
+    // the escaped main worktree path — these are sub-project sessions (e.g.
+    // tools/claude-dash spawned as a separate Claude project).
+    if let Some(ref prefix) = escaped_root {
+        if let Ok(entries) = fs::read_dir(&base) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let dir_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default();
+                if dir_name.starts_with(prefix.as_str()) && !dirs.contains(&path) {
+                    dirs.push(path);
+                }
+            }
+        }
+    }
 
     if dirs.is_empty() {
         vec![cwd_project_dir()]
