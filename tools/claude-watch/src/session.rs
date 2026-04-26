@@ -10,6 +10,12 @@ pub struct SessionEntry {
     pub modified: DateTime<Local>,
     pub path: PathBuf,
     pub active: bool,
+    /// Total tokens (input + output + cache) summed from assistant turns.
+    /// `None` means the file has not been parsed yet.
+    pub(crate) token_total: Option<u64>,
+    /// Whether this session was started with `-p` (headless/SDK-CLI mode).
+    /// `None` means the file has not been parsed yet.
+    pub(crate) is_headless: Option<bool>,
 }
 
 fn home_dir() -> PathBuf {
@@ -157,6 +163,8 @@ pub fn discover_sessions() -> Vec<SessionEntry> {
                 modified,
                 path,
                 active: false,
+                token_total: None,
+                is_headless: None,
             })
         })
         .collect();

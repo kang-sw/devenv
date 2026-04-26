@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
-    text::Span,
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
@@ -22,19 +22,42 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_content_panel(frame, app, chunks[1]);
 }
 
+/// Format a token count into a human-readable string.
+fn format_tokens(n: u64) -> String {
+    if n < 1_000 {
+        format!("{}", n)
+    } else if n < 1_000_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    }
+}
+
 fn draw_session_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let items: Vec<ListItem> = app
         .sessions
         .iter()
         .map(|s| {
             let ts = s.modified.format("%m/%d %H:%M").to_string();
-            let text = format!("{} ({})", s.label, ts);
             let style = if s.active {
                 Style::default().fg(Color::Green)
             } else {
-                Style::default()
+                match s.is_headless {
+                    None => Style::default().fg(Color::DarkGray),       // not yet parsed
+                    Some(true) => Style::default().fg(Color::White),    // -p / headless
+                    Some(false) => Style::default().fg(Color::Yellow),  // interactive
+                }
             };
-            ListItem::new(Span::styled(text, style))
+            let main_text = format!("{} ({})", s.label, ts);
+            let token_text = if let Some(n) = s.token_total {
+                format!(" [{}]", format_tokens(n))
+            } else {
+                String::new()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(main_text, style),
+                Span::styled(token_text, Style::default().fg(Color::Cyan)),
+            ]))
         })
         .collect();
 

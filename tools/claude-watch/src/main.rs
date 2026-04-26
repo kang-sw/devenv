@@ -61,6 +61,7 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
             app.last_refresh = std::time::Instant::now();
         }
         app.poll_processes_if_due();
+        app.poll_token_results();
 
         // Drain all pending events without blocking so input is processed
         // immediately, eliminating up to one frame of latency.
