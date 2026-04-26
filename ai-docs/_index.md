@@ -159,6 +159,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260425-feat-ws-agent-registry-compression` | done | ws-call-named-agent redesign: named agent registry (ws-new-named-agent) + auto-compression at 100K tokens |
 | `260425-chore-implementation-gap-staleness-flagging` | done | Reactive doc-staleness reporting — removed misplaced guideline from spec-conventions + spec-system; reactive one-liner added to impl-playbook, survey-writer, plan-writer, code-review-correctness |
 | `260426-feat-claude-watch` | done | claude-watch Rust TUI — session history browser and live subprocess monitor for Claude CLI; all 4 phases complete |
+| `260426-feat-claude-watch-mouse` | done | claude-watch mouse support — scroll wheel + left-click session selection + event-drain loop perf fix |
 
 ## Session Notes
 
