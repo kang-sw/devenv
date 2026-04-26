@@ -9,12 +9,14 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
-              ScrollbarState, Tabs, Wrap},
+    widgets::{
+        Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs,
+        Wrap,
+    },
     Frame,
 };
 
-use crate::app::{App, SlotKind, SCROLL_STEP};
+use crate::app::{App, SlotKind};
 
 /// Lines per page for PageUp/PageDown in the agent viewer.
 pub const PAGE_SCROLL: usize = 20;
@@ -140,23 +142,33 @@ fn draw_slot_row(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Line::from(spans), area);
 }
 
-fn draw_agent_view(
-    frame: &mut Frame,
-    tab: &mut crate::app::WorktreeTab,
-    area: Rect,
-) {
+fn draw_agent_view(frame: &mut Frame, tab: &mut crate::app::WorktreeTab, area: Rect) {
     let view = match tab.agent_view.as_mut() {
         Some(v) => v,
         None => return,
     };
 
-    let panel_width = area.width.saturating_sub(1) as usize; // leave room for scrollbar
+    // Leave one column for the scrollbar track.
+    let panel_width = area.width.saturating_sub(1) as usize;
     let panel_height = area.height as usize;
 
-    // Compute max_scroll using a simple line count (exact wrap accounting
-    // is added in Phase 4).
-    let total_lines = view.rendered_lines.len();
-    let max_scroll = total_lines.saturating_sub(panel_height);
+    // Compute or reuse total visual rows using word-wrap simulation (Phase 4).
+    // Invalidate the cache when panel_width changes.
+    let total_visual_rows = match view.cached_visual_rows {
+        Some((rows, w)) if w == area.width => rows,
+        _ => {
+            let rows: usize = view
+                .rendered_lines
+                .iter()
+                .map(|line| crate::wrap::visual_rows(line, panel_width))
+                .sum();
+            let rows = rows.max(1);
+            view.cached_visual_rows = Some((rows, area.width));
+            rows
+        }
+    };
+
+    let max_scroll = total_visual_rows.saturating_sub(panel_height);
     let scroll = view.scroll_offset.min(max_scroll) as u16;
 
     let p = Paragraph::new(view.rendered_lines.clone())
@@ -166,21 +178,15 @@ fn draw_agent_view(
 
     // Vertical scrollbar when content overflows.
     if max_scroll > 0 {
-        let mut scrollbar_state =
-            ScrollbarState::new(max_scroll + panel_height)
-                .viewport_content_length(panel_height)
-                .position(view.scroll_offset.min(max_scroll));
+        let mut scrollbar_state = ScrollbarState::new(max_scroll + panel_height)
+            .viewport_content_length(panel_height)
+            .position(view.scroll_offset.min(max_scroll));
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             area,
             &mut scrollbar_state,
         );
     }
-
-    // Cache panel dimensions for Phase 4 visual_rows calculation.
-    view.cached_visual_rows = Some((total_lines, area.width));
-
-    let _ = panel_width; // used for scroll calc placeholder
 }
 
 /// Draw a centred exit modal overlay.
@@ -197,8 +203,8 @@ fn draw_exit_modal(frame: &mut Frame, area: Rect, is_removed: bool, status: &str
         format!("Process exited ({}).\n[R] Restart  [X] Close tab", status)
     };
 
-    let paragraph = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title(" Exit "));
+    let paragraph =
+        Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Exit "));
 
     frame.render_widget(Clear, modal_area);
     frame.render_widget(paragraph, modal_area);
@@ -206,12 +212,58 @@ fn draw_exit_modal(frame: &mut Frame, area: Rect, is_removed: bool, status: &str
 
 /// Format a token count as a human-readable string.
 /// Copied from claude-watch (private fn; cannot import across crates).
-pub fn format_tokens(n: u64) -> String {
+fn format_tokens(n: u64) -> String {
     if n < 1_000 {
         format!("{}", n)
     } else if n < 1_000_000 {
         format!("{:.1}k", n as f64 / 1_000.0)
     } else {
         format!("{:.1}M", n as f64 / 1_000_000.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- format_tokens ---
+
+    #[test]
+    fn format_tokens_zero() {
+        assert_eq!(format_tokens(0), "0");
+    }
+
+    #[test]
+    fn format_tokens_under_thousand() {
+        assert_eq!(format_tokens(999), "999");
+    }
+
+    #[test]
+    fn format_tokens_at_thousand() {
+        assert_eq!(format_tokens(1_000), "1.0k");
+    }
+
+    #[test]
+    fn format_tokens_mid_k() {
+        assert_eq!(format_tokens(12_300), "12.3k");
+    }
+
+    #[test]
+    fn format_tokens_under_million() {
+        assert_eq!(format_tokens(999_999), "1000.0k");
+    }
+
+    #[test]
+    fn format_tokens_at_million() {
+        assert_eq!(format_tokens(1_000_000), "1.0M");
+    }
+
+    #[test]
+    fn format_tokens_large() {
+        assert_eq!(format_tokens(4_500_000), "4.5M");
     }
 }

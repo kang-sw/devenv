@@ -4,6 +4,7 @@
 //! Named-agent slots are added in Phase 3.
 
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::time::Instant;
 
 use portable_pty::PtySize;
@@ -12,9 +13,12 @@ use crate::agent::{discover_named_agents, file_mtime, NamedAgent};
 use crate::parser::parse_turns;
 use crate::pty::PtySession;
 use crate::renderer::{render_turns, RenderOptions};
-use crate::session::find_git_root;
+use crate::session::{find_git_root, parse_session_metadata};
 use crate::vt::VtScreen;
 use crate::worktree::{discover_worktrees, Worktree};
+
+/// Background token-parse result: `(uuid, total_tokens)`.
+type TokenResult = (String, u64);
 
 /// How often worktree/agent lists are refreshed (seconds).
 pub const WORKTREE_POLL_SECS: u64 = 5;
@@ -147,7 +151,15 @@ impl WorktreeTab {
     }
 
     /// Refresh named-agent list for this tab.
-    pub fn refresh_named_agents(&mut self, git_root: &PathBuf) {
+    ///
+    /// For agents whose `token_total` is not yet known and whose session file
+    /// mtime changed (or is new), spawns a background thread that calls
+    /// `parse_session_metadata` and sends the result via `token_tx`.
+    pub fn refresh_named_agents(
+        &mut self,
+        git_root: &PathBuf,
+        token_tx: &mpsc::SyncSender<TokenResult>,
+    ) {
         let new_agents = discover_named_agents(git_root);
         // Reconcile: preserve token_total/parse_queued when uuid + mtime match.
         let reconciled: Vec<NamedAgent> = new_agents
@@ -158,6 +170,18 @@ impl WorktreeTab {
                         new.token_total = old.token_total;
                         new.parse_queued = old.parse_queued;
                     }
+                }
+                // Spawn background parse if needed.
+                if new.token_total.is_none() && !new.parse_queued {
+                    let path = new.session_path.clone();
+                    let uuid = new.uuid.clone();
+                    let tx = token_tx.clone();
+                    std::thread::spawn(move || {
+                        if let Some((tokens, _)) = parse_session_metadata(&path) {
+                            let _ = tx.send((uuid, tokens));
+                        }
+                    });
+                    new.parse_queued = true;
                 }
                 new
             })
@@ -215,6 +239,10 @@ impl WorktreeTab {
                 view.rendered_lines = rendered_lines;
                 view.loaded_mtime = current_mtime;
                 view.cached_visual_rows = None;
+                // Reset scroll to avoid the scroll_offset diverging when content
+                // shrinks: the stored offset may exceed the new max_scroll,
+                // making subsequent Up/Down keypresses start from a stale value.
+                view.scroll_offset = 0;
             }
         }
     }
@@ -232,6 +260,10 @@ pub struct App {
     pub last_worktree_poll: Instant,
     /// Git root for the current repo (used for named-agent discovery).
     pub git_root: Option<PathBuf>,
+    /// Sender used by background token-parse threads to report results.
+    token_tx: mpsc::SyncSender<TokenResult>,
+    /// Receiver drained each frame to update `NamedAgent::token_total`.
+    token_rx: mpsc::Receiver<TokenResult>,
 }
 
 impl App {
@@ -282,12 +314,18 @@ impl App {
             }
         }
 
+        // Bounded channel for background token-parse results.
+        // Capacity 64 is ample for ≤8 agents × number of tabs.
+        let (token_tx, token_rx) = mpsc::sync_channel::<TokenResult>(64);
+
         Ok(App {
             tabs,
             active_tab: 0,
             should_quit: false,
             last_worktree_poll: Instant::now(),
             git_root,
+            token_tx,
+            token_rx,
         })
     }
 
@@ -350,7 +388,15 @@ impl App {
         // Mark/drop tabs whose path is no longer in new_list.
         for tab in &mut self.tabs {
             if !new_list.iter().any(|w| w.path == tab.worktree.path) {
-                tab.worktree.is_removed = true;
+                if !tab.worktree.is_removed {
+                    // Newly removed: kill the session so the process does not
+                    // run indefinitely waiting for user input.  The tab stays
+                    // alive until try_wait() confirms exit (handled below).
+                    tab.worktree.is_removed = true;
+                    if let Some(ref mut s) = tab.session {
+                        s.kill();
+                    }
+                }
             }
         }
 
@@ -382,12 +428,118 @@ impl App {
         }
     }
 
-    /// Refresh named agents for all tabs.
+    /// Refresh named agents for all tabs, spawning background token parses.
     pub fn refresh_named_agents(&mut self) {
         if let Some(ref root) = self.git_root.clone() {
+            let tx = self.token_tx.clone();
             for tab in &mut self.tabs {
-                tab.refresh_named_agents(root);
+                tab.refresh_named_agents(root, &tx);
             }
         }
+    }
+
+    /// Drain completed token-parse results and update matching agents.
+    ///
+    /// Call once per frame in the main loop so token counts appear within
+    /// a frame of the background thread finishing.
+    pub fn drain_token_results(&mut self) {
+        while let Ok((uuid, tokens)) = self.token_rx.try_recv() {
+            for tab in &mut self.tabs {
+                if let Some(agent) = tab.named_agents.iter_mut().find(|a| a.uuid == uuid) {
+                    agent.token_total = Some(tokens);
+                    agent.parse_queued = false;
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_worktree(name: &str) -> Worktree {
+        Worktree {
+            path: std::path::PathBuf::from(format!("/tmp/wt/{}", name)),
+            name: name.to_string(),
+            is_active_ws: false,
+            is_removed: false,
+        }
+    }
+
+    fn make_app(names: &[&str]) -> App {
+        let tabs = names
+            .iter()
+            .map(|name| WorktreeTab::new(make_worktree(name), None))
+            .collect();
+        let (token_tx, token_rx) = mpsc::sync_channel(64);
+        App {
+            tabs,
+            active_tab: 0,
+            should_quit: false,
+            last_worktree_poll: Instant::now(),
+            git_root: None,
+            token_tx,
+            token_rx,
+        }
+    }
+
+    // --- reconcile_worktrees ---
+
+    #[test]
+    fn reconcile_adds_new_worktree() {
+        let mut app = make_app(&["main"]);
+        let new = vec![make_worktree("main"), make_worktree("feature")];
+        app.reconcile_worktrees(new);
+        assert_eq!(app.tabs.len(), 2);
+        assert!(app.tabs.iter().any(|t| t.worktree.name == "feature"));
+    }
+
+    #[test]
+    fn reconcile_marks_removed_with_no_session() {
+        // A tab with no session that disappears from the list is dropped immediately.
+        let mut app = make_app(&["main", "gone"]);
+        let new = vec![make_worktree("main")];
+        app.reconcile_worktrees(new);
+        // "gone" had no session → dropped entirely.
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.tabs[0].worktree.name, "main");
+    }
+
+    #[test]
+    fn reconcile_active_tab_stays_in_bounds_when_last_tab_removed() {
+        let mut app = make_app(&["main", "feat"]);
+        app.active_tab = 1; // active = "feat"
+        let new = vec![make_worktree("main")]; // "feat" removed, no session
+        app.reconcile_worktrees(new);
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.active_tab, 0);
+    }
+
+    #[test]
+    fn reconcile_active_tab_adjusts_when_prior_tab_removed() {
+        let mut app = make_app(&["a", "b", "c"]);
+        app.active_tab = 2; // active = "c"
+                            // Remove "a" (index 0, before active).
+        let new = vec![make_worktree("b"), make_worktree("c")];
+        app.reconcile_worktrees(new);
+        assert_eq!(app.tabs.len(), 2);
+        // active_tab should have shifted down by 1 to still point at "c".
+        assert_eq!(app.tabs[app.active_tab].worktree.name, "c");
+    }
+
+    #[test]
+    fn reconcile_empty_new_list_does_not_crash() {
+        let mut app = make_app(&["main"]);
+        // reconcile_worktrees with empty list: caller guards this in run_loop,
+        // but the function itself should not panic.
+        // "main" has no session → immediately dropped.
+        app.reconcile_worktrees(vec![]);
+        // tabs may be empty; active_tab clamped to 0.
+        assert_eq!(app.active_tab, 0);
     }
 }

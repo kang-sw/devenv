@@ -12,6 +12,7 @@ mod session;
 mod ui;
 mod vt;
 mod worktree;
+mod wrap;
 
 use std::io;
 use std::time::Duration;
@@ -25,7 +26,7 @@ use crossterm::{
 use portable_pty::PtySize;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use app::{App, ExitedModal, SlotKind, SCROLL_STEP, WORKTREE_POLL_SECS};
+use app::{App, SlotKind, SCROLL_STEP, WORKTREE_POLL_SECS};
 use ui::PAGE_SCROLL;
 
 /// Target frame budget in milliseconds (~100 fps, keeping PTY responsive).
@@ -65,8 +66,7 @@ fn run_loop<B: ratatui::backend::Backend>(
     app: &mut App,
 ) -> anyhow::Result<()>
 where
-    <B as ratatui::backend::Backend>::Error:
-        std::error::Error + Send + Sync + 'static,
+    <B as ratatui::backend::Backend>::Error: std::error::Error + Send + Sync + 'static,
 {
     loop {
         // 1. Drain crossterm events.
@@ -79,6 +79,9 @@ where
         for tab in &mut app.tabs {
             tab.drain_pty();
         }
+
+        // 2b. Drain background token-parse results.
+        app.drain_token_results();
 
         // 3. Poll for child process exit on ALL tabs.
         for tab in &mut app.tabs {
@@ -104,8 +107,7 @@ where
 
         // 6. Resize check for active tab.
         if !app.tabs.is_empty() {
-            let (term_cols, term_rows) =
-                crossterm::terminal::size().unwrap_or((80, 24));
+            let (term_cols, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
             // Phase-3 layout: 2-row header (tab + slot) + borders (2 rows, 2 cols).
             let panel_cols = term_cols.saturating_sub(2);
             let panel_rows = term_rows.saturating_sub(4);
@@ -149,24 +151,18 @@ fn handle_event(app: &mut App, event: Event) -> anyhow::Result<()> {
             }
 
             // --- Ctrl+Q — quit app (always, regardless of slot) ---
-            if key.code == KeyCode::Char('q')
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
+            if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 app.should_quit = true;
                 return Ok(());
             }
 
             // --- Tab navigation (Ctrl+[ / Ctrl+]) ---
-            if key.code == KeyCode::Char('[')
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
+            if key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 let new_idx = app.active_tab.saturating_sub(1);
                 app.activate_tab(new_idx);
                 return Ok(());
             }
-            if key.code == KeyCode::Char(']')
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
+            if key.code == KeyCode::Char(']') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 let new_idx = (app.active_tab + 1).min(app.tabs.len().saturating_sub(1));
                 app.activate_tab(new_idx);
                 return Ok(());
@@ -242,25 +238,33 @@ fn handle_agent_scroll(app: &mut App, key: crossterm::event::KeyEvent) {
             view.scroll_offset = view.scroll_offset.saturating_sub(SCROLL_STEP);
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            view.scroll_offset = view.scroll_offset.saturating_add(SCROLL_STEP).min(max_scroll);
+            view.scroll_offset = view
+                .scroll_offset
+                .saturating_add(SCROLL_STEP)
+                .min(max_scroll);
         }
         KeyCode::PageUp => {
             view.scroll_offset = view.scroll_offset.saturating_sub(PAGE_SCROLL);
         }
         KeyCode::PageDown => {
-            view.scroll_offset = view.scroll_offset.saturating_add(PAGE_SCROLL).min(max_scroll);
+            view.scroll_offset = view
+                .scroll_offset
+                .saturating_add(PAGE_SCROLL)
+                .min(max_scroll);
         }
         _ => {}
     }
 }
 
 /// Handle a key press while the exit modal is active on the current tab.
-fn handle_modal_key(
-    app: &mut App,
-    key: crossterm::event::KeyEvent,
-) -> anyhow::Result<()> {
+fn handle_modal_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Result<()> {
     let idx = app.active_tab;
-    if app.tabs.get(idx).map(|t| t.exited_modal.is_none()).unwrap_or(true) {
+    if app
+        .tabs
+        .get(idx)
+        .map(|t| t.exited_modal.is_none())
+        .unwrap_or(true)
+    {
         return Ok(());
     }
 
@@ -277,7 +281,12 @@ fn handle_modal_key(
             let tab = &mut app.tabs[idx];
             tab.exited_modal = None;
             let (cols, rows) = tab.last_inner_size;
-            let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
+            let size = PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            };
             let cwd = tab.worktree.path.clone();
             tab.vt.resize(cols, rows);
             tab.session = Some(pty::PtySession::spawn(&cwd, size)?);
