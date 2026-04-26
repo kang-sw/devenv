@@ -191,7 +191,11 @@ fn draw_agent_view(frame: &mut Frame, tab: &mut crate::app::WorktreeTab, area: R
         }
     };
 
-    let max_scroll = total_visual_rows.saturating_sub(panel_height);
+    // Allow scrolling until the last line reaches the top (blank space fills below).
+    // Keeps a panel_height floor so the scrollbar appears even when content just
+    // barely overflows; the generous cap avoids premature stop caused by
+    // visual_rows() simulation drift vs. ratatui's actual wrap count.
+    let max_scroll = total_visual_rows;
     // Saturate before casting: scroll_offset is usize; as u16 would wrap silently
     // for files with >65 535 visual rows.
     let scroll = view.scroll_offset.min(max_scroll).min(u16::MAX as usize) as u16;
@@ -201,8 +205,8 @@ fn draw_agent_view(frame: &mut Frame, tab: &mut crate::app::WorktreeTab, area: R
         .scroll((scroll, 0));
     frame.render_widget(p, area);
 
-    // Vertical scrollbar when content overflows.
-    if max_scroll > 0 {
+    // Vertical scrollbar when content overflows the panel.
+    if total_visual_rows > panel_height {
         let mut scrollbar_state = ScrollbarState::new(max_scroll + panel_height)
             .viewport_content_length(panel_height)
             .position(view.scroll_offset.min(max_scroll));
