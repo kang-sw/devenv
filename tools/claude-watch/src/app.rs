@@ -48,7 +48,8 @@ pub struct App {
     /// Inner width of the right (content) panel in terminal columns,
     /// excluding the block borders.  Updated by the event loop.
     pub(crate) right_panel_inner_width: u16,
-    /// When set, the next `update_content_height` call pins scroll to bottom.
+    /// When set, `draw_content_panel` pins scroll to bottom on the next frame
+    /// using the exact panel width from the ratatui layout rect.
     pub(crate) needs_scroll_to_bottom: bool,
     /// UUID of the session currently loaded in the right panel.
     pub(crate) loaded_uuid: Option<String>,
@@ -181,13 +182,11 @@ impl App {
     }
 
     /// Called by the event loop before each draw with the current inner panel
-    /// height.  Resolves any pending scroll-to-bottom request.
+    /// height.  Updates the cached height only; `needs_scroll_to_bottom` is
+    /// resolved inside `draw_content_panel` where the exact ratatui layout
+    /// rect is available.
     pub fn update_content_height(&mut self, height: usize) {
         self.content_panel_height = height;
-        if self.needs_scroll_to_bottom {
-            self.needs_scroll_to_bottom = false;
-            self.scroll_offset = self.scroll_to_bottom_offset();
-        }
     }
 
     pub fn scroll_down(&mut self) {

@@ -110,7 +110,7 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
             }
         }
 
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &mut app))?;
 
         // Sleep for one frame budget.  We use thread::sleep rather than
         // event::poll so the intent is unambiguous: this is a fixed-duration
