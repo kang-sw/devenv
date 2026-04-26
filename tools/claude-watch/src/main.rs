@@ -90,8 +90,10 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<(), Box<dyn std::e
             break;
         }
 
-        // Resolve terminal dimensions BEFORE draw so the draw function remains
-        // a pure read of App state.
+        // Update cached dimensions before draw.  draw_content_panel writes
+        // scroll_offset and syncs right_panel_inner_width from the actual
+        // ratatui layout rect, so the cached values here serve as a fallback
+        // for interactive scroll (scroll_down / scroll_page_down).
         match crossterm::terminal::size() {
             Ok((w, h)) => {
                 let left_w = (w as u32 * LEFT_PANEL_PERCENT as u32 / 100) as u16;

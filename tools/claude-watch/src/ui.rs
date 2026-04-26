@@ -53,9 +53,16 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 }
 
 fn draw_content_panel(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    // Use the exact inner width from the ratatui layout rect.  This is the
+    // authoritative source of truth for wrapping calculations and is written
+    // back to the cached field so that interactive scroll methods
+    // (scroll_down / scroll_page_down) use the same value on the next
+    // event-loop iteration.
+    let pw = area.width.saturating_sub(2) as usize;
+    app.right_panel_inner_width = area.width.saturating_sub(2);
+
     // Resolve scroll-to-bottom here, where the exact ratatui layout width is
     // known, rather than in update_content_height which uses an approximation.
-    let pw = area.width.saturating_sub(2) as usize;
     if app.needs_scroll_to_bottom {
         app.needs_scroll_to_bottom = false;
         app.scroll_offset = app.scroll_to_bottom_offset_for_width(pw);
