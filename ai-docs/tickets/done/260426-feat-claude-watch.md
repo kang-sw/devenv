@@ -1,5 +1,6 @@
 ---
 title: claude-watch — Rust TUI for Claude CLI session history and live subprocess monitoring
+completed: 2026-04-26
 spec:
   - 260426-claude-watch-installed
   - 260426-claude-session-viewer
@@ -84,3 +85,15 @@ Poll running processes every 1–2 seconds using `sysinfo`:
 On macOS, `sysinfo` reads args via `sysctl(KERN_PROCARGS2)` which silently returns empty for cross-user processes. An empty args result means "not readable" — treat the session as inactive, no error.
 
 Depends on Phase 2 (requires the session list to be populated before matching).
+
+### Result (5838354) - 2026-04-26
+
+All four phases implemented at `tools/claude-watch/`. `cargo test`: 19 passed, 0 failed. `cargo build`: 0 errors, 0 warnings.
+
+Deviations:
+- `tui-markdown` replaced by `pulldown-cmark` + custom span mapper (tui-markdown 0.3.7 targets ratatui ≤0.29; incompatible with ratatui 0.30 used here).
+- `notify` crate replaced by mtime polling at ~1s (latest stable uncertain at implementation time).
+
+Review findings fixed: `rendered_lines.len() as u16` overflow promoted to `usize`; `tool_result` document-order bug in `parse_user_content`; `find_uuid_in_args` now handles `--key=value` form; agent-name lookup uses JSON field check; `.gitignore` added; `draw()` refactored to pure `&App` read.
+
+Mouse support deferred to separate ticket.
