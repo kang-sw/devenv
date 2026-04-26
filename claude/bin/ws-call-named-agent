@@ -80,7 +80,22 @@ else
   ARGS+=(--session-id "$UUID")
 fi
 
-claude "${ARGS[@]}" "$PROMPT" > "$TMPFILE"
+ERRFILE=$(mktemp)
+CLEANUP_FILES+=("$ERRFILE")
+MAX_RETRIES=3
+RETRY_DELAY=3
+for attempt in $(seq 1 $MAX_RETRIES); do
+  if claude "${ARGS[@]}" "$PROMPT" > "$TMPFILE" 2>"$ERRFILE"; then
+    break
+  fi
+  if grep -q "already in use" "$ERRFILE" && [[ $attempt -lt $MAX_RETRIES ]]; then
+    echo "[info] Session busy, retrying in ${RETRY_DELAY}s (attempt $attempt/$MAX_RETRIES)..." >&2
+    sleep $RETRY_DELAY
+  else
+    cat "$ERRFILE" >&2
+    exit 1
+  fi
+done
 
 # Drain outbox: PostToolBatch hook exits 2 when messages are pending,
 # stopping the agent cleanly. Resume with each pending message in turn.
@@ -154,6 +169,13 @@ if [[ "$NEW_TOKENS" -gt 120000 && "$SKIP_COMPRESSION" -eq 0 ]]; then
 
   jq '.compressed_at = true' "$AGENT_FILE" > "${AGENT_FILE}.tmp" && mv "${AGENT_FILE}.tmp" "$AGENT_FILE"
   NEW_UUID=$(jq -r '.uuid' "$AGENT_FILE")
+
+  # Carry over any pending interrupts so they survive the compaction handoff
+  NEW_OUTBOX_FILE="$REGISTRY_DIR/$AGENT_NAME.outbox.txt"
+  if [[ -s "$OUTBOX_FILE" ]]; then
+    cat "$OUTBOX_FILE" >> "$NEW_OUTBOX_FILE"
+    truncate -s 0 "$OUTBOX_FILE"
+  fi
 
   # Step d: Handoff call to fresh agent
   HANDOFF_PROMPT="${COMPRESSION_DOC}
