@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -101,10 +102,64 @@ fn scan_jsonl_in_dir(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Return the `~/.claude/projects/<escaped-cwd>` path for the current working
+/// directory.  This mirrors the escape scheme used by the Claude CLI
+/// (every `/` replaced with `-`).
+fn cwd_project_dir() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    let escaped = cwd.to_string_lossy().replace('/', "-");
+    home_dir().join(".claude").join("projects").join(escaped)
+}
+
+/// Return all `~/.claude/projects/<escaped>` directories that correspond to
+/// git worktrees of the current repo.
+///
+/// Steps:
+/// 1. Run `git worktree list --porcelain`.  On failure fall back to
+///    `vec![cwd_project_dir()]`.
+/// 2. Parse lines beginning with `"worktree "` to obtain absolute worktree
+///    paths.
+/// 3. Escape each path (replace every `/` with `-`) and construct the
+///    corresponding `~/.claude/projects/<escaped>` path.
+/// 4. Keep only paths where the directory already exists.
+/// 5. If the resulting list is empty, fall back to `vec![cwd_project_dir()]`.
+#[cfg(not(windows))]
+fn discover_project_dirs() -> Vec<PathBuf> {
+    let output = std::process::Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return vec![cwd_project_dir()],
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let base = home_dir().join(".claude").join("projects");
+
+    let dirs: Vec<PathBuf> = stdout
+        .lines()
+        .filter_map(|line| {
+            let path_str = line.strip_prefix("worktree ")?;
+            let escaped = path_str.replace('/', "-");
+            Some(base.join(escaped))
+        })
+        .filter(|p| p.is_dir())
+        .collect();
+
+    if dirs.is_empty() {
+        vec![cwd_project_dir()]
+    } else {
+        dirs
+    }
+}
+
 /// Collect .jsonl files from the Claude projects directory.
 ///
-/// Non-Windows: derive the project sub-directory from CWD by replacing every
-/// `/` with `-` (matching Claude CLI's own path-escaping scheme).
+/// Non-Windows: discover all git worktree project directories via
+/// `discover_project_dirs()` and collect JSONL files from each.  Files are
+/// deduplicated by UUID (the filename stem) in case the same session file
+/// appears under more than one directory.
 ///
 /// Windows: Claude CLI's escaping differs for Windows paths (`C:\...`), so
 /// the project sub-directory cannot be reliably derived.  Instead, all
@@ -113,13 +168,17 @@ fn scan_jsonl_in_dir(dir: &Path) -> Vec<PathBuf> {
 /// subdirectories; match UUIDs across all of them regardless of subdirectory
 /// name."
 #[cfg(not(windows))]
-pub fn collect_jsonl_files(claude_projects: &Path) -> Vec<PathBuf> {
-    let cwd = match std::env::current_dir() {
-        Ok(d) => d,
-        Err(_) => return vec![],
-    };
-    let escaped = cwd.to_string_lossy().replace('/', "-");
-    scan_jsonl_in_dir(&claude_projects.join(&escaped))
+pub fn collect_jsonl_files(_claude_projects: &Path) -> Vec<PathBuf> {
+    let dirs = discover_project_dirs();
+    let mut seen: HashMap<String, PathBuf> = HashMap::new();
+    for dir in dirs {
+        for path in scan_jsonl_in_dir(&dir) {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                seen.entry(stem.to_string()).or_insert(path);
+            }
+        }
+    }
+    seen.into_values().collect()
 }
 
 #[cfg(windows)]
