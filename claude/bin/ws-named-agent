@@ -65,7 +65,7 @@ def _load_registry(registry_dir: Path, agent_name: str) -> dict:
 
 def _atomic_write(path: Path, data: dict) -> None:
     tmp = Path(str(path) + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)  # replace() is atomic and works when dest exists on Windows
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ def _load_ws_config() -> dict:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -162,7 +162,7 @@ def _resolve_ws_agent(agent_type: str) -> str | None:
     agent_file = PLUGIN_DIR / "agents" / f"{stem}.md"
     if not agent_file.exists():
         return None
-    return _strip_frontmatter(agent_file.read_text())
+    return _strip_frontmatter(agent_file.read_text(encoding="utf-8"))
 
 # ── CallResult ────────────────────────────────────────────────────────────────
 
@@ -215,7 +215,7 @@ def _collect_claude_mds() -> str:
     for d in dirs:
         f = d / "CLAUDE.md"
         if f.exists():
-            chunks.append(f.read_text().strip())
+            chunks.append(f.read_text(encoding="utf-8").strip())
     return "\n\n".join(chunks)
 
 
@@ -265,7 +265,7 @@ def _call_claude(
             ret = subprocess.run(args + [prompt], stdout=out, stderr=err)
         if ret.returncode == 0:
             break
-        err_text = Path(errfile).read_text()
+        err_text = Path(errfile).read_text(encoding="utf-8")
         if "already in use" in err_text and attempt < 3:
             print(f"[info] Session busy, retrying in 3s (attempt {attempt}/3)...", file=sys.stderr)
             time.sleep(3)
@@ -276,8 +276,8 @@ def _call_claude(
     # Drain loop: PostToolBatch hook exits 2 when outbox has content
     drain_args = _flags() + ["--resume", uuid]
     while outbox_file.stat().st_size > 0:
-        pending = outbox_file.read_text()
-        outbox_file.write_text("")
+        pending = outbox_file.read_text(encoding="utf-8")
+        outbox_file.write_text("", encoding="utf-8")
         drain_tmp = _mktemp()
         with open(drain_tmp, "w", encoding="utf-8") as out:
             subprocess.run(drain_args + [pending], stdout=out, check=True)
@@ -315,7 +315,7 @@ def _call_claude(
             ["ws-infra-path", "agent-compression.md"],
             capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
-        compression_prompt = Path(compression_path).read_text()
+        compression_prompt = Path(compression_path).read_text(encoding="utf-8")
 
         comp_file = _mktemp()
         with open(comp_file, "w", encoding="utf-8") as out:
@@ -324,7 +324,7 @@ def _call_claude(
             compression_doc = json.load(fh).get("result", "")
 
         # Step c: snapshot outbox, re-register with fresh UUID, restore outbox
-        saved_outbox = outbox_file.read_text() if outbox_file.stat().st_size > 0 else ""
+        saved_outbox = outbox_file.read_text(encoding="utf-8") if outbox_file.stat().st_size > 0 else ""
 
         new_args = ["ws-named-agent", "new", agent_name]
         if model:
@@ -333,7 +333,7 @@ def _call_claude(
             new_args += ["--agent-type", agent_type]
         if system_prompt:
             sp_file = _mktemp()
-            Path(sp_file).write_text(system_prompt)
+            Path(sp_file).write_text(system_prompt, encoding="utf-8")
             new_args += ["--system-prompt", sp_file]
         subprocess.run(new_args, check=True)
 
@@ -344,7 +344,7 @@ def _call_claude(
         _atomic_write(registry_dir / f"{agent_name}.json", new_reg)
 
         if saved_outbox:
-            outbox_file.write_text(saved_outbox)
+            outbox_file.write_text(saved_outbox, encoding="utf-8")
 
         # Step d: handoff to fresh session
         handoff_prompt = f"{compression_doc}\n\n---\n\n{intent_summary}\n\n---\n\n{prompt}"
@@ -434,7 +434,7 @@ def _call_codex(
     sp_file = ""
     if effective_sp:
         sp_file = _mktemp()
-        Path(sp_file).write_text(effective_sp)
+        Path(sp_file).write_text(effective_sp, encoding="utf-8")
 
     def _base_flags() -> list[str]:
         flags = ["--dangerously-bypass-approvals-and-sandbox", "--json"]
@@ -475,8 +475,8 @@ def _call_codex(
 
     # Drain loop: PostToolUse hook exits 2 when outbox has content
     while outbox_file.stat().st_size > 0:
-        pending = outbox_file.read_text()
-        outbox_file.write_text("")
+        pending = outbox_file.read_text(encoding="utf-8")
+        outbox_file.write_text("", encoding="utf-8")
         events = _run(pending, uuid)
 
     tokens = _codex_tokens(events)
@@ -507,12 +507,12 @@ def _call_codex(
             ["ws-infra-path", "agent-compression.md"],
             capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
-        compression_prompt = Path(compression_path).read_text()
+        compression_prompt = Path(compression_path).read_text(encoding="utf-8")
         comp_events = _run(compression_prompt, uuid)
         compression_doc = _codex_result_text(comp_events)
 
         # Step c: snapshot outbox, re-register with fresh uuid, restore outbox
-        saved_outbox = outbox_file.read_text() if outbox_file.stat().st_size > 0 else ""
+        saved_outbox = outbox_file.read_text(encoding="utf-8") if outbox_file.stat().st_size > 0 else ""
 
         new_args = ["ws-named-agent", "new", agent_name]
         if model:
@@ -521,7 +521,7 @@ def _call_codex(
             new_args += ["--agent-type", agent_type]
         if effective_sp:
             sp_tmp = _mktemp()
-            Path(sp_tmp).write_text(effective_sp)
+            Path(sp_tmp).write_text(effective_sp, encoding="utf-8")
             new_args += ["--system-prompt", sp_tmp]
         subprocess.run(new_args, check=True)
 
@@ -531,7 +531,7 @@ def _call_codex(
         _atomic_write(registry_dir / f"{agent_name}.json", new_reg)
 
         if saved_outbox:
-            outbox_file.write_text(saved_outbox)
+            outbox_file.write_text(saved_outbox, encoding="utf-8")
 
         # Step d: handoff to fresh codex session — thread_id assigned at runtime
         handoff_prompt = f"{compression_doc}\n\n---\n\n{intent_summary}\n\n---\n\n{prompt}"
@@ -595,7 +595,7 @@ def cmd_new(argv: list[str]) -> None:
         stem = agent_type[3:]
         agent_file = PLUGIN_DIR / "agents" / f"{stem}.md"
         if agent_file.exists():
-            fm_model = _frontmatter_field(agent_file.read_text(), "model")
+            fm_model = _frontmatter_field(agent_file.read_text(encoding="utf-8"), "model")
             if fm_model in KNOWN_TIERS:
                 fm_tier = fm_model
 
@@ -608,8 +608,9 @@ def cmd_new(argv: list[str]) -> None:
             model = ""
             tier = None
         else:
-            model = "sonnet"
-            tier = "sonnet"
+            default = _load_ws_config().get("default-model", "")
+            model = default if default else "sonnet"
+            tier = model if model in KNOWN_TIERS else None
     elif model_arg in KNOWN_TIERS:
         model = model_arg
         tier = model_arg
@@ -618,7 +619,7 @@ def cmd_new(argv: list[str]) -> None:
         tier = None
 
     backend = infer_backend(model) if model else "claude"
-    system_prompt = Path(system_prompt_path).read_text() if system_prompt_path else ""
+    system_prompt = Path(system_prompt_path).read_text(encoding="utf-8") if system_prompt_path else ""
 
     registry_dir = _registry_dir()
     registry_dir.mkdir(parents=True, exist_ok=True)
@@ -706,7 +707,7 @@ def cmd_call(argv: list[str]) -> None:
 
     output_path = registry_dir / f"{agent_name}.output.txt"
     out_text = result.text if result.text.endswith("\n") else result.text + "\n"
-    output_path.write_text(out_text)
+    output_path.write_text(out_text, encoding="utf-8")
     print(result.text)
 
     if result.is_error:
@@ -741,7 +742,7 @@ def cmd_print(argv: list[str]) -> None:
     if not output_path.exists():
         print(f"error: no output found for agent '{agent_name}'", file=sys.stderr)
         sys.exit(1)
-    print(output_path.read_text(), end="")
+    print(output_path.read_text(encoding="utf-8"), end="")
 
 
 def cmd_check_mailbox(_argv: list[str]) -> None:
@@ -765,13 +766,29 @@ def cmd_override(argv: list[str]) -> None:
 
     if len(argv) < 2:
         print("Usage: ws-named-agent override <tier> <model>", file=sys.stderr)
-        print("       ws-named-agent override <tier> --unset", file=sys.stderr)
+        print("       ws-named-agent override default <model>", file=sys.stderr)
+        print("       ws-named-agent override <tier>|default --unset", file=sys.stderr)
         print("       ws-named-agent override show", file=sys.stderr)
         sys.exit(1)
 
     tier, value = argv[0], argv[1]
+
+    if tier == "default":
+        cfg = _load_ws_config()
+        p = _ws_config_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if value == "--unset":
+            cfg.pop("default-model", None)
+            _atomic_write(p, cfg)
+            print(f"Removed default model  ({p})")
+        else:
+            cfg["default-model"] = value
+            _atomic_write(p, cfg)
+            print(f"Set default model → {value}  ({p})")
+        return
+
     if tier not in KNOWN_TIERS:
-        print(f"error: tier must be one of {sorted(KNOWN_TIERS)}", file=sys.stderr)
+        print(f"error: tier must be one of {sorted(KNOWN_TIERS)} or 'default'", file=sys.stderr)
         sys.exit(1)
 
     cfg = _load_ws_config()
