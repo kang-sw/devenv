@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.10.4 — 2026-04-27
+
+### Added
+- `.cmd` shims for all 16 scripts in `claude/bin/` — Python scripts call `python "%~dp0<name>" %*`; bash scripts call `bash "%~dp0<name>" %*`; cmd.exe selects `.cmd` via PATHEXT, Git Bash selects the shebang file; no conflict
+- `ws-named-agent`: `_inject_git_bash()` runs at module load on Windows — reads Git installation path from `HKLM\SOFTWARE\GitForWindows` registry key, falls back to `C:\Program Files\Git\bin`; injects into `PATH` so all subsequent subprocess calls (including hooks and `.cmd` shims) can resolve `bash`
+
+### Fixed
+- `ws-named-agent override`: local config path moved from `<git-root>/.claude/kang-sw-devenv-ws.json` to `~/.claude/kang-sw-devenv/ws/<escaped-proj>.json`; eliminates git tracking of machine-local config
+
 ## v0.10.3 — 2026-04-27
 
 ### Added
