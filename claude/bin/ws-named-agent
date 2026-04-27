@@ -358,11 +358,7 @@ def _call_claude(
             intent_summary = json.load(fh).get("result", "")
 
         # Step b: inject compression prompt into existing session
-        compression_path = _subrun(
-            ["ws-infra-path", "agent-compression.md"],
-            capture_output=True, text=True, encoding="utf-8", check=True,
-        ).stdout.strip()
-        compression_prompt = Path(compression_path).read_text(encoding="utf-8")
+        compression_prompt = (PLUGIN_DIR / "infra" / "agent-compression.md").read_text(encoding="utf-8")
 
         comp_file = _mktemp()
         with open(comp_file, "w", encoding="utf-8") as out:
@@ -550,11 +546,7 @@ def _call_codex(
             intent_summary = json.load(fh).get("result", "")
 
         # Step b: inject compression prompt into existing codex session
-        compression_path = _subrun(
-            ["ws-infra-path", "agent-compression.md"],
-            capture_output=True, text=True, encoding="utf-8", check=True,
-        ).stdout.strip()
-        compression_prompt = Path(compression_path).read_text(encoding="utf-8")
+        compression_prompt = (PLUGIN_DIR / "infra" / "agent-compression.md").read_text(encoding="utf-8")
         comp_events = _run(compression_prompt, uuid)
         compression_doc = _codex_result_text(comp_events)
 
