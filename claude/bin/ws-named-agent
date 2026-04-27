@@ -86,13 +86,31 @@ def infer_backend(model: str) -> str:
     return "claude"
 
 
+def _ws_config_path() -> Path:
+    repo_root = _git("--show-toplevel") or os.getcwd()
+    repo_name = Path(repo_root).name
+    return Path.home() / ".claude" / f"{repo_name}-ws.json"
+
+
+def _load_ws_config() -> dict:
+    p = _ws_config_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
 def resolve_model_backend(registry: dict) -> tuple[str, str]:
-    """Return (model, backend) applying WS_OVERRIDE_* when a tier is stored."""
+    """Return (model, backend) applying env var > config file > stored model."""
     tier = registry.get("tier")
     stored_model = registry.get("model") or "sonnet"
 
     if tier and tier in KNOWN_TIERS:
         override = os.environ.get(f"WS_OVERRIDE_{tier.upper()}")
+        if not override:
+            override = _load_ws_config().get("agent-overrides", {}).get(tier, "")
         if override:
             return override, infer_backend(override)
 
@@ -700,6 +718,50 @@ def cmd_check_mailbox(_argv: list[str]) -> None:
     sys.exit(2 if p.exists() and p.stat().st_size > 0 else 0)
 
 
+def cmd_configure(argv: list[str]) -> None:
+    if not argv or argv[0] not in ("agent-override", "show"):
+        print("Usage: ws-configure agent-override <tier> <model>", file=sys.stderr)
+        print("       ws-configure agent-override <tier> --unset", file=sys.stderr)
+        print("       ws-configure show", file=sys.stderr)
+        sys.exit(1)
+
+    sub = argv[0]
+
+    if sub == "show":
+        cfg = _load_ws_config()
+        p = _ws_config_path()
+        if not cfg:
+            print(f"(no config at {p})")
+        else:
+            print(f"# {p}")
+            print(json.dumps(cfg, indent=2))
+        return
+
+    if len(argv) < 3:
+        print("Usage: ws-configure agent-override <tier> <model|--unset>", file=sys.stderr)
+        sys.exit(1)
+    tier, value = argv[1], argv[2]
+    if tier not in KNOWN_TIERS:
+        print(f"error: tier must be one of {sorted(KNOWN_TIERS)}", file=sys.stderr)
+        sys.exit(1)
+
+    cfg = _load_ws_config()
+    overrides: dict = cfg.setdefault("agent-overrides", {})
+    p = _ws_config_path()
+    if value == "--unset":
+        overrides.pop(tier, None)
+        if not overrides:
+            cfg.pop("agent-overrides", None)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(p, cfg)
+        print(f"Removed override for '{tier}'  ({p})")
+    else:
+        overrides[tier] = value
+        p.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(p, cfg)
+        print(f"Set {tier} → {value}  ({p})")
+
+
 def _tail_claude(session_path: Path, n: int) -> None:
     lines = session_path.read_text().splitlines()
 
@@ -864,6 +926,7 @@ COMMANDS = {
     "interrupt":     cmd_interrupt,
     "print":         cmd_print,
     "check-mailbox": cmd_check_mailbox,
+    "configure":     cmd_configure,
     "tail":          cmd_tail,
 }
 
