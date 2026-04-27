@@ -108,6 +108,19 @@ def _strip_frontmatter(text: str) -> str:
     return parts[2].strip() if len(parts) >= 3 else text
 
 
+def _frontmatter_field(text: str, field: str) -> str:
+    """Extract a scalar field from YAML frontmatter (---...---). Returns '' if absent."""
+    if not text.startswith("---"):
+        return ""
+    parts = text.split("---\n", 2)
+    if len(parts) < 3:
+        return ""
+    for line in parts[1].splitlines():
+        if line.startswith(f"{field}:"):
+            return line[len(f"{field}:"):].strip()
+    return ""
+
+
 def _resolve_ws_agent(agent_type: str) -> str | None:
     """Resolve ws:<stem> to agent file body. Returns None if file not found."""
     if not agent_type.startswith("ws:"):
@@ -524,10 +537,27 @@ def cmd_new(argv: list[str]) -> None:
         else:
             print(f"Unknown flag: {argv[i]}", file=sys.stderr); sys.exit(1)
 
+    # Step 1: read tier from agent frontmatter (ws: agents only)
+    fm_tier: str | None = None
+    if agent_type and agent_type.startswith("ws:"):
+        stem = agent_type[3:]
+        agent_file = PLUGIN_DIR / "agents" / f"{stem}.md"
+        if agent_file.exists():
+            fm_model = _frontmatter_field(agent_file.read_text(), "model")
+            if fm_model in KNOWN_TIERS:
+                fm_tier = fm_model
+
+    # Step 2: --model arg overrides frontmatter; no arg falls back to frontmatter or defaults
     if model_arg is None:
-        # Match bash ws-new-named-agent: default sonnet only when no agent type
-        model = "" if agent_type_set else "sonnet"
-        tier: str | None = None if agent_type_set else "sonnet"
+        if fm_tier:
+            model = fm_tier
+            tier: str | None = fm_tier
+        elif agent_type_set:
+            model = ""
+            tier = None
+        else:
+            model = "sonnet"
+            tier = "sonnet"
     elif model_arg in KNOWN_TIERS:
         model = model_arg
         tier = model_arg
