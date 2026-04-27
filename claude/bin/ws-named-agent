@@ -17,6 +17,28 @@ SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 PLUGIN_DIR = SCRIPT_DIR.parent
 KNOWN_TIERS = {"opus", "sonnet", "haiku"}
 
+
+def _inject_git_bash() -> None:
+    """On Windows, add Git Bash bin/ to PATH if bash is not already available."""
+    if sys.platform != "win32" or shutil.which("bash"):
+        return
+    git_root: str | None = None
+    try:
+        import winreg  # type: ignore[import]
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\GitForWindows") as k:
+            git_root = winreg.QueryValueEx(k, "InstallPath")[0]
+    except Exception:
+        pass
+    candidates = [str(Path(git_root) / "bin")] if git_root else []
+    candidates += [r"C:\Program Files\Git\bin", r"C:\Program Files (x86)\Git\bin"]
+    for c in candidates:
+        if Path(c, "bash.exe").exists():
+            os.environ["PATH"] = c + os.pathsep + os.environ.get("PATH", "")
+            return
+
+
+_inject_git_bash()
+
 # On Windows, `claude` and `codex` are .cmd files and cannot be exec'd without shell.
 # Resolve once at import time; wrap with `cmd /c` when needed.
 _CLAUDE_EXE = shutil.which("claude") or "claude"
