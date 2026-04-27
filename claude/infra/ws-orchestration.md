@@ -1,7 +1,7 @@
 # WS Orchestration Primitives
 
-Bash-callable scripts at `claude/bin/` for Team-free subagent coordination.
-All scripts are on `$PATH` via `claude/bin/`.
+PATH-accessible scripts provided by the `ws` plugin.
+All scripts are on `$PATH` after `claude plugin install ws@ws`.
 
 ## ws-new-named-agent
 
