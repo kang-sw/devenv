@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.5 — 2026-04-27
+
+### Fixed
+- `ws-named-agent`: added `_WIN_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)` and `_subrun()` wrapper; all 11 `subprocess.run` call sites replaced — suppresses the brief console window that appears per-spawn for `.cmd` shims on Windows
+- `ws-named-agent tail` (codex): added `last_agent_message` fallback in `task_complete` handler — when no inline `agent_message` events are present in a turn, the final message is read from `payload.last_agent_message`; also added explicit `uuid`/`pattern`/`search-dir` diagnostics when no session file is found
+
 ## v0.10.4 — 2026-04-27
 
 ### Added
