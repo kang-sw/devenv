@@ -82,38 +82,47 @@ Suggests `/edit` or `/implement` as the next step based on scope and session war
 
 ## Implementation Skills
 
-### `/edit` {#260422-edit-skill}
+### `/write-code` {#260427-write-code-skill}
 
-Owner-direct single-scope implementation: the main agent reads source, makes edits, verifies via build and test commands, and commits — no subagent delegation for the implementation itself. Best suited for warm sessions with well-understood, narrow scope.
+Core delegated implementation primitive. Operates on the current branch (branch creation is the caller's responsibility). Steps:
 
-After implementation, dispatches `spec-updater` first and waits for it to commit, then dispatches `mental-model-updater` and waits. The sequential order ensures `mental-model-updater`'s spec-diff check captures any 🚧 strips committed by `spec-updater`. If `spec-updater` reports ambiguous stems, surfaces them to the user. Then updates ticket status and `_index.md`, and emits a completion report. {#260423-doc-pipeline-spec-updater}
+1. Reads target; spawns `project-survey`; writes a brief (`ai-docs/plans/YYYY-MM/DD-<stem>.brief.md`) — the implementer's sole context source.
+2. Applies `judge: plan-depth` (soft): **as-is** (no plan file) / **survey** (Sonnet populates a reference map) / **research** (Opus produces a step-by-step plan).
+3. Spawns an implementer subagent and up to three review-partition subagents in parallel. {#260424-implement-file-based-review}
+4. Runs a relay loop (max 3 cycles): implementer responds to each finding with `[fixed]`, `[won't fix: <reason>]`, or `[deferred: <reason>]`; reviewers respond `[accepted]` or `[maintained]`. At cycle 2, the lead adjudicates maintained disputes; at cycle 3, unresolved disputes escalate to the caller.
+5. Deletes review path files and outputs commit range + test status to the caller.
 
-> [!note] Implementation Gap · 2026-04-23
-> Doc pipeline output (spec-updater, mental-model-updater changes, `_index.md` refresh, ticket status update) is dispatched and awaited, but the resulting file changes are not guaranteed to be committed before the skill exits.
-
-> [!note] Constraints
-> - Escalates to `/implement` when scope grows beyond direct-edit bounds.
-> - Suggests `/write-skeleton` when none exist and scope warrants them, but does not auto-invoke it.
-
-### `/implement` {#260422-implement-skill}
-
-Delegated implementation cycle. At invoke, the lead writes a brief (`ai-docs/plans/YYYY-MM/DD-<stem>.brief.md`) distilled from the ticket — the implementer's sole context source. Optionally, a survey (sonnet) or research (opus) agent populates a companion plan file. An implementer subagent then writes code; three review-partition subagents review in parallel; the lead merges and runs the doc pipeline. Suited for cold sessions or wide-scope work.
-
-Review partitions: {#260424-implement-file-based-review}
+Review partitions:
 - **Correctness** — logic, error paths, contracts, security.
 - **Fit** — conventions, naming, reuse, patterns.
 - **Test** — test file quality, coverage of new code paths, assertion validity.
 
-Reviewers write full findings to `ws-review-path`-allocated files; stdout returns only a `[clean|non-clean]: <brief>` summary line. The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. The implementer applies judgment: correctness, contract, and security findings are addressed; style findings conflicting with established patterns may be deprioritized. `ws-review-path` files are deleted in the Cleanup step.
+Reviewers write full findings to `ws-review-path`-allocated files; stdout returns only a `[clean|non-clean]: <brief>` summary line. Won't-fix is allowed for style conflicts with established patterns or out-of-scope suggestions; not allowed for correctness, security, or contract violations.
 
-Pre-merge, dispatches `spec-updater` first and waits for it to commit, then dispatches `mental-model-updater` and waits. Ambiguous stems from `spec-updater` are surfaced at the report/approval gate before merge proceeds.
+### `/edit` {#260422-edit-skill}
 
-> [!note] Implementation Gap · 2026-04-23
-> Pre-merge doc pipeline output (spec-updater and mental-model-updater file changes) is not guaranteed to be committed before the merge step runs.
+Direct-edit primitive. The lead reads source, edits, verifies, and commits — no subagent delegation for the edit itself. One named-agent reviewer covers correctness and fit (both partition docs concatenated into a single system prompt). Relay loop capped at 2 cycles; the lead applies fixes directly without won't-fix negotiation. Outputs commit range and test status to the caller; no doc pipeline.
+
+> [!note] Constraints
+> - Escalates to `/implement` when scope grows to multi-file with new public API or cross-module without established pattern.
+> - Suggests `/write-skeleton` when none exist and scope warrants them, but does not auto-invoke it.
+
+### `/implement` {#260422-implement-skill}
+
+Implementation harness. Routes to `ws:write-code` or `ws:edit` based on `judge: execution-mode`, then runs the shared doc pipeline, report/approval gate, and merge.
+
+- **Direct-edit** — single file, purely internal change, no new public symbols: routes to `ws:edit`.
+- **Delegated** — any cross-file touch, new public contract, or explicit delegation requested: creates an `implement/<scope>` branch and routes to `ws:write-code`.
+
+After the primitive returns, dispatches `spec-updater` then `mental-model-updater` (sequential, spec first so 🚧 strips are visible to the mental-model updater). User approves before merge. Merge uses `ws-merge-branch` (squash for 1 commit, `--no-ff` for 2+). {#260423-doc-pipeline-spec-updater}
+
+> [!note] Constraints
+> - User approval is unconditional — no code reaches the target branch without it.
+> - If `write-code` escalates at cycle 3, unresolved reviewer disputes are listed in the approval report for user decision.
 
 ### Pre-invocation Context Survey — `project-survey` {#260424-project-survey-auto-invoke}
 
-At the start of each `/edit` and `/implement` run, the `project-survey` agent is auto-invoked with the implementation brief. In `/discuss`, the model triggers it on-demand via `judge: needs-survey` when the topic references components not yet read this session or the discussion shifts to a new domain. {#260424-discuss-on-demand-survey}
+`project-survey` is auto-invoked at the start of each `/write-code` run (before the brief is written) and embedded into the brief's `## References` section. Survey output serves as the focused doc list for the plan-population agent and the implementer. In `/discuss`, the model triggers it on-demand via `judge: needs-survey` when the topic references components not yet read this session or the discussion shifts to a new domain. {#260424-discuss-on-demand-survey}
 
 The agent returns a `[Must|Maybe]`-tiered reference list. Output per tier:
 - **Spec entries** — stem, entry title, and one-line summary from the spec body.
@@ -133,23 +142,22 @@ Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket direct
 
 ### `/proceed` {#260421-proceed}
 
-Auto-router: assesses an implementation target and chains to the correct pipeline without executing implementation steps itself. Judges:
+Auto-router: assesses an implementation target and chains to the correct pipeline without executing implementation steps itself. All implementation paths terminate in `/implement` — routing to `/edit` directly is no longer a proceed concern. Judges:
 
-- **Context warmth** — warm session routes to `/edit`; cold routes to `/implement`.
 - **Existing artifacts** — skips `/write-skeleton` if already present.
-- **Direct-edit** — trivial changes skip the full pipeline and route directly to `/edit`.
+- **Needs-skeleton** — routes to `/write-skeleton` before `/implement` when public contracts are absent.
 
-Announces the chosen path before invoking the first skill.
+Announces the chosen path before invoking the first skill. `/implement`'s internal `judge: execution-mode` handles the direct-edit vs. delegated split.
 
 > [!note] Constraints
-> - Stops and asks for clarification when scope is too vague to route.
+> - Stops and routes to `/discuss` when the target is exploratory rather than actionable.
 
 > [!note] Extended behavior — full-pipeline routing {#260422-proceed-full-pipeline-routing}
-> Two prefix judges fire before the existing pipeline judges:
+> Two prefix judges fire before the pipeline judges:
 > - **`judge: needs-spec`** — always invokes `/write-spec`; its own `judge: spec-impact` gate exits without writing if no spec work is needed.
-> - **`judge: needs-ticket`** — auto-invokes `/write-ticket` when the target is a vague inline description with no clear scope. Clear-scope inline descriptions currently bypass `/write-ticket` and proceed directly to implementation. Exception: exploratory targets stop and route back to `/discuss`.
+> - **`judge: needs-ticket`** — auto-invokes `/write-ticket` when the target is an inline description. Exception: exploratory targets stop and route back to `/discuss`.
 >
-> With this change, `/proceed` is a valid entry point from any conversation state, including immediately after `/discuss` or mid-discussion with no ticket path argument.
+> `/proceed` is a valid entry point from any conversation state, including immediately after `/discuss` or mid-discussion with no ticket path argument.
 
 ### `/sprint` — Session Container {#260425-sprint}
 
@@ -196,9 +204,13 @@ The sequential spec → mental-model order ensures `ws:mental-model-updater` see
 > - Wrap-up runs once per sprint, not per task.
 > - Completing wrap-up and merging or deleting the sprint branch closes the sprint.
 
-#### Sprint Implementation Delegation {#260425-sprint-implementation-delegation}
+#### Sprint Implementation {#260425-sprint-implementation-delegation}
 
-Delegated implementation within a sprint uses `ws-call-named-agent` with two review partitions in parallel: **Correctness** (logic, error paths, contracts, security) and **Fit** (conventions, naming, reuse, patterns). The Test partition is omitted. Reviewers write full findings to `ws-review-path`-allocated files; the lead reads summaries only. When non-clean, the lead relays file paths to the implementer, which reads them directly.
+Sprint routes implementation tasks to the shared primitives:
+- Single-file isolated change → `ws:edit` (direct-edit, one named-agent reviewer covering correctness+fit).
+- Multi-file or new-pattern → `ws:write-code` (delegated; three review partitions; won't-fix + 3-cycle cap).
+
+Both primitives self-clean their review path files. No doc pipeline runs during a sprint task — deferred to wrap-up.
 
 ## Reconstruction
 

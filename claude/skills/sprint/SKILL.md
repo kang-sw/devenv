@@ -15,9 +15,6 @@ Target: $ARGUMENTS
 
 - Sprint operates only on `sprint/`-prefixed branches — do not enter the session loop or run wrap-up on any other branch.
 - Doc pipeline (`ws:spec-updater`, `ws:mental-model-updater`) is suppressed during task execution; it runs once at wrap-up only.
-- Do not invoke `/discuss`, `/edit`, or `/implement` skills from the session loop — internalize their patterns directly.
-- Before each delegation task: register agents via `ws-new-named-agent` and allocate `ws-review-path` slots (two separate Bash calls — see Delegation Cycle).
-- After each delegation task: `rm -f <correctness-path> <fit-path>` using the literal paths stored from allocation.
 - All written artifacts must be in English regardless of conversation language.
 - At wrap-up, commit each doc updater's output immediately after it completes — spec-updater changes in one commit, mental-model-updater changes in the next. Do not batch both into a single deferred commit.
 
@@ -63,8 +60,8 @@ Pick the first matching row; execute it; return to the session loop.
 | Question about behavior, concept, or status | Answer inline; dispatch Explore agent if codebase search is needed |
 | Codebase exploration (locate symbols, read files, map structure) | Dispatch Explore agent |
 | Design discussion (approach tradeoffs, alternatives) | Inline discussion — do not auto-chain to `/write-spec` at end |
-| Single-file edit or clear isolated change | Direct edit via Read/Edit tools; no doc pipeline; commit; return |
-| Multi-file or new-pattern implementation | **Delegation Cycle** template |
+| Single-file edit or clear isolated change | Invoke `ws:edit` via Skill tool |
+| Multi-file or new-pattern implementation | Invoke `ws:write-code` via Skill tool |
 | Exploration required before routing is possible | Run sprint-aware survey; re-apply judge |
 
 ### judge: needs-survey
@@ -101,87 +98,6 @@ $PROJ_TREE
 PROMPT
 ```
 
-### Delegation Cycle
-
-Bash shell state does not persist between tool calls. Each step below is a
-separate Bash call. Path values from Step 1 are read into lead context as
-literals and interpolated into subsequent calls — never relied on as shell
-variables.
-
-**Step 1 — Register agents (one Bash call)**
-
-```bash
-ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-ws-new-named-agent reviewer-correctness --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
-ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
-```
-
-**Step 2 — Allocate paths (one Bash call)**
-
-```bash
-ws-review-path correctness fit
-```
-
-Read the two output lines. Store as `<correctness-path>` and `<fit-path>` in
-context.
-
-**Step 3 — Spawn implementer (one Bash call, `run_in_background: true`)**
-
-```bash
-ws-call-named-agent implementer - <<'PROMPT'
-Run `ws-print-infra implementer.md` first.
-Mode: B (inline brief)
-<task description — goals, constraints; no doc pipeline required>
-No skeleton — implement to spec.
-Commit on current branch.
-PROMPT
-```
-
-After the completion notification arrives, read the implementer's report:
-
-```bash
-ws-print-named-agent-output implementer
-```
-
-Note commit range from implementer report as `<first>..<last>`.
-
-**Step 4 — Spawn reviewers in parallel (two Bash calls in the same response turn, each with `run_in_background: true`)**
-
-```bash
-ws-call-named-agent reviewer-correctness - <<'PROMPT'
-Diff range: <first>..<last>
-Write full findings to: <correctness-path>
-Return only: [clean|non-clean]: <one-line summary>
-PROMPT
-```
-
-```bash
-ws-call-named-agent reviewer-fit - <<'PROMPT'
-Diff range: <first>..<last>
-Write full findings to: <fit-path>
-Return only: [clean|non-clean]: <one-line summary>
-PROMPT
-```
-
-After all completion notifications arrive, read each reviewer's summary:
-
-```bash
-ws-print-named-agent-output reviewer-correctness
-ws-print-named-agent-output reviewer-fit
-```
-
-Review loop: if non-clean, relay file paths (not content) to implementer
-(`run_in_background: true`); wait for notification, then
-read output via `ws-print-named-agent-output implementer`; re-review
-(reviewers overwrite paths, each `run_in_background: true`) until both
-return `[clean]`.
-
-**Cleanup (one Bash call)**
-
-```bash
-rm -f <correctness-path> <fit-path>
-```
-
 ## Doctrine
 
-Sprint optimizes for **sustained implementation throughput across a feature branch** — by deferring the doc pipeline to a single wrap-up pass and internalizing routing, the session maintains momentum without manual skill-chaining between tasks. When a rule is ambiguous, apply whichever interpretation better preserves throughput without accumulating documentation debt.
+Sprint optimizes for **sustained implementation throughput across a feature branch** — by deferring the doc pipeline to a single wrap-up pass and delegating implementation to write-code and edit primitives, the session maintains momentum without accumulating documentation debt or managing internal agent state. When a rule is ambiguous, apply whichever interpretation better preserves throughput.

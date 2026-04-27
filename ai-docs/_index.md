@@ -95,10 +95,11 @@ claude/skills/
   write-spec/          — create/update external-perspective spec docs in ai-docs/spec/
   write-skeleton/      — public interface stubs + integration tests
   add-rule/            — classify and route a new rule to CLAUDE.md (cross-cutting) or mental-model Domain Rules (domain-scoped)
-  edit/                — main-agent-direct single-scope cycle (warm sessions, owner edits)
-  implement/           — delegated implementer + reviewer cycle (cold sessions or wide scope)
-  proceed/             — auto-route through the canonical pipeline
-  sprint/              — multi-task session container; branch-as-state persistence, deferred doc pipeline, 2-reviewer delegation
+  write-code/          — brief → plan depth → implementer → reviewer loop; core delegated implementation primitive
+  edit/                — direct-edit primitive: lead edits, one named-agent reviewer (correctness+fit), no doc pipeline
+  implement/           — harness: routes to write-code or edit; runs doc pipeline + approval + merge
+  proceed/             — auto-route through the canonical pipeline; all implementation paths call /implement
+  sprint/              — multi-task session container; branch-as-state persistence, deferred doc pipeline; calls write-code and edit
   ship/                — release: version bump, tag, build, publish per project config
   manual-think/        — manual chain-of-thought when native thinking unavailable
   bootstrap/           — scaffold new project or upgrade existing to canonical template
@@ -110,11 +111,13 @@ claude/skills/
 
 ```
 Full ceremony:  /discuss → /proceed
-                                                             ↓
-                           /write-skeleton? → /edit (warm)
-                                                           → /implement (cold)
-Direct:         /edit <description>
-Auto-route:     /proceed <ticket-path>    — routes via warmth + scope judges
+                                         ↓
+                     /write-skeleton? → /implement
+                                             ↓
+                                    (write-code | edit — routed internally)
+Direct:         /implement <description>   — judge: execution-mode routes internally
+Auto-route:     /proceed <ticket-path>     — all implementation paths route to /implement
+Sprint:         /sprint → write-code | edit per task → wrap-up
 ```
 
 Agent suggests next step at each point; user decides. `/proceed` is the explicit opt-in for auto-chaining through the pipeline.
