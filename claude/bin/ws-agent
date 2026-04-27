@@ -223,7 +223,8 @@ def _call_claude(
     registry["context-window"] = tokens
     _atomic_write(registry_dir / f"{agent_name}.json", registry)
 
-    if tokens > 120000 and not skip_compression:
+    threshold = int(os.environ.get("WS_COMPRESS_THRESHOLD", "120000"))
+    if tokens > threshold and not skip_compression:
         print("[info] Context threshold exceeded — compressing session...", file=sys.stderr)
 
         # Step a: intent summary via haiku
