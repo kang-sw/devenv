@@ -1,6 +1,2 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-OUTBOX="${WS_AGENT_OUTBOX:-}"
-[[ -z "$OUTBOX" || ! -s "$OUTBOX" ]] && exit 0
-exit 2
+exec ws-named-agent check-mailbox

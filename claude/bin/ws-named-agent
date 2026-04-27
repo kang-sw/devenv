@@ -532,7 +532,7 @@ def cmd_new(argv: list[str]) -> None:
             model_arg = argv[i + 1]; i += 2
         elif argv[i] == "--system-prompt":
             system_prompt_path = argv[i + 1]; i += 2
-        elif argv[i] == "--agent-type":
+        elif argv[i] in ("--agent-type", "--agent"):
             agent_type = argv[i + 1]; agent_type_set = True; i += 2
         else:
             print(f"Unknown flag: {argv[i]}", file=sys.stderr); sys.exit(1)
