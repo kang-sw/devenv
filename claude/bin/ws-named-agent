@@ -101,20 +101,36 @@ def infer_backend(model: str) -> str:
     return "claude"
 
 
-def _ws_config_path() -> Path:
+_PLUGIN_CONFIG_NAME = "kang-sw-devenv-ws.json"
+
+
+def _global_config_path() -> Path:
+    return Path.home() / ".claude" / _PLUGIN_CONFIG_NAME
+
+
+def _local_config_path() -> Path:
     repo_root = _git("--show-toplevel") or os.getcwd()
-    repo_name = Path(repo_root).name
-    return Path.home() / ".claude" / f"{repo_name}-ws.json"
+    return Path(repo_root) / ".claude" / _PLUGIN_CONFIG_NAME
 
 
-def _load_ws_config() -> dict:
-    p = _ws_config_path()
+def _load_config_file(p: Path) -> dict:
     if not p.exists():
         return {}
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+def _load_ws_config() -> dict:
+    """Load merged config: global + local. Local wins on conflict."""
+    merged = _load_config_file(_global_config_path())
+    for k, v in _load_config_file(_local_config_path()).items():
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = {**merged[k], **v}
+        else:
+            merged[k] = v
+    return merged
 
 
 def resolve_model_backend(registry: dict) -> tuple[str, str]:
@@ -755,28 +771,31 @@ def cmd_check_mailbox(_argv: list[str]) -> None:
 
 def cmd_override(argv: list[str]) -> None:
     if not argv or argv[0] == "show":
-        cfg = _load_ws_config()
-        p = _ws_config_path()
-        if not cfg:
-            print(f"(no config at {p})")
-        else:
-            print(f"# {p}")
-            print(json.dumps(cfg, indent=2))
+        gp, lp = _global_config_path(), _local_config_path()
+        gcfg, lcfg = _load_config_file(gp), _load_config_file(lp)
+        print(f"# global: {gp}")
+        print(json.dumps(gcfg, indent=2) if gcfg else "(empty)")
+        print(f"# local:  {lp}")
+        print(json.dumps(lcfg, indent=2) if lcfg else "(empty)")
         return
 
+    global_flag = argv[0] == "-g"
+    if global_flag:
+        argv = argv[1:]
+
     if len(argv) < 2:
-        print("Usage: ws-named-agent override <tier> <model>", file=sys.stderr)
-        print("       ws-named-agent override default <model>", file=sys.stderr)
-        print("       ws-named-agent override <tier>|default --unset", file=sys.stderr)
+        print("Usage: ws-named-agent override [-g] <tier> <model>", file=sys.stderr)
+        print("       ws-named-agent override [-g] default <model>", file=sys.stderr)
+        print("       ws-named-agent override [-g] <tier>|default --unset", file=sys.stderr)
         print("       ws-named-agent override show", file=sys.stderr)
         sys.exit(1)
 
     tier, value = argv[0], argv[1]
+    p = _global_config_path() if global_flag else _local_config_path()
+    cfg = _load_config_file(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
 
     if tier == "default":
-        cfg = _load_ws_config()
-        p = _ws_config_path()
-        p.parent.mkdir(parents=True, exist_ok=True)
         if value == "--unset":
             cfg.pop("default-model", None)
             _atomic_write(p, cfg)
@@ -791,10 +810,7 @@ def cmd_override(argv: list[str]) -> None:
         print(f"error: tier must be one of {sorted(KNOWN_TIERS)} or 'default'", file=sys.stderr)
         sys.exit(1)
 
-    cfg = _load_ws_config()
     overrides: dict = cfg.setdefault("agent-overrides", {})
-    p = _ws_config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
     if value == "--unset":
         overrides.pop(tier, None)
         if not overrides:
