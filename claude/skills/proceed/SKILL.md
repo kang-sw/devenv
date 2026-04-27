@@ -17,7 +17,7 @@ Target: $ARGUMENTS
 - This skill routes. It does not implement, plan, or write skeletons itself.
 - Every routing decision is announced with rationale before execution begins.
 - Each pipeline sub-skill is invoked via the Skill tool with the appropriate arguments.
-- Pipeline order is fixed: skeleton → plan → implementation.
+- Pipeline order is fixed: skeleton → implementation.
 - Execution mode is always single. Split multi-scope work into separate tickets; parallel execution is not available.
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only. Do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.

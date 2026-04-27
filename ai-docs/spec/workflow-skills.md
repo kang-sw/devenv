@@ -15,18 +15,19 @@ The standard pipeline runs in this order:
 /discuss → /proceed
                ↓
 /write-spec → /write-ticket
-                                             ↓
-                   /write-skeleton? → /write-plan? → /edit
-                                                  → /implement
+                             ↓
+             /write-skeleton? → /implement
+                                    ↓
+                         (write-code | edit — routed internally)
 ```
 
-Each skill recommends the next step at completion. `/proceed` is the auto-router invoked after `/write-ticket`; it selects and chains skeleton, plan, and implementation stages based on existing artifacts and session context.
+Each skill recommends the next step at completion. `/proceed` is the auto-router invoked after `/write-ticket`; it selects and chains skeleton and implementation stages based on existing artifacts and session context. `/implement` applies its own `judge: execution-mode` to route between direct-edit (`ws:edit`) and delegated (`ws:write-code`) internally.
 
 > [!note] Constraints
 > - Skills do not auto-chain — user invocation or `/proceed` is always required.
 > - `/write-spec` is optional: the `judge: spec-impact` gate inside it exits early when no public behavior is affected.
 > - `/write-skeleton` is optional: required only when public contracts need crystallization before implementation.
-> - `/write-plan` is optional: `/proceed` skips it when the scope is small or the session is warm.
+> - Plan population is handled internally by `write-code` via `judge: plan-depth` — there is no separate `/write-plan` pipeline stage.
 
 ## Planning Skills
 
@@ -74,7 +75,7 @@ A `judge: spec-gate` blocks creation of `todo/`-or-higher tickets when no spec e
 
 Crystallizes public contracts as interface stubs and integration tests before implementation begins. The lead identifies contract directives (type signatures, API shapes, invariants), delegates writing to a subagent, reviews, and commits. Updates the ticket `skeletons:` frontmatter with the commit hash.
 
-Suggests `/edit` or `/implement` as the next step based on scope and session warmth — does not auto-invoke.
+Suggests `/implement` as the next step — does not auto-invoke. `/implement` internally routes to direct-edit or delegated based on `judge: execution-mode`.
 
 > [!note] Constraints
 > - Stub files must compile; integration tests are written but not required to pass (implementation is absent).

@@ -36,9 +36,10 @@ Apply `judge: execution-mode`.
 2. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
    [ ] Execute — invoke ws:edit or ws:write-code; capture commit range
-   [ ] Doc pre-pass — spec-updater then mental-model-updater
+   [ ] Doc pre-pass — spec-updater then mental-model-updater; commit each
    [ ] Report to user — wait for approval; loop on tweaks
    [ ] Merge to original branch (delegated path only)
+   [ ] Doc commit gate — executor-wrapup §Doc Commit Gate + §Ticket Update
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
    ```
 
@@ -52,22 +53,25 @@ Capture the commit range from the skill's completion report.
 
 ### 4. Doc pre-pass
 
-1. Dispatch **ws:spec-updater** with the commit range. Wait. Surface ambiguous stems.
-2. Dispatch **ws:mental-model-updater**. Wait. (Runs after spec-updater so it sees any 🚧 strips.)
+1. Dispatch **ws:spec-updater** with the commit range. Wait. Commit any file changes from spec-updater. Surface ambiguous stems.
+2. Dispatch **ws:mental-model-updater**. Wait. Commit any file changes. (Runs after spec-updater so it sees any 🚧 strips.)
 
 ### 5. Report and approval
 
 Report to the user:
 - What was implemented (from edit/write-code completion report)
-- Review result
+- Review result (from edit's `Review:` line or write-code's reviewer summaries)
 - Test status
 - Deviations or open items
 - If write-code escalated at cycle 3: list each unresolved dispute — user decides fix or accept
 
 Wait for user approval. If tweaks requested:
 - For direct-edit: apply fixes directly and re-verify.
-- For delegated: relay to implementer via `ws-call-named-agent implementer` and re-review per the write-code pattern.
-- Re-run spec-updater then mental-model-updater with the new commit range.
+- For delegated: relay to implementer via `ws-call-named-agent implementer`; re-review via
+  `ws-call-named-agent reviewer-correctness` / `reviewer-fit` / `reviewer-test` per the write-code
+  reviewer prompt pattern. Note: this is a post-approval tweak cycle separate from write-code's
+  3-cycle cap; cycle counter resets.
+- Re-run spec-updater then mental-model-updater with the new commit range; commit each.
 - Re-report. Loop until approved.
 
 ### 6. Merge (delegated path only)
@@ -76,9 +80,10 @@ Run `ws-merge-branch <original-branch> <branch> "<commit-message>"`.
 The script selects strategy by commit count: squash (1 commit) or --no-ff (2+).
 Compose the commit message per CLAUDE.md commit rules.
 
-### 7. Doc pipeline
+### 7. Doc commit gate
 
-Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update. Pass the merge commit range.
+Run `ws-print-infra executor-wrapup.md`. Follow §Doc Commit Gate and (if ticket-driven) §Ticket Update.
+Do not re-run §Doc Pipeline — spec-updater and mental-model-updater already ran in step 4.
 
 ### 8. Update project docs
 

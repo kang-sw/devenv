@@ -20,7 +20,7 @@ Target: $ARGUMENTS
 - Ancestor loading: when implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first. Lead propagates this rule in the implementer spawn prompt.
 - Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
 - Implementer and reviewer sessions persist via `ws-call-named-agent` auto-resume throughout the review loop.
-- Review cycle cap: 3 relays maximum. Lead adjudicates at cycle 2; user escalation at cycle 3.
+- Review cycle cap: 3 relays maximum. Lead adjudicates at cycle 2; caller escalation at cycle 3.
 - Self-cleanup: review path files are deleted before returning.
 - On completion, output the commit range, test status, and brief path in the format defined in Templates.
 
@@ -42,6 +42,8 @@ Spawn `project-survey` with the ticket path or inline description. Capture the r
 Write `ai-docs/plans/YYYY-MM/DD-<stem>.brief.md` using the **brief template** (see Templates).
 Strip ticket noise — this file is the implementer's sole context source.
 Populate `## References` from the project-survey output.
+
+Commit the brief file before proceeding to plan depth.
 
 ### 3. Plan depth
 
@@ -75,7 +77,7 @@ Plan path: ai-docs/plans/YYYY-MM/DD-<stem>.md
 PROMPT
 ```
 
-After the population agent returns, commit the brief and plan files before proceeding.
+After the population agent returns, commit the plan file before proceeding.
 
 ### 4. Prepare
 
