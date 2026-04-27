@@ -791,7 +791,7 @@ def cmd_override(argv: list[str]) -> None:
 
 
 def _tail_claude(session_path: Path, n: int) -> None:
-    lines = session_path.read_text().splitlines()
+    lines = session_path.read_text(encoding="utf-8").splitlines()
 
     # Each assistant line holds exactly one content block; group by message ID.
     msg_order: list[tuple[str, object]] = []   # ("assistant", mid) | ("tool_results", count) | ("user_prompt", text)
@@ -861,28 +861,39 @@ def _tail_claude(session_path: Path, n: int) -> None:
 
 
 def _tail_codex(session_path: Path, n: int) -> None:
-    lines = session_path.read_text().splitlines()
+    # Session file uses {"timestamp":...,"type":...,"payload":...} envelope —
+    # different from the --json stdout format used by _call_codex.
+    # Turn boundaries: event_msg{task_started} → event_msg{task_complete}.
+    # Agent text:      event_msg{agent_message}.payload.message
+    # Tool calls:      response_item{function_call}.payload.name
+    lines = session_path.read_text(encoding="utf-8").splitlines()
 
-    # Group events into turns (turn.started → turn.completed).
     turns: list[list[dict]] = []
     current: list[dict] | None = None
+
     for raw in lines:
         try:
             obj = json.loads(raw)
         except json.JSONDecodeError:
             continue
         t = obj.get("type", "")
-        if t == "turn.started":
-            current = []
-        elif t == "turn.completed":
-            if current is not None:
-                turns.append(current)
-            current = None
-        elif t == "item.completed" and current is not None:
-            current.append(obj.get("item", {}))
+        payload = obj.get("payload", {})
 
-    # If a turn is in progress (no turn.completed yet), include it.
-    if current:
+        if t == "event_msg":
+            pt = payload.get("type", "")
+            if pt == "task_started":
+                current = []
+            elif pt == "task_complete":
+                if current is not None:
+                    turns.append(current)
+                current = None
+            elif pt == "agent_message" and current is not None:
+                current.append({"kind": "agent_message", "text": payload.get("message", "")})
+        elif t == "response_item" and current is not None:
+            if payload.get("type") == "function_call":
+                current.append({"kind": "tool_call", "name": payload.get("name", "?")})
+
+    if current:  # in-progress turn
         turns.append(current)
 
     if not turns:
@@ -895,15 +906,11 @@ def _tail_codex(session_path: Path, n: int) -> None:
         offset = idx - total + 1
         label = f"[{offset:+d}]" if offset != 0 else "[last]"
         for item in items:
-            it = item.get("type", "")
-            if it == "agent_message":
-                text = item.get("text", "")
+            if item["kind"] == "agent_message":
+                text = item["text"]
                 print(f"{label} assistant: {repr(text[:120])}")
-            elif it == "command_execution":
-                cmd = item.get("cmd", [])
-                exit_code = item.get("exit_code", "?")
-                cmd_str = " ".join(str(c) for c in cmd[:4]) if cmd else "?"
-                print(f"{label} tool: {cmd_str!r}  exit={exit_code}")
+            elif item["kind"] == "tool_call":
+                print(f"{label} tool: {item['name']}")
 
 
 def cmd_tail(argv: list[str]) -> None:

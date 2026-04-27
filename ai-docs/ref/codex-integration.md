@@ -40,6 +40,28 @@ On stderr (non-fatal, ignore): `ERROR codex_core::session: failed to record roll
 | Agent response | Last `item.completed` where `item.type == "agent_message"` → `item.text` |
 | Token usage | `turn.completed` → `usage.input_tokens + cached_input_tokens + output_tokens` |
 
+## Session File Format
+
+Session files at `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<thread_id>.jsonl`
+use a **different format** from `--json` stdout. Each line is:
+
+```json
+{"timestamp":"<ISO>","type":"<event_type>","payload":{...}}
+```
+
+Relevant event types for parsing session history:
+
+| `type` | `payload.type` | Meaning | Key field |
+|--------|---------------|---------|-----------|
+| `event_msg` | `task_started` | Turn begins | `turn_id` |
+| `event_msg` | `task_complete` | Turn ends | `last_agent_message` |
+| `event_msg` | `agent_message` | Assistant response | `payload.message` |
+| `response_item` | `function_call` | Tool invocation | `payload.name`, `payload.arguments` |
+| `response_item` | `function_call_output` | Tool result | `payload.output` |
+
+Turn grouping: `event_msg{task_started}` → `event_msg{task_complete}`. An in-progress
+turn has `task_started` with no matching `task_complete` yet.
+
 ## Session Management
 
 - Sessions stored at: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<thread_id>.jsonl`
