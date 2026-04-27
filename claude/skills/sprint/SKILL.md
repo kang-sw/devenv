@@ -47,7 +47,7 @@ Triggers on explicit user done signal ("done", "wrap up", "finish sprint", or eq
 3. Dispatch `ws:mental-model-updater` with commit range `$PARENT..HEAD`. Include a note that docs may be stale from accumulated sprint commits — explore thoroughly. Wait. (Must run after the spec-update loop so it sees the updated spec.)
 4. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline and §Doc Commit Gate. If ticket-driven, follow §Ticket Update: update existing tickets only — set `## Result` and advance state; do not create new tickets.
 5. Report to user: spec entries added, removed, and 🚧-stripped; mental model sections updated.
-6. Suggest: `git checkout main && git merge --no-ff sprint/<name> && git branch -d sprint/<name>`, or `git branch -d sprint/<name>` if no merge is needed.
+6. Merge: run `ws-merge-branch main sprint/<name> "<commit-message>"`. Compose the commit message per CLAUDE.md commit rules — summarize the sprint's scope and key changes across all tasks. If no source changes were made (doc-only or exploration sprint), skip merge and delete the branch: `git branch -d sprint/<name>`.
 
 ## Judgments
 
