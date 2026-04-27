@@ -16,7 +16,7 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-pwd_hash=$(printf '%s' "$PWD" | shasum | cut -c1-8)
+pwd_hash=$(printf '%s' "$PWD" | (sha1sum 2>/dev/null || shasum) | cut -c1-8)
 run_id=$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c8)
 dir="/tmp/claude-reviews"
 mkdir -p "$dir"
