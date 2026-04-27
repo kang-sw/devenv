@@ -36,9 +36,11 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-named-agent
 Parse `$ARGUMENTS`: extract ticket path or inline description, and optional `--ticket <stem>`.
 If ticket-driven: read the ticket. Extract scope, stem, and phase context (prior phase plans, forwards).
 
+Spawn `project-survey` with the ticket path or inline description. Capture the returned `[Must|Maybe]` reference list — it informs the brief's `## References` section and the implementer spawn prompt.
+
 ### 2. Write brief
 
-Lead writes `ai-docs/plans/YYYY-MM/DD-<stem>.brief.md` directly using the **brief template** (see Templates). Strip ticket noise — this file is the implementer's sole context source.
+Lead writes `ai-docs/plans/YYYY-MM/DD-<stem>.brief.md` directly using the **brief template** (see Templates). Strip ticket noise — this file is the implementer's sole context source. Populate `## References` from the project-survey output.
 
 ### 3. Plan depth
 
@@ -76,8 +78,7 @@ After the population agent returns, commit the brief and plan files before proce
 
 ### 4. Prepare
 
-0. Context survey: spawn `project-survey` with the brief path. Capture the returned `[Must|Maybe]` reference list — include it in the implementer spawn prompt at step 5.
-1. Derive `<scope>` from `<stem>` for branch naming.
+0. Derive `<scope>` from `<stem>` for branch naming.
 2. Verify skeleton exists: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests that reference the target contracts. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `/write-skeleton`.
 3. Collect integration test context: identify test file paths and the command to run them. This flows into the implementer spawn prompt.
 4. Record current branch as `<original-branch>`. Create `implement/<scope>` branch.
@@ -298,6 +299,11 @@ Path: `ai-docs/plans/YYYY-MM/DD-<stem>.brief.md`
 ## Details
 <interface specs, data types, public contracts at ticket-level resolution>
 <required when no skeleton has been run; may be omitted when skeleton provides contracts>
+
+## References
+<!-- Populated from project-survey [Must/Maybe] output. -->
+<!-- [Must] entries: read before starting. [Maybe] entries: consult if uncertain. -->
+- `ai-docs/mental-model/<path>` — <relevance>
 ```
 
 ## Judgments

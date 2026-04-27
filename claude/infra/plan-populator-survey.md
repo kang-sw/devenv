@@ -22,7 +22,7 @@ exploratory search that would otherwise consume context without producing output
 ### 1. Understand
 
 1. Read the brief at the path given in the spawn prompt.
-2. Read `ai-docs/mental-model.md`, then load relevant files in `ai-docs/mental-model/` via Glob.
+2. Read the docs listed in the brief's `## References` section (the `[Must]` entries first, then `[Maybe]`). For any mental-model areas not covered there, load additional files via Glob.
 3. If the brief's `## Details` section lists skeleton stubs or test files, read them.
 
 ### 2. Survey
