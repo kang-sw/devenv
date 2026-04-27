@@ -74,9 +74,7 @@ Interface and scope decisions made in discussion become downstream inputs:
 - Approach direction → spec update (`/write-spec` — always the next step after discuss)
 - Scope, phases, acceptance criteria → ticket structure (`/write-ticket`)
 - Type shapes, module boundaries, public API → skeleton contract directives (`/write-skeleton`)
-- Approach choices, architectural trade-offs → plan directives (`/write-plan`)
-
-The canonical chain is: `/discuss` → `/write-spec` → `/write-ticket` → `/proceed` → `/write-skeleton`? → `/write-plan`? → `/edit` | `/implement`.
+The canonical chain is: `/discuss` → `/write-spec` → `/write-ticket` → `/proceed` → `/write-skeleton`? → `/edit` | `/implement`.
 Write-spec's judge handles the no-op case; the chain is uniform regardless of topic type.
 
 When discussion converges on a decision in any of these categories, frame

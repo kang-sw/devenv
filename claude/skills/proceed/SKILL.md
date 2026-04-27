@@ -17,11 +17,11 @@ Target: $ARGUMENTS
 - This skill routes. It does not implement, plan, or write skeletons itself.
 - Every routing decision is announced with rationale before execution begins.
 - Each pipeline sub-skill is invoked via the Skill tool with the appropriate arguments.
-- Pipeline order is fixed: skeleton → plan → implementation.
+- Pipeline order is fixed: skeleton → implementation.
 - Execution mode is always single. Split multi-scope work into separate tickets; parallel execution is not available.
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only. Do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
-- When direct-edit verdict fires, announce and invoke `ws:edit` via the Skill tool.
+- Always invoke `ws:implement` for implementation — implement applies its own judge: execution-mode and routes to edit or write-code internally.
 - If the target is an actionable inline description, auto-invoke `/write-ticket` and continue.
 - If the target is an existing ticket path, skip `/write-ticket`.
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
@@ -57,50 +57,24 @@ Prefix-stage gate-suppression context applies in all routing paths (direct-edit 
 - For `/write-spec`: append to args — "Chained from /proceed — write any 🚧 entries without asking; the session reminder will still emit (this is not a standalone invocation)."
 - For `/write-ticket`: append to args — "Chained from /proceed — treat spec coverage as satisfied regardless of whether /write-spec wrote anything or exited early at judge: spec-impact."
 
-Then apply the existing pipeline judges: direct-edit → needs-plan → needs-skeleton → execution-mode.
+Then apply the pipeline judgments in order. Each produces a yes/no that builds the pipeline.
 
-After prefix judges complete, check whether the implementation pipeline should be skipped entirely:
+1. **judge: needs-skeleton** — Does this need contract stubs before implementation?
 
-**judge: direct-edit** — if the verdict is direct-edit, skip the pipeline judges and announce direct-edit in step 3.
+Build the pipeline:
 
-Otherwise, apply the pipeline judgments in order. Each produces a yes/no that builds the pipeline.
-
-1. **judge: needs-plan** — Does this need codebase research before implementation?
-2. **judge: needs-skeleton** — Does this need contract stubs before implementation?
-3. **judge: execution-mode** — Single-scope.
-
-Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs. When warmth is warm, `/write-plan` internally selects warm mode; proceed does not pass a mode flag — it only decides whether `/write-plan` is invoked at all.
-
-| needs-skeleton | needs-plan | Pipeline |
-|----------------|------------|----------|
-| no | no | `ws:implement` |
-| no | yes | `ws:write-plan` then `ws:implement` |
-| yes | no | `ws:write-skeleton` then `ws:implement` |
-| yes | yes | `ws:write-skeleton` then `ws:write-plan` then `ws:implement` |
+| needs-skeleton | Pipeline |
+|----------------|----------|
+| no | `ws:implement` |
+| yes | `ws:write-skeleton` then `ws:implement` |
 
 ### 3. Announce
-
-For a direct-edit verdict, announce:
-
-```
-## Direct edit → /edit
-
-- **Target**: <ticket path or brief summary>
-- **Warmth**: warm — <what the main agent already knows>
-- **Reason**: <why pipeline is overkill for this change>
-- **Gate suppression**: prefix stages receive override context — interactive confirmation gates are suppressed.
-
-Invoking `/edit`.
-```
-
-For a pipeline verdict, announce:
 
 ```
 ## Pipeline: <stage> → <stage> [→ <stage>]
 
 - **Target**: <ticket path or brief summary>
 - **Warmth**: <warm | cold> — <evidence from conversation state>
-- **Plan**: <skip (reason) | /write-plan (reason)>
 - **Skeleton**: <skip (reason) | /write-skeleton (reason)>
 - **Execution**: /implement — <reason>
 - **Gate suppression**: prefix stages receive override context — interactive confirmation gates are suppressed.
@@ -111,31 +85,18 @@ Proceeding.
 When prefix stages fire, prefix them in the pipeline line:
 - Spec fires + ticket fires: `## Pipeline: /write-spec → /write-ticket → <implementation stages>`
 - Spec fires only: `## Pipeline: /write-spec → <implementation stages>`
-- Direct-edit: use existing direct-edit format unchanged
 
 Do not ask for confirmation — announce and proceed. The user can interrupt if the routing is wrong.
 
 ### 4. Execute
 
-For a direct-edit verdict, invoke `ws:edit` via the Skill tool with the target as arguments.
-
-For a pipeline verdict, invoke each stage sequentially via the Skill tool, passing the target as arguments.
+Invoke each pipeline stage sequentially via the Skill tool, passing the target as arguments.
 
 - After each stage, verify it completed (check for committed artifacts).
-- Pass downstream context: if `/write-plan` produces a plan path, pass it to `/implement`.
 - If a stage fails or the user interrupts, stop — do not continue the pipeline.
 - After `judge: needs-ticket` auto-invoke: capture the ticket path from `/write-ticket`'s output. Use it as the target for all downstream stages (skeleton, plan, implementation).
 
 ## Judgments
-
-### judge: direct-edit
-
-| Decision | When |
-|----------|------|
-| Direct edit (skip pipeline) | Change is confined to a single file AND purely internal (no callers affected, no new public symbols, no new test files needed) AND user has not explicitly requested delegation |
-| Engage pipeline | Any condition above is unmet — including any cross-file touch, new public contract, or new test file |
-
-Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth improves briefing quality for delegation — it does not exempt a change from delegation. When the main agent is warm, produce a richer brief for `/implement` rather than editing directly.
 
 ### judge: needs-ticket
 
@@ -145,19 +106,6 @@ Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth im
 | Proceed | Target is an existing ticket path |
 | Invoke `/write-ticket`, capture `Ticket:` output, continue | Target is an inline description — any scope |
 
-### judge: needs-plan
-
-| Decision | When |
-|----------|------|
-| Skip | Plan already exists for this scope (found in ticket frontmatter or plans directory) |
-| Skip | Implementation path is derivable from existing code — main agent is warm on the area, or the pattern is established and the domain has already been surveyed this session |
-| Plan | Established pattern but domain not yet surveyed this session — survey confirms reuse opportunities and non-obvious constraints before coding starts |
-| Plan | Multiple viable architectural approaches with non-obvious trade-offs that must be resolved before coding starts |
-| Plan | Changes requiring coordination across 3+ modules with no existing pattern to follow |
-| Plan | User explicitly requests deep research, or main agent wants to lock decisions as a committed artifact before implementation |
-
-When plan fires with a warm main agent, `/write-plan` internally selects warm mode (main-agent-authored draft + `plan-populator` enrichment).
-
 ### judge: needs-skeleton
 
 | Decision | When |
@@ -165,14 +113,6 @@ When plan fires with a warm main agent, `/write-plan` internally selects warm mo
 | Skip | Skeleton already exists for this scope (stubs or integration tests found) |
 | Skip | Change is small and isolated — single file, no new public contracts |
 | Skeleton | Change introduces or modifies public interfaces, cross-module boundaries, or new type contracts |
-
-### judge: execution-mode
-
-Execution mode is always single. Split multi-scope work into separate tickets.
-
-| Decision | When |
-|----------|------|
-| Single (`/implement`) | Always |
 
 ## Doctrine
 

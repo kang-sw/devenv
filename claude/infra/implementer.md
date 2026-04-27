@@ -35,11 +35,23 @@ working, tested code that satisfies its contracts.
 
 ## Output
 
-Report to caller:
+**On initial completion:**
 - What was implemented (1-3 sentences).
 - Files changed.
 - Test results (pass/fail/skipped).
 - Any deviations from the plan, with rationale.
+
+**On fix cycle (review findings relayed):**
+
+Per-finding disposition — one line per finding:
+- `[fixed]` — addressed and committed.
+- `[won't fix: <reason>]` — refused; reason must cite a specific codebase pattern or brief scope boundary.
+- `[deferred: <reason>]` — not addressed this cycle; state the resolution condition.
+
+Won't-fix is allowed for: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
+Won't-fix is not allowed for: correctness, security, or contract violations — fix these or escalate with explicit rationale.
+
+Followed by: test results after fixes.
 
 ## Doctrine
 
@@ -48,10 +60,3 @@ or brief is the single source of truth, and every implementation choice
 stays within its boundaries. When a rule is ambiguous, apply whichever
 interpretation more reliably preserves fidelity to the plan's contracts
 and decisions.
-
-> Reviewer criteria are strict by design. When review findings arrive as a file path:
-> read the file, then apply judgment:
-> - Address correctness, contract, and security findings.
-> - Deprioritize style or naming feedback that conflicts with established patterns in the
->   surrounding codebase.
-> - Never apply a finding without understanding why it matters for this specific change.

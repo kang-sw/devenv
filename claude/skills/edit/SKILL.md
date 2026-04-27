@@ -1,10 +1,10 @@
 ---
 name: edit
 description: >
-  Main-agent-direct single-scope implementation. The main agent reads,
-  edits, verifies, and commits directly — no subagent delegation for the
-  edit itself.
-argument-hint: "[ticket-path or inline brief] [--plan <plan-path>]"
+  Direct-edit primitive. The lead reads, edits, verifies, and commits on the
+  current branch. One named-agent reviewer covers correctness and fit.
+  No brief, no delegation, no doc pipeline — callers own those.
+argument-hint: "[ticket-path or inline brief]"
 ---
 
 # Edit
@@ -13,94 +13,96 @@ Target: $ARGUMENTS
 
 ## Invariants
 
-- The main agent edits directly — no subagent delegation for the edit itself.
-- Follow impl-playbook — run `ws-print-infra impl-playbook.md` for test strategy, verify, failure diagnosis, deviation protocol, and mechanical-edit criteria.
-- Load relevant mental-model docs before editing — run `ws-list-mental-model <target-paths>` and read every listed file.
-- Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): when a read touches `mental-model/<domain>/<sub>.md`, load `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before editing. See `ws-print-infra executor-wrapup.md §Ancestor Loading`.
+- The lead edits directly — no subagent delegation for the edit itself.
+- Follow impl-playbook: run `ws-print-infra impl-playbook.md` for test strategy, verify, failure diagnosis, and mechanical-edit criteria.
+- Load relevant mental-model docs before editing: run `ws-list-mental-model <target-paths>` and read every listed file.
+- Ancestor loading: when a read touches `mental-model/<domain>/<sub>.md`, load `mental-model/<domain>/index.md` first.
 - When skeleton exists for the target scope, its stubs and integration tests are the acceptance criteria.
 - Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
-- Escalate to `/implement` or `/proceed` if scope grows beyond single-scope direct-edit capacity.
-- When `judge: needs-review` fires, spawn a one-shot reviewer — no team, fresh context per iteration.
-- Doc pipeline delegates to `ws-print-infra executor-wrapup.md`.
-- Report completion to the user — commit range, test status, deviations.
+- Review relay cap: 2 cycles maximum; proceed to cleanup regardless of status after the cap.
+- Escalate to `/implement` if scope grows to multi-file with new public API or cross-module without established pattern.
+- Self-cleanup: review path file is deleted before returning.
+- On completion, output the completion report in the format defined in Templates.
 
 ## On: invoke
 
 ### 1. Prepare
 
-0. Context survey: spawn `project-survey` with the implementation brief or ticket path. Use the returned `[Must|Maybe]` reference list to guide reads in the steps below.
-1. Parse arguments: ticket path, inline brief, or `--plan` path.
-2. If plan-driven: read the plan file. Note binding decisions and Skeleton Amendments.
-3. If ticket-driven: read the ticket; collect skeleton and plan references from frontmatter.
-4. Verify skeleton coverage when public contracts are touched: grep for stubs. If `judge: skeleton-check` requires a skeleton and none exists, stop and suggest `/write-skeleton`.
-5. Load mental-model docs: `ws-list-mental-model <target-paths>`; read every listed file. `ws-list-mental-model` already emits ancestor `index.md` entries when a direct-child sub-domain matches; read ancestors before their children so inherited `## Domain Rules` are visible first.
+1. Parse arguments: ticket path or inline brief.
+2. Record current HEAD as `<start-commit>`: `git rev-parse HEAD`.
+3. If ticket-driven: read the ticket; collect skeleton references from frontmatter.
+4. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `/write-skeleton`.
+5. Load mental-model docs: `ws-list-mental-model <target-paths>`; read every listed file, ancestors first.
 6. Run `ws-print-infra impl-playbook.md`.
-7. Identify integration test file paths and the command to run them.
+7. Identify integration test file paths and the run command.
 
 ### 2. Edit
 
-1. Edit files directly per plan/brief, honoring impl-playbook.md — test strategy, deviation protocol, mechanical-edit criteria.
-2. Commit at logical checkpoints per CLAUDE.md commit rules. Include `## AI Context`.
+Edit files directly per the brief or ticket, following impl-playbook.md.
+Commit at logical checkpoints per CLAUDE.md rules. Include `## AI Context`.
 
 ### 3. Verify
 
-1. Run the project's test suite(s) and build step. Read full output — never claim pass from a skimmed tail.
+1. Run the test suite and build step. Read full output — never claim pass from a skimmed tail.
 2. Resolve warnings per impl-playbook.md §Verify.
-3. On failure: diagnose blame per impl-playbook.md §Test Failure Diagnosis. Never patch tests to match broken impl or vice versa.
+3. On failure: diagnose per impl-playbook.md §Test Failure Diagnosis. Do not patch tests to match broken impl.
 4. Re-run until verify passes.
 
-### 4. Review (conditional)
+### 4. Review
 
-Apply `judge: needs-review`.
+Register reviewer and allocate review path (two separate Bash calls).
 
-- If skip: proceed to step 5.
-- If review: spawn a one-shot reviewer via Agent tool (no `team_name`):
+Reviewer registration — concatenate both partition docs into one temp file:
 
-```
-Agent(
-  description = "Review /edit diff",
-  subagent_type = "ws:code-reviewer",
-  model = "sonnet",
-  prompt = """
-    Diff range: <first-commit>..HEAD
-    Scope: main-agent-direct implementation — <brief scope description>
-
-    Follow your standard review process (CLAUDE.md + mental-model sweep + diff).
-    Return findings report.
-  """
-)
+```bash
+_REVIEW_TMP=$(mktemp) && \
+cat "$(ws-infra-path code-review-correctness.md)" "$(ws-infra-path code-review-fit.md)" > "$_REVIEW_TMP" && \
+ws-new-named-agent reviewer --agent ws:code-reviewer --system-prompt "$_REVIEW_TMP" && \
+rm -f "$_REVIEW_TMP"
 ```
 
-On findings:
-- Apply Critical/Important fixes directly; re-verify tests.
-- If fixes are trivial and localized, self-confirm and proceed.
-- If fixes are substantive or span multiple files, spawn a fresh reviewer (new Agent call, not a resume) — its context is clean per iteration.
+```bash
+ws-review-path direct
+```
 
-Loop until no Critical/Important issues remain.
+Store the returned path as `<review-path>`.
 
-### 5. Doc pipeline
+Spawn reviewer (`run_in_background: true`):
 
-1. Dispatch **ws:spec-updater** with the implementation commit range. Wait for it to complete. If **spec-updater** reports ambiguous stems, surface them to the user.
-2. Dispatch **ws:mental-model-updater**. Wait for it to complete. Running spec-updater first ensures mental-model-updater's spec-diff check captures any 🚧 strips committed by spec-updater.
-3. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline, §Doc Commit Gate, and (if ticket-driven) §Ticket Update.
+```bash
+ws-call-named-agent reviewer - <<'PROMPT'
+Diff range: <start-commit>..HEAD
+Scope: direct-edit — <brief scope description>
 
-### 6. Report
+Review for correctness and fit.
+Write full findings to: <review-path>
+Return only: [clean|non-clean]: <one-line summary>
+PROMPT
+```
 
-Report to the user:
-- What was implemented (brief summary)
-- Commit range
-- Test status
-- Any deviations or open items
+After notification, read summary: `ws-print-named-agent-output reviewer`.
+
+**If `[clean]`:** proceed to cleanup.
+
+**If `[non-clean]`:** read the review file directly. Apply fixes. Re-verify tests. Re-call reviewer:
+
+```bash
+ws-call-named-agent reviewer - <<'PROMPT'
+Re-review. Updated diff: <start-commit>..HEAD
+PROMPT
+```
+
+Repeat until `[clean]` or after 2 relay cycles — then proceed to cleanup regardless.
+
+### 5. Cleanup
+
+```bash
+rm -f <review-path>
+```
+
+Output the **completion report** (see Templates).
 
 ## Judgments
-
-### judge: scope-bound
-
-| Decision | When |
-|----------|------|
-| Proceed with /edit | Main agent is warm on the target area; change is small (single file or tightly coupled pair, or clear cross-module changes with established pattern); verifiable with focused tests |
-| Escalate to /implement | Cross-module without clear pattern, or main agent cannot hold full context while editing, or scope exceeds 3+ files with new public API |
-| Escalate to /proceed | Upstream artifact missing (ticket, skeleton, or plan) |
 
 ### judge: skeleton-check
 
@@ -109,23 +111,24 @@ Report to the user:
 | Proceed without skeleton | Change is a small isolated edit (single file, no new public contracts) |
 | Require skeleton | Change touches public interfaces or cross-module boundaries |
 
-### judge: needs-review
+## Templates
 
-| Decision | When |
-|----------|------|
-| Skip | Single file, no public contract changes, follows established patterns |
-| Review | 2+ files, or public API modification, or new pattern introduced |
+### Completion report format
 
-Scope exceeding 3+ files with new public API or architectural change is already out of `/edit` capacity — `judge: scope-bound` escalates to `/implement` before review fires.
+```
+Edit complete.
+Commit range: <start-commit>..HEAD
+Test status: pass | fail | skipped
+Review: clean | non-clean (<one-line summary>)
+<if issues remain after cap:> Open issues: <list>
+```
 
 ## Doctrine
 
-Edit optimizes for **session-context preservation during code
-changes** — the main agent retains its accumulated understanding of
-the task through editing rather than forking that context to a
-subagent and reconstructing it across the boundary. When review fires,
-the reviewer fork is fresh per iteration, so the main agent's
-continuity is preserved while the reviewer provides uncommitted
-judgment on the diff. When a rule is ambiguous, apply whichever
-interpretation better preserves the main agent's continuous context
-over the change's full lifecycle.
+Edit optimizes for **session-context preservation during code changes** —
+the lead retains accumulated understanding by editing directly rather than
+forking to a subagent. The reviewer fires in a fresh named-agent context so
+its judgment is uncommitted. The relay cap (2 cycles) keeps the loop bounded
+so the lead's context is not consumed by negotiation. When a rule is ambiguous,
+apply whichever interpretation keeps the lead's context continuous over the
+change's full lifecycle.
