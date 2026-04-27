@@ -141,7 +141,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260420-feat-spec-driven-workflow` | done | Spec-driven workflow infrastructure; all phases done (phase 6 migration cancelled) |
 | `260421-feat-global-spec-stems` | done | Global unique YYMMDD-slug stems; all phases done (phase 5 migration cancelled) |
 | `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
-| `260421-feat-delegate-implement-feature-branch` | done | /implement feature-branch auto-merge mode; all phases complete |
+| `260421-feat-delegate-implement-feature-branch` | done | /implement feature-branch auto-merge mode; all phases complete — **reverted in f4b11f7** (approval gate now unconditional) |
 | `260422-chore-write-ticket-workflow-drift` | done | Fix stale /write-spec suggestion in write-ticket + workflow-skills.md chain drift |
 | `260422-chore-workflow-chain-drift` | done | Fix remaining chain drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md |
 | `260422-feat-write-ticket-review` | done | Add mandatory document-reviewer step to write-ticket after intent review |
