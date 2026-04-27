@@ -135,12 +135,14 @@ def _claude_tokens(data: dict) -> int:
 
 
 def _settings_json() -> str:
+    # Use absolute path so the hook works regardless of the hook shell's PATH
+    cmd = f"{SCRIPT_DIR}/ws-agent check-mailbox"
     return json.dumps({
         "hooks": {
             "PostToolBatch": [{
                 "hooks": [{
                     "type": "command",
-                    "command": "ws-agent check-mailbox",
+                    "command": cmd,
                     "timeout": 5,
                 }]
             }]
