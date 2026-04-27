@@ -47,6 +47,7 @@ One entry per shipped version. Derive content from `git log <last-tag>..HEAD`.
 ## Tag
 
 Format: `v<version>` (e.g. `v0.6.0`)
+Command: `git tag -a v<version> -m "v<version>"` (annotated — required for `--follow-tags`)
 Push: yes
 
 ## Publish
