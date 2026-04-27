@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.0 — 2026-04-27
+
+### Added
+- `claude-dash` — Rust PTY TUI multiplexer for worktree-scoped Claude sessions: tabbed interface, named-agent panel, prefix-key bindings (`<prefix>+q/w/e/r…`), mouse navigation, `--dangerously-skip-permissions` flag, and `claude --worktree` tab spawning
+
+### Changed
+- `ws-call-named-agent` — retry-with-backoff on "Session already in use"; carry pending interrupts across compaction handoff
+- `ws-interrupt-named-agent` — removed dead argument-count guard branch
+
 ## v0.8.0 — 2026-04-27
 
 ### Added
