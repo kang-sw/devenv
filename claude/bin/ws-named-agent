@@ -949,6 +949,11 @@ def _tail_codex(session_path: Path, n: int) -> None:
                 current = []
             elif pt == "task_complete":
                 if current is not None:
+                    # Fall back to last_agent_message when no separate agent_message events fired.
+                    if not any(i["kind"] == "agent_message" for i in current):
+                        last_msg = payload.get("last_agent_message", "")
+                        if last_msg:
+                            current.append({"kind": "agent_message", "text": last_msg})
                     turns.append(current)
                 current = None
             elif pt == "agent_message" and current is not None:
@@ -996,9 +1001,13 @@ def cmd_tail(argv: list[str]) -> None:
     backend = registry.get("backend") or infer_backend(registry.get("model") or "")
 
     if backend == "codex":
-        codex_hits = list((Path.home() / ".codex" / "sessions").rglob(f"rollout-*-{uuid}.jsonl"))
+        sessions_dir = Path.home() / ".codex" / "sessions"
+        codex_hits = list(sessions_dir.rglob(f"rollout-*-{uuid}.jsonl")) if sessions_dir.is_dir() else []
         if not codex_hits:
-            print(f"(no codex session found for {agent_name} / {uuid})", file=sys.stderr)
+            print(f"(no codex session found for {agent_name})", file=sys.stderr)
+            print(f"  uuid:    {uuid}", file=sys.stderr)
+            print(f"  pattern: rollout-*-{uuid}.jsonl", file=sys.stderr)
+            print(f"  search:  {sessions_dir}", file=sys.stderr)
             sys.exit(1)
         _tail_codex(codex_hits[0], n)
     else:
