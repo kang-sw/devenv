@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.1 — 2026-04-28
+
+### Fixed
+- `ws-named-agent`: CLAUDE.md injection moved from claude backend to codex backend — claude CLI reads CLAUDE.md natively; codex does not, so injecting it into `model_instructions_file` is required for codex agents to observe project behavioral constraints
+
 ## v0.11.0 — 2026-04-28
 
 ### Added
