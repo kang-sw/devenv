@@ -57,7 +57,7 @@ Prefix-stage gate-suppression context applies in all routing paths (direct-edit 
 - For `/write-spec`: append to args — "Chained from /proceed — write any 🚧 entries without asking; the session reminder will still emit (this is not a standalone invocation)."
 - For `/write-ticket`: append to args — "Chained from /proceed — treat spec coverage as satisfied regardless of whether /write-spec wrote anything or exited early at judge: spec-impact."
 
-Then apply the existing pipeline judges: direct-edit → needs-plan → needs-skeleton → execution-mode.
+Then apply the existing pipeline judges: direct-edit → needs-skeleton → execution-mode.
 
 After prefix judges complete, check whether the implementation pipeline should be skipped entirely:
 
@@ -65,18 +65,15 @@ After prefix judges complete, check whether the implementation pipeline should b
 
 Otherwise, apply the pipeline judgments in order. Each produces a yes/no that builds the pipeline.
 
-1. **judge: needs-plan** — Does this need codebase research before implementation?
-2. **judge: needs-skeleton** — Does this need contract stubs before implementation?
-3. **judge: execution-mode** — Single-scope.
+1. **judge: needs-skeleton** — Does this need contract stubs before implementation?
+2. **judge: execution-mode** — Single-scope.
 
-Build the pipeline from the results. Skeleton always precedes plan — the plan consumes skeleton contracts as locked inputs. When warmth is warm, `/write-plan` internally selects warm mode; proceed does not pass a mode flag — it only decides whether `/write-plan` is invoked at all.
+Build the pipeline from the results.
 
-| needs-skeleton | needs-plan | Pipeline |
-|----------------|------------|----------|
-| no | no | `ws:implement` |
-| no | yes | `ws:write-plan` then `ws:implement` |
-| yes | no | `ws:write-skeleton` then `ws:implement` |
-| yes | yes | `ws:write-skeleton` then `ws:write-plan` then `ws:implement` |
+| needs-skeleton | Pipeline |
+|----------------|----------|
+| no | `ws:implement` |
+| yes | `ws:write-skeleton` then `ws:implement` |
 
 ### 3. Announce
 
@@ -100,7 +97,6 @@ For a pipeline verdict, announce:
 
 - **Target**: <ticket path or brief summary>
 - **Warmth**: <warm | cold> — <evidence from conversation state>
-- **Plan**: <skip (reason) | /write-plan (reason)>
 - **Skeleton**: <skip (reason) | /write-skeleton (reason)>
 - **Execution**: /implement — <reason>
 - **Gate suppression**: prefix stages receive override context — interactive confirmation gates are suppressed.
@@ -122,7 +118,6 @@ For a direct-edit verdict, invoke `ws:edit` via the Skill tool with the target a
 For a pipeline verdict, invoke each stage sequentially via the Skill tool, passing the target as arguments.
 
 - After each stage, verify it completed (check for committed artifacts).
-- Pass downstream context: if `/write-plan` produces a plan path, pass it to `/implement`.
 - If a stage fails or the user interrupts, stop — do not continue the pipeline.
 - After `judge: needs-ticket` auto-invoke: capture the ticket path from `/write-ticket`'s output. Use it as the target for all downstream stages (skeleton, plan, implementation).
 
@@ -144,19 +139,6 @@ Direct edit invokes `/edit`. This is the exception, not the fast path. Warmth im
 | Stop, suggest `/discuss` | Target is exploratory — user is weighing approaches, not requesting implementation |
 | Proceed | Target is an existing ticket path |
 | Invoke `/write-ticket`, capture `Ticket:` output, continue | Target is an inline description — any scope |
-
-### judge: needs-plan
-
-| Decision | When |
-|----------|------|
-| Skip | Plan already exists for this scope (found in ticket frontmatter or plans directory) |
-| Skip | Implementation path is derivable from existing code — main agent is warm on the area, or the pattern is established and the domain has already been surveyed this session |
-| Plan | Established pattern but domain not yet surveyed this session — survey confirms reuse opportunities and non-obvious constraints before coding starts |
-| Plan | Multiple viable architectural approaches with non-obvious trade-offs that must be resolved before coding starts |
-| Plan | Changes requiring coordination across 3+ modules with no existing pattern to follow |
-| Plan | User explicitly requests deep research, or main agent wants to lock decisions as a committed artifact before implementation |
-
-When plan fires with a warm main agent, `/write-plan` internally selects warm mode (main-agent-authored draft + `plan-populator` enrichment).
 
 ### judge: needs-skeleton
 

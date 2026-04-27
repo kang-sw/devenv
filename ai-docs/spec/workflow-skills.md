@@ -80,17 +80,6 @@ Suggests `/edit` or `/implement` as the next step based on scope and session war
 > - Stub files must compile; integration tests are written but not required to pass (implementation is absent).
 > - The lead does not write skeleton code directly — subagent delegation only.
 
-### `/write-plan` {#260421-write-plan}
-
-Researches the codebase and produces a committed plan file at `ai-docs/plans/YYYY-MM/DD-hhmm.<name>.md`. Three modes:
-
-- **Warm** — lead drafts from session context, reading source as needed.
-- **Survey** — a survey-writer subagent explores the codebase; lead drafts from the output.
-- **Deep** — a plan-writer subagent handles full exploration and drafting; lead reviews and accepts or rejects.
-
-Updates the ticket `plans:` frontmatter with the plan path. `/proceed` passes the plan path directly to the next implementation skill.
-
-
 ## Implementation Skills
 
 ### `/edit` {#260422-edit-skill}
@@ -108,7 +97,7 @@ After implementation, dispatches `spec-updater` first and waits for it to commit
 
 ### `/implement` {#260422-implement-skill}
 
-Delegated implementation cycle: an implementer subagent writes code; three review-partition subagents review in parallel; the lead merges and runs the doc pipeline. Suited for cold sessions or wide-scope work.
+Delegated implementation cycle. At invoke, the lead writes a brief (`ai-docs/plans/YYYY-MM/DD-<stem>.brief.md`) distilled from the ticket — the implementer's sole context source. Optionally, a survey (sonnet) or research (opus) agent populates a companion plan file. An implementer subagent then writes code; three review-partition subagents review in parallel; the lead merges and runs the doc pipeline. Suited for cold sessions or wide-scope work.
 
 Review partitions: {#260424-implement-file-based-review}
 - **Correctness** — logic, error paths, contracts, security.
@@ -147,7 +136,7 @@ Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket direct
 Auto-router: assesses an implementation target and chains to the correct pipeline without executing implementation steps itself. Judges:
 
 - **Context warmth** — warm session routes to `/edit`; cold routes to `/implement`.
-- **Existing artifacts** — skips `/write-skeleton` and `/write-plan` if already present.
+- **Existing artifacts** — skips `/write-skeleton` if already present.
 - **Direct-edit** — trivial changes skip the full pipeline and route directly to `/edit`.
 
 Announces the chosen path before invoking the first skill.

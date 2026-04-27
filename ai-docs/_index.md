@@ -94,7 +94,6 @@ claude/skills/
   write-ticket/        — create/edit tickets in ai-docs/tickets/
   write-spec/          — create/update external-perspective spec docs in ai-docs/spec/
   write-skeleton/      — public interface stubs + integration tests
-  write-plan/          — deep codebase research → implementation plan
   add-rule/            — classify and route a new rule to CLAUDE.md (cross-cutting) or mental-model Domain Rules (domain-scoped)
   edit/                — main-agent-direct single-scope cycle (warm sessions, owner edits)
   implement/           — delegated implementer + reviewer cycle (cold sessions or wide scope)
@@ -112,7 +111,7 @@ claude/skills/
 ```
 Full ceremony:  /discuss → /proceed
                                                              ↓
-                           /write-skeleton? → /write-plan? → /edit (warm)
+                           /write-skeleton? → /edit (warm)
                                                            → /implement (cold)
 Direct:         /edit <description>
 Auto-route:     /proceed <ticket-path>    — routes via warmth + scope judges
