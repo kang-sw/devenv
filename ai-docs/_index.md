@@ -25,6 +25,7 @@ Read before authoring or modifying skills, agents, or infra:
 | Document | Purpose |
 |----------|---------|
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
+| `ai-docs/ref/codex-integration.md` | Probed codex CLI behavior: invocation, JSONL output format, session management, hook config |
 | `ai-docs/ship/ws.md` | Ship config for the `ws` plugin: version strategy, changelog, tag, push |
 | `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `ws-print-infra impl-playbook.md`. |
 | `claude/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `ws-print-infra subagent-rules.md`. |
@@ -77,11 +78,12 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-infra-path               — return absolute path to an infra doc (for --system-prompt args)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
-  ws-new-named-agent                — create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
-  ws-call-named-agent               — call a registered named agent; tracks context; auto-compresses at 120K tokens; persists output to file; drains outbox after each call
-  ws-interrupt-named-agent          — queue a message to a named agent's outbox; delivered as a new user turn at the next tool boundary or ws-call-named-agent call
-  ws-agent-check-mailbox            — PostToolBatch hook: exits 2 (stop) when WS_AGENT_OUTBOX is non-empty; used internally by ws-call-named-agent
-  ws-print-named-agent-output       — print the persisted output file of a named agent
+  ws-named-agent                    — unified Python entry point for named agent management (subcommands: new, call, interrupt, print, check-mailbox, tail, override)
+  ws-new-named-agent                — shim → ws-named-agent new; create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
+  ws-call-named-agent               — shim → ws-named-agent call; auto-routes session, compresses at 120K tokens, persists output, drains outbox
+  ws-interrupt-named-agent          — shim → ws-named-agent interrupt; queue a message to a named agent's outbox
+  ws-agent-check-mailbox            — shim → ws-named-agent check-mailbox; PostToolBatch hook: exits 2 when WS_AGENT_OUTBOX is non-empty
+  ws-print-named-agent-output       — shim → ws-named-agent print; print the persisted output file of a named agent
 ```
 
 ## Skill Inventory

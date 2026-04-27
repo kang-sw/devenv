@@ -47,12 +47,13 @@ Binary tools built from source under `tools/` and installed via
 
 ## Coupling
 
-- `claude-dash` reads the named-agent registry but never writes it. Agents registered via `ws-new-named-agent` appear automatically in the claude-dash panel within the next poll cycle (up to 5 seconds). No additional action is required from the registering skill.
+- `claude-dash` reads the named-agent registry but never writes it. Agents registered via `ws-new-named-agent` with the `claude` backend appear automatically in the claude-dash panel within the next poll cycle (up to 5 seconds). Agents registered with the `codex` backend are invisible to claude-dash — their session files live at `~/.codex/sessions/`, not `~/.claude/projects/`, and claude-dash only resolves JSONL paths under `~/.claude/projects/`. No additional action is required from the registering skill for claude-backend agents.
 - `claude-dash` uses the same JSONL session format as `claude-watch` for its named-agent panel renderer. Both share a dependency on the undocumented Claude CLI JSONL format; unknown fields are passed through gracefully.
 - The `.claude/worktrees/<name>` directory marker is the ws-framework convention for marking a worktree as active. Claude-dash uses this marker for auto-spawn only. Creating or deleting this directory affects startup behavior.
 
 ## Common Mistakes
 
+- Expecting codex-backend named agents to appear in the claude-dash named-agent panel — claude-dash resolves JSONL files under `~/.claude/projects/` only; codex sessions live at `~/.codex/sessions/` and are not visible.
 - Expecting `ws-call-named-agent` or `ws-interrupt-named-agent` output to appear in the claude-dash main PTY slot — the main slot is a plain PTY, not a named-agent session.
 - Expecting to send input to named-agent panels via claude-dash keyboard — named panels are read-only. Use `ws-call-named-agent` or `ws-interrupt-named-agent` directly from the shell.
 - Assuming the ninth+ named agent is accessible via a higher slot key — claude-dash shows at most 8 named agents (prefix+w through prefix+p maps to agents 1–9). The oldest drops off the panel when capacity is exceeded.
