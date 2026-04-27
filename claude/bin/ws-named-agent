@@ -718,16 +718,8 @@ def cmd_check_mailbox(_argv: list[str]) -> None:
     sys.exit(2 if p.exists() and p.stat().st_size > 0 else 0)
 
 
-def cmd_configure(argv: list[str]) -> None:
-    if not argv or argv[0] not in ("agent-override", "show"):
-        print("Usage: ws-configure agent-override <tier> <model>", file=sys.stderr)
-        print("       ws-configure agent-override <tier> --unset", file=sys.stderr)
-        print("       ws-configure show", file=sys.stderr)
-        sys.exit(1)
-
-    sub = argv[0]
-
-    if sub == "show":
+def cmd_override(argv: list[str]) -> None:
+    if not argv or argv[0] == "show":
         cfg = _load_ws_config()
         p = _ws_config_path()
         if not cfg:
@@ -737,10 +729,13 @@ def cmd_configure(argv: list[str]) -> None:
             print(json.dumps(cfg, indent=2))
         return
 
-    if len(argv) < 3:
-        print("Usage: ws-configure agent-override <tier> <model|--unset>", file=sys.stderr)
+    if len(argv) < 2:
+        print("Usage: ws-named-agent override <tier> <model>", file=sys.stderr)
+        print("       ws-named-agent override <tier> --unset", file=sys.stderr)
+        print("       ws-named-agent override show", file=sys.stderr)
         sys.exit(1)
-    tier, value = argv[1], argv[2]
+
+    tier, value = argv[0], argv[1]
     if tier not in KNOWN_TIERS:
         print(f"error: tier must be one of {sorted(KNOWN_TIERS)}", file=sys.stderr)
         sys.exit(1)
@@ -748,16 +743,15 @@ def cmd_configure(argv: list[str]) -> None:
     cfg = _load_ws_config()
     overrides: dict = cfg.setdefault("agent-overrides", {})
     p = _ws_config_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
     if value == "--unset":
         overrides.pop(tier, None)
         if not overrides:
             cfg.pop("agent-overrides", None)
-        p.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(p, cfg)
         print(f"Removed override for '{tier}'  ({p})")
     else:
         overrides[tier] = value
-        p.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(p, cfg)
         print(f"Set {tier} → {value}  ({p})")
 
@@ -926,7 +920,7 @@ COMMANDS = {
     "interrupt":     cmd_interrupt,
     "print":         cmd_print,
     "check-mailbox": cmd_check_mailbox,
-    "configure":     cmd_configure,
+    "override":      cmd_override,
     "tail":          cmd_tail,
 }
 
