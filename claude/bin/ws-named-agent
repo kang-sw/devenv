@@ -184,6 +184,26 @@ def _settings_json() -> str:
     })
 
 
+def _collect_claude_mds() -> str:
+    """Collect CLAUDE.md files from git root down to CWD, outer-to-inner order."""
+    repo_root = _git("--show-toplevel")
+    if not repo_root:
+        return ""
+    root = Path(repo_root)
+    cwd = Path.cwd()
+    try:
+        rel = cwd.relative_to(root)
+        dirs = [root] + [root.joinpath(*rel.parts[:i + 1]) for i in range(len(rel.parts))]
+    except ValueError:
+        dirs = [root]
+    chunks = []
+    for d in dirs:
+        f = d / "CLAUDE.md"
+        if f.exists():
+            chunks.append(f.read_text().strip())
+    return "\n\n".join(chunks)
+
+
 def _call_claude(
     *,
     agent_name: str,
@@ -200,6 +220,10 @@ def _call_claude(
 ) -> CallResult:
     settings = _settings_json()
 
+    # Inject CLAUDE.md between the agent definition and the registered system prompt.
+    claude_md = _collect_claude_mds()
+    effective_sp = "\n\n---\n\n".join(p for p in [claude_md, system_prompt] if p)
+
     def _flags(for_model: str = "") -> list[str]:
         m = for_model or model
         flags = ["claude", "-p", "--dangerously-skip-permissions", "--output-format", "json"]
@@ -207,8 +231,8 @@ def _call_claude(
             flags += ["--model", m]
         if agent_type:
             flags += ["--agent", agent_type]
-        if system_prompt:
-            flags += ["--system-prompt", system_prompt]
+        if effective_sp:
+            flags += ["--system-prompt", effective_sp]
         flags += ["--settings", settings]
         return flags
 
