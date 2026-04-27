@@ -20,7 +20,6 @@ At ship time:
 ## Pre-flight
 
 - `git status --porcelain` — must be empty (clean working tree).
-- `git log origin/main..HEAD` — must be empty (no unpushed commits before tagging).
 
 ## Changelog
 
@@ -52,8 +51,7 @@ Push: yes
 
 ## Publish
 
-- `git push origin main`
-- `git push origin v<version>`
+- `git push origin main --follow-tags`
 
 ## Post-ship
 
