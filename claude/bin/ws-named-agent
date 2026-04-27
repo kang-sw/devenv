@@ -110,7 +110,8 @@ def _global_config_path() -> Path:
 
 def _local_config_path() -> Path:
     repo_root = _git("--show-toplevel") or os.getcwd()
-    return Path(repo_root) / ".claude" / _PLUGIN_CONFIG_NAME
+    escaped = Path(repo_root).as_posix().replace("/", "-")
+    return Path.home() / ".claude" / "kang-sw-devenv" / "ws" / f"{escaped}.json"
 
 
 def _load_config_file(p: Path) -> dict:
