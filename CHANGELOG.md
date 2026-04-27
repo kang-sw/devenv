@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.10.1 — 2026-04-27
+
+### Added
+- `ws-named-agent` (claude backend) — injects CLAUDE.md into the system prompt between the agent definition and the registered system prompt; walks from git root to CWD collecting all CLAUDE.md files in outer-to-inner order
+
+### Fixed
+- `ws-named-agent` Windows portability: `claude.cmd` now invoked via `cmd /c` (resolved with `shutil.which`); `tmp.replace()` replaces `tmp.rename()` to handle existing destination; `find` subprocess calls replaced with `Path.glob`/`Path.rglob`; all `text=True` subprocess calls and temp file opens now specify `encoding="utf-8"`
+
 ## v0.10.0 — 2026-04-27
 
 ### Added
