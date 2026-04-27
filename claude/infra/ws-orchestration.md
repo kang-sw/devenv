@@ -70,6 +70,26 @@ PROMPT
 ws-print-named-agent-output implementer
 ```
 
+## ws-named-agent tail
+
+```
+ws-named-agent tail <agent-name> [-<n>]
+```
+
+Reads the last N assistant turns from the live session file on disk without invoking
+the CLI — safe to call while the agent is running. Defaults to 3 turns.
+
+Output per turn: assistant text preview and tools called, interleaved with tool-result
+counts. Use to distinguish frozen from done:
+
+- `[last]` is a tool-results line → agent waiting for next turn (running or stalled)
+- `[last]` is assistant with tools → waiting on tool results
+- `[last]` is assistant with no tools → agent has concluded its response
+
+```bash
+ws-named-agent tail implementer -5
+```
+
 ## ws-infra-path
 
 ```
