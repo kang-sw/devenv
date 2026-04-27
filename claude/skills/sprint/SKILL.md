@@ -125,7 +125,7 @@ ws-review-path correctness fit
 Read the two output lines. Store as `<correctness-path>` and `<fit-path>` in
 context.
 
-**Step 3 — Spawn implementer (one Bash call, `run_in_background: true`, `timeout: 600000`)**
+**Step 3 — Spawn implementer (one Bash call, `run_in_background: true`)**
 
 ```bash
 ws-call-named-agent implementer - <<'PROMPT'
@@ -145,7 +145,7 @@ ws-print-named-agent-output implementer
 
 Note commit range from implementer report as `<first>..<last>`.
 
-**Step 4 — Spawn reviewers in parallel (two Bash calls in the same response turn, each with `run_in_background: true`, `timeout: 600000`)**
+**Step 4 — Spawn reviewers in parallel (two Bash calls in the same response turn, each with `run_in_background: true`)**
 
 ```bash
 ws-call-named-agent reviewer-correctness - <<'PROMPT'
@@ -171,7 +171,7 @@ ws-print-named-agent-output reviewer-fit
 ```
 
 Review loop: if non-clean, relay file paths (not content) to implementer
-(`run_in_background: true`, `timeout: 600000`); wait for notification, then
+(`run_in_background: true`); wait for notification, then
 read output via `ws-print-named-agent-output implementer`; re-review
 (reviewers overwrite paths, each `run_in_background: true`) until both
 return `[clean]`.

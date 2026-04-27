@@ -64,7 +64,7 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-named-agent
 
 ### 2. Spawn implementer
 
-Issue the Bash tool call with `run_in_background: true` and `timeout: 600000`. Lead continues other work (discussion, etc.) until the completion notification arrives.
+Issue the Bash tool call with `run_in_background: true`. Lead continues other work (discussion, etc.) until the completion notification arrives.
 
 ```bash
 ws-call-named-agent implementer - <<'PROMPT'
@@ -107,7 +107,7 @@ based on the implementer's report and the nature of the changes.
 #### 3b. Spawn reviewers
 
 Spawn one reviewer per selected partition in parallel — issue multiple Bash
-calls in the same response turn, each with `run_in_background: true` and `timeout: 600000`.
+calls in the same response turn, each with `run_in_background: true`.
 After all completion notifications arrive, read each reviewer's summary via
 `ws-print-named-agent-output <reviewer-name>`. Each reviewer loads its partition doc via
 `--system-prompt`:
@@ -160,7 +160,7 @@ PROMPT
 #### 3c. Relay and loop
 
 1. If all reviewers return a `[clean]` summary → exit review loop, proceed to step 4.
-2. Otherwise: relay file paths to the implementer (background Bash, `run_in_background: true`, `timeout: 600000`):
+2. Otherwise: relay file paths to the implementer (background Bash, `run_in_background: true`):
    ```bash
    ws-call-named-agent implementer - <<'PROMPT'
    Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
