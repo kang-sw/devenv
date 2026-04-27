@@ -211,28 +211,57 @@ PROMPT
 
 #### 6c. Relay and loop
 
-1. If all reviewers return a `[clean]` summary → exit review loop, proceed to step 7.
-2. Otherwise: relay file paths to the implementer (background Bash, `run_in_background: true`):
-   ```bash
-   ws-call-named-agent implementer - <<'PROMPT'
-   Fix issues in these review reports: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
-   PROMPT
-   ```
-   After the completion notification, read the fix report: `ws-print-named-agent-output implementer`.
-3. Re-review (parallel background — multiple Bash calls in the same response, `run_in_background: true`, same paths — reviewers overwrite):
-   ```bash
-   ws-call-named-agent reviewer-correctness - <<'PROMPT'
-   Re-review. Updated diff: <diff>
-   PROMPT
-   ws-call-named-agent reviewer-fit - <<'PROMPT'
-   Re-review. Updated diff: <diff>
-   PROMPT
-   ws-call-named-agent reviewer-test - <<'PROMPT'
-   Re-review. Updated diff: <diff>
-   PROMPT
-   ```
-   After all notifications, read summaries via `ws-print-named-agent-output` for each reviewer.
-4. Repeat from 6c.1 until all reviewers return `[clean]`.
+Track relay cycle count starting at 0. Maximum 3 relay cycles.
+
+**Entry:** If all reviewers return `[clean]` → exit loop, proceed to step 7.
+
+**Relay** (background Bash, `run_in_background: true`). Increment cycle counter before each relay.
+
+```bash
+ws-call-named-agent implementer - <<'PROMPT'
+Review cycle <N>: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
+For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
+Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
+Won't-fix not allowed: correctness, security, or contract violations — fix or escalate these.
+PROMPT
+```
+
+After notification, read the report: `ws-print-named-agent-output implementer`. Extract the won't-fix list.
+
+**Re-review** (parallel background, same paths — reviewers overwrite):
+
+```bash
+ws-call-named-agent reviewer-correctness - <<'PROMPT'
+Re-review. Updated diff: <diff>
+Implementer won't-fix items: <list with reasons from implementer report>
+For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+PROMPT
+```
+
+```bash
+ws-call-named-agent reviewer-fit - <<'PROMPT'
+Re-review. Updated diff: <diff>
+Implementer won't-fix items: <list with reasons from implementer report>
+For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+PROMPT
+```
+
+```bash
+ws-call-named-agent reviewer-test - <<'PROMPT'
+Re-review. Updated diff: <diff>
+Implementer won't-fix items: <list with reasons from implementer report>
+For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+PROMPT
+```
+
+After all notifications, read summaries.
+
+**After re-review — branch on cycle and result:**
+
+- All `[clean]` → exit loop, proceed to step 7.
+- Cycle ≤ 2 and non-clean → go to relay.
+- Cycle = 2 and maintained items exist: lead reads the review files directly (not just summaries). For each maintained dispute: accept the won't-fix or override it. If any overrides: relay override list to implementer (counts as cycle 3 relay). Otherwise advance to cycle 3 re-review directly.
+- Cycle = 3 and any non-clean remain: collect all unresolved findings. Skip to step 8 with escalation note — do not relay again.
 
 ### 7. Docs pre-pass
 
@@ -246,6 +275,7 @@ PROMPT
    - Review result (from reviewer report)
    - Test status
    - Any deviations or open items
+   - If escalated from cycle 3: list each unresolved dispute with reviewer finding and implementer rationale — user decides fix or accept
 2. Wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix:
      ```bash
