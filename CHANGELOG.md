@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.10.0 — 2026-04-27
+
+### Added
+- `ws-named-agent` — unified Python CLI entry point for named agent management (subcommands: `new`, `call`, `interrupt`, `print`, `check-mailbox`, `tail`, `override`); multi-backend routing (claude, codex, gemini stub); replaces the standalone bash scripts which are now one-liner shims
+- `ws-named-agent tail` — reads last N assistant turns from the live session JSONL on disk (safe while agent is running); supports claude and codex session formats
+- `ws-named-agent override` — persists tier-to-model overrides in `~/.claude/<repo>-ws.json`; resolution order: `WS_OVERRIDE_<TIER>` env var > config file > stored model
+- codex backend — full feature parity with claude backend: session routing via `~/.codex/sessions`, `PostToolUse` hook for outbox drain, system prompt via `model_instructions_file`, compression handoff
+- `ai-docs/ref/codex-integration.md` — probed codex CLI behavior reference (invocation, JSONL format, session management, hook config, model flag behavior, PATH inheritance)
+
+### Changed
+- `ws-call-named-agent`, `ws-new-named-agent`, `ws-interrupt-named-agent`, `ws-print-named-agent-output`, `ws-agent-check-mailbox` — converted to one-liner shims delegating to `ws-named-agent`
+- Model resolution: frontmatter `model:` field read at `ws-named-agent new` to set initial tier; `--model` overrides frontmatter; backend shorthands (`claude`, `codex`, `gemini`) stored as model but never passed as `--model` to their CLIs
+- `/sprint` Delegation Cycle — `ws-call-named-agent` calls use `run_in_background: true`
+- `/implement` — feature-branch auto-merge mode reverted; approval gate now unconditional
+
+### Fixed
+- `ws-call-named-agent` — replaced path construction with `find` for Windows Git Bash portability
+- `ws-agent-check-mailbox` hook path — now absolute so it resolves correctly regardless of hook shell's working directory
+
 ## v0.9.0 — 2026-04-27
 
 ### Added
