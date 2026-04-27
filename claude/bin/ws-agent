@@ -16,6 +16,9 @@ from pathlib import Path
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 PLUGIN_DIR = SCRIPT_DIR.parent
 KNOWN_TIERS = {"opus", "sonnet", "haiku"}
+# Backend shorthand names: stored as model when no explicit model given.
+# Never passed as --model to their respective CLIs; those CLIs use their own defaults.
+_BACKEND_SHORTHANDS = frozenset({"claude", "codex", "gemini"})
 
 # ── Registry helpers ──────────────────────────────────────────────────────────
 
@@ -367,8 +370,7 @@ def _call_codex(
 
     def _base_flags() -> list[str]:
         flags = ["--dangerously-bypass-approvals-and-sandbox", "--json"]
-        # "codex" alone is a backend shorthand, not a real model name for codex CLI
-        if model and model != "codex":
+        if model and model not in _BACKEND_SHORTHANDS:
             flags += ["--model", model]
         check_cmd = f"{SCRIPT_DIR}/ws-agent check-mailbox"
         # TOML inline-table syntax required; json.dumps for string quoting is compatible
