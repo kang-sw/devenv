@@ -7,6 +7,7 @@ sources:
   - claude/skills/write-spec/
   - claude/skills/sprint/
   - claude/skills/discuss/
+  - claude/skills/implement/
 related:
   spec-system: "/write-spec's judge: spec-impact gate is owned by write-spec, not pre-evaluated by /proceed. /write-ticket's judge: spec-gate fires on any action resulting in todo/-or-higher status (direct creation and idea/→todo/ promotion) and may redirect to /write-spec. /discuss's promotion handler runs /write-spec before git mv so a 🚧 entry exists before the ticket reaches todo/ status."
 ---
@@ -14,8 +15,9 @@ related:
 # Workflow Routing
 
 `/proceed` is the universal router for the canonical chain. It fires prefix
-judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
-(`direct-edit`, `needs-plan`, `needs-skeleton`, `execution-mode`).
+judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judge
+(`needs-skeleton`). `/proceed` always routes to `/implement`; the `judge: execution-mode`
+split (direct-edit vs. delegated) lives inside `/implement`.
 
 ## Entry Points
 
@@ -26,6 +28,9 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 
 ## Module Contracts
 
+- `/proceed` guarantees: the implementation stage always invokes `/implement` via the Skill tool.
+  `/proceed` does not evaluate `judge: execution-mode` itself. The direct-edit vs. delegated
+  split is internal to `/implement` via its own `judge: execution-mode` gate.
 - `/proceed` guarantees: `judge: needs-spec` fires on **every** invocation. It is unconditional.
   `/proceed` does not pre-evaluate whether a spec is needed. It always delegates to `/write-spec`,
   which handles the no-op exit via its own `judge: spec-impact` gate.
@@ -104,6 +109,9 @@ judges (`needs-spec`, `needs-ticket`) before the implementation pipeline judges
 
 ## Common Mistakes
 
+- Routing `/proceed` directly to `/edit` instead of `/implement` — `/proceed` always invokes
+  `/implement`. The execution-mode split (direct-edit vs. delegated) belongs inside `/implement`,
+  not in the routing layer. Adding a direct `/edit` path to `/proceed` breaks the harness contract.
 - Routing sprint sessions through `/proceed` — `/sprint` is a standalone entry point. It manages
   its own routing loop, branch state, and wrap-up sequence. Invoking `/proceed` inside a sprint
   session bypasses sprint's doc-deferral invariant.
