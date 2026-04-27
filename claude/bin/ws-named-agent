@@ -57,10 +57,18 @@ def _codex_exe() -> list[str]:
 # Never passed as --model to their respective CLIs; those CLIs use their own defaults.
 _BACKEND_SHORTHANDS = frozenset({"claude", "codex", "gemini"})
 
+# On Windows, suppress the console window that flashes when spawning .cmd subprocesses.
+_WIN_NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+def _subrun(*args, **kwargs) -> "subprocess.CompletedProcess[object]":
+    if _WIN_NO_WINDOW:
+        kwargs.setdefault("creationflags", _WIN_NO_WINDOW)
+    return subprocess.run(*args, **kwargs)
+
 # ── Registry helpers ──────────────────────────────────────────────────────────
 
 def _git(arg):
-    r = subprocess.run(["git", "rev-parse", arg], capture_output=True, text=True, encoding="utf-8")
+    r = _subrun(["git", "rev-parse", arg], capture_output=True, text=True, encoding="utf-8")
     return r.stdout.strip() if r.returncode == 0 else None
 
 
@@ -301,7 +309,7 @@ def _call_claude(
 
     for attempt in range(1, 4):
         with open(tmpfile, "w", encoding="utf-8") as out, open(errfile, "w", encoding="utf-8") as err:
-            ret = subprocess.run(args + [prompt], stdout=out, stderr=err)
+            ret = _subrun(args + [prompt], stdout=out, stderr=err)
         if ret.returncode == 0:
             break
         err_text = Path(errfile).read_text(encoding="utf-8")
@@ -319,7 +327,7 @@ def _call_claude(
         outbox_file.write_text("", encoding="utf-8")
         drain_tmp = _mktemp()
         with open(drain_tmp, "w", encoding="utf-8") as out:
-            subprocess.run(drain_args + [pending], stdout=out, check=True)
+            _subrun(drain_args + [pending], stdout=out, check=True)
         shutil.copy2(drain_tmp, tmpfile)
 
     with open(tmpfile, encoding="utf-8") as fh:
@@ -339,7 +347,7 @@ def _call_claude(
         # Step a: intent summary via haiku
         intent_file = _mktemp()
         with open(intent_file, "w", encoding="utf-8") as out:
-            subprocess.run(
+            _subrun(
                 _claude_exe() + [
                     "-p", "--dangerously-skip-permissions",
                     "--output-format", "json", "--model", "haiku",
@@ -350,7 +358,7 @@ def _call_claude(
             intent_summary = json.load(fh).get("result", "")
 
         # Step b: inject compression prompt into existing session
-        compression_path = subprocess.run(
+        compression_path = _subrun(
             ["ws-infra-path", "agent-compression.md"],
             capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
@@ -358,7 +366,7 @@ def _call_claude(
 
         comp_file = _mktemp()
         with open(comp_file, "w", encoding="utf-8") as out:
-            subprocess.run(_flags() + ["--resume", uuid] + [compression_prompt], stdout=out, check=True)
+            _subrun(_flags() + ["--resume", uuid] + [compression_prompt], stdout=out, check=True)
         with open(comp_file, encoding="utf-8") as fh:
             compression_doc = json.load(fh).get("result", "")
 
@@ -374,7 +382,7 @@ def _call_claude(
             sp_file = _mktemp()
             Path(sp_file).write_text(system_prompt, encoding="utf-8")
             new_args += ["--system-prompt", sp_file]
-        subprocess.run(new_args, check=True)
+        _subrun(new_args, check=True)
 
         with open(registry_dir / f"{agent_name}.json") as fh:
             new_reg = json.load(fh)
@@ -389,7 +397,7 @@ def _call_claude(
         handoff_prompt = f"{compression_doc}\n\n---\n\n{intent_summary}\n\n---\n\n{prompt}"
         handoff_file = _mktemp()
         with open(handoff_file, "w", encoding="utf-8") as out:
-            subprocess.run(_flags() + ["--session-id", new_uuid] + [handoff_prompt], stdout=out, check=True)
+            _subrun(_flags() + ["--session-id", new_uuid] + [handoff_prompt], stdout=out, check=True)
         with open(handoff_file, encoding="utf-8") as fh:
             h_data = json.load(fh)
         h_tokens = _claude_tokens(h_data)
@@ -493,7 +501,7 @@ def _call_codex(
             cmd = _codex_exe() + ["exec", "resume"] + base + [thread_id, p]
         else:
             cmd = _codex_exe() + ["exec"] + base + [p]
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+        r = _subrun(cmd, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
         events = _codex_parse_jsonl(r.stdout)
         if r.returncode != 0 and not events:
             sys.stderr.write(r.stderr)
@@ -532,7 +540,7 @@ def _call_codex(
         # Step a: intent summary via claude haiku (backend-agnostic helper)
         intent_file = _mktemp()
         with open(intent_file, "w", encoding="utf-8") as out:
-            subprocess.run(
+            _subrun(
                 _claude_exe() + ["-p", "--dangerously-skip-permissions",
                 "--output-format", "json", "--model", "haiku",
                 "--system-prompt", "Summarize the user's intent in 2-3 sentences. Do not perform the task.",
@@ -542,7 +550,7 @@ def _call_codex(
             intent_summary = json.load(fh).get("result", "")
 
         # Step b: inject compression prompt into existing codex session
-        compression_path = subprocess.run(
+        compression_path = _subrun(
             ["ws-infra-path", "agent-compression.md"],
             capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
@@ -562,7 +570,7 @@ def _call_codex(
             sp_tmp = _mktemp()
             Path(sp_tmp).write_text(effective_sp, encoding="utf-8")
             new_args += ["--system-prompt", sp_tmp]
-        subprocess.run(new_args, check=True)
+        _subrun(new_args, check=True)
 
         with open(registry_dir / f"{agent_name}.json") as fh:
             new_reg = json.load(fh)
