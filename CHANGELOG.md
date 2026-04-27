@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.11.0 — 2026-04-28
+
+### Added
+- `/write-code` skill — new delegated-implementation primitive: brief → judge: plan-depth (as-is/survey/research) → implementer named-agent → 3-reviewer loop (correctness, fit, test) with won't-fix disposition system and 3-cycle cap with lead adjudication at cycle 2
+
+### Changed
+- `/edit` recast as direct-edit primitive: lead edits directly, one named-agent reviewer covering correctness+fit (temp-file concatenation), 2-cycle relay cap, self-cleanup, no doc pipeline
+- `/implement` recast as harness: `judge: execution-mode` routes to `ws:edit` or `ws:write-code`; doc pre-pass (spec-updater then mental-model-updater, each committed separately); approval gate; merge
+- `/sprint` routing table updated: calls `ws:edit` | `ws:write-code` directly; Delegation Cycle template removed; wrap-up auto-merges via `ws-merge-branch`
+- `/proceed` simplified: always routes to `/implement`; `judge: direct-edit` and `judge: execution-mode` removed (now owned by `/implement`)
+
+### Removed
+- `/write-plan` skill — brief writing and `judge: plan-depth` absorbed into `/implement`; plan-populator infra docs moved to `claude/infra/`
+
 ## v0.10.6 — 2026-04-27
 
 ### Fixed
