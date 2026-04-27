@@ -487,8 +487,8 @@ def _call_codex(
         # Step a: intent summary via claude haiku (backend-agnostic helper)
         intent_file = _mktemp()
         with open(intent_file, "w", encoding="utf-8") as out:
-            subprocess.run([
-                "claude", "-p", "--dangerously-skip-permissions",
+            subprocess.run(
+                _claude_exe() + ["-p", "--dangerously-skip-permissions",
                 "--output-format", "json", "--model", "haiku",
                 "--system-prompt", "Summarize the user's intent in 2-3 sentences. Do not perform the task.",
                 prompt,
