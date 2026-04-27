@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.10.2 — 2026-04-27
+
+### Added
+- `ws-named-agent override default <model>` — sets a per-repo fallback model in the config file; used by `ws-named-agent new` when no `--model`, agent frontmatter, or `--agent-type` is present. Config file only — `WS_OVERRIDE_*` env vars are not involved.
+
+### Fixed
+- `ws-named-agent`: all `Path.read_text()` / `Path.write_text()` calls now pass `encoding='utf-8'` explicitly; on Windows systems with a non-UTF-8 locale (e.g. CP949), output files were saved in the system code page
+- `ws-named-agent tail` (codex): rewrote `_tail_codex` for the actual session file format — `{"timestamp","type","payload"}` envelope with `event_msg{task_started/task_complete/agent_message}` and `response_item{function_call}` events; old parser was written against the `--json` stdout format and found zero turns
+- `ws-named-agent` (codex compression): `_call_codex` haiku intent step used hardcoded `"claude"` instead of `_claude_exe()`; fails on Windows where claude is `claude.cmd`
+- `ws-named-agent` (codex): `_run()` now uses `_codex_exe()` wrapper; `codex.cmd` on Windows cannot be invoked without `cmd /c`
+
 ## v0.10.1 — 2026-04-27
 
 ### Added
