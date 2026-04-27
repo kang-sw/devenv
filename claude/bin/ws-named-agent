@@ -700,6 +700,162 @@ def cmd_check_mailbox(_argv: list[str]) -> None:
     sys.exit(2 if p.exists() and p.stat().st_size > 0 else 0)
 
 
+def _tail_claude(session_path: Path, n: int) -> None:
+    lines = session_path.read_text().splitlines()
+
+    # Each assistant line holds exactly one content block; group by message ID.
+    msg_order: list[tuple[str, object]] = []   # ("assistant", mid) | ("tool_results", count) | ("user_prompt", text)
+    msg_data: dict[str, dict] = {}             # mid → {texts, tools}
+    seen_mids: set[str] = set()
+
+    for raw in lines:
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        t = obj.get("type")
+        if t == "assistant":
+            msg = obj.get("message", {})
+            mid = msg.get("id", "")
+            if not mid:
+                continue
+            if mid not in seen_mids:
+                seen_mids.add(mid)
+                msg_order.append(("assistant", mid))
+                msg_data[mid] = {"texts": [], "tools": []}
+            for block in msg.get("content", []):
+                bt = block.get("type")
+                if bt == "text":
+                    msg_data[mid]["texts"].append(block.get("text", ""))
+                elif bt == "tool_use":
+                    msg_data[mid]["tools"].append(block.get("name", "?"))
+        elif t == "user":
+            msg = obj.get("message", {})
+            content = msg.get("content", [])
+            if not isinstance(content, list) or not content:
+                continue
+            if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                count = sum(1 for b in content if isinstance(b, dict) and b.get("type") == "tool_result")
+                msg_order.append(("tool_results", count))
+            else:
+                text = next(
+                    (b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"),
+                    str(content[0])[:80] if content else "",
+                )
+                msg_order.append(("user_prompt", text[:80]))
+
+    # Find the last N assistant turns and include surrounding context.
+    assistant_positions = [i for i, (kind, _) in enumerate(msg_order) if kind == "assistant"]
+    if not assistant_positions:
+        print("(no assistant turns found in session)")
+        return
+    start = assistant_positions[-n] if len(assistant_positions) >= n else 0
+    recent = msg_order[start:]
+
+    total = len(recent)
+    for idx, (kind, data) in enumerate(recent):
+        offset = idx - total + 1
+        label = f"[{offset:+d}]" if offset != 0 else "[last]"
+        if kind == "assistant":
+            mid = data
+            d = msg_data[mid]
+            text = " ".join(d["texts"])
+            preview = repr(text[:120]) if text else "(no text)"
+            tools = d["tools"]
+            tool_str = f"  tools: {' '.join(tools)}" if tools else ""
+            print(f"{label} assistant: {preview}{tool_str}")
+        elif kind == "tool_results":
+            print(f"{label} tool-results: {data} returned")
+        elif kind == "user_prompt":
+            print(f"{label} user: {repr(data)}")
+
+
+def _tail_codex(session_path: Path, n: int) -> None:
+    lines = session_path.read_text().splitlines()
+
+    # Group events into turns (turn.started → turn.completed).
+    turns: list[list[dict]] = []
+    current: list[dict] | None = None
+    for raw in lines:
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        t = obj.get("type", "")
+        if t == "turn.started":
+            current = []
+        elif t == "turn.completed":
+            if current is not None:
+                turns.append(current)
+            current = None
+        elif t == "item.completed" and current is not None:
+            current.append(obj.get("item", {}))
+
+    # If a turn is in progress (no turn.completed yet), include it.
+    if current:
+        turns.append(current)
+
+    if not turns:
+        print("(no turns found in session)")
+        return
+
+    recent = turns[-n:]
+    total = len(recent)
+    for idx, items in enumerate(recent):
+        offset = idx - total + 1
+        label = f"[{offset:+d}]" if offset != 0 else "[last]"
+        for item in items:
+            it = item.get("type", "")
+            if it == "agent_message":
+                text = item.get("text", "")
+                print(f"{label} assistant: {repr(text[:120])}")
+            elif it == "command_execution":
+                cmd = item.get("cmd", [])
+                exit_code = item.get("exit_code", "?")
+                cmd_str = " ".join(str(c) for c in cmd[:4]) if cmd else "?"
+                print(f"{label} tool: {cmd_str!r}  exit={exit_code}")
+
+
+def cmd_tail(argv: list[str]) -> None:
+    n = 3
+    agent_name = ""
+    for arg in argv:
+        if arg.startswith("-") and arg[1:].isdigit():
+            n = int(arg[1:])
+        elif not agent_name:
+            agent_name = arg
+
+    if not agent_name:
+        print("Usage: ws-named-agent tail <name> [-<n>]", file=sys.stderr)
+        sys.exit(1)
+
+    registry_dir = _registry_dir()
+    registry = _load_registry(registry_dir, agent_name)
+    uuid = registry.get("uuid", "")
+    backend = registry.get("backend") or infer_backend(registry.get("model") or "")
+
+    if backend == "codex":
+        result = subprocess.run(
+            ["find", str(Path.home() / ".codex" / "sessions"), "-name", f"rollout-*-{uuid}.jsonl"],
+            capture_output=True, text=True,
+        )
+        path_str = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+        if not path_str:
+            print(f"(no codex session found for {agent_name} / {uuid})", file=sys.stderr)
+            sys.exit(1)
+        _tail_codex(Path(path_str), n)
+    else:
+        result = subprocess.run(
+            ["find", str(Path.home() / ".claude" / "projects"), "-maxdepth", "2", "-name", f"{uuid}.jsonl"],
+            capture_output=True, text=True,
+        )
+        path_str = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+        if not path_str:
+            print(f"(no claude session found for {agent_name} / {uuid})", file=sys.stderr)
+            sys.exit(1)
+        _tail_claude(Path(path_str), n)
+
+
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 COMMANDS = {
@@ -708,6 +864,7 @@ COMMANDS = {
     "interrupt":     cmd_interrupt,
     "print":         cmd_print,
     "check-mailbox": cmd_check_mailbox,
+    "tail":          cmd_tail,
 }
 
 if __name__ == "__main__":
