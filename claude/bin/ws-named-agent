@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ws-agent — unified agent orchestration tool."""
+"""ws-named-agent — unified agent orchestration tool."""
 
 import atexit
 import json
@@ -42,7 +42,7 @@ def _registry_dir() -> Path:
 def _load_registry(registry_dir: Path, agent_name: str) -> dict:
     agent_file = registry_dir / f"{agent_name}.json"
     if not agent_file.exists():
-        print(f"error: agent '{agent_name}' not found — run ws-agent new first", file=sys.stderr)
+        print(f"error: agent '{agent_name}' not found — run ws-named-agent new first", file=sys.stderr)
         sys.exit(1)
     with open(agent_file) as fh:
         return json.load(fh)
@@ -152,7 +152,7 @@ def _claude_tokens(data: dict) -> int:
 
 def _settings_json() -> str:
     # Use absolute path so the hook works regardless of the hook shell's PATH
-    cmd = f"{SCRIPT_DIR}/ws-agent check-mailbox"
+    cmd = f"{SCRIPT_DIR}/ws-named-agent check-mailbox"
     return json.dumps({
         "hooks": {
             "PostToolBatch": [{
@@ -271,7 +271,7 @@ def _call_claude(
         # Step c: snapshot outbox, re-register with fresh UUID, restore outbox
         saved_outbox = outbox_file.read_text() if outbox_file.stat().st_size > 0 else ""
 
-        new_args = ["ws-agent", "new", agent_name]
+        new_args = ["ws-named-agent", "new", agent_name]
         if model:
             new_args += ["--model", model]
         if agent_type:
@@ -385,7 +385,7 @@ def _call_codex(
         flags = ["--dangerously-bypass-approvals-and-sandbox", "--json"]
         if model and model not in _BACKEND_SHORTHANDS:
             flags += ["--model", model]
-        check_cmd = f"{SCRIPT_DIR}/ws-agent check-mailbox"
+        check_cmd = f"{SCRIPT_DIR}/ws-named-agent check-mailbox"
         # TOML inline-table syntax required; json.dumps for string quoting is compatible
         hook_toml = f'[{{hooks=[{{type="command",command={json.dumps(check_cmd)},timeout=5}}]}}]'
         flags += ["-c", "features.codex_hooks=true", "-c", f"hooks.PostToolUse={hook_toml}"]
@@ -462,7 +462,7 @@ def _call_codex(
         # Step c: snapshot outbox, re-register with fresh uuid, restore outbox
         saved_outbox = outbox_file.read_text() if outbox_file.stat().st_size > 0 else ""
 
-        new_args = ["ws-agent", "new", agent_name]
+        new_args = ["ws-named-agent", "new", agent_name]
         if model:
             new_args += ["--model", model]
         if agent_type:
@@ -517,7 +517,7 @@ BACKENDS = {
 
 def cmd_new(argv: list[str]) -> None:
     if not argv:
-        print("Usage: ws-agent new <name> [--model M] [--system-prompt P] [--agent-type T]", file=sys.stderr)
+        print("Usage: ws-named-agent new <name> [--model M] [--system-prompt P] [--agent-type T]", file=sys.stderr)
         sys.exit(1)
 
     agent_name = argv[0]
@@ -592,7 +592,7 @@ def cmd_new(argv: list[str]) -> None:
 
 def cmd_call(argv: list[str]) -> None:
     if not argv:
-        print("Usage: ws-agent call <name> <prompt>", file=sys.stderr)
+        print("Usage: ws-named-agent call <name> <prompt>", file=sys.stderr)
         sys.exit(1)
 
     agent_name = argv[0]
@@ -663,7 +663,7 @@ def cmd_call(argv: list[str]) -> None:
 
 def cmd_interrupt(argv: list[str]) -> None:
     if len(argv) < 2:
-        print("Usage: ws-agent interrupt <name> <message>", file=sys.stderr)
+        print("Usage: ws-named-agent interrupt <name> <message>", file=sys.stderr)
         sys.exit(1)
 
     agent_name = argv[0]
@@ -671,7 +671,7 @@ def cmd_interrupt(argv: list[str]) -> None:
 
     registry_dir = _registry_dir()
     if not (registry_dir / f"{agent_name}.json").exists():
-        print(f"error: agent '{agent_name}' not found — run ws-agent new first", file=sys.stderr)
+        print(f"error: agent '{agent_name}' not found — run ws-named-agent new first", file=sys.stderr)
         sys.exit(1)
 
     with open(registry_dir / f"{agent_name}.outbox.txt", "a") as fh:
@@ -681,7 +681,7 @@ def cmd_interrupt(argv: list[str]) -> None:
 
 def cmd_print(argv: list[str]) -> None:
     if not argv:
-        print("Usage: ws-agent print <name>", file=sys.stderr)
+        print("Usage: ws-named-agent print <name>", file=sys.stderr)
         sys.exit(1)
 
     agent_name = argv[0]
@@ -713,6 +713,6 @@ COMMANDS = {
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         cmds = "|".join(COMMANDS)
-        print(f"Usage: ws-agent <{cmds}> ...", file=sys.stderr)
+        print(f"Usage: ws-named-agent <{cmds}> ...", file=sys.stderr)
         sys.exit(1)
     COMMANDS[sys.argv[1]](sys.argv[2:])
