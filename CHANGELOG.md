@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.10.6 — 2026-04-27
+
+### Fixed
+- `ws-named-agent` (compression): replaced `ws-infra-path` subprocess call with direct `PLUGIN_DIR / "infra" / "agent-compression.md"` read in both claude and codex backends; on Windows, Git Bash's `pwd` returns a POSIX path (`/c/Users/...`) that Python's `pathlib` cannot resolve, causing `FileNotFoundError` at every compression handoff
+
 ## v0.10.5 — 2026-04-27
 
 ### Fixed
