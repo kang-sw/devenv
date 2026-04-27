@@ -4,7 +4,7 @@ description: >
   Delegated single-scope implementation cycle. An implementer-reviewer pair
   work behind locked contracts; the lead coordinates, merges, and updates
   docs.
-argument-hint: "<plan-path or inline brief> [--ticket <ticket-stem>] [--main-branch <name>]"
+argument-hint: "<plan-path or inline brief> [--ticket <ticket-stem>]"
 ---
 
 # Delegated Implementation
@@ -17,8 +17,7 @@ Target: $ARGUMENTS
 - When skeleton exists, its stubs and integration tests are the acceptance criteria.
 - Ancestor loading (one-level hierarchies — `<domain>/<sub>.md` only): whenever the implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first so inherited `## Domain Rules` are visible before work begins. The lead propagates this rule through the implementer spawn prompt. See `ws-print-infra executor-wrapup.md §Ancestor Loading`.
 - Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
-- **Main-branch mode** (invoked from `main`/`master`/`trunk`): user approves the report before merge — no code reaches the target branch without user confirmation.
-- **Feature-branch mode** (invoked from any other branch): approval gate is skipped; lead auto-merges after clean review. The feature → main merge remains the user's responsibility.
+- User approves the report before merge — no code reaches the target branch without user confirmation.
 - Implementer and reviewer sessions persist via `ws-call-named-agent` auto-resume throughout the review loop; `ws-new-named-agent` at step 7 resets them to the current run.
 - One delegation cycle per invocation.
 - Follow CLAUDE.md commit rules for the merge commit (including `## Ticket Updates` when ticket-driven).
@@ -38,10 +37,7 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-named-agent
 3. If brief-driven: the brief is the full specification.
 4. Verify skeleton exists: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests that reference the target contracts. If absent, stop and suggest `/write-skeleton`.
 5. Collect integration test context: identify test file paths and the command to run them. This flows into the implementer spawn prompt.
-6. Record current branch as `<original-branch>`. Detect **invocation mode**:
-   - `<original-branch>` matches `main`, `master`, `trunk`, or the value of `--main-branch <name>` → **main-branch mode** (approval gate active).
-   - Otherwise → **feature-branch mode** (approval gate skipped; auto-merge after clean review).
-   Create `implement/<scope>` branch.
+6. Record current branch as `<original-branch>`. Create `implement/<scope>` branch.
 7. Register all agent slots upfront:
    ```bash
    ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
@@ -59,7 +55,7 @@ Run `ws-print-infra ws-orchestration.md` (Bash) to orient on `ws-new-named-agent
    [ ] Spawn implementer — background Bash call; lead reads output after notification via ws-print-named-agent-output
    [ ] Spawn reviewers (partition-allocated) — parallel background Bash calls; lead reads summaries after all notifications via ws-print-named-agent-output; implementer reads review files directly when non-clean → re-review loop until clean
    [ ] Dispatch mental-model-updater + spec-updater in parallel — wait for both; surface ambiguous stems
-   [ ] Report to user — wait for approval  ← main-branch mode only
+   [ ] Report to user — wait for approval
      > if tweaks requested: implementer fixes → re-verify → reviewer re-reviews → re-run both updaters (loop)
    [ ] Merge to original branch
    [ ] Update project docs — refresh ai-docs/_index.md, ticket status
@@ -193,14 +189,12 @@ PROMPT
 
 ### 5. Report and approval
 
-> **Feature-branch mode**: emit the report below, then proceed directly to step 6 (Merge) — do not wait for user approval.
-
 1. Report to the user:
    - What was implemented (from implementer report)
    - Review result (from reviewer report)
    - Test status
    - Any deviations or open items
-2. **Main-branch mode only** — wait for user approval. If the user requests tweaks:
+2. Wait for user approval. If the user requests tweaks:
    - Direct the implementer to fix:
      ```bash
      ws-call-named-agent implementer - <<'PROMPT'

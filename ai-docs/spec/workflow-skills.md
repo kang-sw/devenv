@@ -117,8 +117,6 @@ Review partitions: {#260424-implement-file-based-review}
 
 Reviewers write full findings to `ws-review-path`-allocated files; stdout returns only a `[clean|non-clean]: <brief>` summary line. The lead reads summaries only — full findings are not consolidated in lead context. When non-clean, the lead passes file paths directly to the implementer, which reads them independently. The implementer applies judgment: correctness, contract, and security findings are addressed; style findings conflicting with established patterns may be deprioritized. `ws-review-path` files are deleted in the Cleanup step.
 
-Two invocation modes based on the current branch: **main-branch mode** (invoked from `main`/`master`/`trunk`) presents the user approval gate before merging; **feature-branch mode** (invoked from any other branch) skips the gate and auto-merges after a clean review. The feature → main merge remains the user's responsibility in feature-branch mode. Use `--main-branch <name>` to override the default main-branch names. {#260422-implement-feature-branch-mode}
-
 Pre-merge, dispatches `spec-updater` first and waits for it to commit, then dispatches `mental-model-updater` and waits. Ambiguous stems from `spec-updater` are surfaced at the report/approval gate before merge proceeds.
 
 > [!note] Implementation Gap · 2026-04-23
