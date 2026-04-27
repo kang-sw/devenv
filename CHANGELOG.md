@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.10.3 — 2026-04-27
+
+### Added
+- `ws-named-agent override [-g]` — two-layer config: global (`~/.claude/kang-sw-devenv-ws.json`) and local (`<git-root>/.claude/kang-sw-devenv-ws.json`); `-g` writes to global, default writes to local; `override show` displays both layers separately; local wins on merge conflict
+
+### Fixed
+- `.gitignore`: added `.claude/kang-sw-devenv-ws.json` (local config is per-machine, not committed)
+
 ## v0.10.2 — 2026-04-27
 
 ### Added

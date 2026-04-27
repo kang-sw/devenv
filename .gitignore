@@ -12,3 +12,4 @@ data
 *Zone.Identifier
 ai-docs/**/*.local.md
 claude/infra/__pycache__/
+.claude/kang-sw-devenv-ws.json
