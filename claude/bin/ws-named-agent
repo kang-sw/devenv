@@ -282,9 +282,7 @@ def _call_claude(
 ) -> CallResult:
     settings = _settings_json()
 
-    # Inject CLAUDE.md between the agent definition and the registered system prompt.
-    claude_md = _collect_claude_mds()
-    effective_sp = "\n\n---\n\n".join(p for p in [claude_md, system_prompt] if p)
+    effective_sp = system_prompt
 
     def _flags(for_model: str = "") -> list[str]:
         m = for_model or model
@@ -466,12 +464,14 @@ def _call_codex(
     registry: dict,
     **_,
 ) -> CallResult:
-    # Combine ws: agent body with registry system_prompt
+    claude_md = _collect_claude_mds()
+    # Combine ws: agent body with registry system_prompt, then prepend CLAUDE.md
     effective_sp = system_prompt
     if agent_type and agent_type.startswith("ws:"):
         body = _resolve_ws_agent(agent_type)
         if body:
             effective_sp = (body + "\n\n---\n\n" + system_prompt).strip() if system_prompt else body
+    effective_sp = "\n\n---\n\n".join(p for p in [claude_md, effective_sp] if p)
 
     # Write system prompt once; reuse across all calls in this invocation
     sp_file = ""
