@@ -240,6 +240,8 @@ def _resolve_prompt(value: str) -> tuple[str, dict]:
     """
     if not value:
         return "", {}
+    if value.startswith("ws:"):
+        value = value[3:]
     p = Path(value)
     if p.is_absolute() or os.sep in value or "/" in value:
         text = p.read_text(encoding="utf-8")
