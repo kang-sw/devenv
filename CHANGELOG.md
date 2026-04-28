@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.4 — 2026-04-28
+
+### Fixed
+- `ws-named-agent`: reconfigure `stdout`/`stderr` to UTF-8 on Windows at module load — prevents `UnicodeEncodeError` and mojibake on non-UTF-8 locales (e.g. CP949). Uses `None` guard so the path under `pythonw.exe` (hook invocation) silently skips.
+
 ## v0.11.3 — 2026-04-28
 
 ### Added
