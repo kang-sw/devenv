@@ -322,6 +322,34 @@ Auto-compression is transparent: when cumulative token usage for the session exc
 > - Compression is skipped for one call immediately after a handoff to prevent cascade triggering.
 > - Auto-compression applies to the `claude` backend only. The `codex` backend has compression disabled; token count is tracked for observability but no handoff occurs.
 
+### `ws-named-agent erase` {#260429-ws-named-agent-erase}
+
+`ws-named-agent erase <name>` — removes the named agent's registry entry and its associated Claude session file.
+
+Deletes `<registry-dir>/<name>.{json,outbox.txt,output.txt}` and, when a UUID is stored in the registry entry, globs `~/.claude/projects/*/<uuid>.jsonl` to remove the corresponding session file.
+
+> [!note] Constraints
+> - Exits non-zero if the agent is not found.
+> - Session file deletion is best-effort: if the session file has already been removed, erase continues without error.
+
+### `ws-oneshot-agent` {#260429-ws-oneshot-agent-skill-doc}
+
+Wraps the new → call → erase triad into a single invocation. Use when a task requires full tool access but no session persistence.
+
+```bash
+ws-oneshot-agent -p <prompt-stem> [-p <stem2>] [--model <tier>] [--no-doc-system] - <<'PROMPT'
+...
+PROMPT
+```
+
+The agent name is an ephemeral `_oneshot_<8hex>` identifier. Registry and session files are cleaned up via an EXIT trap regardless of call outcome. Output flows to stdout identically to `ws-call-named-agent`.
+
+Distinct from `ws-subquery`: the spawned agent has full tool access; `ws-subquery` is non-interactive with no tool use.
+
+> [!note] Constraints
+> - At least one `-p` stem is required.
+> - `workflow-for-agent.md` is injected by default; pass `--no-doc-system` to suppress.
+
 ### `agent-compression.md` {#260425-agent-compression-doc}
 
 Infra document at `claude-plugin/infra/agent-compression.md`. Injected by `ws-call-named-agent` as the next user turn into an agent approaching the 120K token threshold.

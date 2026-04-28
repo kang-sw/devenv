@@ -1040,6 +1040,41 @@ def _tail_codex(session_path: Path, n: int) -> None:
                 print(f"{label} tool: {item['name']}")
 
 
+def cmd_erase(argv: list[str]) -> None:
+    if not argv:
+        print("Usage: ws-named-agent erase <name>", file=sys.stderr)
+        sys.exit(1)
+
+    agent_name = argv[0]
+    registry_dir = _registry_dir()
+    agent_file = registry_dir / f"{agent_name}.json"
+
+    if not agent_file.exists():
+        print(f"error: agent '{agent_name}' not found", file=sys.stderr)
+        sys.exit(1)
+
+    registry = _load_registry(registry_dir, agent_name)
+    agent_uuid = registry.get("uuid", "")
+    backend = registry.get("backend") or infer_backend(registry.get("model") or "")
+
+    if agent_uuid:
+        if backend == "codex":
+            sessions_dir = Path.home() / ".codex" / "sessions"
+            if sessions_dir.is_dir():
+                for hit in sessions_dir.rglob(f"rollout-*-{agent_uuid}.jsonl"):
+                    hit.unlink(missing_ok=True)
+        else:
+            for hit in (Path.home() / ".claude" / "projects").glob(f"*/{agent_uuid}.jsonl"):
+                hit.unlink(missing_ok=True)
+
+    for suffix in (".json", ".outbox.txt", ".output.txt"):
+        p = registry_dir / f"{agent_name}{suffix}"
+        if p.exists():
+            p.unlink()
+
+    print(f"Agent '{agent_name}' erased")
+
+
 def cmd_tail(argv: list[str]) -> None:
     n = 3
     agent_name = ""
@@ -1081,6 +1116,7 @@ def cmd_tail(argv: list[str]) -> None:
 COMMANDS = {
     "new":           cmd_new,
     "call":          cmd_call,
+    "erase":         cmd_erase,
     "interrupt":     cmd_interrupt,
     "print":         cmd_print,
     "check-mailbox": cmd_check_mailbox,

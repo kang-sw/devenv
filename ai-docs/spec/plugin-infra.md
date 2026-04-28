@@ -83,6 +83,26 @@ Default model: `haiku`. With `--deep-research`: switches to `sonnet`. Output is 
 > [!note] Constraints
 > - Non-interactive — no tool use, no follow-up turns. The question must be answerable in one pass.
 
+### `ws-oneshot-agent` {#260429-ws-oneshot-agent-tool}
+
+Registers a named agent, calls it once with a prompt, then erases it — all in a single invocation.
+
+```
+ws-oneshot-agent -p <prompt-stem> [-p <stem2>] [--model <tier>] [--no-doc-system] - <<'PROMPT'
+...
+PROMPT
+ws-oneshot-agent -p <prompt-stem> [--model <tier>] [--no-doc-system] '<inline-prompt>'
+```
+
+Internally runs `ws-named-agent new` → `ws-named-agent call` → `ws-named-agent erase`. The agent name is a randomly generated `_oneshot_<8hex>` identifier. Registry and session files are cleaned up via an EXIT trap regardless of call outcome.
+
+Distinct from `ws-subquery`: the spawned agent has full tool access; `ws-subquery` is non-interactive with no tool use.
+
+> [!note] Constraints
+> - `-p` is required; at least one prompt stem must be provided.
+> - Prompt is read from stdin when the last argument is `-` or omitted; pass inline as a positional string otherwise.
+> - `--no-doc-system` suppresses `workflow-for-agent.md` injection; default is to inject it.
+
 ### `ws-list-mental-model` {#260421-ws-list-mental-model-tool}
 
 Lists `ai-docs/mental-model/` domain documents as a YAML map.

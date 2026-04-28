@@ -86,6 +86,29 @@ ws-print-named-agent-output <agent-name>
 
 Prints the last response written by the named agent. Use after a background call completes.
 
+## ws-named-agent erase
+
+```
+ws-named-agent erase <agent-name>
+```
+
+Removes the named agent's registry entry (`.json`, `.outbox.txt`, `.output.txt`) and
+its Claude session file (`~/.claude/projects/*/<uuid>.jsonl`). Exits non-zero if the
+agent is not found.
+
+## ws-oneshot-agent
+
+```
+ws-oneshot-agent -p <prompt-stem> [-p <stem2>] [--model <tier>] [--no-doc-system] - <<'PROMPT'
+...
+PROMPT
+```
+
+Runs a full-tool agent for a single call, then erases it. Use when a task needs tool
+access but no session persistence. Distinct from `ws-subquery` (which has no tool use).
+
+Registry and session files are cleaned up via EXIT trap regardless of call outcome.
+
 ## ws-named-agent tail
 
 ```
