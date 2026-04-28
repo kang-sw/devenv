@@ -157,6 +157,6 @@ Full behavioral spec for the registered plugin and hook: [Plugin Infrastructure]
 
 ### Plugin Snapshot Isolation {#260428-plugin-snapshot-isolation}
 
-`install.sh` copies `claude/` to `~/.claude/plugins/ws-plugin/claude/` via `rsync --delete` and registers that path as the plugin `installLocation`. Claude Code reads the plugin from the snapshot cache, not the live repo.
+`install.sh` copies `claude-plugin/` to `~/.claude/plugins/ws-plugin/claude/` via `rsync --delete` and registers that path as the plugin `installLocation`. Claude Code reads the plugin from the snapshot cache, not the live repo.
 
-Live edits to `claude/` are not immediately visible to the running plugin. To propagate changes, re-run `./install.sh update` or run `claude plugin update ws@kang-sw-devenv`.
+Live edits to `claude-plugin/` are not immediately visible to the running plugin. To propagate changes, re-run `./install.sh update` or run `claude plugin update ws@kang-sw-devenv`.

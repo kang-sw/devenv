@@ -26,7 +26,7 @@ the file path; no frontmatter `parent:` link is maintained.
 
 Ancestor loading is an invariant: any agent loading a sub-domain doc
 must also load the parent `index.md` before starting work, so inherited
-Domain Rules are visible. See `claude/infra/mental-model-conventions.md` for the full contract.
+Domain Rules are visible. See `claude-plugin/infra/mental-model-conventions.md` for the full contract.
 
 ## Domain Rules
 

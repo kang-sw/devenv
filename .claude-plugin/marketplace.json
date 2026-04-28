@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "ws",
-      "source": "./claude",
+      "source": "./claude-plugin",
       "description": "Structured AI-assisted development workflow: ticket-driven, contract-first, multi-agent."
     }
   ]

@@ -24,7 +24,7 @@ Target: $ARGUMENTS
 
 ### 1. Load conventions
 
-Run `ws-print-infra spec-conventions.md` (Bash). Read `claude/skills/write-spec/SKILL.md`.
+Run `ws-print-infra spec-conventions.md` (Bash). Read `claude-plugin/skills/write-spec/SKILL.md`.
 
 ### 2. Resolve commit range
 

@@ -1,11 +1,11 @@
 ---
 title: Plugin Infrastructure
-summary: Claude Code plugin manifest, bin tool suite, and hook provided by the `ws` plugin under `claude/`.
+summary: Claude Code plugin manifest, bin tool suite, and hook provided by the `ws` plugin under `claude-plugin/`.
 ---
 
 # Plugin Infrastructure
 
-The `ws` plugin lives under `claude/` and is delivered through the Claude Code plugin system. It exposes a plugin manifest, a set of PATH-accessible bin tools, and a session hook.
+The `ws` plugin lives under `claude-plugin/` and is delivered through the Claude Code plugin system. It exposes a plugin manifest, a set of PATH-accessible bin tools, and a session hook.
 
 ## Plugin Manifest
 
@@ -23,14 +23,14 @@ No explicit `skills:`, `commands:`, or `bin:` declaration — skill discovery is
 
 Directory-source marketplace definition at the repo root. Points to `./claude` as the plugin source path, enabling `claude plugin install ws@ws` to resolve the plugin from the local repository without a remote registry.
 
-`install.sh` writes this entry to `~/.claude/plugins/known_marketplaces.json` before invoking `claude plugin install`, ensuring the CLI resolves the marketplace on fresh machines before Claude Code processes `settings.json`.
+`install.sh` writes this entry to `~/.claude-plugin/plugins/known_marketplaces.json` before invoking `claude plugin install`, ensuring the CLI resolves the marketplace on fresh machines before Claude Code processes `settings.json`.
 
 > [!note] Constraints
 > - Local-path source only — not a published registry entry.
 
 ## Bin Tools
 
-Executables under `claude/bin/` are placed on PATH by the Claude Code plugin system. Agents and skills invoke them by bare name from any working directory.
+Executables under `claude-plugin/bin/` are placed on PATH by the Claude Code plugin system. Agents and skills invoke them by bare name from any working directory.
 
 ### `ws-print-infra` {#260421-ws-print-infra-tool}
 
@@ -102,10 +102,10 @@ With path args: filters to docs whose `sources:` frontmatter field overlaps with
 
 ### `teammate-idle-token-tracker` {#260421-teammate-idle-token-tracker}
 
-Fires on `TeammateIdle` events. Reads the most recent subagent `.jsonl` transcript for the named teammate, sums `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` from the last assistant message, and writes a `<pct>%/150K` usage entry to `~/.claude/usage/<team-name>.md`.
+Fires on `TeammateIdle` events. Reads the most recent subagent `.jsonl` transcript for the named teammate, sums `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` from the last assistant message, and writes a `<pct>%/150K` usage entry to `~/.claude-plugin/usage/<team-name>.md`.
 
-Registered automatically in `~/.claude/settings.json` as a `TeammateIdle` hook by `install.sh`.
+Registered automatically in `~/.claude-plugin/settings.json` as a `TeammateIdle` hook by `install.sh`.
 
 > [!note] Constraints
 > - Measures the last assistant turn's input context only — not cumulative session usage.
-> - Output path `~/.claude/usage/<team-name>.md` is machine-local; not committed.
+> - Output path `~/.claude-plugin/usage/<team-name>.md` is machine-local; not committed.

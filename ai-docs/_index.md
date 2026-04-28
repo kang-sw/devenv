@@ -10,12 +10,12 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects.
 
-**Plugin:** `ws@0.12.0` — see `claude/.claude-plugin/plugin.json`.
+**Plugin:** `ws@0.12.0` — see `claude-plugin/.claude-plugin/plugin.json`.
 
 **Plugin topology:**
-- Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
-- After any change to `claude/`, run `claude plugin update ws@ws` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
-- `claude/CLAUDE.home.md` is the canonical copy of `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
+- Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude-plugin/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
+- After any change to `claude-plugin/`, run `claude plugin update ws@ws` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
+- `claude-plugin/CLAUDE.home.md` is the canonical copy of `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
 - External install: `/plugin marketplace add kang-sw/devenv` → `/plugin install ws@ws`.
 
 ## Reference Documents
@@ -27,18 +27,18 @@ Read before authoring or modifying skills, agents, or infra:
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
 | `ai-docs/ref/codex-integration.md` | Probed codex CLI behavior: invocation, JSONL output format, session management, hook config |
 | `ai-docs/ship/ws.md` | Ship config for the `ws` plugin: version strategy, changelog, tag, push |
-| `claude/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `ws-print-infra impl-playbook.md`. |
-| `claude/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `ws-print-infra subagent-rules.md`. |
-| `claude/infra/executor-wrapup.md` | Shared post-implementation wrapup: _index.md refresh, doc-commit gate, ticket update. Access via `ws-print-infra executor-wrapup.md`. |
+| `claude-plugin/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `ws-print-infra impl-playbook.md`. |
+| `claude-plugin/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `ws-print-infra subagent-rules.md`. |
+| `claude-plugin/infra/executor-wrapup.md` | Shared post-implementation wrapup: _index.md refresh, doc-commit gate, ticket update. Access via `ws-print-infra executor-wrapup.md`. |
 
 ## Native Agents
 
-Agent definitions live in `claude/agents/`. Each file defines what an
+Agent definitions live in `claude-plugin/agents/`. Each file defines what an
 agent IS and HOW it works (identity, constraints, process, output).
 Team communication rules are injected by the calling skill at spawn time.
 
 ```
-claude/agents/
+claude-plugin/agents/
   code-reviewer.md        — code diff review: correctness, security, contracts (read-only)
   document-reviewer.md    — fresh-eye design/ticket review against mental-model and spec (read-only)
   worker.md               — general-purpose non-code tasks
@@ -51,7 +51,7 @@ claude/agents/
 ## Infra Layout
 
 ```
-claude/infra/                 — docs only; accessed via ws-print-infra
+claude-plugin/infra/                 — docs only; accessed via ws-print-infra
   impl-playbook.md            — subagent-safe implementation discipline
   mental-model-conventions.md — mental-model doc format and invariants
   ticket-conventions.md       — ticket format, status directories, stem convention; optional spec: and spec-remove: fields
@@ -68,7 +68,7 @@ claude/infra/                 — docs only; accessed via ws-print-infra
   sprint-survey.md            — sprint-survey agent role: identifies relevant spec/mental-model docs for sprint wrap-up
   doc-system.md               — doc-layer orientation for 3rd-party subagents: spec/mental-model/ticket relationships, 🚧 markers, stems; auto-injected by ws-named-agent new
 
-claude/bin/                   — PATH-accessible executables (added by plugin)
+claude-plugin/bin/                   — PATH-accessible executables (added by plugin)
   ws-subquery                    — scoped sub-query via headless claude subprocess
   ws-spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
   ws-generate-spec-stem          — emit a new {#YYMMDD-slug} anchor for a given descriptive slug
@@ -90,7 +90,7 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
 ## Skill Inventory
 
 ```
-claude/skills/
+claude-plugin/skills/
   discuss/             — explore approach/direction, capture as tickets
   write-ticket/        — create/edit tickets in ai-docs/tickets/
   update-spec/         — lead-driven spec audit: scan commits for spec-impact, add entries, strip 🚧, handle removals
@@ -128,10 +128,10 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 
 | File | Title | Summary |
 |------|-------|---------|
-| `ai-docs/spec/agent-system.md` | Agent System | Spawnable agents in claude/agents/ |
+| `ai-docs/spec/agent-system.md` | Agent System | Spawnable agents in claude-plugin/agents/ |
 | `ai-docs/spec/personal-devenv.md` | Personal Dev Environment | install.sh, shell, dotfiles, Claude Code config |
 | `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery, ws-call-named-agent primitives |
-| `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude/skills/ tools for ws plugin maintenance |
+| `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude-plugin/skills/ tools for ws plugin maintenance |
 | `ai-docs/spec/spec-system.md` | Spec System | Spec authoring, 🚧 markers, anchor protocol |
 | `ai-docs/spec/tools.md` | Devenv Tools | Custom tools built in this repo (claude-watch TUI, claude-dash multiplexer) |
 | `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship |
@@ -143,7 +143,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260419-chore-blueprint-plugin-extraction` | done | Package claude/ as a Claude Code plugin (now named "ws"); all phases complete and validated |
+| `260419-chore-blueprint-plugin-extraction` | done | Package claude-plugin/ as a Claude Code plugin (now named "ws"); all phases complete and validated |
 | `260420-feat-spec-driven-workflow` | done | Spec-driven workflow infrastructure; all phases done (phase 6 migration cancelled) |
 | `260421-feat-global-spec-stems` | done | Global unique YYMMDD-slug stems; all phases done (phase 5 migration cancelled) |
 | `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
@@ -161,7 +161,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260424-feat-domain-rules-layering` | done | Architecture Rules split + /add-rule skill; domain rules in mental-model docs |
 | `260424-feat-polish-plugin-docs` | done | /polish-plugin-docs local skill + polish-writer agent + ws-call-named-agent context-fill hotfix |
 | `260424-refactor-proceed-gate-suppression` | done | judge:idea-level demoted to reminder + /proceed gate-suppression context in prefix-stage invocations |
-| `260424-feat-infra-path-portability` | done | ws-infra-path portability script; all bare claude/infra/ paths replaced with $(ws-infra-path) |
+| `260424-feat-infra-path-portability` | done | ws-infra-path portability script; all bare claude-plugin/infra/ paths replaced with $(ws-infra-path) |
 | `260424-feat-discuss-on-demand-survey` | done | /discuss on-demand survey via judge:needs-survey; project-survey enriched output (titles + summaries) |
 | `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to ws-review-path files, implementer reads directly |
 | `260425-feat-sprint-skill` | done | /sprint session-container skill — branch-as-state persistence, deferred doc pipeline, sprint-aware survey, 2-reviewer delegation |

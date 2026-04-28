@@ -2,12 +2,12 @@
 domain: workflow-routing
 description: "Contracts and coupling for /proceed's pipeline routing and prefix-stage delegation."
 sources:
-  - claude/skills/proceed/
-  - claude/skills/write-ticket/
-  - claude/skills/write-spec/
-  - claude/skills/sprint/
-  - claude/skills/discuss/
-  - claude/skills/implement/
+  - claude-plugin/skills/proceed/
+  - claude-plugin/skills/write-ticket/
+  - claude-plugin/skills/write-spec/
+  - claude-plugin/skills/sprint/
+  - claude-plugin/skills/discuss/
+  - claude-plugin/skills/implement/
 related:
   spec-system: "/write-spec's judge: spec-impact gate is owned by write-spec, not pre-evaluated by /proceed. /write-ticket's judge: spec-gate fires on any action resulting in todo/-or-higher status (direct creation and idea/→todo/ promotion) and may redirect to /write-spec. /discuss's promotion handler runs /write-spec before git mv so a 🚧 entry exists before the ticket reaches todo/ status."
 ---
@@ -21,10 +21,10 @@ split (direct-edit vs. delegated) lives inside `/implement`.
 
 ## Entry Points
 
-- `claude/skills/proceed/SKILL.md` — full routing logic, judgment tables, invariants, doctrine.
-- `claude/skills/write-ticket/SKILL.md` — ticket authoring protocol, including the completion artifact at step 8.
-- `claude/skills/write-spec/SKILL.md` — `judge: spec-impact` gate definition.
-- `claude/skills/sprint/SKILL.md` — session-container entry point for feature-branch work; independent of `/proceed`.
+- `claude-plugin/skills/proceed/SKILL.md` — full routing logic, judgment tables, invariants, doctrine.
+- `claude-plugin/skills/write-ticket/SKILL.md` — ticket authoring protocol, including the completion artifact at step 8.
+- `claude-plugin/skills/write-spec/SKILL.md` — `judge: spec-impact` gate definition.
+- `claude-plugin/skills/sprint/SKILL.md` — session-container entry point for feature-branch work; independent of `/proceed`.
 
 ## Module Contracts
 

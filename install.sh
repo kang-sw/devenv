@@ -420,7 +420,7 @@ link "$REPO_DIR/shell/scripts" "$HOME/.devenv-scripts"
 link "$REPO_DIR/nvim" "$HOME/.config/nvim"
 
 # Claude Code CLAUDE.md — global instructions
-link "$REPO_DIR/claude/CLAUDE.home.md" "$HOME/.claude/CLAUDE.md"
+link "$REPO_DIR/claude-plugin/CLAUDE.home.md" "$HOME/.claude/CLAUDE.md"
 
 # Claude Code blueprint plugin — clean up old per-file symlinks we created
 # (skills/agents/infra were previously symlinked individually; now the plugin handles them).
@@ -444,7 +444,7 @@ fi
 
 # Claude Code hooks — link hook scripts
 mkdir -p "$HOME/.claude/hooks"
-for hook_file in "$REPO_DIR/claude/hooks"/*.sh; do
+for hook_file in "$REPO_DIR/claude-plugin/hooks"/*.sh; do
   [ -f "$hook_file" ] || continue
   hook_name="$(basename "$hook_file")"
   link "$hook_file" "$HOME/.claude/hooks/$hook_name"
@@ -573,12 +573,12 @@ else:
 PYEOF
 
 # ── ws plugin snapshot copy ───────────────────────────────────────────────────
-# Copy claude/ to a stable cache; Claude Code reads from the cache, not the live repo.
+# Copy claude-plugin/ to a stable cache; Claude Code reads from the cache, not the live repo.
 # Re-run install.sh update (or claude plugin update ws@kang-sw-devenv) after changes.
 PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
 info "Syncing ws plugin snapshot to $PLUGIN_CACHE/claude/..."
 mkdir -p "$PLUGIN_CACHE/claude"
-rsync -a --delete "$REPO_DIR/claude/" "$PLUGIN_CACHE/claude/"
+rsync -a --delete "$REPO_DIR/claude-plugin/" "$PLUGIN_CACHE/claude/"
 success "ws plugin snapshot synced"
 
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it

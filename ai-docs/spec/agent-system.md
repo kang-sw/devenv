@@ -1,11 +1,11 @@
 ---
 title: Agent System
-summary: Spawnable agents in claude/agents/ — their output contracts, refusals, and spawn contexts within ws workflow skills.
+summary: Spawnable agents in claude-plugin/agents/ — their output contracts, refusals, and spawn contexts within ws workflow skills.
 ---
 
 # Agent System
 
-Agents are spawnable zero-context roles defined in `claude/agents/`. Each agent is stateless at spawn — it carries no memory of prior invocations. Skills pass all necessary context in the spawn prompt.
+Agents are spawnable zero-context roles defined in `claude-plugin/agents/`. Each agent is stateless at spawn — it carries no memory of prior invocations. Skills pass all necessary context in the spawn prompt.
 
 ## `clerk` {#260421-clerk-agent}
 
@@ -123,7 +123,7 @@ Produces git commits with `(mental-model-updated)` in the commit body.
 
 **Refusals:**
 - No expansion beyond domains affected by the commits since the base commit.
-- No content that fails the inclusion test (defined in `claude/infra/mental-model-conventions.md`).
+- No content that fails the inclusion test (defined in `claude-plugin/infra/mental-model-conventions.md`).
 
 ### `spec-updater` {#260421-spec-updater-agent}
 

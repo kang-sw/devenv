@@ -265,7 +265,7 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 
 ## Agent Orchestration Primitives
 
-Bash-callable infra scripts at `claude/infra/` that replace `TeamCreate`/`SendMessage`/`TeamDelete` for subagent coordination. Skill leads invoke these directly via the `Bash` tool.
+Bash-callable infra scripts at `claude-plugin/infra/` that replace `TeamCreate`/`SendMessage`/`TeamDelete` for subagent coordination. Skill leads invoke these directly via the `Bash` tool.
 
 ### `ws-new-named-agent` {#260425-ws-new-named-agent}
 
@@ -287,7 +287,7 @@ Overwrites the file if already present. Callers must not clobber a live session.
 
 #### `doc-system.md` auto-injection {#260428-named-agent-doc-system-injection}
 
-When `ws-named-agent new` stores the system prompt, it prepends `claude/infra/doc-system.md` to the caller-supplied content. Stored form: `[doc-system content]\n\n---\n\n[caller system prompt]`. Every agent receives basic orientation on the spec/mental-model/ticket relationship without callers having to request it.
+When `ws-named-agent new` stores the system prompt, it prepends `claude-plugin/infra/doc-system.md` to the caller-supplied content. Stored form: `[doc-system content]\n\n---\n\n[caller system prompt]`. Every agent receives basic orientation on the spec/mental-model/ticket relationship without callers having to request it.
 
 Pass `--no-doc-system` to suppress injection. Use this for narrow-role agents that do not need doc-system orientation (e.g., sprint-survey, project-survey, compression helpers).
 
@@ -311,7 +311,7 @@ Auto-compression is transparent: when cumulative token usage for the session exc
 
 ### `agent-compression.md` {#260425-agent-compression-doc}
 
-Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-named-agent` as the next user turn into an agent approaching the 120K token threshold.
+Infra document at `claude-plugin/infra/agent-compression.md`. Injected by `ws-call-named-agent` as the next user turn into an agent approaching the 120K token threshold.
 
 Instructs the agent to produce a structured handoff document without reading any new files:
 - Original purpose and action plan.
@@ -332,7 +332,7 @@ ws-call-named-agent implementer "<prompt>"
 ```
 
 > [!note] Constraints
-> - Bare `claude/infra/<name>` paths in `--system-prompt` break in downstream projects where `claude/infra/` does not exist relative to CWD.
+> - Bare `claude-plugin/infra/<name>` paths in `--system-prompt` break in downstream projects where `claude-plugin/infra/` does not exist relative to CWD.
 > - Exits non-zero when the named doc is not found.
 
 ### `ws-proj-tree` {#260425-ws-proj-tree}
