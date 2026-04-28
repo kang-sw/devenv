@@ -12,25 +12,38 @@ map("i", "<C-a>", "<Home>", { desc = "Move to line start" })
 map("i", "<C-e>", "<End>", { desc = "Move to line end" })
 
 -- vim-tmux pane navigation (C-M-hjkl)
--- 상하: vim-tmux-navigator 그대로 사용
--- 좌우: vim split 없으면 tmux pane → 그것도 끝이면 previous/next-window
-vim.keymap.set({ "n", "i", "t" }, "<C-M-j>", "<cmd>TmuxNavigateDown<cr>", { desc = "Navigate down (vim/tmux)" })
-vim.keymap.set({ "n", "i", "t" }, "<C-M-k>", "<cmd>TmuxNavigateUp<cr>", { desc = "Navigate up (vim/tmux)" })
+-- snacks picker sidebar에서 wincmd가 예상외 window로 이동해 버리므로 filetype 체크로 우회
+local function in_snacks_picker()
+  return vim.bo.filetype:find("snacks_picker") ~= nil
+end
+
+local function tmux_nav(dir, pane_at, window_cmd)
+  local at_edge = vim.fn.system("tmux display-message -p '#{" .. pane_at .. "}'"):gsub("%s+", "")
+  if at_edge == "1" then
+    vim.fn.system(vim.fn.expand("~/.devenv-scripts/tmux-cross-window.sh") .. " " .. window_cmd)
+  else
+    vim.fn.system("tmux select-pane -" .. dir)
+  end
+end
+
+vim.keymap.set({ "n", "i", "t" }, "<C-M-j>", function()
+  if in_snacks_picker() then vim.fn.system("tmux select-pane -D") else vim.cmd("TmuxNavigateDown") end
+end, { desc = "Navigate down (vim/tmux)" })
+
+vim.keymap.set({ "n", "i", "t" }, "<C-M-k>", function()
+  if in_snacks_picker() then vim.fn.system("tmux select-pane -U") else vim.cmd("TmuxNavigateUp") end
+end, { desc = "Navigate up (vim/tmux)" })
 
 local function navigate_lr(dir, wincmd, pane_at, window_cmd)
   return function()
+    if in_snacks_picker() then
+      tmux_nav(dir, pane_at, window_cmd)
+      return
+    end
     local winnr = vim.fn.winnr()
     vim.cmd("wincmd " .. wincmd)
-    if vim.fn.winnr() ~= winnr then
-      return -- vim split 이동 성공
-    end
-    -- vim 안에서 더 갈 곳 없음 → tmux에 위임
-    local at_edge = vim.fn.system("tmux display-message -p '#{" .. pane_at .. "}'"):gsub("%s+", "")
-    if at_edge == "1" then
-      vim.fn.system(vim.fn.expand("~/.devenv-scripts/tmux-cross-window.sh") .. " " .. window_cmd)
-    else
-      vim.fn.system("tmux select-pane -" .. dir)
-    end
+    if vim.fn.winnr() ~= winnr then return end
+    tmux_nav(dir, pane_at, window_cmd)
   end
 end
 
