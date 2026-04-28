@@ -6,6 +6,7 @@ sources:
   - claude/bin/
   - claude/infra/
   - claude/skills/forge-spec/
+  - claude/skills/update-spec/
 related:
   doc-tooling: "forge-mental-model calls ws-list-spec-stems (no args) to embed spec stems into domain drafts when ai-docs/spec/ is present. A stem format change breaks forge-mental-model's embedding step."
   mental-model-domain: "ws-spec-build-index reads ai-docs/mental-model/ to verify anchor integrity. Renaming or removing a spec stem without updating mental-model refs produces [warn] output on the next run."
@@ -88,9 +89,10 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
   surveys the codebase via parallel Sonnet subagents, confirms domain list and per-behavior
   classification with the user, then writes spec entries domain by domain.
 - **Remove a feature from the codebase**: include `removed: <spec-stem>` in the commit's
-  `## Spec` section (one line per stem). The `spec-updater` agent detects this on its next
-  run and adds the spec entry to the `### Pending removal` report. Remove the spec entry
-  from the file manually after confirming the report. On the ticket side, declare
+  `## Spec` section (one line per stem). In `implement`, `edit`, and `sprint` pipelines,
+  `ws:update-spec` detects this and removes the spec entry automatically. When `spec-updater`
+  is invoked directly (e.g., via `/forge-spec`), it adds the entry to the `### Pending removal`
+  report instead — remove manually after confirming. On the ticket side, declare
   `spec-remove: <stem>` in ticket frontmatter so the stem is recorded before the commit.
 
 ## Common Mistakes
@@ -104,5 +106,5 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
 - Searching for stems in the `stems:` frontmatter field of spec files — that field
   no longer exists. All stem lookup must grep document body for `{#\d{6}-[\w-]+}`.
 - Deleting a spec entry directly without a `removed: <stem>` commit — skips the
-  `spec-updater` detection step and leaves no audit trail. Always commit the removal
-  signal first; let `spec-updater` surface it in the report before deleting.
+  `ws:update-spec` auto-removal step and leaves no audit trail. Always commit the removal
+  signal first.

@@ -36,7 +36,7 @@ Apply `judge: execution-mode`.
 2. Create task list. All tasks are mandatory — do not skip or reorder.
    ```
    [ ] Execute — invoke ws:edit or ws:write-code; capture commit range
-   [ ] Doc pre-pass — spec-updater then mental-model-updater; commit each
+   [ ] Doc pre-pass — update-spec then mental-model-updater; commit each
    [ ] Report to user — wait for approval; loop on tweaks
    [ ] Merge to original branch (delegated path only)
    [ ] Doc commit gate — executor-wrapup §Doc Commit Gate + §Ticket Update
@@ -53,8 +53,8 @@ Capture the commit range from the skill's completion report.
 
 ### 4. Doc pre-pass
 
-1. Dispatch **ws:spec-updater** with the commit range. Wait. Commit any file changes from spec-updater. Surface ambiguous stems.
-2. Dispatch **ws:mental-model-updater**. Wait. Commit any file changes. (Runs after spec-updater so it sees any 🚧 strips.)
+1. Invoke **ws:update-spec** via Skill tool with args `<commit-range>`. (Lead-driven; runs inline.)
+2. Dispatch **ws:mental-model-updater** with the commit range. Wait. Commit any file changes. (Runs after update-spec so it sees any 🚧 strips.)
 
 ### 5. Report and approval
 
@@ -71,7 +71,7 @@ Wait for user approval. If tweaks requested:
   `ws-call-named-agent reviewer-correctness` / `reviewer-fit` / `reviewer-test` per the write-code
   reviewer prompt pattern. Note: this is a post-approval tweak cycle separate from write-code's
   3-cycle cap; cycle counter resets.
-- Re-run spec-updater then mental-model-updater with the new commit range; commit each.
+- Re-invoke ws:update-spec with the new commit range; re-dispatch mental-model-updater; commit each.
 - Re-report. Loop until approved.
 
 ### 6. Merge (delegated path only)
@@ -83,7 +83,7 @@ Compose the commit message per CLAUDE.md commit rules.
 ### 7. Doc commit gate
 
 Run `ws-print-infra executor-wrapup.md`. Follow §Doc Commit Gate and (if ticket-driven) §Ticket Update.
-Do not re-run §Doc Pipeline — spec-updater and mental-model-updater already ran in step 4.
+Do not re-run §Doc Pipeline — update-spec and mental-model-updater already ran in step 4.
 
 ### 8. Update project docs
 

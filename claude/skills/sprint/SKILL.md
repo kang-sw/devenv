@@ -43,13 +43,7 @@ Target: $ARGUMENTS
 Triggers on explicit user done signal ("done", "wrap up", "finish sprint", or equivalent).
 
 1. Determine parent: `PARENT=$(git merge-base HEAD main)`.
-2. **Spec-update pass (lead-driven).** The lead reads conventions and audits commits directly.
-   a. Load: `ws-print-infra spec-conventions.md` (Bash). Read `claude/skills/write-spec/SKILL.md`.
-   b. Scan commits: `git log "$PARENT"..HEAD --oneline`. For each commit, judge **spec-impact** — does it introduce or change behavior a caller can observe? (New flags, changed outputs, new commands, updated conventions all qualify. Internal refactors that preserve behavior do not.)
-   c. For each impacted area: read the relevant spec file(s) from `ai-docs/spec/`. If no entry exists for the new behavior, add one — run `ws-generate-spec-stem <slug>` for each new anchor, follow the `spec-format` template from `write-spec/SKILL.md`. Do not add 🚧 unless the feature is genuinely planned-but-unimplemented.
-   d. Strip 🚧: scan all spec files for `🚧` entries. For each: check whether the stem appears in the commit log (`git log "$PARENT"..HEAD | grep <stem>`). If yes and the feature is confirmed implemented, strip `🚧 ` from the heading and remove any `> [!note] Planned 🚧` callout block.
-   e. Removals: check commits for `removed: <stem>` in `## Spec` sections. Remove the corresponding entry from the spec file.
-   f. Run `ws-spec-build-index` if any file was modified. Commit all spec changes in a single commit.
+2. **Spec-update pass.** Invoke `ws:update-spec` via Skill tool with args `$PARENT..HEAD`.
 3. Dispatch `ws:mental-model-updater` with commit range `$PARENT..HEAD`. Include a note that docs may be stale from accumulated sprint commits — explore thoroughly. Wait. (Must run after the spec-update loop so it sees the updated spec.)
 4. Run `ws-print-infra executor-wrapup.md`. Follow §Doc Pipeline and §Doc Commit Gate. If ticket-driven, follow §Ticket Update: update existing tickets only — set `## Result` and advance state; do not create new tickets.
 5. Report to user: spec entries added, removed, and 🚧-stripped; mental model sections updated.
