@@ -1,5 +1,23 @@
 return {
   "folke/snacks.nvim",
+  keys = {
+    {
+      "<leader>e",
+      function()
+        local explorer = Snacks.picker.get({ source = "explorer" })[1]
+        if explorer then
+          if explorer:is_focused() then
+            explorer:close()
+          else
+            explorer:focus()
+          end
+        else
+          Snacks.explorer.open()
+        end
+      end,
+      desc = "Explorer (smart toggle)",
+    },
+  },
   opts = {
     explorer = {
       -- 여기서 키 오버라이드
@@ -10,26 +28,23 @@ return {
     picker = {
       sources = {
         explorer = {
-          jump = { close = true },
+          jump = { close = false },
           layout = {
             layout = {
-              backdrop = false,
-              width = 0.4,
-              min_width = 40,
-              height = 0.8,
-              position = "float", -- 핵심!
-              border = "rounded",
+              backdrop = true,
+              width = 35,
+              -- min_width = 40,
+              -- height = 0.8,
+              position = "left", -- 핵심!
+              -- border = "rounded",
               box = "vertical",
-              { win = "input", height = 1, border = "rounded", title = "{title}", title_pos = "center" },
-              { win = "list", border = "none" },
+              -- { win = "input", height = 1, border = "rounded", title = "{title}", title_pos = "center" },
+              -- { win = "list", border = "none" },
             },
           },
           win = {
             list = {
-              keys = {
-                ["<C-j>"] = false,
-                ["<C-k>"] = false,
-              },
+              keys = {},
             },
           },
         },
