@@ -5,7 +5,7 @@
 #
 # Usage:
 #   ws-print-infra              list available infra docs and bin scripts
-#   ws-print-infra <doc-name>   print the named infra doc
+#   ws-print-infra <doc-name>   print the named infra doc (bare stem or .md name both accepted)
 
 set -euo pipefail
 
