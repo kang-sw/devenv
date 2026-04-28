@@ -17,6 +17,12 @@ SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 PLUGIN_DIR = SCRIPT_DIR.parent
 KNOWN_TIERS = {"opus", "sonnet", "haiku"}
 
+if sys.platform == "win32":
+    if sys.stdout is not None:
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr is not None:
+        sys.stderr.reconfigure(encoding="utf-8")
+
 
 def _inject_git_bash() -> None:
     """On Windows, add Git Bash bin/ to PATH if bash is not already available."""
