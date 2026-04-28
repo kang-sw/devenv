@@ -211,37 +211,73 @@ def _frontmatter_field(text: str, field: str) -> str:
     return ""
 
 
-def _resolve_ws_agent(agent_type: str) -> str | None:
-    """Resolve ws:<stem> to agent file body. Returns None if file not found."""
-    if not agent_type.startswith("ws:"):
-        return None
-    stem = agent_type[3:]
-    agent_file = PLUGIN_DIR / "agents" / f"{stem}.md"
-    if not agent_file.exists():
-        return None
-    return _strip_frontmatter(agent_file.read_text(encoding="utf-8"))
+def _parse_frontmatter(text: str) -> dict:
+    """Parse simple key: value pairs from YAML frontmatter (---...---).
+
+    Handles only top-level scalar fields (no multiline values, no nested
+    structures). Returns an empty dict when no frontmatter is present.
+    """
+    if not text.startswith("---"):
+        return {}
+    parts = text.split("---\n", 2)
+    if len(parts) < 3:
+        return {}
+    result = {}
+    for line in parts[1].splitlines():
+        if ":" in line and not line.startswith((" ", "\t")):
+            key, _, val = line.partition(":")
+            k, v = key.strip(), val.strip()
+            if k and v and v != ">":
+                result[k] = v
+    return result
 
 
-def _resolve_system_prompt(value: str) -> str:
-    """Resolve --system-prompt argument to file content.
+def _resolve_prompt(value: str) -> tuple[str, dict]:
+    """Resolve a -p/--prompt argument to (full_content, frontmatter_dict).
 
-    Bare name (no path separator, not absolute): probe infra/ then cwd,
-    trying the exact name then <name>.md. Explicit path (separator present
-    or absolute): read directly.
+    Resolution order for bare names: infra/prompts/ → infra/ → cwd.
+    Explicit path (absolute or contains a path separator): read directly.
     """
     if not value:
-        return ""
+        return "", {}
     p = Path(value)
     if p.is_absolute() or os.sep in value or "/" in value:
-        return p.read_text(encoding="utf-8")
+        text = p.read_text(encoding="utf-8")
+        return text, _parse_frontmatter(text)
     candidates = [value] if value.endswith(".md") else [value, value + ".md"]
-    for base in [PLUGIN_DIR / "infra", Path.cwd()]:
+    search_bases = [PLUGIN_DIR / "infra" / "prompts", PLUGIN_DIR / "infra", Path.cwd()]
+    for base in search_bases:
         for name in candidates:
             probe = base / name
             if probe.exists():
-                return probe.read_text(encoding="utf-8")
-    print(f"error: --system-prompt '{value}' not found in infra/ or working directory", file=sys.stderr)
+                text = probe.read_text(encoding="utf-8")
+                return text, _parse_frontmatter(text)
+    print(f"error: -p '{value}' not found in infra/prompts/, infra/, or working directory", file=sys.stderr)
     sys.exit(1)
+
+
+def _resolve_ws_agent(agent_type: str) -> str | None:
+    """Resolve ws:<stem> to agent file body. Checks infra/prompts/ then agents/."""
+    if not agent_type.startswith("ws:"):
+        return None
+    stem = agent_type[3:]
+    for base in [PLUGIN_DIR / "infra" / "prompts", PLUGIN_DIR / "agents"]:
+        agent_file = base / f"{stem}.md"
+        if agent_file.exists():
+            return _strip_frontmatter(agent_file.read_text(encoding="utf-8"))
+    return None
+
+
+def _resolve_system_prompt(value: str) -> str:
+    """Resolve --system-prompt argument to file content (legacy; prefer -p).
+
+    Bare name: probe infra/prompts/ → infra/ → cwd.
+    Explicit path: read directly.
+    """
+    if not value:
+        return ""
+    content, _ = _resolve_prompt(value)
+    return content
 
 # ── CallResult ────────────────────────────────────────────────────────────────
 
@@ -591,12 +627,13 @@ BACKENDS = {
 
 def cmd_new(argv: list[str]) -> None:
     if not argv:
-        print("Usage: ws-named-agent new <name> [--model M] [--system-prompt P] [--agent-type T]", file=sys.stderr)
+        print("Usage: ws-named-agent new <name> [-p PROMPT]... [--model M] [--agent T] [--system-prompt P]", file=sys.stderr)
         sys.exit(1)
 
     agent_name = argv[0]
     model_arg: str | None = None
-    system_prompt_path = ""
+    prompt_specs: list[str] = []   # -p / --prompt values (new path)
+    system_prompt_path = ""        # --system-prompt (legacy)
     agent_type = ""
     agent_type_set = False
     no_doc_system = False
@@ -605,6 +642,8 @@ def cmd_new(argv: list[str]) -> None:
     while i < len(argv):
         if argv[i] == "--model":
             model_arg = argv[i + 1]; i += 2
+        elif argv[i] in ("-p", "--prompt"):
+            prompt_specs.append(argv[i + 1]); i += 2
         elif argv[i] == "--system-prompt":
             system_prompt_path = argv[i + 1]; i += 2
         elif argv[i] in ("--agent-type", "--agent"):
@@ -614,17 +653,49 @@ def cmd_new(argv: list[str]) -> None:
         else:
             print(f"Unknown flag: {argv[i]}", file=sys.stderr); sys.exit(1)
 
-    # Step 1: read tier from agent frontmatter (ws: agents only)
+    # ── New -p path ───────────────────────────────────────────────────────────
+    # When -p is used, each value is resolved (prompts/ → infra/ → cwd),
+    # model is taken from the first frontmatter that declares it, bodies are
+    # concatenated with --- separators. No --agent is forwarded to the CLI.
     fm_tier: str | None = None
-    if agent_type and agent_type.startswith("ws:"):
-        stem = agent_type[3:]
-        agent_file = PLUGIN_DIR / "agents" / f"{stem}.md"
-        if agent_file.exists():
-            fm_model = _frontmatter_field(agent_file.read_text(encoding="utf-8"), "model")
-            if fm_model in KNOWN_TIERS:
-                fm_tier = fm_model
+    if prompt_specs:
+        fm_model_raw = ""
+        p_bodies: list[str] = []
+        for spec in prompt_specs:
+            content, fm = _resolve_prompt(spec)
+            body = _strip_frontmatter(content)
+            if body:
+                p_bodies.append(body)
+            if not fm_model_raw and fm.get("model"):
+                fm_model_raw = fm["model"]
+        system_prompt = "\n\n---\n\n".join(p_bodies)
+        if fm_model_raw in KNOWN_TIERS:
+            fm_tier = fm_model_raw
+        # -p path: don't forward agent_type to the CLI
+        agent_type = ""
+        agent_type_set = False
 
-    # Step 2: --model arg overrides frontmatter; no arg falls back to frontmatter or defaults
+    # ── Legacy --agent / --system-prompt path ────────────────────────────────
+    else:
+        # Read tier from ws: agent frontmatter (check prompts/ then agents/)
+        if agent_type and agent_type.startswith("ws:"):
+            stem = agent_type[3:]
+            for base in [PLUGIN_DIR / "infra" / "prompts", PLUGIN_DIR / "agents"]:
+                af = base / f"{stem}.md"
+                if af.exists():
+                    fm_model = _frontmatter_field(af.read_text(encoding="utf-8"), "model")
+                    if fm_model in KNOWN_TIERS:
+                        fm_tier = fm_model
+                    break
+        system_prompt = _resolve_system_prompt(system_prompt_path)
+        # Prepend ws: agent body when --agent is set
+        if agent_type and agent_type.startswith("ws:"):
+            body = _resolve_ws_agent(agent_type)
+            if body:
+                system_prompt = (body + "\n\n---\n\n" + system_prompt).strip() if system_prompt else body
+
+    # ── Model resolution ─────────────────────────────────────────────────────
+    # --model > frontmatter model > default
     if model_arg is None:
         if fm_tier:
             model = fm_tier
@@ -644,13 +715,14 @@ def cmd_new(argv: list[str]) -> None:
         tier = None
 
     backend = infer_backend(model) if model else "claude"
-    system_prompt = _resolve_system_prompt(system_prompt_path)
 
     if not no_doc_system:
-        doc_sys_path = PLUGIN_DIR / "infra" / "doc-system.md"
-        if doc_sys_path.exists():
-            doc_sys = doc_sys_path.read_text(encoding="utf-8")
-            system_prompt = (doc_sys + "\n\n---\n\n" + system_prompt).strip() if system_prompt else doc_sys
+        for doc_name in ("workflow-for-agent.md", "doc-system.md"):
+            doc_sys_path = PLUGIN_DIR / "infra" / doc_name
+            if doc_sys_path.exists():
+                doc_sys = doc_sys_path.read_text(encoding="utf-8")
+                system_prompt = (doc_sys + "\n\n---\n\n" + system_prompt).strip() if system_prompt else doc_sys
+                break
 
     registry_dir = _registry_dir()
     registry_dir.mkdir(parents=True, exist_ok=True)
@@ -708,7 +780,7 @@ def cmd_call(argv: list[str]) -> None:
         if agent_type.startswith("ws:"):
             body = _resolve_ws_agent(agent_type)
             if body is None:
-                print(f"[warn] ws: agent '{agent_type}' not found in {PLUGIN_DIR}/agents/", file=sys.stderr)
+                print(f"[warn] ws: agent '{agent_type}' not found in infra/prompts/ or agents/", file=sys.stderr)
             # body will be used by the backend implementation when it exists
         else:
             print(
