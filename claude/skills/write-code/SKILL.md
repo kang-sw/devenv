@@ -54,7 +54,7 @@ Apply `judge: plan-depth`. Default to survey when uncertain between as-is and su
 **survey** — register and call plan surveyor (sonnet):
 
 ```bash
-ws-new-named-agent plan-surveyor --model sonnet --system-prompt "$(ws-infra-path plan-populator-survey.md)"
+ws-new-named-agent plan-surveyor --model sonnet --system-prompt plan-populator-survey.md
 ```
 
 ```bash
@@ -67,7 +67,7 @@ PROMPT
 **research** — register and call plan researcher (opus):
 
 ```bash
-ws-new-named-agent plan-researcher --model opus --system-prompt "$(ws-infra-path plan-populator-research.md)"
+ws-new-named-agent plan-researcher --model opus --system-prompt plan-populator-research.md
 ```
 
 ```bash
@@ -85,10 +85,10 @@ After the population agent returns, commit the plan file before proceeding.
 2. Collect integration test context: identify test file paths and the run command. Flows into the implementer spawn prompt.
 3. Register all agent slots:
    ```bash
-   ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-   ws-new-named-agent reviewer-correctness --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
-   ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
-   ws-new-named-agent reviewer-test --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-test.md)"
+   ws-new-named-agent implementer --model sonnet --system-prompt implementer.md
+   ws-new-named-agent reviewer-correctness --agent ws:code-reviewer --system-prompt code-review-correctness.md
+   ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt code-review-fit.md
+   ws-new-named-agent reviewer-test --agent ws:code-reviewer --system-prompt code-review-test.md
    ```
 4. Allocate review path slots (separate Bash call); capture all output lines as literals:
    ```bash

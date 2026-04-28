@@ -78,7 +78,7 @@ Does NOT fire for follow-up turns within an established domain, or for status / 
 ### Sprint-Aware Survey Call
 
 ```bash
-ws-new-named-agent sprint-survey --model sonnet --system-prompt "$(ws-infra-path sprint-survey.md)"
+ws-new-named-agent sprint-survey --model sonnet --system-prompt sprint-survey.md
 ```
 
 ```bash

@@ -211,6 +211,28 @@ def _resolve_ws_agent(agent_type: str) -> str | None:
         return None
     return _strip_frontmatter(agent_file.read_text(encoding="utf-8"))
 
+
+def _resolve_system_prompt(value: str) -> str:
+    """Resolve --system-prompt argument to file content.
+
+    Bare name (no path separator, not absolute): try PLUGIN_DIR/infra/<name>,
+    then cwd/<name>, then error.
+    Explicit path (separator present or absolute): read directly.
+    """
+    if not value:
+        return ""
+    p = Path(value)
+    if p.is_absolute() or os.sep in value or "/" in value:
+        return p.read_text(encoding="utf-8")
+    infra = PLUGIN_DIR / "infra" / value
+    if infra.exists():
+        return infra.read_text(encoding="utf-8")
+    local = Path.cwd() / value
+    if local.exists():
+        return local.read_text(encoding="utf-8")
+    print(f"error: --system-prompt '{value}' not found in infra/ or working directory", file=sys.stderr)
+    sys.exit(1)
+
 # ── CallResult ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -658,7 +680,7 @@ def cmd_new(argv: list[str]) -> None:
         tier = None
 
     backend = infer_backend(model) if model else "claude"
-    system_prompt = Path(system_prompt_path).read_text(encoding="utf-8") if system_prompt_path else ""
+    system_prompt = _resolve_system_prompt(system_prompt_path)
 
     registry_dir = _registry_dir()
     registry_dir.mkdir(parents=True, exist_ok=True)
