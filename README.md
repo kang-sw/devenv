@@ -31,6 +31,17 @@ shell/    tmux, WezTerm, starship, zsh dotfiles, helper scripts
 
 Detects the platform and handles: Homebrew, CLI tools, zsh plugins, dotfile symlinks, and Claude Code skill/agent symlinks. Stale symlinks are cleaned up automatically.
 
+## Claude Code Plugin (`ws`)
+
+The `claude-plugin/` directory is packaged as the `ws` Claude Code plugin. Install it on any machine:
+
+```sh
+claude plugin marketplace add kang-sw/devenv
+claude plugin install ws@kang-sw-devenv
+```
+
+After `install.sh` runs on the home machine, re-run the above if the plugin is not already present.
+
 ## License
 
 Personal configuration — use freely, no warranty implied.
