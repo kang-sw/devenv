@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.11.3 — 2026-04-28
+
+### Added
+- `ws-print-infra` now accepts bare stems (no `.md` suffix): probes exact match first, then appends `.md`; consistent with `ws-named-agent --system-prompt` resolution.
+
+### Fixed
+- `ws-named-agent`: PostToolBatch/PostToolUse hook uses `pythonw.exe` on Windows — suppresses per-tool-call console window flashes when running inside a PTY (e.g. claude-dash).
+- `ws-named-agent` (codex, Windows): prompt now delivered via stdin (`-`) to bypass `cmd.exe /c` newline truncation that silently cut multi-line prompts to their first line.
+- `ws-named-agent` (codex, Windows): compression re-registration now uses `sys.executable + SCRIPT_DIR` path — bare name `ws-named-agent` was unresolvable via `CreateProcess` on Windows.
+- `ws-named-agent` (codex): `_codex_tokens()` no longer double-counts `cached_input_tokens`; OpenAI reports it as a subset of `input_tokens`, not an additive field — was inflating compression threshold checks by ~3×.
+
 ## v0.11.2 — 2026-04-28
 
 ### Added
