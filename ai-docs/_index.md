@@ -51,6 +51,7 @@ claude-plugin/infra/prompts/     — agent role docs (frontmatter: name, model, 
   skeleton-writer.md      — skeleton stub and integration test authoring
   plan-populator-research.md — step-by-step plan drafter
   plan-populator-survey.md   — codebase survey for brief support
+  subquery.md             — scoped sub-query worker prompt; haiku default; Constraints/Process/Output/Doctrine layout
 ```
 
 ## Infra Layout
@@ -70,7 +71,7 @@ claude-plugin/infra/                 — docs only; accessed via ws-print-infra 
   workflow-for-agent.md       — doc-layer orientation for sub-agents + safe primitive subset; auto-injected by ws-named-agent new
 
 claude-plugin/bin/                   — PATH-accessible executables (added by plugin)
-  ws-subquery                    — scoped sub-query via headless claude subprocess
+  ws-subquery                    — scoped sub-query via ws-oneshot-agent; delegates to -p subquery; haiku default, --deep-research for sonnet
   ws-spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
   ws-generate-spec-stem          — emit a new {#YYMMDD-slug} anchor for a given descriptive slug
   ws-list-spec-stems             — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
@@ -80,7 +81,8 @@ claude-plugin/bin/                   — PATH-accessible executables (added by p
   ws-infra-path               — return absolute path to an infra doc (for external path contexts; use -p <stem> with ws-new-named-agent)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
-  ws-named-agent                    — unified Python entry point for named agent management (subcommands: new, call, interrupt, print, check-mailbox, tail, override)
+  ws-oneshot-agent                  — register + call + erase a named agent in one invocation; -p required; full tool access; doc-system injected by default
+  ws-named-agent                    — unified Python entry point for named agent management (subcommands: new, call, erase, interrupt, print, check-mailbox, tail, override)
   ws-new-named-agent                — shim → ws-named-agent new; create named agent registry entry (.git/ws@<repo>/agents/<name>.json); supports -p flag for multi-prompt composition
   ws-call-named-agent               — shim → ws-named-agent call; auto-routes session, compresses at 120K tokens (claude backend only), persists output, drains outbox
   ws-interrupt-named-agent          — shim → ws-named-agent interrupt; queue a message to a named agent's outbox
