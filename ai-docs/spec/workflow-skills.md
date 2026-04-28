@@ -102,7 +102,7 @@ Reviewers write full findings to `ws-review-path`-allocated files; stdout return
 
 ### `/edit` {#260422-edit-skill}
 
-Direct-edit primitive. The lead reads source, edits, verifies, and commits — no subagent delegation for the edit itself. One named-agent reviewer covers correctness and fit (both partition docs concatenated into a single system prompt). Relay loop capped at 2 cycles; the lead applies fixes directly without won't-fix negotiation. Outputs commit range and test status to the caller; no doc pipeline.
+Direct-edit primitive. The lead reads source, edits, verifies, and commits — no subagent delegation for the edit itself. One named-agent reviewer covers correctness and fit (both partition docs concatenated into a single system prompt). Relay loop capped at 2 cycles; the lead applies fixes directly without won't-fix negotiation. After cleanup, invokes `ws:update-spec` on the edit's commit range. Outputs commit range, test status, and spec result to the caller. Callers own mental-model updates.
 
 > [!note] Constraints
 > - Escalates to `/implement` when scope grows to multi-file with new public API or cross-module without established pattern.
@@ -115,11 +115,22 @@ Implementation harness. Routes to `ws:write-code` or `ws:edit` based on `judge: 
 - **Direct-edit** — single file, purely internal change, no new public symbols: routes to `ws:edit`.
 - **Delegated** — any cross-file touch, new public contract, or explicit delegation requested: creates an `implement/<scope>` branch and routes to `ws:write-code`.
 
-After the primitive returns, dispatches `spec-updater` then `mental-model-updater` (sequential, spec first so 🚧 strips are visible to the mental-model updater). User approves before merge. Merge uses `ws-merge-branch` (squash for 1 commit, `--no-ff` for 2+). {#260423-doc-pipeline-spec-updater}
+After the primitive returns, invokes `ws:update-spec` (lead-driven) then dispatches `ws:mental-model-updater` (sequential, spec first so 🚧 strips are visible to the mental-model updater). User approves before merge. Merge uses `ws-merge-branch` (squash for 1 commit, `--no-ff` for 2+). {#260423-doc-pipeline-spec-updater}
 
 > [!note] Constraints
 > - User approval is unconditional — no code reaches the target branch without it.
 > - If `write-code` escalates at cycle 3, unresolved reviewer disputes are listed in the approval report for user decision.
+
+### `/update-spec` {#260428-update-spec-skill}
+
+Lead-driven spec audit for a commit range. The lead (not a subagent) loads `spec-conventions.md` and `write-spec/SKILL.md`, scans each commit for caller-visible behavior changes, adds missing spec entries, strips `🚧` markers where the corresponding stem appears in the commit log, and removes entries flagged with `removed: <stem>` in commit bodies. Runs `ws-spec-build-index` and commits if any file was modified.
+
+Called by `/edit` (after cleanup, on the edit's own commit range), `/implement` (as the first doc pre-pass step, before `mental-model-updater`), and `/sprint` (at wrap-up, with the `$PARENT..HEAD` range). Can also be invoked standalone.
+
+> [!note] Constraints
+> - No subagent delegation — the lead applies `judge: spec-impact` inline.
+> - Only adds entries for confirmed-implemented features; never adds `🚧` entries autonomously.
+> - On borderline cases, errs toward adding an entry.
 
 ### Pre-invocation Context Survey — `project-survey` {#260424-project-survey-auto-invoke}
 
