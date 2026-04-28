@@ -10,7 +10,7 @@
 Configuration and template repository for Claude Code workflows.
 Meta-workflow project only — defines skills, agents, and workflow patterns for downstream projects. Sessions here work on the workflow system itself; domain specs, mental-models, and domain tickets belong to downstream projects.
 
-**Plugin:** `ws@0.13.1` — see `claude-plugin/.claude-plugin/plugin.json`.
+**Plugin:** `ws@0.13.2` — see `claude-plugin/.claude-plugin/plugin.json`.
 
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude-plugin/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.

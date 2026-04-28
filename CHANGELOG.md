@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.13.2 — 2026-04-29
+
+### Fixed
+- Remove all `timeout: 600000` mentions from skill and mental-model docs — blanket timeout instruction was causing downstream agents to insert incorrect timeout values into Bash calls, triggering 127 errors.
+
 ## v0.13.1 — 2026-04-29
 
 ### Changed
