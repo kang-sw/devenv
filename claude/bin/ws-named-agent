@@ -595,6 +595,7 @@ def cmd_new(argv: list[str]) -> None:
     system_prompt_path = ""
     agent_type = ""
     agent_type_set = False
+    no_doc_system = False
 
     i = 1
     while i < len(argv):
@@ -604,6 +605,8 @@ def cmd_new(argv: list[str]) -> None:
             system_prompt_path = argv[i + 1]; i += 2
         elif argv[i] in ("--agent-type", "--agent"):
             agent_type = argv[i + 1]; agent_type_set = True; i += 2
+        elif argv[i] == "--no-doc-system":
+            no_doc_system = True; i += 1
         else:
             print(f"Unknown flag: {argv[i]}", file=sys.stderr); sys.exit(1)
 
@@ -638,6 +641,12 @@ def cmd_new(argv: list[str]) -> None:
 
     backend = infer_backend(model) if model else "claude"
     system_prompt = _resolve_system_prompt(system_prompt_path)
+
+    if not no_doc_system:
+        doc_sys_path = PLUGIN_DIR / "infra" / "doc-system.md"
+        if doc_sys_path.exists():
+            doc_sys = doc_sys_path.read_text(encoding="utf-8")
+            system_prompt = (doc_sys + "\n\n---\n\n" + system_prompt).strip() if system_prompt else doc_sys
 
     registry_dir = _registry_dir()
     registry_dir.mkdir(parents=True, exist_ok=True)
