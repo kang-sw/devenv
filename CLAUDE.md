@@ -34,6 +34,7 @@ Skill and agent documents follow `ai-docs/ref/skill-authoring.md` — read it be
 ## Architecture Rules
 
 - Shell state does not persist between Bash tool calls; any value a later call needs from an earlier call must be read from tool output into conversation context and interpolated as a literal in the subsequent call — never via shell variables.
+- Every new script added to `claude-plugin/bin/` must include a Windows-compatible variant (`.cmd` shim or equivalent) verified to run under both PowerShell and Cmd.
 
 ## Workflow
 
