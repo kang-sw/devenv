@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.13.0 — 2026-04-29
+
+### Added
+- `ws-oneshot-agent` — new bin tool: registers, calls, and erases a named agent in one invocation. Accepts `-p <stem>` (multi-flag), `--model`, `--no-doc-system`. Doc-system injected by default. Stdin or inline positional prompt. EXIT trap guarantees cleanup.
+- `ws-named-agent erase` — removes a named agent's registry entry and its associated Claude session file.
+- `/workflow` skill — loads the WS orchestration primitives reference into session context; survives compaction via the Skill tool mechanism.
+- `claude-plugin/infra/prompts/subquery.md` — extracted subquery worker prompt; standard agent layout (Identity/Constraints/Process/Output/Doctrine).
+
+### Changed
+- `ws-named-agent new`: accepts `-p <stem>` multi-flag; resolves against `infra/prompts/` → `infra/` → cwd; concatenates bodies with `---`; first frontmatter `model:` sets tier. A leading `ws:` prefix on `-p` values is silently stripped.
+- `ws-named-agent new`: removed `--agent` and `--agent-type` flags (all call sites migrated to `-p`). `--system-prompt` retained as internal flag for compression re-registration only.
+- `ws-subquery`: delegates to `ws-oneshot-agent -p subquery`; full tool access replaces prior `--allowed-tools` restriction; doc-system injected by default.
+- Agent prompts consolidated from `claude/agents/` and `claude/infra/` into `claude-plugin/infra/prompts/` (single resolution root for `-p`).
+- Plugin directory renamed `claude/` → `claude-plugin/`.
+- `doc-system.md` renamed to `workflow-for-agent.md` (more accurate name for the orientation doc).
+
+### Fixed
+- `install.sh`: plugin snapshot correctly generates `marketplace.json` so `claude plugin install` discovery works on fresh machines.
+- `install.sh`: purge stale registry entry before reinstall to bypass version no-op.
+
 ## v0.12.0 — 2026-04-28
 
 ### Added

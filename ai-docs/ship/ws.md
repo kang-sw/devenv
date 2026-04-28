@@ -4,7 +4,7 @@ The `ws` Claude Code plugin — structured AI-assisted development workflow skil
 
 ## Version Strategy
 
-Semantic versioning. Source of truth: `claude/.claude-plugin/plugin.json` → `version` field.
+Semantic versioning. Source of truth: `claude-plugin/.claude-plugin/plugin.json` → `version` field.
 
 Bump rules:
 - **Minor** (0.X.0): new user-invocable skill or agent added.
