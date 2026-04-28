@@ -572,20 +572,28 @@ else:
     print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
-# ── ws plugin install (cache copy; run `claude plugin update ws@kang-sw-devenv` after changes)
+# ── ws plugin snapshot copy ───────────────────────────────────────────────────
+# Copy claude/ to a stable cache; Claude Code reads from the cache, not the live repo.
+# Re-run install.sh update (or claude plugin update ws@kang-sw-devenv) after changes.
+PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
+info "Syncing ws plugin snapshot to $PLUGIN_CACHE..."
+mkdir -p "$PLUGIN_CACHE"
+rsync -a --delete "$REPO_DIR/claude/" "$PLUGIN_CACHE/"
+success "ws plugin snapshot synced"
+
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it
 # before Claude Code has had a chance to process extraKnownMarketplaces itself.
 mkdir -p "$HOME/.claude/plugins"
-python3 - "$HOME/.claude/plugins/known_marketplaces.json" "$REPO_DIR" <<'PYEOF'
+python3 - "$HOME/.claude/plugins/known_marketplaces.json" "$PLUGIN_CACHE" "$REPO_DIR" <<'PYEOF'
 import json, sys, os
 from datetime import datetime, timezone
 
-km_path, repo_dir = sys.argv[1], sys.argv[2]
+km_path, plugin_cache, repo_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 km = json.load(open(km_path)) if os.path.isfile(km_path) else {}
 
 entry = {
     "source": {"source": "directory", "path": repo_dir},
-    "installLocation": repo_dir,
+    "installLocation": plugin_cache,
     "lastUpdated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z"
 }
 if km.get("kang-sw-devenv") == entry:
