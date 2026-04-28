@@ -36,13 +36,13 @@ end, { desc = "Navigate up (vim/tmux)" })
 
 local function navigate_lr(dir, wincmd, pane_at, window_cmd)
   return function()
-    if in_snacks_picker() then
-      tmux_nav(dir, pane_at, window_cmd)
-      return
+    -- snacks picker going left: sidebar is always leftmost, wincmd h misbehaves → tmux direct
+    -- snacks picker going right: wincmd l correctly reaches main editor → keep check
+    if not (in_snacks_picker() and wincmd == "h") then
+      local winnr = vim.fn.winnr()
+      vim.cmd("wincmd " .. wincmd)
+      if vim.fn.winnr() ~= winnr then return end
     end
-    local winnr = vim.fn.winnr()
-    vim.cmd("wincmd " .. wincmd)
-    if vim.fn.winnr() ~= winnr then return end
     tmux_nav(dir, pane_at, window_cmd)
   end
 end
