@@ -67,6 +67,14 @@ Status directories: `idea/` → `todo/` → `done/` (or `dropped/`). Ticket stem
 
 A `judge: spec-gate` blocks creation of `todo/`-or-higher tickets when no spec entry covers the topic, and suggests `/write-spec` first. `idea/` creation is ungated.
 
+#### Ticket Queue {#260428-ticket-queue-convention}
+
+`ai-docs/_index.md` maintains a `## Ticket Queue` section listing `todo/` tickets in intended implementation order. Format: one line per ticket — `` `stem` — purpose and dependency notes ``. Three touch points maintain the queue:
+
+- `/write-ticket` adds an entry when a ticket is created or promoted to `todo/`.
+- `/discuss` adds an entry when an `idea/` ticket is promoted to `todo/`.
+- `executor-wrapup` removes the entry when a ticket moves to `done/`.
+
 
 > [!note] Constraints
 > - Does not advance a ticket's status directory — status changes happen via `git mv` during implementation.
@@ -145,7 +153,7 @@ Tiers:
 - **`[Must]`** — directly covers behavior, patterns, or constraints required before starting.
 - **`[Maybe]`** — tangentially related; useful when uncertain.
 
-Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket directories (`idea/`, `todo/`, `wip/`). Source code references are out of scope.
+Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket directories (`idea/`, `todo/`). Source code references are out of scope.
 
 > [!note] Constraints
 > - `done/` and `dropped/` ticket directories are excluded from the search scope.
