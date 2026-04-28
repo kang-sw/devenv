@@ -37,6 +37,7 @@ git status --porcelain ai-docs/
 
 1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase. Content: what was implemented, deviations from plan, key findings for future phases. Short hash = implementation commit (or merge commit when applicable).
 2. If all phases are complete: `git mv` ticket to the next status directory.
+3. Remove the ticket's entry from the `## Ticket Queue` section in `ai-docs/_index.md` (if present).
 
 ## Doctrine
 

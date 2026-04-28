@@ -26,10 +26,11 @@ Target: $ARGUMENTS
    d. If category is `epic`: body defines scope and decomposition (not implementation spec); list child ticket stems; completion means child work is done.
    e. If multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
    f. After drafting, verify scope — see `judge: ticket-scope`.
+   g. If status is `todo/`: add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` — one-line purpose and dependency notes ``.
 3. **Edit** (existing ticket):
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
-   c. For moves, `git mv` and add `started:` (→ `wip/`) or `completed:` (→ `done/`) date in frontmatter.
+   c. For moves, `git mv` and add `completed:` date in frontmatter (→ `done/`).
 4. **Phase content** — carry everything from discussion that informs implementation: goals, constraints, rationale, rejected alternatives, suggested approaches (pseudo code, struct shapes, data formats, algorithm sketches). Leave to the plan: codebase-derived details (file paths, existing type reuse, integration patterns, function signatures, testing classifications).
 5. **Intent review** — re-read the written/edited ticket against the preceding conversation:
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?

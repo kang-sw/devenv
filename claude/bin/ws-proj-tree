@@ -4,7 +4,7 @@
 Outputs three sections:
   1. ai-docs/ directory tree  (excluding tickets/ and spec/)
   2. spec: hierarchy with frontmatter stats (features, 🚧 count, ticket refs)
-  3. tickets: grouped by status (wip → todo → idea → done → dropped),
+  3. tickets: grouped by status (todo → idea → done → dropped),
      with frontmatter details for parent / related lookups.
 """
 
@@ -96,7 +96,7 @@ def parse_frontmatter(path: Path) -> dict:
 # Ticket helpers
 # ---------------------------------------------------------------------------
 
-STATUS_ORDER = ['wip', 'todo', 'idea']
+STATUS_ORDER = ['todo', 'idea']
 TICKET_REF_RE = re.compile(r'\[(\d{6}-[\w-]+/p\d+)\]')
 
 
@@ -218,8 +218,7 @@ def render_tickets(tickets_root: Path) -> None:
             fm = parse_frontmatter(ticket)
             stem = ticket.stem
             tag = f'[{status}]'
-            date_str = f"  ({fm['started']})" if status == 'wip' and fm.get('started') else ''
-            print(f'  {tag} {stem}{date_str}')
+            print(f'  {tag} {stem}')
 
             # parent
             parent = fm.get('parent')

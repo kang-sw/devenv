@@ -63,7 +63,7 @@ After writing, runs `ws-spec-build-index` to rebuild the `features:` frontmatter
 
 Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/proceed` after authoring, which auto-routes to skeleton, plan, or implementation.
 
-Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`). Ticket stem format: `YYMMDD-type-slug`.
+Status directories: `idea/` → `todo/` → `done/` (or `dropped/`). Ticket stem format: `YYMMDD-type-slug`.
 
 A `judge: spec-gate` blocks creation of `todo/`-or-higher tickets when no spec entry covers the topic, and suggests `/write-spec` first. `idea/` creation is ungated.
 
@@ -329,7 +329,7 @@ ws-call-named-agent implementer "<prompt>"
 
 ### `ws-proj-tree` {#260425-ws-proj-tree}
 
-`ws-proj-tree` — prints a structured project map to stdout: the `ai-docs/` directory tree (excluding `tickets/` and `spec/`), spec file stats (feature count, `🚧` count, ticket refs), and active tickets grouped by status (`wip` → `todo` → `idea`).
+`ws-proj-tree` — prints a structured project map to stdout: the `ai-docs/` directory tree (excluding `tickets/` and `spec/`), spec file stats (feature count, `🚧` count, ticket refs), and active tickets grouped by status (`todo` → `idea`).
 
 Used by `/discuss` as pre-injected project context at skill start.
 

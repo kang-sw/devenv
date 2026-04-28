@@ -138,7 +138,7 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 
 ## Tickets
 
-Status directories: `idea/` → `todo/` → `wip/` → `done/` (or `dropped/`).
+Status directories: `idea/` → `todo/` → `done/` (or `dropped/`).
 Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 | Stem | Status | Summary |
@@ -172,6 +172,10 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260426-perf-claude-watch-scroll-cache` | done | claude-watch scroll perf — cache total visual rows; Phase 2 (Arc clone) dropped (ratatui ownership constraint) |
 | `260426-feat-claude-watch-features` | done | claude-watch sprint — token count display, headless/-p color distinction, worktree session discovery, vertical scrollbar, on-demand background parsing; ws-orchestration output persistence + background mode |
 | `260426-feat-claude-dash` | done | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; all 4 phases complete |
+
+## Ticket Queue
+
+<!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 
 ## Session Notes
 

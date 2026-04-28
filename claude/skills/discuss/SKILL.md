@@ -52,6 +52,7 @@ Triggers when the user requests a ticket status change — promoting an idea tic
    a. Invoke `/write-spec` to add a `🚧` entry for each caller-visible behavior in the ticket.
    b. Perform `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
    c. Invoke `ws:write-ticket` (Edit path) on the promoted ticket to populate the `spec:` frontmatter field with the stems created in step (a).
+   d. Add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` — one-line purpose and dependency notes ``.
 3. **Drop (→ dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
    b. No other ticket references this stem → invoke `/write-spec` to remove the `🚧` entry.
