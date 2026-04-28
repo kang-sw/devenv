@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.11.2 — 2026-04-28
+
+### Added
+- `claude/infra/searcher.md` — resident codebase-search agent with domain accumulation; lead agents spawn once per domain and reset via `ws-new-named-agent` on domain shift
+
+### Changed
+- `ws-new-named-agent --system-prompt` now accepts bare stems and bare names: probe order is `infra/<name>`, `infra/<name>.md`, `cwd/<name>`, `cwd/<name>.md`, then error; explicit paths pass through unchanged. Removes the `$(ws-infra-path xxx)` boilerplate from all call sites.
+
 ## v0.11.1 — 2026-04-28
 
 ### Fixed
