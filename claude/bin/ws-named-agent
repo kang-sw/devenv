@@ -18,6 +18,8 @@ PLUGIN_DIR = SCRIPT_DIR.parent
 KNOWN_TIERS = {"opus", "sonnet", "haiku"}
 
 if sys.platform == "win32":
+    if sys.stdin is not None:
+        sys.stdin.reconfigure(encoding="utf-8")
     if sys.stdout is not None:
         sys.stdout.reconfigure(encoding="utf-8")
     if sys.stderr is not None:
