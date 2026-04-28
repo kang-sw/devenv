@@ -608,8 +608,13 @@ PYEOF
 
 if has claude; then
   INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
-  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if 'ws@kang-sw-devenv' in d.get('plugins',{}) else 1)" "$INSTALLED_PLUGINS" 2>/dev/null; then
-    muted "ws plugin already installed"
+  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+p = d.get('plugins', {}).get('ws@kang-sw-devenv', {})
+sys.exit(0 if p and p.get('installLocation') == sys.argv[2] else 1)
+" "$INSTALLED_PLUGINS" "$PLUGIN_CACHE" 2>/dev/null; then
+    muted "ws plugin already installed at snapshot path"
   else
     info "Installing ws plugin..."
     claude plugin install ws@kang-sw-devenv && success "ws plugin installed" || warn "ws plugin install failed — run manually: claude plugin install ws@kang-sw-devenv"
