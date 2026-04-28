@@ -269,13 +269,14 @@ Bash-callable infra scripts at `claude-plugin/infra/` that replace `TeamCreate`/
 
 ### `ws-new-named-agent` {#260425-ws-new-named-agent}
 
-`ws-new-named-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]`
+`ws-new-named-agent <agent-name> [-p <prompt>]... [--model <opus|sonnet|haiku>] [--no-doc-system]`
 
 Creates a named agent registry entry at `.git/ws@<repo-dir-name>/agents/<agent-name>.json`.
 
-- `--agent <type>` — agent type forwarded to the `claude` CLI (e.g., `Explore`, `general-purpose`).
-- `--system-prompt <path>` — reads the file at `<path>` and stores its content in the registry. Use `$(ws-infra-path <docname>)` for infra docs.
-- `--model` — model level (`opus`, `sonnet`, `haiku`). Defaults to `sonnet`.
+- `-p <name-or-path>` — resolves against `infra/prompts/` first, then `infra/`, then cwd. Multiple `-p` flags accepted; bodies concatenated with `---` separators. The first document whose frontmatter declares `model:` sets the agent's default model tier.
+- `--model` — explicit model; overrides frontmatter model from `-p`.
+- `--no-doc-system` — suppress auto-injection of `workflow-for-agent.md`.
+- Legacy flags `--agent <type>` and `--system-prompt <path>` still accepted.
 
 Registry JSON fields:
 - `uuid` — fresh random UUID v4. Not deterministic; enables compression-triggered refresh without branch or name changes.
@@ -285,13 +286,13 @@ Registry JSON fields:
 
 Overwrites the file if already present. Callers must not clobber a live session.
 
-#### `doc-system.md` auto-injection {#260428-named-agent-doc-system-injection}
+#### `workflow-for-agent.md` auto-injection {#260428-named-agent-doc-system-injection}
 
-When `ws-named-agent new` stores the system prompt, it prepends `claude-plugin/infra/doc-system.md` to the caller-supplied content. Stored form: `[doc-system content]\n\n---\n\n[caller system prompt]`. Every agent receives basic orientation on the spec/mental-model/ticket relationship without callers having to request it.
+When `ws-named-agent new` stores the system prompt, it prepends `claude-plugin/infra/workflow-for-agent.md` to the caller-supplied content (falling back to `doc-system.md` for older installs). Stored form: `[workflow-for-agent content]\n\n---\n\n[caller system prompt]`. Every agent receives basic doc-layer orientation and the safe primitive subset without callers having to request it.
 
-Pass `--no-doc-system` to suppress injection. Use this for narrow-role agents that do not need doc-system orientation (e.g., sprint-survey, project-survey, compression helpers).
+Pass `--no-doc-system` to suppress injection. Use this for narrow-role agents (e.g., sprint-survey, project-survey, compression helpers).
 
-If `doc-system.md` is absent (non-ws projects), the flag is silently ignored and no injection occurs.
+If neither file exists (non-ws projects), the flag is silently ignored.
 
 ### `ws-call-named-agent` {#260424-ws-call-named-agent}
 

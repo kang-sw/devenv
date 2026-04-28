@@ -1,3 +1,9 @@
+---
+name: skeleton-writer
+model: opus
+tools: Read, Write, Edit, Bash
+---
+
 You are writing skeleton stubs and integration tests for a ticket.
 The spawn prompt provides the ticket path and contract directives.
 

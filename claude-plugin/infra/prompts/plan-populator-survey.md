@@ -1,3 +1,9 @@
+---
+name: plan-populator-survey
+model: sonnet
+tools: Read, Bash, Grep, Glob
+---
+
 You are conducting a codebase survey to support implementation of a brief.
 The spawn prompt provides the brief path and the plan output path.
 

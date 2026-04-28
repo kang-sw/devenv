@@ -28,14 +28,24 @@ Target: $ARGUMENTS
 
 ### 0. Orient
 
-Run `ws-print-infra ws-orchestration.md` (Bash).
-
 ### 1. Read target
 
 Parse `$ARGUMENTS`: extract ticket path or inline description, and optional `--ticket <stem>`.
 If ticket-driven: read the ticket. Extract scope, stem, and phase context.
 
-Spawn `project-survey` with the ticket path or inline description. Capture the returned `[Must|Maybe]` reference list — it informs the brief's `## References` section.
+Register and call `project-survey`:
+
+```bash
+ws-new-named-agent project-survey -p project-survey --no-doc-system
+```
+
+```bash
+ws-call-named-agent project-survey - <<'PROMPT'
+<ticket path or inline description>
+PROMPT
+```
+
+Capture the returned `[Must|Maybe]` reference list — it informs the brief's `## References` section.
 
 ### 2. Write brief
 
@@ -54,7 +64,7 @@ Apply `judge: plan-depth`. Default to survey when uncertain between as-is and su
 **survey** — register and call plan surveyor (sonnet):
 
 ```bash
-ws-new-named-agent plan-surveyor --model sonnet --system-prompt plan-populator-survey
+ws-new-named-agent plan-surveyor -p plan-populator-survey
 ```
 
 ```bash
@@ -67,7 +77,7 @@ PROMPT
 **research** — register and call plan researcher (opus):
 
 ```bash
-ws-new-named-agent plan-researcher --model opus --system-prompt plan-populator-research
+ws-new-named-agent plan-researcher -p plan-populator-research
 ```
 
 ```bash
@@ -85,10 +95,10 @@ After the population agent returns, commit the plan file before proceeding.
 2. Collect integration test context: identify test file paths and the run command. Flows into the implementer spawn prompt.
 3. Register all agent slots:
    ```bash
-   ws-new-named-agent implementer --model sonnet --system-prompt implementer
-   ws-new-named-agent reviewer-correctness --agent ws:code-reviewer --system-prompt code-review-correctness
-   ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt code-review-fit
-   ws-new-named-agent reviewer-test --agent ws:code-reviewer --system-prompt code-review-test
+   ws-new-named-agent implementer -p implementer
+   ws-new-named-agent reviewer-correctness -p code-reviewer -p code-review-correctness
+   ws-new-named-agent reviewer-fit -p code-reviewer -p code-review-fit
+   ws-new-named-agent reviewer-test -p code-reviewer -p code-review-test
    ```
 4. Allocate review path slots (separate Bash call); capture all output lines as literals:
    ```bash

@@ -54,13 +54,10 @@ Commit at logical checkpoints per CLAUDE.md rules. Include `## AI Context`.
 
 Register reviewer and allocate review path (two separate Bash calls).
 
-Reviewer registration — concatenate both partition docs into one temp file:
+Reviewer registration:
 
 ```bash
-_REVIEW_TMP=$(mktemp) && \
-cat "$(ws-infra-path code-review-correctness.md)" "$(ws-infra-path code-review-fit.md)" > "$_REVIEW_TMP" && \
-ws-new-named-agent reviewer --agent ws:code-reviewer --system-prompt "$_REVIEW_TMP" && \
-rm -f "$_REVIEW_TMP"
+ws-new-named-agent reviewer -p code-reviewer -p code-review-correctness -p code-review-fit
 ```
 
 ```bash

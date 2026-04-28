@@ -4,7 +4,7 @@ description: "Mental-model authoring toolchain (forge-mental-model, mental-model
 sources:
   - claude-plugin/skills/forge-mental-model/
   - claude-plugin/skills/add-rule/
-  - claude-plugin/agents/
+  - claude-plugin/infra/prompts/
   - claude-plugin/infra/
 related:
   spec-system: "forge-mental-model calls ws-list-spec-stems to embed spec stems when ai-docs/spec/ is present. A stem format change breaks the embedding step."
@@ -19,7 +19,7 @@ construction), `mental-model-updater` (incremental update after code changes), a
 ## Entry Points
 
 - `claude-plugin/skills/forge-mental-model/SKILL.md` — from-scratch construction workflow; entry point when no mental-model baseline exists or a full rebuild is needed.
-- `claude-plugin/agents/mental-model-updater.md` — incremental updater agent; entry point for post-implementation mental-model maintenance.
+- `claude-plugin/infra/prompts/mental-model-updater.md` — incremental updater agent; entry point for post-implementation mental-model maintenance.
 - `claude-plugin/skills/add-rule/SKILL.md` — rule authoring skill; entry point for classifying and routing new rules to `CLAUDE.md ## Architecture Rules` or a domain doc `## Domain Rules`.
 - `.claude-plugin/skills/polish-plugin-docs/polish-writer.md` — no-file-read sub-agent for plugin doc simplification; entry point for the verbatim-embed pattern used when an agent cannot read files.
 

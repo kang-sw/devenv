@@ -30,13 +30,19 @@ Topic: $ARGUMENTS
 
 ## On: invoke
 
-1. Run `git branch --show-current`. If the result starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected — `/sprint` provides session continuity."
-2. If `$ARGUMENTS` references a ticket, read it.
-3. Enter discussion loop.
+1. Invoke `ws:workflow` via Skill tool (loads orchestration primitives reference).
+2. Run `git branch --show-current`. If the result starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected — `/sprint` provides session continuity."
+3. If `$ARGUMENTS` references a ticket, read it.
+4. Enter discussion loop.
 
 ## On: discussion loop
 
-1. Apply **judge: needs-survey** — identify every named component, skill, agent, spec, or ticket the current question touches. For each: was its doc loaded this session? If any was not, spawn `project-survey` with the topic as the brief and incorporate the returned reference list before responding.
+1. Apply **judge: needs-survey** — identify every named component, skill, agent, spec, or ticket the current question touches. For each: was its doc loaded this session? If any was not, register and call `project-survey`:
+   ```bash
+   ws-new-named-agent project-survey -p project-survey --no-doc-system
+   ws-call-named-agent project-survey "<topic brief>"
+   ```
+   Incorporate the returned reference list before responding.
 2. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
 3. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
    When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."

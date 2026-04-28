@@ -34,7 +34,7 @@ Target: $ARGUMENTS
 **Register (one Bash call):**
 
 ```bash
-ws-new-named-agent skeleton-writer --model opus --system-prompt skeleton-writer
+ws-new-named-agent skeleton-writer -p skeleton-writer
 ```
 
 **Spawn (one Bash call):**

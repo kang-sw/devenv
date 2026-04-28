@@ -33,40 +33,41 @@ Read before authoring or modifying skills, agents, or infra:
 
 ## Native Agents
 
-Agent definitions live in `claude-plugin/agents/`. Each file defines what an
-agent IS and HOW it works (identity, constraints, process, output).
-Team communication rules are injected by the calling skill at spawn time.
+`claude-plugin/agents/` contains agent types used by Claude Code's native Agent tool.
+Agent role documents (system prompts with frontmatter) live in `claude-plugin/infra/prompts/`.
 
 ```
 claude-plugin/agents/
+  clerk.md                — ticket management (used by forge-spec as ws:clerk subagent_type)
+
+claude-plugin/infra/prompts/     — agent role docs (frontmatter: name, model, tools)
   code-reviewer.md        — code diff review: correctness, security, contracts (read-only)
-  document-reviewer.md    — fresh-eye design/ticket review against mental-model and spec (read-only)
-  worker.md               — general-purpose non-code tasks
-  clerk.md                — ticket management
   mental-model-updater.md — mental-model doc updates after code changes
-  spec-updater.md         — strip 🚧 markers when spec-stems appear in merged commits; flag entries for removal when commits contain `removed: <stem>`
-  project-survey.md       — pre-invocation context survey; returns [Must|Maybe]-tiered spec/mental-model/ticket reference list for a given brief
+  spec-updater.md         — strip 🚧 markers; flag entries for removal on `removed: <stem>`
+  project-survey.md       — pre-invocation context survey; [Must|Maybe]-tiered reference list
+  sprint-survey.md        — sprint-context survey for wrap-up doc assessment
+  implementer.md          — code implementer role
+  searcher.md             — codebase search assistant
+  skeleton-writer.md      — skeleton stub and integration test authoring
+  plan-populator-research.md — step-by-step plan drafter
+  plan-populator-survey.md   — codebase survey for brief support
 ```
 
 ## Infra Layout
 
 ```
-claude-plugin/infra/                 — docs only; accessed via ws-print-infra
+claude-plugin/infra/                 — docs only; accessed via ws-print-infra or -p flag
   impl-playbook.md            — subagent-safe implementation discipline
   mental-model-conventions.md — mental-model doc format and invariants
   ticket-conventions.md       — ticket format, status directories, stem convention; optional spec: and spec-remove: fields
   spec-conventions.md         — spec doc format, 🚧 marker rules, {#slug} anchor protocol
   subagent-rules.md           — exploration, branches, general rules
-  implementer.md              — code implementer role; spawn as general-purpose + read first
   code-review-correctness.md  — Correctness review partition: logic, error paths, contracts, security
   code-review-fit.md          — Fit review partition: conventions, naming, reuse, patterns
   code-review-test.md         — Test review partition: assertion validity, coverage, mock integrity
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
   agent-compression.md        — compression handoff prompt injected into agents approaching the 120K token threshold
-  skeleton-writer.md          — skeleton-writer agent role: codebase exploration, stub + test authoring, build verification
-  ws-orchestration.md         — ws-new-named-agent / ws-call-named-agent coordination primitives for subagent orchestration
-  sprint-survey.md            — sprint-survey agent role: identifies relevant spec/mental-model docs for sprint wrap-up
-  doc-system.md               — doc-layer orientation for 3rd-party subagents: spec/mental-model/ticket relationships, 🚧 markers, stems; auto-injected by ws-named-agent new
+  workflow-for-agent.md       — doc-layer orientation for sub-agents + safe primitive subset; auto-injected by ws-named-agent new
 
 claude-plugin/bin/                   — PATH-accessible executables (added by plugin)
   ws-subquery                    — scoped sub-query via headless claude subprocess
@@ -80,7 +81,7 @@ claude-plugin/bin/                   — PATH-accessible executables (added by p
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
   ws-named-agent                    — unified Python entry point for named agent management (subcommands: new, call, interrupt, print, check-mailbox, tail, override)
-  ws-new-named-agent                — shim → ws-named-agent new; create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
+  ws-new-named-agent                — shim → ws-named-agent new; create named agent registry entry (.git/ws@<repo>/agents/<name>.json); supports -p flag for multi-prompt composition
   ws-call-named-agent               — shim → ws-named-agent call; auto-routes session, compresses at 120K tokens (claude backend only), persists output, drains outbox
   ws-interrupt-named-agent          — shim → ws-named-agent interrupt; queue a message to a named agent's outbox
   ws-agent-check-mailbox            — shim → ws-named-agent check-mailbox; PostToolBatch hook: exits 2 when WS_AGENT_OUTBOX is non-empty
@@ -107,6 +108,7 @@ claude-plugin/skills/
   bootstrap/           — scaffold new project or upgrade existing to canonical template
   forge-spec/          — from-scratch spec reconstruction; archive-first, domain-by-domain, cross-compact via TaskCreate (disable-model-invocation)
   forge-mental-model/  — from-scratch mental-model construction; survey → user confirm → per-domain verify cycle (disable-model-invocation)
+  workflow/            — loads orchestration primitives reference; session-resident across compaction; invoked at discuss/sprint entry
 ```
 
 ## Canonical Flows
@@ -128,7 +130,7 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 
 | File | Title | Summary |
 |------|-------|---------|
-| `ai-docs/spec/agent-system.md` | Agent System | Spawnable agents in claude-plugin/agents/ |
+| `ai-docs/spec/agent-system.md` | Agent System | Spawnable agent roles — output contracts, refusals, spawn contexts |
 | `ai-docs/spec/personal-devenv.md` | Personal Dev Environment | install.sh, shell, dotfiles, Claude Code config |
 | `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery, ws-call-named-agent primitives |
 | `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude-plugin/skills/ tools for ws plugin maintenance |

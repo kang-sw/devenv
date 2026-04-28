@@ -19,10 +19,6 @@ Target: $ARGUMENTS
 
 ## On: invoke
 
-### 0. Orient
-
-Run `ws-print-infra ws-orchestration.md` (Bash).
-
 ### 1. Assess
 
 Parse `$ARGUMENTS`: extract ticket path or inline description.
@@ -54,7 +50,12 @@ Capture the commit range from the skill's completion report.
 ### 4. Doc pre-pass
 
 1. Invoke **ws:update-spec** via Skill tool with args `<commit-range>`. (Lead-driven; runs inline.)
-2. Dispatch **ws:mental-model-updater** with the commit range. Wait. Commit any file changes. (Runs after update-spec so it sees any 🚧 strips.)
+2. Register and call `mental-model-updater` (run_in_background: true; timeout: 600000):
+   ```bash
+   ws-new-named-agent mental-model-updater -p mental-model-updater
+   ws-call-named-agent mental-model-updater "Commit range: <commit-range>"
+   ```
+   Wait for completion. Commit any file changes. (Runs after update-spec so it sees any 🚧 strips.)
 
 ### 5. Report and approval
 

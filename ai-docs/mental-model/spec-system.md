@@ -2,7 +2,7 @@
 domain: spec-system
 description: "Spec authoring tools, stem format, anchor protocol, frontmatter contracts, and feature removal protocol."
 sources:
-  - claude-plugin/agents/
+  - claude-plugin/infra/prompts/
   - claude-plugin/bin/
   - claude-plugin/infra/
   - claude-plugin/skills/forge-spec/

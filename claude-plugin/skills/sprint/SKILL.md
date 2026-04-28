@@ -20,7 +20,7 @@ Target: $ARGUMENTS
 
 ## On: invoke
 
-1. Run `ws-print-infra ws-orchestration.md` (Bash).
+1. Invoke `ws:workflow` via Skill tool (loads orchestration primitives reference).
 2. Read `git branch --show-current`.
    - Starts with `sprint/`: detect sprint name from branch. Present options:
      - **continue** → enter **On: session loop**.
@@ -78,7 +78,7 @@ Does NOT fire for follow-up turns within an established domain, or for status / 
 ### Sprint-Aware Survey Call
 
 ```bash
-ws-new-named-agent sprint-survey --model sonnet --system-prompt sprint-survey
+ws-new-named-agent sprint-survey -p sprint-survey --no-doc-system
 ```
 
 ```bash
