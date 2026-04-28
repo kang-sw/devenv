@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.13.1 — 2026-04-29
+
+### Changed
+- `sprint` skill: inject project map at skill invocation via `!`ws-proj-tree`` — mirrors the pattern already present in `discuss`.
+
 ## v0.13.0 — 2026-04-29
 
 ### Added
