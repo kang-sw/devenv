@@ -2,11 +2,11 @@
 domain: spec-system
 description: "Spec authoring tools, stem format, anchor protocol, frontmatter contracts, and feature removal protocol."
 sources:
-  - claude/agents/
-  - claude/bin/
-  - claude/infra/
-  - claude/skills/forge-spec/
-  - claude/skills/update-spec/
+  - claude-plugin/infra/prompts/
+  - claude-plugin/bin/
+  - claude-plugin/infra/
+  - claude-plugin/skills/forge-spec/
+  - claude-plugin/skills/update-spec/
 related:
   doc-tooling: "forge-mental-model calls ws-list-spec-stems (no args) to embed spec stems into domain drafts when ai-docs/spec/ is present. A stem format change breaks forge-mental-model's embedding step."
   mental-model-domain: "ws-spec-build-index reads ai-docs/mental-model/ to verify anchor integrity. Renaming or removing a spec stem without updating mental-model refs produces [warn] output on the next run."
@@ -20,10 +20,10 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
 
 ## Entry Points
 
-- `claude/infra/spec-conventions.md` — canonical stem format, anchor rules, frontmatter protocol.
-- `claude/bin/ws-generate-spec-stem` — collision-safe stem minting.
-- `claude/bin/ws-spec-build-index` — spec health pipeline; strips `features:` and `stems:` blocks; detects duplicate stems, stale Implementation Gap callouts (> 90 days), and broken mental-model anchor refs; no file arguments; scans `ai-docs/spec/` and `ai-docs/mental-model/` automatically.
-- `claude/skills/forge-spec/SKILL.md` — from-scratch spec reconstruction workflow; entry point when rebuilding an entire spec.
+- `claude-plugin/infra/spec-conventions.md` — canonical stem format, anchor rules, frontmatter protocol.
+- `claude-plugin/bin/ws-generate-spec-stem` — collision-safe stem minting.
+- `claude-plugin/bin/ws-spec-build-index` — spec health pipeline; strips `features:` and `stems:` blocks; detects duplicate stems, stale Implementation Gap callouts (> 90 days), and broken mental-model anchor refs; no file arguments; scans `ai-docs/spec/` and `ai-docs/mental-model/` automatically.
+- `claude-plugin/skills/forge-spec/SKILL.md` — from-scratch spec reconstruction workflow; entry point when rebuilding an entire spec.
 
 ## Module Contracts
 

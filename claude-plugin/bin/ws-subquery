@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# ws-subquery — scoped sub-query via ws-oneshot-agent (no session persistence).
+#
+# Default model: haiku. Pass --deep-research for sonnet.
+#
+# Usage:
+#   ws-subquery "<question>"                  # haiku, quick lookup
+#   ws-subquery --deep-research "<question>"  # sonnet, cross-module tracing
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+MODEL="haiku"
+if [ "${1:-}" = "--deep-research" ]; then
+  MODEL="sonnet"
+  shift
+fi
+
+if [ $# -ne 1 ]; then
+  echo "usage: $(basename "$0") [--deep-research] \"<question>\"" >&2
+  exit 2
+fi
+
+"$SCRIPT_DIR/ws-oneshot-agent" -p subquery --model "$MODEL" "$1"

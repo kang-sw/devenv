@@ -29,11 +29,12 @@ Read in this order at every session start, before any other action:
 
 Skill and agent documents follow `ai-docs/ref/skill-authoring.md` — read it before authoring or auditing any skill/agent file.
 
-**Architecture rule — skill/agent compliance:** Before committing any write to `claude/skills/`, `claude/agents/`, or `claude/infra/`, run `ai-docs/ref/skill-authoring.md`'s invariant checklist against every Invariants/Constraints line added or modified, verify the Doctrine names a finite resource with a generator clause, and confirm no rationale is interleaved in handler or process steps. Applies to implementers and the lead alike.
+**Architecture rule — skill/agent compliance:** Before committing any write to `claude-plugin/skills/`, `claude-plugin/agents/`, `claude-plugin/infra/`, or `claude-plugin/infra/prompts/`, run `ai-docs/ref/skill-authoring.md`'s invariant checklist against every Invariants/Constraints line added or modified, verify the Doctrine names a finite resource with a generator clause, and confirm no rationale is interleaved in handler or process steps. Applies to implementers and the lead alike.
 
 ## Architecture Rules
 
 - Shell state does not persist between Bash tool calls; any value a later call needs from an earlier call must be read from tool output into conversation context and interpolated as a literal in the subsequent call — never via shell variables.
+- Every new script added to `claude-plugin/bin/` must include a Windows-compatible variant (`.cmd` shim or equivalent) verified to run under both PowerShell and Cmd.
 
 ## Workflow
 

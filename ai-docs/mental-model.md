@@ -10,6 +10,7 @@ Cross-domain patterns and shared conventions for the devenv workflow system.
 | workflow-routing | `mental-model/workflow-routing.md` | /proceed routing contracts, prefix-stage delegation, write-ticket artifact protocol |
 | executor-wrapup | `mental-model/executor-wrapup.md` | Shared wrapup playbook for executor-series skills: doc pipeline, commit gate, ticket update |
 | doc-tooling | `mental-model/doc-tooling.md` | Mental-model authoring toolchain: forge-mental-model, mental-model-updater (forge authority, Domain Rules handling, Stale Rules output), and add-rule (rule classification and routing) |
+| personal-devenv | `mental-model/personal-devenv.md` | install.sh bootstrap/update contracts, ws plugin snapshot layout, and Claude Code marketplace registration |
 | tools | `mental-model/tools.md` | Standalone binary tools built in tools/: claude-watch (TUI session viewer) and claude-dash (worktree PTY multiplexer); coupling to named-agent registry |
 
 ## Directory Hierarchy
@@ -26,7 +27,7 @@ the file path; no frontmatter `parent:` link is maintained.
 
 Ancestor loading is an invariant: any agent loading a sub-domain doc
 must also load the parent `index.md` before starting work, so inherited
-Domain Rules are visible. See `claude/infra/mental-model-conventions.md` for the full contract.
+Domain Rules are visible. See `claude-plugin/infra/mental-model-conventions.md` for the full contract.
 
 ## Domain Rules
 

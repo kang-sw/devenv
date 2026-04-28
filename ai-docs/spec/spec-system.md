@@ -58,7 +58,7 @@ For each file, the tool:
 
 ## Authoring Conventions
 
-These rules apply to every file under `ai-docs/spec/`. They are published as `claude/infra/spec-conventions.md` and loaded at authoring time via `ws-print-infra spec-conventions.md`.
+These rules apply to every file under `ai-docs/spec/`. They are published as `claude-plugin/infra/spec-conventions.md` and loaded at authoring time via `ws-print-infra spec-conventions.md`.
 
 ### Anchor Format {#260421-spec-anchor-format}
 

@@ -420,7 +420,7 @@ link "$REPO_DIR/shell/scripts" "$HOME/.devenv-scripts"
 link "$REPO_DIR/nvim" "$HOME/.config/nvim"
 
 # Claude Code CLAUDE.md — global instructions
-link "$REPO_DIR/claude/CLAUDE.home.md" "$HOME/.claude/CLAUDE.md"
+link "$REPO_DIR/claude-plugin/CLAUDE.home.md" "$HOME/.claude/CLAUDE.md"
 
 # Claude Code blueprint plugin — clean up old per-file symlinks we created
 # (skills/agents/infra were previously symlinked individually; now the plugin handles them).
@@ -444,19 +444,23 @@ fi
 
 # Claude Code hooks — link hook scripts
 mkdir -p "$HOME/.claude/hooks"
-for hook_file in "$REPO_DIR/claude/hooks"/*.sh; do
+for hook_file in "$REPO_DIR/claude-plugin/hooks"/*.sh; do
   [ -f "$hook_file" ] || continue
   hook_name="$(basename "$hook_file")"
   link "$hook_file" "$HOME/.claude/hooks/$hook_name"
 done
 
+# ── ws plugin snapshot copy ───────────────────────────────────────────────────
+# Defined early so settings.json and known_marketplaces.json can reference it.
+PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
+
 # Claude Code settings — ensure required config is set
 info "Ensuring Claude Code settings..."
 mkdir -p "$HOME/.claude"
-python3 - "$HOME/.claude/settings.json" "$HOME/.claude.json" "$REPO_DIR" <<'PYEOF'
+python3 - "$HOME/.claude/settings.json" "$HOME/.claude.json" "$REPO_DIR" "$PLUGIN_CACHE" <<'PYEOF'
 import json, sys, os
 
-settings_path, claude_json_path, repo_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+settings_path, claude_json_path, repo_dir, plugin_cache = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 # ── settings.json (project-level: env vars) ──────────────────────────────────
 required_env = {
@@ -510,7 +514,7 @@ for event, entries in required_hooks.items():
 # ── blueprint plugin registration ────────────────────────────────────────────
 required_marketplaces = {
     "kang-sw-devenv": {
-        "source": {"source": "directory", "path": repo_dir}
+        "source": {"source": "directory", "path": plugin_cache}
     }
 }
 required_plugins = {"ws@kang-sw-devenv": True}
@@ -572,20 +576,51 @@ else:
     print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
-# ── ws plugin install (cache copy; run `claude plugin update ws@kang-sw-devenv` after changes)
+# ── ws plugin snapshot copy ───────────────────────────────────────────────────
+# Copy claude-plugin/ to a stable cache; Claude Code reads from the cache, not the live repo.
+# Re-run install.sh update (or claude plugin update ws@kang-sw-devenv) after changes.
+info "Syncing ws plugin snapshot to $PLUGIN_CACHE/ws/..."
+mkdir -p "$PLUGIN_CACHE/ws"
+# Remove stale subdirs from earlier layouts (claude/, claude-plugin/)
+rm -rf "$PLUGIN_CACHE/claude" "$PLUGIN_CACHE/claude-plugin"
+rsync -a --delete "$REPO_DIR/claude-plugin/" "$PLUGIN_CACHE/ws/"
+# Generate marketplace.json that registers ws as a plugin at ./ws
+mkdir -p "$PLUGIN_CACHE/.claude-plugin"
+python3 - "$PLUGIN_CACHE/.claude-plugin/marketplace.json" "$PLUGIN_CACHE/ws/.claude-plugin/plugin.json" <<'MKTEOF'
+import json, sys, os
+mkt_path, plugin_json_path = sys.argv[1], sys.argv[2]
+plugin = json.load(open(plugin_json_path))
+marketplace = {
+    "name": "kang-sw-devenv",
+    "description": "kang-sw personal devenv plugin marketplace",
+    "owner": {"name": "kang-sw"},
+    "plugins": [{
+        "name": plugin["name"],
+        "version": plugin.get("version"),
+        "description": plugin.get("description", ""),
+        "author": plugin.get("author", {"name": "kang-sw"}),
+        "source": "./ws",
+    }],
+}
+with open(mkt_path, "w") as f:
+    json.dump(marketplace, f, indent=2)
+    f.write("\n")
+MKTEOF
+success "ws plugin snapshot synced"
+
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it
 # before Claude Code has had a chance to process extraKnownMarketplaces itself.
 mkdir -p "$HOME/.claude/plugins"
-python3 - "$HOME/.claude/plugins/known_marketplaces.json" "$REPO_DIR" <<'PYEOF'
+python3 - "$HOME/.claude/plugins/known_marketplaces.json" "$PLUGIN_CACHE" "$REPO_DIR" <<'PYEOF'
 import json, sys, os
 from datetime import datetime, timezone
 
-km_path, repo_dir = sys.argv[1], sys.argv[2]
+km_path, plugin_cache, repo_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 km = json.load(open(km_path)) if os.path.isfile(km_path) else {}
 
 entry = {
-    "source": {"source": "directory", "path": repo_dir},
-    "installLocation": repo_dir,
+    "source": {"source": "directory", "path": plugin_cache},
+    "installLocation": plugin_cache,
     "lastUpdated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z"
 }
 if km.get("kang-sw-devenv") == entry:
@@ -600,10 +635,29 @@ PYEOF
 
 if has claude; then
   INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
-  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if 'ws@kang-sw-devenv' in d.get('plugins',{}) else 1)" "$INSTALLED_PLUGINS" 2>/dev/null; then
-    muted "ws plugin already installed"
+  if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+p = d.get('plugins', {}).get('ws@kang-sw-devenv', {})
+sys.exit(0 if p and p.get('installLocation') == sys.argv[2] else 1)
+" "$INSTALLED_PLUGINS" "$PLUGIN_CACHE" 2>/dev/null; then
+    muted "ws plugin already installed at snapshot path"
   else
     info "Installing ws plugin..."
+    # Remove stale entry so claude plugin install writes a fresh installLocation.
+    # Version equality would otherwise cause the install to no-op without updating the path.
+    if [[ -f "$INSTALLED_PLUGINS" ]]; then
+      python3 - "$INSTALLED_PLUGINS" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+d = json.load(open(path))
+if 'ws@kang-sw-devenv' in d.get('plugins', {}):
+    del d['plugins']['ws@kang-sw-devenv']
+    with open(path, 'w') as f:
+        json.dump(d, f, indent=2)
+        f.write('\n')
+PYEOF
+    fi
     claude plugin install ws@kang-sw-devenv && success "ws plugin installed" || warn "ws plugin install failed — run manually: claude plugin install ws@kang-sw-devenv"
   fi
 else

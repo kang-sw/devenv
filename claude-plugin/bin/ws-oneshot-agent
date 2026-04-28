@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# ws-oneshot-agent — register, call, and erase a named agent in one shot.
+# Usage: ws-oneshot-agent -p <prompt-stem> [--model <tier>] [--no-doc-system] - <<'PROMPT'
+#        ws-oneshot-agent -p <prompt-stem> [--model <tier>] [--no-doc-system] '<inline-prompt>'
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WS_NAMED_AGENT="$SCRIPT_DIR/ws-named-agent"
+
+usage() {
+    echo "Usage: ws-oneshot-agent -p <prompt-stem> [-p <stem2>] [--model <tier>] [--no-doc-system] - <<'PROMPT'" >&2
+    echo "       ws-oneshot-agent -p <prompt-stem> [--model <tier>] [--no-doc-system] '<inline-prompt>'" >&2
+    exit 1
+}
+
+PROMPT_ARGS=()
+MODEL_ARGS=()
+NO_DOC_SYSTEM_ARGS=()
+POSITIONAL=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -p|--prompt)
+            [[ $# -lt 2 ]] && { echo "error: $1 requires an argument" >&2; usage; }
+            PROMPT_ARGS+=("-p" "$2"); shift 2 ;;
+        --model)
+            [[ $# -lt 2 ]] && { echo "error: --model requires an argument" >&2; usage; }
+            MODEL_ARGS+=("--model" "$2"); shift 2 ;;
+        --no-doc-system)
+            NO_DOC_SYSTEM_ARGS+=("--no-doc-system"); shift ;;
+        --)
+            shift; POSITIONAL+=("$@"); break ;;
+        -)
+            POSITIONAL+=("-"); shift ;;
+        -*)
+            echo "Unknown flag: $1" >&2; usage ;;
+        *)
+            POSITIONAL+=("$1"); shift ;;
+    esac
+done
+
+if [[ ${#PROMPT_ARGS[@]} -eq 0 ]]; then
+    usage
+fi
+
+AGENT_NAME="_oneshot_$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
+
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"; "$WS_NAMED_AGENT" erase "$AGENT_NAME" >/dev/null 2>&1 || true' EXIT
+
+"$WS_NAMED_AGENT" new "$AGENT_NAME" \
+    "${PROMPT_ARGS[@]}" \
+    ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
+    ${NO_DOC_SYSTEM_ARGS[@]+"${NO_DOC_SYSTEM_ARGS[@]}"} \
+    >/dev/null
+
+if [[ ${#POSITIONAL[@]} -eq 0 || "${POSITIONAL[0]}" == "-" ]]; then
+    cat > "$TMPFILE"
+else
+    printf '%s' "${POSITIONAL[0]}" > "$TMPFILE"
+fi
+
+"$WS_NAMED_AGENT" call "$AGENT_NAME" - < "$TMPFILE"

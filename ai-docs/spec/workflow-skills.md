@@ -230,6 +230,18 @@ Sprint routes implementation tasks to the shared primitives:
 
 Both primitives self-clean their review path files. No doc pipeline runs during a sprint task — deferred to wrap-up.
 
+### `/workflow` {#260428-workflow-skill}
+
+Loads the WS orchestration primitives reference into session context. Invoked via Skill tool at the start of `/discuss` and `/sprint` sessions; users may also invoke directly with `/workflow`.
+
+Content is session-resident: unlike `ws-print-infra` output (which is cleared by compaction), skill content loaded via the Skill tool survives context compaction. Re-invoking `/workflow` after a compaction restores the reference without re-running any shell commands.
+
+The skill has no side effects — reading it is the act of invocation.
+
+> [!note] Constraints
+> - Does not replace `ws-print-infra` for agent Bash tool contexts; those agents use `ws-print-infra` or `workflow-for-agent.md` auto-injection.
+> - Skills that invoke `/workflow` via `ws:workflow` Skill tool do so in their `On: invoke` step; they do not call `ws-print-infra ws-orchestration.md`.
+
 ## Reconstruction
 
 ### `/forge-spec` {#260421-forge-spec}
@@ -265,17 +277,18 @@ A soft `judge: spec-gate` fires first: if no spec is found, warns that stem cros
 
 ## Agent Orchestration Primitives
 
-Bash-callable infra scripts at `claude/infra/` that replace `TeamCreate`/`SendMessage`/`TeamDelete` for subagent coordination. Skill leads invoke these directly via the `Bash` tool.
+Bash-callable infra scripts at `claude-plugin/infra/` that replace `TeamCreate`/`SendMessage`/`TeamDelete` for subagent coordination. Skill leads invoke these directly via the `Bash` tool.
 
 ### `ws-new-named-agent` {#260425-ws-new-named-agent}
 
-`ws-new-named-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--model <opus|sonnet|haiku>]`
+`ws-new-named-agent <agent-name> [-p <prompt>]... [--model <opus|sonnet|haiku>] [--no-doc-system]`
 
 Creates a named agent registry entry at `.git/ws@<repo-dir-name>/agents/<agent-name>.json`.
 
-- `--agent <type>` — agent type forwarded to the `claude` CLI (e.g., `Explore`, `general-purpose`).
-- `--system-prompt <path>` — reads the file at `<path>` and stores its content in the registry. Use `$(ws-infra-path <docname>)` for infra docs.
-- `--model` — model level (`opus`, `sonnet`, `haiku`). Defaults to `sonnet`.
+- `-p <name-or-path>` — resolves against `infra/prompts/` first, then `infra/`, then cwd. Multiple `-p` flags accepted; bodies concatenated with `---` separators. The first document whose frontmatter declares `model:` sets the agent's default model tier. A leading `ws:` prefix is silently stripped before resolution (e.g. `-p ws:searcher` is equivalent to `-p searcher`). {#260429-ws-named-agent-p-flag}
+- `--model` — explicit model; overrides frontmatter model from `-p`.
+- `--no-doc-system` — suppress auto-injection of `workflow-for-agent.md`.
+- Legacy flags `--agent <type>` and `--system-prompt <path>` still accepted.
 
 Registry JSON fields:
 - `uuid` — fresh random UUID v4. Not deterministic; enables compression-triggered refresh without branch or name changes.
@@ -285,13 +298,13 @@ Registry JSON fields:
 
 Overwrites the file if already present. Callers must not clobber a live session.
 
-#### `doc-system.md` auto-injection {#260428-named-agent-doc-system-injection}
+#### `workflow-for-agent.md` auto-injection {#260428-named-agent-doc-system-injection}
 
-When `ws-named-agent new` stores the system prompt, it prepends `claude/infra/doc-system.md` to the caller-supplied content. Stored form: `[doc-system content]\n\n---\n\n[caller system prompt]`. Every agent receives basic orientation on the spec/mental-model/ticket relationship without callers having to request it.
+When `ws-named-agent new` stores the system prompt, it prepends `claude-plugin/infra/workflow-for-agent.md` to the caller-supplied content (falling back to `doc-system.md` for pre-refactor installs where the file may still exist). Stored form: `[workflow-for-agent content]\n\n---\n\n[caller system prompt]`. Every agent receives basic doc-layer orientation and the safe primitive subset without callers having to request it.
 
-Pass `--no-doc-system` to suppress injection. Use this for narrow-role agents that do not need doc-system orientation (e.g., sprint-survey, project-survey, compression helpers).
+Pass `--no-doc-system` to suppress injection. Use this for narrow-role agents (e.g., sprint-survey, project-survey, compression helpers).
 
-If `doc-system.md` is absent (non-ws projects), the flag is silently ignored and no injection occurs.
+If neither file exists (non-ws projects), the flag is silently ignored.
 
 ### `ws-call-named-agent` {#260424-ws-call-named-agent}
 
@@ -299,7 +312,7 @@ If `doc-system.md` is absent (non-ws projects), the flag is silently ignored and
 
 Calls a registered agent by name and delivers its plain-text response to stdout. Agent configuration (model, agent type, system prompt) is read from the registry entry created by `ws-new-named-agent`. Auto-creates a new session or resumes the existing one based on whether a session file exists in `~/.claude/projects/`.
 
-Use `$(ws-infra-path <docname>)` in `ws-new-named-agent --system-prompt` to ensure portability across downstream projects. {#260424-infra-path-portability}
+Use `$(ws-infra-path <docname>)` when a path string is needed outside `ws-new-named-agent` (e.g., piping into `cat`). For `ws-new-named-agent`, pass the bare stem via `-p <stem>` instead — resolution is plugin-relative by design. {#260424-infra-path-portability}
 
 Auto-compression is transparent: when cumulative token usage for the session exceeds 120K, `ws-call-named-agent` extracts the original intent (one-shot Haiku call), injects `agent-compression.md` into the current session to produce a structured handoff document, re-registers the agent with a fresh UUID, and replays the original prompt to the new session. The caller receives the fresh agent's response without any visible interruption. {#260425-ws-call-named-agent-auto-compression}
 
@@ -309,9 +322,37 @@ Auto-compression is transparent: when cumulative token usage for the session exc
 > - Compression is skipped for one call immediately after a handoff to prevent cascade triggering.
 > - Auto-compression applies to the `claude` backend only. The `codex` backend has compression disabled; token count is tracked for observability but no handoff occurs.
 
+### `ws-named-agent erase` {#260429-ws-named-agent-erase}
+
+`ws-named-agent erase <name>` — removes the named agent's registry entry and its associated Claude session file.
+
+Deletes `<registry-dir>/<name>.{json,outbox.txt,output.txt}` and, when a UUID is stored in the registry entry, globs `~/.claude/projects/*/<uuid>.jsonl` to remove the corresponding session file.
+
+> [!note] Constraints
+> - Exits non-zero if the agent is not found.
+> - Session file deletion is best-effort: if the session file has already been removed, erase continues without error.
+
+### `ws-oneshot-agent` {#260429-ws-oneshot-agent-skill-doc}
+
+Wraps the new → call → erase triad into a single invocation. Use when a task requires full tool access but no session persistence.
+
+```bash
+ws-oneshot-agent -p <prompt-stem> [-p <stem2>] [--model <tier>] [--no-doc-system] - <<'PROMPT'
+...
+PROMPT
+```
+
+The agent name is an ephemeral `_oneshot_<8hex>` identifier. Registry and session files are cleaned up via an EXIT trap regardless of call outcome. Output flows to stdout identically to `ws-call-named-agent`.
+
+Distinct from `ws-subquery`: the spawned agent has full tool access; `ws-subquery` is non-interactive with no tool use.
+
+> [!note] Constraints
+> - At least one `-p` stem is required.
+> - `workflow-for-agent.md` is injected by default; pass `--no-doc-system` to suppress.
+
 ### `agent-compression.md` {#260425-agent-compression-doc}
 
-Infra document at `claude/infra/agent-compression.md`. Injected by `ws-call-named-agent` as the next user turn into an agent approaching the 120K token threshold.
+Infra document at `claude-plugin/infra/agent-compression.md`. Injected by `ws-call-named-agent` as the next user turn into an agent approaching the 120K token threshold.
 
 Instructs the agent to produce a structured handoff document without reading any new files:
 - Original purpose and action plan.
@@ -324,15 +365,21 @@ Instructs the agent to produce a structured handoff document without reading any
 
 `ws-infra-path <docname>` → prints the absolute path to a named infra doc, resolved from the plugin's own `infra/` directory regardless of CWD.
 
-Use in `--system-prompt` arguments so callers work in downstream projects:
+Use when a path string is needed outside `ws-new-named-agent` — for example, to pipe into another tool:
 
 ```bash
-ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+cat "$(ws-infra-path impl-playbook.md)"
+```
+
+For `ws-new-named-agent`, pass the bare stem via `-p <stem>` instead:
+
+```bash
+ws-new-named-agent implementer -p implementer
 ws-call-named-agent implementer "<prompt>"
 ```
 
 > [!note] Constraints
-> - Bare `claude/infra/<name>` paths in `--system-prompt` break in downstream projects where `claude/infra/` does not exist relative to CWD.
+> - Bare `claude-plugin/infra/<name>` paths break in downstream projects where `claude-plugin/infra/` does not exist relative to CWD. Always use `-p <stem>` with `ws-new-named-agent` or `$(ws-infra-path <docname>)` for other path contexts.
 > - Exits non-zero when the named doc is not found.
 
 ### `ws-proj-tree` {#260425-ws-proj-tree}

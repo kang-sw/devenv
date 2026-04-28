@@ -17,7 +17,7 @@ bash install.sh --update # skip packages & sudo, refresh symlinks only
 
 ```
 nvim/     Neovim config (LazyVim distro, language support, debugger, etc.)
-claude/   Claude Code skills, agents, and per-project CLAUDE.md template
+claude-plugin/   Claude Code skills, agents, and per-project CLAUDE.md template
 shell/    tmux, WezTerm, starship, zsh dotfiles, helper scripts
 ```
 

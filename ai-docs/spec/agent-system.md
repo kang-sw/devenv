@@ -1,11 +1,11 @@
 ---
 title: Agent System
-summary: Spawnable agents in claude/agents/ — their output contracts, refusals, and spawn contexts within ws workflow skills.
+summary: Spawnable agent roles — output contracts, refusals, and spawn contexts within ws workflow skills.
 ---
 
 # Agent System
 
-Agents are spawnable zero-context roles defined in `claude/agents/`. Each agent is stateless at spawn — it carries no memory of prior invocations. Skills pass all necessary context in the spawn prompt.
+Agent roles are defined as prompt documents in `claude-plugin/infra/prompts/` (with frontmatter declaring model and tools). `clerk` remains in `claude-plugin/agents/` as a native Claude Code agent type. All agents are stateless at spawn — they carry no memory of prior invocations. Skills pass all necessary context in the spawn prompt.
 
 ## `clerk` {#260421-clerk-agent}
 
@@ -77,32 +77,17 @@ Re-review is restricted to previously reported issues only — no expansion to u
 
 ### `code-reviewer` partition mode {#260421-code-reviewer-partition-mode}
 
-When spawned with a partition doc pre-loaded via `ws-print-infra`, the reviewer restricts findings exclusively to that partition's checklist. Three partition docs are available:
+When spawned with a partition doc via `-p`, the reviewer restricts findings exclusively to that partition's checklist. Three partition docs are available in `infra/`:
 
-| Partition | Loaded via | Covers |
+| Partition | `-p` stem | Covers |
 |---|---|---|
-| Correctness | `ws-print-infra code-review-correctness.md` | Logic errors, error paths, contract compliance, security surface, edge cases |
-| Fit | `ws-print-infra code-review-fit.md` | Conventions, code reuse, established patterns, test style |
-| Test | `ws-print-infra code-review-test.md` | Assertion validity, unreachable paths, mock integrity, coverage, test isolation |
+| Correctness | `code-review-correctness` | Logic errors, error paths, contract compliance, security surface, edge cases |
+| Fit | `code-review-fit` | Conventions, code reuse, established patterns, test style |
+| Test | `code-review-test` | Assertion validity, unreachable paths, mock integrity, coverage, test isolation |
 
 Each partition doc explicitly names what it excludes. When a partition is active, findings outside that partition are not reported.
 
 `/implement` spawns Correctness and Fit reviewers in parallel and consolidates findings before sending to the implementer.
-
-### `document-reviewer` {#260421-document-reviewer-agent}
-
-Read-only fresh-eye review of tickets, specs, and design docs. Identical two-phase output structure to `code-reviewer` (Findings report → Final report), but severity meanings are document-domain:
-
-- **Critical** — contradicts a mental-model invariant or spec contract. Blocks the design.
-- **Important** — conceptual gap, unrealistic assumption, or significant reuse gap.
-- **Minor** — clarity, scope, or completeness issue.
-
-Review dimensions: drift against mental-model, spec consistency, conceptual realism, reuse gaps, convention compliance. When the target is a skill or agent doc, also loads `skill-authoring.md` for convention compliance.
-
-**Refusals:**
-- Read-only — no document edits, no commits.
-- No direct source code reads — uses `ws-subquery "<question>"` (Bash) for any code questions.
-- No improvement suggestions for decisions already resolved in mental-model docs.
 
 ## Maintenance Agents
 
@@ -123,25 +108,13 @@ Produces git commits with `(mental-model-updated)` in the commit body.
 
 **Refusals:**
 - No expansion beyond domains affected by the commits since the base commit.
-- No content that fails the inclusion test (defined in `claude/infra/mental-model-conventions.md`).
+- No content that fails the inclusion test (defined in `claude-plugin/infra/mental-model-conventions.md`).
 
 ### `spec-updater` {#260421-spec-updater-agent}
 
 Strips `🚧` markers from spec entries whose implementations have landed in commit history. Conservative: defers to caller on ambiguous matches, never strips speculatively.
 
 Full behavioral spec: see [`spec-system.md` → `spec-updater` Agent](spec-system.md#spec-updater-agent).
-
-## `worker` {#260421-worker-agent}
-
-General-purpose non-code task agent. Accepts any task description in the spawn prompt along with referenced files, tickets, or docs. Scope is defined entirely by the spawn prompt.
-
-**Output:** prose report covering what was produced, output file paths, and open questions. Commits deliverables on the current branch.
-
-**Refusals:**
-- No modification of files outside the task scope without escalating to the caller.
-
-> [!note] Constraints
-> - `worker` is intentionally open-ended — task scope and output format are caller-defined. Use more specific agents (clerk, code-reviewer, document-reviewer, mental-model-updater) when the task fits their contracts.
 
 ## Mental-Model Document System {#260424-mental-model-directory-hierarchy}
 

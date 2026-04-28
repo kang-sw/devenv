@@ -21,10 +21,7 @@ local function navigate_lr(dir, wincmd, pane_at, window_cmd)
   return function()
     local winnr = vim.fn.winnr()
     vim.cmd("wincmd " .. wincmd)
-    if vim.fn.winnr() ~= winnr then
-      return -- vim split 이동 성공
-    end
-    -- vim 안에서 더 갈 곳 없음 → tmux에 위임
+    if vim.fn.winnr() ~= winnr then return end
     local at_edge = vim.fn.system("tmux display-message -p '#{" .. pane_at .. "}'"):gsub("%s+", "")
     if at_edge == "1" then
       vim.fn.system(vim.fn.expand("~/.devenv-scripts/tmux-cross-window.sh") .. " " .. window_cmd)
