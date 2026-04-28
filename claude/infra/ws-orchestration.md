@@ -12,7 +12,9 @@ ws-new-named-agent <agent-name> [--agent <type>] [--system-prompt <path>] [--mod
 Creates a named agent registry entry at `.git/ws@<repo-dir>/agents/<name>.json`.
 
 - `--agent <type>` — agent type forwarded to the `claude` CLI.
-- `--system-prompt <path>` — file path; content is stored in the registry at registration time.
+- `--system-prompt <name-or-path>` — content stored in the registry at registration time.
+  Bare name (no path separator): resolved against `infra/` first, then the working directory, then error.
+  Explicit path (separator present or absolute): read directly.
 - `--model` — model level (`opus`, `sonnet`, `haiku`). Defaults to `sonnet`.
 
 Call at skill start for each agent slot. Overwrites any prior registry entry for
@@ -96,11 +98,17 @@ ws-named-agent tail implementer -5
 ws-infra-path <doc-name>
 ```
 
-Returns the absolute path to an infra doc. Use for `--system-prompt` arguments where
-a path string is required rather than file content.
+Returns the absolute path to an infra doc. Prefer passing bare names directly to
+`--system-prompt` instead — `ws-new-named-agent` resolves them automatically.
+Use `ws-infra-path` only when a path string is needed outside of `ws-new-named-agent`
+(e.g., `cat "$(ws-infra-path implementer.md)"`).
 
 ```bash
-ws-new-named-agent implementer --system-prompt "$(ws-infra-path implementer.md)"
+# preferred — bare name resolved automatically
+ws-new-named-agent implementer --system-prompt implementer
+
+# use ws-infra-path only when the path itself is needed
+cat "$(ws-infra-path implementer.md)"
 ```
 
 ## ws-review-path
@@ -124,9 +132,9 @@ This avoids token overhead from relaying review text through the lead.
 
 ```bash
 # 1. Register all agent slots upfront (creates fresh sessions; stores system prompts)
-ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
-ws-new-named-agent reviewer-corr --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-correctness.md)"
-ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt "$(ws-infra-path code-review-fit.md)"
+ws-new-named-agent implementer --model sonnet --system-prompt implementer
+ws-new-named-agent reviewer-corr --agent ws:code-reviewer --system-prompt code-review-correctness
+ws-new-named-agent reviewer-fit --agent ws:code-reviewer --system-prompt code-review-fit
 
 # 2. Call implementer — auto-starts session on first call
 ws-call-named-agent implementer - <<'PROMPT'
@@ -153,4 +161,9 @@ PROMPT
 # 5. Mid-task interrupt (while implementer runs in background)
 ws-interrupt-named-agent implementer "Stop after the current file. Scope reduced to src/foo.ts only."
 ws-print-named-agent-output implementer
+
+# 6. Resident searcher — spawn once per domain, reset on domain shift
+ws-new-named-agent searcher --system-prompt searcher
+ws-call-named-agent searcher "Where is the session routing logic in ws-named-agent?"
+# Domain shifts: call ws-new-named-agent searcher again to reset context
 ```
