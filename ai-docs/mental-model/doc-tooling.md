@@ -6,6 +6,7 @@ sources:
   - claude-plugin/skills/add-rule/
   - claude-plugin/infra/prompts/
   - claude-plugin/infra/
+  - .claude/skills/polish-plugin-docs/
 related:
   spec-system: "forge-mental-model calls ws-list-spec-stems to embed spec stems when ai-docs/spec/ is present. A stem format change breaks the embedding step."
 ---
@@ -21,7 +22,7 @@ construction), `mental-model-updater` (incremental update after code changes), a
 - `claude-plugin/skills/forge-mental-model/SKILL.md` — from-scratch construction workflow; entry point when no mental-model baseline exists or a full rebuild is needed.
 - `claude-plugin/infra/prompts/mental-model-updater.md` — incremental updater agent; entry point for post-implementation mental-model maintenance.
 - `claude-plugin/skills/add-rule/SKILL.md` — rule authoring skill; entry point for classifying and routing new rules to `CLAUDE.md ## Architecture Rules` or a domain doc `## Domain Rules`.
-- `.claude-plugin/skills/polish-plugin-docs/polish-writer.md` — no-file-read sub-agent for plugin doc simplification; entry point for the verbatim-embed pattern used when an agent cannot read files.
+- `.claude/skills/polish-plugin-docs/polish-writer.md` — no-file-read sub-agent for plugin doc simplification; entry point for the verbatim-embed pattern used when an agent cannot read files.
 
 ## Module Contracts
 
@@ -42,7 +43,7 @@ construction), `mental-model-updater` (incremental update after code changes), a
 - `forge-mental-model` ↔ `TaskCreate` / `TaskList` / `TaskUpdate`: forge-mental-model registers one task per domain using the name prefix `forge-mental-model-<domain>`. Resume detection at invocation reads tasks by this prefix. Clearing or renaming these tasks destroys cross-compact resume state silently.
 - `forge-mental-model` → `ws-list-spec-stems`: when `ai-docs/spec/` is present, forge-mental-model calls `ws-list-spec-stems` (no args) to discover all spec stems, then embeds matching stems in the domain draft. This step is skipped when no spec exists. A change to the `{#YYMMDD-slug}` stem format breaks the embedding step.
 - `forge-spec` ↔ `forge-mental-model`: independent tools. forge-spec produces spec content; forge-mental-model consumes stems from that content via ws-list-spec-stems. forge-spec does not invoke forge-mental-model and vice versa. Bootstrap suggests forge-spec first when both are absent.
-- `polish-writer` ↔ `ai-docs/ref/skill-authoring.md`: polish-writer embeds the full content of skill-authoring.md verbatim (no file-read capability). A change to skill-authoring.md requires a manual update to the embedded block in `.claude-plugin/skills/polish-plugin-docs/polish-writer.md`. The block is identified by the Doctrine comment in that file.
+- `polish-writer` ↔ `ai-docs/ref/skill-authoring.md`: polish-writer embeds the full content of skill-authoring.md verbatim (no file-read capability). A change to skill-authoring.md requires a manual update to the embedded block in `.claude/skills/polish-plugin-docs/polish-writer.md`. The block is identified by the Doctrine comment in that file.
 
 ## Extension Points & Change Recipes
 
@@ -60,4 +61,4 @@ construction), `mental-model-updater` (incremental update after code changes), a
 - Splitting or restructuring mental-model docs without a corresponding code-structure change in the diff — forge authority requires an observable code-structure trigger. Restructuring on judgment alone violates the updater's invariant.
 - Editing `## Domain Rules` content directly via `mental-model-updater` — the updater only promotes rules upward and flags stale ones in output. Edits to rule content require manual user action or re-invocation of `/add-rule`.
 - Writing a rule directly to `CLAUDE.md` or a domain doc without going through `/add-rule` — misrouting is silent and not caught at write time. Use `/add-rule` to trigger the classification step.
-- Editing `ai-docs/ref/skill-authoring.md` without updating the verbatim copy embedded in `.claude-plugin/skills/polish-plugin-docs/polish-writer.md` — the agent silently applies stale authoring principles. The embedded block must stay in sync with the source file.
+- Editing `ai-docs/ref/skill-authoring.md` without updating the verbatim copy embedded in `.claude/skills/polish-plugin-docs/polish-writer.md` — the agent silently applies stale authoring principles. The embedded block must stay in sync with the source file.
