@@ -617,6 +617,20 @@ sys.exit(0 if p and p.get('installLocation') == sys.argv[2] else 1)
     muted "ws plugin already installed at snapshot path"
   else
     info "Installing ws plugin..."
+    # Remove stale entry so claude plugin install writes a fresh installLocation.
+    # Version equality would otherwise cause the install to no-op without updating the path.
+    if [[ -f "$INSTALLED_PLUGINS" ]]; then
+      python3 - "$INSTALLED_PLUGINS" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+d = json.load(open(path))
+if 'ws@kang-sw-devenv' in d.get('plugins', {}):
+    del d['plugins']['ws@kang-sw-devenv']
+    with open(path, 'w') as f:
+        json.dump(d, f, indent=2)
+        f.write('\n')
+PYEOF
+    fi
     claude plugin install ws@kang-sw-devenv && success "ws plugin installed" || warn "ws plugin install failed — run manually: claude plugin install ws@kang-sw-devenv"
   fi
 else
