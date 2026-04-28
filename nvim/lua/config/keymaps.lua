@@ -11,31 +11,24 @@ map("i", "<M-BS>", "<C-w>", { desc = "Delete word backward" })
 map("i", "<C-a>", "<Home>", { desc = "Move to line start" })
 map("i", "<C-e>", "<End>", { desc = "Move to line end" })
 
--- vim-tmux pane navigation (C-M-hjkl)
--- 상하: vim-tmux-navigator 그대로 사용
--- 좌우: vim split 없으면 tmux pane → 그것도 끝이면 previous/next-window
-vim.keymap.set({ "n", "i", "t" }, "<C-M-j>", "<cmd>TmuxNavigateDown<cr>", { desc = "Navigate down (vim/tmux)" })
-vim.keymap.set({ "n", "i", "t" }, "<C-M-k>", "<cmd>TmuxNavigateUp<cr>", { desc = "Navigate up (vim/tmux)" })
-
-local function navigate_lr(dir, wincmd, pane_at, window_cmd)
-  return function()
-    local winnr = vim.fn.winnr()
-    vim.cmd("wincmd " .. wincmd)
-    if vim.fn.winnr() ~= winnr then
-      return -- vim split 이동 성공
-    end
-    -- vim 안에서 더 갈 곳 없음 → tmux에 위임
-    local at_edge = vim.fn.system("tmux display-message -p '#{" .. pane_at .. "}'"):gsub("%s+", "")
-    if at_edge == "1" then
-      vim.fn.system(vim.fn.expand("~/.devenv-scripts/tmux-cross-window.sh") .. " " .. window_cmd)
-    else
-      vim.fn.system("tmux select-pane -" .. dir)
-    end
-  end
-end
-
-vim.keymap.set({ "n", "i", "t" }, "<C-M-h>", navigate_lr("L", "h", "pane_at_left", "right"), { desc = "Navigate left (vim/tmux/window)" })
-vim.keymap.set({ "n", "i", "t" }, "<C-M-l>", navigate_lr("R", "l", "pane_at_right", "left"), { desc = "Navigate right (vim/tmux/window)" })
+-- vim-tmux pane navigation (C-M-hjkl) — disabled; tmux now handles navigation directly
+-- vim.keymap.set({ "n", "i", "t" }, "<C-M-j>", "<cmd>TmuxNavigateDown<cr>", { desc = "Navigate down (vim/tmux)" })
+-- vim.keymap.set({ "n", "i", "t" }, "<C-M-k>", "<cmd>TmuxNavigateUp<cr>", { desc = "Navigate up (vim/tmux)" })
+-- local function navigate_lr(dir, wincmd, pane_at, window_cmd)
+--   return function()
+--     local winnr = vim.fn.winnr()
+--     vim.cmd("wincmd " .. wincmd)
+--     if vim.fn.winnr() ~= winnr then return end
+--     local at_edge = vim.fn.system("tmux display-message -p '#{" .. pane_at .. "}'"):gsub("%s+", "")
+--     if at_edge == "1" then
+--       vim.fn.system(vim.fn.expand("~/.devenv-scripts/tmux-cross-window.sh") .. " " .. window_cmd)
+--     else
+--       vim.fn.system("tmux select-pane -" .. dir)
+--     end
+--   end
+-- end
+-- vim.keymap.set({ "n", "i", "t" }, "<C-M-h>", navigate_lr("L", "h", "pane_at_left", "right"), { desc = "Navigate left (vim/tmux/window)" })
+-- vim.keymap.set({ "n", "i", "t" }, "<C-M-l>", navigate_lr("R", "l", "pane_at_right", "left"), { desc = "Navigate right (vim/tmux/window)" })
 
 -- tmux 스타일 스플릿
 vim.keymap.set("n", '<leader>"', "<cmd>split<CR>", { desc = "Horizontal split" })

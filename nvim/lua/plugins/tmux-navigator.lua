@@ -1,4 +1,5 @@
-return {
-  "christoomey/vim-tmux-navigator",
-  event = "VeryLazy",
-}
+-- return {
+--   "christoomey/vim-tmux-navigator",
+--   event = "VeryLazy",
+-- }
+return {}
