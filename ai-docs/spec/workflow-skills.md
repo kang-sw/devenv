@@ -230,6 +230,18 @@ Sprint routes implementation tasks to the shared primitives:
 
 Both primitives self-clean their review path files. No doc pipeline runs during a sprint task — deferred to wrap-up.
 
+### `/workflow` {#260428-workflow-skill}
+
+Loads the WS orchestration primitives reference into session context. Invoked via Skill tool at the start of `/discuss` and `/sprint` sessions; users may also invoke directly with `/workflow`.
+
+Content is session-resident: unlike `ws-print-infra` output (which is cleared by compaction), skill content loaded via the Skill tool survives context compaction. Re-invoking `/workflow` after a compaction restores the reference without re-running any shell commands.
+
+The skill has no side effects — reading it is the act of invocation.
+
+> [!note] Constraints
+> - Does not replace `ws-print-infra` for agent Bash tool contexts; those agents use `ws-print-infra` or `workflow-for-agent.md` auto-injection.
+> - Skills that invoke `/workflow` via `ws:workflow` Skill tool do so in their `On: invoke` step; they do not call `ws-print-infra ws-orchestration.md`.
+
 ## Reconstruction
 
 ### `/forge-spec` {#260421-forge-spec}
