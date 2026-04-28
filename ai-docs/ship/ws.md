@@ -14,7 +14,7 @@ Bump rules:
 At ship time:
 1. Run `git log <last-tag>..HEAD --oneline` to enumerate changes.
 2. Classify each commit as minor, patch, or major using the rules above.
-3. Apply the highest bump to the current version in `claude/.claude-plugin/plugin.json`.
+3. Apply the highest bump to the current version in `claude-plugin/.claude-plugin/plugin.json`.
 4. Update the `Plugin: ws@<version>` line in `ai-docs/_index.md`.
 
 ## Pre-flight
@@ -42,7 +42,7 @@ One entry per shipped version. Derive content from `git log <last-tag>..HEAD`.
 
 ## Build
 
-- `claude plugin update ws@ws` — propagate changes to local plugin cache.
+- `claude plugin update ws@kang-sw-devenv` — propagate changes to local plugin cache.
 
 ## Tag
 
