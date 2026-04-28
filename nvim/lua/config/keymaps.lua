@@ -37,18 +37,6 @@ end
 vim.keymap.set({ "n", "i", "t" }, "<C-M-h>", navigate_lr("L", "h", "pane_at_left", "right"), { desc = "Navigate left (vim/tmux/window)" })
 vim.keymap.set({ "n", "i", "t" }, "<C-M-l>", navigate_lr("R", "l", "pane_at_right", "left"), { desc = "Navigate right (vim/tmux/window)" })
 
--- snacks picker list intercepts all keys, so re-apply navigation keymaps buffer-locally
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "snacks_picker_list",
-  callback = function(ev)
-    local buf = ev.buf
-    vim.keymap.set("n", "<C-M-j>", "<cmd>TmuxNavigateDown<cr>", { buffer = buf })
-    vim.keymap.set("n", "<C-M-k>", "<cmd>TmuxNavigateUp<cr>", { buffer = buf })
-    vim.keymap.set("n", "<C-M-h>", navigate_lr("L", "h", "pane_at_left", "right"), { buffer = buf })
-    vim.keymap.set("n", "<C-M-l>", navigate_lr("R", "l", "pane_at_right", "left"), { buffer = buf })
-  end,
-})
-
 -- tmux 스타일 스플릿
 vim.keymap.set("n", '<leader>"', "<cmd>split<CR>", { desc = "Horizontal split" })
 vim.keymap.set("n", "<leader>%", "<cmd>vsplit<CR>", { desc = "Vertical split" })
