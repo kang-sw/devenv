@@ -252,9 +252,19 @@ def _claude_tokens(data: dict) -> int:
     )
 
 
+def _hook_cmd() -> str:
+    # On Windows, use pythonw.exe so the hook fires without a console window flash.
+    # pythonw suppresses stdout/stderr, which is fine: check-mailbox uses only exit codes.
+    if sys.platform == "win32":
+        pythonw = Path(sys.executable).parent / "pythonw.exe"
+        exe = str(pythonw) if pythonw.exists() else sys.executable
+        return f'"{exe}" "{SCRIPT_DIR}/ws-named-agent" check-mailbox'
+    return f"{SCRIPT_DIR}/ws-named-agent check-mailbox"
+
+
 def _settings_json() -> str:
     # Use absolute path so the hook works regardless of the hook shell's PATH
-    cmd = f"{SCRIPT_DIR}/ws-named-agent check-mailbox"
+    cmd = _hook_cmd()
     return json.dumps({
         "hooks": {
             "PostToolBatch": [{
@@ -505,7 +515,7 @@ def _call_codex(
         flags = ["--dangerously-bypass-approvals-and-sandbox", "--json"]
         if model and model not in _BACKEND_SHORTHANDS:
             flags += ["--model", model]
-        check_cmd = f"{SCRIPT_DIR}/ws-named-agent check-mailbox"
+        check_cmd = _hook_cmd()
         # TOML inline-table syntax required; json.dumps for string quoting is compatible
         hook_toml = f'[{{hooks=[{{type="command",command={json.dumps(check_cmd)},timeout=5}}]}}]'
         flags += ["-c", "features.codex_hooks=true", "-c", f"hooks.PostToolUse={hook_toml}"]
