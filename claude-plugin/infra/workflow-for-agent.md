@@ -39,3 +39,28 @@ advancing ticket status) is the lead's responsibility.
 
 If a doc appears stale or contradicts code you encounter, note it in your output.
 Do not silently work around it.
+
+## Available Primitives
+
+These read-only tools are safe to call from any agent context:
+
+```bash
+ws-print-infra <stem>        # print an infra doc to stdout
+ws-infra-path <stem>         # resolve infra doc path
+ws-list-mental-model [paths] # list relevant mental-model docs
+ws-list-spec-stems           # list all spec stems in ai-docs/spec/
+ws-proj-tree                 # print project structure overview
+ws-spec-build-index          # run spec health checks (read + fix only, no side-effects)
+ws-subquery "<question>"     # haiku-backed read-only codebase search
+ws-subquery --deep-research "<question>"  # sonnet-backed, for cross-module traces
+```
+
+Do NOT call these from sub-agent context — they are lead-only orchestration
+primitives:
+
+```
+ws-new-named-agent    # registers a new agent session
+ws-call-named-agent   # dispatches a registered agent
+ws-interrupt-named-agent  # injects a message into a running agent
+ws-merge-branch       # merges a sprint branch into main
+```
