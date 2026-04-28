@@ -11,6 +11,10 @@ argument-hint: "[sprint-name]"
 
 Target: $ARGUMENTS
 
+## Project Map
+
+!`ws-proj-tree`
+
 ## Invariants
 
 - Sprint operates only on `sprint/`-prefixed branches — do not enter the session loop or run wrap-up on any other branch.
