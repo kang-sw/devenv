@@ -18,6 +18,8 @@ PLUGIN_DIR = SCRIPT_DIR.parent
 KNOWN_TIERS = {"opus", "sonnet", "haiku"}
 
 if sys.platform == "win32":
+    if sys.stdin is not None:
+        sys.stdin.reconfigure(encoding="utf-8")
     if sys.stdout is not None:
         sys.stdout.reconfigure(encoding="utf-8")
     if sys.stderr is not None:
@@ -465,6 +467,7 @@ def _codex_tokens(events: list[dict]) -> int:
             u = event.get("usage") or {}
             return (
                 (u.get("input_tokens") or 0)
+                + (u.get("cached_input_tokens") or 0)
                 + (u.get("output_tokens") or 0)
             )
     return 0
@@ -566,65 +569,6 @@ def _call_codex(
     registry["context-window"] = tokens
     _atomic_write(registry_dir / f"{agent_name}.json", registry)
 
-    threshold = int(os.environ.get("WS_COMPRESS_THRESHOLD", "120000"))
-    if tokens > threshold and not skip_compression:
-        print("[info] Context threshold exceeded — compressing session...", file=sys.stderr)
-
-        # Step a: intent summary via claude haiku (backend-agnostic helper)
-        intent_file = _mktemp()
-        with open(intent_file, "w", encoding="utf-8") as out:
-            _subrun(
-                _claude_exe() + ["-p", "--dangerously-skip-permissions",
-                "--output-format", "json", "--model", "haiku",
-                "--system-prompt", "Summarize the user's intent in 2-3 sentences. Do not perform the task.",
-                prompt,
-            ], stdout=out, check=True)
-        with open(intent_file, encoding="utf-8") as fh:
-            intent_summary = json.load(fh).get("result", "")
-
-        # Step b: inject compression prompt into existing codex session
-        compression_prompt = (PLUGIN_DIR / "infra" / "agent-compression.md").read_text(encoding="utf-8")
-        comp_events = _run(compression_prompt, uuid)
-        compression_doc = _codex_result_text(comp_events)
-
-        # Step c: snapshot outbox, re-register with fresh uuid, restore outbox
-        saved_outbox = outbox_file.read_text(encoding="utf-8") if outbox_file.stat().st_size > 0 else ""
-
-        new_args = [sys.executable, str(SCRIPT_DIR / "ws-named-agent"), "new", agent_name]
-        if model:
-            new_args += ["--model", model]
-        if agent_type:
-            new_args += ["--agent-type", agent_type]
-        if effective_sp:
-            sp_tmp = _mktemp()
-            Path(sp_tmp).write_text(effective_sp, encoding="utf-8")
-            new_args += ["--system-prompt", sp_tmp]
-        _subrun(new_args, check=True)
-
-        with open(registry_dir / f"{agent_name}.json") as fh:
-            new_reg = json.load(fh)
-        new_reg["compressed_at"] = True
-        _atomic_write(registry_dir / f"{agent_name}.json", new_reg)
-
-        if saved_outbox:
-            outbox_file.write_text(saved_outbox, encoding="utf-8")
-
-        # Step d: handoff to fresh codex session — thread_id assigned at runtime
-        handoff_prompt = f"{compression_doc}\n\n---\n\n{intent_summary}\n\n---\n\n{prompt}"
-        handoff_events = _run(handoff_prompt, "")
-
-        new_thread_id = _codex_thread_id(handoff_events)
-        with open(registry_dir / f"{agent_name}.json") as fh:
-            new_reg = json.load(fh)
-        if new_thread_id:
-            new_reg["uuid"] = new_thread_id
-        h_tokens = _codex_tokens(handoff_events)
-        new_reg["token_count"] = h_tokens
-        new_reg["context-window"] = h_tokens
-        _atomic_write(registry_dir / f"{agent_name}.json", new_reg)
-
-        return CallResult(text=_codex_result_text(handoff_events), is_error=False, tokens=h_tokens)
-
     return CallResult(text=text, is_error=False, tokens=tokens)
 
 
@@ -653,6 +597,7 @@ def cmd_new(argv: list[str]) -> None:
     system_prompt_path = ""
     agent_type = ""
     agent_type_set = False
+    no_doc_system = False
 
     i = 1
     while i < len(argv):
@@ -662,6 +607,8 @@ def cmd_new(argv: list[str]) -> None:
             system_prompt_path = argv[i + 1]; i += 2
         elif argv[i] in ("--agent-type", "--agent"):
             agent_type = argv[i + 1]; agent_type_set = True; i += 2
+        elif argv[i] == "--no-doc-system":
+            no_doc_system = True; i += 1
         else:
             print(f"Unknown flag: {argv[i]}", file=sys.stderr); sys.exit(1)
 
@@ -696,6 +643,12 @@ def cmd_new(argv: list[str]) -> None:
 
     backend = infer_backend(model) if model else "claude"
     system_prompt = _resolve_system_prompt(system_prompt_path)
+
+    if not no_doc_system:
+        doc_sys_path = PLUGIN_DIR / "infra" / "doc-system.md"
+        if doc_sys_path.exists():
+            doc_sys = doc_sys_path.read_text(encoding="utf-8")
+            system_prompt = (doc_sys + "\n\n---\n\n" + system_prompt).strip() if system_prompt else doc_sys
 
     registry_dir = _registry_dir()
     registry_dir.mkdir(parents=True, exist_ok=True)

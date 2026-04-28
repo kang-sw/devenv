@@ -166,7 +166,7 @@ A multi-task session container that replaces the manual `/discuss` → `/proceed
 
 > [!note] Constraints
 > - Sprint operates only on `sprint/`-prefixed branches.
-> - The doc pipeline (`ws:spec-updater`, `ws:mental-model-updater`) is suppressed during task execution and runs once at wrap-up.
+> - The doc pipeline (spec audit, `ws:mental-model-updater`) is suppressed during task execution and runs once at wrap-up.
 
 #### Sprint Continue Detection {#260425-sprint-continue}
 
@@ -193,13 +193,11 @@ At session start, and on demand when the domain shifts mid-session, sprint dispa
 Triggered by an explicit user done signal. The hardcoded wrap-up procedure:
 
 1. Reads the full branch diff (`git diff parent..HEAD`).
-2. Spec-update pass: registers `ws:spec-updater` in Suggestion mode with the full commit list. Spec-updater returns `### Proposed strips` and any pending-removal entries without editing files. The lead applies proposed strips directly, surfaces pending-removal entries to the user, and runs `ws-spec-build-index`.
-3. Dispatches `ws:mental-model-updater` with a note that docs may be stale — explore thoroughly.
+2. **Spec-update pass (lead-driven)**: the lead loads `spec-conventions.md` and `write-spec/SKILL.md`, then scans each commit for caller-visible behavior changes (`judge: spec-impact`). For each impacted area, the lead reads the relevant spec file and adds new entries if missing (running `ws-generate-spec-stem` for each new anchor). The lead then strips `🚧` from headings whose stems appear in the commit log and removes any corresponding `> [!note] Planned 🚧` callout blocks. Commits with `removed: <stem>` in their `## Spec` section trigger manual removal of the corresponding entry. `ws-spec-build-index` runs after any modification; all spec changes commit together.
+3. Dispatches `ws:mental-model-updater` with a note that docs may be stale — explore thoroughly. (Runs after spec-update so the updater sees any stripped 🚧 entries.)
 4. Runs `executor-wrapup` (existing tickets only — sets `## Result` and advances state; no new ticket creation).
 5. Emits a post-hoc report to the user (entries added, stripped, or removed).
 6. Suggests branch merge or deletion.
-
-The sequential spec → mental-model order ensures `ws:mental-model-updater` sees any 🚧 strips committed by the spec-update loop.
 
 > [!note] Constraints
 > - Wrap-up runs once per sprint, not per task.
@@ -268,6 +266,14 @@ Registry JSON fields:
 
 Overwrites the file if already present. Callers must not clobber a live session.
 
+#### `doc-system.md` auto-injection {#260428-named-agent-doc-system-injection}
+
+When `ws-named-agent new` stores the system prompt, it prepends `claude/infra/doc-system.md` to the caller-supplied content. Stored form: `[doc-system content]\n\n---\n\n[caller system prompt]`. Every agent receives basic orientation on the spec/mental-model/ticket relationship without callers having to request it.
+
+Pass `--no-doc-system` to suppress injection. Use this for narrow-role agents that do not need doc-system orientation (e.g., sprint-survey, project-survey, compression helpers).
+
+If `doc-system.md` is absent (non-ws projects), the flag is silently ignored and no injection occurs.
+
 ### `ws-call-named-agent` {#260424-ws-call-named-agent}
 
 `ws-call-named-agent <agent-name> "<prompt>"`
@@ -282,6 +288,7 @@ Auto-compression is transparent: when cumulative token usage for the session exc
 > - Output is the agent's plain-text response. No JSON is exposed to callers.
 > - Exit code is 1 when the underlying call reports an error.
 > - Compression is skipped for one call immediately after a handoff to prevent cascade triggering.
+> - Auto-compression applies to the `claude` backend only. The `codex` backend has compression disabled; token count is tracked for observability but no handoff occurs.
 
 ### `agent-compression.md` {#260425-agent-compression-doc}
 

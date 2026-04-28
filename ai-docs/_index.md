@@ -66,6 +66,7 @@ claude/infra/                 — docs only; accessed via ws-print-infra
   skeleton-writer.md          — skeleton-writer agent role: codebase exploration, stub + test authoring, build verification
   ws-orchestration.md         — ws-new-named-agent / ws-call-named-agent coordination primitives for subagent orchestration
   sprint-survey.md            — sprint-survey agent role: identifies relevant spec/mental-model docs for sprint wrap-up
+  doc-system.md               — doc-layer orientation for 3rd-party subagents: spec/mental-model/ticket relationships, 🚧 markers, stems; auto-injected by ws-named-agent new
 
 claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-subquery                    — scoped sub-query via headless claude subprocess
@@ -80,7 +81,7 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
   ws-named-agent                    — unified Python entry point for named agent management (subcommands: new, call, interrupt, print, check-mailbox, tail, override)
   ws-new-named-agent                — shim → ws-named-agent new; create named agent registry entry (.git/ws@<repo>/agents/<name>.json)
-  ws-call-named-agent               — shim → ws-named-agent call; auto-routes session, compresses at 120K tokens, persists output, drains outbox
+  ws-call-named-agent               — shim → ws-named-agent call; auto-routes session, compresses at 120K tokens (claude backend only), persists output, drains outbox
   ws-interrupt-named-agent          — shim → ws-named-agent interrupt; queue a message to a named agent's outbox
   ws-agent-check-mailbox            — shim → ws-named-agent check-mailbox; PostToolBatch hook: exits 2 when WS_AGENT_OUTBOX is non-empty
   ws-print-named-agent-output       — shim → ws-named-agent print; print the persisted output file of a named agent
