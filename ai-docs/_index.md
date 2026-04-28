@@ -74,7 +74,7 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
   ws-list-spec-stems             — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
   ws-merge-branch                — branch merge with strategy selection (squash or --no-ff)
   ws-list-mental-model           — enumerate mental-model docs relevant to target paths
-  ws-print-infra                  — cat any infra doc by name (agent Bash tool context)
+  ws-print-infra                  — cat any infra doc by name or bare stem (agent Bash tool context)
   ws-infra-path               — return absolute path to an infra doc (for --system-prompt args)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
