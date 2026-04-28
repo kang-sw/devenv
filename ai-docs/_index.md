@@ -93,6 +93,7 @@ claude/bin/                   — PATH-accessible executables (added by plugin)
 claude/skills/
   discuss/             — explore approach/direction, capture as tickets
   write-ticket/        — create/edit tickets in ai-docs/tickets/
+  update-spec/         — lead-driven spec audit: scan commits for spec-impact, add entries, strip 🚧, handle removals
   write-spec/          — create/update external-perspective spec docs in ai-docs/spec/
   write-skeleton/      — public interface stubs + integration tests
   add-rule/            — classify and route a new rule to CLAUDE.md (cross-cutting) or mental-model Domain Rules (domain-scoped)

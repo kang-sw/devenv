@@ -3,7 +3,8 @@ name: edit
 description: >
   Direct-edit primitive. The lead reads, edits, verifies, and commits on the
   current branch. One named-agent reviewer covers correctness and fit.
-  No brief, no delegation, no doc pipeline — callers own those.
+  Runs ws:update-spec on the edit's commit range before returning.
+  No brief, no delegation — callers own mental-model updates.
 argument-hint: "[ticket-path or inline brief]"
 ---
 
@@ -22,6 +23,7 @@ Target: $ARGUMENTS
 - Review relay cap: 2 cycles maximum; proceed to cleanup regardless of status after the cap.
 - Escalate to `/implement` if scope grows to multi-file with new public API or cross-module without established pattern.
 - Self-cleanup: review path file is deleted before returning.
+- Run `ws:update-spec` with the edit's commit range before outputting the completion report.
 - On completion, output the completion report in the format defined in Templates.
 
 ## On: invoke
@@ -100,6 +102,10 @@ Repeat until `[clean]` or after 2 relay cycles — then proceed to cleanup regar
 rm -f <review-path>
 ```
 
+### 6. Spec update
+
+Invoke `ws:update-spec` via Skill tool with args `<start-commit>..HEAD`.
+
 Output the **completion report** (see Templates).
 
 ## Judgments
@@ -120,6 +126,7 @@ Edit complete.
 Commit range: <start-commit>..HEAD
 Test status: pass | fail | skipped
 Review: clean | non-clean (<one-line summary>)
+Spec: <N entries added, M 🚧 stripped> | no changes
 <if issues remain after cap:> Open issues: <list>
 ```
 
