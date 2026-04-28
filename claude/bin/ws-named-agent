@@ -399,7 +399,7 @@ def _call_claude(
         # Step c: snapshot outbox, re-register with fresh UUID, restore outbox
         saved_outbox = outbox_file.read_text(encoding="utf-8") if outbox_file.stat().st_size > 0 else ""
 
-        new_args = ["ws-named-agent", "new", agent_name]
+        new_args = [sys.executable, str(SCRIPT_DIR / "ws-named-agent"), "new", agent_name]
         if model:
             new_args += ["--model", model]
         if agent_type:
@@ -459,7 +459,6 @@ def _codex_tokens(events: list[dict]) -> int:
             u = event.get("usage") or {}
             return (
                 (u.get("input_tokens") or 0)
-                + (u.get("cached_input_tokens") or 0)
                 + (u.get("output_tokens") or 0)
             )
     return 0
@@ -526,10 +525,10 @@ def _call_codex(
     def _run(p: str, thread_id: str = "") -> list[dict]:
         base = _base_flags()
         if thread_id:
-            cmd = _codex_exe() + ["exec", "resume"] + base + [thread_id, p]
+            cmd = _codex_exe() + ["exec", "resume"] + base + [thread_id, "-"]
         else:
-            cmd = _codex_exe() + ["exec"] + base + [p]
-        r = _subrun(cmd, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+            cmd = _codex_exe() + ["exec"] + base + ["-"]
+        r = _subrun(cmd, capture_output=True, text=True, encoding="utf-8", input=p)
         events = _codex_parse_jsonl(r.stdout)
         if r.returncode != 0 and not events:
             sys.stderr.write(r.stderr)
@@ -585,7 +584,7 @@ def _call_codex(
         # Step c: snapshot outbox, re-register with fresh uuid, restore outbox
         saved_outbox = outbox_file.read_text(encoding="utf-8") if outbox_file.stat().st_size > 0 else ""
 
-        new_args = ["ws-named-agent", "new", agent_name]
+        new_args = [sys.executable, str(SCRIPT_DIR / "ws-named-agent"), "new", agent_name]
         if model:
             new_args += ["--model", model]
         if agent_type:
