@@ -71,6 +71,8 @@ _WIN_NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 def _subrun(*args, **kwargs) -> "subprocess.CompletedProcess[object]":
     if _WIN_NO_WINDOW:
         kwargs.setdefault("creationflags", _WIN_NO_WINDOW)
+    if "stdin" not in kwargs and "input" not in kwargs:
+        kwargs["stdin"] = subprocess.DEVNULL
     return subprocess.run(*args, **kwargs)
 
 # ── Registry helpers ──────────────────────────────────────────────────────────
