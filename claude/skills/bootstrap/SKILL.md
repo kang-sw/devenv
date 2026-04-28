@@ -38,7 +38,7 @@ Mode: $ARGUMENTS
 3. Create `ai-docs/` structure per the MIGRATION block in the template:
    - `ai-docs/_index.md` (with memory-policy comment, skeleton headings)
    - `ai-docs/_index.local.md` (stub, add to `.gitignore`)
-   - `ai-docs/tickets/` with status subdirectories: `idea/`, `todo/`, `wip/`, `done/`, `dropped/`
+   - `ai-docs/tickets/` with status subdirectories: `idea/`, `todo/`, `done/`, `dropped/`
    - `ai-docs/mental-model/`, `ai-docs/deps/`, `ai-docs/ref/`
 4. Add `ai-docs/_index.local.md` to `.gitignore` if not present.
 5. Set `<!-- Template Version: vNNNN -->` to latest version from template.

@@ -97,7 +97,7 @@ When a spec heading's `{#slug}` changes, include `renamed-spec: <old-stem> → <
 - Before creating or editing tickets, load `/write-ticket` for conventions.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
   full path — stems stay stable across status moves.
-- When starting work on a ticket, move it to `wip/` immediately.
+- Check `## Ticket Queue` in `ai-docs/_index.md` for the intended implementation order before starting a ticket.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>`
   and look for `## Ticket Updates` sections in matching commits.
 - **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
@@ -114,7 +114,7 @@ ai-docs/
   spec/              — external-perspective specs (area/ directories for multi-section areas)
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
-  tickets/<status>/  — idea/ todo/ wip/ done/ dropped/
+  tickets/<status>/  — idea/ todo/ done/ dropped/
 
 _index.md should cover:
   - Project summary (what it is, who it's for, current milestone)
@@ -253,6 +253,12 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          are domain-scoped, not cross-cutting. Reclassify them into
          `ai-docs/mental-model/<domain>.md ## Domain Rules` via `/add-rule`.
          Applied on the next `/bootstrap upgrade` run.
+- v0029: If `ai-docs/tickets/wip/` exists: for each ticket inside, `git mv` it to
+         `ai-docs/tickets/todo/`. Remove the now-empty `wip/` directory.
+         Add a `## Ticket Queue` section to `ai-docs/_index.md` if absent
+         (format: one line per `todo/` ticket — `` `stem` — purpose and dependency notes ``).
+         Then open a `/discuss` session with the user to agree on implementation
+         order for `todo/` tickets and populate the queue.
 -->
 
-<!-- Template Version: v0028 -->
+<!-- Template Version: v0029 -->
