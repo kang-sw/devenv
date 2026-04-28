@@ -77,7 +77,7 @@ claude-plugin/bin/                   — PATH-accessible executables (added by p
   ws-merge-branch                — branch merge with strategy selection (squash or --no-ff)
   ws-list-mental-model           — enumerate mental-model docs relevant to target paths
   ws-print-infra                  — cat any infra doc by name or bare stem (agent Bash tool context)
-  ws-infra-path               — return absolute path to an infra doc (for --system-prompt args)
+  ws-infra-path               — return absolute path to an infra doc (for external path contexts; use -p <stem> with ws-new-named-agent)
   ws-proj-tree                — render ai-docs/ tree + spec/ticket summary for /discuss project map
   ws-review-path                 — allocate temp file paths for review outputs (multi-stem, non-deterministic)
   ws-named-agent                    — unified Python entry point for named agent management (subcommands: new, call, interrupt, print, check-mailbox, tail, override)

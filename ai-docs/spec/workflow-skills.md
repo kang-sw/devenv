@@ -288,7 +288,7 @@ Overwrites the file if already present. Callers must not clobber a live session.
 
 #### `workflow-for-agent.md` auto-injection {#260428-named-agent-doc-system-injection}
 
-When `ws-named-agent new` stores the system prompt, it prepends `claude-plugin/infra/workflow-for-agent.md` to the caller-supplied content (falling back to `doc-system.md` for older installs). Stored form: `[workflow-for-agent content]\n\n---\n\n[caller system prompt]`. Every agent receives basic doc-layer orientation and the safe primitive subset without callers having to request it.
+When `ws-named-agent new` stores the system prompt, it prepends `claude-plugin/infra/workflow-for-agent.md` to the caller-supplied content (falling back to `doc-system.md` for pre-refactor installs where the file may still exist). Stored form: `[workflow-for-agent content]\n\n---\n\n[caller system prompt]`. Every agent receives basic doc-layer orientation and the safe primitive subset without callers having to request it.
 
 Pass `--no-doc-system` to suppress injection. Use this for narrow-role agents (e.g., sprint-survey, project-survey, compression helpers).
 
@@ -300,7 +300,7 @@ If neither file exists (non-ws projects), the flag is silently ignored.
 
 Calls a registered agent by name and delivers its plain-text response to stdout. Agent configuration (model, agent type, system prompt) is read from the registry entry created by `ws-new-named-agent`. Auto-creates a new session or resumes the existing one based on whether a session file exists in `~/.claude/projects/`.
 
-Use `$(ws-infra-path <docname>)` in `ws-new-named-agent --system-prompt` to ensure portability across downstream projects. {#260424-infra-path-portability}
+Use `$(ws-infra-path <docname>)` when a path string is needed outside `ws-new-named-agent` (e.g., piping into `cat`). For `ws-new-named-agent`, pass the bare stem via `-p <stem>` instead — resolution is plugin-relative by design. {#260424-infra-path-portability}
 
 Auto-compression is transparent: when cumulative token usage for the session exceeds 120K, `ws-call-named-agent` extracts the original intent (one-shot Haiku call), injects `agent-compression.md` into the current session to produce a structured handoff document, re-registers the agent with a fresh UUID, and replays the original prompt to the new session. The caller receives the fresh agent's response without any visible interruption. {#260425-ws-call-named-agent-auto-compression}
 
@@ -325,15 +325,21 @@ Instructs the agent to produce a structured handoff document without reading any
 
 `ws-infra-path <docname>` → prints the absolute path to a named infra doc, resolved from the plugin's own `infra/` directory regardless of CWD.
 
-Use in `--system-prompt` arguments so callers work in downstream projects:
+Use when a path string is needed outside `ws-new-named-agent` — for example, to pipe into another tool:
 
 ```bash
-ws-new-named-agent implementer --model sonnet --system-prompt "$(ws-infra-path implementer.md)"
+cat "$(ws-infra-path impl-playbook.md)"
+```
+
+For `ws-new-named-agent`, pass the bare stem via `-p <stem>` instead:
+
+```bash
+ws-new-named-agent implementer -p implementer
 ws-call-named-agent implementer "<prompt>"
 ```
 
 > [!note] Constraints
-> - Bare `claude-plugin/infra/<name>` paths in `--system-prompt` break in downstream projects where `claude-plugin/infra/` does not exist relative to CWD.
+> - Bare `claude-plugin/infra/<name>` paths break in downstream projects where `claude-plugin/infra/` does not exist relative to CWD. Always use `-p <stem>` with `ws-new-named-agent` or `$(ws-infra-path <docname>)` for other path contexts.
 > - Exits non-zero when the named doc is not found.
 
 ### `ws-proj-tree` {#260425-ws-proj-tree}

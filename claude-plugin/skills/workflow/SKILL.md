@@ -1,3 +1,10 @@
+---
+name: workflow
+description: >
+  Loads WS orchestration primitives reference into session context.
+  Content survives compaction; re-invoke after compact if references are needed.
+---
+
 # Workflow
 
 > **Session invariant:** Keep this skill's content active for the entire session.
