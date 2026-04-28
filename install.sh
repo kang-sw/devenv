@@ -576,9 +576,9 @@ PYEOF
 # Copy claude/ to a stable cache; Claude Code reads from the cache, not the live repo.
 # Re-run install.sh update (or claude plugin update ws@kang-sw-devenv) after changes.
 PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
-info "Syncing ws plugin snapshot to $PLUGIN_CACHE..."
-mkdir -p "$PLUGIN_CACHE"
-rsync -a --delete "$REPO_DIR/claude/" "$PLUGIN_CACHE/"
+info "Syncing ws plugin snapshot to $PLUGIN_CACHE/claude/..."
+mkdir -p "$PLUGIN_CACHE/claude"
+rsync -a --delete "$REPO_DIR/claude/" "$PLUGIN_CACHE/claude/"
 success "ws plugin snapshot synced"
 
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it
