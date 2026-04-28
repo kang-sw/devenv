@@ -450,13 +450,17 @@ for hook_file in "$REPO_DIR/claude-plugin/hooks"/*.sh; do
   link "$hook_file" "$HOME/.claude/hooks/$hook_name"
 done
 
+# ── ws plugin snapshot copy ───────────────────────────────────────────────────
+# Defined early so settings.json and known_marketplaces.json can reference it.
+PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
+
 # Claude Code settings — ensure required config is set
 info "Ensuring Claude Code settings..."
 mkdir -p "$HOME/.claude"
-python3 - "$HOME/.claude/settings.json" "$HOME/.claude.json" "$REPO_DIR" <<'PYEOF'
+python3 - "$HOME/.claude/settings.json" "$HOME/.claude.json" "$REPO_DIR" "$PLUGIN_CACHE" <<'PYEOF'
 import json, sys, os
 
-settings_path, claude_json_path, repo_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+settings_path, claude_json_path, repo_dir, plugin_cache = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 # ── settings.json (project-level: env vars) ──────────────────────────────────
 required_env = {
@@ -510,7 +514,7 @@ for event, entries in required_hooks.items():
 # ── blueprint plugin registration ────────────────────────────────────────────
 required_marketplaces = {
     "kang-sw-devenv": {
-        "source": {"source": "directory", "path": repo_dir}
+        "source": {"source": "directory", "path": plugin_cache}
     }
 }
 required_plugins = {"ws@kang-sw-devenv": True}
@@ -575,12 +579,33 @@ PYEOF
 # ── ws plugin snapshot copy ───────────────────────────────────────────────────
 # Copy claude-plugin/ to a stable cache; Claude Code reads from the cache, not the live repo.
 # Re-run install.sh update (or claude plugin update ws@kang-sw-devenv) after changes.
-PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
-info "Syncing ws plugin snapshot to $PLUGIN_CACHE/claude-plugin/..."
-mkdir -p "$PLUGIN_CACHE/claude-plugin"
-# Remove stale claude/ subdir left over from pre-rename layout
-rm -rf "$PLUGIN_CACHE/claude"
-rsync -a --delete "$REPO_DIR/claude-plugin/" "$PLUGIN_CACHE/claude-plugin/"
+info "Syncing ws plugin snapshot to $PLUGIN_CACHE/ws/..."
+mkdir -p "$PLUGIN_CACHE/ws"
+# Remove stale subdirs from earlier layouts (claude/, claude-plugin/)
+rm -rf "$PLUGIN_CACHE/claude" "$PLUGIN_CACHE/claude-plugin"
+rsync -a --delete "$REPO_DIR/claude-plugin/" "$PLUGIN_CACHE/ws/"
+# Generate marketplace.json that registers ws as a plugin at ./ws
+mkdir -p "$PLUGIN_CACHE/.claude-plugin"
+python3 - "$PLUGIN_CACHE/.claude-plugin/marketplace.json" "$PLUGIN_CACHE/ws/.claude-plugin/plugin.json" <<'MKTEOF'
+import json, sys, os
+mkt_path, plugin_json_path = sys.argv[1], sys.argv[2]
+plugin = json.load(open(plugin_json_path))
+marketplace = {
+    "name": "kang-sw-devenv",
+    "description": "kang-sw personal devenv plugin marketplace",
+    "owner": {"name": "kang-sw"},
+    "plugins": [{
+        "name": plugin["name"],
+        "version": plugin.get("version"),
+        "description": plugin.get("description", ""),
+        "author": plugin.get("author", {"name": "kang-sw"}),
+        "source": "./ws",
+    }],
+}
+with open(mkt_path, "w") as f:
+    json.dump(marketplace, f, indent=2)
+    f.write("\n")
+MKTEOF
 success "ws plugin snapshot synced"
 
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it
@@ -594,7 +619,7 @@ km_path, plugin_cache, repo_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 km = json.load(open(km_path)) if os.path.isfile(km_path) else {}
 
 entry = {
-    "source": {"source": "directory", "path": repo_dir},
+    "source": {"source": "directory", "path": plugin_cache},
     "installLocation": plugin_cache,
     "lastUpdated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z"
 }
