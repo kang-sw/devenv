@@ -28,6 +28,7 @@ return {
     picker = {
       sources = {
         explorer = {
+          hidden = true,
           jump = { close = false },
           layout = {
             layout = {
