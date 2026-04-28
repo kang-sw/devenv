@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.12.0 — 2026-04-28
+
+### Added
+- `/update-spec` skill — lead-driven spec audit: loads `spec-conventions.md` and `write-spec/SKILL.md`, scans a commit range for caller-visible behavior changes (`judge: spec-impact`), adds missing entries, strips `🚧` markers, and handles removals. No subagent delegation. Wired into `/edit` (after cleanup), `/implement` (doc pre-pass step 1), and `/sprint` (wrap-up step 2).
+- `claude/infra/doc-system.md` — orientation doc for 3rd-party subagents: explains the three doc layers (spec/mental-model/tickets), `{#YYMMDD-slug}` stems, and `🚧` = planned-but-unimplemented. Auto-injected by `ws-named-agent new` into every agent system prompt.
+
+### Changed
+- `ws-named-agent new`: prepends `doc-system.md` to stored system prompt automatically. Pass `--no-doc-system` to suppress (for narrow-role agents such as sprint-survey, project-survey, compression helpers).
+- `/sprint` wrap-up spec-update pass: replaced inline 11-line procedure with `Invoke ws:update-spec`.
+- `/implement` doc pre-pass: replaced `ws:spec-updater` dispatch with `ws:update-spec` Skill invocation.
+- `/edit`: added step 6 — invoke `ws:update-spec` on the edit's commit range; adds `Spec:` line to completion report.
+- `ws-named-agent` (`codex` backend): compression disabled — multiple interacting bugs made it unreliable; token count still tracked for observability.
+- `ws-named-agent`: `_subrun` now defaults `stdin=subprocess.DEVNULL` when neither `stdin` nor `input` is provided — prevents child claude/codex processes from inheriting the caller's stdin fd and blocking on a heredoc pipe.
+
+### Fixed
+- `ws-named-agent`: reconfigure `stdin` to UTF-8 on Windows — non-ASCII characters in heredoc prompts (e.g. `×`, `—`) were read via CP949-encoded stdin, producing surrogates that caused `UnicodeEncodeError` when passed as subprocess input.
+
 ## v0.11.4 — 2026-04-28
 
 ### Fixed
