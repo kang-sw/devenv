@@ -285,7 +285,7 @@ Bash-callable infra scripts at `claude-plugin/infra/` that replace `TeamCreate`/
 
 Creates a named agent registry entry at `.git/ws@<repo-dir-name>/agents/<agent-name>.json`.
 
-- `-p <name-or-path>` — resolves against `infra/prompts/` first, then `infra/`, then cwd. Multiple `-p` flags accepted; bodies concatenated with `---` separators. The first document whose frontmatter declares `model:` sets the agent's default model tier.
+- `-p <name-or-path>` — resolves against `infra/prompts/` first, then `infra/`, then cwd. Multiple `-p` flags accepted; bodies concatenated with `---` separators. The first document whose frontmatter declares `model:` sets the agent's default model tier. A leading `ws:` prefix is silently stripped before resolution (e.g. `-p ws:searcher` is equivalent to `-p searcher`). {#260429-ws-named-agent-p-flag}
 - `--model` — explicit model; overrides frontmatter model from `-p`.
 - `--no-doc-system` — suppress auto-injection of `workflow-for-agent.md`.
 - Legacy flags `--agent <type>` and `--system-prompt <path>` still accepted.
