@@ -33,6 +33,10 @@ fi
 
 TARGET="${PLUGIN_ROOT}/infra/$1"
 
+if [ ! -f "$TARGET" ] && [[ "$1" != *.md ]]; then
+  TARGET="${PLUGIN_ROOT}/infra/$1.md"
+fi
+
 if [ ! -f "$TARGET" ]; then
   echo "ws-print-infra: not found: infra/$1" >&2
   exit 1
