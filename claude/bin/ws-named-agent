@@ -252,9 +252,19 @@ def _claude_tokens(data: dict) -> int:
     )
 
 
+def _hook_cmd() -> str:
+    # On Windows, use pythonw.exe so the hook fires without a console window flash.
+    # pythonw suppresses stdout/stderr, which is fine: check-mailbox uses only exit codes.
+    if sys.platform == "win32":
+        pythonw = Path(sys.executable).parent / "pythonw.exe"
+        exe = str(pythonw) if pythonw.exists() else sys.executable
+        return f'"{exe}" "{SCRIPT_DIR}/ws-named-agent" check-mailbox'
+    return f"{SCRIPT_DIR}/ws-named-agent check-mailbox"
+
+
 def _settings_json() -> str:
     # Use absolute path so the hook works regardless of the hook shell's PATH
-    cmd = f"{SCRIPT_DIR}/ws-named-agent check-mailbox"
+    cmd = _hook_cmd()
     return json.dumps({
         "hooks": {
             "PostToolBatch": [{
@@ -389,7 +399,7 @@ def _call_claude(
         # Step c: snapshot outbox, re-register with fresh UUID, restore outbox
         saved_outbox = outbox_file.read_text(encoding="utf-8") if outbox_file.stat().st_size > 0 else ""
 
-        new_args = ["ws-named-agent", "new", agent_name]
+        new_args = [sys.executable, str(SCRIPT_DIR / "ws-named-agent"), "new", agent_name]
         if model:
             new_args += ["--model", model]
         if agent_type:
@@ -449,7 +459,6 @@ def _codex_tokens(events: list[dict]) -> int:
             u = event.get("usage") or {}
             return (
                 (u.get("input_tokens") or 0)
-                + (u.get("cached_input_tokens") or 0)
                 + (u.get("output_tokens") or 0)
             )
     return 0
@@ -505,7 +514,7 @@ def _call_codex(
         flags = ["--dangerously-bypass-approvals-and-sandbox", "--json"]
         if model and model not in _BACKEND_SHORTHANDS:
             flags += ["--model", model]
-        check_cmd = f"{SCRIPT_DIR}/ws-named-agent check-mailbox"
+        check_cmd = _hook_cmd()
         # TOML inline-table syntax required; json.dumps for string quoting is compatible
         hook_toml = f'[{{hooks=[{{type="command",command={json.dumps(check_cmd)},timeout=5}}]}}]'
         flags += ["-c", "features.codex_hooks=true", "-c", f"hooks.PostToolUse={hook_toml}"]
@@ -516,10 +525,10 @@ def _call_codex(
     def _run(p: str, thread_id: str = "") -> list[dict]:
         base = _base_flags()
         if thread_id:
-            cmd = _codex_exe() + ["exec", "resume"] + base + [thread_id, p]
+            cmd = _codex_exe() + ["exec", "resume"] + base + [thread_id, "-"]
         else:
-            cmd = _codex_exe() + ["exec"] + base + [p]
-        r = _subrun(cmd, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+            cmd = _codex_exe() + ["exec"] + base + ["-"]
+        r = _subrun(cmd, capture_output=True, text=True, encoding="utf-8", input=p)
         events = _codex_parse_jsonl(r.stdout)
         if r.returncode != 0 and not events:
             sys.stderr.write(r.stderr)
@@ -575,7 +584,7 @@ def _call_codex(
         # Step c: snapshot outbox, re-register with fresh uuid, restore outbox
         saved_outbox = outbox_file.read_text(encoding="utf-8") if outbox_file.stat().st_size > 0 else ""
 
-        new_args = ["ws-named-agent", "new", agent_name]
+        new_args = [sys.executable, str(SCRIPT_DIR / "ws-named-agent"), "new", agent_name]
         if model:
             new_args += ["--model", model]
         if agent_type:

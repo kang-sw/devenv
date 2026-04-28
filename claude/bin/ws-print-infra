@@ -5,7 +5,7 @@
 #
 # Usage:
 #   ws-print-infra              list available infra docs and bin scripts
-#   ws-print-infra <doc-name>   print the named infra doc
+#   ws-print-infra <doc-name>   print the named infra doc (bare stem or .md name both accepted)
 
 set -euo pipefail
 
@@ -32,6 +32,10 @@ if [ $# -ne 1 ]; then
 fi
 
 TARGET="${PLUGIN_ROOT}/infra/$1"
+
+if [ ! -f "$TARGET" ] && [[ "$1" != *.md ]]; then
+  TARGET="${PLUGIN_ROOT}/infra/$1.md"
+fi
 
 if [ ! -f "$TARGET" ]; then
   echo "ws-print-infra: not found: infra/$1" >&2
