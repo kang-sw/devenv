@@ -72,16 +72,18 @@ Prints one path per stem under `/tmp/claude-reviews/`. Creates the parent direct
 
 ### `ws-subquery` {#260421-ws-subquery-tool}
 
-Spawns a headless `claude -p` subprocess with a structured-report system prompt.
+Delegates to `ws-oneshot-agent -p subquery` with a structured-report prompt. {#260429-ws-subquery-oneshot-routing}
 
 ```
 ws-subquery [--deep-research] "<question>"
 ```
 
-Default model: `haiku`. With `--deep-research`: switches to `sonnet`. Output is a self-contained answer in structured-report format.
+Default model: `haiku`. With `--deep-research`: switches to `sonnet`. Output is a self-contained answer in structured-report format. The `subquery` prompt instructs the agent to explore read-only and return a concise, citation-backed report.
 
 > [!note] Constraints
-> - Non-interactive — no tool use, no follow-up turns. The question must be answerable in one pass.
+> - Single-turn — no follow-up turns. The question must be answerable in one pass.
+> - Full tool access via `ws-oneshot-agent`; behavior is scoped by the `subquery` prompt, not by CLI tool restrictions.
+> - Doc-system (`workflow-for-agent.md`) is injected by default — subquery agents see project workflow context.
 
 ### `ws-oneshot-agent` {#260429-ws-oneshot-agent-tool}
 
@@ -96,7 +98,7 @@ ws-oneshot-agent -p <prompt-stem> [--model <tier>] [--no-doc-system] '<inline-pr
 
 Internally runs `ws-named-agent new` → `ws-named-agent call` → `ws-named-agent erase`. The agent name is a randomly generated `_oneshot_<8hex>` identifier. Registry and session files are cleaned up via an EXIT trap regardless of call outcome.
 
-Distinct from `ws-subquery`: the spawned agent has full tool access; `ws-subquery` is non-interactive with no tool use.
+Distinct from `ws-subquery`: accepts arbitrary prompt stems and inline prompts; `ws-subquery` is a fixed-prompt wrapper around this tool targeting read-only codebase search.
 
 > [!note] Constraints
 > - `-p` is required; at least one prompt stem must be provided.
