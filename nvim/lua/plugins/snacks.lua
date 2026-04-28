@@ -45,20 +45,22 @@ return {
           win = {
             list = {
               keys = {
-                ["<C-M-j>"] = { function() vim.cmd("TmuxNavigateDown") end },
-                ["<C-M-k>"] = { function() vim.cmd("TmuxNavigateUp") end },
+                ["<C-M-j>"] = { function() vim.fn.system("tmux select-pane -D") end },
+                ["<C-M-k>"] = { function() vim.fn.system("tmux select-pane -U") end },
+                -- winnr check is unreliable in picker context: wincmd can silently move to
+                -- an internal snacks window (backdrop/input) and return a changed winnr.
+                -- Instead: attempt wincmd, then check filetype — if still in any snacks_picker
+                -- buffer, treat the move as failed and delegate to tmux.
                 ["<C-M-h>"] = { function()
-                  local winnr = vim.fn.winnr()
                   vim.cmd("wincmd h")
-                  if vim.fn.winnr() == winnr then
+                  if vim.bo.filetype:find("snacks_picker") then
                     local edge = vim.fn.system("tmux display-message -p '#{pane_at_left}'"):gsub("%s+", "")
                     if edge ~= "1" then vim.fn.system("tmux select-pane -L") end
                   end
                 end },
                 ["<C-M-l>"] = { function()
-                  local winnr = vim.fn.winnr()
                   vim.cmd("wincmd l")
-                  if vim.fn.winnr() == winnr then
+                  if vim.bo.filetype:find("snacks_picker") then
                     local edge = vim.fn.system("tmux display-message -p '#{pane_at_right}'"):gsub("%s+", "")
                     if edge ~= "1" then vim.fn.system("tmux select-pane -R") end
                   end
