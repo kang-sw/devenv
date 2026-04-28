@@ -47,20 +47,41 @@ return {
               keys = {
                 ["<C-M-j>"] = { function() vim.fn.system("tmux select-pane -D") end },
                 ["<C-M-k>"] = { function() vim.fn.system("tmux select-pane -U") end },
-                -- winnr check is unreliable in picker context: wincmd can silently move to
-                -- an internal snacks window (backdrop/input) and return a changed winnr.
-                -- Instead: attempt wincmd, then check filetype — if still in any snacks_picker
-                -- buffer, treat the move as failed and delegate to tmux.
+                -- wincmd is avoided entirely: in picker context it moves to unexpected windows
+                -- and breaks subsequent code. Instead, scan window positions directly.
                 ["<C-M-h>"] = { function()
-                  vim.cmd("wincmd h")
-                  if vim.bo.filetype:find("snacks_picker") then
+                  local cur = vim.api.nvim_get_current_win()
+                  local cur_col = vim.api.nvim_win_get_position(cur)[2]
+                  local best, best_col = nil, -1
+                  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+                    if w == cur or vim.api.nvim_win_get_config(w).relative ~= "" then goto skip end
+                    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype:find("snacks_picker") then goto skip end
+                    local col = vim.api.nvim_win_get_position(w)[2]
+                    if col < cur_col and col > best_col then best, best_col = w, col end
+                    ::skip::
+                  end
+                  if best then
+                    vim.api.nvim_set_current_win(best)
+                  else
                     local edge = vim.fn.system("tmux display-message -p '#{pane_at_left}'"):gsub("%s+", "")
                     if edge ~= "1" then vim.fn.system("tmux select-pane -L") end
                   end
                 end },
                 ["<C-M-l>"] = { function()
-                  vim.cmd("wincmd l")
-                  if vim.bo.filetype:find("snacks_picker") then
+                  local cur = vim.api.nvim_get_current_win()
+                  local cur_col = vim.api.nvim_win_get_position(cur)[2]
+                  local cur_w = vim.api.nvim_win_get_width(cur)
+                  local best, best_col = nil, math.huge
+                  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+                    if w == cur or vim.api.nvim_win_get_config(w).relative ~= "" then goto skip end
+                    if vim.bo[vim.api.nvim_win_get_buf(w)].filetype:find("snacks_picker") then goto skip end
+                    local col = vim.api.nvim_win_get_position(w)[2]
+                    if col >= cur_col + cur_w and col < best_col then best, best_col = w, col end
+                    ::skip::
+                  end
+                  if best then
+                    vim.api.nvim_set_current_win(best)
+                  else
                     local edge = vim.fn.system("tmux display-message -p '#{pane_at_right}'"):gsub("%s+", "")
                     if edge ~= "1" then vim.fn.system("tmux select-pane -R") end
                   end
