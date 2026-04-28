@@ -450,8 +450,6 @@ def _call_claude(
         new_args = [sys.executable, str(SCRIPT_DIR / "ws-named-agent"), "new", agent_name]
         if model:
             new_args += ["--model", model]
-        if agent_type:
-            new_args += ["--agent-type", agent_type]
         if system_prompt:
             sp_file = _mktemp()
             Path(sp_file).write_text(system_prompt, encoding="utf-8")
@@ -629,15 +627,13 @@ BACKENDS = {
 
 def cmd_new(argv: list[str]) -> None:
     if not argv:
-        print("Usage: ws-named-agent new <name> [-p PROMPT]... [--model M] [--agent T] [--system-prompt P]", file=sys.stderr)
+        print("Usage: ws-named-agent new <name> [-p PROMPT]... [--model M] [--no-doc-system]", file=sys.stderr)
         sys.exit(1)
 
     agent_name = argv[0]
     model_arg: str | None = None
-    prompt_specs: list[str] = []   # -p / --prompt values (new path)
-    system_prompt_path = ""        # --system-prompt (legacy)
-    agent_type = ""
-    agent_type_set = False
+    prompt_specs: list[str] = []   # -p / --prompt values
+    system_prompt_path = ""        # --system-prompt (internal use by compression only)
     no_doc_system = False
 
     i = 1
@@ -648,17 +644,15 @@ def cmd_new(argv: list[str]) -> None:
             prompt_specs.append(argv[i + 1]); i += 2
         elif argv[i] == "--system-prompt":
             system_prompt_path = argv[i + 1]; i += 2
-        elif argv[i] in ("--agent-type", "--agent"):
-            agent_type = argv[i + 1]; agent_type_set = True; i += 2
         elif argv[i] == "--no-doc-system":
             no_doc_system = True; i += 1
         else:
             print(f"Unknown flag: {argv[i]}", file=sys.stderr); sys.exit(1)
 
-    # ── New -p path ───────────────────────────────────────────────────────────
-    # When -p is used, each value is resolved (prompts/ → infra/ → cwd),
-    # model is taken from the first frontmatter that declares it, bodies are
-    # concatenated with --- separators. No --agent is forwarded to the CLI.
+    # ── Prompt resolution ─────────────────────────────────────────────────────
+    # -p: resolve against infra/prompts/ → infra/ → cwd; concatenate bodies;
+    # first frontmatter model: sets the tier.
+    # --system-prompt: internal path used by compression re-registration only.
     fm_tier: str | None = None
     if prompt_specs:
         fm_model_raw = ""
@@ -673,28 +667,8 @@ def cmd_new(argv: list[str]) -> None:
         system_prompt = "\n\n---\n\n".join(p_bodies)
         if fm_model_raw in KNOWN_TIERS:
             fm_tier = fm_model_raw
-        # -p path: don't forward agent_type to the CLI
-        agent_type = ""
-        agent_type_set = False
-
-    # ── Legacy --agent / --system-prompt path ────────────────────────────────
     else:
-        # Read tier from ws: agent frontmatter (check prompts/ then agents/)
-        if agent_type and agent_type.startswith("ws:"):
-            stem = agent_type[3:]
-            for base in [PLUGIN_DIR / "infra" / "prompts", PLUGIN_DIR / "agents"]:
-                af = base / f"{stem}.md"
-                if af.exists():
-                    fm_model = _frontmatter_field(af.read_text(encoding="utf-8"), "model")
-                    if fm_model in KNOWN_TIERS:
-                        fm_tier = fm_model
-                    break
         system_prompt = _resolve_system_prompt(system_prompt_path)
-        # Prepend ws: agent body when --agent is set
-        if agent_type and agent_type.startswith("ws:"):
-            body = _resolve_ws_agent(agent_type)
-            if body:
-                system_prompt = (body + "\n\n---\n\n" + system_prompt).strip() if system_prompt else body
 
     # ── Model resolution ─────────────────────────────────────────────────────
     # --model > frontmatter model > default
@@ -702,9 +676,6 @@ def cmd_new(argv: list[str]) -> None:
         if fm_tier:
             model = fm_tier
             tier: str | None = fm_tier
-        elif agent_type_set:
-            model = ""
-            tier = None
         else:
             default = _load_ws_config().get("default-model", "")
             model = default if default else "sonnet"
@@ -734,7 +705,6 @@ def cmd_new(argv: list[str]) -> None:
         "tier": tier,
         "model": model,
         "backend": backend,
-        "agent_type": agent_type,
         "system_prompt": system_prompt,
         "token_count": 0,
         "compressed_at": False,
