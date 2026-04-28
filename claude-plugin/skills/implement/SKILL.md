@@ -50,7 +50,7 @@ Capture the commit range from the skill's completion report.
 ### 4. Doc pre-pass
 
 1. Invoke **ws:update-spec** via Skill tool with args `<commit-range>`. (Lead-driven; runs inline.)
-2. Register and call `mental-model-updater` (run_in_background: true; timeout: 600000):
+2. Register and call `mental-model-updater` (run_in_background: true):
    ```bash
    ws-new-named-agent mental-model-updater -p mental-model-updater
    ws-call-named-agent mental-model-updater "Commit range: <commit-range>"

@@ -59,9 +59,6 @@ are compressed and handed off without caller involvement.
 
 **Output:** agent response text to stdout and to `<registry-dir>/<name>.output.txt`. Exit code 1 on error.
 
-**Bash tool timeout:** Always pass `timeout: 600000` when calling via the Bash tool.
-Agent tasks routinely exceed the 120s default, causing silent background detachment.
-
 **Background mode:** Pass `run_in_background: true` to let the lead continue other work.
 Read output with `ws-print-named-agent-output` after the completion notification arrives.
 

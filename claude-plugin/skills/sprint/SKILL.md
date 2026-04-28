@@ -48,7 +48,7 @@ Triggers on explicit user done signal ("done", "wrap up", "finish sprint", or eq
 
 1. Determine parent: `PARENT=$(git merge-base HEAD main)`.
 2. **Spec-update pass.** Invoke `ws:update-spec` via Skill tool with args `$PARENT..HEAD`.
-3. Register and call `mental-model-updater` (run_in_background: true; timeout: 600000):
+3. Register and call `mental-model-updater` (run_in_background: true):
    ```bash
    ws-new-named-agent mental-model-updater -p mental-model-updater
    ws-call-named-agent mental-model-updater "Commit range: $PARENT..HEAD. Note: docs may be stale from accumulated sprint commits — explore thoroughly."
