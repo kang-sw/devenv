@@ -10,7 +10,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 
 ## Status Flow
 
-- Status is directory-based only: `idea/` → `todo/` → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
+- Status is directory-based only: `idea/` → `todo/` → `wip/` (optional) → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
 - Move tickets with `git mv`; no cross-link updates needed.
 - Add `completed:` date on move to `.done/`.
 - `idea/` tickets may not have `spec:` entries — spec linkage begins at `todo/` or higher.

@@ -22,7 +22,7 @@ ws-ask-api --list
 - With domain hint that exactly matches an existing `ai-docs/.deps/<hint>/` directory: pre-router is skipped; `ws-ask-api-internal <hint>` is called directly.
 - With domain hint that does not match any existing directory: hint is passed to the pre-router as a strong prior; the pre-router may expand to additional domains.
 - `--refresh <domain>`: forces re-fetch of all doc levels for the named domain.
-- `--check-stale <domain>`: runs `scripts/detect-version` against the project and reports whether the cached version matches. No fetch.
+- `--check-stale <domain>`: runs `scripts/check-stale` against the project and reports whether the cached version matches. No fetch.
 - `--list`: emits all domain names present in `ai-docs/.deps/`.
 - Extra positional arguments beyond `[hint] prompt` are rejected with a usage message and exit 1.
 
@@ -91,10 +91,9 @@ Invoked only when no domain hint is given, or when the hint does not exactly mat
 Each canonical domain runs as a persistent `ws-named-agent` session named `api-doc-<domain>`. Session persistence is tied to the canonical domain name, not to the caller's invocation style — any `ws-ask-api` call that resolves to the same domain resumes the existing session.
 
 Executor behavior per call:
-1. Acquire the per-domain lock (see below).
-2. Run `scripts/check-stale`. If stale or the domain directory is absent: run `scripts/fetch` (bootstrap on first call).
-3. Load relevant doc levels (`l1.md`, `l2.md`, and selectively `l3.md` or subdomain files).
-4. Answer the prompt. Release lock.
+1. `ws-ask-api-internal` acquires the per-domain lock (see below) and dispatches to the `api-doc-<domain>` named agent.
+2. The named agent (`api-doc-manager` prompt) handles the rest: checks staleness, runs `scripts/fetch` if stale or absent, loads relevant doc levels, and answers the prompt.
+3. Lock is released on `ws-ask-api-internal` exit.
 
 Session compression follows the standard `ws-call-named-agent` 120K auto-compression mechanism. Executor sessions are not erased at sprint wrap-up; they persist until explicitly erased via `ws-named-agent erase api-doc-<domain>`.
 
@@ -106,12 +105,10 @@ Session compression follows the standard `ws-call-named-agent` 120K auto-compres
 
 `ws-ask-api-internal` acquires an exclusive advisory lock on `.deps/<domain>/.lockfile` before any read or write operation for that domain. Lock implementation:
 
-- Unix: `flock -x -w 60 <lockfile>` — OS releases the lock automatically on process exit; no stale lock risk.
-- Windows: atomic `mkdir .deps/<domain>/.lock` with EXIT trap `rmdir`; 60-second poll timeout.
+- Unix: `flock -x <lockfile>` — blocks indefinitely; OS releases the fd (and lock) automatically on any process exit including SIGKILL. No stale lock risk, no timeout.
+- Windows: atomic `mkdir .deps/<domain>/.lock` with EXIT trap `rmdir`; polls indefinitely. Stale locks are reclaimed by checking the holder PID via `kill -0`.
 
 Lock granularity is per domain. Concurrent `ws-ask-api` invocations targeting different domains proceed in parallel without contention.
-
-On lock timeout: `ws-ask-api-internal` exits non-zero with the message `lock timeout: <domain> is being updated by another agent`.
 
 > [!note] Constraints
 > - Lock scope covers both reads and writes. There is no shared read mode — any access may trigger a fetch.

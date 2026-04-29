@@ -74,7 +74,7 @@ Agent(
   model = "sonnet",
   prompt = """
     Survey all tickets under ai-docs/tickets/ (all statuses: idea/, todo/,
-    wip/, done/, dropped/).
+    wip/, .done/, .dropped/).
 
     Steps:
     1. Glob ai-docs/tickets/**/*.md and read each file.
@@ -210,7 +210,7 @@ Agent(
     2. Filter to tickets whose title or body mentions <domain> keywords
        or the module paths: <paths>.
     3. For each match: extract the feature or behavior described and
-       its ticket status (todo/wip/done/dropped).
+       its ticket status (todo/wip/.done/.dropped).
 
     Return: list of features → ticket status. Wip/todo items are
     candidates for 🚧 planned markers.
@@ -364,7 +364,7 @@ Total stems generated: <count>
 
 ### 3. Suggested next steps
 
-- Spawn `ws:spec-updater` agent to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
+- Run `ws-oneshot-agent -p spec-updater` to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
 - Review `🚧` entries with open tickets — confirm each has an active wip/todo ticket or drop the marker.
 - Run `/write-spec` for any domain surfaces discovered after wrap-up.
 

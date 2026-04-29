@@ -52,6 +52,8 @@ claude-plugin/infra/prompts/     — agent role docs (frontmatter: name, model, 
   plan-populator-research.md — step-by-step plan drafter
   plan-populator-survey.md   — codebase survey for brief support
   subquery.md             — scoped sub-query worker prompt; haiku default; Constraints/Process/Output/Doctrine layout
+  api-doc-manager.md      — persistent per-domain API doc executor; check-stale, fetch, answer
+  pre-router.md           — oneshot Haiku pre-router; resolves domain list from free-text prompt
 ```
 
 ## Infra Layout
@@ -69,6 +71,7 @@ claude-plugin/infra/                 — docs only; accessed via ws-print-infra 
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
   agent-compression.md        — compression handoff prompt injected into agents approaching the 120K token threshold
   workflow-for-agent.md       — doc-layer orientation for sub-agents + safe primitive subset; auto-injected by ws-named-agent new
+  cargo-brief.md              — Rust API hint; injected via --prompt-cond cargo-brief when cargo-brief binary is in PATH
 
 claude-plugin/bin/                   — PATH-accessible executables (added by plugin)
   ws-subquery                    — scoped sub-query via ws-oneshot-agent; delegates to -p subquery; haiku default, --deep-research for sonnet
@@ -88,6 +91,8 @@ claude-plugin/bin/                   — PATH-accessible executables (added by p
   ws-interrupt-named-agent          — shim → ws-named-agent interrupt; queue a message to a named agent's outbox
   ws-agent-check-mailbox            — shim → ws-named-agent check-mailbox; PostToolBatch hook: exits 2 when WS_AGENT_OUTBOX is non-empty
   ws-print-named-agent-output       — shim → ws-named-agent print; print the persisted output file of a named agent
+  ws-ask-api                        — 2-layer API doc query: pre-router resolves domains, per-domain executor answers
+  ws-ask-api-internal               — per-domain executor; acquires flock, dispatches to api-doc-<domain> named agent
 ```
 
 ## Skill Inventory

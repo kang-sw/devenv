@@ -166,8 +166,7 @@ sources:
 
 Add sibling sections (Entry Points, Module Contracts, etc.) only if the
 user asks — `/add-rule` is a rule authoring skill, not a mental-model
-scaffolding skill. `/forge-mental-model` or `/write-mental-model` owns
-full-doc authorship.
+scaffolding skill. `/forge-mental-model` owns full-doc authorship.
 
 ## Doctrine
 
