@@ -50,7 +50,7 @@ ws-list-mental-model [paths] # list relevant mental-model docs
 ws-list-spec-stems           # list all spec stems in ai-docs/spec/
 ws-proj-tree                 # print project structure overview
 ws-spec-build-index          # rebuild spec features: frontmatter; may write spec files
-ws-subquery "<question>"     # haiku-backed read-only codebase search
+ws-subquery "<question>"     # haiku-backed codebase search; Explore-level tool access (no Edit/Write)
 ws-subquery --deep-research "<question>"  # sonnet-backed, for cross-module traces
 ```
 
