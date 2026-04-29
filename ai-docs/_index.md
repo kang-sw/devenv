@@ -31,16 +31,14 @@ Read before authoring or modifying skills, agents, or infra:
 | `claude-plugin/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `ws-print-infra subagent-rules.md`. |
 | `claude-plugin/infra/executor-wrapup.md` | Shared post-implementation wrapup: _index.md refresh, doc-commit gate, ticket update. Access via `ws-print-infra executor-wrapup.md`. |
 
-## Native Agents
+## Agents
 
-`claude-plugin/agents/` contains agent types used by Claude Code's native Agent tool.
 Agent role documents (system prompts with frontmatter) live in `claude-plugin/infra/prompts/`.
+All agents are invoked via `ws-oneshot-agent -p <stem>` or `ws-named-agent new -p <stem>`.
 
 ```
-claude-plugin/agents/
-  clerk.md                — ticket management (used by forge-spec as ws:clerk subagent_type)
-
 claude-plugin/infra/prompts/     — agent role docs (frontmatter: name, model, tools)
+  clerk.md                — ticket management (one-shot; invoked via ws-oneshot-agent -p clerk)
   code-reviewer.md        — code diff review: correctness, security, contracts (read-only)
   mental-model-updater.md — mental-model doc updates after code changes
   spec-updater.md         — strip 🚧 markers; flag entries for removal on `removed: <stem>`

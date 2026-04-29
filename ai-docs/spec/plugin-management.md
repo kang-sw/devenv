@@ -11,7 +11,7 @@ Local `.claude-plugin/skills/` skills for maintaining and auditing the ws plugin
 
 User invokes `/polish-plugin-docs` to run an iterative review + simplification cycle on ws plugin documentation.
 
-**Scope:** `claude-plugin/skills/`, `claude-plugin/agents/`, `claude-plugin/infra/`, `claude-plugin/infra/prompts/` (`.md` files only). Excludes `claude-plugin/CLAUDE.home.md` and `claude-plugin/bin/`.
+**Scope:** `claude-plugin/skills/`, `claude-plugin/infra/prompts/`, `claude-plugin/infra/`, `claude-plugin/infra/prompts/` (`.md` files only). Excludes `claude-plugin/CLAUDE.home.md` and `claude-plugin/bin/`.
 
 The skill operates on a dedicated branch. It runs an initial review for consistency, operational breakage, and authoring-rule compliance. It then iterates (2–3 rounds): a writer simplifies files without changing behavioral meaning, reviewers confirm findings are resolved and no new issues appear. The skill exits when both reviewers produce a clean Final report. User merges the branch with `--no-ff`.
 
@@ -23,6 +23,6 @@ Audits the plugin documentation for consistency, broken references, and downstre
 - **Broken references** — stale tool names, missing files, dead cross-references (`ws:code-reviewer`).
 - **Downstream portability** — bare `claude-plugin/infra/` paths, renamed tools, hardcoded CWD assumptions (`ws:code-reviewer`). A known-renamed-tools list is embedded in the reviewer prompt to catch stale references by name.
 
-**Scope:** `claude-plugin/skills/`, `claude-plugin/agents/`, `claude-plugin/infra/prompts/`, and `claude-plugin/bin/`.
+**Scope:** `claude-plugin/skills/`, `claude-plugin/infra/prompts/`, `claude-plugin/infra/prompts/`, and `claude-plugin/bin/`.
 
 Output: flat severity-ordered report (`Critical / Important / Minor`) aggregated from all three reviewers.
