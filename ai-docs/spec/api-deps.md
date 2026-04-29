@@ -19,7 +19,8 @@ ws-ask-api --list
 ```
 
 - No domain hint: the pre-router resolves relevant domains from the prompt and existing cache.
-- With domain hint: passed to the pre-router as a strong prior; the pre-router may expand to additional domains.
+- With domain hint that exactly matches an existing `ai-docs/.deps/<hint>/` directory: pre-router is skipped; `ws-ask-api-internal <hint>` is called directly.
+- With domain hint that does not match any existing directory: hint is passed to the pre-router as a strong prior; the pre-router may expand to additional domains.
 - `--refresh <domain>`: forces re-fetch of all doc levels for the named domain.
 - `--check-stale <domain>`: runs `scripts/detect-version` against the project and reports whether the cached version matches. No fetch.
 - `--list`: emits all domain names present in `ai-docs/.deps/`.
@@ -73,6 +74,8 @@ Resolution rules:
 1. Match against existing `.deps/` directory names first. Fuzzy caller input (e.g. `asio-net`) resolves to the existing `asio` directory.
 2. When no existing directory matches, derive a canonical slug from the prompt context.
 3. The domain hint is treated as a strong prior but does not suppress additional domains when the prompt spans multiple libraries.
+
+Invoked only when no domain hint is given, or when the hint does not exactly match an existing `.deps/` directory. Exact-match detection is performed by `ws-ask-api` at the bin-tool level before the pre-router is called.
 
 `ws-ask-api` launches per-domain executors in parallel for each name in the output list and concatenates their responses.
 

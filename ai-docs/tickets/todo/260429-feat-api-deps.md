@@ -71,8 +71,9 @@ Write `claude-plugin/bin/ws-ask-api` (Python, like `ws-named-agent`) and `claude
 - `--list`: print directory names under `ai-docs/.deps/`.
 - `--check-stale <domain>`: run `scripts/check-stale` for that domain and report.
 - `--refresh <domain>`: call `ws-ask-api-internal <domain> --force-refresh`.
-- Default mode: enumerate `ai-docs/.deps/` dirs → register and call pre-router oneshot (Haiku, `--no-doc-system`) with prompt + hint + dir list → read resolved domain list → spawn `ws-ask-api-internal <domain> "<prompt>"` in parallel for each domain → concatenate outputs to stdout.
-- Pre-router registration: use `ws-oneshot-agent -p pre-router --no-doc-system` pattern internally.
+- Default mode (routing logic):
+  1. If `<domain-hint>` given and `ai-docs/.deps/<hint>/` exists as a directory → skip pre-router, call `ws-ask-api-internal <hint> "<prompt>"` directly.
+  2. Otherwise → enumerate `ai-docs/.deps/` dirs → call pre-router oneshot (`ws-oneshot-agent -p pre-router --no-doc-system`) with prompt + hint? + dir list → read resolved domain list → spawn `ws-ask-api-internal <domain> "<prompt>"` in parallel for each domain → concatenate outputs to stdout.
 
 **`ws-ask-api-internal <domain> "<prompt>" [--force-refresh]`**:
 - Acquire `flock` lock on `ai-docs/.deps/<domain>/.lockfile` (60s timeout, emit message on failure).
