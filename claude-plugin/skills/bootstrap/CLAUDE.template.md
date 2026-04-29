@@ -270,8 +270,6 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          held manually-maintained API delta docs; it is superseded by the
          `ws-ask-api` / `ai-docs/.deps/` cache system.
          If `ai-docs/deps/` exists: `git mv ai-docs/deps ai-docs/ref/deps-old`.
-         Add `ai-docs/.deps/` to `.gitignore` if not already present (the cache
-         is machine-local and should not be committed in downstream projects).
 -->
 
 <!-- Template Version: v0031 -->
