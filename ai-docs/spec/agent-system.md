@@ -5,7 +5,7 @@ summary: Spawnable agent roles — output contracts, refusals, and spawn context
 
 # Agent System
 
-Agent roles are defined as prompt documents in `claude-plugin/infra/prompts/` (with frontmatter declaring model and tools). `clerk` remains in `claude-plugin/agents/` as a native Claude Code agent type. All agents are stateless at spawn — they carry no memory of prior invocations. Skills pass all necessary context in the spawn prompt.
+Agent roles are defined as prompt documents in `claude-plugin/infra/prompts/` (with frontmatter declaring model and tools). All agents are invoked via `ws-oneshot-agent -p <stem>` or `ws-named-agent new -p <stem>` — the native Claude Code Agent tool is not used. All agents are stateless at spawn — they carry no memory of prior invocations. Skills pass all necessary context in the spawn prompt.
 
 ## `clerk` {#260421-clerk-agent}
 

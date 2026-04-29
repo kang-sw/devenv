@@ -18,7 +18,7 @@ Target: $ARGUMENTS
 ## Invariants
 
 - Sprint operates only on `sprint/`-prefixed branches — do not enter the session loop or run wrap-up on any other branch.
-- Doc pipeline (spec audit, `ws:mental-model-updater`) is suppressed during task execution; it runs once at wrap-up only.
+- Doc pipeline (spec audit, `mental-model-updater`) is suppressed during task execution; it runs once at wrap-up only.
 - All written artifacts must be in English regardless of conversation language.
 - At wrap-up, commit each doc update immediately after it completes — spec changes in one commit, mental-model-updater changes in the next. Do not batch both into a single deferred commit.
 

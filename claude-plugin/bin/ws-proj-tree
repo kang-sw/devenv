@@ -2,9 +2,9 @@
 """Project map — pre-injected context for the /discuss skill.
 
 Outputs three sections:
-  1. ai-docs/ directory tree  (excluding tickets/ and spec/)
+  1. ai-docs/ directory tree  (excluding tickets/, spec/, and dot-prefix dirs)
   2. spec: hierarchy with frontmatter stats (features, 🚧 count, ticket refs)
-  3. tickets: grouped by status (todo → idea → done → dropped),
+  3. tickets: active status only (todo, idea); .done/.dropped omitted
      with frontmatter details for parent / related lookups.
 """
 
@@ -147,6 +147,8 @@ def render_ai_docs(ai_docs: Path) -> None:
     except PermissionError:
         return
     for entry in entries:
+        if entry.name.startswith('.'):
+            continue
         if entry.name in ('tickets', 'spec'):
             continue
         if entry.is_dir():

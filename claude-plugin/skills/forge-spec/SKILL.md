@@ -15,7 +15,7 @@ Target: $ARGUMENTS
 ## Invariants
 
 - Run `ws-print-infra spec-conventions.md` (Bash) before any spec write — conventions are canonical there.
-- Every `Agent()` dispatch carries explicit `model = "sonnet"` — never inherited.
+- All survey queries use `ws-subquery --deep-research` (sonnet); clerk uses `ws-oneshot-agent -p clerk --model sonnet`.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Run `ws-generate-spec-stem <descriptive-slug>` before every anchor insertion.
@@ -45,90 +45,61 @@ Target: $ARGUMENTS
 
 ### 2. Parallel codebase survey
 
-Dispatch all four survey subagents in a single response turn:
+Issue all four queries in a single response turn as parallel Bash calls:
 
-```
-Agent(
-  name = "survey-structure",
-  description = "Survey directory and module structure",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Survey the project's directory and module structure.
+```bash
+ws-subquery --deep-research - <<'PROMPT'
+Survey the project's directory and module structure.
 
-    Steps:
-    1. Run `ls -R` or `find . -type f -name '*.md' -o -name '*.py' -o -name '*.ts'`
-       on the working directory to enumerate the source tree layout.
-    2. Identify top-level modules, packages, or service boundaries.
-    3. Return a structured summary: module names, paths, brief description
-       of purpose derived from file names and directory layout.
+Steps:
+1. Run `find . -type f` to enumerate the source tree layout.
+2. Identify top-level modules, packages, or service boundaries.
+3. Return a structured summary: module names, paths, brief description of purpose derived from file names and directory layout.
 
-    Format your response as a markdown bullet list grouped by module/area.
-  """
-)
-
-Agent(
-  name = "survey-tickets",
-  description = "Survey all tickets for behavioral signals",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Survey all tickets under ai-docs/tickets/ (all statuses: idea/, todo/,
-    wip/, done/, dropped/).
-
-    Steps:
-    1. Glob ai-docs/tickets/**/*.md and read each file.
-    2. Extract: ticket title, status directory, and any behavior or feature
-       described as public-facing or user-visible.
-    3. Group by apparent behavioral domain (infer from ticket title and
-       content).
-
-    Return a grouped list: domain → behaviors/features mentioned in tickets.
-  """
-)
-
-Agent(
-  name = "survey-old-spec",
-  description = "Survey archived spec files for domain candidates",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Survey the archived spec files in ai-docs/ref/old-spec/ (most recent
-    YYMMDD subdirectory).
-
-    Steps:
-    1. Glob ai-docs/ref/old-spec/**/*.md and read each file.
-    2. For each file: extract the title, summary, and all ## headings.
-    3. Note which features are marked 🚧 (planned) vs unmarked (implemented).
-
-    Return: a flat list of domain names found, with their heading topics.
-    These are reference candidates only — do not treat them as authoritative.
-  """
-)
-
-Agent(
-  name = "survey-commits",
-  description = "Survey recent commit history for behavioral signals",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Survey recent commit history for behavioral signals.
-
-    Steps:
-    1. Run `git log --oneline -100`.
-    2. Identify commits that mention user-visible features, API changes,
-       CLI changes, or spec updates (look for feat:, fix:, spec: prefixes
-       and commit bodies referencing spec-stems).
-    3. Group commit messages by apparent behavioral area.
-
-    Return: a grouped list of behavioral areas → representative commit
-    messages. Omit chore/docs/refactor commits unless they reference
-    spec-stems.
-  """
-)
+Format your response as a markdown bullet list grouped by module/area.
+PROMPT
 ```
 
-Wait for all four subagents to return.
+```bash
+ws-subquery --deep-research - <<'PROMPT'
+Survey all tickets under ai-docs/tickets/ (all statuses: idea/, todo/, wip/, .done/, .dropped/).
+
+Steps:
+1. Glob ai-docs/tickets/**/*.md and read each file.
+2. Extract: ticket title, status directory, and any behavior or feature described as public-facing or user-visible.
+3. Group by apparent behavioral domain (infer from ticket title and content).
+
+Return a grouped list: domain → behaviors/features mentioned in tickets.
+PROMPT
+```
+
+```bash
+ws-subquery --deep-research - <<'PROMPT'
+Survey the archived spec files in ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory).
+
+Steps:
+1. Glob ai-docs/ref/old-spec/**/*.md and read each file.
+2. For each file: extract the title, summary, and all ## headings.
+3. Note which features are marked 🚧 (planned) vs unmarked (implemented).
+
+Return: a flat list of domain names found, with their heading topics. These are reference candidates only — do not treat them as authoritative.
+PROMPT
+```
+
+```bash
+ws-subquery --deep-research - <<'PROMPT'
+Survey recent commit history for behavioral signals.
+
+Steps:
+1. Run `git log --oneline -100`.
+2. Identify commits that mention user-visible features, API changes, CLI changes, or spec updates (feat:, fix:, spec: prefixes and commit bodies referencing spec-stems).
+3. Group commit messages by apparent behavioral area.
+
+Return: a grouped list of behavioral areas → representative commit messages. Omit chore/docs/refactor commits unless they reference spec-stems.
+PROMPT
+```
+
+Wait for all four to return before synthesizing.
 
 ### 3. Synthesize domain candidates
 
@@ -171,97 +142,66 @@ Call `TaskUpdate` to set the domain task status to `in_progress`.
 
 ### 2. Parallel domain survey
 
-Dispatch all four survey subagents in a single response turn:
+Issue all four queries in a single response turn as parallel Bash calls:
 
-```
-Agent(
-  name = "domain-survey-code",
-  description = "Survey source code for domain: <domain>",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Survey source code for the <domain> domain.
+```bash
+ws-subquery --deep-research - <<PROMPT
+Survey source code for the <domain> domain.
+Module paths: <paths from task description>
 
-    Module paths: <paths from task description>
+Steps:
+1. Read all source files under the listed paths.
+2. Identify caller-visible behaviors: public functions, CLI commands, HTTP endpoints, config options, output formats, events, or any interface a consumer can observe.
+3. For each behavior: note whether it appears fully implemented or partially implemented (stubs, TODOs, feature flags).
 
-    Steps:
-    1. Read all source files under the listed paths.
-    2. Identify caller-visible behaviors: public functions, CLI commands,
-       HTTP endpoints, config options, output formats, events, or any
-       interface a consumer can observe.
-    3. For each behavior: note whether it appears fully implemented or
-       partially implemented (stubs, TODOs, feature flags).
-
-    Return: bullet list of caller-visible behaviors with implementation
-    status (implemented / partial / none visible).
-  """
-)
-
-Agent(
-  name = "domain-survey-tickets",
-  description = "Survey tickets relevant to domain: <domain>",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Find tickets relevant to the <domain> domain.
-
-    Steps:
-    1. Glob ai-docs/tickets/**/*.md.
-    2. Filter to tickets whose title or body mentions <domain> keywords
-       or the module paths: <paths>.
-    3. For each match: extract the feature or behavior described and
-       its ticket status (todo/wip/done/dropped).
-
-    Return: list of features → ticket status. Wip/todo items are
-    candidates for 🚧 planned markers.
-  """
-)
-
-Agent(
-  name = "domain-survey-old-spec",
-  description = "Survey archived spec for domain: <domain>",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Survey the archived spec files for the <domain> domain.
-
-    Archived location: ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory)
-    Old spec files for this domain: <files from task description, or scan all>
-
-    Steps:
-    1. Read the relevant archived spec files.
-    2. For each ## heading: note the feature name and 🚧 status.
-    3. Flag any behaviors in the old spec not visible in current source
-       (potential regressions or planned features that were never implemented).
-
-    Return: feature list from old spec with 🚧 status and a note on
-    current-source presence.
-  """
-)
-
-Agent(
-  name = "domain-survey-commits",
-  description = "Survey commit history for domain: <domain>",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Survey commit history for the <domain> domain.
-
-    Module paths: <paths from task description>
-
-    Steps:
-    1. Run `git log --oneline -- <paths>`.
-    2. Identify commits that added or changed caller-visible behavior
-       (feat:, fix:, spec: prefixes or spec-stem references in body).
-    3. For each significant commit: note the behavior changed and whether
-       it appears implemented (feat/fix merged) or still in-flight.
-
-    Return: chronological list of behavioral changes, newest first.
-  """
-)
+Return: bullet list of caller-visible behaviors with implementation status (implemented / partial / none visible).
+PROMPT
 ```
 
-Wait for all four subagents to return.
+```bash
+ws-subquery --deep-research - <<PROMPT
+Find tickets relevant to the <domain> domain.
+Module paths: <paths from task description>
+
+Steps:
+1. Glob ai-docs/tickets/**/*.md.
+2. Filter to tickets whose title or body mentions <domain> keywords or the module paths.
+3. For each match: extract the feature or behavior described and its ticket status (todo/wip/.done/.dropped).
+
+Return: list of features → ticket status. Wip/todo items are candidates for 🚧 planned markers.
+PROMPT
+```
+
+```bash
+ws-subquery --deep-research - <<PROMPT
+Survey the archived spec files for the <domain> domain.
+Archived location: ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory)
+Old spec files for this domain: <files from task description, or scan all>
+
+Steps:
+1. Read the relevant archived spec files.
+2. For each ## heading: note the feature name and 🚧 status.
+3. Flag any behaviors in the old spec not visible in current source.
+
+Return: feature list from old spec with 🚧 status and a note on current-source presence.
+PROMPT
+```
+
+```bash
+ws-subquery --deep-research - <<PROMPT
+Survey commit history for the <domain> domain.
+Module paths: <paths from task description>
+
+Steps:
+1. Run `git log --oneline -- <paths>`.
+2. Identify commits that added or changed caller-visible behavior (feat:, fix:, spec: prefixes or spec-stem references in body).
+3. For each significant commit: note the behavior changed and whether it appears implemented or still in-flight.
+
+Return: chronological list of behavioral changes, newest first.
+PROMPT
+```
+
+Wait for all four to return before synthesizing.
 
 ### 3. Synthesize behavior brief
 
@@ -297,36 +237,27 @@ Collect the confirmed list before writing anything.
 ### 6. Associate stems with tickets
 
 1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, commit the spec file changes now (`git add ai-docs/spec/ && git commit`) and skip to step 7.
-2. Dispatch one `clerk` agent (model override: sonnet) covering all collected tickets in a single prompt:
+2. Dispatch clerk covering all collected tickets in a single call:
 
-```
-Agent(
-  name = "clerk-ticket-association",
-  description = "Associate spec stems with wip/todo tickets for domain: <domain>",
-  subagent_type = "ws:clerk",
-  model = "sonnet",
-  prompt = """
-    Associate spec stems with tickets and check convention compliance.
+```bash
+ws-oneshot-agent -p clerk --model sonnet - <<PROMPT
+Associate spec stems with tickets and check convention compliance.
 
-    Run first:
-    ```bash
-    ws-print-infra ticket-conventions.md
-    ```
+Run first:
+  ws-print-infra ticket-conventions.md
 
-    Spec stems generated for this domain:
-    <list: {#YYMMDD-slug} — feature name, one per line>
+Spec stems generated for this domain:
+<list: {#YYMMDD-slug} — feature name, one per line>
 
-    Tickets to update (wip/todo only):
-    <list: ai-docs/tickets/<status>/<stem>.md — one-line description>
+Tickets to update (wip/todo only):
+<list: ai-docs/tickets/<status>/<stem>.md — one-line description>
 
-    For each ticket:
-    1. Read the ticket file.
-    2. Add or update the `spec:` frontmatter field with the stems relevant to
-       this ticket. Merge with any existing `spec:` entries — never overwrite.
-    3. Check the ticket body against loaded conventions. Fix any issues in place.
-    4. Do not commit — the caller handles all git operations.
-  """
-)
+For each ticket:
+1. Read the ticket file.
+2. Add or update the `spec:` frontmatter field with the stems relevant to this ticket. Merge with any existing `spec:` entries — never overwrite.
+3. Check the ticket body against loaded conventions. Fix any issues in place.
+4. Do not commit — the caller handles all git operations.
+PROMPT
 ```
 
 3. Review the `## Clerk report`. Resolve any open questions with the user before committing.
@@ -364,7 +295,7 @@ Total stems generated: <count>
 
 ### 3. Suggested next steps
 
-- Spawn `ws:spec-updater` agent to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
+- Run `ws-oneshot-agent -p spec-updater` to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
 - Review `🚧` entries with open tickets — confirm each has an active wip/todo ticket or drop the marker.
 - Run `/write-spec` for any domain surfaces discovered after wrap-up.
 
@@ -380,22 +311,6 @@ Total stems generated: <count>
 When uncertain, start flat. Re-evaluate after writing — if a split condition fires, note the file for a follow-up `/write-spec` invocation.
 
 ## Templates
-
-### Agent() spawn
-
-```
-Agent(
-  name = "<role>",
-  description = "<one-line purpose>",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    <instructions>
-  """
-)
-```
-
-All four survey agents per phase share a single response turn. Wait for all before synthesizing.
 
 ### ws-spec-build-index call
 

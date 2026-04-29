@@ -19,9 +19,8 @@ points, invariants, coupling. They are kept in sync with code by the
 behavior before implementing.
 
 **`ai-docs/tickets/`** — Work units.
-Each ticket tracks a bounded scope of work through `idea/ → todo/ → wip/ → done/`.
-A ticket's `spec:` frontmatter field lists the spec stems it covers. Tickets in
-`todo/` or later require at least one spec stem.
+Each ticket tracks a bounded scope of work through `idea/ → todo/ → wip/ → .done/`.
+A ticket's `spec:` frontmatter field (optional) lists the spec stems it covers.
 
 ## How They Connect
 
@@ -50,8 +49,8 @@ ws-infra-path <stem>         # resolve infra doc path
 ws-list-mental-model [paths] # list relevant mental-model docs
 ws-list-spec-stems           # list all spec stems in ai-docs/spec/
 ws-proj-tree                 # print project structure overview
-ws-spec-build-index          # run spec health checks (read + fix only, no side-effects)
-ws-subquery "<question>"     # haiku-backed read-only codebase search
+ws-spec-build-index          # rebuild spec features: frontmatter; may write spec files
+ws-subquery "<question>"     # haiku-backed codebase search; Explore-level tool access (no Edit/Write)
 ws-subquery --deep-research "<question>"  # sonnet-backed, for cross-module traces
 ```
 

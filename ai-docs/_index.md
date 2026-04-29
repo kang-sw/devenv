@@ -31,16 +31,14 @@ Read before authoring or modifying skills, agents, or infra:
 | `claude-plugin/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `ws-print-infra subagent-rules.md`. |
 | `claude-plugin/infra/executor-wrapup.md` | Shared post-implementation wrapup: _index.md refresh, doc-commit gate, ticket update. Access via `ws-print-infra executor-wrapup.md`. |
 
-## Native Agents
+## Agents
 
-`claude-plugin/agents/` contains agent types used by Claude Code's native Agent tool.
 Agent role documents (system prompts with frontmatter) live in `claude-plugin/infra/prompts/`.
+All agents are invoked via `ws-oneshot-agent -p <stem>` or `ws-named-agent new -p <stem>`.
 
 ```
-claude-plugin/agents/
-  clerk.md                — ticket management (used by forge-spec as ws:clerk subagent_type)
-
 claude-plugin/infra/prompts/     — agent role docs (frontmatter: name, model, tools)
+  clerk.md                — ticket management (one-shot; invoked via ws-oneshot-agent -p clerk)
   code-reviewer.md        — code diff review: correctness, security, contracts (read-only)
   mental-model-updater.md — mental-model doc updates after code changes
   spec-updater.md         — strip 🚧 markers; flag entries for removal on `removed: <stem>`
@@ -52,6 +50,8 @@ claude-plugin/infra/prompts/     — agent role docs (frontmatter: name, model, 
   plan-populator-research.md — step-by-step plan drafter
   plan-populator-survey.md   — codebase survey for brief support
   subquery.md             — scoped sub-query worker prompt; haiku default; Constraints/Process/Output/Doctrine layout
+  api-doc-manager.md      — persistent per-domain API doc executor; check-stale, fetch, answer
+  pre-router.md           — oneshot Haiku pre-router; resolves domain list from free-text prompt
 ```
 
 ## Infra Layout
@@ -69,9 +69,10 @@ claude-plugin/infra/                 — docs only; accessed via ws-print-infra 
   executor-wrapup.md          — Shared executor wrapup: _index.md refresh, doc-commit gate, ticket update
   agent-compression.md        — compression handoff prompt injected into agents approaching the 120K token threshold
   workflow-for-agent.md       — doc-layer orientation for sub-agents + safe primitive subset; auto-injected by ws-named-agent new
+  cargo-brief.md              — Rust API hint; injected via --prompt-cond cargo-brief when cargo-brief binary is in PATH
 
 claude-plugin/bin/                   — PATH-accessible executables (added by plugin)
-  ws-subquery                    — scoped sub-query via ws-oneshot-agent; delegates to -p subquery; haiku default, --deep-research for sonnet
+  ws-subquery                    — scoped sub-query via ws-oneshot-agent; delegates to -p subquery; haiku default, --deep-research for sonnet; Explore-level tool access; accepts inline string, `-` sentinel, or piped stdin
   ws-spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
   ws-generate-spec-stem          — emit a new {#YYMMDD-slug} anchor for a given descriptive slug
   ws-list-spec-stems             — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
@@ -88,6 +89,8 @@ claude-plugin/bin/                   — PATH-accessible executables (added by p
   ws-interrupt-named-agent          — shim → ws-named-agent interrupt; queue a message to a named agent's outbox
   ws-agent-check-mailbox            — shim → ws-named-agent check-mailbox; PostToolBatch hook: exits 2 when WS_AGENT_OUTBOX is non-empty
   ws-print-named-agent-output       — shim → ws-named-agent print; print the persisted output file of a named agent
+  ws-ask-api                        — 2-layer API doc query: pre-router resolves domains, per-domain executor answers
+  ws-ask-api-internal               — per-domain executor; acquires flock, dispatches to api-doc-<domain> named agent
 ```
 
 ## Skill Inventory
@@ -111,6 +114,7 @@ claude-plugin/skills/
   forge-spec/          — from-scratch spec reconstruction; archive-first, domain-by-domain, cross-compact via TaskCreate (disable-model-invocation)
   forge-mental-model/  — from-scratch mental-model construction; survey → user confirm → per-domain verify cycle (disable-model-invocation)
   workflow/            — loads orchestration primitives reference; session-resident across compaction; invoked at discuss/sprint entry
+  exit-session/        — session handoff: commit staged work, write context note to _index.md ## Session Notes, commit after user approval
 ```
 
 ## Canonical Flows
@@ -139,11 +143,11 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 | `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude-plugin/skills/ tools for ws plugin maintenance |
 | `ai-docs/spec/spec-system.md` | Spec System | Spec authoring, 🚧 markers, anchor protocol |
 | `ai-docs/spec/tools.md` | Devenv Tools | Custom tools built in this repo (claude-watch TUI, claude-dash multiplexer) |
-| `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship |
+| `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship, /exit-session |
 
 ## Tickets
 
-Status directories: `idea/` → `todo/` → `done/` (or `dropped/`).
+Status directories: `idea/` → `todo/` → `.done/` (or `.dropped/`).
 Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 | Stem | Status | Summary |

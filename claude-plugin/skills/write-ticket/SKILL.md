@@ -30,7 +30,7 @@ Target: $ARGUMENTS
 3. **Edit** (existing ticket):
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
-   c. For moves, `git mv` and add `completed:` date in frontmatter (→ `done/`).
+   c. For moves, `git mv` and add `completed:` date in frontmatter (→ `.done/`).
 4. **Phase content** — carry everything from discussion that informs implementation: goals, constraints, rationale, rejected alternatives, suggested approaches (pseudo code, struct shapes, data formats, algorithm sketches). Leave to the plan: codebase-derived details (file paths, existing type reuse, integration patterns, function signatures, testing classifications).
 5. **Intent review** — re-read the written/edited ticket against the preceding conversation:
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?

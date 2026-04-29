@@ -63,7 +63,7 @@ After writing, runs `ws-spec-build-index` to rebuild the `features:` frontmatter
 
 Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/proceed` after authoring, which auto-routes to skeleton, plan, or implementation.
 
-Status directories: `idea/` → `todo/` → `done/` (or `dropped/`). Ticket stem format: `YYMMDD-type-slug`.
+Status directories: `idea/` → `todo/` → `.done/` (or `.dropped/`). Ticket stem format: `YYMMDD-type-slug`.
 
 A `judge: spec-gate` blocks creation of `todo/`-or-higher tickets when no spec entry covers the topic, and suggests `/write-spec` first. `idea/` creation is ungated.
 
@@ -73,7 +73,7 @@ A `judge: spec-gate` blocks creation of `todo/`-or-higher tickets when no spec e
 
 - `/write-ticket` adds an entry when a ticket is created or promoted to `todo/`.
 - `/discuss` adds an entry when an `idea/` ticket is promoted to `todo/`.
-- `executor-wrapup` removes the entry when a ticket moves to `done/`.
+- `executor-wrapup` removes the entry when a ticket moves to `.done/`.
 
 
 > [!note] Constraints
@@ -95,7 +95,7 @@ Suggests `/implement` as the next step — does not auto-invoke. `/implement` in
 
 Core delegated implementation primitive. Operates on the current branch (branch creation is the caller's responsibility). Steps:
 
-1. Reads target; spawns `project-survey`; writes a brief (`ai-docs/plans/YYYY-MM/DD-<stem>.brief.md`) — the implementer's sole context source.
+1. Reads target; spawns `project-survey`; writes a brief (`ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`) — the implementer's sole context source.
 2. Applies `judge: plan-depth` (soft): **as-is** (no plan file) / **survey** (Sonnet populates a reference map) / **research** (Opus produces a step-by-step plan).
 3. Spawns an implementer subagent and up to three review-partition subagents in parallel. {#260424-implement-file-based-review}
 4. Runs a relay loop (max 3 cycles): implementer responds to each finding with `[fixed]`, `[won't fix: <reason>]`, or `[deferred: <reason>]`; reviewers respond `[accepted]` or `[maintained]`. At cycle 2, the lead adjudicates maintained disputes; at cycle 3, unresolved disputes escalate to the caller.
@@ -156,7 +156,7 @@ Tiers:
 Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket directories (`idea/`, `todo/`). Source code references are out of scope.
 
 > [!note] Constraints
-> - `done/` and `dropped/` ticket directories are excluded from the search scope.
+> - `.done/` and `.dropped/` ticket directories are excluded from the search scope.
 > - Source code file references are not produced by this agent.
 > - In `/discuss`, the survey does not fire for session-continuity queries — those draw from session state or git log.
 
@@ -427,7 +427,28 @@ On first invocation with no config present, creates a template for the user to f
 
 Scaffolds a new project (`fresh` mode) or upgrades an existing one (`upgrade` / `adopt` modes) to the canonical `CLAUDE.md` template structure. Performs a surgical merge: never overwrites project-specific sections; marks unresolvable conflicts inline with `<!-- CONFLICT: ... -->`.
 
-Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`, `plans/`, `ref/`) and a `.gitignore` entry for `.local.md` files.
+Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`, `.plans/`, `ref/`) and a `.gitignore` entry for `.local.md` files.
 
 Legacy project detection: when `ai-docs/spec/` or `ai-docs/mental-model/` is absent after bootstrapping, the skill suggests running `/forge-spec` followed by `/forge-mental-model` to establish the documentation baseline. {#260423-bootstrap-legacy-forge-routing}
+
+### `/exit-session` {#260429-exit-session-skill}
+
+Session handoff skill. Captures the current session context into `ai-docs/_index.md ## Session Notes` so a subsequent fresh session can orient itself without re-deriving state from git log alone.
+
+**Phase 1 — Commit pass:** commits any staged changes (excluding `_index.md`) in logical units before writing the context note. Prevents accidental loss if the user later runs `git checkout -- ai-docs/_index.md` to reset a stale note.
+
+**Phase 2 — Context write:** overwrites `## Session Notes` in `_index.md` from the current conversation context only — no additional tool calls or file reads. The note format:
+- File path + optional line range for every referenced artifact (e.g. `claude-plugin/bin/ws-subquery:14-25`), enabling the next session to read directly rather than re-search.
+- Uncertain items marked `(uncertain)` — signals the next session to verify before acting.
+- Compact; respects the `_index.md` memory policy (prune aggressively when stale).
+
+**Phase 3 — User approval:** presents the written note for review. Waits for explicit confirmation before committing.
+
+**Phase 4 — Commit:** commits `_index.md` with message `chore(session): exit context note`. Session continues.
+
+The note is ephemeral by design: once the next session has absorbed its context, the `## Session Notes` section is pruned as part of normal memory hygiene — no revert commit required.
+
+> [!note] Constraints
+> - Phase 2 produces no tool calls. Accuracy depends on what is already in the conversation context; the `(uncertain)` marker is the safety valve.
+> - Only staged files are committed in Phase 1. Unstaged and untracked changes are not touched.
 

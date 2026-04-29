@@ -76,13 +76,18 @@ Delegates to `ws-oneshot-agent -p subquery` with a structured-report prompt. {#2
 
 ```
 ws-subquery [--deep-research] "<question>"
+ws-subquery [--deep-research] - <<'PROMPT'
+...multi-line question...
+PROMPT
+echo "question" | ws-subquery [--deep-research]
 ```
 
-Default model: `haiku`. With `--deep-research`: switches to `sonnet`. Output is a self-contained answer in structured-report format. The `subquery` prompt instructs the agent to explore read-only and return a concise, citation-backed report.
+Default model: `haiku`. With `--deep-research`: switches to `sonnet`. Accepts an inline string, a `-` sentinel (reads stdin), or piped stdin — all three forms are equivalent. Output is a self-contained answer in structured-report format.
+
+Tool access: Explore level. The `subquery` prompt permits Bash (read-only commands), Read, Glob, Grep, WebFetch, and WebSearch; prohibits Edit, Write, NotebookEdit, and Agent. {#260429-ws-subquery-explore-access}
 
 > [!note] Constraints
 > - Single-turn — no follow-up turns. The question must be answerable in one pass.
-> - Full tool access via `ws-oneshot-agent`; behavior is scoped by the `subquery` prompt, not by CLI tool restrictions.
 > - Doc-system (`workflow-for-agent.md`) is injected by default — subquery agents see project workflow context.
 
 ### `ws-oneshot-agent` {#260429-ws-oneshot-agent-tool}
@@ -98,7 +103,7 @@ ws-oneshot-agent -p <prompt-stem> [--model <tier>] [--no-doc-system] '<inline-pr
 
 Internally runs `ws-named-agent new` → `ws-named-agent call` → `ws-named-agent erase`. The agent name is a randomly generated `_oneshot_<8hex>` identifier. Registry and session files are cleaned up via an EXIT trap regardless of call outcome.
 
-Distinct from `ws-subquery`: accepts arbitrary prompt stems and inline prompts; `ws-subquery` is a fixed-prompt wrapper around this tool targeting read-only codebase search.
+Distinct from `ws-subquery`: accepts arbitrary prompt stems and inline prompts; `ws-subquery` is a fixed-prompt wrapper around this tool targeting Explore-level codebase search.
 
 > [!note] Constraints
 > - `-p` is required; at least one prompt stem must be provided.

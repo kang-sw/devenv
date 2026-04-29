@@ -1,7 +1,7 @@
 ---
 title: claude-dash — Interactive worktree-scoped Claude TUI multiplexer
 plans:
-  - ai-docs/plans/2026-04/26-2352.claude-dash.md
+  - ai-docs/.plans/2026-04/26-2352.claude-dash.md
 spec:
   - 260426-claude-dash
   - 260426-claude-dash-layout

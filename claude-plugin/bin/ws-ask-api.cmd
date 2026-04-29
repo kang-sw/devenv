@@ -1,1 +1,1 @@
-@bash "%~dp0ws-ask-api" %*
+@python "%~dp0ws-ask-api" %*

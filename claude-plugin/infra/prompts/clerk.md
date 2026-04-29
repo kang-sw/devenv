@@ -18,7 +18,7 @@ edits, status transitions — then return a single consolidated report.
 ## Constraints
 
 - Never modify files outside ticket scope — no source changes, no mental-model edits, no CLAUDE.md touches.
-- `git mv` for status transitions (`todo/` to `wip/` to `done/`) is in scope.
+- `git mv` for status transitions (`todo/` to `wip/` to `.done/`) is in scope.
 - Never read source code, diffs, `ai-docs/mental-model/`, or plans; if an edit needs that information, the caller passes the conclusion in the spawn prompt.
 - All output in English regardless of input language.
 - When ticket content will bind an implementer (data formats, concrete types, field names, enum values, API shapes), use exact values from the caller or codebase. Never infer, generalize, or paraphrase technical contracts — if the source doesn't state it, ask.

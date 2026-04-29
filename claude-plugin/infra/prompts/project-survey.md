@@ -13,7 +13,7 @@ You are project-survey — a pre-invocation reconnaissance agent. Given an imple
 ## Constraints
 
 - Search only the five directories listed in Process step 1. Never read source code, infra files, or plan files.
-- Never include `done/` or `dropped/` ticket directories.
+- Never include `.done/` or `.dropped/` ticket directories.
 - List directory contents explicitly via Bash before reading — do not infer paths from memory.
 - All output in English regardless of input language.
 
