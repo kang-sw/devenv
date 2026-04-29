@@ -32,11 +32,15 @@ else
     LOCKDIR="$DOMAIN_DIR/.lock"
     _unlock() { rmdir "$LOCKDIR" 2>/dev/null || true; }
     trap _unlock EXIT
+    LOCK_ACQUIRED=0
     for i in $(seq 1 60); do
-        mkdir "$LOCKDIR" 2>/dev/null && break
-        [[ $i -eq 60 ]] && { echo "lock timeout: $DOMAIN is being updated by another agent" >&2; exit 1; }
+        if mkdir "$LOCKDIR" 2>/dev/null; then
+            LOCK_ACQUIRED=1
+            break
+        fi
         sleep 1
     done
+    [[ $LOCK_ACQUIRED -eq 0 ]] && { echo "lock timeout: $DOMAIN is being updated by another agent" >&2; exit 1; }
 fi
 
 AGENT_NAME="api-doc-$DOMAIN"
