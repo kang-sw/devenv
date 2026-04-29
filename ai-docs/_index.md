@@ -181,6 +181,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
+`260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 
 ## Session Notes
 
