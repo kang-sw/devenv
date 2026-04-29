@@ -431,3 +431,24 @@ Creates the `ai-docs/` directory structure (`tickets/`, `spec/`, `mental-model/`
 
 Legacy project detection: when `ai-docs/spec/` or `ai-docs/mental-model/` is absent after bootstrapping, the skill suggests running `/forge-spec` followed by `/forge-mental-model` to establish the documentation baseline. {#260423-bootstrap-legacy-forge-routing}
 
+### `/exit-session` {#260429-exit-session-skill}
+
+Session handoff skill. Captures the current session context into `ai-docs/_index.md ## Session Notes` so a subsequent fresh session can orient itself without re-deriving state from git log alone.
+
+**Phase 1 — Commit pass:** commits any staged changes (excluding `_index.md`) in logical units before writing the context note. Prevents accidental loss if the user later runs `git checkout -- ai-docs/_index.md` to reset a stale note.
+
+**Phase 2 — Context write:** overwrites `## Session Notes` in `_index.md` from the current conversation context only — no additional tool calls or file reads. The note format:
+- File path + optional line range for every referenced artifact (e.g. `claude-plugin/bin/ws-subquery:14-25`), enabling the next session to read directly rather than re-search.
+- Uncertain items marked `(uncertain)` — signals the next session to verify before acting.
+- Compact; respects the `_index.md` memory policy (prune aggressively when stale).
+
+**Phase 3 — User approval:** presents the written note for review. Waits for explicit confirmation before committing.
+
+**Phase 4 — Commit:** commits `_index.md` with message `chore(session): exit context note`. Session continues.
+
+The note is ephemeral by design: once the next session has absorbed its context, the `## Session Notes` section is pruned as part of normal memory hygiene — no revert commit required.
+
+> [!note] Constraints
+> - Phase 2 produces no tool calls. Accuracy depends on what is already in the conversation context; the `(uncertain)` marker is the safety valve.
+> - Only staged files are committed in Phase 1. Unstaged and untracked changes are not touched.
+
