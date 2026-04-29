@@ -112,7 +112,6 @@ ai-docs/
   mental-model.md    — overview file for overall mental model documents.
   mental-model/      — project map: contracts, coupling, architectural narrative
   spec/              — external-perspective specs (area/ directories for multi-section areas)
-  deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
   tickets/<status>/  — idea/ todo/ .done/ .dropped/
 
@@ -267,6 +266,12 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
            `git mv ai-docs/plans  ai-docs/.plans`
          Update any references to `tickets/done/`, `tickets/dropped/`, or `ai-docs/plans/`
          in CLAUDE.md, `ai-docs/_index.md`, and infra/skill docs to use the dot-prefix form.
+- v0031: Archive legacy `ai-docs/deps/` directory if it exists. This directory
+         held manually-maintained API delta docs; it is superseded by the
+         `ws-ask-api` / `ai-docs/.deps/` cache system.
+         If `ai-docs/deps/` exists: `git mv ai-docs/deps ai-docs/ref/deps-old`.
+         Add `ai-docs/.deps/` to `.gitignore` if not already present (the cache
+         is machine-local and should not be committed in downstream projects).
 -->
 
-<!-- Template Version: v0030 -->
+<!-- Template Version: v0031 -->

@@ -28,7 +28,7 @@ Mode: $ARGUMENTS
 3. Detect mode:
    - **fresh** — no `CLAUDE.md` exists. Scaffold from template.
    - **upgrade** — `CLAUDE.md` exists with `<!-- Template Version: vNNNN -->`. Apply items where version > current.
-   - **adopt** — `CLAUDE.md` exists without version tag. Follow v0030 rules: audit v0001–latest against project state, apply what's missing.
+   - **adopt** — `CLAUDE.md` exists without version tag. Follow v0031 rules: audit v0001–latest against project state, apply what's missing.
 4. Execute the appropriate handler below.
 
 ## On: fresh
@@ -39,7 +39,7 @@ Mode: $ARGUMENTS
    - `ai-docs/_index.md` (with memory-policy comment, skeleton headings)
    - `ai-docs/_index.local.md` (stub, add to `.gitignore`)
    - `ai-docs/tickets/` with status subdirectories: `idea/`, `todo/`, `.done/`, `.dropped/`
-   - `ai-docs/mental-model/`, `ai-docs/deps/`, `ai-docs/ref/`
+   - `ai-docs/mental-model/`, `ai-docs/ref/`
 4. Add `ai-docs/_index.local.md` to `.gitignore` if not present.
 5. Set `<!-- Template Version: vNNNN -->` to latest version from template.
 6. Commit.
@@ -62,7 +62,7 @@ Mode: $ARGUMENTS
 
 ## On: adopt
 
-1. Follow v0030: review v0001 through latest against current project state.
+1. Follow v0031: review v0001 through latest against current project state.
 2. For each item, check whether already satisfied; apply only what's missing.
 3. Add `<!-- Template Version: vNNNN -->` at bottom of CLAUDE.md set to latest.
 4. Proceed to **upgrade** handler for any remaining sync.
