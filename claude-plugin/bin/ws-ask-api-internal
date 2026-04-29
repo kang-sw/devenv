@@ -55,7 +55,7 @@ REPO_NAME="$(basename "$REPO_ROOT")"
 REGISTRY="$GIT_DIR/ws@$REPO_NAME/agents/$AGENT_NAME.json"
 
 if [[ ! -f "$REGISTRY" ]]; then
-    ws-new-named-agent "$AGENT_NAME" -p api-doc-manager >/dev/null
+    ws-new-named-agent "$AGENT_NAME" -p api-doc-manager --no-doc-system >/dev/null
 fi
 
 # Deliver prompt (or refresh signal) to the executor session.
