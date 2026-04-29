@@ -69,6 +69,10 @@ stable feature identity. Three tools cooperate: `ws-generate-spec-stem`,
 - `forge-spec` → `spec-updater`: forge-spec suggests invoking the `spec-updater` agent at
   wrap-up to strip `🚧` markers. The two tools are independent — forge-spec does not call
   spec-updater directly.
+- `forge-spec` → `ws-oneshot-agent -p clerk`: the per-domain ticket-association step dispatches
+  `ws-oneshot-agent -p clerk --model sonnet` as a one-shot agent (not via the named-agent registry).
+  clerk.md lives at `claude-plugin/infra/prompts/clerk.md`. Removing or renaming that file silently
+  breaks ticket association for forge-spec with no plan-time warning.
 - `ws-spec-build-index` → `ai-docs/mental-model/`: the anchor integrity check reads every
   `*.md` under `ai-docs/mental-model/` and matches each `{#YYMMDD-slug}` ref against the
   spec registry. Renaming or deleting a spec stem without updating mental-model refs produces
