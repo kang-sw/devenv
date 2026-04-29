@@ -64,3 +64,24 @@ ws-call-named-agent   # dispatches a registered agent
 ws-interrupt-named-agent  # injects a message into a running agent
 ws-merge-branch       # merges a sprint branch into main
 ```
+
+## API Documentation
+
+When you need external library API information (function signatures, usage patterns,
+threading models, error handling — anything from a third-party library), use
+`ws-ask-api`. Do NOT use WebSearch or WebFetch for API lookup.
+
+```bash
+ws-ask-api "<question>"                  # domain resolved automatically
+ws-ask-api <domain-hint> "<question>"    # hint for a specific library
+```
+
+Examples:
+```bash
+ws-ask-api "how does asio strand prevent data races?"
+ws-ask-api asio "executor vs strand difference"
+ws-ask-api "grpc ClientContext deadline semantics"
+```
+
+`ws-ask-api` returns a structured answer citing which cached doc sections were used.
+The cache is maintained automatically; you do not need to manage it.
