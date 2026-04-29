@@ -15,7 +15,7 @@ Target: $ARGUMENTS
 ## Invariants
 
 - Run `ws-print-infra mental-model-conventions.md` (Bash) before any document write — conventions are canonical there.
-- Every `Agent()` dispatch carries explicit `model = "sonnet"` — never inherited.
+- All survey and verifier queries use `ws-subquery --deep-research`.
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
 - Domain task names use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Renaming tasks breaks cross-compact resume detection.
@@ -47,71 +47,46 @@ Record whether spec is available (drives step 4 per domain).
 
 ### 2. Parallel codebase survey
 
-Dispatch all three survey subagents in a single response turn:
+Issue all three queries in a single response turn as parallel Bash calls:
 
-```
-Agent(
-  name = "survey-structure",
-  description = "Survey directory and module structure",
-  subagent_type = "Explore",
-  model = "sonnet",
-  prompt = """
-    Survey the project's directory and module structure.
+```bash
+ws-subquery --deep-research - <<'PROMPT'
+Survey the project's directory and module structure.
 
-    Steps:
-    1. Enumerate the source tree: find top-level modules, packages, or service
-       boundaries. Use glob/find as needed.
-    2. For each boundary: identify its apparent responsibility and whether it
-       has outward-facing interfaces (APIs, CLI commands, config options).
+Steps:
+1. Enumerate the source tree: find top-level modules, packages, or service boundaries. Use find/glob as needed.
+2. For each boundary: identify its apparent responsibility and whether it has outward-facing interfaces (APIs, CLI commands, config options).
 
-    Return: a bullet list of module/area names with a one-line responsibility
-    description each. Include file count per area as a rough size signal.
-  """
-)
-
-Agent(
-  name = "survey-entry-points",
-  description = "Survey entry points and cross-module contracts",
-  subagent_type = "Explore",
-  model = "sonnet",
-  prompt = """
-    Survey the project for entry points and cross-module contracts.
-
-    Steps:
-    1. Find main entry points (e.g., main.rs, __main__.py, index.ts, bin/).
-    2. For each entry point: identify what it orchestrates, what modules it
-       depends on, and what outputs it produces.
-    3. Identify shared contracts: trait impls, protocols, interface files,
-       plugin registries, or configuration schemas that cross module boundaries.
-
-    Return: a bullet list of entry points and contracts with coupling direction
-    (who depends on whom).
-  """
-)
-
-Agent(
-  name = "survey-coupling",
-  description = "Survey coupling hotspots and implicit contracts",
-  subagent_type = "Explore",
-  model = "sonnet",
-  prompt = """
-    Survey the project for coupling hotspots and implicit contracts — areas
-    that cause wrong outcomes for a developer who modifies them without
-    knowing the contract.
-
-    Look for: shared mutable state, ordering dependencies, sync points,
-    extension registries, global config reads, event buses, or any code
-    that must be called in a specific order.
-
-    For each hotspot: note the modules involved, the contract, and the
-    failure mode if violated.
-
-    Return: a bullet list of hotspots with modules, contract, and failure mode.
-  """
-)
+Return: a bullet list of module/area names with a one-line responsibility description each. Include file count per area as a rough size signal.
+PROMPT
 ```
 
-Wait for all three subagents to return.
+```bash
+ws-subquery --deep-research - <<'PROMPT'
+Survey the project for entry points and cross-module contracts.
+
+Steps:
+1. Find main entry points (e.g., main.rs, __main__.py, index.ts, bin/).
+2. For each entry point: identify what it orchestrates, what modules it depends on, and what outputs it produces.
+3. Identify shared contracts: trait impls, protocols, interface files, plugin registries, or configuration schemas that cross module boundaries.
+
+Return: a bullet list of entry points and contracts with coupling direction (who depends on whom).
+PROMPT
+```
+
+```bash
+ws-subquery --deep-research - <<'PROMPT'
+Survey the project for coupling hotspots and implicit contracts — areas that cause wrong outcomes for a developer who modifies them without knowing the contract.
+
+Look for: shared mutable state, ordering dependencies, sync points, extension registries, global config reads, event buses, or any code that must be called in a specific order.
+
+For each hotspot: note the modules involved, the contract, and the failure mode if violated.
+
+Return: a bullet list of hotspots with modules, contract, and failure mode.
+PROMPT
+```
+
+Wait for all three to return before synthesizing.
 
 ### 3. Synthesize domain candidates
 
@@ -154,34 +129,26 @@ Call `TaskUpdate` to set the domain task status to `in_progress`.
 
 ### 2. Domain survey
 
-Dispatch one Explore subagent:
+```bash
+ws-subquery --deep-research - <<PROMPT
+Analyze domain: <domain>
+Source paths: <paths from task description>
 
-```
-Agent(
-  name = "domain-survey-<domain>",
-  description = "Survey internals of domain: <domain>",
-  subagent_type = "Explore",
-  model = "sonnet",
-  prompt = """
-    Analyze domain: <domain>
-    Source paths: <paths from task description>
+Analyze this domain for a developer who needs to modify it.
+Focus on what would cause wrong outcomes if unknown:
+1. Implicit contracts between modules (ordering, data flow, sync)
+2. Coupling (changes here → must also change there)
+3. Extension points (registries, enums, plugin interfaces, config)
+4. Fragile areas (invariants that break silently or cause wrong results, known debt)
+5. Common mistakes (forgetting required steps, wrong outcomes)
+6. Distinguish existing patterns from scaffolded/planned features.
 
-    Analyze this domain for a developer who needs to modify it.
-    Focus on what would cause wrong outcomes if unknown:
-    1. Implicit contracts between modules (ordering, data flow, sync)
-    2. Coupling (changes here → must also change there)
-    3. Extension points (registries, enums, plugin interfaces, config)
-    4. Fragile areas (invariants that break silently or cause wrong results, known debt)
-    5. Common mistakes (forgetting required steps, wrong outcomes)
-    6. Distinguish existing patterns from scaffolded/planned features.
-
-    Be concrete: cite file paths, function names, specific types.
-    Do NOT produce type/field listings or paraphrase what functions do.
-  """
-)
+Be concrete: cite file paths, function names, specific types.
+Do NOT produce type/field listings or paraphrase what functions do.
+PROMPT
 ```
 
-Wait for the subagent to return.
+Wait for the result before drafting.
 
 ### 3. Draft domain file
 
@@ -200,34 +167,23 @@ Skip if no spec exists.
 
 ### 5. Verify
 
-Dispatch one verifier subagent:
+```bash
+ws-subquery --deep-research - <<PROMPT
+Verify the following mental-model domain document against the codebase.
 
-```
-Agent(
-  name = "verifier-<domain>",
-  description = "Verify mental-model draft for domain: <domain>",
-  subagent_type = "general-purpose",
-  model = "sonnet",
-  prompt = """
-    Verify the following mental-model domain document against the codebase.
+Domain file draft:
+<full draft content>
 
-    Domain file draft:
-    <full draft content>
+Source paths to check: <paths from task description>
 
-    Source paths to check: <paths from task description>
+For each claim in the draft, assign a severity:
+- [HIGH] Factually wrong — misnames a function, inverts a dependency, states a constraint that is not enforced.
+- [LOW] Incomplete — a relevant contract or coupling is missing.
+- [STALE] References removed code or an old API.
+- [BLOAT] Fails the inclusion test — type/field listing, paraphrase of what a function does, or content derivable without cost.
 
-    For each claim in the draft, assign a severity:
-    - [HIGH] Factually wrong — misnames a function, inverts a dependency,
-      states a constraint that is not enforced.
-    - [LOW] Incomplete — a relevant contract or coupling is missing.
-    - [STALE] References removed code or an old API.
-    - [BLOAT] Fails the inclusion test — type/field listing, paraphrase of
-      what a function does, or content derivable without cost.
-
-    Return a finding list. Each finding: severity tag, location in draft,
-    correction or suggested removal.
-  """
-)
+Return a finding list. Each finding: severity tag, location in draft, correction or suggested removal.
+PROMPT
 ```
 
 Process verifier output:
