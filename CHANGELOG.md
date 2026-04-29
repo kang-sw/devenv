@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.15.0 — 2026-04-29
+
+### Added
+- `/exit-session` skill — 4-phase session handoff: commit staged work, write context note to `_index.md ## Session Notes` from memory only (no tool calls), user approval, commit `_index.md`. Optimizes next-session orientation cost via file-path citations and `(uncertain)` markers.
+
+### Changed
+- `ws-subquery`: Explore-level tool access — Bash (read-only), Read, Glob, Grep, WebFetch, WebSearch permitted; Edit, Write, NotebookEdit, Agent prohibited. Matches the native `Explore` subagent type.
+- `ws-subquery`: stdin/heredoc support — accepts inline string, `-` sentinel (reads stdin), or piped stdin. Enables multi-line prompts via `ws-subquery --deep-research - <<'PROMPT' ... PROMPT`.
+- `forge-spec`: all native `Agent()` calls replaced with `ws-subquery --deep-research` (survey dispatches) and `ws-oneshot-agent -p clerk` (ticket association). No native Agent tool dependency.
+- `forge-mental-model`: all native `Agent()` calls replaced with `ws-subquery --deep-research`. No native Agent tool dependency.
+- `clerk.md`: moved from `claude-plugin/agents/` to `claude-plugin/infra/prompts/`. Invoked via `ws-oneshot-agent -p clerk --model sonnet`.
+
 ## v0.14.0 — 2026-04-29
 
 ### Added
