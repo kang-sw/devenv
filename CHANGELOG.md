@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.14.0 — 2026-04-29
+
+### Added
+- `ws-ask-api` — new bin tool: queries a per-project `ai-docs/.deps/` external API documentation cache. 2-layer routing: Haiku pre-router resolves canonical domain names; persistent `api-doc-<domain>` named-agent sessions handle fetch, cache, and answer. Supports `--refresh`, `--check-stale`, `--list`. Parallel dispatch for multi-domain queries. Exit code propagated from all call sites.
+- `api-doc-manager` infra prompt — per-domain executor agent: bootstraps `l1–l3.md` + scripts on first use, answers queries from cache, re-fetches on stale detection.
+- `pre-router` infra prompt — Haiku one-shot agent: maps free-text prompts to canonical `.deps/` domain names with fuzzy matching and exact-match bypass.
+- `--prompt-cond BINARY[=PROMPT]` flag on `ws-new-named-agent` — appends a named prompt to the system prompt only when the specified binary is present in PATH at registration time.
+- `cargo-brief.md` infra prompt — injected via `--prompt-cond cargo-brief`; instructs agents to use `cargo brief` for Rust API exploration.
+- `ws-ask-api` entry in `ws:workflow` skill primitives reference.
+
+### Changed
+- `workflow-for-agent.md`: added `## API Documentation` section — agents must use `ws-ask-api` for external library API lookup; direct `WebSearch`/`WebFetch` for API docs prohibited.
+
+### Fixed
+- `ws-ask-api-internal`: flock timeout removed — kernel releases fd on any exit including crash; Windows mkdir fallback replaced with PID-based stale lock detection (no timeout, crash-safe).
+- `ws-ask-api-internal`: `api-doc-manager` now registered with `--no-doc-system` to prevent recursive `ws-ask-api` invocation from within the cache agent.
+
 ## v0.13.2 — 2026-04-29
 
 ### Fixed
