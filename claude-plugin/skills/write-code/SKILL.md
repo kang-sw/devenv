@@ -49,7 +49,7 @@ Capture the returned `[Must|Maybe]` reference list — it informs the brief's `#
 
 ### 2. Write brief
 
-Write `ai-docs/plans/YYYY-MM/DD-<stem>.brief.md` using the **brief template** (see Templates).
+Write `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using the **brief template** (see Templates).
 Strip ticket noise — this file is the implementer's sole context source.
 Populate `## References` from the project-survey output.
 
@@ -70,7 +70,7 @@ ws-new-named-agent plan-surveyor -p plan-populator-survey
 ```bash
 ws-call-named-agent plan-surveyor - <<'PROMPT'
 Brief path: <brief-path>
-Plan path: ai-docs/plans/YYYY-MM/DD-<stem>.md
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
 PROMPT
 ```
 
@@ -83,7 +83,7 @@ ws-new-named-agent plan-researcher -p plan-populator-research
 ```bash
 ws-call-named-agent plan-researcher - <<'PROMPT'
 Brief path: <brief-path>
-Plan path: ai-docs/plans/YYYY-MM/DD-<stem>.md
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
 PROMPT
 ```
 
@@ -280,7 +280,7 @@ Soft judgment. Default to survey when uncertain between as-is and survey.
 
 ### Brief format
 
-Path: `ai-docs/plans/YYYY-MM/DD-<stem>.brief.md`
+Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 
 ```markdown
 # Brief: <stem>

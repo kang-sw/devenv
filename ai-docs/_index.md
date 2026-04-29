@@ -143,7 +143,7 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 
 ## Tickets
 
-Status directories: `idea/` → `todo/` → `done/` (or `dropped/`).
+Status directories: `idea/` → `todo/` → `.done/` (or `.dropped/`).
 Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 | Stem | Status | Summary |

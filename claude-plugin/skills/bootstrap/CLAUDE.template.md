@@ -114,7 +114,7 @@ ai-docs/
   spec/              — external-perspective specs (area/ directories for multi-section areas)
   deps/              — external library API delta docs
   ref/               — static reference material (external specs, protocol docs, design notes)
-  tickets/<status>/  — idea/ todo/ done/ dropped/
+  tickets/<status>/  — idea/ todo/ .done/ .dropped/
 
 _index.md should cover:
   - Project summary (what it is, who it's for, current milestone)
@@ -123,7 +123,7 @@ _index.md should cover:
   - Conventions (tickets, dependency docs, naming rules)
   - Build/test commands and operational pitfalls
   - Session notes (cross-session intent only, 2-5 lines max, delete when stale)
-  - Never reference done/ or dropped/ tickets — they live in git history
+  - Never reference .done/ or .dropped/ tickets — they live in git history
 
 _index.md must start with this comment (do not remove after creation):
 
@@ -259,6 +259,14 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          (format: one line per `todo/` ticket — `` `stem` — purpose and dependency notes ``).
          Then open a `/discuss` session with the user to agree on implementation
          order for `todo/` tickets and populate the queue.
+- v0030: Rename archive ticket directories and plan directory to dot-prefix form
+         (hidden from default grep/glob). Run the following `git mv` commands if
+         the plain-named directories still exist:
+           `git mv ai-docs/tickets/done  ai-docs/tickets/.done`
+           `git mv ai-docs/tickets/dropped  ai-docs/tickets/.dropped`
+           `git mv ai-docs/plans  ai-docs/.plans`
+         Update any references to `tickets/done/`, `tickets/dropped/`, or `ai-docs/plans/`
+         in CLAUDE.md, `ai-docs/_index.md`, and infra/skill docs to use the dot-prefix form.
 -->
 
-<!-- Template Version: v0029 -->
+<!-- Template Version: v0030 -->

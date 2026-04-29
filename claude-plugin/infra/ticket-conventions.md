@@ -10,9 +10,9 @@ Canonical reference for ticket structure, naming, and lifecycle.
 
 ## Status Flow
 
-- Status is directory-based only: `idea/` → `todo/` → `done/` (or `dropped/`). Never duplicate status in frontmatter.
+- Status is directory-based only: `idea/` → `todo/` → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
 - Move tickets with `git mv`; no cross-link updates needed.
-- Add `completed:` date on move to `done/`.
+- Add `completed:` date on move to `.done/`.
 - `idea/` tickets may not have `spec:` entries — spec linkage begins at `todo/` or higher.
 - Promoting `idea/` → `todo/` for a ticket with spec-relevant behaviors: route through `/discuss` → `/write-spec` adds the `🚧` entry before or after the move.
 - Dropping a ticket with linked spec entries: route through `/discuss` → `/write-spec` removes orphaned `🚧` entries before the move.
@@ -27,7 +27,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 ## Stems
 
 - Ticket stems are **immutable absolute references** — history is queried by stem (`git log --grep`).
-- If a ticket's concept changes fundamentally, create a new ticket that absorbs the old scope and move the old ticket to `dropped/`.
+- If a ticket's concept changes fundamentally, create a new ticket that absorbs the old scope and move the old ticket to `.dropped/`.
 
 ## General
 
@@ -48,13 +48,13 @@ spec:                # optional; list of spec-stems this ticket implements
 spec-remove:         # optional; list of spec-stems this ticket's implementation will remove
   - 260421-feat-removed-feature
 parent:              # optional; epic stem (e.g., 260401-epic-auth-rewrite)
-plans:               # maps phases to plan path stems under ai-docs/plans/ (without .md)
+plans:               # maps phases to plan path stems under ai-docs/.plans/ (without .md)
   phase-1: 2026-03/28-1430.event-serialization
 skeletons:           # maps phases to skeleton commit hashes
   phase-1: abc1234
 related-mental-model:  # optional; mental-model stems (filename without .md) consulted
   - workflow-routing   #   during ticket authoring — recovery hint for future sessions
-completed:           # YYYY-MM-DD, added on move to done/
+completed:           # YYYY-MM-DD, added on move to .done/
 ---
 ```
 
@@ -111,4 +111,4 @@ Research tickets have no phases. Sections after `## Background` are freeform top
 - Body defines **scope and decomposition**, not implementation spec.
 - Lists child ticket stems (or planned descriptions).
 - Child tickets set `parent:` in frontmatter pointing back to the epic stem.
-- Epic moves to `done/` when its scope is satisfied.
+- Epic moves to `.done/` when its scope is satisfied.

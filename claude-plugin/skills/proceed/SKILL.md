@@ -39,7 +39,7 @@ Gather the facts needed for routing. Do not read source code — read only artif
 1. Parse the target: ticket path or inline description.
 2. If ticket path: read the ticket. Extract scope, phases, and existing artifact references (`plans:`, `skeletons:` frontmatter).
 3. Check for existing artifacts:
-   - **Plan exists?** — check ticket frontmatter `plans:` field, or scan `ai-docs/plans/` for matching files.
+   - **Plan exists?** — check ticket frontmatter `plans:` field, or scan `ai-docs/.plans/` for matching files.
    - **Skeleton exists?** — check ticket frontmatter `skeletons:` field, or grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs in relevant paths.
 4. If inline description (no ticket): assess from the description alone.
 5. Assess context warmth: has this session already engaged with relevant code (prior turns read files in the target scope, or user explicitly signaled direct authorship like "let me draft it" or "I'll do it directly")? Signal is observable from conversation state alone — do not read source to decide.

@@ -63,7 +63,7 @@ After writing, runs `ws-spec-build-index` to rebuild the `features:` frontmatter
 
 Creates or edits a ticket file under `ai-docs/tickets/`. Captures scope, phases, constraints, and rejected alternatives. Optionally adds a `spec:` frontmatter field listing spec-stems the ticket implements. Always suggests `/proceed` after authoring, which auto-routes to skeleton, plan, or implementation.
 
-Status directories: `idea/` → `todo/` → `done/` (or `dropped/`). Ticket stem format: `YYMMDD-type-slug`.
+Status directories: `idea/` → `todo/` → `.done/` (or `.dropped/`). Ticket stem format: `YYMMDD-type-slug`.
 
 A `judge: spec-gate` blocks creation of `todo/`-or-higher tickets when no spec entry covers the topic, and suggests `/write-spec` first. `idea/` creation is ungated.
 
@@ -73,7 +73,7 @@ A `judge: spec-gate` blocks creation of `todo/`-or-higher tickets when no spec e
 
 - `/write-ticket` adds an entry when a ticket is created or promoted to `todo/`.
 - `/discuss` adds an entry when an `idea/` ticket is promoted to `todo/`.
-- `executor-wrapup` removes the entry when a ticket moves to `done/`.
+- `executor-wrapup` removes the entry when a ticket moves to `.done/`.
 
 
 > [!note] Constraints
@@ -95,7 +95,7 @@ Suggests `/implement` as the next step — does not auto-invoke. `/implement` in
 
 Core delegated implementation primitive. Operates on the current branch (branch creation is the caller's responsibility). Steps:
 
-1. Reads target; spawns `project-survey`; writes a brief (`ai-docs/plans/YYYY-MM/DD-<stem>.brief.md`) — the implementer's sole context source.
+1. Reads target; spawns `project-survey`; writes a brief (`ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`) — the implementer's sole context source.
 2. Applies `judge: plan-depth` (soft): **as-is** (no plan file) / **survey** (Sonnet populates a reference map) / **research** (Opus produces a step-by-step plan).
 3. Spawns an implementer subagent and up to three review-partition subagents in parallel. {#260424-implement-file-based-review}
 4. Runs a relay loop (max 3 cycles): implementer responds to each finding with `[fixed]`, `[won't fix: <reason>]`, or `[deferred: <reason>]`; reviewers respond `[accepted]` or `[maintained]`. At cycle 2, the lead adjudicates maintained disputes; at cycle 3, unresolved disputes escalate to the caller.
@@ -156,7 +156,7 @@ Tiers:
 Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, and active ticket directories (`idea/`, `todo/`). Source code references are out of scope.
 
 > [!note] Constraints
-> - `done/` and `dropped/` ticket directories are excluded from the search scope.
+> - `.done/` and `.dropped/` ticket directories are excluded from the search scope.
 > - Source code file references are not produced by this agent.
 > - In `/discuss`, the survey does not fire for session-continuity queries — those draw from session state or git log.
 

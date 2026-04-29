@@ -147,6 +147,8 @@ def render_ai_docs(ai_docs: Path) -> None:
     except PermissionError:
         return
     for entry in entries:
+        if entry.name.startswith('.'):
+            continue
         if entry.name in ('tickets', 'spec'):
             continue
         if entry.is_dir():
