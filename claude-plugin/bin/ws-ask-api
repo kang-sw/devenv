@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""ws-ask-api — query external API documentation via the ai-docs/.deps/ cache."""
+
+import concurrent.futures
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
+
+
+def _repo_root():
+    r = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    return Path(r.stdout.strip()) if r.returncode == 0 else None
+
+
+def _deps_dir():
+    root = _repo_root()
+    if root is None:
+        return None
+    d = root / "ai-docs" / ".deps"
+    return d if d.exists() else None
+
+
+def _domains(deps):
+    if deps is None:
+        return []
+    return sorted(p.name for p in deps.iterdir() if p.is_dir() and not p.name.startswith("."))
+
+
+def _call_internal(domain, prompt, force_refresh=False, capture=False):
+    internal = str(SCRIPT_DIR / "ws-ask-api-internal")
+    cmd = [internal, domain]
+    if force_refresh:
+        cmd.append("--force-refresh")
+    else:
+        cmd.append(prompt)
+    if capture:
+        return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd)
+
+
+def _pre_router(hint, domains, prompt):
+    domain_list = "\n".join(domains) if domains else "(none)"
+    message = (
+        f"Hint: {hint or '(none)'}\n"
+        f"Existing domains:\n{domain_list}\n"
+        f"Prompt: {prompt}"
+    )
+    r = subprocess.run(
+        [str(SCRIPT_DIR / "ws-oneshot-agent"), "-p", "pre-router", "--no-doc-system", "-"],
+        input=message, capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        print(f"pre-router error: {r.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+    return [ln.strip() for ln in r.stdout.strip().splitlines() if ln.strip()]
+
+
+def _usage():
+    print(
+        "usage: ws-ask-api [<domain-hint>] \"<prompt>\"\n"
+        "       ws-ask-api --refresh <domain>\n"
+        "       ws-ask-api --check-stale <domain>\n"
+        "       ws-ask-api --list",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        _usage()
+
+    deps = _deps_dir()
+
+    # -- management commands --------------------------------------------------
+
+    if args[0] == "--list":
+        for d in _domains(deps):
+            print(d)
+        return
+
+    if args[0] == "--check-stale":
+        if len(args) < 2:
+            print("error: --check-stale requires a domain name", file=sys.stderr)
+            sys.exit(1)
+        domain = args[1]
+        script = (deps / domain / "scripts" / "check-stale") if deps else None
+        if not script or not script.exists():
+            print(f"no cache for '{domain}'", file=sys.stderr)
+            sys.exit(1)
+        r = subprocess.run([str(script)], cwd=str(deps / domain))
+        print(f"{domain}: {'fresh' if r.returncode == 0 else 'stale'}")
+        sys.exit(r.returncode)
+
+    if args[0] == "--refresh":
+        if len(args) < 2:
+            print("error: --refresh requires a domain name", file=sys.stderr)
+            sys.exit(1)
+        _call_internal(args[1], "", force_refresh=True)
+        return
+
+    # -- query path -----------------------------------------------------------
+
+    if len(args) >= 2:
+        hint, prompt = args[0], args[1]
+    else:
+        hint, prompt = None, args[0]
+
+    # Exact match: skip pre-router when hint names an existing .deps/ directory.
+    if hint and deps and (deps / hint).is_dir():
+        _call_internal(hint, prompt)
+        return
+
+    # Pre-router resolves canonical domain names.
+    domains = _domains(deps)
+    resolved = _pre_router(hint, domains, prompt)
+    if not resolved:
+        print("pre-router returned no domains", file=sys.stderr)
+        sys.exit(1)
+
+    if len(resolved) == 1:
+        _call_internal(resolved[0], prompt)
+        return
+
+    # Parallel dispatch for multiple domains; concat in resolution order.
+    def _run(domain):
+        return domain, _call_internal(domain, prompt, capture=True)
+
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        for domain, r in pool.map(_run, resolved):
+            results[domain] = r
+
+    for domain in resolved:
+        r = results[domain]
+        if r.returncode != 0:
+            print(f"[error from {domain}]", file=sys.stderr)
+            continue
+        print(f"\n--- {domain} ---\n")
+        print(r.stdout, end="")
+
+
+if __name__ == "__main__":
+    main()

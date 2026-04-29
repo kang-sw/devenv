@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# ws-ask-api-internal — per-domain executor with flock and registry guard.
+#
+# Usage: ws-ask-api-internal <domain> <prompt>
+#        ws-ask-api-internal <domain> --force-refresh
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+[[ $# -lt 2 ]] && { echo "usage: ws-ask-api-internal <domain> <prompt|--force-refresh>" >&2; exit 1; }
+
+DOMAIN="$1"
+ARG="$2"  # prompt text or --force-refresh
+
+# Locate repo root and deps dir.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || { echo "error: not inside a git repository" >&2; exit 1; }
+DEPS_DIR="$REPO_ROOT/ai-docs/.deps"
+DOMAIN_DIR="$DEPS_DIR/$DOMAIN"
+
+mkdir -p "$DOMAIN_DIR"
+LOCKFILE="$DOMAIN_DIR/.lockfile"
+touch "$LOCKFILE"
+
+# Acquire per-domain exclusive lock.
+if command -v flock >/dev/null 2>&1; then
+    exec {lock_fd}>"$LOCKFILE"
+    flock -x -w 60 "$lock_fd" \
+        || { echo "lock timeout: $DOMAIN is being updated by another agent" >&2; exit 1; }
+else
+    # Windows fallback: atomic mkdir poll.
+    LOCKDIR="$DOMAIN_DIR/.lock"
+    _unlock() { rmdir "$LOCKDIR" 2>/dev/null || true; }
+    trap _unlock EXIT
+    for i in $(seq 1 60); do
+        mkdir "$LOCKDIR" 2>/dev/null && break
+        [[ $i -eq 60 ]] && { echo "lock timeout: $DOMAIN is being updated by another agent" >&2; exit 1; }
+        sleep 1
+    done
+fi
+
+AGENT_NAME="api-doc-$DOMAIN"
+
+# Check registry: call ws-new-named-agent only when no entry exists.
+GIT_DIR="$(git rev-parse --git-dir)"
+REPO_NAME="$(basename "$REPO_ROOT")"
+REGISTRY="$GIT_DIR/ws@$REPO_NAME/agents/$AGENT_NAME.json"
+
+if [[ ! -f "$REGISTRY" ]]; then
+    ws-new-named-agent "$AGENT_NAME" -p api-doc-manager >/dev/null
+fi
+
+# Deliver prompt (or refresh signal) to the executor session.
+ws-call-named-agent "$AGENT_NAME" "$ARG"
