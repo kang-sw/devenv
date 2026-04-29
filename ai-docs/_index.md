@@ -72,7 +72,7 @@ claude-plugin/infra/                 — docs only; accessed via ws-print-infra 
   cargo-brief.md              — Rust API hint; injected via --prompt-cond cargo-brief when cargo-brief binary is in PATH
 
 claude-plugin/bin/                   — PATH-accessible executables (added by plugin)
-  ws-subquery                    — scoped sub-query via ws-oneshot-agent; delegates to -p subquery; haiku default, --deep-research for sonnet
+  ws-subquery                    — scoped sub-query via ws-oneshot-agent; delegates to -p subquery; haiku default, --deep-research for sonnet; Explore-level tool access; accepts inline string, `-` sentinel, or piped stdin
   ws-spec-build-index            — rebuild features: frontmatter in spec docs; removes stale stems: blocks
   ws-generate-spec-stem          — emit a new {#YYMMDD-slug} anchor for a given descriptive slug
   ws-list-spec-stems             — list {#YYMMDD-slug} anchors from spec files; file-arg adds heading context
@@ -143,7 +143,7 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 | `ai-docs/spec/plugin-management.md` | Plugin Management | Local .claude-plugin/skills/ tools for ws plugin maintenance |
 | `ai-docs/spec/spec-system.md` | Spec System | Spec authoring, 🚧 markers, anchor protocol |
 | `ai-docs/spec/tools.md` | Devenv Tools | Custom tools built in this repo (claude-watch TUI, claude-dash multiplexer) |
-| `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship |
+| `ai-docs/spec/workflow-skills.md` | Workflow Skills | /discuss, /write-*, /edit, /implement, /proceed, /ship, /exit-session |
 
 ## Tickets
 
