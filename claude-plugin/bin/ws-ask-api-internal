@@ -24,23 +24,27 @@ touch "$LOCKFILE"
 
 # Acquire per-domain exclusive lock.
 if command -v flock >/dev/null 2>&1; then
+    # flock fd is released by the kernel on any exit (including crash/SIGKILL).
     exec {lock_fd}>"$LOCKFILE"
-    flock -x -w 60 "$lock_fd" \
-        || { echo "lock timeout: $DOMAIN is being updated by another agent" >&2; exit 1; }
+    flock -x "$lock_fd"
 else
-    # Windows fallback: atomic mkdir poll.
+    # Windows fallback: atomic mkdir + PID file.
+    # PID file lets a new waiter reclaim the lock if the holder crashed.
     LOCKDIR="$DOMAIN_DIR/.lock"
-    _unlock() { rmdir "$LOCKDIR" 2>/dev/null || true; }
+    _unlock() { rm -rf "$LOCKDIR" 2>/dev/null || true; }
     trap _unlock EXIT
-    LOCK_ACQUIRED=0
-    for i in $(seq 1 60); do
+    while true; do
         if mkdir "$LOCKDIR" 2>/dev/null; then
-            LOCK_ACQUIRED=1
+            echo $$ > "$LOCKDIR/pid"
             break
+        fi
+        # Reclaim stale lock if holder process is dead.
+        holder=$(cat "$LOCKDIR/pid" 2>/dev/null)
+        if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
+            rm -rf "$LOCKDIR"
         fi
         sleep 1
     done
-    [[ $LOCK_ACQUIRED -eq 0 ]] && { echo "lock timeout: $DOMAIN is being updated by another agent" >&2; exit 1; }
 fi
 
 AGENT_NAME="api-doc-$DOMAIN"
