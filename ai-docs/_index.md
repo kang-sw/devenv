@@ -132,6 +132,7 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 
 | File | Title | Summary |
 |------|-------|---------|
+| `ai-docs/spec/api-deps.md` | API Dependency Docs | Filesystem-based external API doc cache with 2-layer agent routing, consumed via ws-ask-api |
 | `ai-docs/spec/agent-system.md` | Agent System | Spawnable agent roles — output contracts, refusals, spawn contexts |
 | `ai-docs/spec/personal-devenv.md` | Personal Dev Environment | install.sh, shell, dotfiles, Claude Code config |
 | `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery, ws-call-named-agent primitives |
