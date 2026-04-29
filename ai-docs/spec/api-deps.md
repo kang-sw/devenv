@@ -7,7 +7,7 @@ summary: Filesystem-based external API documentation cache with 2-layer agent ro
 
 `ws-ask-api` provides downstream project agents with structured, cached external API documentation. Agents query it in natural language; the system resolves relevant domains, fetches and caches docs on demand, and returns answers without exposing the cache layout or web browsing to callers.
 
-## 🚧 `ws-ask-api` Bin Tool {#260429-ws-ask-api-tool}
+## `ws-ask-api` Bin Tool {#260429-ws-ask-api-tool}
 
 PATH-accessible script installed by the `ws` plugin.
 
@@ -24,12 +24,15 @@ ws-ask-api --list
 - `--refresh <domain>`: forces re-fetch of all doc levels for the named domain.
 - `--check-stale <domain>`: runs `scripts/detect-version` against the project and reports whether the cached version matches. No fetch.
 - `--list`: emits all domain names present in `ai-docs/.deps/`.
+- Extra positional arguments beyond `[hint] prompt` are rejected with a usage message and exit 1.
+
+Exit code: non-zero when the underlying domain executor fails, when all domains in a parallel dispatch fail, or when any management command fails. Callers may rely on exit code to detect failure. {#260429-ws-ask-api-exit-code}
 
 > [!note] Constraints
 > - A `.cmd` Windows shim must accompany every Unix script addition under `claude-plugin/bin/`.
 > - `ws-ask-api-internal` is not PATH-exposed; it is invoked only by `ws-ask-api`.
 
-## 🚧 `ai-docs/.deps/` Cache Layout {#260429-api-deps-cache-layout}
+## `ai-docs/.deps/` Cache Layout {#260429-api-deps-cache-layout}
 
 Dependency documentation lives under `ai-docs/.deps/<domain>/`. The `.deps` directory name starts with `.` to suppress inclusion in default ripgrep/ag scans. The directory is committed to version control.
 
@@ -59,7 +62,7 @@ ai-docs/.deps/
 > - Subdomain directories represent on-demand drill-down (equivalent depth to L4). Within them, `l1–l3` mirror the root level convention scoped to that subdomain.
 > - `scripts/` files are executable shell scripts; the `api-doc-manager` writes them during bootstrap.
 
-## 🚧 Pre-Router Domain Resolution {#260429-pre-router-domain-resolution}
+## Pre-Router Domain Resolution {#260429-pre-router-domain-resolution}
 
 A Haiku-tier one-shot agent that maps an incoming prompt to a list of canonical domain names before any domain-level work begins.
 
@@ -83,7 +86,7 @@ Invoked only when no domain hint is given, or when the hint does not exactly mat
 > - Pre-router is always one-shot; it holds no session state.
 > - `workflow-for-agent.md` is not injected (`--no-doc-system`).
 
-## 🚧 Per-Domain Executor Session {#260429-per-domain-executor-session}
+## Per-Domain Executor Session {#260429-per-domain-executor-session}
 
 Each canonical domain runs as a persistent `ws-named-agent` session named `api-doc-<domain>`. Session persistence is tied to the canonical domain name, not to the caller's invocation style — any `ws-ask-api` call that resolves to the same domain resumes the existing session.
 
@@ -99,7 +102,7 @@ Session compression follows the standard `ws-call-named-agent` 120K auto-compres
 > - `ws-ask-api-internal` checks the registry before calling `ws-new-named-agent`; it calls `new` only when no registry entry exists for the domain. Calling `new` on a live session overwrites the registry and destroys session state.
 > - Direct reads or writes to `ai-docs/.deps/` by agents other than the per-domain executor are not permitted.
 
-## 🚧 Per-Domain Lock {#260429-per-domain-lock}
+## Per-Domain Lock {#260429-per-domain-lock}
 
 `ws-ask-api-internal` acquires an exclusive advisory lock on `.deps/<domain>/.lockfile` before any read or write operation for that domain. Lock implementation:
 
@@ -114,7 +117,7 @@ On lock timeout: `ws-ask-api-internal` exits non-zero with the message `lock tim
 > - Lock scope covers both reads and writes. There is no shared read mode — any access may trigger a fetch.
 > - The lock is acquired by the bin tool layer, never delegated to an agent tool call.
 
-## 🚧 Worker Agent Contract {#260429-worker-agent-contract}
+## Worker Agent Contract {#260429-worker-agent-contract}
 
 Agents in downstream projects obtain external API information exclusively through `ws-ask-api`. Direct use of `WebSearch` or `WebFetch` for API documentation lookup is prohibited.
 
