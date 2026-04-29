@@ -114,6 +114,7 @@ claude-plugin/skills/
   forge-spec/          — from-scratch spec reconstruction; archive-first, domain-by-domain, cross-compact via TaskCreate (disable-model-invocation)
   forge-mental-model/  — from-scratch mental-model construction; survey → user confirm → per-domain verify cycle (disable-model-invocation)
   workflow/            — loads orchestration primitives reference; session-resident across compaction; invoked at discuss/sprint entry
+  exit-session/        — session handoff: commit staged work, write context note to _index.md ## Session Notes, commit after user approval
 ```
 
 ## Canonical Flows
