@@ -26,7 +26,7 @@ All scripts are on `$PATH` after `claude plugin install ws@ws`.
 ## ws-new-named-agent
 
 ```
-ws-new-named-agent <agent-name> [-p <prompt>]... [--model <opus|sonnet|haiku>] [--no-doc-system] [--prompt-cond <binary>[=<prompt>]]...
+ws-new-named-agent <agent-name> [-p <prompt>]... [--model <opus|sonnet|haiku>] [--no-doc-system]
 ```
 
 Creates a named agent registry entry at `.git/ws@<repo-dir>/agents/<name>.json`.
@@ -36,8 +36,6 @@ Creates a named agent registry entry at `.git/ws@<repo-dir>/agents/<name>.json`.
   The first document whose frontmatter declares `model:` sets the agent's model tier.
 - `--model` — explicit model level; overrides frontmatter model.
 - `--no-doc-system` — suppress auto-injection of `workflow-for-agent.md` into the system prompt.
-- `--prompt-cond <binary>[=<prompt>]` — append the named prompt only if `<binary>` is found in
-  PATH at registration time. Repeatable. Bare form uses binary name as prompt name.
 - Legacy flags `--agent <ws:type>` and `--system-prompt <path>` still accepted.
 
 Call at skill start for each agent slot. Overwrites any prior registry entry for
