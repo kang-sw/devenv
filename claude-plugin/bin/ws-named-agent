@@ -627,12 +627,13 @@ BACKENDS = {
 
 def cmd_new(argv: list[str]) -> None:
     if not argv:
-        print("Usage: ws-named-agent new <name> [-p PROMPT]... [--model M] [--no-doc-system]", file=sys.stderr)
+        print("Usage: ws-named-agent new <name> [-p PROMPT]... [--model M] [--no-doc-system] [--prompt-cond BINARY[=PROMPT]]...", file=sys.stderr)
         sys.exit(1)
 
     agent_name = argv[0]
     model_arg: str | None = None
     prompt_specs: list[str] = []   # -p / --prompt values
+    cond_specs: list[str] = []     # --prompt-cond values: "BINARY" or "BINARY=PROMPT_NAME"
     system_prompt_path = ""        # --system-prompt (internal use by compression only)
     no_doc_system = False
 
@@ -642,6 +643,8 @@ def cmd_new(argv: list[str]) -> None:
             model_arg = argv[i + 1]; i += 2
         elif argv[i] in ("-p", "--prompt"):
             prompt_specs.append(argv[i + 1]); i += 2
+        elif argv[i] == "--prompt-cond":
+            cond_specs.append(argv[i + 1]); i += 2
         elif argv[i] == "--system-prompt":
             system_prompt_path = argv[i + 1]; i += 2
         elif argv[i] == "--no-doc-system":
@@ -696,6 +699,19 @@ def cmd_new(argv: list[str]) -> None:
                 doc_sys = doc_sys_path.read_text(encoding="utf-8")
                 system_prompt = (doc_sys + "\n\n---\n\n" + system_prompt).strip() if system_prompt else doc_sys
                 break
+
+    # Conditional prompts: append when the named binary is present in PATH.
+    # Format: "BINARY" (prompt name == binary name) or "BINARY=PROMPT_NAME".
+    for cond_spec in cond_specs:
+        if "=" in cond_spec:
+            binary, prompt_name = cond_spec.split("=", 1)
+        else:
+            binary = prompt_name = cond_spec
+        if shutil.which(binary.strip()):
+            content, _ = _resolve_prompt(prompt_name.strip())
+            body = _strip_frontmatter(content)
+            if body:
+                system_prompt = (system_prompt + "\n\n---\n\n" + body).strip() if system_prompt else body
 
     registry_dir = _registry_dir()
     registry_dir.mkdir(parents=True, exist_ok=True)
