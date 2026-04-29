@@ -26,7 +26,7 @@ All scripts are on `$PATH` after `claude plugin install ws@ws`.
 ## ws-new-named-agent
 
 ```
-ws-new-named-agent <agent-name> [-p <prompt>]... [--model <opus|sonnet|haiku>] [--no-doc-system]
+ws-new-named-agent <agent-name> [-p <prompt>]... [--model <opus|sonnet|haiku>] [--no-doc-system] [--prompt-cond <binary>[=<prompt>]]...
 ```
 
 Creates a named agent registry entry at `.git/ws@<repo-dir>/agents/<name>.json`.
@@ -36,6 +36,8 @@ Creates a named agent registry entry at `.git/ws@<repo-dir>/agents/<name>.json`.
   The first document whose frontmatter declares `model:` sets the agent's model tier.
 - `--model` — explicit model level; overrides frontmatter model.
 - `--no-doc-system` — suppress auto-injection of `workflow-for-agent.md` into the system prompt.
+- `--prompt-cond <binary>[=<prompt>]` — append the named prompt only if `<binary>` is found in
+  PATH at registration time. Repeatable. Bare form uses binary name as prompt name.
 - Legacy flags `--agent <ws:type>` and `--system-prompt <path>` still accepted.
 
 Call at skill start for each agent slot. Overwrites any prior registry entry for
@@ -150,6 +152,29 @@ ws-print-infra <stem>
 ```
 
 Prints an infra doc to stdout. Accepts bare stem or `.md` extension.
+
+## ws-ask-api
+
+```
+ws-ask-api [<domain-hint>] "<prompt>"
+ws-ask-api --refresh <domain>
+ws-ask-api --check-stale <domain>
+ws-ask-api --list
+```
+
+Queries the project's `ai-docs/.deps/` external API documentation cache. On first use for
+a domain, bootstraps a cache by fetching official docs. Subsequent calls are answered from
+the cache; a stale check runs automatically before each answer.
+
+- No hint: pre-router resolves relevant domains from the prompt. Multiple domains are
+  dispatched in parallel; results are concatenated.
+- With hint matching an existing `.deps/<hint>/` directory: pre-router is skipped.
+- `--refresh <domain>`: force re-fetch all doc levels for a domain.
+- `--check-stale <domain>`: report whether the cached version matches the project's current dependency.
+- `--list`: print all cached domain names.
+
+**Do not use `WebSearch` or `WebFetch` for external library API lookup** when `ws-ask-api`
+is available. Use it for any question about a third-party library's API, types, or behavior.
 
 ## Usage Pattern
 
