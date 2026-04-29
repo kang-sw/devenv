@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # ws-subquery — scoped sub-query via ws-oneshot-agent (no session persistence).
+# Explore-level tool access: Read, Bash (read-only), Glob, Grep, WebFetch, WebSearch.
 #
 # Default model: haiku. Pass --deep-research for sonnet.
 #
 # Usage:
-#   ws-subquery "<question>"                  # haiku, quick lookup
-#   ws-subquery --deep-research "<question>"  # sonnet, cross-module tracing
+#   ws-subquery "<question>"                       # haiku, quick lookup
+#   ws-subquery --deep-research "<question>"       # sonnet, cross-module tracing
+#   ws-subquery [--deep-research] - <<'PROMPT'     # multi-line via heredoc
+#   echo "question" | ws-subquery [--deep-research]  # piped stdin
 
 set -euo pipefail
 
@@ -17,9 +20,11 @@ if [ "${1:-}" = "--deep-research" ]; then
   shift
 fi
 
-if [ $# -ne 1 ]; then
-  echo "usage: $(basename "$0") [--deep-research] \"<question>\"" >&2
+if [ $# -gt 1 ]; then
+  echo "usage: $(basename "$0") [--deep-research] [\"<question>\" | -]" >&2
   exit 2
 fi
 
-"$SCRIPT_DIR/ws-oneshot-agent" -p subquery --model "$MODEL" "$1"
+# Default to "-" (stdin) when no argument given
+PROMPT_ARG="${1:--}"
+"$SCRIPT_DIR/ws-oneshot-agent" -p subquery --model "$MODEL" "$PROMPT_ARG"
