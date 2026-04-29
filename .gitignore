@@ -11,4 +11,5 @@ data
 *.docx
 *Zone.Identifier
 ai-docs/**/*.local.md
+ai-docs/.deps/
 claude/infra/__pycache__/
