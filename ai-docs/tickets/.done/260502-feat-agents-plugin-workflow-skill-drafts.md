@@ -3,6 +3,7 @@ title: agents-plugin workflow skill drafts
 related:
   260429-research-host-neutral-ws-plugin: research anchor for host-neutral ws plugin architecture
   260502-feat-agents-plugin-codex-port-scaffold: completed scaffold prerequisite
+completed: 2026-05-02
 ---
 
 # agents-plugin workflow skill drafts
@@ -57,7 +58,7 @@ Success criteria:
 - Audit procedure distinguishes structure, invariants, doctrine, and closure gaps.
 - `agents/openai.yaml` remains aligned with the skill.
 
-### Result (pending commit) - 2026-05-02
+### Result (da6023f) - 2026-05-02
 
 Hardened `agents-plugin/skills/skill-authoring/SKILL.md` without changing the
 skill name or UI metadata. The dense invariant checklist is now a named judgment
@@ -89,7 +90,7 @@ Success criteria:
   supply the missing execution surfaces.
 - `agents/openai.yaml` files exist for both skills.
 
-### Result (pending commit) - 2026-05-02
+### Result (da6023f) - 2026-05-02
 
 Added draft `agents-plugin` skills for `write-ticket` and `discuss`, each with
 `SKILL.md` and `agents/openai.yaml`. The drafts preserve the source Claude skills'
@@ -127,3 +128,19 @@ Success criteria:
 - `ai-docs/_index.md` reflects the new `agents-plugin` skill inventory.
 - This ticket records validation and remaining limitations.
 - Follow-up work is identified without pre-committing the bootstrap design.
+
+### Result (pending commit) - 2026-05-02
+
+Updated project memory to list the current `agents-plugin` skill inventory:
+`skill-authoring`, `write-ticket`, and `discuss`. Removed this ticket from the
+active queue and marked it complete.
+
+Remaining follow-up work:
+
+- Manual Codex smoke test for `$ws:write-ticket` and `$ws:discuss` in a fresh
+  session after plugin reload.
+- Manual Claude closeout for `/ws:skill-authoring`, `/ws:write-ticket`, and
+  `/ws:discuss` if the user wants to verify the candidate in Claude.
+- MCP/runtime design for ticket/spec lookup, project survey, helper execution, and
+  agent orchestration before claiming operational parity with `claude-plugin/`.
+- Bootstrap design after the smaller workflow-port pattern has been reviewed.

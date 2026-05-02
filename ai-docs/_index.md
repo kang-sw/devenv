@@ -120,6 +120,15 @@ claude-plugin/skills/
   exit-session/        — session handoff: commit staged work, write context note to _index.md ## Session Notes, commit after user approval
 ```
 
+`agents-plugin/` Codex-first candidate skills:
+
+```
+agents-plugin/skills/
+  skill-authoring/ — author or audit ws skills and agent prompts; porting pivot
+  write-ticket/    — draft host-neutral ticket creation/update workflow; helper/MCP execution deferred
+  discuss/         — draft host-neutral design discussion workflow; survey/tooling execution deferred
+```
+
 ## Canonical Flows
 
 ```
@@ -185,12 +194,12 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260426-feat-claude-watch-features` | done | claude-watch sprint — token count display, headless/-p color distinction, worktree session discovery, vertical scrollbar, on-demand background parsing; ws-orchestration output persistence + background mode |
 | `260426-feat-claude-dash` | done | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; all 4 phases complete |
 | `260502-feat-agents-plugin-codex-port-scaffold` | done | `agents-plugin/` Codex-first `ws` candidate scaffold — Codex marketplace/install verified, Claude manifest validation passes, broad skill porting deferred |
+| `260502-feat-agents-plugin-workflow-skill-drafts` | done | Harden `skill-authoring`; add draft host-neutral `write-ticket` and `discuss` skills with helper/MCP runtime reconstruction deferred |
 
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
-`260502-feat-agents-plugin-workflow-skill-drafts` — harden `skill-authoring`; draft host-neutral `write-ticket` and `discuss` without tooling/MCP reconstruction
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 
 ## Session Notes
