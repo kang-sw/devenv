@@ -14,6 +14,7 @@ Meta-workflow project only — defines skills, agents, and workflow patterns for
 
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude-plugin/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
+- `agents-plugin/` is the Codex-first host-neutral plugin candidate; it currently contains the scaffold manifest and the initial `skill-authoring` skill.
 - After any change to `claude-plugin/`, run `claude plugin update ws@ws` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
 - `claude-plugin/CLAUDE.home.md` is the canonical copy of `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.
 - External install: `/plugin marketplace add kang-sw/devenv` → `/plugin install ws@ws`.

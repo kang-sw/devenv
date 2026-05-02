@@ -1,0 +1,31 @@
+{
+  "name": "agents-plugin",
+  "version": "0.1.0",
+  "description": "Codex-first ws workflow plugin candidate for host-neutral skills and project context.",
+  "author": {
+    "name": "kang-sw"
+  },
+  "repository": "https://github.com/kang-sw/devenv",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "skills",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agents Plugin",
+    "shortDescription": "Codex-first ws workflow skills",
+    "longDescription": "A Codex-first candidate for porting ws workflow skills before converging with the existing Claude plugin.",
+    "developerName": "kang-sw",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use $skill-authoring to draft a portable ws skill.",
+      "Use $skill-authoring to audit a skill or agent prompt."
+    ]
+  }
+}
