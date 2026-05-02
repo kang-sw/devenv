@@ -82,6 +82,21 @@ Claude compatibility is a best-effort second pass:
 - Do not declare Claude compatibility complete until it is verified in a real
   Claude session by the user.
 
+## First Slice Status
+
+The first implementation slice is
+`260502-feat-agents-plugin-codex-port-scaffold`. It created `agents-plugin/` as a
+parallel Codex-first `ws` candidate while leaving `claude-plugin/` untouched.
+
+Current validation boundary:
+
+- Codex marketplace registration and manual UI install were verified.
+- `$ws:skill-authoring` is available in Codex after install.
+- A Claude-facing `.claude-plugin/plugin.json` was added and
+  `claude plugin validate agents-plugin` passes.
+- Runtime Claude invocation remains a later manual closeout; do not treat the
+  candidate as Claude-compatible beyond manifest validation.
+
 ## Later Convergence Target
 
 Move toward a single plugin directory:
@@ -175,7 +190,6 @@ the core contract.
 
 ## Next Step
 
-Promote the first slice as an actionable ticket that creates `agents-plugin/` as a
-Codex-first port candidate while leaving `claude-plugin/` untouched. The ticket
-should verify Codex discovery and one minimal workflow path before broad skill
-normalization or shared-runtime work begins.
+Choose the next actionable slice after the scaffold: manual Claude closeout,
+`skill-authoring` quality hardening, first real workflow-skill port, or MCP/`ws-*`
+runtime exposure.

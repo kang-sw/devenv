@@ -3,6 +3,7 @@ title: agents-plugin Codex-first port scaffold
 related:
   260429-research-host-neutral-ws-plugin: research anchor for host-neutral ws plugin architecture
   260501-research-agents-bootstrap-root-context: root context direction for host-neutral agents
+completed: 2026-05-02
 ---
 
 # agents-plugin Codex-first port scaffold
@@ -191,3 +192,23 @@ Success criteria:
   ticket as the first implementation slice.
 - Follow-up tickets are identified for MCP exposure, broader skill normalization,
   or Claude manual closeout if needed.
+
+### Result (pending commit) - 2026-05-02
+
+Updated project memory and the research anchor for the completed scaffold slice.
+`ai-docs/_index.md` now records the two-plugin topology, the Codex verification
+boundary, the Claude manifest-validation boundary, and removes this ticket from
+the active queue. The research ticket now points to this ticket as the first
+implementation slice instead of describing it as future work.
+
+Follow-up ticket candidates identified:
+
+- Manual Claude closeout: install or load `agents-plugin/` in Claude and verify
+  `/ws:skill-authoring` runtime behavior.
+- `skill-authoring` hardening: tighten the first Codex skill against
+  `ai-docs/ref/skill-authoring.md` audit findings before using it as the pivot for
+  broader ports.
+- First workflow-skill port: choose a small real skill after `skill-authoring`,
+  likely before attempting `/bootstrap`.
+- MCP or `ws-*` runtime exposure: define how Codex reaches helper behavior without
+  relying on Claude plugin PATH mutation.
