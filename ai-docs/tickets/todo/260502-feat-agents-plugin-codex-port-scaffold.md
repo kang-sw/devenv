@@ -62,6 +62,25 @@ Success criteria:
   workflow.
 - `claude-plugin/` remains unchanged except for unrelated explicit follow-up work.
 
+### Result (7994a9a) - 2026-05-02
+
+Created `agents-plugin/` as the isolated Codex-first plugin candidate. The
+scaffold includes `.codex-plugin/plugin.json`, a `skills/` tree, and the initial
+`skill-authoring` skill derived from `ai-docs/ref/skill-authoring.md` so future
+skill ports have a local authoring pivot.
+
+Validation completed:
+
+- `python3 -m json.tool agents-plugin/.codex-plugin/plugin.json`
+- direct structure check for manifest fields, skill frontmatter, required skill
+  sections, and `agents/openai.yaml` default prompt
+- `git diff --check`
+
+The generated skill validator could not run because the local Python environment
+lacked `PyYAML` (`ModuleNotFoundError: No module named 'yaml'`). Phase 2 still
+needs to verify actual Codex discovery/loading and a minimal `$skill-authoring`
+invocation path.
+
 ### Phase 2: Codex loading and minimal workflow verification
 
 Verify that Codex can discover the local candidate and that one minimal workflow
