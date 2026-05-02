@@ -1,7 +1,8 @@
 ---
 title: AGENTS bootstrap-managed root workflow context
 related:
-  260429-research-host-neutral-ws-plugin: first slice for making the workflow usable from host-neutral agents
+  260429-research-host-neutral-ws-plugin: host-neutral ws plugin architecture anchor
+  260502-feat-agents-plugin-codex-port-scaffold: first implementation slice for the parallel Codex plugin candidate
 ---
 
 # AGENTS bootstrap-managed root workflow context
@@ -55,6 +56,11 @@ upgrade, and adopt modes should maintain `AGENTS.md` with the same idempotent
 discipline currently used for `CLAUDE.md`, while preserving project-specific
 sections and surfacing conflicts inline.
 
+After the parallel plugin direction was chosen, this work should be treated as a
+follow-up to the first `agents-plugin/` scaffold rather than the first
+implementation slice. The scaffold should prove where Codex plugin-local context
+belongs before `/bootstrap` starts managing `AGENTS.md` for downstream projects.
+
 ## Open Questions
 
 - Should `AGENTS.md` be generated from a standalone `AGENTS.template.md`, or
@@ -69,8 +75,8 @@ sections and surfacing conflicts inline.
 
 ## Next Step
 
-Promote this research into an actionable `todo/` ticket after choosing the first
-implementation boundary and confirming whether any caller-visible behavior needs
-a spec entry. The expected first implementation slice is small: make
-`AGENTS.md` bootstrap-managed and move durable document-system orientation there
-without changing the broader plugin directory layout.
+Keep this research as the follow-up design anchor for bootstrap-managed
+`AGENTS.md`. The first actionable implementation slice is
+`260502-feat-agents-plugin-codex-port-scaffold`, which should clarify the
+Codex plugin-local context shape before this research is promoted into a
+bootstrap-specific todo ticket.

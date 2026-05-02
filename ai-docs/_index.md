@@ -185,7 +185,9 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
+`260502-feat-agents-plugin-codex-port-scaffold` — first host-neutral migration slice: create `agents-plugin/` as a Codex-first plugin candidate while preserving `claude-plugin/`
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
+`260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 
 ## Session Notes
 

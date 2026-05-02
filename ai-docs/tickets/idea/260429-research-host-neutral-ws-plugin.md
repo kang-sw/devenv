@@ -18,15 +18,23 @@ The original compatibility question was whether the existing Claude plugin could
 made drop-in compatible with Codex by adding Codex plugin metadata. That is possible
 at the packaging layer, but it leaves the behavior layer dependent on Claude Code
 idioms and user-local PATH setup. Because this plugin is intended for users beyond
-the original author, the better direction is to make the ws plugin host-neutral and
-then expose thin Claude and Codex adapters.
+the original author, the long-term direction is still a host-neutral ws plugin with
+thin Claude and Codex adapters.
+
+The first implementation slice should not mutate `claude-plugin/` in place. Keep
+the existing Claude plugin as the stable reference implementation and create a
+parallel `agents-plugin/` directory for Codex-first porting and validation. Only
+after the Codex candidate works should the project decide whether to converge on a
+single shared plugin directory, keep separate adapters, or replace the old Claude
+package.
 
 ## Current Findings
 
 Codex plugin packaging expects a `.codex-plugin/plugin.json` manifest and can load a
 repo-local marketplace entry. Claude plugin packaging expects `.claude-plugin/`
 metadata. Both can point at the same plugin directory if the shared files avoid
-host-specific assumptions.
+host-specific assumptions, but that should be treated as a later convergence target,
+not the first migration step.
 
 The Codex `apps` facility is for OpenAI-registered app/connectors such as GitHub,
 Linear, or Figma. It is not a local executable or PATH injection mechanism.
@@ -42,7 +50,39 @@ Claude's exact `Task` tool idiom. Shared skill documents should describe behavio
 such as maintaining a visible task list, delegating independent exploration, or using
 available search/edit capabilities instead of naming host-specific tools.
 
-## Proposed Shape
+## Revised Proposed Shape
+
+Create a parallel Codex-first plugin candidate:
+
+```text
+claude-plugin/    # existing stable Claude Code plugin; do not mutate for porting experiments
+agents-plugin/    # Codex-first host-neutral port candidate
+```
+
+`agents-plugin/` should start as the isolated workspace for adapting manifests,
+skills, prompts, helper access, and root context to Codex. It may copy or subset
+material from `claude-plugin/`, but any copied content should be normalized as it
+enters the new tree rather than forcing host-neutral edits back into the stable
+Claude package.
+
+Codex validation is the first completion gate:
+
+- Codex can discover and load the plugin candidate.
+- The candidate exposes at least one usable workflow entry point or skill.
+- The candidate does not depend on Claude plugin PATH injection for `ws-*`
+  availability.
+- `AGENTS.md` and any plugin-local context point to the current mixed-state
+  authority boundary.
+
+Claude compatibility is a best-effort second pass:
+
+- Use the current `claude-plugin/` layout as the compatibility reference.
+- Add Claude-compatible metadata to `agents-plugin/` only where it does not
+  compromise Codex behavior.
+- Do not declare Claude compatibility complete until it is verified in a real
+  Claude session by the user.
+
+## Later Convergence Target
 
 Move toward a single plugin directory:
 
@@ -60,9 +100,10 @@ plugin/
 ```
 
 The shared `skills/`, `infra/`, and `bin/` trees become the durable source. The
-Claude and Codex manifest directories become host adapters. Avoid introducing a
-separate overlay tree until there is a concrete need, because overlays would create
-another documentation drift surface.
+Claude and Codex manifest directories become host adapters. This remains the
+preferred long-term shape, but only after `agents-plugin/` has proven the Codex
+contract and the Claude compatibility pass has identified which assumptions can be
+shared safely.
 
 ## Skill Normalization Direction
 
@@ -120,9 +161,8 @@ the core contract.
 
 ## Open Questions
 
-- Should the first implementation milestone be a pure packaging move
-  (`claude-plugin/` to `plugin/` plus Codex manifest), or should packaging wait
-  until the highest-risk skill idioms are normalized?
+- How much content should the first `agents-plugin/` scaffold copy from
+  `claude-plugin/` versus starting with a minimal Codex-loadable subset?
 - Which `ws-*` commands are essential enough to expose through MCP first?
 - Should the installer create `~/.local/bin` symlinks for CLI compatibility, or
   should public Codex usage avoid CLI dependency entirely at first?
@@ -130,12 +170,12 @@ the core contract.
   model-name inference such as `sonnet` or `codex`?
 - Which Claude hooks remain valuable after the shared runtime moves toward MCP, and
   which should become Claude-only convenience behavior?
+- What is the exact user verification checklist for the later Claude compatibility
+  closeout?
 
 ## Next Step
 
-Promote this idea into one or more actionable tickets only after choosing the first
-slice. A conservative first slice is packaging-only: rename `claude-plugin/` to
-`plugin/`, preserve existing Claude behavior, add `.codex-plugin/plugin.json`, and
-add a Codex marketplace entry that points at `./plugin`. A more durable first slice
-is skill normalization: keep the directory layout unchanged while removing
-host-specific tool names from the most-used skills.
+Promote the first slice as an actionable ticket that creates `agents-plugin/` as a
+Codex-first port candidate while leaving `claude-plugin/` untouched. The ticket
+should verify Codex discovery and one minimal workflow path before broad skill
+normalization or shared-runtime work begins.
