@@ -143,7 +143,7 @@ Success criteria:
   verification path.
 - Remaining manual Claude checks are listed explicitly.
 
-### Result (2806cff) - 2026-05-02
+### Result (148c4b0) - 2026-05-02
 
 Added `agents-plugin/.claude-plugin/plugin.json` as isolated Claude-facing
 metadata for the Codex-first candidate. The manifest mirrors the candidate plugin
