@@ -143,6 +143,41 @@ Success criteria:
   verification path.
 - Remaining manual Claude checks are listed explicitly.
 
+### Result (2806cff) - 2026-05-02
+
+Added `agents-plugin/.claude-plugin/plugin.json` as isolated Claude-facing
+metadata for the Codex-first candidate. The manifest mirrors the candidate plugin
+identity (`ws`, version `0.1.0`, repository, license, author, description) without
+changing the existing `.codex-plugin/plugin.json` or skill tree.
+
+Compatibility findings:
+
+- Claude Code plugin docs expect `.claude-plugin/plugin.json` at the plugin root
+  and `skills/` at the plugin root, so the current `agents-plugin/skills/`
+  layout is structurally compatible with Claude's default skill discovery model.
+- Claude plugin skills are namespaced by the plugin manifest `name`; the expected
+  manual Claude invocation candidate is `/ws:skill-authoring`, matching the
+  Codex namespace choice conceptually even though the host syntax differs.
+- `agents-plugin/` intentionally does not copy `claude-plugin/bin/`, `infra/`,
+  `hooks/`, or the broad workflow skill set in this phase. Those are later porting
+  slices, not Phase 3 compatibility alignment.
+- The candidate version remains `0.1.0` rather than `0.15.0` because it is not the
+  stable Claude package and should not imply parity with `claude-plugin/`.
+
+Validation completed:
+
+- `python3 -m json.tool agents-plugin/.claude-plugin/plugin.json`
+- `python3 -m json.tool agents-plugin/.codex-plugin/plugin.json`
+- `claude plugin validate agents-plugin`
+
+Remaining manual Claude checks:
+
+- Start Claude with the candidate plugin directory or install it from a Claude
+  marketplace entry and verify `/ws:skill-authoring` appears.
+- Invoke `/ws:skill-authoring` against a small authoring/audit prompt.
+- Confirm the additional `agents/openai.yaml` support file is ignored as inert
+  skill-adjacent content by Claude.
+
 ### Phase 4: Documentation and queue refresh
 
 Update project memory and related research tickets to reflect the new two-plugin
