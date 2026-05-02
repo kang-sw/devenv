@@ -141,6 +141,9 @@ approach was chosen and any compatibility trade-offs.
 Write `## AI Context` with enough detail for future agents to recover the
 reasoning from git history: include the user intent, rejected alternatives,
 verification limits, and migration or compatibility implications when relevant.
+Prefer a heredoc or temporary commit-message file over long `git commit -m`
+chains when writing multi-paragraph commit messages, so paragraph spacing remains
+readable in git history.
 
 Keep unrelated untracked files out of commits. In this workspace, `.codex` may
 exist as an untracked local file; do not stage it unless explicitly requested.
