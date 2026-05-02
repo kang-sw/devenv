@@ -57,6 +57,23 @@ Success criteria:
 - Audit procedure distinguishes structure, invariants, doctrine, and closure gaps.
 - `agents/openai.yaml` remains aligned with the skill.
 
+### Result (pending commit) - 2026-05-02
+
+Hardened `agents-plugin/skills/skill-authoring/SKILL.md` without changing the
+skill name or UI metadata. The dense invariant checklist is now a named judgment
+instead of a single overloaded invariant, the audit procedure distinguishes
+structure, invariant quality, doctrine quality, and closure gaps, and independent
+validation is conditional on the host and user authorizing it. Doctrine now names
+the model's limited attention budget under context pressure as the finite resource
+and includes the generator clause.
+
+Validation:
+
+- Manual structure check for frontmatter and Doctrine sections passed.
+- `git diff --check` passed.
+- `quick_validate.py` could not run because the local Python environment lacks
+  `PyYAML` (`ModuleNotFoundError: No module named 'yaml'`).
+
 ### Phase 2: Draft `write-ticket` and `discuss`
 
 Add initial `agents-plugin` versions of `write-ticket` and `discuss`. Use the
@@ -71,6 +88,34 @@ Success criteria:
 - The drafts state their tooling limits clearly enough that a future MCP ticket can
   supply the missing execution surfaces.
 - `agents/openai.yaml` files exist for both skills.
+
+### Result (pending commit) - 2026-05-02
+
+Added draft `agents-plugin` skills for `write-ticket` and `discuss`, each with
+`SKILL.md` and `agents/openai.yaml`. The drafts preserve the source Claude skills'
+workflow intent while removing operational dependencies on `$ARGUMENTS`,
+slash-command chaining, shell interpolation, `ws-*` helper execution, native tool
+names, and named-agent orchestration.
+
+Porting boundary:
+
+- `write-ticket` reads ticket conventions directly and performs ordinary file
+  edits/status moves; helper-backed stem/spec lookup is deferred.
+- `discuss` reads project memory and named artifacts directly; survey agents and
+  helper-generated project maps are deferred.
+- Both drafts explicitly mark missing `ws-*`, named-agent, hook, MCP, and
+  host-specific plugin behavior as future tooling work.
+
+Validation:
+
+- Manual structure check for frontmatter and Doctrine sections passed.
+- `rg` check found no `$ARGUMENTS`, shell interpolation, named-agent calls,
+  Claude native tool names, or slash-chain references in the three
+  `agents-plugin` skills.
+- `claude plugin validate agents-plugin` passed.
+- `git diff --check` passed.
+- `quick_validate.py` could not run for these skills because the local Python
+  environment lacks `PyYAML`.
 
 ### Phase 3: Documentation refresh
 

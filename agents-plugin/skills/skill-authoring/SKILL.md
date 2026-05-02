@@ -8,7 +8,7 @@ description: Author or audit ws workflow skills and agent prompts using the repo
 ## Invariants
 
 - Put directives before rationale; put rationale only in Doctrine.
-- Keep every invariant or constraint falsifiable, actionable, one-line, context-free, non-redundant, universal, and derivable from Doctrine.
+- Keep each invariant or constraint short enough to audit as one standalone rule.
 - Keep skills self-contained; do not require tickets, session history, or sibling skills to understand the rule text.
 - Keep agent prompts self-contained; do not require conversation history or caller session state.
 - Mechanize repeatedly violated behavior with handlers, templates, or structured output blocks.
@@ -40,8 +40,9 @@ description: Author or audit ws workflow skills and agent prompts using the repo
 2. Check top-to-bottom section order against the matching layout.
 3. Run `judge: invariant-quality` on every invariant or constraint line.
 4. Run `judge: doctrine-quality` on the Doctrine paragraph.
-5. Verify handlers contain procedure, judgments contain criteria, and Doctrine contains rationale.
-6. Report contradictions, duplicate rules, orphan references, missing output contracts, and closure gaps.
+5. Verify handlers contain procedure, judgments contain criteria, and Doctrine contains only the generator rationale.
+6. When independent validation is available and authorized, request a fresh audit for contradictions, duplication, orphan references, and closure gaps.
+7. Report contradictions, duplicate rules, orphan references, missing output contracts, and closure gaps.
 
 ## Judgments
 
@@ -60,6 +61,8 @@ Accept a line only when every answer is yes:
 ### judge: doctrine-quality
 
 Accept Doctrine only when it names one finite resource and includes this generator: when a rule is ambiguous, apply whichever interpretation better preserves that resource.
+
+Concrete finite resources include context window, attention budget, execution steps, review time, and user turns. Reject fuzzy resources such as quality, focus, clarity, and robustness unless the sentence anchors them to a measurable constraint.
 
 ## Templates
 
@@ -132,4 +135,4 @@ description: <what the skill does and all trigger conditions>
 
 ## Doctrine
 
-Skill and agent documents optimize for reliable execution by the model under attention pressure. When a rule is ambiguous, apply whichever interpretation better preserves reliable execution by the model under attention pressure.
+Skill and agent documents optimize for the model's limited attention budget while executing under context pressure: directives stay skimmable, procedures stay mechanical, judgments stay named, and rationale stays isolated. When a rule is ambiguous, apply whichever interpretation better preserves the model's limited attention budget while executing under context pressure.
