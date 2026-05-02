@@ -190,6 +190,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
+`260502-feat-agents-plugin-workflow-skill-drafts` — harden `skill-authoring`; draft host-neutral `write-ticket` and `discuss` without tooling/MCP reconstruction
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 
 ## Session Notes
