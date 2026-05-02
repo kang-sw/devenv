@@ -193,7 +193,7 @@ Success criteria:
 - Follow-up tickets are identified for MCP exposure, broader skill normalization,
   or Claude manual closeout if needed.
 
-### Result (pending commit) - 2026-05-02
+### Result (2822c80) - 2026-05-02
 
 Updated project memory and the research anchor for the completed scaffold slice.
 `ai-docs/_index.md` now records the two-plugin topology, the Codex verification
