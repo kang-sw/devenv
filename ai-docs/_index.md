@@ -15,7 +15,8 @@ Meta-workflow project only — defines skills, agents, and workflow patterns for
 **Plugin topology:**
 - Skills and agents are delivered via the `ws` Claude Code plugin, sourced from `claude-plugin/` via a `directory`-type marketplace entry in `~/.claude/settings.json`.
 - `agents-plugin/` is the Codex-first host-neutral plugin candidate for `ws@0.1.0`; it currently contains Codex and Claude manifests plus the initial `skill-authoring` skill.
-- Codex verification for `agents-plugin/`: registered through `.agents/plugins/marketplace.json`; user installed `ws` in Codex UI and verified `$ws:skill-authoring`.
+- Codex verification for `agents-plugin/`: registered through `.agents/plugins/marketplace.json`; user installed `ws` in Codex UI and verified `$ws:skill-authoring`, `$ws:write-ticket`, and `$ws:discuss`.
+- Codex local plugin iteration: no supported CLI install/uninstall/updater command was found; use UI uninstall/install or a fresh Codex session after editing the registered local source.
 - Claude verification for `agents-plugin/`: `claude plugin validate agents-plugin` passes; runtime invocation `/ws:skill-authoring` remains a manual closeout item.
 - After any change to `claude-plugin/`, run `claude plugin update ws@ws` to propagate to the plugin cache. `./install.sh update` handles first-time install and settings patching on a new machine.
 - `claude-plugin/CLAUDE.home.md` is the canonical copy of `~/.claude/CLAUDE.md` — edits to the global thinking doctrine land in this repo; `git diff` surfaces them here.

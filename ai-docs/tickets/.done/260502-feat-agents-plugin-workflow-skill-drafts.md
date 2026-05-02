@@ -144,3 +144,12 @@ Remaining follow-up work:
 - MCP/runtime design for ticket/spec lookup, project survey, helper execution, and
   agent orchestration before claiming operational parity with `claude-plugin/`.
 - Bootstrap design after the smaller workflow-port pattern has been reviewed.
+
+## Post-Completion Notes
+
+- 2026-05-02: User uninstalled and reinstalled the `ws` plugin in the Codex UI and
+  confirmed `$ws:skill-authoring`, `$ws:write-ticket`, and `$ws:discuss` are
+  visible after install.
+- 2026-05-02: User confirmed Codex does not appear to provide supported CLI-level
+  plugin install, uninstall, or updater commands for this local plugin workflow;
+  local iteration should rely on UI uninstall/install or fresh-session reloads.

@@ -3,6 +3,39 @@
 Probed 2026-04-27 against `codex exec` on WSL2/Linux.
 Source: https://developers.openai.com/codex/hooks, https://developers.openai.com/codex/config-reference
 
+## Plugin Operations
+
+Probed 2026-05-02 against a repo-local Codex marketplace for
+`/Users/kang-sw/devenv`.
+
+Repo-local marketplace registration works through:
+
+```bash
+codex plugin marketplace add /Users/kang-sw/devenv
+```
+
+Observed Codex config:
+
+```toml
+[marketplaces.kang-sw-devenv]
+source_type = "local"
+source = "/Users/kang-sw/devenv"
+```
+
+Local marketplace registration does not install the plugin. The user must install
+the listed plugin from the Codex Plugins UI at least once.
+
+No supported CLI-level plugin install, uninstall, or updater command was found for
+this local workflow. `codex plugin marketplace upgrade <name>` is for Git-backed
+marketplaces and fails for `source_type = "local"`.
+
+Iterative local plugin testing uses UI uninstall/install or a fresh Codex session
+after editing the registered local source. Verified after UI uninstall/install:
+`$ws:skill-authoring`, `$ws:write-ticket`, and `$ws:discuss` are visible.
+
+Skill invocation is namespaced as `$<plugin-name>:<skill-name>`; for this repo's
+candidate plugin the form is `$ws:<skill-name>`.
+
 ## Invocation
 
 ```bash
