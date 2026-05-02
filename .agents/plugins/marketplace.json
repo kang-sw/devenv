@@ -1,0 +1,20 @@
+{
+  "name": "kang-sw-devenv",
+  "interface": {
+    "displayName": "kang-sw devenv"
+  },
+  "plugins": [
+    {
+      "name": "ws",
+      "source": {
+        "source": "local",
+        "path": "./agents-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

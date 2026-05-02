@@ -39,8 +39,9 @@ description: Author or audit ws workflow skills and agent prompts using the repo
 1. Classify the document as skill or agent.
 2. Check top-to-bottom section order against the matching layout.
 3. Run `judge: invariant-quality` on every invariant or constraint line.
-4. Verify handlers contain procedure, judgments contain criteria, and Doctrine contains rationale.
-5. Report contradictions, duplicate rules, orphan references, missing output contracts, and closure gaps.
+4. Run `judge: doctrine-quality` on the Doctrine paragraph.
+5. Verify handlers contain procedure, judgments contain criteria, and Doctrine contains rationale.
+6. Report contradictions, duplicate rules, orphan references, missing output contracts, and closure gaps.
 
 ## Judgments
 
@@ -131,4 +132,4 @@ description: <what the skill does and all trigger conditions>
 
 ## Doctrine
 
-Skill and agent documents optimize for executability under attention pressure. When a rule is ambiguous, apply whichever interpretation the model under pressure would execute more reliably.
+Skill and agent documents optimize for reliable execution by the model under attention pressure. When a rule is ambiguous, apply whichever interpretation better preserves reliable execution by the model under attention pressure.

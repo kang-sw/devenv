@@ -98,6 +98,35 @@ Success criteria:
 - One minimal workflow path is exercised.
 - Any Codex-specific limitations are recorded for future tickets.
 
+### Result (manual verification) - 2026-05-02
+
+Codex marketplace registration succeeded with:
+
+```bash
+codex plugin marketplace add /Users/kang-sw/devenv
+```
+
+Observed config entry:
+
+```toml
+[marketplaces.kang-sw-devenv]
+source_type = "local"
+source = "/Users/kang-sw/devenv"
+```
+
+`codex plugin marketplace upgrade kang-sw-devenv` is not the local-marketplace
+refresh path; it fails because the marketplace is not Git-backed. Local iteration
+uses the registered source path directly, so file edits are picked up by opening a
+new Codex session after the plugin is installed.
+
+Important install behavior: `marketplace add` registers the catalog but does not
+install the plugin. The user opened Codex Plugins UI, saw `ws` as uninstalled,
+installed it manually, and verified that `$ws:skill-authoring` is available. The
+effective skill invocation name is namespaced as `$<plugin-name>:<skill-name>`,
+not bare `$skill-authoring`.
+
+No `ws-*` helper path behavior is involved in this scaffold verification.
+
 ### Phase 3: Best-effort Claude compatibility alignment
 
 Compare the `agents-plugin/` structure with `claude-plugin/` and current
