@@ -129,7 +129,7 @@ Success criteria:
 - This ticket records validation and remaining limitations.
 - Follow-up work is identified without pre-committing the bootstrap design.
 
-### Result (pending commit) - 2026-05-02
+### Result (9e9c23a) - 2026-05-02
 
 Updated project memory to list the current `agents-plugin` skill inventory:
 `skill-authoring`, `write-ticket`, and `discuss`. Removed this ticket from the
