@@ -138,6 +138,9 @@ Follow the existing repository discipline:
 Create commits for logical units of work unless the user asks not to commit.
 Include an `## AI Context` section in each commit message explaining why the
 approach was chosen and any compatibility trade-offs.
+Write `## AI Context` with enough detail for future agents to recover the
+reasoning from git history: include the user intent, rejected alternatives,
+verification limits, and migration or compatibility implications when relevant.
 
 Keep unrelated untracked files out of commits. In this workspace, `.codex` may
 exist as an untracked local file; do not stage it unless explicitly requested.
