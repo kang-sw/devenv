@@ -289,7 +289,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
 | `260503-feat-agents-plugin-agent-session-runtime` | done | Host-neutral agent session runtime: wsstate paths, wsagent registry, Codex resume backend, minimum ws/agents.* tools, and write-skeleton port |
 | `260503-feat-agents-plugin-async-agent-calls` | done | Async ws agent calls: streaming Codex session-id registration, current-call state, call_async/wait/status/tail/cancel, MCP/CLI subquery correction, and real Codex-backed smoke |
-| `260503-feat-agents-plugin-edit-port` | todo | Port `edit` as the first core implementation orchestration skill: lead-owned direct edits plus one reviewer delegate and generated workflow path primitive |
+| `260503-feat-agents-plugin-edit-port` | done | Ported `edit` into `agents-plugin/` as lead-owned direct edit plus one async reviewer; Codex visibility confirmed after plugin refresh |
 | `260503-feat-agents-plugin-sidecar-skill-drafts` | done | Ported lead-run sidecar skills `add-rule`, `ship`, and `exit-session`; deferred `manual-think` and `workflow` |
 | `260503-feat-agents-plugin-spec-skill-drafts` | done | Ported `write-spec` and `update-spec` into `agents-plugin/` as host-neutral draft skills with convention/stem/index helpers called through MCP |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
@@ -298,7 +298,6 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
-`260503-feat-agents-plugin-edit-port` — first core implementation orchestration port; skill draft is committed, remaining work is Codex/plugin visibility smoke and documentation
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash

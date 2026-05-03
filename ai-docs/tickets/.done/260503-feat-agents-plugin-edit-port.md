@@ -1,5 +1,6 @@
 ---
 title: agents-plugin edit port
+completed: 2026-05-03
 parent: 260503-epic-agents-plugin-skill-porting
 related:
   260503-feat-agents-plugin-agent-session-runtime: named agent registry and synchronous delegation baseline
@@ -224,3 +225,17 @@ Success criteria:
   when host cache refresh is available.
 - Any unverified Claude compatibility or Windows behavior is documented rather
   than implied.
+
+### Result (bd31673/e660b73) - 2026-05-03
+
+Completed the `edit` port closeout. Local validation confirmed
+`agents-plugin` manifest validation and MCP `tools/list` coverage for every
+runtime primitive named by the skill: `mental_models.list`, `infra.read`,
+`path.generate`, `agents.register`, `agents.call_async`, `agents.wait`,
+`agents.print`, and `agents.erase`. The installed Codex plugin cache was then
+refreshed by the user, who confirmed that `ws:edit` is visible in the host skill
+list.
+
+This closes the ticket's Codex-side smoke boundary. Claude runtime invocation
+and Windows plugin-managed launcher behavior remain outside this ticket and are
+not implied by this result.
