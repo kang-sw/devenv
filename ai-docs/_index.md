@@ -291,7 +291,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260503-feat-agents-plugin-agent-session-runtime` | done | Host-neutral agent session runtime: wsstate paths, wsagent registry, Codex resume backend, minimum ws/agents.* tools, and write-skeleton port |
 | `260503-feat-agents-plugin-async-agent-calls` | done | Async ws agent calls: streaming Codex session-id registration, current-call state, call_async/wait/status/tail/cancel, MCP/CLI subquery correction, and real Codex-backed smoke |
 | `260503-feat-agents-plugin-edit-port` | done | Ported `edit` into `agents-plugin/` as lead-owned direct edit plus one async reviewer; Codex visibility confirmed after plugin refresh |
-| `260503-feat-agents-plugin-write-code-port` | todo | Port `write-code` into `agents-plugin/`: embedded implementer/survey/reviewer prompts, delegated commit smoke, reviewer fanout, and relay loop |
+| `260503-feat-agents-plugin-write-code-port` | done | Ported `write-code` into `agents-plugin/`: embedded implementer/survey/reviewer prompts, delegated commit smoke, reviewer fanout, async relay loop, and Codex visibility closeout |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
 | `260503-feat-agents-plugin-sidecar-skill-drafts` | done | Ported lead-run sidecar skills `add-rule`, `ship`, and `exit-session`; deferred `manual-think` and `workflow` |
 | `260503-feat-agents-plugin-spec-skill-drafts` | done | Ported `write-spec` and `update-spec` into `agents-plugin/` as host-neutral draft skills with convention/stem/index helpers called through MCP |
@@ -301,7 +301,6 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
-`260503-feat-agents-plugin-write-code-port` — next core orchestration slice; expand prompt bundle, verify delegated commit ownership, then port write-code with reviewer fanout
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
@@ -315,7 +314,7 @@ until the branch merges. Tickets may reference known spec context in prose, but
 do not add `spec:` frontmatter, run `ws:update-spec`, or update
 `ai-docs/spec/` / `ai-docs/mental-model/` on this branch.
 
-`write-code` is ported locally in `agents-plugin/skills/write-code` and local
-runtime smoke passed. Next closeout is host visibility: user refreshes Codex
-plugin cache and confirms `ws:write-code`, then update Phase 6 of
-`260503-feat-agents-plugin-write-code-port`.
+`write-code` is ported and closed in `agents-plugin/skills/write-code`; Codex
+plugin visibility and installed MCP runtime metadata were confirmed after plugin
+refresh. Next core-orchestration step is a new child ticket for the
+`implement`/`proceed` harness layer or the `ws/git.*` tooling epic.

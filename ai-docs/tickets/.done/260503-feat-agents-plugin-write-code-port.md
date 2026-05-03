@@ -6,6 +6,7 @@ related:
   260503-feat-agents-plugin-async-agent-calls: async call, wait, tail, status, cancel primitives
   260503-feat-agents-plugin-edit-port: first core orchestration port with generated review paths and one reviewer
   260503-epic-agents-plugin-skill-porting: parent roadmap for staged skill porting
+completed: 2026-05-03
 ---
 
 # agents-plugin write-code port
@@ -317,3 +318,27 @@ Success criteria:
 - Any unverified Claude compatibility, Windows behavior, recursive MCP budget
   policy, or delegate commit limitation is documented before closing this
   ticket.
+
+### Result (installed cache) - 2026-05-03
+
+Closed the host visibility gate after a user-performed Codex plugin refresh and
+session restart. The current Codex session exposes `ws:write-code` in the
+installed skill list, and the cached plugin tree contains
+`skills/write-code/SKILL.md`.
+
+The installed MCP runtime reports version `0.1.0-dev`, source commit `dev`, and
+prompt bundle hash
+`c68893663ac91db1fb5b186bb3f4b62762099defa69ec703302035e67512cb26`, matching
+the local smoke metadata. Runtime inspection confirmed the embedded stems used
+by `write-code`: `implementer`, `impl-playbook`, `project-survey`,
+`plan-populator-survey`, `plan-populator-research`, `code-reviewer`,
+`code-review-correctness`, `code-review-fit`, and `code-review-test`.
+
+The final closeout also confirmed that the current MCP session can call
+`runtime.info` and that the installed binary can allocate a generated review
+path through `path generate`. Plugin validation still passes for
+`agents-plugin`. Remaining compatibility gaps are intentionally outside this
+ticket: real Claude runtime invocation for the candidate plugin, native Windows
+plugin-managed launcher behavior, and a fuller recursive-MCP depth or remaining
+budget policy. Delegate commit ownership has already been smoke-tested in Phase
+2 and remains accepted for this port.
