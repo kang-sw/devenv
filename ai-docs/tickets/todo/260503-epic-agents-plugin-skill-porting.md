@@ -170,7 +170,6 @@ relay, doc pipeline, approval gates, and task continuity.
 
 Planned child ticket group:
 
-- `feat-agents-plugin-forge-skills-port`
 - `feat-agents-plugin-bootstrap-design`
 
 Covered skills:
@@ -182,6 +181,21 @@ Covered skills:
 Purpose: port the broadest reconstruction and project-initialization workflows
 last. These depend on stable document conventions, runtime surfaces, delegation
 semantics, and host-specific context bootstrap behavior.
+
+Status:
+
+- `forge-spec` ported in `1674bba` using a persistent named implementer agent
+  as a live MCP-backed delegation smoke. The port keeps archive confirmation,
+  domain confirmation, user classification gates, spec stem generation, spec
+  index verification, and clerk-style ticket association through
+  `ws/agents.oneshot` with inline instructions.
+- `forge-mental-model` ported in `6477224` by reusing the same named implementer
+  agent session. The port keeps spec availability warning, domain confirmation,
+  survey-before-write, verifier-before-write, and the
+  `(mental-model-updated)` commit marker.
+- `bootstrap` remains deferred to a dedicated design ticket because it mixes
+  project scaffolding, install/update behavior, AGENTS/CLAUDE context, and
+  host-specific plugin bootstrap concerns.
 
 ## Completion Criteria
 
