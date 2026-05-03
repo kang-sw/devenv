@@ -83,6 +83,9 @@ Success criteria:
 - Embed host-neutral versions of `implementer`, `project-survey`,
   `plan-populator-survey`, `plan-populator-research`, and
   `code-review-test`.
+- Embed `impl-playbook` so the `write-code` caller can register the implementer
+  with `prompts: ["implementer", "impl-playbook"]` instead of making the
+  implementer fetch runtime policy at task start.
 - Preserve prompt-chain compatibility through `prompts` on `ws/agents.register`
   and `ws/agents.oneshot`.
 - Normalize prompts away from Claude-only helper names and repo-local paths.
@@ -100,7 +103,8 @@ before the shared `write-code` skill instructs delegates to commit.
 
 Success criteria:
 
-- Register a named implementer with the embedded `implementer` prompt.
+- Register a named implementer with embedded prompts `implementer` and
+  `impl-playbook`.
 - Give it a narrow, reversible task in a disposable or low-risk scope.
 - Allow the delegate to edit and commit exactly one logical change.
 - Lead verifies the diff, commit message shape, and `## AI Context` quality.

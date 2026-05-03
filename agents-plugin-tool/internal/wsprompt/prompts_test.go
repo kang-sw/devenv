@@ -83,6 +83,38 @@ func TestResolveSkeletonWriterPrompt(t *testing.T) {
 	}
 }
 
+func TestResolveWriteCodePromptSet(t *testing.T) {
+	cases := []struct {
+		stem string
+		tier string
+		want string
+	}{
+		{"implementer", "core", "You are a code implementer."},
+		{"project-survey", "light", "You are project-survey"},
+		{"plan-populator-survey", "core", "You are conducting a codebase survey"},
+		{"plan-populator-research", "deep", "You are drafting a step-by-step implementation plan"},
+		{"code-review-test", "", "Test Partition"},
+		{"impl-playbook", "", "Implementation Playbook"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.stem, func(t *testing.T) {
+			resolved, err := Resolve([]string{tc.stem}, "", "", "")
+			if err != nil {
+				t.Fatalf("Resolve returned error: %v", err)
+			}
+			if tc.tier != "" && resolved.Tier != tc.tier {
+				t.Fatalf("tier = %q", resolved.Tier)
+			}
+			if strings.Contains(resolved.Text, "tools:") || strings.Contains(resolved.Text, "model:") {
+				t.Fatalf("frontmatter was not stripped:\n%s", resolved.Text)
+			}
+			if !strings.Contains(resolved.Text, tc.want) {
+				t.Fatalf("missing %q in prompt:\n%s", tc.want, resolved.Text)
+			}
+		})
+	}
+}
+
 func TestBundleMetadata(t *testing.T) {
 	info, err := Bundle("dev")
 	if err != nil {
@@ -91,7 +123,18 @@ func TestBundleMetadata(t *testing.T) {
 	if info.SourceCommit != "dev" || len(info.ContentSHA256) != 64 {
 		t.Fatalf("bundle info = %+v", info)
 	}
-	for _, prompt := range []string{"code-reviewer", "skeleton-writer", "code-review-correctness", "code-review-fit"} {
+	for _, prompt := range []string{
+		"code-reviewer",
+		"implementer",
+		"plan-populator-research",
+		"plan-populator-survey",
+		"project-survey",
+		"skeleton-writer",
+		"code-review-correctness",
+		"code-review-fit",
+		"code-review-test",
+		"impl-playbook",
+	} {
 		found := false
 		for _, item := range info.Prompts {
 			if item == prompt {

@@ -7,12 +7,18 @@
   "release_tag": "v0.1.0",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "98a3049bfa612c547dd87048b74728a31bd74d8e363fe3a739891c57a4ddfbfc",
+    "content_sha256": "c68893663ac91db1fb5b186bb3f4b62762099defa69ec703302035e67512cb26",
     "prompts": [
       "code-reviewer",
+      "implementer",
+      "plan-populator-research",
+      "plan-populator-survey",
+      "project-survey",
       "skeleton-writer",
       "code-review-correctness",
-      "code-review-fit"
+      "code-review-fit",
+      "code-review-test",
+      "impl-playbook"
     ]
   },
   "tools": {

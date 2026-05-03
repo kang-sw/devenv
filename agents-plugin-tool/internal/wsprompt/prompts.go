@@ -16,9 +16,15 @@ var promptFS embed.FS
 
 var embeddedPromptPaths = []string{
 	"prompts/code-reviewer.md",
+	"prompts/implementer.md",
+	"prompts/plan-populator-research.md",
+	"prompts/plan-populator-survey.md",
+	"prompts/project-survey.md",
 	"prompts/skeleton-writer.md",
 	"infra/code-review-correctness.md",
 	"infra/code-review-fit.md",
+	"infra/code-review-test.md",
+	"infra/impl-playbook.md",
 }
 
 type Source struct {
@@ -79,9 +85,15 @@ func Resolve(specs []string, systemPromptText, explicitTier, explicitModel strin
 func Bundle(sourceCommit string) (BundleInfo, error) {
 	prompts := []string{
 		"code-reviewer",
+		"implementer",
+		"plan-populator-research",
+		"plan-populator-survey",
+		"project-survey",
 		"skeleton-writer",
 		"code-review-correctness",
 		"code-review-fit",
+		"code-review-test",
+		"impl-playbook",
 	}
 	hash, err := ContentSHA256()
 	if err != nil {
