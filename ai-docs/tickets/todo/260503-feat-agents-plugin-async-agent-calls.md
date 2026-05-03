@@ -279,7 +279,7 @@ Success criteria:
 - The skill-porting epic records that core implementation orchestration can now
   choose between synchronous and async delegate calls.
 
-### Result (pending) - 2026-05-03
+### Result (a832dcd) - 2026-05-03
 
 Updated the host-neutral workflow skill with concrete usage patterns for the
 implemented agent primitives. The workflow reference now distinguishes one-shot
