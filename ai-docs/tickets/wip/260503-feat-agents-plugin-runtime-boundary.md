@@ -190,6 +190,20 @@ This phase must answer these host questions with a small Codex POC:
 - whether a fresh `codex exec` can see and call `ws.project_tree` from the
   installed plugin-managed MCP server after the user refreshes the plugin cache
 
+Initial dev POC status:
+
+- `agents-plugin/.codex-plugin/plugin.json` now references plugin-local
+  `.mcp.json`.
+- `agents-plugin/.mcp.json` runs `./bin/ws-mcp-launcher`.
+- `agents-plugin/runtime.json` records the plugin/runtime compatibility contract.
+- `agents-plugin/bin/ws-mcp-launcher` can copy a local bootstrap binary or download
+  a runtime binary, verify basic version compatibility, and exec
+  `ws-mcp serve --stdio` without writing launcher diagnostics to stdout.
+- A temporary global Codex MCP registration using the launcher confirmed that a
+  fresh `codex exec` can call `ws.project_tree` through the `ws-mcp` server.
+- Plugin-managed MCP verification is still pending the required user-performed
+  Codex plugin cache refresh.
+
 `install-ws-plugin` is no longer a required setup skill if the launcher POC works.
 It may be dropped, deferred, or re-scoped later as a repair/doctor skill for
 offline environments, corporate proxy failures, permission issues, or manual

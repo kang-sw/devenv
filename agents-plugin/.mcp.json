@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ws": {
+      "command": "./bin/ws-mcp-launcher",
+      "args": ["serve", "--stdio"]
+    }
+  }
+}

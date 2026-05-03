@@ -113,6 +113,11 @@ Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
 `ws.project_tree` and `ws.infra.read`; current Claude-compatible fallbacks are
 `ws-proj-tree` and `ws-print-infra`.
 
+Codex launcher POC status: `agents-plugin` now contains plugin-local `.mcp.json`,
+`runtime.json`, and `bin/ws-mcp-launcher`. Host-free launcher smoke and temporary
+global Codex MCP registration work; installed plugin-managed MCP verification is
+pending user-performed Codex plugin cache refresh.
+
 ## Skill Inventory
 
 ```

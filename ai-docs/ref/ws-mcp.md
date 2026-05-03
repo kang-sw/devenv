@@ -69,16 +69,34 @@ The plugin-local `.mcp.json` uses an MCP server map:
 }
 ```
 
+The current POC adds `agents-plugin/bin/ws-mcp-launcher` and
+`agents-plugin/runtime.json`. The launcher is intentionally quiet on stdout:
+stdout belongs to the MCP JSON-RPC stream, while diagnostics go to stderr.
+
 The preferred Codex design is a plugin-local launcher, not a mandatory separate
 install skill. The launcher runs from the installed plugin cache, reads a
-plugin-local runtime contract, downloads and verifies the prebuilt `ws-mcp`
-binary when missing or incompatible, then execs `ws-mcp serve --stdio`.
+plugin-local runtime contract, downloads or copies and verifies the prebuilt
+`ws-mcp` binary when missing or incompatible, then execs
+`ws-mcp serve --stdio`.
+
+Current launcher inputs:
+
+| Variable | Purpose |
+|----------|---------|
+| `WS_MCP_RUNTIME_DIR` | Override the runtime binary directory; defaults to plugin-local `.runtime/<os>-<arch>`. |
+| `WS_MCP_BOOTSTRAP_BINARY` | Copy a prebuilt local binary into the runtime directory. Used by the current dev POC. |
+| `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
+| `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
+| `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 
 This is still a Phase 3 design/POC boundary. The implementation must verify
 whether Codex accepts relative command paths, what working directory it uses for
 plugin-managed MCP servers, and whether platform-specific `.sh`/`.cmd` launchers
-can be selected safely. Do not add a production `.mcp.json` that requires Go,
-Python, Node, Cargo, or Visual Studio Build Tools on target user machines.
+can be selected safely. The current macOS POC verified the launcher through a
+temporary global MCP registration, but plugin-managed MCP verification still
+requires a user-performed Codex plugin cache refresh. Do not treat that host path
+as proven until a fresh Codex session can call `ws.project_tree` from the
+installed plugin-managed MCP server.
 
 For repo-local Codex plugin iteration, changed plugin-managed MCP configuration
 requires a human-in-the-loop cache refresh: the user must uninstall/install the

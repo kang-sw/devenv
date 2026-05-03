@@ -1,0 +1,93 @@
+#!/bin/sh
+set -eu
+
+fail() {
+  printf 'ws-mcp-launcher: %s\n' "$*" >&2
+  exit 1
+}
+
+note() {
+  if [ "${WS_MCP_LAUNCHER_DEBUG:-}" = "1" ]; then
+    printf 'ws-mcp-launcher: %s\n' "$*" >&2
+  fi
+}
+
+resolve_link() {
+  target=$1
+  while [ -L "$target" ]; do
+    dir=$(CDPATH= cd -- "$(dirname -- "$target")" && pwd -P)
+    link=$(readlink "$target")
+    case "$link" in
+      /*) target=$link ;;
+      *) target=$dir/$link ;;
+    esac
+  done
+  printf '%s\n' "$target"
+}
+
+launcher_path=$(resolve_link "$0")
+launcher_dir=$(CDPATH= cd -- "$(dirname -- "$launcher_path")" && pwd -P)
+plugin_dir=$(CDPATH= cd -- "$launcher_dir/.." && pwd -P)
+runtime_contract=$plugin_dir/runtime.json
+
+[ -f "$runtime_contract" ] || fail "missing runtime contract: $runtime_contract"
+
+os=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m 2>/dev/null)
+case "$os" in
+  darwin) os=darwin ;;
+  linux) os=linux ;;
+  msys*|mingw*|cygwin*) os=windows ;;
+  *) fail "unsupported operating system: $os" ;;
+esac
+
+case "$arch" in
+  arm64|aarch64) arch=arm64 ;;
+  x86_64|amd64) arch=amd64 ;;
+  *) fail "unsupported architecture: $arch" ;;
+esac
+
+platform=$os-$arch
+runtime_dir=${WS_MCP_RUNTIME_DIR:-"$plugin_dir/.runtime/$platform"}
+binary_name=ws-mcp
+[ "$os" = "windows" ] && binary_name=ws-mcp.exe
+binary=$runtime_dir/$binary_name
+
+mkdir -p "$runtime_dir"
+
+if [ ! -x "$binary" ]; then
+  if [ -n "${WS_MCP_BOOTSTRAP_BINARY:-}" ]; then
+    [ -f "$WS_MCP_BOOTSTRAP_BINARY" ] || fail "bootstrap binary not found: $WS_MCP_BOOTSTRAP_BINARY"
+    cp "$WS_MCP_BOOTSTRAP_BINARY" "$binary"
+    chmod 755 "$binary"
+    note "installed bootstrap binary into $binary"
+  elif [ -n "${WS_MCP_BOOTSTRAP_URL:-}" ]; then
+    tmp=$runtime_dir/$binary_name.download
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$WS_MCP_BOOTSTRAP_URL" -o "$tmp" || fail "failed to download $WS_MCP_BOOTSTRAP_URL"
+    else
+      fail "curl is required to download $WS_MCP_BOOTSTRAP_URL"
+    fi
+    if [ -n "${WS_MCP_BOOTSTRAP_SHA256:-}" ]; then
+      actual=$(shasum -a 256 "$tmp" | awk '{print $1}')
+      [ "$actual" = "$WS_MCP_BOOTSTRAP_SHA256" ] || fail "checksum mismatch for downloaded ws-mcp"
+    fi
+    mv "$tmp" "$binary"
+    chmod 755 "$binary"
+    note "downloaded runtime binary into $binary"
+  else
+    fail "missing runtime binary for $platform; set WS_MCP_BOOTSTRAP_BINARY or WS_MCP_BOOTSTRAP_URL"
+  fi
+fi
+
+version=$("$binary" version 2>/dev/null || true)
+case "$version" in
+  0.1.*) ;;
+  *) fail "incompatible ws-mcp version: ${version:-unknown}" ;;
+esac
+
+note "plugin_dir=$plugin_dir"
+note "runtime_dir=$runtime_dir"
+note "cwd=$(pwd -P)"
+
+exec "$binary" "$@"

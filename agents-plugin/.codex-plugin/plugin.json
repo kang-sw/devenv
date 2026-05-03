@@ -13,6 +13,7 @@
     "codex"
   ],
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "ws",
     "shortDescription": "Codex-first ws workflow skills",
