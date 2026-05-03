@@ -55,6 +55,10 @@ Agent runtime state uses the project-state layout from
               inbox/
                 000001.json
               outbox/
+              current/
+                state.json
+                stdout
+                stderr
               output.md
               events.jsonl
           review-paths/
@@ -78,6 +82,7 @@ Required files:
 - `agent.json` — registry metadata for active-agent lookup and backend calls.
 - `inbox/` — lead-to-agent queued messages such as interrupts and amendments.
 - `outbox/` — agent-to-lead queued messages when a backend supports asynchronous requests.
+- `current/` — current async-call state and captured stdout/stderr streams.
 - `output.md` — last plain-text response returned to the caller.
 - `events.jsonl` — append-only lifecycle and call log for debugging and UI state.
 
@@ -162,6 +167,43 @@ running process may still enqueue the message and deliver it on the next resume.
 
 `outbox/` uses the same file shape for future agent-to-lead requests. It is a
 planned surface; initial Codex backend work may leave it unused.
+
+## Current Call State
+
+Each named agent has at most one active asynchronous call. Public async tools are
+keyed by agent name; internal execution identifiers are for diagnostics only.
+
+`current/state.json` schema version 1:
+
+```json
+{
+  "schema_version": 1,
+  "agent_name": "implementer",
+  "call_seq": 1,
+  "execution_id": "000001",
+  "status": "running",
+  "pid": 1234,
+  "started_at": "2026-05-03T00:00:00Z",
+  "updated_at": "2026-05-03T00:00:01Z",
+  "prompt_path": "",
+  "stdout_path": "current/stdout",
+  "stderr_path": "current/stderr",
+  "session_id": "019..."
+}
+```
+
+Current-call status values:
+
+- `queued` — accepted by ws but not yet known to be running in a child process.
+- `running` — child process is active or was last observed active.
+- `completed` — child process exited successfully and final output was captured.
+- `failed` — child process or backend parsing failed.
+- `cancelled` — ws requested termination and marked the call cancelled.
+
+Creating/registering an agent with an existing name resets the previous
+task-scoped session when no current call is active. If `current/state.json` is
+`queued` or `running`, registration fails until the call is cancelled, failed,
+completed, or explicitly reset by a future operation that owns process cleanup.
 
 ## Workload Tiers
 

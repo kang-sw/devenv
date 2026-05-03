@@ -23,6 +23,14 @@ const (
 	StatusErased  = "erased"
 )
 
+const (
+	CallStatusQueued    = "queued"
+	CallStatusRunning   = "running"
+	CallStatusCompleted = "completed"
+	CallStatusFailed    = "failed"
+	CallStatusCancelled = "cancelled"
+)
+
 var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 type Clock func() time.Time
@@ -86,15 +94,37 @@ type Message struct {
 	Text          string `json:"text"`
 }
 
+type CurrentCall struct {
+	SchemaVersion int    `json:"schema_version"`
+	AgentName     string `json:"agent_name"`
+	CallSeq       int    `json:"call_seq,omitempty"`
+	ExecutionID   string `json:"execution_id,omitempty"`
+	Status        string `json:"status"`
+	PID           int    `json:"pid,omitempty"`
+	StartedAt     string `json:"started_at,omitempty"`
+	UpdatedAt     string `json:"updated_at"`
+	FinishedAt    string `json:"finished_at,omitempty"`
+	PromptPath    string `json:"prompt_path,omitempty"`
+	StdoutPath    string `json:"stdout_path"`
+	StderrPath    string `json:"stderr_path"`
+	ExitCode      *int   `json:"exit_code,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
 type Layout struct {
-	Root       string
-	AgentDir   string
-	AgentFile  string
-	InboxDir   string
-	OutboxDir  string
-	OutputFile string
-	EventsFile string
-	SystemFile string
+	Root             string
+	AgentDir         string
+	AgentFile        string
+	InboxDir         string
+	OutboxDir        string
+	CurrentDir       string
+	CurrentStateFile string
+	CurrentStdout    string
+	CurrentStderr    string
+	OutputFile       string
+	EventsFile       string
+	SystemFile       string
 }
 
 type Manager struct {
@@ -118,6 +148,20 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	name := strings.TrimSpace(opts.Name)
 	if name == "" {
 		return Agent{}, Layout{}, errors.New("agent name is required")
+	}
+	existingLayout, err := m.layout(opts.Root, name, false)
+	if err != nil {
+		return Agent{}, Layout{}, err
+	}
+	existingCall, err := readCurrentCall(existingLayout.CurrentStateFile)
+	if err == nil && isActiveCallStatus(existingCall.Status) {
+		return Agent{}, Layout{}, fmt.Errorf("agent %q has active call status %q", name, existingCall.Status)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Agent{}, Layout{}, err
+	}
+	if err := os.RemoveAll(existingLayout.AgentDir); err != nil {
+		return Agent{}, Layout{}, fmt.Errorf("reset agent directory: %w", err)
 	}
 	layout, err := m.layout(opts.Root, name, true)
 	if err != nil {
@@ -287,6 +331,106 @@ func (m Manager) Print(root, name string) (string, error) {
 	return string(raw), nil
 }
 
+func (m Manager) BeginCurrentCall(layout Layout, agent Agent) (CurrentCall, error) {
+	existing, err := readCurrentCall(layout.CurrentStateFile)
+	if err == nil && isActiveCallStatus(existing.Status) {
+		return CurrentCall{}, fmt.Errorf("agent %q has active call status %q", agent.Name, existing.Status)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return CurrentCall{}, err
+	}
+	now := m.now().UTC().Format(time.RFC3339)
+	call := CurrentCall{
+		SchemaVersion: schemaVersion,
+		AgentName:     agent.Name,
+		CallSeq:       existing.CallSeq + 1,
+		ExecutionID:   fmt.Sprintf("%06d", existing.CallSeq+1),
+		Status:        CallStatusQueued,
+		StartedAt:     now,
+		UpdatedAt:     now,
+		StdoutPath:    "current/stdout",
+		StderrPath:    "current/stderr",
+		SessionID:     agent.SessionID,
+	}
+	if err := os.MkdirAll(layout.CurrentDir, 0o755); err != nil {
+		return CurrentCall{}, fmt.Errorf("create current call dir: %w", err)
+	}
+	for _, path := range []string{layout.CurrentStdout, layout.CurrentStderr} {
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			return CurrentCall{}, fmt.Errorf("reset current call stream: %w", err)
+		}
+	}
+	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
+		return CurrentCall{}, err
+	}
+	return call, nil
+}
+
+func (m Manager) MarkCurrentCallRunning(layout Layout, pid int, sessionID string) (CurrentCall, error) {
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		return CurrentCall{}, err
+	}
+	call.Status = CallStatusRunning
+	call.PID = pid
+	call.UpdatedAt = m.now().UTC().Format(time.RFC3339)
+	if strings.TrimSpace(sessionID) != "" {
+		call.SessionID = sessionID
+	}
+	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
+		return CurrentCall{}, err
+	}
+	return call, nil
+}
+
+func (m Manager) CompleteCurrentCall(layout Layout, sessionID string, exitCode int) (CurrentCall, error) {
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		return CurrentCall{}, err
+	}
+	now := m.now().UTC().Format(time.RFC3339)
+	call.Status = CallStatusCompleted
+	call.UpdatedAt = now
+	call.FinishedAt = now
+	call.PID = 0
+	call.ExitCode = &exitCode
+	if strings.TrimSpace(sessionID) != "" {
+		call.SessionID = sessionID
+	}
+	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
+		return CurrentCall{}, err
+	}
+	return call, nil
+}
+
+func (m Manager) FailCurrentCall(layout Layout, errText string, exitCode *int) (CurrentCall, error) {
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		return CurrentCall{}, err
+	}
+	now := m.now().UTC().Format(time.RFC3339)
+	call.Status = CallStatusFailed
+	call.UpdatedAt = now
+	call.FinishedAt = now
+	call.PID = 0
+	call.ExitCode = exitCode
+	call.Error = errText
+	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
+		return CurrentCall{}, err
+	}
+	return call, nil
+}
+
+func ResetCurrentCall(layout Layout) error {
+	if err := os.RemoveAll(layout.CurrentDir); err != nil {
+		return fmt.Errorf("reset current call: %w", err)
+	}
+	if err := os.MkdirAll(layout.CurrentDir, 0o755); err != nil {
+		return fmt.Errorf("create current call dir: %w", err)
+	}
+	return nil
+}
+
 func (m Manager) Erase(root, name string) error {
 	if strings.TrimSpace(root) == "" {
 		root = "."
@@ -315,17 +459,21 @@ func (m Manager) layout(root, name string, create bool) (Layout, error) {
 	}
 	dir := filepath.Join(state.AgentsDir, key)
 	layout := Layout{
-		Root:       root,
-		AgentDir:   dir,
-		AgentFile:  filepath.Join(dir, "agent.json"),
-		InboxDir:   filepath.Join(dir, "inbox"),
-		OutboxDir:  filepath.Join(dir, "outbox"),
-		OutputFile: filepath.Join(dir, "output.md"),
-		EventsFile: filepath.Join(dir, "events.jsonl"),
-		SystemFile: filepath.Join(dir, "system.md"),
+		Root:             root,
+		AgentDir:         dir,
+		AgentFile:        filepath.Join(dir, "agent.json"),
+		InboxDir:         filepath.Join(dir, "inbox"),
+		OutboxDir:        filepath.Join(dir, "outbox"),
+		CurrentDir:       filepath.Join(dir, "current"),
+		CurrentStateFile: filepath.Join(dir, "current", "state.json"),
+		CurrentStdout:    filepath.Join(dir, "current", "stdout"),
+		CurrentStderr:    filepath.Join(dir, "current", "stderr"),
+		OutputFile:       filepath.Join(dir, "output.md"),
+		EventsFile:       filepath.Join(dir, "events.jsonl"),
+		SystemFile:       filepath.Join(dir, "system.md"),
 	}
 	if create {
-		for _, path := range []string{layout.InboxDir, layout.OutboxDir} {
+		for _, path := range []string{layout.InboxDir, layout.OutboxDir, layout.CurrentDir} {
 			if err := os.MkdirAll(path, 0o755); err != nil {
 				return Layout{}, fmt.Errorf("create %s: %w", path, err)
 			}
@@ -376,6 +524,43 @@ func writeAgent(path string, agent Agent) error {
 		return fmt.Errorf("replace agent: %w", err)
 	}
 	return nil
+}
+
+func readCurrentCall(path string) (CurrentCall, error) {
+	var call CurrentCall
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return call, os.ErrNotExist
+		}
+		return call, fmt.Errorf("read current call: %w", err)
+	}
+	if err := json.Unmarshal(raw, &call); err != nil {
+		return call, fmt.Errorf("parse current call: %w", err)
+	}
+	return call, nil
+}
+
+func writeCurrentCall(path string, call CurrentCall) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create current call dir: %w", err)
+	}
+	raw, err := json.MarshalIndent(call, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal current call: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write current call: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("replace current call: %w", err)
+	}
+	return nil
+}
+
+func isActiveCallStatus(status string) bool {
+	return status == CallStatusQueued || status == CallStatusRunning
 }
 
 func appendEvent(path string, now time.Time, event string, fields map[string]any) error {

@@ -165,6 +165,26 @@ Success criteria:
   reset behavior, and recovery from existing current-call files.
 - Existing synchronous `ws/agents.call` behavior remains unchanged.
 
+### Result (pending) - 2026-05-03
+
+Added the current-call state model to the Go wsagent runtime. Agent layouts now
+include `current/state.json`, `current/stdout`, and `current/stderr`, with a
+schema-versioned `CurrentCall` record, status constants, atomic state writes,
+state recovery, and helper transitions for queued, running, completed, failed,
+and reset flows.
+
+The public model remains agent-name keyed. `BeginCurrentCall` rejects a second
+call when the named agent has `queued` or `running` current state, while
+completed or failed current state can be replaced by the next call and keeps an
+incremented internal sequence for diagnostics. Re-registering an existing agent
+now resets the task-scoped session and clears previous output when no current
+call is active; it refuses to reset an agent with active current-call state.
+
+Added unit tests for state persistence, status transitions, busy-agent
+rejection, reset behavior, recovery from an existing state file, and same-name
+registration reset semantics. Updated the agent runtime reference with the
+`current/` layout, schema, statuses, and active-call reset boundary.
+
 ### Phase 2: Async process execution
 
 Implement `ws/agents.call_async` by launching the backend call in a child process

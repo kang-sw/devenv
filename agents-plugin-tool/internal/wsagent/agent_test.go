@@ -157,6 +157,138 @@ func TestCallPersistsStreamedSessionIDBeforeCompletion(t *testing.T) {
 	}
 }
 
+func TestCurrentCallLifecycleAndBusyRejection(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	agent, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	call, err := manager.BeginCurrentCall(layout, agent)
+	if err != nil {
+		t.Fatalf("BeginCurrentCall returned error: %v", err)
+	}
+	if call.Status != CallStatusQueued || call.CallSeq != 1 || call.ExecutionID != "000001" {
+		t.Fatalf("initial call mismatch: %+v", call)
+	}
+	for _, path := range []string{layout.CurrentStateFile, layout.CurrentStdout, layout.CurrentStderr} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected current call file %s: %v", path, err)
+		}
+	}
+	if _, err := manager.BeginCurrentCall(layout, agent); err == nil || !strings.Contains(err.Error(), "active call") {
+		t.Fatalf("expected active-call rejection, got %v", err)
+	}
+
+	call, err = manager.MarkCurrentCallRunning(layout, 1234, "thread-current")
+	if err != nil {
+		t.Fatalf("MarkCurrentCallRunning returned error: %v", err)
+	}
+	if call.Status != CallStatusRunning || call.PID != 1234 || call.SessionID != "thread-current" {
+		t.Fatalf("running call mismatch: %+v", call)
+	}
+
+	call, err = manager.CompleteCurrentCall(layout, "thread-current", 0)
+	if err != nil {
+		t.Fatalf("CompleteCurrentCall returned error: %v", err)
+	}
+	if call.Status != CallStatusCompleted || call.ExitCode == nil || *call.ExitCode != 0 || call.FinishedAt == "" {
+		t.Fatalf("completed call mismatch: %+v", call)
+	}
+
+	call, err = manager.BeginCurrentCall(layout, agent)
+	if err != nil {
+		t.Fatalf("second BeginCurrentCall returned error: %v", err)
+	}
+	if call.CallSeq != 2 || call.ExecutionID != "000002" {
+		t.Fatalf("second call sequence mismatch: %+v", call)
+	}
+}
+
+func TestCurrentCallFailureAndRecoveryFromExistingState(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	agent, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.BeginCurrentCall(layout, agent); err != nil {
+		t.Fatal(err)
+	}
+	exitCode := 7
+	call, err := manager.FailCurrentCall(layout, "boom", &exitCode)
+	if err != nil {
+		t.Fatalf("FailCurrentCall returned error: %v", err)
+	}
+	if call.Status != CallStatusFailed || call.Error != "boom" || call.ExitCode == nil || *call.ExitCode != 7 {
+		t.Fatalf("failed call mismatch: %+v", call)
+	}
+	recovered, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		t.Fatalf("readCurrentCall returned error: %v", err)
+	}
+	if recovered.Status != CallStatusFailed || recovered.CallSeq != 1 {
+		t.Fatalf("recovered call mismatch: %+v", recovered)
+	}
+	if err := ResetCurrentCall(layout); err != nil {
+		t.Fatalf("ResetCurrentCall returned error: %v", err)
+	}
+	if _, err := os.Stat(layout.CurrentStateFile); !os.IsNotExist(err) {
+		t.Fatalf("state file still exists or stat failed differently: %v", err)
+	}
+}
+
+func TestRegisterResetsExistingAgentUnlessCurrentCallActive(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    &fakeRunner{},
+	})
+	agent, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "impl", SystemPromptText: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "first"}); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, layout, err = manager.Register(RegisterOptions{Root: repo, Name: "impl", SystemPromptText: "new"})
+	if err != nil {
+		t.Fatalf("Register reset returned error: %v", err)
+	}
+	if agent.SessionID != "" {
+		t.Fatalf("reset register kept session id: %+v", agent)
+	}
+	if _, err := os.Stat(layout.OutputFile); !os.IsNotExist(err) {
+		t.Fatalf("output survived reset or stat failed differently: %v", err)
+	}
+	raw, err := os.ReadFile(layout.SystemFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "new" {
+		t.Fatalf("system prompt after reset = %q", raw)
+	}
+
+	if _, err := manager.BeginCurrentCall(layout, agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err == nil || !strings.Contains(err.Error(), "active call") {
+		t.Fatalf("expected active-call register rejection, got %v", err)
+	}
+}
+
 func TestOneShotErasesAgentDirectory(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
