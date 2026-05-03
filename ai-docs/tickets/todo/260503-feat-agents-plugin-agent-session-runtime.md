@@ -167,6 +167,34 @@ Success criteria:
 - The contract identifies which capabilities are required for `write-skeleton`
   and which can wait for core orchestration skills.
 
+### Result (pending) - 2026-05-03
+
+Added `ai-docs/ref/ws-agent-runtime.md` as the host-neutral session contract for
+future agent orchestration work. The document extracts the reusable pattern from
+the current Claude `ws-named-agent` implementation while avoiding Claude-specific
+paths, model names, hook names, and session file formats in the shared contract.
+
+The contract defines:
+
+- `ws/<tool-name>` notation for agent MCP tools, such as `ws/agents.call`
+- the cache-backed project/worktree state layout from Phase 1
+- per-agent directories under `agents/<agent-name>/`
+- `agent.json` registry metadata for active-agent lookup
+- `inbox/` lead-to-agent message queues for interrupts, amendments, and queued
+  prompts
+- `outbox/` as a reserved agent-to-lead queue surface
+- `output.md` and `events.jsonl` as plain-text output and lifecycle log files
+- workload-depth tiers `light`, `core`, and `deep`
+- planned tools `agents.register`, `agents.call`, `agents.oneshot`,
+  `agents.interrupt`, `agents.print`, `agents.tail`, `agents.erase`, and
+  `agents.list`
+
+The first implementation subset is deliberately smaller than the full planned
+surface: `agents.register`, `agents.call`, `agents.oneshot`, `agents.print`, and
+`agents.erase` are enough to prove resume-backed delegation for `write-skeleton`.
+Interrupts, tailing, active-agent listing, background execution, compression, and
+agent-to-lead outbox delivery are deferred until later consumers need them.
+
 ### Phase 3: Backend adapter prototype
 
 Implement the smallest adapter-backed session prototype needed to prove the

@@ -32,6 +32,7 @@ Read before authoring or modifying skills, agents, or infra:
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
 | `ai-docs/ref/codex-integration.md` | Probed codex CLI behavior: invocation, JSONL output format, session management, hook config |
 | `ai-docs/ref/ws-mcp.md` | Host-neutral `ws-mcp` process model, MCP tool contracts, CLI fallbacks, and distribution boundary |
+| `ai-docs/ref/ws-agent-runtime.md` | Host-neutral durable agent session contract: state layout, registry schema, queues, tiers, and planned MCP tools |
 | `ai-docs/ship/ws.md` | Ship config for the `ws` plugin: version strategy, changelog, tag, push |
 | `claude-plugin/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `ws-print-infra impl-playbook.md`. |
 | `claude-plugin/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `ws-print-infra subagent-rules.md`. |
