@@ -175,6 +175,16 @@ short reviewer clean/non-clean summaries, and file paths for full details, while
 raw `stdout`, `stderr`, runtime logs, and full finding text remain in files
 unless explicitly requested.
 
+Tool naming should reinforce this boundary. Normal workflow tools remain under
+`agents.*`: `agents.status`, `agents.wait`, and `agents.print` are the surfaces
+that lead agents should reach for during ordinary orchestration. Raw log and
+stream inspection should move behind an explicit debug namespace such as
+`agents.debug.tail`, `agents.debug.stdout`, `agents.debug.stderr`,
+`agents.debug.runtime_log`, and `agents.debug.events`. The existing
+`agents.tail` tool may remain as a deprecated compatibility alias during the
+transition, but shared skill text and prompts should prefer `agents.debug.*`
+when raw diagnostics are truly needed.
+
 Success criteria:
 
 - `write-code` can inspect normal implementer completion through a concise
@@ -187,6 +197,9 @@ Success criteria:
   clear before the lead needs `agents.tail`.
 - `agents.tail` and raw `stdout`/`stderr`/runtime-log inspection are treated as
   debugging actions with bounded output by default.
+- MCP tools expose the debug/raw surfaces under `agents.debug.*`, while
+  preserving `agents.tail` as a compatibility alias until downstream prompts and
+  skills stop depending on it.
 - Failure, timeout, and cancellation paths provide enough state and pointers for
   recovery without requiring immediate raw transcript inspection.
 
