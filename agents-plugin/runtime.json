@@ -7,9 +7,10 @@
   "release_tag": "v0.1.0",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "7bd1e3f4173ab148a10bb7d99255a906413b318c57a28cbe9fe56ae0dba56cda",
+    "content_sha256": "98a3049bfa612c547dd87048b74728a31bd74d8e363fe3a739891c57a4ddfbfc",
     "prompts": [
       "code-reviewer",
+      "skeleton-writer",
       "code-review-correctness",
       "code-review-fit"
     ]

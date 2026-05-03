@@ -16,6 +16,7 @@ var promptFS embed.FS
 
 var embeddedPromptPaths = []string{
 	"prompts/code-reviewer.md",
+	"prompts/skeleton-writer.md",
 	"infra/code-review-correctness.md",
 	"infra/code-review-fit.md",
 }
@@ -78,6 +79,7 @@ func Resolve(specs []string, systemPromptText, explicitTier, explicitModel strin
 func Bundle(sourceCommit string) (BundleInfo, error) {
 	prompts := []string{
 		"code-reviewer",
+		"skeleton-writer",
 		"code-review-correctness",
 		"code-review-fit",
 	}

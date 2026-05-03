@@ -131,11 +131,12 @@ and `ws/agents.erase`, plus matching CLI fallback subcommands under
 backend stores thread ids in `agent.json`, resumes with
 `codex exec resume --json <thread-id>`, and persists plain-text output in
 `output.md`. Agent registration now accepts runtime-resolved prompt chains
-through `prompts` with `prompt_refs` retained as a migration alias; the first
-embedded prompt bundle contains `code-reviewer`, `code-review-correctness`, and
-`code-review-fit`, and `runtime.json` records the expected bundle hash for
-launcher drift detection. `ws/agents.call_async` writes a current prompt
-snapshot, starts a cache-local `agents run-current` worker, and captures backend streams under
+through `prompts` with `prompt_refs` retained as a migration alias. The first
+embedded prompt bundle contains `code-reviewer`, `code-review-correctness`,
+`code-review-fit`, and `skeleton-writer`; `runtime.json` records the expected
+bundle hash for launcher drift detection. `ws/agents.call_async` writes a
+current prompt snapshot, starts a cache-local `agents run-current` worker, and
+captures backend streams under
 `current/` while the lead regains control. The wait/status/tail/cancel tools
 inspect or mark that current-call state without invoking another backend turn.
 Shared skill text should use `ws/agents.*` notation rather than the CLI command

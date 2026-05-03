@@ -309,12 +309,12 @@ prompt bodies in caller order with `---` separators. `system_prompt_text`, when
 provided, is appended after resolved prompt bodies so existing materialized
 prompt callers remain compatible.
 
-The first embedded bundle contains `code-reviewer`, `code-review-correctness`,
-and `code-review-fit` for the `edit` port. Frontmatter `model: haiku`,
+The first embedded bundle contains `code-reviewer`, `skeleton-writer`,
+`code-review-correctness`, and `code-review-fit`. Frontmatter `model: haiku`,
 `model: sonnet`, and `model: opus` map to shared tiers `light`, `core`, and
-`deep` when the caller did not pass an explicit `tier` or `model`. Unknown
-frontmatter model names become concrete backend model overrides only when no
-explicit model was supplied.
+`deep` when the caller did not pass an explicit `tier` or `model`. Frontmatter
+may also use shared tiers directly. Unknown frontmatter model names become
+concrete backend model overrides only when no explicit model was supplied.
 
 Registration writes the materialized prompt to `system.md` in the agent
 directory and stores the requested prompt chain in `agent.json` as `prompt_refs`

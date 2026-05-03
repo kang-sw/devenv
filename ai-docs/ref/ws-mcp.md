@@ -493,6 +493,7 @@ Prompt resolution:
 Current embedded prompt stems:
 
 - `code-reviewer`
+- `skeleton-writer`
 - `code-review-correctness`
 - `code-review-fit`
 
