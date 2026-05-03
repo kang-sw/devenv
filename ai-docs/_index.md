@@ -271,6 +271,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260502-feat-agents-plugin-workflow-skill-drafts` | done | Harden `skill-authoring`; add draft host-neutral `write-ticket` and `discuss` skills with helper/MCP runtime reconstruction deferred |
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
 | `260503-feat-agents-plugin-agent-session-runtime` | done | Host-neutral agent session runtime: wsstate paths, wsagent registry, Codex resume backend, minimum ws.agents.* tools, and write-skeleton port |
+| `260503-feat-agents-plugin-async-agent-calls` | todo | Add `ws.agents.call_async`, wait/status/tail/cancel, and run-state persistence before core implementation orchestration ports |
 | `260503-feat-agents-plugin-sidecar-skill-drafts` | done | Ported lead-run sidecar skills `add-rule`, `ship`, and `exit-session`; deferred `manual-think` and `workflow` |
 | `260503-feat-agents-plugin-spec-skill-drafts` | done | Ported `write-spec` and `update-spec` into `agents-plugin/` as host-neutral draft skills with convention/stem/index helpers called through MCP |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
@@ -279,6 +280,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
+`260503-feat-agents-plugin-async-agent-calls` — add async delegate run state and `call_async`/wait/status/tail/cancel before core implementation orchestration ports
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash

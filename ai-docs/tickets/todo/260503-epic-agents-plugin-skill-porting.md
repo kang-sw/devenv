@@ -138,14 +138,15 @@ session registration, resume-backed calls, queued follow-ups, output lookup, and
 workload-depth tiers. `write-skeleton` is the first consumer after that contract
 exists.
 
-Remaining gaps before the core implementation track: interrupts, tail/list,
-review-path allocation, runtime locks, reviewer fanout, and shared prompt-bundle
-resolution.
+Remaining gaps before the core implementation track: async calls, interrupts,
+tail/list, review-path allocation, runtime locks, reviewer fanout, and shared
+prompt-bundle resolution.
 
 ### 7. Core implementation orchestration
 
 Planned child ticket group:
 
+- `260503-feat-agents-plugin-async-agent-calls`
 - `feat-agents-plugin-write-code-port`
 - `feat-agents-plugin-implement-proceed-port`
 - `feat-agents-plugin-sprint-port`
