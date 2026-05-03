@@ -21,7 +21,7 @@ description: Crystallize ticket contracts as public interface stubs and integrat
 1. Read the target ticket and identify the implementation phase that needs a skeleton.
 2. Inspect only the code and docs needed to form contract directives.
 3. Write 2-5 contract directives covering choices the delegate cannot derive from the ticket and codebase.
-4. Call MCP tool `ws/agents.register` with `root`, `name: "skeleton-writer"`, `backend: "codex"`, `tier: "deep"`, `prompt_refs: ["skeleton-writer"]`, and `system_prompt_text` from `Templates / Skeleton Writer System Prompt`.
+4. Call MCP tool `ws/agents.register` with `root`, `name: "skeleton-writer"`, `backend: "codex"`, `tier: "deep"`, and `system_prompt_text` from `Templates / Skeleton Writer System Prompt`.
 5. Call MCP tool `ws/agents.call` with `name: "skeleton-writer"` and a prompt using `Templates / Delegate Prompt`.
 6. Review `git diff HEAD` and `git status --short`; read changed files where contract or build correctness is uncertain.
 7. Run the project build or syntax check required for compilation; do not run tests that are expected to fail against stubs.
