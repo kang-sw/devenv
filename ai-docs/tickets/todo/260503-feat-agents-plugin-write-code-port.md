@@ -178,9 +178,14 @@ Success criteria:
 - Ensure worker process exit without `CompleteCurrentCall` marks the current
   call failed or otherwise non-active.
 - Preserve stdout/stderr capture for backend errors.
+- Append per-agent async worker lifecycle diagnostics to a JSONL log such as
+  `current/runtime.jsonl`.
+- Log enough lifecycle points to localize silent exits: worker entry, prompt
+  read, backend call start, backend session id, backend exit or error, state
+  finalization begin/end, and panic recovery.
 - Make `ws/agents.wait` stop waiting when the recorded worker process is dead.
 - Make `ws/agents.status` and `ws/agents.tail` expose enough failure detail for
-  lead-side diagnosis.
+  lead-side diagnosis, including recent runtime lifecycle log lines.
 - Re-run the controlled async implementer smoke enough to prove that failure
   states close cleanly, even if the delegate task itself fails.
 
