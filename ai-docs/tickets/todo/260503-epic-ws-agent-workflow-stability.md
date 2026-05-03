@@ -158,20 +158,37 @@ agents-plugin`, `git diff --check`, Windows compile-only coverage for
 Codex-backed cancel smoke. This phase improves the concrete `write-code`
 dogfood failures but does not finish Phase 2 summary ergonomics.
 
-### Phase 2: Lead-context compression
+### Phase 2: Raw-output containment
 
-Reduce the amount of lead context required for normal delegated workflows.
-Status, wait, print, and tail should return compact summaries by default and
-make large raw logs an explicit debugging action.
+Reduce the amount of lead context required for delegated workflows by preventing
+debug logs, raw tails, and review bodies from leaking into the lead's active
+conversation during normal operation. This phase is not primarily about
+shortening implementer final reports; a concise implementer report containing
+commit hashes, changed files, verification, and risks is useful workflow state.
+The target is the abnormal and review paths where the lead currently has to
+inspect tail/status output repeatedly or copy long finding bodies between
+agents.
+
+Normal completion should keep useful final summaries visible. Debugging output
+should be opt-in and pointer-based: the lead should see state, next action,
+short reviewer clean/non-clean summaries, and file paths for full details, while
+raw `stdout`, `stderr`, runtime logs, and full finding text remain in files
+unless explicitly requested.
 
 Success criteria:
 
-- `write-code` can inspect implementer and reviewer outcomes through compact
-  final summaries or structured output paths.
-- Tail output supports bounded line counts and does not encourage reading full
-  model transcripts during normal operation.
-- Review relay instructions can point agents at files and summaries instead of
-  requiring the lead to paste long review bodies through chat.
+- `write-code` can inspect normal implementer completion through a concise
+  report without losing commit hashes, changed files, verification results, or
+  unresolved risks.
+- Reviewer outcomes reach the lead as `[clean]` or `[non-clean]` summaries plus
+  finding file paths; full findings stay in files and are relayed to the
+  implementer by path.
+- `agents.status`, `agents.wait`, and `agents.print` make the normal next action
+  clear before the lead needs `agents.tail`.
+- `agents.tail` and raw `stdout`/`stderr`/runtime-log inspection are treated as
+  debugging actions with bounded output by default.
+- Failure, timeout, and cancellation paths provide enough state and pointers for
+  recovery without requiring immediate raw transcript inspection.
 
 ### Phase 3: Workflow regression dogfood
 
