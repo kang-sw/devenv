@@ -349,3 +349,20 @@ tool-surface smoke, leaf-profile smoke, installed Codex cache launcher smoke,
 Codex plugin cache binary, launcher, and runtime metadata were refreshed
 manually for this development machine; a fresh Codex session is still needed to
 load the new tool surface.
+
+Follow-up cancellation smoke after refreshing Codex confirmed the operational
+contract. Interrupting a long `agents.wait(timeout_seconds: 300)` no longer
+blocks the MCP server: `agents.status` returned immediately after the user
+interrupt. The underlying async worker continued running until the lead called
+`agents.cancel`, which successfully cleaned the process tree and reported
+`cleanup_needed: false`. This means user interrupt should be treated as
+cancelling or abandoning the wait RPC only, not as cancelling the agent task.
+
+The first logging approach depended on `WS_MCP_DEBUG_LOG`, but plugin-managed
+MCP processes did not reliably inherit the user's shell environment. A later
+slice added the process-local `runtime.debug_events` MCP tool backed by a
+256-entry ring buffer. Re-running the interruption smoke with that retrieval API
+showed no `notification.cancelled` event after the Codex UI interrupt; only
+ordinary `request.received` events appeared. Therefore, for the current Codex
+behavior, ws must not rely on MCP `notifications/cancelled` for user-triggered
+wait cancellation. Explicit task cancellation remains `agents.cancel`.

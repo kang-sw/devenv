@@ -325,5 +325,8 @@ lifecycle hardening, `agents.debug.*` diagnostics, concurrent MCP stdio
 handling, `agents.call` as the async start primitive, removal of
 `agents.call_async`/generic `agents.oneshot`, short-poll default wait behavior,
 and MCP tool profiles `lead`, `delegate`, and `leaf`. The next critical slice is
-a small regression dogfood of `write-code` or a simpler named-agent workflow
-after refreshing the active Codex session.
+a small regression dogfood of `write-code` or a simpler named-agent workflow.
+Post-refresh cancellation smoke showed Codex UI interrupt does not currently
+arrive as MCP `notifications/cancelled`; it only aborts the wait call from the
+lead's perspective, so agent task cancellation must remain explicit through
+`agents.cancel`.
