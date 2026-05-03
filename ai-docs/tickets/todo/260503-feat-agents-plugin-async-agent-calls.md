@@ -245,7 +245,7 @@ Success criteria:
 - Process restart recovery is documented: which operations remain available and
   which require the process handle to still exist.
 
-### Result (pending) - 2026-05-03
+### Result (946263b) - 2026-05-03
 
 Implemented the operational async inspection surface. The runtime now exposes
 `ws/agents.wait`, `ws/agents.status`, `ws/agents.tail`, and `ws/agents.cancel`,
