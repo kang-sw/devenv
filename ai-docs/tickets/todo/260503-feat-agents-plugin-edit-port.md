@@ -40,15 +40,20 @@ boundaries.
   temp-file string construction. `edit` needs `kind: "review"` first, but future
   workflow slices may need the same primitive for handoff notes, scratch
   artifacts, or other retained text files.
+- Resolve prompt chains in the runtime instead of embedding reviewer prompt text
+  in the `edit` skill. Prompt presets should be embedded into the single
+  `ws-mcp` binary and checked against `runtime.json` metadata for plugin/runtime
+  drift.
 
 ## Constraints
 
 - Do not mutate `claude-plugin/skills/edit` during this port.
 - Shared skill text must use `ws/<tool>` notation and avoid host-specific
   `ws-*` helper commands as the main contract.
-- The first port may embed reviewer instructions through `system_prompt_text`;
-  prompt-bundle resolution can remain a follow-up unless the implementation
-  needs it to keep the skill executable.
+- The first port must support runtime-resolved prompt chains before `edit`
+  depends on reviewer presets.
+- Prompt drift detection should compare prompt bundle content hashes, with source
+  commit hashes preserved for provenance and context recovery.
 - Review relay remains bounded at two cycles.
 - `ws:update-spec` invocation remains a skill-level handoff in Codex unless a
   future runtime primitive replaces it.
@@ -109,20 +114,38 @@ multi-path stable ordering, uniqueness, and worktree scoping. Validation covered
 Go tests, MCP smoke, plugin validation, runtime JSON parsing, shell syntax, and
 whitespace checks.
 
-### Phase 2: Reviewer prompt materialization
+### Phase 2: Embedded prompt bundle resolver
 
-Decide how `edit` should provide reviewer instructions in the first host-neutral
-port. Prefer a self-contained `system_prompt_text` assembled in the skill if
-prompt-bundle resolution is still too broad for this slice.
+Implement prompt-chain resolution in `ws-mcp` before porting `edit`. The runtime
+should embed prompt presets into the Go binary and materialize the same chained
+system prompt shape that Claude `ws-named-agent new ... -p ...` used.
 
 Success criteria:
 
-- The reviewer system prompt covers read-only behavior, correctness checks, fit
-  checks, severity, scoped findings, and the expected summary line.
-- The prompt tells the reviewer to write full findings to the allocated review
-  path and return only `[clean|non-clean]: <summary>`.
-- The approach is documented as either embedded prompt text or prompt-reference
-  resolution, with follow-up gaps preserved.
+- Add a prompt package with embedded preset files copied from the current Claude
+  prompt prior art needed by `edit`: `code-reviewer`,
+  `code-review-correctness`, and `code-review-fit`.
+- Expose `prompts` on `ws/agents.register` and `ws/agents.oneshot`; keep
+  `prompt_refs` as a compatibility alias during migration.
+- Resolve bare prompt stems from embedded presets, and resolve absolute paths by
+  reading those files directly. Reject ambiguous relative paths unless a later
+  ticket defines root-relative behavior.
+- Strip YAML frontmatter from resolved prompt files and concatenate prompt
+  bodies in input order with the existing `---` separator convention.
+- Preserve frontmatter-derived tier/model behavior where it applies to known
+  workload tiers, while keeping explicit `tier` or `model` arguments higher
+  priority.
+- Write the materialized prompt to the agent `system.md` so calls continue to
+  use backend-specific system prompt injection.
+- Add runtime metadata for prompt compatibility: prompt bundle source commit,
+  prompt bundle content SHA-256, and embedded prompt stem list.
+- Expose a runtime info surface through MCP or CLI so the launcher and smoke
+  tests can compare the installed binary against `agents-plugin/runtime.json`.
+- Extend launcher compatibility checks to detect prompt bundle drift in addition
+  to tool and command drift.
+- Tests cover prompt stem resolution, absolute path resolution, path traversal or
+  relative path rejection, frontmatter stripping, prompt ordering, tier/model
+  precedence, prompt metadata, and drift detection.
 
 ### Phase 3: Port `edit` skill draft
 
