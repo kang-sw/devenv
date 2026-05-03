@@ -6,6 +6,8 @@ related:
   260503-feat-agents-plugin-write-code-port: first production workflow that dogfoods named agents
   260503-feat-ws-mcp-git-read-primitives: dogfood run that exposed lifecycle failures under write-code
   260503-epic-agents-plugin-skill-porting: skill roadmap that depends on stable orchestration
+plans:
+  phase-1: 2026-05/03-260503-epic-ws-agent-workflow-stability-phase-1
 ---
 
 # ws agent workflow stability
@@ -121,6 +123,40 @@ Success criteria:
   like an ambiguous failure.
 - Runtime diagnostics are appended under the existing ws project state root.
 - Local Go tests and a real Codex-backed smoke cover the fixed behavior.
+
+### Result (2c6f90f) - 2026-05-03
+
+Implemented the first lifecycle hardening slice in `agents-plugin-tool`'s
+`wsagent` runtime. `agents.status` now preserves the existing text shape while
+adding lifecycle fields that a lead can act on without reading raw tails:
+`active`, `cleanup_needed`, `cancel_pid`, stream paths, `runtime_log_path`,
+completed `output_path`, and a status-specific `follow_up` hint. `agents.wait`
+now records `wait.timeout` in the runtime log and returns `wait_timeout: true`
+plus safe follow-up commands instead of a bare timeout prefix, so host-side wait
+timeouts no longer look like backend failures.
+
+Cancellation now targets the runtime-owned process tree. Async workers already
+start in their own process group, but the Codex runner previously created a
+second process group inside async workers; that allowed Codex/tool children to
+survive when only the worker group was killed. Async Codex calls now inherit the
+worker process group, while synchronous calls keep their isolated group for
+timeout cancellation. Unix cancellation also walks the current descendant
+process tree with `ps` and kills discovered process groups and PIDs, covering
+tool children that create their own process groups. Windows keeps a conservative
+PID-kill fallback pending native Windows runtime smoke.
+
+The real cancel smoke reproduced the important failure before the descendant
+tree fix: cancelling an async Codex worker that launched `sleep 60` left the
+sleep process orphaned. After the fix, the same smoke left no matching child
+process. A second adjustment added a short post-cancel liveness retry to avoid
+over-reporting `cleanup_needed` while the killed worker is still being reaped.
+
+Verification covered `go test ./internal/wsagent`, `go test ./...` from
+`agents-plugin-tool`, runtime JSON parsing, `claude plugin validate
+agents-plugin`, `git diff --check`, Windows compile-only coverage for
+`cmd/ws-mcp`, a real Codex-backed async completion smoke, and a real
+Codex-backed cancel smoke. This phase improves the concrete `write-code`
+dogfood failures but does not finish Phase 2 summary ergonomics.
 
 ### Phase 2: Lead-context compression
 
