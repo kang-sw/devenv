@@ -219,7 +219,7 @@ Success criteria:
 - Failure diagnostics go to stderr and do not corrupt any future MCP stdout
   contract.
 
-### Result (pending) - 2026-05-03
+### Result (ea9042a) - 2026-05-03
 
 Added `agents-plugin-tool/internal/wsagent` and a `ws-mcp agents ...` CLI
 prototype for the minimum durable session subset. The implementation creates
