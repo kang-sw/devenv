@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
@@ -189,6 +190,47 @@ func (s *Server) callTool(req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\n", result.AgentName, result.Status, result.PID), nil)
+	case "agents.wait":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
+			Root:    root,
+			Name:    name,
+			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
+		})
+		return toolTextResponse(req.ID, text, err)
+	case "agents.status":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
+		return toolTextResponse(req.ID, text, err)
+	case "agents.tail":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		lines := intFromArgument(params.Arguments["lines"], 40)
+		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
+			Root:  root,
+			Name:  name,
+			Lines: lines,
+		})
+		return toolTextResponse(req.ID, text, err)
+	case "agents.cancel":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
+		return toolTextResponse(req.ID, text, err)
 	case "agents.oneshot":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -385,6 +427,56 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "agents.wait",
+			"description": "Wait for the current async call for a registered ws agent.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":            stringProperty("Repository root. Defaults to the server root."),
+					"name":            stringProperty("Agent name."),
+					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to no timeout."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "agents.status",
+			"description": "Return current status for a registered ws agent.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Repository root. Defaults to the server root."),
+					"name": stringProperty("Agent name."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "agents.tail",
+			"description": "Return recent event, stream, and output lines for a registered ws agent.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":  stringProperty("Repository root. Defaults to the server root."),
+					"name":  stringProperty("Agent name."),
+					"lines": integerProperty("Number of lines per section. Defaults to 40."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "agents.cancel",
+			"description": "Best-effort cancel the current async call for a registered ws agent.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Repository root. Defaults to the server root."),
+					"name": stringProperty("Agent name."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
 			"name":        "agents.oneshot",
 			"description": "Register, call, and erase a temporary ws agent.",
 			"inputSchema": map[string]any{
@@ -458,5 +550,65 @@ func stringArrayProperty(description string) map[string]any {
 		"items": map[string]string{
 			"type": "string",
 		},
+	}
+}
+
+func numberProperty(description string) map[string]string {
+	return map[string]string{
+		"type":        "number",
+		"description": description,
+	}
+}
+
+func integerProperty(description string) map[string]string {
+	return map[string]string{
+		"type":        "integer",
+		"description": description,
+	}
+}
+
+func durationFromSeconds(value any) time.Duration {
+	switch v := value.(type) {
+	case float64:
+		if v <= 0 {
+			return 0
+		}
+		return time.Duration(v * float64(time.Second))
+	case string:
+		if v == "" {
+			return 0
+		}
+		duration, err := time.ParseDuration(v)
+		if err == nil {
+			return duration
+		}
+		seconds, err := strconv.ParseFloat(v, 64)
+		if err != nil || seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds * float64(time.Second))
+	default:
+		return 0
+	}
+}
+
+func intFromArgument(value any, fallback int) int {
+	switch v := value.(type) {
+	case float64:
+		if v <= 0 {
+			return fallback
+		}
+		return int(v)
+	case string:
+		if v == "" {
+			return fallback
+		}
+		parsed, err := strconv.Atoi(v)
+		if err != nil || parsed <= 0 {
+			return fallback
+		}
+		return parsed
+	default:
+		return fallback
 	}
 }

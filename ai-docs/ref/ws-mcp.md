@@ -412,6 +412,67 @@ Behavior:
   `current/state.json`.
 - A second active call for the same named agent is rejected as busy.
 
+### `ws/agents.wait`
+
+Wait for the current async call for a registered ws agent.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    },
+    "name": {
+      "type": "string",
+      "description": "Agent name."
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "description": "Maximum seconds to wait. Defaults to no timeout."
+    }
+  },
+  "required": ["name"]
+}
+```
+
+Output:
+
+- Completed calls return the final plain-text `output.md`.
+- Timed-out calls return `timeout` followed by `ws/agents.status` text.
+- Failed or cancelled calls return status text.
+
+### `ws/agents.status`
+
+Return current agent and current-call state without invoking a backend.
+
+Output includes stable line keys such as `agent`, `agent_status`, `backend`,
+`session_id`, `call_status`, `pid`, `started_at`, `updated_at`, `finished_at`,
+`exit_code`, and `error` when those fields exist.
+
+### `ws/agents.tail`
+
+Return recent diagnostic lines without invoking a backend.
+
+Input adds optional `lines` per section, defaulting to `40`. Output contains
+sections for `events`, `stdout`, `stderr`, and `output`.
+
+### `ws/agents.cancel`
+
+Best-effort cancel the current async call for a registered ws agent.
+
+Behavior:
+
+- If `current/state.json` is `queued` or `running`, the runtime attempts to kill
+  the stored local worker pid when one exists.
+- The agent is marked idle and the current call is marked `cancelled`.
+- The tool returns `ws/agents.status` text after the cancellation attempt.
+- After an MCP server restart, cancellation is only as strong as the retained
+  local pid. Backend-specific process-group cleanup is not implemented yet.
+
 ## Deferred Write-Capable Operations
 
 The following behavior is intentionally out of scope for the first MCP contract:
@@ -420,8 +481,8 @@ The following behavior is intentionally out of scope for the first MCP contract:
 - mutating spec indexes beyond verification
 - writing mental-model updates
 - branch management, merge helpers, release helpers, and ship automation
-- advanced agent operations beyond the current register/call/call_async/oneshot/
-  print/erase prototype, including wait, status, tail, cancel, list, interrupts,
+- advanced agent operations beyond the current register/call/call_async/wait/
+  status/tail/cancel/oneshot/print/erase prototype, including list, interrupts,
   runtime locks, review-path allocation, and message queues
 
 These operations have workflow semantics beyond file access. They should be

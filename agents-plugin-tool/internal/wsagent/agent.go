@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,6 +74,19 @@ type CallAsyncResult struct {
 	PromptPath string
 	StdoutPath string
 	StderrPath string
+}
+
+type WaitOptions struct {
+	Root    string
+	Name    string
+	Timeout time.Duration
+	Poll    time.Duration
+}
+
+type TailOptions struct {
+	Root  string
+	Name  string
+	Lines int
 }
 
 type AsyncWorkerRequest struct {
@@ -555,6 +569,205 @@ func (m Manager) Print(root, name string) (string, error) {
 	return string(raw), nil
 }
 
+func (m Manager) Wait(opts WaitOptions) (string, error) {
+	if strings.TrimSpace(opts.Root) == "" {
+		opts.Root = "."
+	}
+	if opts.Poll <= 0 {
+		opts.Poll = 200 * time.Millisecond
+	}
+	layout, err := m.layout(opts.Root, opts.Name, false)
+	if err != nil {
+		return "", err
+	}
+	deadline := time.Time{}
+	if opts.Timeout > 0 {
+		deadline = time.Now().Add(opts.Timeout)
+	}
+	for {
+		call, err := readCurrentCall(layout.CurrentStateFile)
+		if err != nil {
+			return "", err
+		}
+		switch call.Status {
+		case CallStatusCompleted:
+			text, err := m.Print(opts.Root, opts.Name)
+			if err != nil {
+				return "", err
+			}
+			return text, nil
+		case CallStatusFailed, CallStatusCancelled:
+			return m.Status(opts.Root, opts.Name)
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			status, err := m.Status(opts.Root, opts.Name)
+			if err != nil {
+				return "", err
+			}
+			return "timeout\n" + status, nil
+		}
+		time.Sleep(opts.Poll)
+	}
+}
+
+func (m Manager) Status(root, name string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	layout, err := m.layout(root, name, false)
+	if err != nil {
+		return "", err
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "agent: %s\n", agent.Name)
+	fmt.Fprintf(&b, "agent_status: %s\n", agent.Status)
+	fmt.Fprintf(&b, "backend: %s\n", agent.Backend)
+	fmt.Fprintf(&b, "tier: %s\n", agent.Tier)
+	if agent.Model != "" {
+		fmt.Fprintf(&b, "model: %s\n", agent.Model)
+	}
+	if agent.SessionID != "" {
+		fmt.Fprintf(&b, "session_id: %s\n", agent.SessionID)
+	}
+	if agent.LastCallAt != "" {
+		fmt.Fprintf(&b, "last_call_at: %s\n", agent.LastCallAt)
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if errors.Is(err, os.ErrNotExist) {
+		b.WriteString("call_status: none\n")
+		return b.String(), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&b, "call_status: %s\n", call.Status)
+	if call.ExecutionID != "" {
+		fmt.Fprintf(&b, "execution_id: %s\n", call.ExecutionID)
+	}
+	if call.PID != 0 {
+		fmt.Fprintf(&b, "pid: %d\n", call.PID)
+	}
+	if call.SessionID != "" && call.SessionID != agent.SessionID {
+		fmt.Fprintf(&b, "call_session_id: %s\n", call.SessionID)
+	}
+	if call.StartedAt != "" {
+		fmt.Fprintf(&b, "started_at: %s\n", call.StartedAt)
+	}
+	if call.UpdatedAt != "" {
+		fmt.Fprintf(&b, "updated_at: %s\n", call.UpdatedAt)
+	}
+	if call.FinishedAt != "" {
+		fmt.Fprintf(&b, "finished_at: %s\n", call.FinishedAt)
+	}
+	if call.ExitCode != nil {
+		fmt.Fprintf(&b, "exit_code: %d\n", *call.ExitCode)
+	}
+	if call.Error != "" {
+		fmt.Fprintf(&b, "error: %s\n", call.Error)
+	}
+	return b.String(), nil
+}
+
+func (m Manager) Tail(opts TailOptions) (string, error) {
+	if strings.TrimSpace(opts.Root) == "" {
+		opts.Root = "."
+	}
+	if opts.Lines <= 0 {
+		opts.Lines = 40
+	}
+	layout, err := m.layout(opts.Root, opts.Name, false)
+	if err != nil {
+		return "", err
+	}
+	if _, err := readAgent(layout.AgentFile); err != nil {
+		return "", err
+	}
+	sections := []struct {
+		name string
+		path string
+	}{
+		{name: "events", path: layout.EventsFile},
+		{name: "stdout", path: layout.CurrentStdout},
+		{name: "stderr", path: layout.CurrentStderr},
+		{name: "output", path: layout.OutputFile},
+	}
+	var b strings.Builder
+	for _, section := range sections {
+		fmt.Fprintf(&b, "== %s ==\n", section.name)
+		lines, err := tailLines(section.path, opts.Lines)
+		if errors.Is(err, os.ErrNotExist) {
+			b.WriteString("(missing)\n")
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if len(lines) == 0 {
+			b.WriteString("(empty)\n")
+			continue
+		}
+		b.WriteString(strings.Join(lines, "\n"))
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
+}
+
+func (m Manager) Cancel(root, name string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	layout, err := m.layout(root, name, false)
+	if err != nil {
+		return "", err
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		return "", err
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		return "", err
+	}
+	if !isActiveCallStatus(call.Status) {
+		return m.Status(root, name)
+	}
+	var cancelErr error
+	if call.PID != 0 {
+		process, err := os.FindProcess(call.PID)
+		if err != nil {
+			cancelErr = err
+		} else if err := process.Kill(); err != nil {
+			cancelErr = err
+		}
+	}
+	now := m.now().UTC().Format(time.RFC3339)
+	agent.Status = StatusIdle
+	agent.LastSeenAt = now
+	if err := writeAgent(layout.AgentFile, agent); err != nil {
+		return "", err
+	}
+	errText := ""
+	if cancelErr != nil {
+		errText = cancelErr.Error()
+	}
+	cancelledPID := call.PID
+	call, err = m.CancelCurrentCall(layout, errText)
+	if err != nil {
+		return "", err
+	}
+	if err := appendEvent(layout.EventsFile, m.now(), "call_async.cancelled", map[string]any{
+		"pid":   cancelledPID,
+		"error": errText,
+	}); err != nil {
+		return "", err
+	}
+	return m.Status(root, name)
+}
+
 func (m Manager) BeginCurrentCall(layout Layout, agent Agent) (CurrentCall, error) {
 	existing, err := readCurrentCall(layout.CurrentStateFile)
 	if err == nil && isActiveCallStatus(existing.Status) {
@@ -641,6 +854,23 @@ func (m Manager) FailCurrentCall(layout Layout, errText string, exitCode *int) (
 	call.FinishedAt = now
 	call.PID = 0
 	call.ExitCode = exitCode
+	call.Error = errText
+	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
+		return CurrentCall{}, err
+	}
+	return call, nil
+}
+
+func (m Manager) CancelCurrentCall(layout Layout, errText string) (CurrentCall, error) {
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		return CurrentCall{}, err
+	}
+	now := m.now().UTC().Format(time.RFC3339)
+	call.Status = CallStatusCancelled
+	call.UpdatedAt = now
+	call.FinishedAt = now
+	call.PID = 0
 	call.Error = errText
 	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
 		return CurrentCall{}, err
@@ -743,7 +973,7 @@ func writeAgent(path string, agent Agent) error {
 	if err != nil {
 		return fmt.Errorf("marshal agent: %w", err)
 	}
-	tmp := path + ".tmp"
+	tmp := uniqueTempPath(path)
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write agent: %w", err)
 	}
@@ -776,7 +1006,7 @@ func writeCurrentCall(path string, call CurrentCall) error {
 	if err != nil {
 		return fmt.Errorf("marshal current call: %w", err)
 	}
-	tmp := path + ".tmp"
+	tmp := uniqueTempPath(path)
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write current call: %w", err)
 	}
@@ -814,6 +1044,33 @@ func appendEvent(path string, now time.Time, event string, fields map[string]any
 		return fmt.Errorf("append event: %w", err)
 	}
 	return nil
+}
+
+func tailLines(path string, count int) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+		if len(lines) > count {
+			copy(lines, lines[1:])
+			lines = lines[:count]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return lines, nil
+}
+
+func uniqueTempPath(path string) string {
+	return fmt.Sprintf("%s.%d.%d.tmp", path, os.Getpid(), time.Now().UnixNano())
 }
 
 func absOptional(base, rel string) string {

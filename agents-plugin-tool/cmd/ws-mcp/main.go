@@ -86,6 +86,14 @@ func agents(args []string) {
 		agentsCallAsync(args[1:])
 	case "run-current":
 		agentsRunCurrent(args[1:])
+	case "wait":
+		agentsWait(args[1:])
+	case "status":
+		agentsStatus(args[1:])
+	case "tail":
+		agentsTail(args[1:])
+	case "cancel":
+		agentsCancel(args[1:])
 	case "oneshot":
 		agentsOneShot(args[1:])
 	case "print":
@@ -99,7 +107,7 @@ func agents(args []string) {
 }
 
 func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|call-async|run-current|oneshot|print|erase>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|call-async|run-current|wait|status|tail|cancel|oneshot|print|erase>")
 }
 
 type multiFlag []string
@@ -197,6 +205,68 @@ func agentsRunCurrent(args []string) {
 	if err := wsagent.NewManager(wsagent.Options{}).RunCurrent(defaultRoot(*root), *name); err != nil {
 		fatal("agents run-current", err)
 	}
+}
+
+func agentsWait(args []string) {
+	fs := flag.NewFlagSet("agents wait", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	timeout := fs.Duration("timeout", 0, "maximum wait duration, for example 30s or 2m")
+	_ = fs.Parse(args)
+
+	text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
+		Root:    defaultRoot(*root),
+		Name:    *name,
+		Timeout: *timeout,
+	})
+	if err != nil {
+		fatal("agents wait", err)
+	}
+	fmt.Print(text)
+}
+
+func agentsStatus(args []string) {
+	fs := flag.NewFlagSet("agents status", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	_ = fs.Parse(args)
+
+	text, err := wsagent.NewManager(wsagent.Options{}).Status(defaultRoot(*root), *name)
+	if err != nil {
+		fatal("agents status", err)
+	}
+	fmt.Print(text)
+}
+
+func agentsTail(args []string) {
+	fs := flag.NewFlagSet("agents tail", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	lines := fs.Int("lines", 40, "number of lines per section")
+	_ = fs.Parse(args)
+
+	text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
+		Root:  defaultRoot(*root),
+		Name:  *name,
+		Lines: *lines,
+	})
+	if err != nil {
+		fatal("agents tail", err)
+	}
+	fmt.Print(text)
+}
+
+func agentsCancel(args []string) {
+	fs := flag.NewFlagSet("agents cancel", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	_ = fs.Parse(args)
+
+	text, err := wsagent.NewManager(wsagent.Options{}).Cancel(defaultRoot(*root), *name)
+	if err != nil {
+		fatal("agents cancel", err)
+	}
+	fmt.Print(text)
 }
 
 func agentsOneShot(args []string) {

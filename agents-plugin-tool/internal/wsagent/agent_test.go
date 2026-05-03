@@ -277,6 +277,70 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 	if len(runner.calls) != 1 || runner.calls[0].Prompt != "async prompt" {
 		t.Fatalf("runner prompt mismatch: %+v", runner.calls)
 	}
+
+	waited, err := manager.Wait(WaitOptions{Root: repo, Name: "impl", Timeout: time.Second})
+	if err != nil {
+		t.Fatalf("Wait returned error: %v", err)
+	}
+	if waited != "async reply\n" {
+		t.Fatalf("waited = %q", waited)
+	}
+	status, err := manager.Status(repo, "impl")
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if !strings.Contains(status, "call_status: completed") || !strings.Contains(status, "session_id: thread-async") {
+		t.Fatalf("status mismatch:\n%s", status)
+	}
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 5})
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	if !strings.Contains(tail, "== events ==") || !strings.Contains(tail, "jsonl") || !strings.Contains(tail, "async reply") {
+		t.Fatalf("tail mismatch:\n%s", tail)
+	}
+}
+
+func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	agent, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.BeginCurrentCall(layout, agent); err != nil {
+		t.Fatal(err)
+	}
+	timeoutText, err := manager.Wait(WaitOptions{
+		Root:    repo,
+		Name:    "impl",
+		Timeout: time.Millisecond,
+		Poll:    time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Wait timeout returned error: %v", err)
+	}
+	if !strings.Contains(timeoutText, "timeout") || !strings.Contains(timeoutText, "call_status: queued") {
+		t.Fatalf("timeout text mismatch:\n%s", timeoutText)
+	}
+	cancelled, err := manager.Cancel(repo, "impl")
+	if err != nil {
+		t.Fatalf("Cancel returned error: %v", err)
+	}
+	if !strings.Contains(cancelled, "call_status: cancelled") {
+		t.Fatalf("cancel status mismatch:\n%s", cancelled)
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call.Status != CallStatusCancelled || call.FinishedAt == "" {
+		t.Fatalf("cancelled call mismatch: %+v", call)
+	}
 }
 
 type streamingFakeRunner struct {

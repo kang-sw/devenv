@@ -42,9 +42,11 @@ Examples:
 Use MCP tools only when they are available in the current `ws` runtime. The
 minimum agent session tools `ws/agents.register`, `ws/agents.call`,
 `ws/agents.call_async`, `ws/agents.oneshot`, `ws/agents.print`, and
-`ws/agents.erase` are available. Treat wait, status, cancel, interrupts,
-active-agent listing, tailing, review-path allocation, message queues, and
-runtime locks as planned surfaces until the runtime implements them.
+`ws/agents.erase` are available. The async inspection tools `ws/agents.wait`,
+`ws/agents.status`, `ws/agents.tail`, and `ws/agents.cancel` are available for
+the current named agent call. Treat interrupts, active-agent listing,
+review-path allocation, message queues, and runtime locks as planned surfaces
+until the runtime implements them.
 When a skill needs a planned surface, state the required server/tool contract
 instead of naming a host-specific helper command as the shared primitive.
 

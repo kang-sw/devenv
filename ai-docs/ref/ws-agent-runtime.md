@@ -223,12 +223,13 @@ MCP tools use server `ws` and the following tool names:
 - `agents.register` — create or replace one named agent registry entry. Implemented.
 - `agents.call` — call a registered agent and resume existing session state when possible. Implemented.
 - `agents.call_async` — start a current call for a registered agent and return immediately. Implemented.
-- `agents.wait` — wait for the current async call to finish. Planned.
-- `agents.status` — report the current async call and agent registry state. Planned.
+- `agents.wait` — wait for the current async call to finish, with timeout support. Implemented.
+- `agents.status` — report the current async call and agent registry state. Implemented.
 - `agents.oneshot` — register, call, and erase an ephemeral agent. Implemented.
 - `agents.interrupt` — enqueue a lead-to-agent message. Planned.
 - `agents.print` — return `output.md` for a named agent. Implemented.
-- `agents.tail` — summarize recent session/event state without invoking the backend. Planned.
+- `agents.tail` — summarize recent session/event state without invoking the backend. Implemented.
+- `agents.cancel` — best-effort terminate the active worker pid and mark the current call cancelled. Implemented.
 - `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
 
@@ -250,6 +251,10 @@ ws-mcp agents call --root <repo> --name <name> --prompt-file -
 ws-mcp agents call-async --root <repo> --name <name> <prompt>
 ws-mcp agents call-async --root <repo> --name <name> --prompt-file -
 ws-mcp agents run-current --root <repo> --name <name>
+ws-mcp agents wait --root <repo> --name <name> [--timeout 30s]
+ws-mcp agents status --root <repo> --name <name>
+ws-mcp agents tail --root <repo> --name <name> [--lines 40]
+ws-mcp agents cancel --root <repo> --name <name>
 ws-mcp agents oneshot --root <repo> [--name <temporary-name>] <prompt>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
@@ -258,6 +263,7 @@ ws-mcp agents erase --root <repo> --name <name>
 The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 `events.jsonl` layout described above. Shared skill text should prefer the MCP
 tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.call_async`,
+`ws/agents.wait`, `ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`,
 `ws/agents.oneshot`, `ws/agents.print`, and `ws/agents.erase`.
 
 `agents.call_async` writes the prompt snapshot to `current/prompt.md`, starts an
@@ -267,6 +273,19 @@ the actual backend call, captures backend stdout and stderr to `current/stdout`
 and `current/stderr`, persists streamed Codex `session_id` updates, writes the
 final `output.md`, and transitions the current call to `completed` or `failed`.
 Only one active call is allowed per named agent.
+
+`agents.wait` polls `current/state.json` and returns `output.md` when the call is
+completed. If a timeout expires, it returns `timeout` plus the same structured
+status text produced by `agents.status`. Failed and cancelled calls also return
+status text so workflow skills can branch without opening state files directly.
+
+`agents.tail` reads recent lines from `events.jsonl`, `current/stdout`,
+`current/stderr`, and `output.md` without invoking a backend. `agents.cancel`
+uses the stored worker pid for a best-effort local process kill and marks the
+current call `cancelled`. After process restart, `wait`, `status`, `tail`, and
+`print` still work from disk state; `cancel` can only terminate a process when
+the stored pid still refers to a live local worker, and it does not yet provide
+backend-specific process-group cleanup.
 
 ## Prompt Resolution
 

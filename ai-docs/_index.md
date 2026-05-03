@@ -121,16 +121,19 @@ text is bundled into the runtime and read through `ws/convention.read`.
 
 Agent runtime prototype: `ai-docs/ref/ws-agent-runtime.md`. `ws-mcp` exposes
 minimum MCP tools `ws/agents.register`, `ws/agents.call`,
-`ws/agents.call_async`, `ws/agents.oneshot`, `ws/agents.print`, and
-`ws/agents.erase`, plus matching CLI fallback subcommands under `ws-mcp agents`.
-Both surfaces are backed by `internal/wsagent`. The Codex backend stores thread
-ids in `agent.json`, resumes with `codex exec resume --json <thread-id>`, and
-persists plain-text output in `output.md`. `ws/agents.call_async` writes a
-current prompt snapshot, starts a cache-local `agents run-current` worker, and
-captures backend streams under `current/` while the lead regains control. Shared
-skill text should use `ws/agents.*` notation rather than the CLI command names.
-`runtime.json` records both MCP tool and CLI command surfaces so the plugin
-launcher can repair stale local cache binaries.
+`ws/agents.call_async`, `ws/agents.wait`, `ws/agents.status`,
+`ws/agents.tail`, `ws/agents.cancel`, `ws/agents.oneshot`, `ws/agents.print`,
+and `ws/agents.erase`, plus matching CLI fallback subcommands under
+`ws-mcp agents`. Both surfaces are backed by `internal/wsagent`. The Codex
+backend stores thread ids in `agent.json`, resumes with
+`codex exec resume --json <thread-id>`, and persists plain-text output in
+`output.md`. `ws/agents.call_async` writes a current prompt snapshot, starts a
+cache-local `agents run-current` worker, and captures backend streams under
+`current/` while the lead regains control. The wait/status/tail/cancel tools
+inspect or mark that current-call state without invoking another backend turn.
+Shared skill text should use `ws/agents.*` notation rather than the CLI command
+names. `runtime.json` records both MCP tool and CLI command surfaces so the
+plugin launcher can repair stale local cache binaries.
 
 Codex launcher POC status: `agents-plugin` now contains plugin-local `.mcp.json`,
 `runtime.json`, and `bin/ws-mcp-launcher`. Host-free launcher smoke, temporary

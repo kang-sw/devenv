@@ -15,6 +15,10 @@
     "agents.register": ">=0.1.0-dev <0.2.0",
     "agents.call": ">=0.1.0-dev <0.2.0",
     "agents.call_async": ">=0.1.0-dev <0.2.0",
+    "agents.wait": ">=0.1.0-dev <0.2.0",
+    "agents.status": ">=0.1.0-dev <0.2.0",
+    "agents.tail": ">=0.1.0-dev <0.2.0",
+    "agents.cancel": ">=0.1.0-dev <0.2.0",
     "agents.oneshot": ">=0.1.0-dev <0.2.0",
     "agents.print": ">=0.1.0-dev <0.2.0",
     "agents.erase": ">=0.1.0-dev <0.2.0"
@@ -24,6 +28,10 @@
     "agents.call": ">=0.1.0-dev <0.2.0",
     "agents.call-async": ">=0.1.0-dev <0.2.0",
     "agents.run-current": ">=0.1.0-dev <0.2.0",
+    "agents.wait": ">=0.1.0-dev <0.2.0",
+    "agents.status": ">=0.1.0-dev <0.2.0",
+    "agents.tail": ">=0.1.0-dev <0.2.0",
+    "agents.cancel": ">=0.1.0-dev <0.2.0",
     "agents.oneshot": ">=0.1.0-dev <0.2.0",
     "agents.print": ">=0.1.0-dev <0.2.0",
     "agents.erase": ">=0.1.0-dev <0.2.0"

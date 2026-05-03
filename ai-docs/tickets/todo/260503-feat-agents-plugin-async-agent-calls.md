@@ -245,6 +245,27 @@ Success criteria:
 - Process restart recovery is documented: which operations remain available and
   which require the process handle to still exist.
 
+### Result (pending) - 2026-05-03
+
+Implemented the operational async inspection surface. The runtime now exposes
+`ws/agents.wait`, `ws/agents.status`, `ws/agents.tail`, and `ws/agents.cancel`,
+with matching CLI fallback commands under `ws-mcp agents`.
+
+`wait` polls the named agent's `current/state.json`, returns final `output.md`
+for completed calls, and supports bounded waits through `timeout_seconds` in MCP
+or `--timeout` in the CLI. Timeout, failed, and cancelled cases return
+structured status text rather than requiring callers to inspect state files.
+`status` reports stable line-oriented fields for the agent registry and current
+call. `tail` reads recent lines from `events.jsonl`, `current/stdout`,
+`current/stderr`, and `output.md` without invoking a backend. `cancel` attempts
+to kill the stored worker pid, marks the current call `cancelled`, returns
+status text, and records the cancellation event.
+
+The process restart boundary is intentionally documented as best effort:
+`wait`, `status`, `tail`, and `print` recover from disk state after MCP restart,
+but `cancel` can only terminate a process when the stored pid still refers to a
+live local worker. Backend-specific process-group cleanup remains future work.
+
 ### Phase 4: Skill integration readiness
 
 Update workflow/runtime documentation and prepare the core implementation track to
