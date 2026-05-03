@@ -28,6 +28,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"infra.read","arguments":{"name":"example"}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"path.generate","arguments":{"kind":"review","stems":["direct"]}}}`,
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.status","arguments":{}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -37,8 +38,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("expected 6 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 7 {
+		t.Fatalf("expected 7 responses, got %d\n%s", len(lines), out.String())
 	}
 
 	var listResp map[string]any
@@ -63,7 +64,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(lines[1], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", lines[1])
 	}
-	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.cancel"} {
+	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base"} {
 		if !strings.Contains(lines[1], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, lines[1])
 		}
@@ -79,6 +80,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if !strings.Contains(lines[5], "prompt_bundle") || !strings.Contains(lines[5], "code-reviewer") {
 		t.Fatalf("runtime.info response missing prompt bundle: %s", lines[5])
+	}
+	if !strings.Contains(lines[6], "changed_files") || !strings.Contains(lines[6], "branch") {
+		t.Fatalf("git.status response missing status JSON: %s", lines[6])
 	}
 }
 

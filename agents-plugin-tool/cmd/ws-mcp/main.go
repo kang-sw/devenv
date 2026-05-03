@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -39,6 +41,8 @@ func main() {
 		path(os.Args[2:])
 	case "agents":
 		agents(os.Args[2:])
+	case "git":
+		gitCommand(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -46,7 +50,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|path|agents>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|path|agents|git>")
 }
 
 func doctor(args []string) {
@@ -170,6 +174,94 @@ func pathGenerate(args []string) {
 	for _, path := range paths {
 		fmt.Println(path.Path)
 	}
+}
+
+func gitCommand(args []string) {
+	if len(args) < 1 {
+		gitUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "status":
+		gitStatus(args[1:])
+	case "diff":
+		gitDiff(args[1:])
+	case "log":
+		gitLog(args[1:])
+	case "merge-base":
+		gitMergeBase(args[1:])
+	default:
+		gitUsage()
+		os.Exit(2)
+	}
+}
+
+func gitUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp git <status|diff|log|merge-base>")
+}
+
+func gitStatus(args []string) {
+	fs := flag.NewFlagSet("git status", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	_ = fs.Parse(args)
+
+	result, err := wsgit.NewClient().Status(context.Background(), defaultRoot(*root))
+	printJSONOrFatal("git status", result, err)
+}
+
+func gitDiff(args []string) {
+	fs := flag.NewFlagSet("git diff", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	rangeValue := fs.String("range", "", "revision range")
+	mode := fs.String("mode", wsgit.DiffModeFull, "diff mode: full, stat, or name_only")
+	var paths multiFlag
+	fs.Var(&paths, "path", "path filter; may be repeated")
+	_ = fs.Parse(args)
+	paths = append(paths, fs.Args()...)
+
+	result, err := wsgit.NewClient().Diff(context.Background(), defaultRoot(*root), wsgit.DiffOptions{Range: *rangeValue, Mode: *mode, Paths: paths})
+	printJSONOrFatal("git diff", result, err)
+}
+
+func gitLog(args []string) {
+	fs := flag.NewFlagSet("git log", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	rangeValue := fs.String("range", "", "revision range")
+	limit := fs.Int("limit", 20, "maximum commits to return, capped at 100")
+	includeBody := fs.Bool("include-body", false, "include commit body")
+	_ = fs.Parse(args)
+
+	result, err := wsgit.NewClient().Log(context.Background(), defaultRoot(*root), wsgit.LogOptions{Range: *rangeValue, Limit: *limit, IncludeBody: *includeBody})
+	printJSONOrFatal("git log", result, err)
+}
+
+func gitMergeBase(args []string) {
+	fs := flag.NewFlagSet("git merge-base", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	base := fs.String("base", "", "base revision")
+	head := fs.String("head", "", "head revision")
+	_ = fs.Parse(args)
+	remaining := fs.Args()
+	if *base == "" && len(remaining) > 0 {
+		*base = remaining[0]
+	}
+	if *head == "" && len(remaining) > 1 {
+		*head = remaining[1]
+	}
+
+	result, err := wsgit.NewClient().MergeBase(context.Background(), defaultRoot(*root), *base, *head)
+	printJSONOrFatal("git merge-base", result, err)
+}
+
+func printJSONOrFatal(prefix string, value any, err error) {
+	if err != nil {
+		fatal(prefix, err)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		fatal(prefix, err)
+	}
+	fmt.Println(string(encoded))
 }
 
 func agents(args []string) {

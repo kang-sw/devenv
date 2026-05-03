@@ -40,7 +40,11 @@
     "agents.cancel": ">=0.1.0-dev <0.2.0",
     "agents.oneshot": ">=0.1.0-dev <0.2.0",
     "agents.print": ">=0.1.0-dev <0.2.0",
-    "agents.erase": ">=0.1.0-dev <0.2.0"
+    "agents.erase": ">=0.1.0-dev <0.2.0",
+    "git.status": ">=0.1.0-dev <0.2.0",
+    "git.diff": ">=0.1.0-dev <0.2.0",
+    "git.log": ">=0.1.0-dev <0.2.0",
+    "git.merge_base": ">=0.1.0-dev <0.2.0"
   },
   "commands": {
     "runtime.info": ">=0.1.0-dev <0.2.0",
@@ -56,6 +60,10 @@
     "agents.cancel": ">=0.1.0-dev <0.2.0",
     "agents.oneshot": ">=0.1.0-dev <0.2.0",
     "agents.print": ">=0.1.0-dev <0.2.0",
-    "agents.erase": ">=0.1.0-dev <0.2.0"
+    "agents.erase": ">=0.1.0-dev <0.2.0",
+    "git.status": ">=0.1.0-dev <0.2.0",
+    "git.diff": ">=0.1.0-dev <0.2.0",
+    "git.log": ">=0.1.0-dev <0.2.0",
+    "git.merge-base": ">=0.1.0-dev <0.2.0"
   }
 }

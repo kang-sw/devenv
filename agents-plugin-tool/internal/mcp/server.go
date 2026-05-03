@@ -12,6 +12,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -121,6 +122,41 @@ func (s *Server) callTool(req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, string(raw)+"\n", nil)
+
+	case "git.status":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		result, err := wsgit.NewClient().Status(context.Background(), root)
+		return toolJSONResponse(req.ID, result, err)
+	case "git.diff":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		rangeValue, _ := params.Arguments["range"].(string)
+		mode, _ := params.Arguments["mode"].(string)
+		result, err := wsgit.NewClient().Diff(context.Background(), root, wsgit.DiffOptions{Range: rangeValue, Mode: mode, Paths: stringList(params.Arguments["paths"])})
+		return toolJSONResponse(req.ID, result, err)
+	case "git.log":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		rangeValue, _ := params.Arguments["range"].(string)
+		includeBody, _ := params.Arguments["include_body"].(bool)
+		result, err := wsgit.NewClient().Log(context.Background(), root, wsgit.LogOptions{Range: rangeValue, Limit: intFromArgument(params.Arguments["limit"], 20), IncludeBody: includeBody})
+		return toolJSONResponse(req.ID, result, err)
+	case "git.merge_base":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		base, _ := params.Arguments["base"].(string)
+		head, _ := params.Arguments["head"].(string)
+		result, err := wsgit.NewClient().MergeBase(context.Background(), root, base, head)
+		return toolJSONResponse(req.ID, result, err)
 	case "project_tree":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -336,6 +372,17 @@ func runtimeInfo(version, sourceCommit string) (map[string]any, error) {
 	}, nil
 }
 
+func toolJSONResponse(id json.RawMessage, value any, err error) response {
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	return toolTextResponse(id, string(raw)+"\n", nil)
+}
+
 func toolTextResponse(id json.RawMessage, text string, err error) response {
 	if err != nil {
 		return response{JSONRPC: "2.0", ID: id, Result: map[string]any{
@@ -366,6 +413,55 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
+			},
+		},
+		{
+			"name":        "git.status",
+			"description": "Return read-only Git branch and worktree status.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Repository root. Defaults to the server root."),
+				},
+			},
+		},
+		{
+			"name":        "git.diff",
+			"description": "Return read-only Git diff output in full, stat, or name-only mode.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":  stringProperty("Repository root. Defaults to the server root."),
+					"range": stringProperty("Optional revision range."),
+					"paths": stringArrayProperty("Optional path filters appended after --."),
+					"mode":  enumStringProperty("Diff mode.", []string{"full", "stat", "name_only"}),
+				},
+			},
+		},
+		{
+			"name":        "git.log",
+			"description": "Return a bounded read-only Git commit log.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":         stringProperty("Repository root. Defaults to the server root."),
+					"range":        stringProperty("Optional revision range."),
+					"limit":        integerProperty("Maximum commits to return. Defaults to 20 and is capped at 100."),
+					"include_body": boolProperty("Include commit body text."),
+				},
+			},
+		},
+		{
+			"name":        "git.merge_base",
+			"description": "Return the read-only Git merge-base hash for two revisions.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Repository root. Defaults to the server root."),
+					"base": stringProperty("Base revision."),
+					"head": stringProperty("Head revision."),
+				},
+				"required": []string{"base", "head"},
 			},
 		},
 		{
@@ -648,6 +744,14 @@ func stringArrayProperty(description string) map[string]any {
 		"items": map[string]string{
 			"type": "string",
 		},
+	}
+}
+
+func enumStringProperty(description string, values []string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"description": description,
+		"enum":        values,
 	}
 }
 
