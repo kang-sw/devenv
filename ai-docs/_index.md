@@ -303,7 +303,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
-`260503-epic-ws-agent-workflow-stability` — active runtime quality gate for `write-code`: debug tools landed, but next critical slice is Phase 4 nonblocking MCP orchestration so long waits/oneshot/call cannot monopolize stdio
+`260503-epic-ws-agent-workflow-stability` — active runtime quality gate for `write-code`: lifecycle, debug, nonblocking MCP, tool profiles, and tier config have landed; next critical slice is a small named-agent/write-code regression dogfood
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
@@ -320,12 +320,12 @@ do not add `spec:` frontmatter, run `ws:update-spec`, or update
 
 `write-code` is ported and closed in `agents-plugin/skills/write-code`; Codex
 plugin visibility and installed MCP runtime metadata were confirmed after plugin
-refresh. `260503-epic-ws-agent-workflow-stability` Phases 1, 2, and 4 now cover
-lifecycle hardening, `agents.debug.*` diagnostics, concurrent MCP stdio
-handling, `agents.call` as the async start primitive, removal of
-`agents.call_async`/generic `agents.oneshot`, short-poll default wait behavior,
-and MCP tool profiles `lead`, `delegate`, and `leaf`. The next critical slice is
-a small regression dogfood of `write-code` or a simpler named-agent workflow.
+refresh. `260503-epic-ws-agent-workflow-stability` Phases 1, 2, 4, and 5 now
+cover lifecycle hardening, `agents.debug.*` diagnostics, concurrent MCP stdio,
+`agents.call` as the async start primitive, removal of `agents.call_async` and
+generic `agents.oneshot`, short-poll waits, MCP tool profiles
+`lead`/`delegate`/`leaf`, and user-local tier model config. Next cursor: run a
+small named-agent smoke, then dogfood `ws:write-code` on `config.show`.
 Post-refresh cancellation smoke showed Codex UI interrupt does not currently
 arrive as MCP `notifications/cancelled`; it only aborts the wait call from the
 lead's perspective, so agent task cancellation must remain explicit through
