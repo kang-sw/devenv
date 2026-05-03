@@ -294,6 +294,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260503-feat-agents-plugin-async-agent-calls` | done | Async ws agent calls: streaming Codex session-id registration, current-call state, call_async/wait/status/tail/cancel, MCP/CLI subquery correction, and real Codex-backed smoke |
 | `260503-feat-agents-plugin-edit-port` | done | Ported `edit` into `agents-plugin/` as lead-owned direct edit plus one async reviewer; Codex visibility confirmed after plugin refresh |
 | `260503-feat-agents-plugin-write-code-port` | done | Ported `write-code` into `agents-plugin/`: embedded implementer/survey/reviewer prompts, delegated commit smoke, reviewer fanout, async relay loop, and Codex visibility closeout |
+| `260503-epic-ws-agent-workflow-stability` | todo | Live stabilization epic for named-agent workflow lifecycle, timeout, cancellation, diagnostics, and lead-context compression |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
 | `260503-feat-ws-mcp-git-read-primitives` | done | Added read-only `ws/git.*` MCP primitives for status, diff, log, and merge-base using native Git argument-array execution |
 | `260503-feat-agents-plugin-sidecar-skill-drafts` | done | Ported lead-run sidecar skills `add-rule`, `ship`, and `exit-session`; deferred `manual-think` and `workflow` |
@@ -303,6 +304,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
+`260503-epic-ws-agent-workflow-stability` — active runtime quality gate for `write-code`: Phase 1 fixes oneshot timeout, wait/status ambiguity, cancel cleanup, diagnostics, and lead-context overhead found during dogfood
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
@@ -319,6 +321,6 @@ do not add `spec:` frontmatter, run `ws:update-spec`, or update
 
 `write-code` is ported and closed in `agents-plugin/skills/write-code`; Codex
 plugin visibility and installed MCP runtime metadata were confirmed after plugin
-refresh. `ws-mcp` Git read primitives are implemented locally; refreshing the
-installed runtime binary is still needed before the active Codex MCP session can
-serve `git.status`, `git.diff`, `git.log`, and `git.merge_base`.
+refresh. The next runtime priority is
+`260503-epic-ws-agent-workflow-stability` Phase 1, which fixes the timeout,
+cancel, cleanup, and diagnostics failures exposed while dogfooding `write-code`.
