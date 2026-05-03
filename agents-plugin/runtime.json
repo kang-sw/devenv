@@ -10,6 +10,7 @@
     "ws.infra.read": ">=0.1.0-dev <0.2.0",
     "ws.convention.read": ">=0.1.0-dev <0.2.0",
     "ws.spec_stem.generate": ">=0.1.0-dev <0.2.0",
-    "ws.spec_index.verify": ">=0.1.0-dev <0.2.0"
+    "ws.spec_index.verify": ">=0.1.0-dev <0.2.0",
+    "ws.mental_models.list": ">=0.1.0-dev <0.2.0"
   }
 }

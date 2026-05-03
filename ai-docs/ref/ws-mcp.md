@@ -286,7 +286,6 @@ the current baseline.
 |-----------|---------|------------------|
 | `ws.project_index.read` | Read `ai-docs/_index.md` as project memory. | `cat ai-docs/_index.md` |
 | `ws.ticket_queue.list` | Return active ticket stems grouped by status. | `ws-proj-tree` or direct file listing |
-| `ws.mental_models.list` | List relevant mental-model documents for target paths. | `ws-list-mental-model [paths...]` |
 
 ### `ws.spec_stem.generate`
 
@@ -340,6 +339,28 @@ Output:
 This initial MCP surface is verification-only. It does not yet reproduce every
 mutation performed by `ws-spec-build-index`; shared skills should still call the
 MCP tool name so the runtime can grow behind a stable contract.
+
+### `ws.mental_models.list`
+
+List mental-model documents with domains, descriptions, and sources.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    }
+  }
+}
+```
+
+Output:
+
+- MCP text content containing a compact `mental-models:` catalog.
 
 ## Deferred Write-Capable Operations
 

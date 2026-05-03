@@ -98,21 +98,26 @@ clear enough to replace or isolate `ws-spec-build-index`,
 
 ### 5. Sidecar productivity skills
 
-Planned child ticket:
+Completed:
 
-- `feat-agents-plugin-sidecar-skill-drafts`
+- `260503-feat-agents-plugin-sidecar-skill-drafts`
 
 Covered skills:
 
 - `add-rule`
 - `ship`
 - `exit-session`
+
+Excluded from this slice:
+
 - `manual-think`
 - `workflow`
 
 Purpose: port useful skills outside the core implementation track before tackling
-heavy delegation. These are mostly direct-execution or reference skills and should
-not require the full orchestration runtime.
+heavy delegation. These are mostly direct-execution skills and should not require
+the full orchestration runtime. `workflow` remains deferred because its Claude
+source is a named-agent/PATH primitive reference and the shared delegation
+contract does not exist yet.
 
 ### 6. Delegation contract prototype
 

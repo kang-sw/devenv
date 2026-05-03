@@ -132,6 +132,13 @@ func (s *Server) callTool(req request) response {
 		}
 		text, err := wsdoc.VerifySpecIndex(root)
 		return toolTextResponse(req.ID, text, err)
+	case "ws.mental_models.list":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		text, err := wsdoc.MentalModelsList(root)
+		return toolTextResponse(req.ID, text, err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
@@ -223,6 +230,19 @@ func tools() []map[string]any {
 		{
 			"name":        "ws.spec_index.verify",
 			"description": "Verify basic spec anchor index health.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": map[string]string{
+						"type":        "string",
+						"description": "Repository root. Defaults to the server root.",
+					},
+				},
+			},
+		},
+		{
+			"name":        "ws.mental_models.list",
+			"description": "List mental-model documents with domains, descriptions, and sources.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

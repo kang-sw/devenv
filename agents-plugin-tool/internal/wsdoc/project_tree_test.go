@@ -95,6 +95,25 @@ func TestVerifySpecIndexReportsDuplicates(t *testing.T) {
 	}
 }
 
+func TestMentalModelsListRendersFrontmatter(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/mental-model/demo.md", "---\ndomain: demo\ndescription: \"Demo domain\"\nsources:\n  - demo/\n---\n# Demo\n")
+
+	got, err := MentalModelsList(root)
+	if err != nil {
+		t.Fatalf("MentalModelsList returned error: %v", err)
+	}
+	for _, want := range []string{
+		"mental-models:",
+		"ai-docs/mental-model/demo.md  - demo  # Demo domain",
+		"sources: demo/",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("MentalModelsList output missing %q\n%s", want, got)
+		}
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
