@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -321,6 +322,8 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 
 	var stdoutFile *os.File
 	var stderrFile *os.File
+	var stdoutWriter io.Writer
+	var stderrWriter io.Writer
 	if captureStreams {
 		var err error
 		stdoutFile, err = os.OpenFile(layout.CurrentStdout, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -333,20 +336,16 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 			return "", agent, fmt.Errorf("open current stderr: %w", err)
 		}
 		defer stderrFile.Close()
+		stdoutWriter = stdoutFile
+		stderrWriter = stderrFile
 	}
 	runner := m.opts.Runner
 	if runner == nil {
 		runner = CodexRunner{}
 	}
-	result, err := runner.Call(RunnerRequest{
-		Root:             layout.Root,
-		Prompt:           prompt,
-		Model:            agent.Model,
-		SessionID:        agent.SessionID,
-		SystemPromptPath: absOptional(layout.AgentDir, agent.SystemPromptPath),
-		Stdout:           stdoutFile,
-		Stderr:           stderrFile,
-		OnSessionID: func(sessionID string) error {
+	var onSessionID func(string) error
+	if captureStreams {
+		onSessionID = func(sessionID string) error {
 			if strings.TrimSpace(sessionID) == "" {
 				return nil
 			}
@@ -355,15 +354,23 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 			if err := writeAgent(layout.AgentFile, agent); err != nil {
 				return err
 			}
-			if captureStreams {
-				if _, err := m.MarkCurrentCallRunning(layout, os.Getpid(), sessionID); err != nil {
-					return err
-				}
+			if _, err := m.MarkCurrentCallRunning(layout, os.Getpid(), sessionID); err != nil {
+				return err
 			}
 			return appendEvent(layout.EventsFile, m.now(), "call.session_started", map[string]any{
 				"session_id": sessionID,
 			})
-		},
+		}
+	}
+	result, err := runner.Call(RunnerRequest{
+		Root:             layout.Root,
+		Prompt:           prompt,
+		Model:            agent.Model,
+		SessionID:        agent.SessionID,
+		SystemPromptPath: absOptional(layout.AgentDir, agent.SystemPromptPath),
+		Stdout:           stdoutWriter,
+		Stderr:           stderrWriter,
+		OnSessionID:      onSessionID,
 	})
 	if err != nil {
 		agent.Status = StatusFailed

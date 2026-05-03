@@ -35,6 +35,18 @@ type sessionPersistRunner struct {
 }
 
 func (r sessionPersistRunner) Call(req RunnerRequest) (RunnerResult, error) {
+	if req.OnSessionID != nil {
+		r.t.Fatal("OnSessionID should be nil for synchronous calls")
+	}
+	return RunnerResult{SessionID: "thread-streamed", Text: "done\n"}, nil
+}
+
+type asyncSessionPersistRunner struct {
+	t         *testing.T
+	agentFile string
+}
+
+func (r asyncSessionPersistRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if req.OnSessionID == nil {
 		r.t.Fatal("OnSessionID is nil")
 	}
@@ -128,6 +140,9 @@ func TestCallCreatesAndResumesSession(t *testing.T) {
 	if len(runner.calls) != 1 || runner.calls[0].SessionID != "" || runner.calls[0].SystemPromptPath == "" {
 		t.Fatalf("first runner call mismatch: %+v", runner.calls)
 	}
+	if runner.calls[0].Stdout != nil || runner.calls[0].Stderr != nil {
+		t.Fatalf("sync call passed stream writers: stdout=%T stderr=%T", runner.calls[0].Stdout, runner.calls[0].Stderr)
+	}
 
 	agent, text, err = manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "second"})
 	if err != nil {
@@ -148,7 +163,7 @@ func TestCallCreatesAndResumesSession(t *testing.T) {
 	}
 }
 
-func TestCallPersistsStreamedSessionIDBeforeCompletion(t *testing.T) {
+func TestCallStoresSessionIDAfterSynchronousCompletion(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	baseManager := NewManager(Options{

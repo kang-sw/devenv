@@ -338,3 +338,33 @@ runtime metadata, plugin validation, and whitespace checks. A real Codex-backed
 over 90 seconds and was killed; this matches the current instability observed
 around direct Codex-backed oneshot calls and should be revisited with the
 oneshot backend path rather than treated as a subquery API-shape failure.
+
+### Phase 6: Synchronous runner stream fix
+
+Fix the direct `ws-mcp agents oneshot` and `ws-mcp subquery` execution failure
+found during smoke testing. The failure appeared as `codex failed: invalid
+argument: Reading additional input from stdin...` and affected synchronous calls
+that did not intend to capture backend streams.
+
+Success criteria:
+
+- Synchronous `agents.call`, `agents.oneshot`, and `subquery` pass nil stream
+  writers to the Codex runner.
+- Async `run-current` still captures stdout and stderr to current-call files.
+- Real Codex-backed `ws-mcp agents oneshot` smoke succeeds.
+- Real Codex-backed `ws-mcp subquery` smoke succeeds.
+
+### Result (pending) - 2026-05-03
+
+Fixed a Go typed-nil writer bug in the synchronous agent call path. The runtime
+declared `*os.File` stream variables for optional stdout/stderr capture, then
+assigned those typed nil pointers into `io.Writer` interface fields even when
+capture was disabled. The resulting non-nil interfaces caused the Codex runner
+to tee stdout/stderr into nil file writers, surfacing as `invalid argument`
+failures in direct oneshot and subquery calls.
+
+The fix introduces explicit `io.Writer` variables that remain nil unless
+`captureStreams` is true. Async `run-current` still assigns real file writers
+and continues to capture Codex stdout/stderr. A unit test now asserts that sync
+calls do not pass stream writers. Real Codex-backed smoke now succeeds for both
+`ws-mcp agents oneshot` and `ws-mcp subquery`.
