@@ -116,7 +116,9 @@ Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
 Codex launcher POC status: `agents-plugin` now contains plugin-local `.mcp.json`,
 `runtime.json`, and `bin/ws-mcp-launcher`. Host-free launcher smoke and temporary
 global Codex MCP registration work; installed plugin-managed MCP verification is
-pending user-performed Codex plugin cache refresh.
+pending user-performed Codex plugin cache refresh. The Unix launcher direction is
+POSIX `sh` with internal OS/arch selection; Windows remains blocked on verifying
+whether `./bin/ws-mcp-launcher` resolves to `./bin/ws-mcp-launcher.exe`.
 
 ## Skill Inventory
 

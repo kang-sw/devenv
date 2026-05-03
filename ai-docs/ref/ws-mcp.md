@@ -79,6 +79,18 @@ plugin-local runtime contract, downloads or copies and verifies the prebuilt
 `ws-mcp` binary when missing or incompatible, then execs
 `ws-mcp serve --stdio`.
 
+For macOS and Linux, `./bin/ws-mcp-launcher` is the canonical entrypoint and may
+remain a POSIX `sh` script. A single script can branch internally on `uname -s`
+and `uname -m`, then select an OS/architecture-specific native `ws-mcp` binary.
+The command name can stay stable even though the selected binary differs.
+
+Windows remains a separate production risk. The `.mcp.json` format does not
+provide an OS selector, so the production path depends on whether Codex on
+Windows resolves `command: "./bin/ws-mcp-launcher"` to
+`./bin/ws-mcp-launcher.exe`. If it does not, the project must choose a Windows
+adapter such as an OS-specific plugin artifact/manifest or a one-time global MCP
+setup path.
+
 Current launcher inputs:
 
 | Variable | Purpose |
@@ -91,11 +103,11 @@ Current launcher inputs:
 
 This is still a Phase 3 design/POC boundary. The implementation must verify
 whether Codex accepts relative command paths, what working directory it uses for
-plugin-managed MCP servers, and whether platform-specific `.sh`/`.cmd` launchers
-can be selected safely. The current macOS POC verified the launcher through a
-temporary global MCP registration, but plugin-managed MCP verification still
-requires a user-performed Codex plugin cache refresh. Do not treat that host path
-as proven until a fresh Codex session can call `ws.project_tree` from the
+plugin-managed MCP servers, and whether Windows extensionless `.exe` resolution
+works for the stable launcher command. The current macOS POC verified the launcher
+through a temporary global MCP registration, but plugin-managed MCP verification
+still requires a user-performed Codex plugin cache refresh. Do not treat that host
+path as proven until a fresh Codex session can call `ws.project_tree` from the
 installed plugin-managed MCP server.
 
 For repo-local Codex plugin iteration, changed plugin-managed MCP configuration

@@ -182,11 +182,11 @@ This phase must answer these host questions with a small Codex POC:
 - whether `.mcp.json` command paths can be relative to the installed plugin cache
 - whether Codex starts the MCP server with the plugin cache as the working
   directory, or whether the launcher must discover its own location
-- whether `.mcp.json` supports platform-specific command selection; if not,
-  whether one cross-platform launcher binary is required, or whether a shell/cmd
-  wrapper approach is still viable
-- whether Windows can execute plugin-local `.cmd` launchers through Codex MCP
-  configuration
+- whether the POSIX `sh` launcher is sufficient as the canonical macOS/Linux
+  entrypoint, with internal `uname`-based selection of native `ws-mcp` binaries
+- whether Windows resolves `command: "./bin/ws-mcp-launcher"` to
+  `./bin/ws-mcp-launcher.exe`; if not, the project needs a Windows-specific plugin
+  artifact/manifest or a one-time global MCP setup path
 - whether a fresh `codex exec` can see and call `ws.project_tree` from the
   installed plugin-managed MCP server after the user refreshes the plugin cache
 
@@ -201,6 +201,10 @@ Initial dev POC status:
   `ws-mcp serve --stdio` without writing launcher diagnostics to stdout.
 - A temporary global Codex MCP registration using the launcher confirmed that a
   fresh `codex exec` can call `ws.project_tree` through the `ws-mcp` server.
+- OpenAI Codex plugin docs, Codex config reference, official plugin examples, and
+  MCP transport docs do not show a standard OS/platform selector for `.mcp.json`.
+  Platform variance should live inside the launcher or in host-specific plugin
+  artifacts, not in the MCP config schema.
 - Plugin-managed MCP verification is still pending the required user-performed
   Codex plugin cache refresh.
 
