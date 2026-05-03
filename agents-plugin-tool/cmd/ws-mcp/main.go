@@ -152,6 +152,8 @@ func configCommand(args []string) {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "show":
+		configShow(args[1:])
 	case "agents-tier":
 		configAgentsTier(args[1:])
 	default:
@@ -161,7 +163,15 @@ func configCommand(args []string) {
 }
 
 func configUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp config <agents-tier>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp config <show|agents-tier>")
+}
+
+func configShow(args []string) {
+	fs := flag.NewFlagSet("config show", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	view, err := wsconfig.Show(wsconfig.Options{})
+	printJSONOrFatal("config show", view, err)
 }
 
 func configAgentsTier(args []string) {

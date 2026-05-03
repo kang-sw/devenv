@@ -166,6 +166,76 @@ func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
 	}
 }
 
+func TestConfigCLICommandsReturnConfigView(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "ws-mcp")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	cache := filepath.Join(t.TempDir(), "cache")
+	wantConfigPath := func() string {
+		t.Helper()
+		abs, err := filepath.Abs(cache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if evaluated, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = evaluated
+		}
+		return filepath.Join(abs, "config.json")
+	}
+	show := func(args ...string) []byte {
+		t.Helper()
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), "WS_CACHE_HOME="+cache)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("ws-mcp %v failed: %v\n%s", args, err, string(out))
+		}
+		return out
+	}
+
+	var before struct {
+		Path   string `json:"path"`
+		Config struct {
+			SchemaVersion int `json:"schema_version"`
+			Agents        struct {
+				Tiers map[string]struct {
+					Backend string `json:"backend"`
+					Model   string `json:"model"`
+				} `json:"tiers"`
+			} `json:"agents"`
+		} `json:"config"`
+	}
+	mustUnmarshalCLIJSON(t, show("config", "show"), &before)
+	if before.Path != wantConfigPath() {
+		t.Fatalf("config show path = %q", before.Path)
+	}
+	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 0 {
+		t.Fatalf("default config show = %#v", before.Config)
+	}
+
+	show("config", "agents-tier", "--tier", "light", "--model", "gemini-3-1-pro")
+
+	var after struct {
+		Path   string `json:"path"`
+		Config struct {
+			Agents struct {
+				Tiers map[string]struct {
+					Backend string `json:"backend"`
+					Model   string `json:"model"`
+				} `json:"tiers"`
+			} `json:"agents"`
+		} `json:"config"`
+	}
+	mustUnmarshalCLIJSON(t, show("config", "show"), &after)
+	light := after.Config.Agents.Tiers["light"]
+	if after.Path != wantConfigPath() || light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
+		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
+	}
+}
+
 func mustWriteCLITest(t *testing.T, path, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

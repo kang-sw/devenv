@@ -239,6 +239,7 @@ MCP tools use server `ws` and the following tool names:
 - `agents.cancel` — best-effort terminate the active worker pid and mark the current call cancelled. Implemented.
 - `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
+- `config.show` — inspect the current user-local configuration and resolved config path without modifying it. Implemented.
 - `config.agents_tier` — configure the user-local backend/model mapping for a workload tier. Implemented.
 - `path.generate` — allocate worktree-scoped writable workflow artifact paths. Implemented for `kind: "review"`.
 - `runtime.info` — return runtime metadata, including embedded prompt bundle hash. Implemented.
@@ -265,6 +266,7 @@ ws-mcp agents tail --root <repo> --name <name> [--lines 40]
 ws-mcp agents cancel --root <repo> --name <name>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
+ws-mcp config show
 ws-mcp config agents-tier --tier <light|core|deep> [--backend <backend>] [--model <model>]
 ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
 ws-mcp runtime info
@@ -274,8 +276,8 @@ The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 `events.jsonl` layout described above. Shared skill text should prefer the MCP
 tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
 `ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`, `ws/agents.print`,
-`ws/agents.erase`, `ws/config.agents_tier`, `ws/path.generate`, and
-`ws/runtime.info`.
+`ws/agents.erase`, `ws/config.show`, `ws/config.agents_tier`,
+`ws/path.generate`, and `ws/runtime.info`.
 
 `agents.call` writes the prompt snapshot to `current/prompt.md`, starts an
 internal `agents run-current` worker process, records the worker pid in

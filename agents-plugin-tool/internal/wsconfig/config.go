@@ -25,6 +25,11 @@ type AgentsConfig struct {
 	Tiers map[string]AgentTier `json:"tiers,omitempty"`
 }
 
+type View struct {
+	Path   string `json:"path"`
+	Config Config `json:"config"`
+}
+
 type AgentTier struct {
 	Backend string `json:"backend,omitempty"`
 	Model   string `json:"model,omitempty"`
@@ -53,6 +58,18 @@ func Load(opts Options) (Config, error) {
 		cfg.Agents.Tiers = map[string]AgentTier{}
 	}
 	return cfg, nil
+}
+
+func Show(opts Options) (View, error) {
+	path, err := Path(opts)
+	if err != nil {
+		return View{}, err
+	}
+	cfg, err := Load(opts)
+	if err != nil {
+		return View{}, err
+	}
+	return View{Path: path, Config: cfg}, nil
 }
 
 func SetAgentsTier(opts Options, tier, backend, model string) (Config, error) {

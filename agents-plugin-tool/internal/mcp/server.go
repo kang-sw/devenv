@@ -265,6 +265,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	case "runtime.debug_events":
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
+	case "config.show":
+		view, err := wsconfig.Show(wsconfig.Options{})
+		return toolJSONResponse(req.ID, view, err)
 	case "config.agents_tier":
 		tier, _ := params.Arguments["tier"].(string)
 		backend, _ := params.Arguments["backend"].(string)
@@ -565,6 +568,14 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"limit": integerProperty("Maximum number of events to return. Defaults to 80 and is capped."),
 				},
+			},
+		},
+		{
+			"name":        "config.show",
+			"description": "Return the current ws user-local configuration and resolved config path without modifying it.",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{

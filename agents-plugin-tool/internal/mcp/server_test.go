@@ -16,9 +16,11 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
 func TestServeStdioToolsListAndCall(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\n---\n# Demo\n")
@@ -37,6 +39,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.status","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":10}}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -46,8 +49,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 8 {
-		t.Fatalf("expected 8 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 9 {
+		t.Fatalf("expected 9 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -79,6 +82,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "config.agents_tier") {
 		t.Fatalf("tools/list missing config.agents_tier: %s", byID["2"])
 	}
+	if !strings.Contains(byID["2"], "config.show") {
+		t.Fatalf("tools/list missing config.show: %s", byID["2"])
+	}
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
@@ -105,9 +111,14 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(toolText(t, byID["8"]), `"event":"request.received"`) {
 		t.Fatalf("runtime.debug_events missing request evidence: %s", byID["8"])
 	}
+	configText := toolText(t, byID["9"])
+	if !strings.Contains(configText, `"path"`) || !strings.Contains(configText, `config.json`) || !strings.Contains(configText, `"config"`) {
+		t.Fatalf("config.show response missing path/config: %s", byID["9"])
+	}
 }
 
 func TestServeStdioAgentDebugToolCalls(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	cache := filepath.Join(t.TempDir(), "cache")
@@ -146,7 +157,43 @@ func TestServeStdioAgentDebugToolCalls(t *testing.T) {
 	}
 }
 
+func TestServeStdioConfigShow(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cache)
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`+"\n",
+	), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	showBefore := toolText(t, byID["1"])
+	if !strings.Contains(showBefore, filepath.Join(cache, "config.json")) || !strings.Contains(showBefore, `"schema_version":1`) {
+		t.Fatalf("config.show default response mismatch: %s", byID["1"])
+	}
+
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{}, "light", "", "gemini-3-1-pro"); err != nil {
+		t.Fatalf("SetAgentsTier returned error: %v", err)
+	}
+	out.Reset()
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`+"\n",
+	), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	showAfter := toolText(t, byID["2"])
+	if !strings.Contains(showAfter, `"backend":"gemini"`) || !strings.Contains(showAfter, `"model":"gemini-3-1-pro"`) {
+		t.Fatalf("config.show response missing tier mapping: %s", byID["2"])
+	}
+}
+
 func TestServeStdioConfigAgentsTier(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -179,6 +226,7 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 }
 
 func TestServeStdioLogsCancellationNotificationsWhenEnabled(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	debugLog := filepath.Join(t.TempDir(), "mcp-debug.jsonl")
@@ -214,6 +262,7 @@ func TestServeStdioLogsCancellationNotificationsWhenEnabled(t *testing.T) {
 }
 
 func TestServeStdioExposesCancellationNotificationsInDebugEvents(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	input := strings.Join([]string{
@@ -236,6 +285,7 @@ func TestServeStdioExposesCancellationNotificationsInDebugEvents(t *testing.T) {
 }
 
 func TestServeStdioFiltersToolsByProfile(t *testing.T) {
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "")
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_MCP_TOOL_PROFILE", "leaf")
@@ -244,6 +294,7 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"light","model":"gpt-5.2"}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -251,7 +302,7 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "subquery") || strings.Contains(byID["1"], "config.agents_tier") {
+	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "subquery") || strings.Contains(byID["1"], "config.agents_tier") || strings.Contains(byID["1"], "config.show") {
 		t.Fatalf("leaf tools/list exposed recursive tools: %s", byID["1"])
 	}
 	if !strings.Contains(byID["1"], "runtime.info") {
@@ -266,9 +317,13 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 	if !strings.Contains(byID["4"], "tool not available") {
 		t.Fatalf("leaf tools/call did not reject config.agents_tier: %s", byID["4"])
 	}
+	if !strings.Contains(byID["5"], "tool not available") {
+		t.Fatalf("leaf tools/call did not reject config.show: %s", byID["5"])
+	}
 }
 
 func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -324,6 +379,12 @@ func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
 	}
 }
 
+func useLeadProfile(t *testing.T) {
+	t.Helper()
+	t.Setenv("WS_MCP_TOOL_PROFILE", "lead")
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "")
+}
+
 func mustWrite(t *testing.T, root, rel, text string) {
 	t.Helper()
 	path := filepath.Join(root, rel)
@@ -354,6 +415,7 @@ func initGit(t *testing.T, root string) {
 }
 
 func TestServeStdioGitToolCalls(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
 	initGit(t, root)
 	runGit(t, root, "config", "user.email", "test@example.com")

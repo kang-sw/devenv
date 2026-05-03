@@ -242,6 +242,30 @@ Success criteria:
 - Remaining workflow gaps are captured as new child tickets or later phases
   before this epic closes.
 
+### Result (26e0174) - 2026-05-03
+
+Implemented the small `config.show` regression target as a direct edit with a
+named-agent correctness/fit reviewer. The new read-only surface returns the
+resolved config path and current config through both MCP (`config.show`) and CLI
+(`ws-mcp config show`), and the runtime metadata records both surfaces so launcher
+drift checks can repair stale binaries. The same `wsconfig.Show` read path backs
+MCP and CLI behavior; it does not create `config.json` in the no-file case.
+
+This run did not exercise the full `write-code` skill because the caller
+provided a direct implementation brief for the current branch, but it did
+exercise the nonblocking named-agent reviewer flow after Phase 4. The reviewer
+ran to completion through `agents.call` plus bounded `agents.wait`; no
+runtime-owned process cleanup was needed, and state was recoverable through the
+normal agent wait/status surfaces. The reviewer caught this missing epic update,
+which was relayed as a fix rather than leaving the dogfood result out of ticket
+history.
+
+Verification covered `cd agents-plugin-tool && go test ./...`, runtime JSON
+parsing, `claude plugin validate agents-plugin`, `git diff --check`, and a CLI
+smoke with temporary `WS_CACHE_HOME` that configured `light` to
+`gemini-3-1-pro` and confirmed `ws-mcp config show` returned the expected path
+and mapping. No spec or mental-model updates were made on this branch.
+
 ### Phase 4: Nonblocking MCP orchestration
 
 Make ws MCP request handling and agent workflow calls safe under host tool-call

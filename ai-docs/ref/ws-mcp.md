@@ -467,6 +467,21 @@ Behavior:
 - Filenames use `<seed8>-<index>-<stem>.md`; invocation time is intentionally
   omitted from the filename to reduce prompt and review-path context cost.
 
+### `ws/config.show`
+
+Return the current ws user-local configuration and the absolute path where it is read from.
+
+Input fields: none.
+
+Behavior:
+
+- The tool is read-only and does not create or modify `config.json`.
+- If no config file exists, the response contains the default empty config shape
+  and the path where config would be read from.
+- The JSON response contains `path` and `config` fields.
+- Delegate and leaf MCP tool profiles hide and reject this tool together with
+  the other `config.*` tools.
+
 ### `ws/config.agents_tier`
 
 Configure the user-local backend/model mapping for a workload tier.
