@@ -62,17 +62,23 @@ The plugin-local `.mcp.json` uses an MCP server map:
 {
   "mcpServers": {
     "ws": {
-      "command": "ws-mcp",
-      "args": ["serve", "--stdio", "--root", "<repo-root>"]
+      "command": "./bin/ws-mcp-launcher",
+      "args": []
     }
   }
 }
 ```
 
-The exact command path is not locked yet. Phase 3 must decide whether this points
-at a stable user-local binary path, a wrapper, or a host-specific install path.
-Do not add a production `.mcp.json` that requires Go, Python, Node, Cargo, or
-Visual Studio Build Tools on target user machines.
+The preferred Codex design is a plugin-local launcher, not a mandatory separate
+install skill. The launcher runs from the installed plugin cache, reads a
+plugin-local runtime contract, downloads and verifies the prebuilt `ws-mcp`
+binary when missing or incompatible, then execs `ws-mcp serve --stdio`.
+
+This is still a Phase 3 design/POC boundary. The implementation must verify
+whether Codex accepts relative command paths, what working directory it uses for
+plugin-managed MCP servers, and whether platform-specific `.sh`/`.cmd` launchers
+can be selected safely. Do not add a production `.mcp.json` that requires Go,
+Python, Node, Cargo, or Visual Studio Build Tools on target user machines.
 
 For repo-local Codex plugin iteration, changed plugin-managed MCP configuration
 requires a human-in-the-loop cache refresh: the user must uninstall/install the
@@ -207,11 +213,13 @@ bundle and the local `ws-mcp` binary.
 Expected direction:
 
 - plugin documents carry a small runtime contract file
-- `ws-mcp` reads that file during `doctor` and startup
+- the plugin-local launcher reads that file before starting `ws-mcp`
+- `ws-mcp doctor` can also read that file for direct diagnostics
 - major/minor compatibility is strict, patch compatibility can be flexible
-- stale binaries produce actionable diagnostics that point to the
-  `install-ws-plugin` skill or update command
+- missing or incompatible binaries can trigger automatic first-run download when
+  network access is available
+- stale binaries produce actionable diagnostics when automatic repair is not
+  possible
 
 Until that exists, skill documents must not assume that installed plugin text and
 installed `ws-mcp` binary are automatically in sync.
-

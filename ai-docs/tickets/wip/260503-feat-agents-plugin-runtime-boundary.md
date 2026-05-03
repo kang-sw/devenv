@@ -49,6 +49,11 @@ mechanisms, and keep the runtime free of user-installed language dependencies.
   the user must uninstall/install the plugin in the Codex UI or start a fresh
   session after plugin bundle changes. Agents should signal the user before any
   verification step that depends on the refreshed installed plugin cache.
+- Codex and Claude plugin runtime paths must remain adapter-specific. Codex uses
+  plugin cache copies and plugin-managed MCP configuration; Claude currently uses
+  the stable `claude-plugin/` package, plugin update timing, and `bin/`/PATH
+  helper behavior. Shared runtime contracts may converge later, but installation
+  and update mechanics should not be forced into one path during this ticket.
 
 ## Phases
 
@@ -145,26 +150,82 @@ Added `ai-docs/ref/ws-mcp.md` as the first explicit runtime contract for the
 Updated `ai-docs/ref/codex-integration.md` and `_index.md` so future sessions can
 find the new MCP contract from the normal recovery path.
 
-### Phase 3: Distribution design
+### Phase 3: Plugin-local launcher POC
 
-Define the portable binary distribution plan:
+Prototype Codex plugin-managed MCP through a plugin-local launcher instead of a
+mandatory separate install skill. The preferred Codex shape is:
 
-- release asset naming for Windows, macOS, and Linux
-- curl/PowerShell installer behavior
-- install location and MCP client config expectations
-- `install-ws-plugin` skill behavior for preparing or updating the `ws-mcp`
-  binary that plugin-local `.mcp.json` points at
-- version drift detection between the installed plugin bundle and the local
-  `ws-mcp` binary, likely through a small plugin runtime contract file read by
-  `ws-mcp doctor` and server startup
-- CI cross-compilation matrix
-- manual host smoke checklist
+```text
+agents-plugin/
+  .codex-plugin/plugin.json   # references "./.mcp.json"
+  .mcp.json                   # runs a plugin-local launcher
+  bin/                        # launcher scripts or launcher binary
+  runtime.json                # plugin/runtime compatibility contract
+```
+
+The launcher should:
+
+- run from the installed Codex plugin cache when Codex starts the MCP server
+- read the plugin-local `runtime.json`
+- detect OS and architecture
+- check whether a compatible `ws-mcp` binary already exists in the selected
+  cache-local or user-local runtime location
+- download a prebuilt binary and checksum when the binary is missing or
+  incompatible; automatic first-run download is allowed for this plugin
+- verify the checksum before executing downloaded binaries
+- exec `ws-mcp serve --stdio` without writing non-MCP text to stdout
+- print actionable diagnostics to stderr when download, checksum, permission, or
+  version checks fail
+
+This phase must answer these host questions with a small Codex POC:
+
+- whether `.mcp.json` command paths can be relative to the installed plugin cache
+- whether Codex starts the MCP server with the plugin cache as the working
+  directory, or whether the launcher must discover its own location
+- whether `.mcp.json` supports platform-specific command selection; if not,
+  whether one cross-platform launcher binary is required, or whether a shell/cmd
+  wrapper approach is still viable
+- whether Windows can execute plugin-local `.cmd` launchers through Codex MCP
+  configuration
+- whether a fresh `codex exec` can see and call `ws.project_tree` from the
+  installed plugin-managed MCP server after the user refreshes the plugin cache
+
+`install-ws-plugin` is no longer a required setup skill if the launcher POC works.
+It may be dropped, deferred, or re-scoped later as a repair/doctor skill for
+offline environments, corporate proxy failures, permission issues, or manual
+runtime recovery.
 
 Success criteria:
 
-- The design does not require Go, Python, Node, Cargo, or Visual Studio Build
-  Tools on target user machines.
+- The POC does not require Go, Python, Node, Cargo, or Visual Studio Build Tools on
+  target user machines.
+- Plugin install in Codex can trigger MCP startup through plugin-managed config
+  without a mandatory user-run setup skill.
+- A fresh `codex exec` can list or call the `ws` MCP server after the user
+  refreshes the installed plugin cache.
+- The ticket records whether relative command paths and platform-specific
+  launchers are viable for production.
+
+### Phase 4: Release distribution design
+
+Define the portable binary distribution plan after the launcher POC proves the
+host mechanics:
+
+- release asset naming for Windows, macOS, and Linux
+- checksum file format and verification behavior
+- runtime binary location policy for cache-local versus user-local storage
+- `runtime.json` compatibility fields and drift behavior
+- launcher update policy: first-run download is allowed, but routine update checks
+  should avoid surprising network work unless the runtime contract requires it
+- offline/proxy failure UX and any optional repair skill
+- CI cross-compilation matrix
+- manual host smoke checklist for macOS, Linux, and Windows
+
+Success criteria:
+
 - Windows installation is described as downloading a prebuilt `.exe`, not building
   locally.
-- Runtime drift produces an actionable diagnostic instead of silently exposing
-  tools that are too old for the installed skill documents.
+- Runtime drift produces an actionable diagnostic or verified automatic first-run
+  repair instead of silently exposing tools that are too old for the installed
+  skill documents.
+- Offline/proxy failure behavior is documented.

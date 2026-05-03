@@ -219,7 +219,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; current child is the runtime/MCP boundary slice
-`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 3 should define binary distribution, install/update skill behavior, plugin MCP config path, and version drift detection
+`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 3 should test plugin-local launcher MCP startup, relative paths, auto-download fallback, and Windows command handling
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 
