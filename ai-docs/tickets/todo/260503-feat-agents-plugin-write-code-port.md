@@ -137,7 +137,54 @@ Success criteria:
 - If delegate commit ownership is reliable, keep the prior-art behavior where
   the implementer commits logical checkpoints.
 
-### Phase 3: Port `write-code` skill draft
+### Result (72a20cb) - 2026-05-03
+
+Verified delegated commit ownership on the synchronous named-agent path. A
+Codex-backed `smoke-implementer` was registered with embedded prompts
+`implementer` and `impl-playbook`, given a single-file test-only task, and
+allowed to create exactly one commit. The delegate added
+`TestResolveWriteCodeImplementerPolicyChain` to
+`agents-plugin-tool/internal/wsprompt/prompts_test.go`, ran
+`go test ./internal/wsprompt`, and committed the change as `72a20cb` with a
+detailed `## AI Context` body.
+
+Lead-side review confirmed that the diff stayed within scope, the commit message
+explained the user intent and verification boundary, `ws/agents.print` and
+`ws/agents.tail` recovered useful output, and session state recorded a reusable
+Codex session id. This supports keeping the prior-art behavior where the
+implementer may commit logical checkpoints.
+
+The same smoke exposed a blocker for the asynchronous path used by `write-code`.
+Two `call_async` attempts, one via `go run` and one via a stable temporary
+binary, reached `call_async.worker_started` and `call.started`, then the worker
+process exited while `current/state.json` and `agent.json` remained `running`
+with empty stdout/stderr/output. `ws/agents.wait` timed out and `ws/agents.status`
+continued to report the dead pid as active. Before porting `write-code`, the
+runtime needs a failure-finalization fix so async worker exits cannot leave
+stale-running agent state.
+
+Validation after the delegate commit covered lead inspection of the commit and
+diff, `go test ./...`, plugin manifest validation, whitespace checks, and cleanup
+of the smoke agent registry entry.
+
+### Phase 3: Async worker failure finalization
+
+Fix the async agent runtime so dead or failed worker processes are reflected in
+current-call state and can be diagnosed by `wait`, `status`, and `tail`.
+
+Success criteria:
+
+- Reproduce the stale-running case with a focused test or local smoke.
+- Ensure worker process exit without `CompleteCurrentCall` marks the current
+  call failed or otherwise non-active.
+- Preserve stdout/stderr capture for backend errors.
+- Make `ws/agents.wait` stop waiting when the recorded worker process is dead.
+- Make `ws/agents.status` and `ws/agents.tail` expose enough failure detail for
+  lead-side diagnosis.
+- Re-run the controlled async implementer smoke enough to prove that failure
+  states close cleanly, even if the delegate task itself fails.
+
+### Phase 4: Port `write-code` skill draft
 
 Create `agents-plugin/skills/write-code/SKILL.md` as a host-neutral port of the
 Claude skill.
@@ -159,7 +206,7 @@ Success criteria:
 - The skill avoids downstream-breaking references to this repository's
   `claude-plugin/` source paths.
 
-### Phase 4: Runtime smoke and documentation closeout
+### Phase 5: Runtime smoke and documentation closeout
 
 Smoke the new `write-code` surface enough to prove that the runtime primitives
 and prompt bundle can support the skill.
