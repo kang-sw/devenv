@@ -106,12 +106,23 @@ sha256_file() {
 }
 
 tools_compatible() {
+  compat_cache=$(mktemp -d "${TMPDIR:-/tmp}/ws-mcp-compat.XXXXXX" 2>/dev/null || printf '%s\n' "$runtime_dir/.compat-$$")
+  compat_root=$compat_cache/root
+  mkdir -p "$compat_root"
+  git -C "$compat_root" init >/dev/null 2>&1 || {
+    rm -rf "$compat_cache"
+    return 1
+  }
   output=$(
     printf '%s\n' \
       '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
       '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
-      "$binary" serve --stdio 2>/dev/null || true
+      WS_CACHE_HOME="$compat_cache" \
+      WS_MCP_TOOL_PROFILE=lead \
+      WS_MCP_ALLOWED_TOOLS= \
+      "$binary" serve --stdio --root "$compat_root" 2>/dev/null || true
   )
+  rm -rf "$compat_cache"
   [ -n "$output" ] || return 1
   for tool in $(runtime_tools); do
     case "$output" in
@@ -303,6 +314,8 @@ if [ ! -x "$binary" ]; then
   install_runtime
 fi
 
+detect_project_root
+
 version=$("$binary" version 2>/dev/null || true)
 if ! version_compatible "$version"; then
   note "replacing incompatible runtime version: ${version:-unknown}"
@@ -341,8 +354,6 @@ if ! prompt_bundle_compatible; then
   commands_compatible || fail "incompatible ws-mcp command surface after prompt-bundle repair"
   prompt_bundle_compatible || fail "incompatible ws-mcp prompt bundle after repair"
 fi
-
-detect_project_root
 
 note "plugin_dir=$plugin_dir"
 note "runtime_dir=$runtime_dir"
