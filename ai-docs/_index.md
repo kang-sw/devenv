@@ -183,6 +183,7 @@ agents-plugin/skills/
   add-rule/        — draft host-neutral persistent rule capture workflow; convention and mental-model catalog via MCP
   ship/            — draft host-neutral release workflow driven by ai-docs/ship config
   exit-session/    — draft host-neutral session handoff workflow for ai-docs/_index.md
+  workflow/        — partial host-neutral session-resident reference for MCP notation and migration boundaries
 ```
 
 ## Canonical Flows

@@ -111,13 +111,13 @@ Covered skills:
 Excluded from this slice:
 
 - `manual-think`
-- `workflow`
 
 Purpose: port useful skills outside the core implementation track before tackling
 heavy delegation. These are mostly direct-execution skills and should not require
-the full orchestration runtime. `workflow` remains deferred because its Claude
-source is a named-agent/PATH primitive reference and the shared delegation
-contract does not exist yet.
+the full orchestration runtime. `workflow` was not bulk-ported from Claude's
+PATH primitive reference; the `agents-plugin` version is a partial
+session-resident notation and migration-boundary reference until the shared
+delegation contract exists.
 
 ### 6. Agent session runtime and delegation contract
 
