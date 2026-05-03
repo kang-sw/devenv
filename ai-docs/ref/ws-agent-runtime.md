@@ -105,7 +105,7 @@ or a future garbage-collection command.
   "system_prompt_path": "system.md",
   "capabilities": {
     "resume": true,
-    "interrupt": true,
+    "interrupt": false,
     "compression": false
   }
 }
@@ -193,6 +193,32 @@ and support `write-skeleton`: `agents.register`, `agents.call`,
 `agents.tail`, and `agents.list` may be implemented when the queue and UI surfaces
 need them.
 
+## CLI Prototype
+
+The Phase 3 prototype exposes the minimum runtime through `ws-mcp agents ...`
+subcommands before publishing MCP `agents.*` tools. This keeps the MCP stdio
+stdout contract isolated while the backend adapter and state files settle.
+The plugin launcher treats these subcommands as part of the runtime command
+surface recorded in `agents-plugin/runtime.json`, so local plugin cache binaries
+are repaired when the CLI surface drifts even if the MCP tool list is unchanged.
+
+Implemented prototype commands:
+
+```text
+ws-mcp agents register --root <repo> --name <name> [--backend codex] [--tier light|core|deep] [--model <model>] [--prompt-ref <logical-name>] [--system-prompt-file <path>]
+ws-mcp agents call --root <repo> --name <name> <prompt>
+ws-mcp agents call --root <repo> --name <name> --prompt-file -
+ws-mcp agents oneshot --root <repo> [--name <temporary-name>] <prompt>
+ws-mcp agents print --root <repo> --name <name>
+ws-mcp agents erase --root <repo> --name <name>
+```
+
+The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
+`events.jsonl` layout described above. It is an implementation proving ground, not
+the final shared skill notation. Shared skill text should still refer to the
+planned MCP tools with `ws/agents.register`, `ws/agents.call`,
+`ws/agents.oneshot`, `ws/agents.print`, and `ws/agents.erase`.
+
 ## Prompt Resolution
 
 Prompt references are logical names, not repository-local file paths. The runtime
@@ -217,6 +243,11 @@ Backends are responsible for:
 
 Plain text is the default caller-facing output. Backend JSON or event streams are
 adapter internals unless a future tool explicitly exposes them.
+
+The Codex CLI prototype starts sessions with `codex exec --json` and resumes them
+with `codex exec resume --json <thread-id>`. `codex exec resume` does not accept
+the same `--cd` option as `codex exec`, so the adapter sets the subprocess working
+directory instead of passing a command-line cwd flag.
 
 ## Required For `write-skeleton`
 

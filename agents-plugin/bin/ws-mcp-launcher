@@ -22,6 +22,11 @@ runtime_tools() {
     sed -n 's/^[[:space:]]*"\(ws\.[^"]*\)"[[:space:]]*:.*/\1/p'
 }
 
+runtime_commands() {
+  sed -n '/^[[:space:]]*"commands"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}/p' "$runtime_contract" |
+    sed -n 's/^[[:space:]]*"\([^"]*\.[^"]*\)"[[:space:]]*:.*/\1/p'
+}
+
 resolve_link() {
   target=$1
   while [ -L "$target" ]; do
@@ -109,6 +114,25 @@ tools_compatible() {
   return 0
 }
 
+commands_compatible() {
+  output=$("$binary" agents 2>&1 || true)
+  [ -n "$output" ] || return 1
+  for command in $(runtime_commands); do
+    group=${command%%.*}
+    subcommand=${command#*.}
+    case "$group" in
+      agents)
+        case "$output" in
+          *"$subcommand"*) ;;
+          *) note "runtime missing required CLI command: $command"; return 1 ;;
+        esac
+        ;;
+      *) note "unknown required CLI command group: $group"; return 1 ;;
+    esac
+  done
+  return 0
+}
+
 download_runtime() {
   [ -n "$release_base_url" ] || fail "missing runtime binary for $platform; set WS_MCP_BOOTSTRAP_BINARY, WS_MCP_BOOTSTRAP_URL, or release_repository/release_tag in runtime.json"
   command -v curl >/dev/null 2>&1 || fail "curl is required to download $release_base_url/$asset"
@@ -146,7 +170,7 @@ install_local_devenv_runtime() {
     if [ -x "$candidate" ]; then
       cp "$candidate" "$binary"
       chmod 755 "$binary"
-      if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible; then
+      if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible; then
         note "installed local devenv runtime from $candidate"
         return 0
       fi
@@ -160,7 +184,7 @@ install_local_devenv_runtime() {
       go build -o "$binary" ./cmd/ws-mcp
     ) || return 1
     chmod 755 "$binary"
-    if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible; then
+    if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible; then
       note "built local devenv runtime from $HOME/devenv/agents-plugin-tool"
       return 0
     fi
@@ -217,6 +241,16 @@ if ! tools_compatible; then
   version=$("$binary" version 2>/dev/null || true)
   version_compatible "$version" || fail "incompatible ws-mcp version after tool-surface repair: ${version:-unknown}"
   tools_compatible || fail "incompatible ws-mcp tool surface after repair"
+fi
+
+if ! commands_compatible; then
+  note "replacing runtime with incompatible CLI command surface"
+  rm -f "$binary"
+  install_runtime
+  version=$("$binary" version 2>/dev/null || true)
+  version_compatible "$version" || fail "incompatible ws-mcp version after command-surface repair: ${version:-unknown}"
+  tools_compatible || fail "incompatible ws-mcp tool surface after command-surface repair"
+  commands_compatible || fail "incompatible ws-mcp command surface after repair"
 fi
 
 note "plugin_dir=$plugin_dir"

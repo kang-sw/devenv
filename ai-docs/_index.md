@@ -107,7 +107,9 @@ Go MCP/tooling baseline:
 agents-plugin-tool/
   cmd/ws-mcp/       — `ws-mcp` command; stdio MCP server plus version/doctor commands
   internal/mcp/     — minimal JSON-RPC/MCP stdio loop
+  internal/wsagent/ — host-neutral agent registry/session prototype used by `ws-mcp agents`
   internal/wsdoc/   — project document helper logic used by MCP tools
+  internal/wsstate/ — cache-root project/worktree path manager for workflow state
 ```
 
 Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
@@ -116,6 +118,16 @@ Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
 `ws.mental_models.list`. Shared `agents-plugin` skills assume MCP availability
 and should not reference repo-local `claude-plugin/infra/*` paths; convention
 text is bundled into the runtime and read through `ws.convention.read`.
+
+Agent runtime prototype: `ai-docs/ref/ws-agent-runtime.md`. `ws-mcp agents`
+currently exposes CLI-only `register`, `call`, `oneshot`, `print`, and `erase`
+subcommands backed by `internal/wsagent`. The Codex backend stores thread ids in
+`agent.json`, resumes with `codex exec resume --json <thread-id>`, and persists
+plain-text output in `output.md`. MCP `agents.*` tools are still planned and
+should wrap this internal package later; shared skill text should use
+`ws/agents.*` notation rather than the CLI command names. `runtime.json` records
+this CLI command surface so the plugin launcher can repair stale local cache
+binaries even when the MCP tool list has not changed.
 
 Codex launcher POC status: `agents-plugin` now contains plugin-local `.mcp.json`,
 `runtime.json`, and `bin/ws-mcp-launcher`. Host-free launcher smoke, temporary

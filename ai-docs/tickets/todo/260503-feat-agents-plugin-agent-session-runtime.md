@@ -167,7 +167,7 @@ Success criteria:
 - The contract identifies which capabilities are required for `write-skeleton`
   and which can wait for core orchestration skills.
 
-### Result (pending) - 2026-05-03
+### Result (93fccb6) - 2026-05-03
 
 Added `ai-docs/ref/ws-agent-runtime.md` as the host-neutral session contract for
 future agent orchestration work. The document extracts the reusable pattern from
@@ -218,6 +218,50 @@ Success criteria:
 - A one-shot delegate call creates no persistent registry entry after cleanup.
 - Failure diagnostics go to stderr and do not corrupt any future MCP stdout
   contract.
+
+### Result (pending) - 2026-05-03
+
+Added `agents-plugin-tool/internal/wsagent` and a `ws-mcp agents ...` CLI
+prototype for the minimum durable session subset. The implementation creates
+worktree-local agent directories on top of the Phase 1 `wsstate` path manager,
+stores `agent.json` registry metadata, writes optional materialized `system.md`
+prompts, appends `events.jsonl`, persists the latest plain-text response in
+`output.md`, and erases temporary agent directories explicitly.
+
+The prototype supports:
+
+- `ws-mcp agents register`
+- `ws-mcp agents call`
+- `ws-mcp agents oneshot`
+- `ws-mcp agents print`
+- `ws-mcp agents erase`
+
+The Codex backend starts sessions with `codex exec --json` and resumes them with
+`codex exec resume --json <thread-id>`, parsing `thread.started.thread_id` and
+the last `agent_message` from JSONL stdout. A local smoke found that
+`codex exec resume` does not accept `--cd`, so the adapter sets the subprocess
+working directory instead of relying on a command-line cwd flag.
+
+This phase deliberately does not publish MCP `agents.*` tools yet. Keeping the
+first prototype as a CLI surface avoids accidental stdout contamination in
+`serve --stdio` while the backend adapter and state files are still being tested.
+Because the plugin launcher previously checked only MCP `tools/list`, this phase
+also records the CLI command surface in `agents-plugin/runtime.json` and teaches
+the launcher to repair stale cache-local binaries when `ws-mcp agents` subcommands
+are missing.
+
+Verification:
+
+- `go test ./...` from `agents-plugin-tool/`
+- local Codex CLI smoke: register → call → resume call → print → erase with an
+  isolated `WS_CACHE_HOME`
+- local Codex CLI oneshot smoke with an isolated `WS_CACHE_HOME`
+- `scripts/smoke-ws-mcp.sh ..` from `agents-plugin-tool/`
+- `sh -n agents-plugin/bin/ws-mcp-launcher`
+- `jq . agents-plugin/runtime.json`
+- launcher smoke with a temporary `WS_MCP_RUNTIME_DIR`
+- `claude plugin validate agents-plugin`
+- `git diff --check`
 
 ### Phase 4: First consumer skill
 
