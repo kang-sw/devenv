@@ -408,6 +408,44 @@ Behavior:
 - The delegate is instructed to answer one scoped question with cited English
   output, assumptions when inferred, and searched gaps when evidence is missing.
 
+### `ws/path.generate`
+
+Allocate worktree-scoped writable paths for file-backed workflow artifacts.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    },
+    "kind": {
+      "type": "string",
+      "description": "Generated path kind. Initially supports review."
+    },
+    "stems": {
+      "type": "array",
+      "description": "Logical file stems to allocate in stable order.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["kind", "stems"]
+}
+```
+
+Behavior:
+
+- Initial supported kind is `review`.
+- Review paths are allocated under the worktree-local `review-paths/` state
+  directory.
+- Stems are sanitized before path use.
+- Returned paths are reserved as empty writable files and preserve input order.
+
 ### `ws/agents.call_async`
 
 Start an asynchronous call for a registered ws agent and return immediately.
@@ -521,7 +559,7 @@ The following behavior is intentionally out of scope for the first MCP contract:
 - branch management, merge helpers, release helpers, and ship automation
 - advanced agent operations beyond the current subquery and register/call/
   call_async/wait/status/tail/cancel/oneshot/print/erase prototype, including
-  list, interrupts, runtime locks, review-path allocation, and message queues
+  list, interrupts, runtime locks, and message queues
 
 These operations have workflow semantics beyond file access. They should be
 designed only after the read surfaces and plugin-managed MCP distribution path are

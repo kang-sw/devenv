@@ -93,6 +93,22 @@ Success criteria:
 - `agents-plugin/skills/workflow` marks generated workflow path allocation as
   available after the primitive lands.
 
+### Result (pending) - 2026-05-03
+
+Implemented generated workflow path allocation as MCP tool `ws/path.generate`
+and CLI fallback `ws-mcp path generate`. The first supported kind is `review`,
+which maps to the worktree-local `review-paths/` directory managed by
+`wsstate`. Each allocation accepts one or more stems, sanitizes them, preserves
+input order, reserves empty writable `.md` files, and adds a timestamp plus
+random run id so repeated and concurrent allocations do not reuse paths.
+
+Updated runtime metadata, MCP tool listing, CLI smoke, workflow skill
+availability text, and ws MCP/runtime references. Tests cover review path
+allocation, stem sanitization, unsupported kind errors, missing stem errors,
+multi-path stable ordering, uniqueness, and worktree scoping. Validation covered
+Go tests, MCP smoke, plugin validation, runtime JSON parsing, shell syntax, and
+whitespace checks.
+
 ### Phase 2: Reviewer prompt materialization
 
 Decide how `edit` should provide reviewer instructions in the first host-neutral

@@ -11,6 +11,7 @@ import (
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 var version = "0.1.0-dev"
@@ -30,6 +31,8 @@ func main() {
 		serve(os.Args[2:])
 	case "subquery":
 		subquery(os.Args[2:])
+	case "path":
+		path(os.Args[2:])
 	case "agents":
 		agents(os.Args[2:])
 	default:
@@ -39,7 +42,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|serve|subquery|agents>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|serve|subquery|path|agents>")
 }
 
 func doctor(args []string) {
@@ -94,6 +97,39 @@ func subquery(args []string) {
 		fatal("subquery", err)
 	}
 	fmt.Print(text)
+}
+
+func path(args []string) {
+	if len(args) < 1 {
+		pathUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "generate":
+		pathGenerate(args[1:])
+	default:
+		pathUsage()
+		os.Exit(2)
+	}
+}
+
+func pathUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp path <generate>")
+}
+
+func pathGenerate(args []string) {
+	fs := flag.NewFlagSet("path generate", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	kind := fs.String("kind", "review", "generated path kind")
+	_ = fs.Parse(args)
+
+	paths, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(defaultRoot(*root), *kind, fs.Args())
+	if err != nil {
+		fatal("path generate", err)
+	}
+	for _, path := range paths {
+		fmt.Println(path.Path)
+	}
 }
 
 func agents(args []string) {

@@ -232,6 +232,7 @@ MCP tools use server `ws` and the following tool names:
 - `agents.cancel` — best-effort terminate the active worker pid and mark the current call cancelled. Implemented.
 - `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
+- `path.generate` — allocate worktree-scoped writable workflow artifact paths. Implemented for `kind: "review"`.
 
 ## CLI Prototype
 
@@ -258,13 +259,15 @@ ws-mcp agents cancel --root <repo> --name <name>
 ws-mcp agents oneshot --root <repo> [--name <temporary-name>] <prompt>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
+ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
 ```
 
 The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 `events.jsonl` layout described above. Shared skill text should prefer the MCP
 tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.call_async`,
 `ws/agents.wait`, `ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`,
-`ws/agents.oneshot`, `ws/agents.print`, and `ws/agents.erase`.
+`ws/agents.oneshot`, `ws/agents.print`, `ws/agents.erase`, and
+`ws/path.generate`.
 
 `agents.call_async` writes the prompt snapshot to `current/prompt.md`, starts an
 internal `agents run-current` worker process, records the worker pid in

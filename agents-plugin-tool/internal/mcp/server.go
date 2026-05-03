@@ -12,6 +12,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 type Server struct {
@@ -157,6 +158,21 @@ func (s *Server) callTool(req request) response {
 			DeepResearch: deepResearch,
 		})
 		return toolTextResponse(req.ID, text, err)
+	case "path.generate":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		kind, _ := params.Arguments["kind"].(string)
+		generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(root, kind, stringList(params.Arguments["stems"]))
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		text := ""
+		for _, path := range generated {
+			text += path.Path + "\n"
+		}
+		return toolTextResponse(req.ID, text, nil)
 	case "agents.register":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -410,6 +426,19 @@ func tools() []map[string]any {
 					"deep_research": boolProperty("Use deep workload tier for broad tracing or research."),
 				},
 				"required": []string{"question"},
+			},
+		},
+		{
+			"name":        "path.generate",
+			"description": "Generate worktree-scoped writable paths for workflow artifacts.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":  stringProperty("Repository root. Defaults to the server root."),
+					"kind":  stringProperty("Generated path kind. Initially supports review."),
+					"stems": stringArrayProperty("Logical file stems to allocate in stable order."),
+				},
+				"required": []string{"kind", "stems"},
 			},
 		},
 		{
