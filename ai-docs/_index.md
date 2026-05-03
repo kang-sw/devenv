@@ -196,10 +196,12 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260426-feat-claude-dash` | done | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; all 4 phases complete |
 | `260502-feat-agents-plugin-codex-port-scaffold` | done | `agents-plugin/` Codex-first `ws` candidate scaffold — Codex marketplace/install verified, Claude manifest validation passes, broad skill porting deferred |
 | `260502-feat-agents-plugin-workflow-skill-drafts` | done | Harden `skill-authoring`; add draft host-neutral `write-ticket` and `discuss` skills with helper/MCP runtime reconstruction deferred |
+| `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
 
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
+`260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child should define Codex runtime/MCP boundary
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 
