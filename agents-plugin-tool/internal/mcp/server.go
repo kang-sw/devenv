@@ -141,6 +141,22 @@ func (s *Server) callTool(req request) response {
 		}
 		text, err := wsdoc.MentalModelsList(root)
 		return toolTextResponse(req.ID, text, err)
+	case "subquery":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		question, _ := params.Arguments["question"].(string)
+		if question == "" {
+			question, _ = params.Arguments["prompt"].(string)
+		}
+		deepResearch, _ := params.Arguments["deep_research"].(bool)
+		text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
+			Root:         root,
+			Question:     question,
+			DeepResearch: deepResearch,
+		})
+		return toolTextResponse(req.ID, text, err)
 	case "agents.register":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -384,6 +400,19 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "subquery",
+			"description": "Run a scoped one-turn codebase or documentation query through a temporary ws delegate.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":          stringProperty("Repository root. Defaults to the server root."),
+					"question":      stringProperty("Scoped question to answer."),
+					"deep_research": boolProperty("Use deep workload tier for broad tracing or research."),
+				},
+				"required": []string{"question"},
+			},
+		},
+		{
 			"name":        "agents.register",
 			"description": "Register a durable ws agent session for the current worktree.",
 			"inputSchema": map[string]any{
@@ -563,6 +592,13 @@ func numberProperty(description string) map[string]string {
 func integerProperty(description string) map[string]string {
 	return map[string]string{
 		"type":        "integer",
+		"description": description,
+	}
+}
+
+func boolProperty(description string) map[string]string {
+	return map[string]string{
+		"type":        "boolean",
 		"description": description,
 	}
 }

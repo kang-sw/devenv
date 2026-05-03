@@ -301,3 +301,40 @@ and `deep` for broad tracing or research.
 just a one-shot helper. It needs pre-routing, persistent per-domain agents,
 stale-check/fetch behavior, and lock semantics before it can be represented as a
 stable shared workflow contract.
+
+### Phase 5: Subquery MCP correction
+
+Correct the subquery porting surface. The prior Claude behavior was a separate
+`ws-subquery` CLI helper backed by oneshot delegation, not a user-facing workflow
+skill. The host-neutral port should therefore be an MCP tool and CLI fallback,
+not `agents-plugin/skills/subquery`.
+
+Success criteria:
+
+- Remove the mistaken `agents-plugin/skills/subquery` skill.
+- Add MCP tool `ws/subquery` that composes over `ws/agents.oneshot`.
+- Add CLI fallback `ws-mcp subquery`.
+- Preserve the prior `--deep-research` behavior as a workload-tier switch.
+- Keep `ask-api` deferred as a distinct specialized workflow.
+
+### Result (pending) - 2026-05-03
+
+Corrected the subquery surface from a user-facing skill to a runtime primitive.
+The mistaken `agents-plugin/skills/subquery` skill was removed. The runtime now
+exposes MCP tool `ws/subquery` and CLI fallback `ws-mcp subquery`, both composed
+over the existing `ws/agents.oneshot` path with a runtime-owned subquery system
+prompt.
+
+The old `ws-subquery --deep-research` option is represented as
+`deep_research: true` in MCP and `--deep-research` in the CLI, mapping to the
+shared `deep` workload tier. The default path uses the `light` tier. Workflow
+documentation now names `ws/subquery` as the available composition and keeps
+`ask-api` deferred because it still needs pre-routing, persistent per-domain
+agents, stale checks, fetch behavior, and locks.
+
+Validation covered Go unit tests, MCP `tools/list`, launcher surface detection,
+runtime metadata, plugin validation, and whitespace checks. A real Codex-backed
+`ws-mcp subquery` smoke was attempted with a fresh local binary, but it hung for
+over 90 seconds and was killed; this matches the current instability observed
+around direct Codex-backed oneshot calls and should be revisited with the
+oneshot backend path rather than treated as a subquery API-shape failure.

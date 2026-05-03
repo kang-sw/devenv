@@ -28,6 +28,8 @@ func main() {
 		doctor(os.Args[2:])
 	case "serve":
 		serve(os.Args[2:])
+	case "subquery":
+		subquery(os.Args[2:])
 	case "agents":
 		agents(os.Args[2:])
 	default:
@@ -37,7 +39,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|serve|agents>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|serve|subquery|agents>")
 }
 
 func doctor(args []string) {
@@ -70,6 +72,28 @@ func serve(args []string) {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func subquery(args []string) {
+	fs := flag.NewFlagSet("subquery", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	deepResearch := fs.Bool("deep-research", false, "use deep workload tier for broad tracing or research")
+	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
+	_ = fs.Parse(args)
+
+	prompt, err := promptFromArgs(fs.Args(), *promptFile)
+	if err != nil {
+		fatal("subquery", err)
+	}
+	text, err := wsagent.NewManager(wsagent.Options{}).Subquery(wsagent.SubqueryOptions{
+		Root:         defaultRoot(*root),
+		Question:     prompt,
+		DeepResearch: *deepResearch,
+	})
+	if err != nil {
+		fatal("subquery", err)
+	}
+	fmt.Print(text)
 }
 
 func agents(args []string) {

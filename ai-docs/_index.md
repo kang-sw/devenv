@@ -115,9 +115,10 @@ agents-plugin-tool/
 Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
 `ws/project_tree`, `ws/infra.read`, `ws/convention.read`,
 `ws/spec_stem.generate`, `ws/spec_index.verify`, and
-`ws/mental_models.list`. Shared `agents-plugin` skills assume MCP availability
-and should not reference repo-local `claude-plugin/infra/*` paths; convention
-text is bundled into the runtime and read through `ws/convention.read`.
+`ws/mental_models.list`, plus scoped delegate helper `ws/subquery`. Shared
+`agents-plugin` skills assume MCP availability and should not reference
+repo-local `claude-plugin/infra/*` paths; convention text is bundled into the
+runtime and read through `ws/convention.read`.
 
 Agent runtime prototype: `ai-docs/ref/ws-agent-runtime.md`. `ws-mcp` exposes
 minimum MCP tools `ws/agents.register`, `ws/agents.call`,
@@ -207,7 +208,6 @@ agents-plugin/skills/
   exit-session/    — draft host-neutral session handoff workflow for ai-docs/_index.md
   workflow/        — host-neutral session-resident reference for MCP notation and orchestration primitive boundaries
   write-skeleton/  — draft host-neutral skeleton workflow using ws/agents.* delegate sessions
-  subquery/        — scoped one-turn fact-finding workflow using ws/agents.oneshot
 ```
 
 ## Canonical Flows

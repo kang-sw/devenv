@@ -41,6 +41,7 @@ Supported local commands:
 ws-mcp version
 ws-mcp doctor --root <repo-root>
 ws-mcp serve --stdio --root <repo-root>
+ws-mcp subquery --root <repo-root> [--deep-research] <question>
 ```
 
 `doctor` is a host-independent smoke check. In this repository it verifies the
@@ -370,6 +371,43 @@ Output:
 
 - MCP text content containing a compact `mental-models:` catalog.
 
+### `ws/subquery`
+
+Run a scoped one-turn codebase or documentation query through a temporary ws
+delegate.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    },
+    "question": {
+      "type": "string",
+      "description": "Scoped question to answer."
+    },
+    "deep_research": {
+      "type": "boolean",
+      "description": "Use deep workload tier for broad tracing or research."
+    }
+  },
+  "required": ["question"]
+}
+```
+
+Behavior:
+
+- The tool is the MCP replacement for the old `ws-subquery` CLI.
+- It composes over `agents.oneshot`; no named agent session persists.
+- Default workload tier is `light`; `deep_research: true` uses `deep`.
+- The system prompt is runtime-owned and self-contained.
+- The delegate is instructed to answer one scoped question with cited English
+  output, assumptions when inferred, and searched gaps when evidence is missing.
+
 ### `ws/agents.call_async`
 
 Start an asynchronous call for a registered ws agent and return immediately.
@@ -481,9 +519,9 @@ The following behavior is intentionally out of scope for the first MCP contract:
 - mutating spec indexes beyond verification
 - writing mental-model updates
 - branch management, merge helpers, release helpers, and ship automation
-- advanced agent operations beyond the current register/call/call_async/wait/
-  status/tail/cancel/oneshot/print/erase prototype, including list, interrupts,
-  runtime locks, review-path allocation, and message queues
+- advanced agent operations beyond the current subquery and register/call/
+  call_async/wait/status/tail/cancel/oneshot/print/erase prototype, including
+  list, interrupts, runtime locks, review-path allocation, and message queues
 
 These operations have workflow semantics beyond file access. They should be
 designed only after the read surfaces and plugin-managed MCP distribution path are

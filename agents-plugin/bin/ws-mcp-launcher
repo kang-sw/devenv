@@ -116,19 +116,26 @@ tools_compatible() {
 }
 
 commands_compatible() {
-  output=$("$binary" agents 2>&1 || true)
-  [ -n "$output" ] || return 1
   for command in $(runtime_commands); do
-    group=${command%%.*}
-    subcommand=${command#*.}
-    case "$group" in
-      agents)
+    case "$command" in
+      *.*)
+        group=${command%%.*}
+        subcommand=${command#*.}
+        output=$("$binary" "$group" 2>&1 || true)
+        [ -n "$output" ] || return 1
         case "$output" in
           *"$subcommand"*) ;;
           *) note "runtime missing required CLI command: $command"; return 1 ;;
         esac
         ;;
-      *) note "unknown required CLI command group: $group"; return 1 ;;
+      *)
+        output=$("$binary" 2>&1 || true)
+        [ -n "$output" ] || return 1
+        case "$output" in
+          *"$command"*) ;;
+          *) note "runtime missing required CLI command: $command"; return 1 ;;
+        esac
+        ;;
     esac
   done
   return 0

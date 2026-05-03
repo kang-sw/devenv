@@ -46,6 +46,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(lines[1], "agents.call_async") {
 		t.Fatalf("tools/list missing agents.call_async: %s", lines[1])
 	}
+	if !strings.Contains(lines[1], "subquery") {
+		t.Fatalf("tools/list missing subquery: %s", lines[1])
+	}
 	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.cancel"} {
 		if !strings.Contains(lines[1], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, lines[1])

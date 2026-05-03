@@ -519,6 +519,35 @@ func TestOneShotErasesAgentDirectory(t *testing.T) {
 	}
 }
 
+func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	runner := &fakeRunner{}
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    runner,
+	})
+
+	text, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Where is workflow?"})
+	if err != nil {
+		t.Fatalf("Subquery returned error: %v", err)
+	}
+	if text != "reply: Where is workflow?\n" {
+		t.Fatalf("subquery text = %q", text)
+	}
+	if len(runner.calls) != 1 || !strings.Contains(runner.calls[0].SystemPromptPath, "system.md") {
+		t.Fatalf("subquery runner call mismatch: %+v", runner.calls)
+	}
+
+	if _, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Trace history", DeepResearch: true}); err != nil {
+		t.Fatalf("deep Subquery returned error: %v", err)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("runner calls = %d", len(runner.calls))
+	}
+}
+
 func TestParseCodexJSONL(t *testing.T) {
 	raw := []byte(strings.Join([]string{
 		`{"type":"thread.started","thread_id":"019test"}`,

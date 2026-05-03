@@ -42,7 +42,7 @@ Examples:
 ### judge: primitive-availability
 
 Use MCP tools only when they are available in the current `ws` runtime. The
-minimum agent session tools `ws/agents.register`, `ws/agents.call`,
+minimum delegate tools `ws/subquery`, `ws/agents.register`, `ws/agents.call`,
 `ws/agents.call_async`, `ws/agents.oneshot`, `ws/agents.print`, and
 `ws/agents.erase` are available. The async inspection tools `ws/agents.wait`,
 `ws/agents.status`, `ws/agents.tail`, and `ws/agents.cancel` are available for
@@ -66,11 +66,11 @@ current task is more valuable than preserving backend continuity.
 
 ### judge: specialized-workflow-gap
 
-Treat `ws:subquery` as an available composition over `ws/agents.oneshot`. Treat
-API documentation routing as planned until the runtime provides the pre-router,
-domain agent, stale-check, fetch, and lock contracts. Treat interrupts, active
-agent listing, review-path allocation, message queues, and runtime locks as
-planned even though basic async cancellation is available.
+Treat `ws/subquery` as an available MCP tool composed over `ws/agents.oneshot`.
+Treat API documentation routing as planned until the runtime provides the
+pre-router, domain agent, stale-check, fetch, and lock contracts. Treat
+interrupts, active agent listing, review-path allocation, message queues, and
+runtime locks as planned even though basic async cancellation is available.
 
 ## Templates
 

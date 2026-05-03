@@ -112,6 +112,12 @@ type OneShotOptions struct {
 	Prompt           string
 }
 
+type SubqueryOptions struct {
+	Root         string
+	Question     string
+	DeepResearch bool
+}
+
 type SelfWorkerStarter struct{}
 
 func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
@@ -552,6 +558,20 @@ func (m Manager) OneShot(opts OneShotOptions) (string, error) {
 		return "", callErr
 	}
 	return text, eraseErr
+}
+
+func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
+	tier := "light"
+	if opts.DeepResearch {
+		tier = "deep"
+	}
+	return m.OneShot(OneShotOptions{
+		Root:             opts.Root,
+		Backend:          "codex",
+		Tier:             tier,
+		SystemPromptText: SubquerySystemPrompt,
+		Prompt:           opts.Question,
+	})
 }
 
 func (m Manager) Print(root, name string) (string, error) {
