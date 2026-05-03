@@ -27,18 +27,26 @@ asynchronous inside the retained `ws-mcp` runtime.
 ## Decisions
 
 - Keep `ws.agents.call` synchronous for compatibility and short delegate turns.
-- Add `ws.agents.call_async` for asynchronous delegate calls that return a
-  `run_id` immediately.
+- Treat each named agent as a task-scoped session. Creating/registering the same
+  name for a new task should reset the previous conversation state rather than
+  imply a permanent worker identity.
+- Add `ws.agents.call_async` for asynchronous delegate calls that return
+  immediately with the agent name and current status. Do not require callers to
+  track a public run handle for the normal case.
 - Use `call_async` rather than `start`, `post`, `submit`, or `dispatch` because
   it preserves the semantic relationship to `call` and gives models the clearest
   tool-selection signal.
-- Add `ws.agents.wait` to block until an async run completes, with timeout
-  support.
+- Add `ws.agents.wait` to block until the named agent's current async call
+  completes, with timeout support.
 - Add `ws.agents.status` and `ws.agents.tail` so the lead can inspect running
   delegates without waiting for final output.
 - Add `ws.agents.cancel` before core implementation skills rely on long-running
   async calls.
-- Persist run state to disk; do not rely only on in-memory process handles.
+- Allow only one active async call per named agent. A second async call against
+  the same agent should fail with an explicit busy status unless the caller
+  cancels or resets the agent first.
+- Persist current-call state to disk; do not rely only on in-memory process
+  handles.
 
 ## Constraints
 
@@ -48,6 +56,9 @@ asynchronous inside the retained `ws-mcp` runtime.
 - `ws.agents.call_async` must not write non-MCP diagnostics to stdout.
 - `ws.agents.wait` must support bounded waits so skills can avoid unbounded host
   turns.
+- Public async operations should be keyed by agent name. Internal execution ids,
+  sequence numbers, or state file names may exist for crash recovery, but they
+  should not become the primary user-facing contract.
 - The async layer must reuse the existing `wsstate` and `wsagent` path managers.
 - The initial implementation may target Codex backend only, but schemas should
   leave room for Claude and future backends.
@@ -64,59 +75,75 @@ slice:
 - long-running orchestration needs cancellation and status visibility
 - compression is backend-specific and should not block the basic async contract
 
+Claude `ws-oneshot-agent` is only a routing composition: create a temporary named
+agent, call it once, then erase it. The MCP `ws.agents.oneshot` surface should
+keep that composition semantics rather than introduce a separate session model.
+
+The API documentation workflow is more nuanced and should not be collapsed into
+pure oneshot behavior. `ws-ask-api` uses a oneshot pre-router to select domains,
+then delegates each domain query to a persistent, lock-protected
+`api-doc-<domain>` named agent through `ws-ask-api-internal`. Future API-doc MCP
+work should preserve that split: ephemeral routing for domain selection,
+persistent per-domain sessions for cached documentation management.
+
 The current Go runtime already stores `agent.json`, `output.md`, and
 `events.jsonl` under the worktree-local state directory. This ticket should add a
-run-level state layer under each agent directory.
+current-call state layer under each agent directory.
 
 ## Phases
 
-### Phase 1: Run state model
+### Phase 1: Current call state model
 
-Add run-level state under each agent directory.
+Add current async-call state under each agent directory. The public API should be
+agent-name keyed, while the file format may keep an internal sequence or
+execution id for diagnostics and recovery.
 
 Suggested layout:
 
 ```text
 agents/<agent-name>/
-  runs/
-    <run-id>.json
-    <run-id>.stdout
-    <run-id>.stderr
+  current/
+    state.json
+    stdout
+    stderr
 ```
 
-`run.json` should include at least:
+`state.json` should include at least:
 
 - `schema_version`
-- `run_id`
 - `agent_name`
+- internal `call_seq` or `execution_id` when useful for diagnostics
 - `status`: `queued`, `running`, `completed`, `failed`, or `cancelled`
 - `pid` when a local process is active
 - `started_at`, `updated_at`, `finished_at`
 - `prompt_path` or prompt snapshot metadata
-- `stdout_path`, `stderr_path`
+- `stdout_path` and `stderr_path`
 - `exit_code`
 - `session_id` after completion
 - `error` when failed
 
 Success criteria:
 
-- Unit tests cover run id generation, state persistence, status transitions, and
-  recovery from existing run files.
+- Unit tests cover state persistence, status transitions, busy-agent rejection,
+  reset behavior, and recovery from existing current-call files.
 - Existing synchronous `ws.agents.call` behavior remains unchanged.
 
 ### Phase 2: Async process execution
 
 Implement `ws.agents.call_async` by launching the backend call in a child process
-or goroutine-managed subprocess and returning `run_id` immediately.
+or goroutine-managed subprocess and returning immediately with the agent name and
+status.
 
 Success criteria:
 
 - `call_async` returns before the backend finishes.
+- A second `call_async` against an already-running agent fails with a clear busy
+  response.
 - Backend stdout/stderr are captured to run files.
 - Completion updates the agent `session_id`, `output.md`, `events.jsonl`, and
-  run status.
-- Failure marks the run failed and preserves diagnostics without corrupting MCP
-  stdout.
+  current-call status.
+- Failure marks the current call failed and preserves diagnostics without
+  corrupting MCP stdout.
 
 ### Phase 3: Wait, status, tail, and cancel tools
 
@@ -129,10 +156,11 @@ Expose the operational async surfaces:
 
 Success criteria:
 
-- `wait` returns final text for completed runs and supports timeout.
+- `wait` returns final text for the named agent's completed current call and
+  supports timeout.
 - `status` returns structured status text suitable for skill decisions.
 - `tail` returns recent event/output/stderr snippets without invoking a backend.
-- `cancel` terminates an active process when possible and marks the run
+- `cancel` terminates an active process when possible and marks the current call
   cancelled.
 - Process restart recovery is documented: which operations remain available and
   which require the process handle to still exist.
