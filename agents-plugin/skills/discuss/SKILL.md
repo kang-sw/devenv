@@ -15,6 +15,7 @@ description: Explore a workflow design, migration direction, ticket scope, or im
 - Use ws MCP tools when the discussion needs project memory or convention text.
 - Keep all AI-authored captured artifacts in English.
 - Do not read convention files from host-local plugin source paths.
+- Do not declare design closure while top-level design domains remain open.
 
 ## On: Start Discussion
 
@@ -25,6 +26,21 @@ description: Explore a workflow design, migration direction, ticket scope, or im
 5. Ask at most one blocking question when the boundary cannot be inferred safely.
 6. Enter the discussion loop.
 
+## On: Design Discuss
+
+Use this handler when the topic concerns workflow semantics, interface naming,
+runtime behavior, migration policy, failure handling, or caller-visible
+contracts.
+
+1. Apply `judge: design-domains` and create a top-level checklist.
+2. Mark each domain as `open`, `closed`, `delegated-detail`, `blocked`, or `irrelevant`.
+3. Question `open` domains actively with concrete alternatives and trade-offs.
+4. When a domain is too broad, split it into subdomains and repeat this handler.
+5. When the user delegates implementation detail, mark only that subdomain `delegated-detail`.
+6. After each answer, update the checklist before asking the next question.
+7. Ask one to five high-leverage questions per turn; prefer fewer when questions are difficult.
+8. Do not move to capture or implementation until `judge: design-closure` is not `open`.
+
 ## On: Discussion Loop
 
 1. Restate the current decision in one or two sentences when the thread shifts.
@@ -32,8 +48,9 @@ description: Explore a workflow design, migration direction, ticket scope, or im
 3. Mark assumptions, verification gaps, and compatibility risks explicitly.
 4. Separate settled decisions from candidates and rejected alternatives.
 5. When a claim depends on code or docs not yet read, inspect the artifact or label the claim as unverified.
-6. When the user converges on a direction, summarize the capture target with `judge: capture-target`.
-7. Continue until the user asks to implement, write a ticket, update docs, or stop.
+6. Use `On: Design Discuss` before closure when the topic is a design discussion.
+7. When the user converges on a direction, summarize the capture target with `judge: capture-target`.
+8. Continue until the user asks to implement, write a ticket, update docs, or stop.
 
 ## On: Capture Outcome
 
@@ -59,6 +76,18 @@ Create or edit an artifact only when the discussion produced a durable decision,
 
 If an option requires named agents, hooks, or host-specific plugin behavior that is not part of the ws MCP contract, mark it as adapter work and keep it out of shared behavior.
 
+### judge: design-domains
+
+Start with these top-level domains and drop irrelevant ones: interface and naming; state and lifecycle; failure and recovery; compatibility and migration; security and permissions; host and platform variance; testing and verification; rollout and deprecation; documentation and ticket/spec impact; user ergonomics.
+
+### judge: design-closure
+
+Return `open` while any relevant top-level domain is unresolved. Return `closed` when all relevant domains are decided. Return `delegated-detail` only for domains the user explicitly delegates to implementation judgment. Return `blocked` for domains that need external verification before closure.
+
+### judge: question-pressure
+
+Ask aggressively when an unresolved domain changes user-facing behavior, workflow safety, or migration cost. Offer delegation when a domain is internal implementation detail. Stop questioning when the remaining domains are all `closed`, `delegated-detail`, `blocked`, or `irrelevant`.
+
 ## Templates
 
 ### Decision Summary
@@ -69,6 +98,25 @@ Rationale: <why this direction won>
 Rejected: <important alternatives and why they were rejected>
 Risks: <unresolved verification or compatibility risks>
 Next: <ticket, spec, implementation, or no artifact>
+```
+
+### Design Closure Checklist
+
+```markdown
+Design closure:
+- Interface and naming: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- State and lifecycle: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- Failure and recovery: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- Compatibility and migration: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- Security and permissions: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- Host and platform variance: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- Testing and verification: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- Rollout and deprecation: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- Documentation and ticket/spec impact: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+- User ergonomics: <open|closed|delegated-detail|blocked|irrelevant> - <note>
+
+Questions:
+- <question tied to one open domain>
 ```
 
 ## Doctrine
