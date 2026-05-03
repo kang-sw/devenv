@@ -41,6 +41,12 @@ agents, plugin packaging, helper commands, and development environment templates
 Domain specs, tickets, and mental models in this repository describe the
 workflow system itself. Do not add downstream application-domain material here.
 
+Keep root-level workflow migration artifacts grouped by deliverable. During the
+Agents/Codex migration, `agents-plugin/` is the plugin distribution candidate and
+`agents-plugin-tool/` is the companion native tooling/MCP source tree. Do not add
+loose root-level `cmd/`, `internal/`, `scripts/`, or language module files for
+this migration unless a ticket explicitly changes the repository layout.
+
 ## Documentation System
 
 Use these locations as the current document system:

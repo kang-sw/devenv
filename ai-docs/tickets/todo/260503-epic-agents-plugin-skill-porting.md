@@ -66,7 +66,7 @@ deferring helper execution and MCP reconstruction.
 
 Next child ticket:
 
-- Planned: `feat-agents-plugin-runtime-boundary`
+- `260503-feat-agents-plugin-runtime-boundary`
 
 Purpose: decide what `agents-plugin` skills perform directly, what MCP
 tools/resources/prompts must provide, and what remains as CLI fallback behavior.

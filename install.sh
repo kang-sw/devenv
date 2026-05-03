@@ -167,6 +167,7 @@ else
   brew_install lazygit
   brew_install node
   brew_install python3
+  brew_install go
 
   # ══════════════════════════════════════════════════════════════════════════════
   # 6. Quality-of-life extras

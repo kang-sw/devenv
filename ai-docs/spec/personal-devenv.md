@@ -57,7 +57,7 @@ Tools installed via Homebrew during a full install:
 | Category | Tools |
 |---|---|
 | Core CLI | `fzf`, `ripgrep`, `fd`, `bat`, `tmux` |
-| Neovim toolchain | `neovim`, `tree-sitter`, `lazygit`, `node`, `python3` |
+| Neovim toolchain | `neovim`, `tree-sitter`, `lazygit`, `node`, `python3`, `go` |
 | Extras | `eza`, `zoxide`, `delta`, `starship`, `lf` |
 | Font (macOS only) | JetBrains Mono Nerd Font |
 | Zsh plugins | `zsh-autosuggestions`, `zsh-syntax-highlighting`, `zsh-history-substring-search` |
