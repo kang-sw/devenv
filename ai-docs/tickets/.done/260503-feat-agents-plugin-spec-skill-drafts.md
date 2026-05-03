@@ -48,7 +48,7 @@ Success criteria:
 - The skill does not depend on `$ARGUMENTS`, Claude slash commands, or implicit
   plugin PATH injection.
 
-### Result (TBD) - 2026-05-03
+### Result (0b481cf) - 2026-05-03
 
 Added `agents-plugin/skills/write-spec/SKILL.md` as a host-neutral draft.
 
@@ -78,7 +78,7 @@ Success criteria:
 - The skill makes helper requirements explicit and does not assume Claude named
   agents or plugin PATH injection.
 
-### Result (TBD) - 2026-05-03
+### Result (0b481cf) - 2026-05-03
 
 Added `agents-plugin/skills/update-spec/SKILL.md` as a host-neutral draft.
 
@@ -104,7 +104,7 @@ Success criteria:
 - Codex visibility remains a human-in-the-loop plugin cache refresh item, not a
   local CLI claim.
 
-### Result (TBD) - 2026-05-03
+### Result (0b481cf) - 2026-05-03
 
 Verified the draft skill files and plugin manifests.
 
