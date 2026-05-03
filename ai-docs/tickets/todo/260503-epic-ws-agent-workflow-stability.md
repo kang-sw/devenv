@@ -455,3 +455,40 @@ tests for `cmd/ws-mcp`, `wsconfig`, `wsagent`, and `mcp`, runtime JSON parsing,
 Darwin ARM64 runtime binary, and a real CLI smoke that configured
 `light -> gemini-3-1-pro` and confirmed a registered agent stored
 `backend: gemini` and `model: gemini-3-1-pro`.
+
+### Phase 6: Enforce delegated tool profiles in plugin-managed Codex sessions
+
+Fix the tool-profile containment gap exposed by the `config.show` dogfood run.
+The intended policy is that async implementers run as `leaf` workers and cannot
+call `agents.*`, `subquery`, or other recursive orchestration tools. The dogfood
+run showed that this policy is not currently effective in plugin-managed Codex
+sessions: the implementer successfully called `ws/agents.call`,
+`ws/agents.wait`, and `ws/agents.erase` for an internal `reviewer` agent, ran a
+review loop, amended its commit, and erased that reviewer before returning.
+
+This did not break the `config.show` implementation, and the internal reviewer
+even found a real missing-ticket-result issue. The failure is workflow
+containment, not output quality: delegated implementers should not be able to
+re-enter lead-level orchestration because it makes cost, latency, process
+lifecycle, and review ownership unpredictable.
+
+Likely causes to investigate:
+
+- `CodexRunner` sets `WS_MCP_TOOL_PROFILE=leaf`, but the plugin-managed MCP
+  server may be a session-level process that does not inherit per-subprocess
+  environment overrides.
+- Codex may reuse the parent MCP server configuration for nested `codex exec`
+  sessions instead of starting a profile-specific MCP server.
+- Environment-only profile selection may be the wrong boundary for hosts that
+  treat MCP servers as process/session singletons.
+
+Success criteria:
+
+- A leaf-profile Codex agent cannot see or call `agents.*`, `subquery`, or other
+  recursive orchestration tools in a real plugin-managed smoke.
+- The implementation has an automated or semi-automated smoke that fails if a
+  leaf worker can call `agents.status` or `agents.call`.
+- `write-code` implementers cannot spawn reviewers or other durable named
+  agents; lead remains the owner of reviewer fanout.
+- The chosen design is documented in `ai-docs/ref/ws-agent-runtime.md` or
+  `ai-docs/ref/ws-mcp.md`, including any host-specific limitation or fallback.
