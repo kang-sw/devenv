@@ -136,6 +136,7 @@ install_local_devenv_runtime() {
     "$HOME"/.codex/plugins/cache/kang-sw-devenv/ws/*) ;;
     *) return 1 ;;
   esac
+  [ -f "$plugin_dir/.local-devenv-runtime" ] || return 1
   [ "$os" != "windows" ] || return 1
 
   for candidate in \

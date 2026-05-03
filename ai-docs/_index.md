@@ -138,8 +138,9 @@ missing tools are repaired. For this machine's local Codex marketplace install
 only (`~/.codex/plugins/cache/kang-sw-devenv/ws/`), the POSIX launcher can copy a
 dev binary from `~/devenv/agents-plugin-tool/dist/` or
 `~/devenv/agents-plugin/.runtime/`, or build `~/devenv/agents-plugin-tool`
-directly when local candidates are stale. Windows plugin-managed startup still
-needs a native launcher or adapter-specific manifest verification.
+directly when local candidates are stale, but only when the installed cache
+contains the gitignored `.local-devenv-runtime` marker. Windows plugin-managed
+startup still needs a native launcher or adapter-specific manifest verification.
 
 `ws-mcp` development verification levels are documented in
 `ai-docs/ref/ws-mcp.md`: Level 1 Go/MCP tests, Level 2 local release asset and
