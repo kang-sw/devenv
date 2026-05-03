@@ -459,6 +459,19 @@ Update/drift behavior:
 - Offline/proxy failure: keep stdout clean, fail startup, and tell the user which
   URL or runtime directory needs manual repair.
 
+Local devenv development exception:
+
+- When the installed plugin path is under
+  `~/.codex/plugins/cache/kang-sw-devenv/ws/`, the POSIX launcher may copy a
+  local runtime binary from `~/devenv/agents-plugin-tool/dist/` or
+  `~/devenv/agents-plugin/.runtime/` before attempting GitHub release download.
+  If those local binaries are absent or fail the tool-surface check, it may build
+  `~/devenv/agents-plugin-tool/cmd/ws-mcp` directly into the cache-local runtime
+  path when Go is available.
+- This path exists only for the repository-local Codex plugin development loop.
+  It does not trigger for normal release installs, downstream repositories, or
+  Windows.
+
 The local build script is:
 
 ```bash

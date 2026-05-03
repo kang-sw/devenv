@@ -131,6 +131,44 @@ download_runtime() {
   note "downloaded runtime binary into $binary"
 }
 
+install_local_devenv_runtime() {
+  case "$plugin_dir" in
+    "$HOME"/.codex/plugins/cache/kang-sw-devenv/ws/*) ;;
+    *) return 1 ;;
+  esac
+  [ "$os" != "windows" ] || return 1
+
+  for candidate in \
+    "$HOME/devenv/agents-plugin-tool/dist/$asset" \
+    "$HOME/devenv/agents-plugin/.runtime/$platform/$binary_name"
+  do
+    if [ -x "$candidate" ]; then
+      cp "$candidate" "$binary"
+      chmod 755 "$binary"
+      if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible; then
+        note "installed local devenv runtime from $candidate"
+        return 0
+      fi
+      note "local devenv runtime candidate is incompatible: $candidate"
+      rm -f "$binary"
+    fi
+  done
+  if [ -d "$HOME/devenv/agents-plugin-tool" ] && command -v go >/dev/null 2>&1; then
+    (
+      cd "$HOME/devenv/agents-plugin-tool"
+      go build -o "$binary" ./cmd/ws-mcp
+    ) || return 1
+    chmod 755 "$binary"
+    if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible; then
+      note "built local devenv runtime from $HOME/devenv/agents-plugin-tool"
+      return 0
+    fi
+    note "local devenv build produced incompatible runtime"
+    rm -f "$binary"
+  fi
+  return 1
+}
+
 install_runtime() {
   if [ -n "${WS_MCP_BOOTSTRAP_BINARY:-}" ]; then
     [ -f "$WS_MCP_BOOTSTRAP_BINARY" ] || fail "bootstrap binary not found: $WS_MCP_BOOTSTRAP_BINARY"
@@ -151,6 +189,8 @@ install_runtime() {
     mv "$tmp" "$binary"
     chmod 755 "$binary"
     note "downloaded runtime binary into $binary"
+  elif install_local_devenv_runtime; then
+    :
   else
     download_runtime
   fi
