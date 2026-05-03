@@ -261,7 +261,7 @@ This index lists active tickets only; completed tickets live under
 |------|--------|---------|
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
 | `260503-epic-ws-agent-workflow-stability` | todo | Live stabilization epic for named-agent workflow; completed phases split into child tickets, active child is worktree orchestrator lock |
-| `260503-feat-ws-mcp-worktree-orchestrator-lock` | todo | Worktree-local MCP orchestrator lock so only the first live MCP server for a worktree receives lead authority |
+| `260503-feat-ws-mcp-worktree-orchestrator-lock` | todo | Worktree-local MCP orchestrator lock; Phase 1-2 implemented, plugin-managed Codex smoke remains |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
 | `260429-feat-api-deps` | todo | ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt, pre-router prompt, bin tools, workflow integration |
@@ -272,8 +272,8 @@ This index lists active tickets only; completed tickets live under
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
-`260503-epic-ws-agent-workflow-stability` — active runtime quality gate for `write-code`; completed slices split into child tickets, current blocker is delegated containment
-`260503-feat-ws-mcp-worktree-orchestrator-lock` — Phase 6 child: replace env-only delegated profile containment with worktree-local MCP lead authority
+`260503-epic-ws-agent-workflow-stability` — active runtime quality gate for `write-code`; completed slices split into child tickets, current blocker is plugin-managed containment smoke
+`260503-feat-ws-mcp-worktree-orchestrator-lock` — Phase 6 child: Phase 1-2 lock/effective-role implementation complete; next is plugin-managed Codex smoke after cache refresh
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
@@ -292,9 +292,9 @@ do not add `spec:` frontmatter, run `ws:update-spec`, or update
 plugin visibility and installed MCP runtime metadata were confirmed after plugin
 refresh. Completed agent workflow stability slices have been split into `.done`
 child tickets; active containment work is
-`260503-feat-ws-mcp-worktree-orchestrator-lock`. `config.show` dogfood showed
-plugin-managed Codex implementers can still call `agents.*`, so env-only leaf
-profiles are insufficient.
+`260503-feat-ws-mcp-worktree-orchestrator-lock`. Phase 1-2 are implemented in
+`6203e71`; next validation is a plugin-managed Codex smoke after reinstall/cache
+refresh to confirm delegated implementers cannot see or call `agents.*`.
 Post-refresh cancellation smoke showed Codex UI interrupt does not currently
 arrive as MCP `notifications/cancelled`; it only aborts the wait call from the
 lead's perspective, so agent task cancellation must remain explicit through

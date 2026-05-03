@@ -87,6 +87,19 @@ Success criteria:
 - If liveness cannot be checked safely, the server behaves conservatively as a
   non-owner instead of stealing the lock.
 
+### Result (6203e71) - 2026-05-04
+
+Implemented a worktree-local `locks/orchestrator.lock` primitive in
+`internal/wsstate` and added it to the ensured worktree layout. The lock payload
+records schema version, pid, start time, worktree root, worktree key, and runtime
+version. Acquisition uses `O_CREATE|O_EXCL`; stale recovery removes locks whose
+pid is no longer alive. Unix liveness uses `kill(pid, 0)`, and Windows liveness
+uses `OpenProcess` with query-limited access so the implementation compiles for
+the planned Windows target.
+
+Tests cover first-owner acquisition, second acquisition observing the existing
+owner, stale-lock recovery, and linked worktrees acquiring independent locks.
+
 ### Phase 2: Effective role enforcement
 
 Replace environment-only profile selection with an effective role calculation:
@@ -112,6 +125,21 @@ Success criteria:
 - Existing `WS_MCP_ALLOWED_TOOLS` behavior is either preserved as a test-only
   explicit allowlist or deliberately narrowed so it cannot bypass the lock in
   production.
+
+### Result (6203e71) - 2026-05-04
+
+`internal/mcp.Server` now derives an effective role at startup from the
+worktree-local lock plus `WS_MCP_TOOL_PROFILE`. Lock owners receive base `lead`;
+non-owners receive base `delegate`; env profile can only reduce authority.
+Delegate and leaf roles hide and reject `agents.*` and `config.*`; leaf also
+hides and rejects `subquery`. `WS_MCP_ALLOWED_TOOLS` now narrows only after role
+checks, so it cannot bypass lock-derived containment.
+
+Unit tests cover owner leaf downgrade, non-owner lead escalation failure, tool
+hidden-vs-rejected behavior, and allowlist non-bypass. A direct two-process
+stdio smoke held one `ws-mcp` server open, then confirmed a second server for the
+same worktree with `WS_MCP_TOOL_PROFILE=lead` could not see `agents.status` or
+`config.show` while still seeing delegate-level `subquery`.
 
 ### Phase 3: Plugin-managed Codex smoke
 
