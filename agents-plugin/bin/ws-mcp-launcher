@@ -125,6 +125,18 @@ tools_compatible() {
 commands_compatible() {
   for command in $(runtime_commands); do
     case "$command" in
+      *.*.*)
+        group=${command%%.*}
+        rest=${command#*.}
+        parent=${rest%.*}
+        subcommand=${rest##*.}
+        output=$("$binary" "$group" "$parent" 2>&1 || true)
+        [ -n "$output" ] || return 1
+        case "$output" in
+          *"$subcommand"*) ;;
+          *) note "runtime missing required CLI command: $command"; return 1 ;;
+        esac
+        ;;
       *.*)
         group=${command%%.*}
         subcommand=${command#*.}
