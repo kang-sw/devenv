@@ -36,6 +36,56 @@ after editing the registered local source. Verified after UI uninstall/install:
 Skill invocation is namespaced as `$<plugin-name>:<skill-name>`; for this repo's
 candidate plugin the form is `$ws:<skill-name>`.
 
+## Plugin-Managed MCP
+
+Verified 2026-05-03 by checking official `openai/plugins` examples and local Codex
+CLI surfaces.
+
+Codex plugin bundles can include MCP server configuration:
+
+```json
+{
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}
+```
+
+The plugin-local `.mcp.json` uses the usual MCP server map shape:
+
+```json
+{
+  "mcpServers": {
+    "server-name": {
+      "command": "some-command",
+      "args": ["arg1"]
+    }
+  }
+}
+```
+
+Official examples:
+
+- `openai/plugins/plugins/build-ios-apps` declares `"mcpServers": "./.mcp.json"`
+  and uses a stdio MCP server launched through `npx`.
+- `openai/plugins/plugins/cloudflare` declares `"mcpServers": "./.mcp.json"` and
+  uses an HTTP MCP server.
+
+Observed CLI support remains separate:
+
+```bash
+codex mcp add <name> -- <command>...
+codex mcp add <name> --url <url>
+codex mcp list
+codex mcp get <name>
+```
+
+For repo-local plugin iteration, changed plugin-managed MCP configuration is not
+known to refresh automatically. Treat Codex UI uninstall/install, or a fresh Codex
+session after editing the registered local source, as a required human-in-the-loop
+cache refresh step before validating plugin-managed MCP changes. Agents should
+explicitly ask the user to perform that refresh when a verification step depends on
+the installed plugin cache.
+
 ## Invocation
 
 ```bash

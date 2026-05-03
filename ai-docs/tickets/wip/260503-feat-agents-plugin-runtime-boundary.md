@@ -40,6 +40,15 @@ mechanisms, and keep the runtime free of user-installed language dependencies.
   each replacement MCP surface and CLI wrapper path is documented.
 - Avoid CGO and native dependencies in the baseline so CI cross-compilation remains
   simple.
+- Codex plugins can declare bundled MCP server configuration by setting
+  `"mcpServers": "./.mcp.json"` in `.codex-plugin/plugin.json` and placing the
+  server configuration in plugin-local `.mcp.json`. Verified against the official
+  `openai/plugins` examples (`build-ios-apps`, `cloudflare`) and current Codex CLI
+  MCP commands.
+- Codex plugin cache refresh for this repo-local plugin remains human-in-the-loop:
+  the user must uninstall/install the plugin in the Codex UI or start a fresh
+  session after plugin bundle changes. Agents should signal the user before any
+  verification step that depends on the refreshed installed plugin cache.
 
 ## Phases
 
@@ -101,11 +110,15 @@ Verification:
 
 Document the first MCP contract for `agents-plugin` skills:
 
+- plugin-managed MCP packaging shape:
+  `.codex-plugin/plugin.json` points to plugin-local `.mcp.json`
 - MCP resources or tools for project memory and ticket queue
 - MCP tools/resources for ticket, spec, and mental-model conventions
 - MCP helper for spec stem lookup
 - explicit CLI fallback names for Claude compatibility
 - deferred write-capable operations and why they are out of scope
+- host verification boundary: Codex UI uninstall/install is required before
+  testing changed plugin-managed MCP config from the installed plugin cache
 
 Success criteria:
 
@@ -121,6 +134,11 @@ Define the portable binary distribution plan:
 - release asset naming for Windows, macOS, and Linux
 - curl/PowerShell installer behavior
 - install location and MCP client config expectations
+- `install-ws-plugin` skill behavior for preparing or updating the `ws-mcp`
+  binary that plugin-local `.mcp.json` points at
+- version drift detection between the installed plugin bundle and the local
+  `ws-mcp` binary, likely through a small plugin runtime contract file read by
+  `ws-mcp doctor` and server startup
 - CI cross-compilation matrix
 - manual host smoke checklist
 
@@ -130,3 +148,5 @@ Success criteria:
   Tools on target user machines.
 - Windows installation is described as downloading a prebuilt `.exe`, not building
   locally.
+- Runtime drift produces an actionable diagnostic instead of silently exposing
+  tools that are too old for the installed skill documents.
