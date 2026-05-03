@@ -6,6 +6,7 @@ related:
   260503-feat-agents-plugin-write-code-port: first production workflow that dogfoods named agents
   260503-feat-ws-mcp-git-read-primitives: dogfood run that exposed lifecycle failures under write-code
   260503-epic-agents-plugin-skill-porting: skill roadmap that depends on stable orchestration
+  260503-feat-ws-mcp-worktree-orchestrator-lock: Phase 6 child ticket for worktree-local authority lock
 plans:
   phase-1: 2026-05/03-260503-epic-ws-agent-workflow-stability-phase-1
 ---
@@ -492,3 +493,10 @@ Success criteria:
   agents; lead remains the owner of reviewer fanout.
 - The chosen design is documented in `ai-docs/ref/ws-agent-runtime.md` or
   `ai-docs/ref/ws-mcp.md`, including any host-specific limitation or fallback.
+
+Child ticket:
+
+- `260503-feat-ws-mcp-worktree-orchestrator-lock` — implement a worktree-local
+  orchestrator lock so the first live MCP server for a worktree receives lead
+  authority, later MCP servers for that same worktree are delegates, and
+  environment profiles can only further restrict the effective role.

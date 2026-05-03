@@ -294,6 +294,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260503-feat-agents-plugin-edit-port` | done | Ported `edit` into `agents-plugin/` as lead-owned direct edit plus one async reviewer; Codex visibility confirmed after plugin refresh |
 | `260503-feat-agents-plugin-write-code-port` | done | Ported `write-code` into `agents-plugin/`: embedded implementer/survey/reviewer prompts, delegated commit smoke, reviewer fanout, async relay loop, and Codex visibility closeout |
 | `260503-epic-ws-agent-workflow-stability` | todo | Live stabilization epic for named-agent workflow lifecycle, timeout, cancellation, diagnostics, and lead-context compression; Phases 1-2 have implementation slices |
+| `260503-feat-ws-mcp-worktree-orchestrator-lock` | todo | Worktree-local MCP orchestrator lock so only the first live MCP server for a worktree receives lead authority |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
 | `260503-feat-ws-mcp-git-read-primitives` | done | Added read-only `ws/git.*` MCP primitives for status, diff, log, and merge-base using native Git argument-array execution |
 | `260503-feat-agents-plugin-sidecar-skill-drafts` | done | Ported lead-run sidecar skills `add-rule`, `ship`, and `exit-session`; deferred `manual-think` and `workflow` |
@@ -304,6 +305,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-ws-agent-workflow-stability` — active runtime quality gate for `write-code`: lifecycle, debug, nonblocking MCP, tool profiles, and tier config have landed; next critical slice is a small named-agent/write-code regression dogfood
+`260503-feat-ws-mcp-worktree-orchestrator-lock` — Phase 6 child: replace env-only delegated profile containment with worktree-local MCP lead authority
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
