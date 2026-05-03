@@ -210,6 +210,29 @@ task-scoped session when no current call is active. If `current/state.json` is
 `queued` or `running`, registration fails until the call is cancelled, failed,
 completed, or explicitly reset by a future operation that owns process cleanup.
 
+## Orchestration Authority
+
+Agent orchestration tools are lead-owned. The runtime does not rely only on
+`WS_MCP_TOOL_PROFILE`, because plugin-managed hosts may reuse or scope MCP server
+processes differently from the nested agent subprocess environment.
+
+At MCP startup, `ws-mcp` tries to create a worktree-local
+`locks/orchestrator.lock` file under the cache layout. The lock owner receives
+the base `lead` role. Other MCP servers for the same worktree receive the base
+`delegate` role. Linked worktrees use distinct worktree keys and may each have
+their own lead owner.
+
+The effective tool role is the lower of the lock-derived base role and the
+requested profile:
+
+```text
+lead > delegate > leaf
+```
+
+`delegate` and `leaf` cannot see or call `agents.*` or `config.*` tools, and
+`leaf` also cannot see or call `subquery`. Explicit tool allowlists may narrow
+the visible surface for tests, but cannot raise a delegate or leaf back to lead.
+
 ## Workload Tiers
 
 Shared skills use workload-depth tiers, not provider model names:

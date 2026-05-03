@@ -41,6 +41,7 @@ func TestEnsureCreatesStableProjectAndWorktreeLayout(t *testing.T) {
 		layout.AgentsDir,
 		layout.ReviewDir,
 		layout.SessionsDir,
+		layout.WorktreeLocksDir,
 		layout.TmpDir,
 	} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
@@ -56,6 +57,9 @@ func TestEnsureCreatesStableProjectAndWorktreeLayout(t *testing.T) {
 	if !strings.HasPrefix(layout.ProjectDir, filepath.Join(cache, "proj")+string(os.PathSeparator)) {
 		t.Fatalf("project dir %q is not under cache proj", layout.ProjectDir)
 	}
+	if layout.WorktreeLocksDir != filepath.Join(layout.WorktreeDir, "locks") {
+		t.Fatalf("worktree locks dir = %q, want worktree-local locks dir", layout.WorktreeLocksDir)
+	}
 
 	var projectFile ProjectMetadata
 	readJSON(t, layout.ProjectMeta, &projectFile)
@@ -70,6 +74,75 @@ func TestEnsureCreatesStableProjectAndWorktreeLayout(t *testing.T) {
 	readJSON(t, layout.WorktreeMeta, &worktreeFile)
 	if worktreeFile.WorktreePath != canonRepo || worktreeFile.WorktreeID != shortHash(canonRepo) {
 		t.Fatalf("worktree metadata mismatch: %+v, root %q", worktreeFile, canonRepo)
+	}
+}
+
+func TestAcquireOrchestratorLockIsWorktreeLocal(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return fixedNow },
+	})
+
+	first, err := manager.AcquireOrchestratorLock(repo, "test-version")
+	if err != nil {
+		t.Fatalf("first AcquireOrchestratorLock returned error: %v", err)
+	}
+	if !first.Owner {
+		t.Fatalf("first lock acquisition was not owner: %+v", first)
+	}
+	if first.Lock.PID != os.Getpid() || first.Lock.Version != "test-version" || first.Lock.WorktreeKey == "" {
+		t.Fatalf("first lock payload mismatch: %+v", first.Lock)
+	}
+	if filepath.Base(first.Path) != orchestratorLockFile {
+		t.Fatalf("lock path = %q, want orchestrator lock file", first.Path)
+	}
+
+	second, err := manager.AcquireOrchestratorLock(repo, "test-version")
+	if err != nil {
+		t.Fatalf("second AcquireOrchestratorLock returned error: %v", err)
+	}
+	if second.Owner {
+		t.Fatalf("second lock acquisition unexpectedly became owner: %+v", second)
+	}
+	if second.Lock.PID != os.Getpid() {
+		t.Fatalf("second lock did not report existing owner: %+v", second.Lock)
+	}
+}
+
+func TestAcquireOrchestratorLockRecoversStaleLock(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return fixedNow },
+	})
+	layout, _, worktree, err := manager.Ensure(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := OrchestratorLock{
+		SchemaVersion: schemaVersion,
+		PID:           999999999,
+		StartedAt:     fixedNow.Add(-time.Hour).Format(time.RFC3339),
+		Root:          worktree.WorktreePath,
+		WorktreeKey:   worktree.WorktreeKey,
+		Version:       "stale",
+	}
+	if err := os.WriteFile(filepath.Join(layout.WorktreeLocksDir, orchestratorLockFile), mustMarshalForTest(t, stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := manager.AcquireOrchestratorLock(repo, "fresh")
+	if err != nil {
+		t.Fatalf("AcquireOrchestratorLock returned error: %v", err)
+	}
+	if !got.Owner {
+		t.Fatalf("stale lock was not recovered: %+v", got)
+	}
+	if got.Lock.PID != os.Getpid() || got.Lock.Version != "fresh" {
+		t.Fatalf("fresh lock payload mismatch: %+v", got.Lock)
 	}
 }
 
@@ -147,6 +220,21 @@ func TestLinkedWorktreeSharesProjectIdentityAndSeparatesWorktreeState(t *testing
 	}
 	if linkedWorktree.RootPath != canonicalForTest(t, repo) {
 		t.Fatalf("linked worktree root path = %q, want main repo path", linkedWorktree.RootPath)
+	}
+
+	rootLock, err := manager.AcquireOrchestratorLock(repo, "test")
+	if err != nil {
+		t.Fatalf("AcquireOrchestratorLock(root) returned error: %v", err)
+	}
+	linkedLock, err := manager.AcquireOrchestratorLock(worktreePath, "test")
+	if err != nil {
+		t.Fatalf("AcquireOrchestratorLock(worktree) returned error: %v", err)
+	}
+	if !rootLock.Owner || !linkedLock.Owner {
+		t.Fatalf("linked worktrees should acquire independent locks, root=%+v linked=%+v", rootLock, linkedLock)
+	}
+	if rootLock.Path == linkedLock.Path {
+		t.Fatalf("linked worktree reused root lock path %q", rootLock.Path)
 	}
 }
 
@@ -244,6 +332,15 @@ func readJSON(t *testing.T, path string, dest any) {
 	if err := json.Unmarshal(raw, dest); err != nil {
 		t.Fatalf("unmarshal %s: %v\n%s", path, err, string(raw))
 	}
+}
+
+func mustMarshalForTest(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(raw, '\n')
 }
 
 func canonicalForTest(t *testing.T, path string) string {

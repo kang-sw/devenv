@@ -159,6 +159,31 @@ and `ws-mcp` uses that environment variable whenever a tool or command omits
 `root` or passes `"."`. Skills may still pass `root` explicitly, but omitted
 root should resolve to the active project in plugin-managed Codex sessions.
 
+## Orchestrator Authority
+
+`ws-mcp` assigns lead orchestration authority through a worktree-local lock under
+the ws cache root:
+
+```text
+~/.cache/ws@kang-sw-devenv/proj/<worktree-key>/locks/orchestrator.lock
+```
+
+The first live MCP server for a worktree owns the lock and receives the base
+`lead` role. Later MCP servers for the same worktree receive the base
+`delegate` role. Linked worktrees use different worktree keys, so each linked
+worktree may have an independent lead server.
+
+`WS_MCP_TOOL_PROFILE` is an additional restriction only. The effective role is
+the minimum of the lock-derived base role and the requested profile, ordered
+`lead > delegate > leaf`. A non-owner cannot regain lead tools by setting
+`WS_MCP_TOOL_PROFILE=lead`; a lock owner can still voluntarily reduce itself to
+`delegate` or `leaf`.
+
+Delegate and leaf roles hide and reject lead-owned orchestration or mutation
+tools, currently `agents.*` and `config.*`. Leaf also hides `subquery`.
+`WS_MCP_ALLOWED_TOOLS` can narrow the resulting visible surface for tests or
+debugging, but it cannot bypass the effective role.
+
 For repo-local Codex plugin iteration, changed plugin-managed MCP configuration
 requires a human-in-the-loop cache refresh: the user must uninstall/install the
 plugin in the Codex UI or start a fresh session before installed-plugin

@@ -25,7 +25,16 @@ type Server struct {
 	root         string
 	version      string
 	sourceCommit string
+	role         toolRole
 }
+
+type toolRole string
+
+const (
+	roleLead     toolRole = "lead"
+	roleDelegate toolRole = "delegate"
+	roleLeaf     toolRole = "leaf"
+)
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -63,7 +72,9 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 	if len(sourceCommit) > 0 && sourceCommit[0] != "" {
 		commit = sourceCommit[0]
 	}
-	return &Server{root: filepath.Clean(root), version: version, sourceCommit: commit}
+	cleanRoot := filepath.Clean(root)
+	role := effectiveToolRole(cleanRoot, version)
+	return &Server{root: cleanRoot, version: version, sourceCommit: commit, role: role}
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -161,7 +172,7 @@ func (s *Server) handle(ctx context.Context, req request) response {
 			},
 		}}
 	case "tools/list":
-		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": filteredTools()}}
+		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": s.filteredTools()}}
 	case "tools/call":
 		return s.callTool(ctx, req)
 	default:
@@ -247,7 +258,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, -32602, "invalid params")
 	}
-	if !toolAllowed(params.Name) {
+	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current ws MCP profile: %s", params.Name))
 	}
 
@@ -884,31 +895,83 @@ func tools() []map[string]any {
 	}
 }
 
-func filteredTools() []map[string]any {
+func (s *Server) filteredTools() []map[string]any {
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
-		if toolAllowed(name) {
+		if s.toolAllowed(name) {
 			filtered = append(filtered, tool)
 		}
 	}
 	return filtered
 }
 
-func toolAllowed(name string) bool {
+func (s *Server) toolAllowed(name string) bool {
+	if !roleAllowsTool(s.role, name) {
+		return false
+	}
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
 		return allowed[name]
 	}
+	return true
+}
+
+func effectiveToolRole(root, version string) toolRole {
+	base := roleDelegate
+	lock, err := wsstate.NewManager(wsstate.Options{}).AcquireOrchestratorLock(root, version)
+	if err != nil {
+		appendDebugEvent("orchestrator_lock.error", map[string]any{"root": root, "error": err.Error()})
+	} else if lock.Owner || lock.Lock.PID == os.Getpid() {
+		base = roleLead
+		appendDebugEvent("orchestrator_lock.owner", map[string]any{"root": root, "path": lock.Path})
+	} else {
+		appendDebugEvent("orchestrator_lock.delegate", map[string]any{"root": root, "path": lock.Path, "owner_pid": lock.Lock.PID})
+	}
+	return minRole(base, requestedToolRole())
+}
+
+func requestedToolRole() toolRole {
 	switch strings.TrimSpace(os.Getenv("WS_MCP_TOOL_PROFILE")) {
 	case "", "lead":
-		return true
+		return roleLead
 	case "delegate":
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
+		return roleDelegate
 	case "leaf":
+		return roleLeaf
+	default:
+		return roleLead
+	}
+}
+
+func minRole(base, requested toolRole) toolRole {
+	if roleRank(requested) < roleRank(base) {
+		return requested
+	}
+	return base
+}
+
+func roleRank(role toolRole) int {
+	switch role {
+	case roleLeaf:
+		return 0
+	case roleDelegate:
+		return 1
+	default:
+		return 2
+	}
+}
+
+func roleAllowsTool(role toolRole, name string) bool {
+	switch role {
+	case roleLead:
+		return true
+	case roleDelegate:
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
+	case roleLeaf:
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && name != "subquery"
 	default:
-		return true
+		return false
 	}
 }
 

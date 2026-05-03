@@ -36,13 +36,14 @@ type Layout struct {
 	SharedDir   string
 	LocksDir    string
 
-	WorktreesDir string
-	WorktreeDir  string
-	WorktreeMeta string
-	AgentsDir    string
-	ReviewDir    string
-	SessionsDir  string
-	TmpDir       string
+	WorktreesDir     string
+	WorktreeDir      string
+	WorktreeMeta     string
+	AgentsDir        string
+	ReviewDir        string
+	SessionsDir      string
+	WorktreeLocksDir string
+	TmpDir           string
 }
 
 type ProjectMetadata struct {
@@ -144,6 +145,7 @@ func (m Manager) Ensure(repoPath string) (Layout, ProjectMetadata, WorktreeMetad
 		layout.AgentsDir,
 		layout.ReviewDir,
 		layout.SessionsDir,
+		layout.WorktreeLocksDir,
 		layout.TmpDir,
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -172,20 +174,21 @@ func layoutFor(cacheRoot, projectKey, worktreeKey string) Layout {
 	worktreesDir := filepath.Join(cacheRoot, "proj")
 	worktreeDir := filepath.Join(cacheRoot, "proj", worktreeKey)
 	return Layout{
-		CacheRoot:    cacheRoot,
-		ProjectKey:   projectKey,
-		WorktreeKey:  worktreeKey,
-		ProjectDir:   projectDir,
-		ProjectMeta:  filepath.Join(projectDir, "project.json"),
-		SharedDir:    sharedDir,
-		LocksDir:     filepath.Join(sharedDir, "locks"),
-		WorktreesDir: worktreesDir,
-		WorktreeDir:  worktreeDir,
-		WorktreeMeta: filepath.Join(worktreeDir, "worktree.json"),
-		AgentsDir:    filepath.Join(worktreeDir, "agents"),
-		ReviewDir:    filepath.Join(worktreeDir, "review-paths"),
-		SessionsDir:  filepath.Join(worktreeDir, "sessions"),
-		TmpDir:       filepath.Join(worktreeDir, "tmp"),
+		CacheRoot:        cacheRoot,
+		ProjectKey:       projectKey,
+		WorktreeKey:      worktreeKey,
+		ProjectDir:       projectDir,
+		ProjectMeta:      filepath.Join(projectDir, "project.json"),
+		SharedDir:        sharedDir,
+		LocksDir:         filepath.Join(sharedDir, "locks"),
+		WorktreesDir:     worktreesDir,
+		WorktreeDir:      worktreeDir,
+		WorktreeMeta:     filepath.Join(worktreeDir, "worktree.json"),
+		AgentsDir:        filepath.Join(worktreeDir, "agents"),
+		ReviewDir:        filepath.Join(worktreeDir, "review-paths"),
+		SessionsDir:      filepath.Join(worktreeDir, "sessions"),
+		WorktreeLocksDir: filepath.Join(worktreeDir, "locks"),
+		TmpDir:           filepath.Join(worktreeDir, "tmp"),
 	}
 }
 
