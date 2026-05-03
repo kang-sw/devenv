@@ -282,22 +282,35 @@ This index lists active tickets only; completed tickets live under
 
 ## Session Notes
 
-<!-- Cross-session intent only, 2-5 lines max, delete when stale. -->
-On `topic/open-conventions-mcp-skills`, defer all spec and mental-model updates
-until the branch merges. Tickets may reference known spec context in prose, but
-do not add `spec:` frontmatter, run `ws:update-spec`, or update
-`ai-docs/spec/` / `ai-docs/mental-model/` on this branch.
+**Branch:** `topic/open-conventions-mcp-skills` — Codex-first `ws` plugin and
+MCP runtime migration. Defer all spec and mental-model updates until this branch
+merges; do not add `spec:` frontmatter, run `ws:update-spec`, or edit
+`ai-docs/spec/` / `ai-docs/mental-model/`.
 
-`write-code` is ported and closed in `agents-plugin/skills/write-code`; Codex
-plugin visibility and installed MCP runtime metadata were confirmed after plugin
-refresh. Completed agent workflow stability slices have been split into `.done`
-child tickets; active containment work is
-`260503-feat-ws-mcp-worktree-orchestrator-lock`. Phase 1-4 are implemented or
-smoked: delegated Codex agents cannot see `agents.*`/`config.*`, and public
-`agents.register` prepends `delegate-orientation`; `subquery` intentionally keeps
-its scoped prompt. Leaf-profile propagation and same-agent current-call locking
-remain follow-ups.
-Post-refresh cancellation smoke showed Codex UI interrupt does not currently
-arrive as MCP `notifications/cancelled`; it only aborts the wait call from the
-lead's perspective, so agent task cancellation must remain explicit through
-`agents.cancel`.
+**Accomplished:** `6203e71` added worktree-local MCP lead/delegate authority,
+`5596eec` fixed launcher tool-surface probing, and `6f022ed` added
+`delegate-orientation` to public `agents.register`. Plugin-managed smoke showed
+delegated Codex agents cannot see `agents.*`/`config.*`; `subquery` remains
+available at delegate level and intentionally keeps its scoped prompt.
+
+**In-flight:** none in the worktree. The active design gap is runtime
+stability: same-agent concurrent `agents.call` needs a race-safe current-call
+claim, and `agents.interrupt` is still planned rather than implemented.
+
+**Next actions:** Start a fresh session by reading
+`ai-docs/tickets/todo/260503-feat-ws-mcp-worktree-orchestrator-lock.md`, then
+split or extend the stability work for `current/prompt.md` serialization and
+`agents.interrupt`. Before designing interrupt, read
+`claude-plugin/bin/ws-named-agent` and related shim/history because the existing
+Python interrupt/mailbox flow went through substantial prior iteration.
+
+**Key artifacts:** `agents-plugin-tool/internal/wsagent/agent.go` — current-call
+and one-shot/subquery flow; `agents-plugin-tool/internal/mcp/server.go` — role
+filtering; `agents-plugin-tool/internal/wsprompt/infra/delegate-orientation.md`
+— prompt-level delegate boundary; `ai-docs/ref/ws-agent-runtime.md` — runtime
+contract.
+
+**Open questions:** How to implement interrupt for Codex when UI cancellation
+does not arrive as MCP `notifications/cancelled`; whether leaf-level tool
+restriction needs durable role assignment beyond env propagation; how stale
+current-call claim locks should recover safely.
