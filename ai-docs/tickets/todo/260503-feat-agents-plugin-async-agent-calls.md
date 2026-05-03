@@ -202,7 +202,7 @@ Success criteria:
 - Failure marks the current call failed and preserves diagnostics without
   corrupting MCP stdout.
 
-### Result (pending) - 2026-05-03
+### Result (b5cc3b1) - 2026-05-03
 
 Implemented the first asynchronous execution path for Codex-backed ws agents.
 The runtime now exposes `ws/agents.call_async` and CLI fallback
