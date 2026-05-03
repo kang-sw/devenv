@@ -7,8 +7,9 @@ candidate.
 
 `ws-mcp` replaces implicit `ws-*` command availability with an explicit MCP
 server process that a host can launch. The first contract is intentionally small
-and read-oriented: it gives skills access to project memory and convention
-documents without depending on plugin PATH injection.
+and read-oriented: it gives skills access to project memory, bundled convention
+documents, and spec helper surfaces without depending on plugin PATH injection or
+repository-local plugin source paths.
 
 The current source tree is:
 
@@ -42,8 +43,23 @@ ws-mcp doctor --root <repo-root>
 ws-mcp serve --stdio --root <repo-root>
 ```
 
-`doctor` is a host-independent smoke check. It verifies the repository root,
-`ai-docs/`, `agents-plugin/`, `claude-plugin/`, and `ai-docs/_index.md`.
+`doctor` is a host-independent smoke check. In this repository it verifies the
+repository root, `ai-docs/`, `agents-plugin/`, `claude-plugin/`, and
+`ai-docs/_index.md`; downstream projects may not have the same plugin source
+layout and should rely on MCP tools for conventions.
+
+## Skill Porting Policy
+
+Shared `agents-plugin` skill text assumes ws MCP is available. Porting should
+preserve the source skill's wording and flow where possible, changing only the
+host-specific tool calls, shell interpolations, slash-command syntax, and local
+paths that would break outside Claude.
+
+Do not point shared skill text at repository-local paths such as
+`claude-plugin/infra/spec-conventions.md`. Convention documents are distributed
+with the MCP runtime and read through `ws.convention.read`, so downstream
+projects can use the same skill text without carrying this repository's
+`claude-plugin/` source tree.
 
 ## Codex Plugin Configuration
 
@@ -182,6 +198,43 @@ The MCP output does not have to be byte-identical to the legacy helper, but it
 must preserve the same workflow purpose: compact project orientation for
 discussion and ticket planning.
 
+### `ws.convention.read`
+
+Read a bundled ws convention document by bare stem or filename.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Convention document stem or filename, for example spec-conventions."
+    }
+  },
+  "required": ["name"]
+}
+```
+
+Output:
+
+- MCP text content containing the bundled Markdown convention document.
+
+Constraints:
+
+- `name` must be a bare stem or filename.
+- Path separators are rejected.
+- `.md` is appended when absent.
+- The document is read from the runtime bundle, not from the downstream project
+  filesystem.
+
+Current bundled documents:
+
+- `ticket-conventions`
+- `spec-conventions`
+- `mental-model-conventions`
+
 ### `ws.infra.read`
 
 Read a ws infra convention document by bare stem or filename.
@@ -210,8 +263,8 @@ Constraints:
 - `name` must be a bare stem or filename.
 - Path separators are rejected.
 - `.md` is appended when absent.
-- The document is read from `claude-plugin/infra/` until host-neutral convention
-  documents replace that authority.
+- The document is read from this repository's local `claude-plugin/infra/` tree.
+  Shared `agents-plugin` skills should use `ws.convention.read` instead.
 
 Error behavior:
 
@@ -233,21 +286,67 @@ the current baseline.
 |-----------|---------|------------------|
 | `ws.project_index.read` | Read `ai-docs/_index.md` as project memory. | `cat ai-docs/_index.md` |
 | `ws.ticket_queue.list` | Return active ticket stems grouped by status. | `ws-proj-tree` or direct file listing |
-| `ws.spec_stems.list` | List spec anchors and headings for a spec file or all specs. | `ws-list-spec-stems [spec-file]` |
-| `ws.spec_stem.generate` | Generate a collision-free spec anchor for a slug. | `ws-generate-spec-stem <slug>` |
 | `ws.mental_models.list` | List relevant mental-model documents for target paths. | `ws-list-mental-model [paths...]` |
 
-Convention access should remain through `ws.infra.read` until the convention
-documents move to host-neutral locations. If Codex and other hosts expose MCP
-resources consistently enough for static documents, these convention documents
-may later become resources; for now tools are the stable contract.
+### `ws.spec_stem.generate`
+
+Generate a collision-free spec anchor stem for a descriptive slug.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "slug": {
+      "type": "string",
+      "description": "Descriptive slug seed."
+    },
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    }
+  },
+  "required": ["slug"]
+}
+```
+
+Output:
+
+- MCP text content containing the generated `YYMMDD-slug` stem.
+
+### `ws.spec_index.verify`
+
+Verify basic spec anchor index health.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    }
+  }
+}
+```
+
+Output:
+
+- MCP text content reporting `Spec index: ok` or duplicate anchor findings.
+
+This initial MCP surface is verification-only. It does not yet reproduce every
+mutation performed by `ws-spec-build-index`; shared skills should still call the
+MCP tool name so the runtime can grow behind a stable contract.
 
 ## Deferred Write-Capable Operations
 
 The following behavior is intentionally out of scope for the first MCP contract:
 
 - creating or editing tickets
-- generating or mutating spec indexes
+- mutating spec indexes beyond verification
 - writing mental-model updates
 - branch management, merge helpers, release helpers, and ship automation
 - spawning or coordinating implementation/review agents

@@ -1,0 +1,109 @@
+# Spec Conventions
+
+Canonical reference for spec document content, format, and authoring rules.
+
+## Definition
+
+Spec documents describe project behavior from an external or consumer perspective —
+what the project does, not how it is built.
+
+Detail level: behavioral descriptions and pseudo-code only. Include actual code only
+when the code IS the public contract (e.g., a CLI flag name, a wire format, an
+invariant the caller must satisfy).
+
+Refactor test: if an internal refactor that preserves behavior would break this
+description, abstract it further.
+
+## Location
+
+- `ai-docs/spec/<area>/` (directory) for areas with multiple sub-sections.
+- `ai-docs/spec/<area>.md` (flat leaf) for single, self-contained feature surfaces.
+
+## 🚧 Markers
+
+- New unimplemented feature heading: `### 🚧 Feature Name {#YYMMDD-feature-slug}`.
+- Planned change to an existing feature: `> [!note] Planned 🚧`
+  callout beneath the existing feature body. Current behavior description stays unchanged.
+- No ticket reference in the marker — implementation traceability flows through commits that include `## Spec` sections referencing the spec-stem.
+- No `🚧` means implemented — verify each such feature actually exists before committing.
+- `🚧` entries — heading form or `> [!note] Planned 🚧` callout — require the feature to have a `todo/`-or-higher ticket. Idea-only tickets (`idea/`) do not qualify.
+
+## Implementation Gap Callout
+
+Use `> [!note] Implementation Gap · YYYY-MM-DD` for a known-but-unscheduled gap with no ticket. Two forms:
+
+- **Missing behavior**: the intended behavior is understood but not yet built.
+- **Unexposed capability**: a capability exists in code but is not yet caller-exposed, with no decision to keep it private.
+
+The callout body text identifies which form applies.
+
+- The date records when the gap was first noted; use today's date when first authoring.
+- No ticket required — this distinguishes it from `🚧` entries, which must have a `todo/`-or-higher ticket.
+- Resolution path: at the next spec review, either create a ticket and convert to `🚧`, or accept the current state and absorb into body prose.
+- Discuss sessions surface a staleness warning for entries older than 90 days.
+
+Permanent behavioral invariants belong in body prose, not in any callout. Write them directly in the body — they are facts about the system, not exceptions worth flagging.
+
+## Anchors
+
+- Every named feature carries a `{#YYMMDD-slug}` anchor — authored once, stable forever.
+- Call MCP tool `ws.spec_stem.generate` with a descriptive slug to obtain a collision-free stem before inserting.
+- Anchors may appear on any line (heading or body text), not heading-only.
+- Slugs are clean identifiers: lowercase, hyphens, no spaces.
+- When a slug changes, the commit message must include `renamed-spec: <old-stem> → <new-stem>`.
+- When a slug changes and mental-model files reference `{#old-stem}`, those files must be updated in the same commit.
+- Headings without `{#YYMMDD-slug}` are organizational and carry no spec identity.
+
+## Feature Removal
+
+When a commit removes a feature from the codebase, include `removed: <spec-stem>` in the commit's `## Spec` section — one line per removed stem. The spec-updater detects this and adds the corresponding spec entry to the `### Pending removal` report section. Remove the spec entry manually after confirming the report.
+
+## Frontmatter
+
+Call MCP tool `ws.spec_index.verify` after every spec write or update. It scans the
+full corpus and reports spec health issues such as duplicate stems. Mutation-capable
+index repair can be added behind the same MCP boundary without changing shared skill
+text.
+
+## Language
+
+All spec content must be in English regardless of conversation language.
+
+## Template
+
+```markdown
+---
+title: <Area / Feature Name>
+summary: <One-line external-perspective summary>
+---
+
+# <Area / Feature Name>
+
+<One-two sentence summary — what this provides to users or callers.>
+
+## Implemented Feature {#260421-implemented-feature}
+
+Behavioral description. Pseudo-code where it aids clarity.
+
+A specific sub-concept within a section can also carry an anchor. {#260421-sub-concept}
+
+> [!note] Implementation Gap · YYYY-MM-DD
+> Known-but-unscheduled incomplete behavior. No ticket yet.
+
+> [!note] Planned 🚧
+> Will gain X capability. Current behavior unchanged until implemented.
+
+## 🚧 New Feature {#260421-new-feature}
+
+Planned behavior description — what the caller will observe once implemented.
+```
+
+## Doctrine
+
+Spec documents are the pivot for discussion sessions — when the topic is "what does
+this currently do from the outside," the spec must answer without requiring source
+exploration. Every authoring choice optimizes for **drift resistance at the behavioral
+level**: describe what callers observe, not what the implementation does, so that
+internal refactors preserving behavior do not invalidate the spec. When a rule is
+ambiguous, apply whichever interpretation a reader could verify without reading source
+code.

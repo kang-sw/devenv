@@ -14,11 +14,11 @@ description: Create or update repository workflow tickets. Use when the user ask
 - Preserve user intent, constraints, rejected alternatives, and verification limits in ticket text.
 - Keep implementation-plan details out of tickets unless they are needed to explain scope.
 - Keep all AI-authored ticket content in English.
-- Do not depend on `ws-*` helpers or named-agent orchestration in this draft port.
+- Use `ws.convention.read` for ticket conventions.
 
 ## On: Create Ticket
 
-1. Read `claude-plugin/infra/ticket-conventions.md` until a host-neutral convention resource exists.
+1. Call MCP tool `ws.convention.read` with `{"name":"ticket-conventions"}`.
 2. Classify the request with `judge: ticket-kind`.
 3. Choose initial status with `judge: initial-status`.
 4. Generate a `YYMMDD-<category>-<slug>.md` stem using today's date and a short stable slug.
@@ -33,7 +33,7 @@ description: Create or update repository workflow tickets. Use when the user ask
 
 ## On: Edit Ticket
 
-1. Read `claude-plugin/infra/ticket-conventions.md` until a host-neutral convention resource exists.
+1. Call MCP tool `ws.convention.read` with `{"name":"ticket-conventions"}`.
 2. Read the target ticket before editing it.
 3. Apply only the requested change and any required consistency update.
 4. Use `git mv` for status transitions when possible.

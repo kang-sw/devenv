@@ -12,14 +12,14 @@ description: Explore a workflow design, migration direction, ticket scope, or im
 - Treat unresolved risks as open questions instead of smoothing them into agreement.
 - Surface existing patterns before proposing new abstractions.
 - Keep Claude-specific commands and Codex-specific tooling out of shared conclusions.
-- State tooling gaps instead of pretending missing MCP or helper surfaces exist.
+- Use ws MCP tools when the discussion needs project memory or convention text.
 - Keep all AI-authored captured artifacts in English.
-- Do not depend on `ws-*` helpers, shell interpolation, or named-agent orchestration in this draft port.
+- Do not read convention files from host-local plugin source paths.
 
 ## On: Start Discussion
 
 1. Identify the concrete topic, ticket, skill, spec, or decision under discussion.
-2. Read `ai-docs/_index.md` for current project memory.
+2. Call MCP tool `ws.project_tree` for current project memory.
 3. Read any named ticket, spec, skill, or convention document before making claims about it.
 4. Define the active boundary: design discussion, ticket shaping, skill porting, or implementation planning.
 5. Ask at most one blocking question when the boundary cannot be inferred safely.
@@ -42,7 +42,7 @@ description: Explore a workflow design, migration direction, ticket scope, or im
 3. Preserve rejected alternatives when they explain why the chosen direction matters.
 4. Record remaining risks and follow-up questions separately from settled decisions.
 5. If the capture target is a ticket, use the `write-ticket` skill.
-6. If the capture target is a spec or convention, read that document's conventions before editing.
+6. If the capture target is a spec or convention, call `ws.convention.read` for the relevant convention before editing.
 7. Commit only the captured documentation changes.
 
 ## Judgments
@@ -57,7 +57,7 @@ Create or edit an artifact only when the discussion produced a durable decision,
 
 ### judge: tooling-boundary
 
-If an option requires `ws-*`, named agents, hooks, MCP resources, or host-specific plugin behavior that does not exist in `agents-plugin`, mark it as future tooling work and keep it out of the current draft behavior.
+If an option requires named agents, hooks, or host-specific plugin behavior that is not part of the ws MCP contract, mark it as adapter work and keep it out of shared behavior.
 
 ## Templates
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdoc"
 )
@@ -112,6 +113,25 @@ func (s *Server) callTool(req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsdoc.ReadInfra(s.root, name)
 		return toolTextResponse(req.ID, text, err)
+	case "ws.convention.read":
+		name, _ := params.Arguments["name"].(string)
+		text, err := wsdoc.ReadConvention(name)
+		return toolTextResponse(req.ID, text, err)
+	case "ws.spec_stem.generate":
+		slug, _ := params.Arguments["slug"].(string)
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		stem, err := wsdoc.GenerateSpecStem(root, slug, time.Now())
+		return toolTextResponse(req.ID, stem+"\n", err)
+	case "ws.spec_index.verify":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		text, err := wsdoc.VerifySpecIndex(root)
+		return toolTextResponse(req.ID, text, err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
@@ -156,7 +176,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.infra.read",
-			"description": "Read a ws infra convention document by bare stem or filename.",
+			"description": "Read a repository-local ws infra document by bare stem or filename.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -166,6 +186,51 @@ func tools() []map[string]any {
 					},
 				},
 				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "ws.convention.read",
+			"description": "Read a bundled ws convention document by bare stem or filename.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]string{
+						"type":        "string",
+						"description": "Convention document stem or filename, for example ticket-conventions.",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "ws.spec_stem.generate",
+			"description": "Generate a collision-free spec anchor stem for a slug.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"slug": map[string]string{
+						"type":        "string",
+						"description": "Descriptive slug seed.",
+					},
+					"root": map[string]string{
+						"type":        "string",
+						"description": "Repository root. Defaults to the server root.",
+					},
+				},
+				"required": []string{"slug"},
+			},
+		},
+		{
+			"name":        "ws.spec_index.verify",
+			"description": "Verify basic spec anchor index health.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": map[string]string{
+						"type":        "string",
+						"description": "Repository root. Defaults to the server root.",
+					},
+				},
 			},
 		},
 	}

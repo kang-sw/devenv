@@ -28,6 +28,9 @@ In scope:
 - Preserve `claude-plugin/` as the stable Claude package during the port.
 - Define the runtime boundary before claiming operational parity.
 - Keep helper, MCP, and delegation contracts explicit in child tickets.
+- Preserve source skill wording and flow where possible; change only broken
+  host-specific calls, shell syntax, slash-command syntax, and local paths.
+- Assume ws MCP is available in shared `agents-plugin` skill text.
 
 Out of scope:
 
@@ -35,6 +38,9 @@ Out of scope:
 - Declaring Claude compatibility complete without a real Claude runtime check.
 - Bulk-copying `bin/`, `infra/`, hooks, or all skills as a single migration step.
 - Designing `/bootstrap` before smaller workflow and delegation patterns are proven.
+- Shared skill references to repo-local paths such as `claude-plugin/infra/*`;
+  convention access must go through MCP so downstream projects do not need this
+  repository's plugin source tree.
 
 ## Porting Order
 

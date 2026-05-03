@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProjectTreeRendersCoreSections(t *testing.T) {
@@ -52,6 +53,53 @@ func TestReadInfraRequiresBareName(t *testing.T) {
 	if _, err := ReadInfra(root, "../example"); err == nil {
 		t.Fatal("ReadInfra accepted path traversal")
 	}
+}
+
+func TestReadConventionUsesBundledDocs(t *testing.T) {
+	got, err := ReadConvention("ticket-conventions")
+	if err != nil {
+		t.Fatalf("ReadConvention returned error: %v", err)
+	}
+	if !strings.Contains(got, "# Ticket Conventions") {
+		t.Fatalf("ReadConvention returned unexpected text: %q", got[:min(len(got), 80)])
+	}
+	if _, err := ReadConvention("../ticket-conventions"); err == nil {
+		t.Fatal("ReadConvention accepted path traversal")
+	}
+}
+
+func TestGenerateSpecStemAvoidsCollisions(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/demo.md", "## Demo {#260503-demo}\n")
+
+	got, err := GenerateSpecStem(root, "Demo", time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("GenerateSpecStem returned error: %v", err)
+	}
+	if got != "260503-demo-2" {
+		t.Fatalf("GenerateSpecStem = %q", got)
+	}
+}
+
+func TestVerifySpecIndexReportsDuplicates(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/a.md", "## A {#260503-dup}\n")
+	mustWrite(t, root, "ai-docs/spec/b.md", "## B {#260503-dup}\n")
+
+	got, err := VerifySpecIndex(root)
+	if err != nil {
+		t.Fatalf("VerifySpecIndex returned error: %v", err)
+	}
+	if !strings.Contains(got, "duplicate anchors") || !strings.Contains(got, "260503-dup") {
+		t.Fatalf("VerifySpecIndex output missing duplicate report:\n%s", got)
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func mustWrite(t *testing.T, root, rel, text string) {

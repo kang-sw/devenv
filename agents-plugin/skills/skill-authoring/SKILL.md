@@ -11,6 +11,8 @@ description: Author or audit ws workflow skills and agent prompts using the repo
 - Keep each invariant or constraint short enough to audit as one standalone rule.
 - Keep skills self-contained; do not require tickets, session history, or sibling skills to understand the rule text.
 - Keep agent prompts self-contained; do not require conversation history or caller session state.
+- Replace broken host-specific tool calls with exact ws MCP tool calls.
+- Do not read convention files from host-local plugin source paths.
 - Mechanize repeatedly violated behavior with handlers, templates, or structured output blocks.
 - Separate soft judgment from mechanical procedure; handlers reference named judgments instead of embedding criteria.
 - Re-read added text at the end of every authoring pass and cut redundant or non-executable prose.

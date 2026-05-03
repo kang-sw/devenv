@@ -110,8 +110,11 @@ agents-plugin-tool/
 ```
 
 Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
-`ws.project_tree` and `ws.infra.read`; current Claude-compatible fallbacks are
-`ws-proj-tree` and `ws-print-infra`.
+`ws.project_tree`, `ws.infra.read`, `ws.convention.read`,
+`ws.spec_stem.generate`, and `ws.spec_index.verify`. Shared `agents-plugin`
+skills assume MCP availability and should not reference repo-local
+`claude-plugin/infra/*` paths; convention text is bundled into the runtime and
+read through `ws.convention.read`.
 
 Codex launcher POC status: `agents-plugin` now contains plugin-local `.mcp.json`,
 `runtime.json`, and `bin/ws-mcp-launcher`. Host-free launcher smoke, temporary
@@ -168,8 +171,8 @@ agents-plugin/skills/
   skill-authoring/ — author or audit ws skills and agent prompts; porting pivot
   write-ticket/    — draft host-neutral ticket creation/update workflow; helper/MCP execution deferred
   discuss/         — draft host-neutral design discussion workflow; survey/tooling execution deferred
-  write-spec/      — draft host-neutral spec creation/update workflow; spec helper execution explicit as MCP/fallback
-  update-spec/     — draft host-neutral commit-range spec audit workflow; spec helper execution explicit as MCP/fallback
+  write-spec/      — draft host-neutral spec creation/update workflow; convention/stem/index helpers called through MCP
+  update-spec/     — draft host-neutral commit-range spec audit workflow; convention/stem/index helpers called through MCP
 ```
 
 ## Canonical Flows
@@ -239,7 +242,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260502-feat-agents-plugin-codex-port-scaffold` | done | `agents-plugin/` Codex-first `ws` candidate scaffold — Codex marketplace/install verified, Claude manifest validation passes, broad skill porting deferred |
 | `260502-feat-agents-plugin-workflow-skill-drafts` | done | Harden `skill-authoring`; add draft host-neutral `write-ticket` and `discuss` skills with helper/MCP runtime reconstruction deferred |
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
-| `260503-feat-agents-plugin-spec-skill-drafts` | done | Ported `write-spec` and `update-spec` into `agents-plugin/` as host-neutral draft skills with explicit MCP/fallback helper boundaries |
+| `260503-feat-agents-plugin-spec-skill-drafts` | done | Ported `write-spec` and `update-spec` into `agents-plugin/` as host-neutral draft skills with convention/stem/index helpers called through MCP |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
 
 ## Ticket Queue

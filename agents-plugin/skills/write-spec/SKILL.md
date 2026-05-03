@@ -7,28 +7,28 @@ description: Create or update behavioral spec documents for caller-visible workf
 
 ## Invariants
 
-- Read `claude-plugin/infra/spec-conventions.md` before creating or changing spec files.
+- Call `ws.convention.read` for `spec-conventions` before creating or changing spec files.
 - Write specs from the external caller perspective, not from implementation structure.
 - Keep all AI-authored spec content in English.
 - Add `🚧` only when the feature has or will receive a `todo/`-or-higher ticket in the same session.
 - Never remove `🚧` without confirming the feature is implemented.
 - Give every named feature a stable `{#YYMMDD-slug}` anchor.
-- Run spec index verification after every spec edit when the repository fallback is available.
-- Do not depend on implicit `ws-*` PATH injection, shell interpolation, or Claude slash-command chaining.
+- Call `ws.spec_index.verify` after every spec edit.
+- Do not read convention files from host-local plugin source paths.
 
 ## On: Write Spec
 
 1. Identify the target behavior, area name, or existing spec file from the user request.
 2. Apply `judge: spec-impact`; if there is no caller-visible behavior, report `No public behavior affected.` and stop.
-3. Read `claude-plugin/infra/spec-conventions.md` until a host-neutral convention resource exists.
+3. Call MCP tool `ws.convention.read` with `{"name":"spec-conventions"}`.
 4. Inspect `ai-docs/spec/` and any likely target spec before choosing create versus update.
 5. If creating a spec, choose the file shape with `judge: directory-vs-flat`.
-6. Generate anchors with `judge: anchor-generation` before inserting new named features.
+6. Call MCP tool `ws.spec_stem.generate` before inserting each new named feature.
 7. Write or update the spec using `Templates / Spec Entry`.
 8. Apply `judge: planned-marker` before adding any `🚧` heading or Planned callout.
 9. Apply `judge: split-trigger` after writing; split sections only when the criteria are met.
 10. Verify implemented entries with `judge: accuracy-check`.
-11. Run spec index verification with `judge: spec-index-verification`.
+11. Call MCP tool `ws.spec_index.verify`.
 12. Commit only the spec files and directly required index changes.
 13. Report the changed spec paths and any deferred verification.
 
@@ -44,7 +44,7 @@ Use `ai-docs/spec/<area>/index.md` only when the area already has or clearly nee
 
 ### judge: anchor-generation
 
-Prefer the MCP surface once `ws.spec_stem.generate` exists; until then use the repository fallback `ws-generate-spec-stem <slug>` or manually choose a collision-free `YYMMDD-slug` after searching all specs.
+Call `ws.spec_stem.generate` with `{"slug":"<descriptive-slug>"}` and use the returned `YYMMDD-slug` exactly.
 
 ### judge: planned-marker
 
@@ -57,10 +57,6 @@ Split a section into its own file when it has an independent ticket lifecycle, r
 ### judge: accuracy-check
 
 For every heading without `🚧`, confirm the behavior exists through code, tests, docs, or an available focused delegate; if confirmation is missing, keep or add the planned/gap marker instead.
-
-### judge: spec-index-verification
-
-Prefer the MCP surface once spec index verification exists; until then run `ws-spec-build-index` when available and report when the fallback is unavailable.
 
 ## Templates
 
