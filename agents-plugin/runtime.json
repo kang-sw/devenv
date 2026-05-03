@@ -6,17 +6,17 @@
   "release_repository": "kang-sw/devenv",
   "release_tag": "v0.1.0",
   "tools": {
-    "ws.project_tree": ">=0.1.0-dev <0.2.0",
-    "ws.infra.read": ">=0.1.0-dev <0.2.0",
-    "ws.convention.read": ">=0.1.0-dev <0.2.0",
-    "ws.spec_stem.generate": ">=0.1.0-dev <0.2.0",
-    "ws.spec_index.verify": ">=0.1.0-dev <0.2.0",
-    "ws.mental_models.list": ">=0.1.0-dev <0.2.0",
-    "ws.agents.register": ">=0.1.0-dev <0.2.0",
-    "ws.agents.call": ">=0.1.0-dev <0.2.0",
-    "ws.agents.oneshot": ">=0.1.0-dev <0.2.0",
-    "ws.agents.print": ">=0.1.0-dev <0.2.0",
-    "ws.agents.erase": ">=0.1.0-dev <0.2.0"
+    "project_tree": ">=0.1.0-dev <0.2.0",
+    "infra.read": ">=0.1.0-dev <0.2.0",
+    "convention.read": ">=0.1.0-dev <0.2.0",
+    "spec_stem.generate": ">=0.1.0-dev <0.2.0",
+    "spec_index.verify": ">=0.1.0-dev <0.2.0",
+    "mental_models.list": ">=0.1.0-dev <0.2.0",
+    "agents.register": ">=0.1.0-dev <0.2.0",
+    "agents.call": ">=0.1.0-dev <0.2.0",
+    "agents.oneshot": ">=0.1.0-dev <0.2.0",
+    "agents.print": ">=0.1.0-dev <0.2.0",
+    "agents.erase": ">=0.1.0-dev <0.2.0"
   },
   "commands": {
     "agents.register": ">=0.1.0-dev <0.2.0",

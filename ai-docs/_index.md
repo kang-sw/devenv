@@ -113,15 +113,15 @@ agents-plugin-tool/
 ```
 
 Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
-`ws.project_tree`, `ws.infra.read`, `ws.convention.read`,
-`ws.spec_stem.generate`, `ws.spec_index.verify`, and
-`ws.mental_models.list`. Shared `agents-plugin` skills assume MCP availability
+`ws/project_tree`, `ws/infra.read`, `ws/convention.read`,
+`ws/spec_stem.generate`, `ws/spec_index.verify`, and
+`ws/mental_models.list`. Shared `agents-plugin` skills assume MCP availability
 and should not reference repo-local `claude-plugin/infra/*` paths; convention
-text is bundled into the runtime and read through `ws.convention.read`.
+text is bundled into the runtime and read through `ws/convention.read`.
 
 Agent runtime prototype: `ai-docs/ref/ws-agent-runtime.md`. `ws-mcp` exposes
-minimum MCP tools `ws.agents.register`, `ws.agents.call`,
-`ws.agents.oneshot`, `ws.agents.print`, and `ws.agents.erase`, plus matching
+minimum MCP tools `ws/agents.register`, `ws/agents.call`,
+`ws/agents.oneshot`, `ws/agents.print`, and `ws/agents.erase`, plus matching
 CLI fallback subcommands under `ws-mcp agents`. Both surfaces are backed by
 `internal/wsagent`. The Codex backend stores thread ids in `agent.json`, resumes
 with `codex exec resume --json <thread-id>`, and persists plain-text output in
@@ -200,7 +200,7 @@ agents-plugin/skills/
   ship/            — draft host-neutral release workflow driven by ai-docs/ship config
   exit-session/    — draft host-neutral session handoff workflow for ai-docs/_index.md
   workflow/        — host-neutral session-resident reference for MCP notation and orchestration primitive boundaries
-  write-skeleton/  — draft host-neutral skeleton workflow using ws.agents.* delegate sessions
+  write-skeleton/  — draft host-neutral skeleton workflow using ws/agents.* delegate sessions
 ```
 
 ## Canonical Flows
@@ -270,8 +270,8 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260502-feat-agents-plugin-codex-port-scaffold` | done | `agents-plugin/` Codex-first `ws` candidate scaffold — Codex marketplace/install verified, Claude manifest validation passes, broad skill porting deferred |
 | `260502-feat-agents-plugin-workflow-skill-drafts` | done | Harden `skill-authoring`; add draft host-neutral `write-ticket` and `discuss` skills with helper/MCP runtime reconstruction deferred |
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
-| `260503-feat-agents-plugin-agent-session-runtime` | done | Host-neutral agent session runtime: wsstate paths, wsagent registry, Codex resume backend, minimum ws.agents.* tools, and write-skeleton port |
-| `260503-feat-agents-plugin-async-agent-calls` | todo | Add `ws.agents.call_async`, wait/status/tail/cancel, and run-state persistence before core implementation orchestration ports |
+| `260503-feat-agents-plugin-agent-session-runtime` | done | Host-neutral agent session runtime: wsstate paths, wsagent registry, Codex resume backend, minimum ws/agents.* tools, and write-skeleton port |
+| `260503-feat-agents-plugin-async-agent-calls` | todo | Add `ws/agents.call_async`, wait/status/tail/cancel, and run-state persistence before core implementation orchestration ports |
 | `260503-feat-agents-plugin-sidecar-skill-drafts` | done | Ported lead-run sidecar skills `add-rule`, `ship`, and `exit-session`; deferred `manual-think` and `workflow` |
 | `260503-feat-agents-plugin-spec-skill-drafts` | done | Ported `write-spec` and `update-spec` into `agents-plugin/` as host-neutral draft skills with convention/stem/index helpers called through MCP |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |

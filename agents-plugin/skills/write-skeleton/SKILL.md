@@ -21,16 +21,16 @@ description: Crystallize ticket contracts as public interface stubs and integrat
 1. Read the target ticket and identify the implementation phase that needs a skeleton.
 2. Inspect only the code and docs needed to form contract directives.
 3. Write 2-5 contract directives covering choices the delegate cannot derive from the ticket and codebase.
-4. Call MCP tool `ws.agents.register` with `root`, `name: "skeleton-writer"`, `backend: "codex"`, `tier: "deep"`, `prompt_refs: ["skeleton-writer"]`, and `system_prompt_text` from `Templates / Skeleton Writer System Prompt`.
-5. Call MCP tool `ws.agents.call` with `name: "skeleton-writer"` and a prompt using `Templates / Delegate Prompt`.
+4. Call MCP tool `ws/agents.register` with `root`, `name: "skeleton-writer"`, `backend: "codex"`, `tier: "deep"`, `prompt_refs: ["skeleton-writer"]`, and `system_prompt_text` from `Templates / Skeleton Writer System Prompt`.
+5. Call MCP tool `ws/agents.call` with `name: "skeleton-writer"` and a prompt using `Templates / Delegate Prompt`.
 6. Review `git diff HEAD` and `git status --short`; read changed files where contract or build correctness is uncertain.
 7. Run the project build or syntax check required for compilation; do not run tests that are expected to fail against stubs.
-8. Apply `judge: review-outcome`; fix minor issues directly and send structural amendments through `ws.agents.call`.
+8. Apply `judge: review-outcome`; fix minor issues directly and send structural amendments through `ws/agents.call`.
 9. Commit stubs and tests together with a `feat(<scope>): skeleton - <contract>` message.
 10. Add `## AI Context` with the key contract decisions and delegation amendments.
 11. Add `## Ticket Updates` with the ticket stem and future implementation notes.
 12. Update the ticket `skeletons:` frontmatter for the implemented phase after the commit hash exists.
-13. Call MCP tool `ws.agents.erase` for `skeleton-writer` after the skeleton commit and ticket metadata are complete.
+13. Call MCP tool `ws/agents.erase` for `skeleton-writer` after the skeleton commit and ticket metadata are complete.
 14. Suggest the next execution path using `judge: next-step`.
 
 ## Judgments

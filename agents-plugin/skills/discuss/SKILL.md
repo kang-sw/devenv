@@ -19,7 +19,7 @@ description: Explore a workflow design, migration direction, ticket scope, or im
 ## On: Start Discussion
 
 1. Identify the concrete topic, ticket, skill, spec, or decision under discussion.
-2. Call MCP tool `ws.project_tree` for current project memory.
+2. Call MCP tool `ws/project_tree` for current project memory.
 3. Read any named ticket, spec, skill, or convention document before making claims about it.
 4. Define the active boundary: design discussion, ticket shaping, skill porting, or implementation planning.
 5. Ask at most one blocking question when the boundary cannot be inferred safely.
@@ -42,7 +42,7 @@ description: Explore a workflow design, migration direction, ticket scope, or im
 3. Preserve rejected alternatives when they explain why the chosen direction matters.
 4. Record remaining risks and follow-up questions separately from settled decisions.
 5. If the capture target is a ticket, use the `write-ticket` skill.
-6. If the capture target is a spec or convention, call `ws.convention.read` for the relevant convention before editing.
+6. If the capture target is a spec or convention, call `ws/convention.read` for the relevant convention before editing.
 7. Commit only the captured documentation changes.
 
 ## Judgments

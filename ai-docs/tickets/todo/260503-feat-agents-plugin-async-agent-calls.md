@@ -11,7 +11,7 @@ related:
 
 ## Background
 
-The minimum `ws.agents.call` path is synchronous: the MCP tool invocation waits
+The minimum `ws/agents.call` path is synchronous: the MCP tool invocation waits
 until the backend Codex turn completes and returns the final agent text. That is
 acceptable for short delegate turns and the first `write-skeleton` path, but it
 will be a poor fit for the core implementation track. `write-code`, `edit`,
@@ -26,21 +26,21 @@ asynchronous inside the retained `ws-mcp` runtime.
 
 ## Decisions
 
-- Keep `ws.agents.call` synchronous for compatibility and short delegate turns.
+- Keep `ws/agents.call` synchronous for compatibility and short delegate turns.
 - Treat each named agent as a task-scoped session. Creating/registering the same
   name for a new task should reset the previous conversation state rather than
   imply a permanent worker identity.
-- Add `ws.agents.call_async` for asynchronous delegate calls that return
+- Add `ws/agents.call_async` for asynchronous delegate calls that return
   immediately with the agent name and current status. Do not require callers to
   track a public run handle for the normal case.
 - Use `call_async` rather than `start`, `post`, `submit`, or `dispatch` because
   it preserves the semantic relationship to `call` and gives models the clearest
   tool-selection signal.
-- Add `ws.agents.wait` to block until the named agent's current async call
+- Add `ws/agents.wait` to block until the named agent's current async call
   completes, with timeout support.
-- Add `ws.agents.status` and `ws.agents.tail` so the lead can inspect running
+- Add `ws/agents.status` and `ws/agents.tail` so the lead can inspect running
   delegates without waiting for final output.
-- Add `ws.agents.cancel` before core implementation skills rely on long-running
+- Add `ws/agents.cancel` before core implementation skills rely on long-running
   async calls.
 - Allow only one active async call per named agent. A second async call against
   the same agent should fail with an explicit busy status unless the caller
@@ -53,8 +53,8 @@ asynchronous inside the retained `ws-mcp` runtime.
 - The MCP server process is retained while the host session is alive, but it may
   restart. Async state must survive process restart well enough for status, tail,
   and print recovery.
-- `ws.agents.call_async` must not write non-MCP diagnostics to stdout.
-- `ws.agents.wait` must support bounded waits so skills can avoid unbounded host
+- `ws/agents.call_async` must not write non-MCP diagnostics to stdout.
+- `ws/agents.wait` must support bounded waits so skills can avoid unbounded host
   turns.
 - Public async operations should be keyed by agent name. Internal execution ids,
   sequence numbers, or state file names may exist for crash recovery, but they
@@ -80,7 +80,7 @@ slice:
 - compression is backend-specific and should not block the basic async contract
 
 Claude `ws-oneshot-agent` is only a routing composition: create a temporary named
-agent, call it once, then erase it. The MCP `ws.agents.oneshot` surface should
+agent, call it once, then erase it. The MCP `ws/agents.oneshot` surface should
 keep that composition semantics rather than introduce a separate session model.
 
 The API documentation workflow is more nuanced and should not be collapsed into
@@ -111,7 +111,7 @@ Success criteria:
 - Document that `status` may briefly show a running call with no `session_id`
   until the first streamed event arrives.
 - Preserve final-output extraction from the last `agent_message`.
-- Existing synchronous `ws.agents.call` behavior remains unchanged.
+- Existing synchronous `ws/agents.call` behavior remains unchanged.
 
 ### Phase 1: Current call state model
 
@@ -147,11 +147,11 @@ Success criteria:
 
 - Unit tests cover state persistence, status transitions, busy-agent rejection,
   reset behavior, and recovery from existing current-call files.
-- Existing synchronous `ws.agents.call` behavior remains unchanged.
+- Existing synchronous `ws/agents.call` behavior remains unchanged.
 
 ### Phase 2: Async process execution
 
-Implement `ws.agents.call_async` by launching the backend call in a child process
+Implement `ws/agents.call_async` by launching the backend call in a child process
 or goroutine-managed subprocess and returning immediately with the agent name and
 status.
 
@@ -170,10 +170,10 @@ Success criteria:
 
 Expose the operational async surfaces:
 
-- `ws.agents.wait`
-- `ws.agents.status`
-- `ws.agents.tail`
-- `ws.agents.cancel`
+- `ws/agents.wait`
+- `ws/agents.status`
+- `ws/agents.tail`
+- `ws/agents.cancel`
 
 Success criteria:
 

@@ -57,7 +57,7 @@ paths that would break outside Claude.
 
 Do not point shared skill text at repository-local paths such as
 `claude-plugin/infra/spec-conventions.md`. Convention documents are distributed
-with the MCP runtime and read through `ws.convention.read`, so downstream
+with the MCP runtime and read through `ws/convention.read`, so downstream
 projects can use the same skill text without carrying this repository's
 `claude-plugin/` source tree.
 
@@ -164,7 +164,7 @@ depends on the installed plugin cache.
 
 ## MCP Tool Contract
 
-### `ws.project_tree`
+### `ws/project_tree`
 
 Render the ws project document map, spec inventory, and active ticket queue.
 
@@ -206,7 +206,7 @@ The MCP output does not have to be byte-identical to the legacy helper, but it
 must preserve the same workflow purpose: compact project orientation for
 discussion and ticket planning.
 
-### `ws.convention.read`
+### `ws/convention.read`
 
 Read a bundled ws convention document by bare stem or filename.
 
@@ -243,7 +243,7 @@ Current bundled documents:
 - `spec-conventions`
 - `mental-model-conventions`
 
-### `ws.infra.read`
+### `ws/infra.read`
 
 Read a ws infra convention document by bare stem or filename.
 
@@ -272,7 +272,7 @@ Constraints:
 - Path separators are rejected.
 - `.md` is appended when absent.
 - The document is read from this repository's local `claude-plugin/infra/` tree.
-  Shared `agents-plugin` skills should use `ws.convention.read` instead.
+  Shared `agents-plugin` skills should use `ws/convention.read` instead.
 
 Error behavior:
 
@@ -292,10 +292,10 @@ the current baseline.
 
 | Candidate | Purpose | Current fallback |
 |-----------|---------|------------------|
-| `ws.project_index.read` | Read `ai-docs/_index.md` as project memory. | `cat ai-docs/_index.md` |
-| `ws.ticket_queue.list` | Return active ticket stems grouped by status. | `ws-proj-tree` or direct file listing |
+| `ws/project_index.read` | Read `ai-docs/_index.md` as project memory. | `cat ai-docs/_index.md` |
+| `ws/ticket_queue.list` | Return active ticket stems grouped by status. | `ws-proj-tree` or direct file listing |
 
-### `ws.spec_stem.generate`
+### `ws/spec_stem.generate`
 
 Generate a collision-free spec anchor stem for a descriptive slug.
 
@@ -322,7 +322,7 @@ Output:
 
 - MCP text content containing the generated `YYMMDD-slug` stem.
 
-### `ws.spec_index.verify`
+### `ws/spec_index.verify`
 
 Verify basic spec anchor index health.
 
@@ -348,7 +348,7 @@ This initial MCP surface is verification-only. It does not yet reproduce every
 mutation performed by `ws-spec-build-index`; shared skills should still call the
 MCP tool name so the runtime can grow behind a stable contract.
 
-### `ws.mental_models.list`
+### `ws/mental_models.list`
 
 List mental-model documents with domains, descriptions, and sources.
 
@@ -539,12 +539,12 @@ session after cache refresh is available. Then run:
 ```bash
 codex mcp get ws
 codex exec --dangerously-bypass-approvals-and-sandbox --json \
-  'There is an enabled MCP server named ws. Use its tool named ws.project_tree with arguments {"root":"/Users/kang-sw/devenv"}. Do not use shell commands. Reply with the exact server name, exact tool name, and the first non-empty line of the tool result.' \
+  'There is an enabled MCP server named ws. Use its tool named project_tree with arguments {"root":"/Users/kang-sw/devenv"}. Do not use shell commands. Reply with the exact server name, exact tool name, and the first non-empty line of the tool result.' \
   < /dev/null
 ```
 
 Success means the JSONL output contains an MCP tool call with server `ws`, tool
-`ws.project_tree`, and a result whose first non-empty line is `ai-docs/`.
+`project_tree`, and a result whose first non-empty line is `ai-docs/`.
 
 Use Level 1 for ordinary Go/MCP changes, Level 2 for release/build changes, and
 Level 3 whenever `.codex-plugin/plugin.json`, `.mcp.json`, launcher behavior, or

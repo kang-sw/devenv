@@ -103,22 +103,22 @@ func (s *Server) callTool(req request) response {
 	}
 
 	switch params.Name {
-	case "ws.project_tree":
+	case "project_tree":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
 		}
 		text, err := wsdoc.ProjectTree(root)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.infra.read":
+	case "infra.read":
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsdoc.ReadInfra(s.root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.convention.read":
+	case "convention.read":
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsdoc.ReadConvention(name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.spec_stem.generate":
+	case "spec_stem.generate":
 		slug, _ := params.Arguments["slug"].(string)
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -126,21 +126,21 @@ func (s *Server) callTool(req request) response {
 		}
 		stem, err := wsdoc.GenerateSpecStem(root, slug, time.Now())
 		return toolTextResponse(req.ID, stem+"\n", err)
-	case "ws.spec_index.verify":
+	case "spec_index.verify":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
 		}
 		text, err := wsdoc.VerifySpecIndex(root)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.mental_models.list":
+	case "mental_models.list":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
 		}
 		text, err := wsdoc.MentalModelsList(root)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.agents.register":
+	case "agents.register":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
@@ -160,7 +160,7 @@ func (s *Server) callTool(req request) response {
 			SystemPromptText: systemPromptText,
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
-	case "ws.agents.call":
+	case "agents.call":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
@@ -173,7 +173,7 @@ func (s *Server) callTool(req request) response {
 			Prompt: prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.agents.oneshot":
+	case "agents.oneshot":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
@@ -195,7 +195,7 @@ func (s *Server) callTool(req request) response {
 			Prompt:           prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
-	case "ws.agents.print":
+	case "agents.print":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
@@ -203,7 +203,7 @@ func (s *Server) callTool(req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
 		return toolTextResponse(req.ID, text, err)
-	case "ws.agents.erase":
+	case "agents.erase":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
@@ -241,7 +241,7 @@ func errorResponse(id json.RawMessage, code int, message string) response {
 func tools() []map[string]any {
 	return []map[string]any{
 		{
-			"name":        "ws.project_tree",
+			"name":        "project_tree",
 			"description": "Render the ws project document map, spec inventory, and active ticket queue.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -254,7 +254,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.infra.read",
+			"name":        "infra.read",
 			"description": "Read a repository-local ws infra document by bare stem or filename.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -268,7 +268,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.convention.read",
+			"name":        "convention.read",
 			"description": "Read a bundled ws convention document by bare stem or filename.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -282,7 +282,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.spec_stem.generate",
+			"name":        "spec_stem.generate",
 			"description": "Generate a collision-free spec anchor stem for a slug.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -300,7 +300,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.spec_index.verify",
+			"name":        "spec_index.verify",
 			"description": "Verify basic spec anchor index health.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -313,7 +313,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.mental_models.list",
+			"name":        "mental_models.list",
 			"description": "List mental-model documents with domains, descriptions, and sources.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -326,7 +326,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.agents.register",
+			"name":        "agents.register",
 			"description": "Register a durable ws agent session for the current worktree.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -343,7 +343,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.agents.call",
+			"name":        "agents.call",
 			"description": "Call a registered ws agent and resume its stored backend session when available.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -356,7 +356,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.agents.oneshot",
+			"name":        "agents.oneshot",
 			"description": "Register, call, and erase a temporary ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -374,7 +374,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.agents.print",
+			"name":        "agents.print",
 			"description": "Return the last plain-text output for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -386,7 +386,7 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "ws.agents.erase",
+			"name":        "agents.erase",
 			"description": "Erase a registered ws agent directory for the current worktree.",
 			"inputSchema": map[string]any{
 				"type": "object",

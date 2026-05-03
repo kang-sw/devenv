@@ -21,8 +21,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.project_tree","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"ws.infra.read","arguments":{"name":"example"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"project_tree","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"infra.read","arguments":{"name":"example"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -40,8 +40,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &listResp); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(lines[1], "ws.project_tree") {
-		t.Fatalf("tools/list missing ws.project_tree: %s", lines[1])
+	if !strings.Contains(lines[1], "project_tree") {
+		t.Fatalf("tools/list missing project_tree: %s", lines[1])
 	}
 	if !strings.Contains(lines[2], "tickets:") {
 		t.Fatalf("project_tree response missing tickets: %s", lines[2])

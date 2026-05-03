@@ -11,15 +11,15 @@ description: Classify a natural-language rule as cross-cutting or domain-scoped 
 - Write to exactly one target file per invocation.
 - Never write the same rule to both `CLAUDE.md` and a mental-model document.
 - Keep all AI-authored rule content in English.
-- Use `ws.convention.read` for mental-model conventions.
-- Use `ws.mental_models.list` for the current domain catalog.
+- Use `ws/convention.read` for mental-model conventions.
+- Use `ws/mental_models.list` for the current domain catalog.
 - Commit the single target-file change with `## AI Context` recording the classification decision.
 
 ## On: Add Rule
 
 1. Parse the rule from the user request; if missing, ask for the rule text and wait.
-2. Call MCP tool `ws.convention.read` with `{"name":"mental-model-conventions"}`.
-3. Call MCP tool `ws.mental_models.list`.
+2. Call MCP tool `ws/convention.read` with `{"name":"mental-model-conventions"}`.
+3. Call MCP tool `ws/mental_models.list`.
 4. Read `CLAUDE.md` to inspect current `## Architecture Rules`.
 5. Read candidate mental-model documents before selecting a domain target.
 6. Apply `judge: classification`.

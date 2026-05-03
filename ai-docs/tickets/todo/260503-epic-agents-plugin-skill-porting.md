@@ -128,8 +128,8 @@ Completed child ticket:
 Covered skill/runtime:
 
 - `write-skeleton`
-- minimum `ws.agents.register`, `ws.agents.call`, `ws.agents.oneshot`,
-  `ws.agents.print`, and `ws.agents.erase`
+- minimum `ws/agents.register`, `ws/agents.call`, `ws/agents.oneshot`,
+  `ws/agents.print`, and `ws/agents.erase`
 
 Purpose: define the host-neutral sustainable session runtime before porting the
 first production delegation skill. The runtime should generalize Claude's

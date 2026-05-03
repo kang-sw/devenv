@@ -8,26 +8,26 @@ description: Audit recent commits for caller-visible behavior changes and update
 ## Invariants
 
 - Lead the audit directly unless the user explicitly authorizes delegation.
-- Call `ws.convention.read` for `spec-conventions` before changing specs.
+- Call `ws/convention.read` for `spec-conventions` before changing specs.
 - Add entries only for confirmed implemented behavior unless the user explicitly asks for planned spec text.
 - Strip `🚧` only after confirming the feature is implemented.
 - Keep all AI-authored spec content in English.
-- Call `ws.spec_index.verify` after any spec edit.
+- Call `ws/spec_index.verify` after any spec edit.
 - Commit all spec changes in one `docs(spec): ...` commit.
 - Do not read convention files from host-local plugin source paths.
 
 ## On: Update Spec
 
 1. Resolve the commit range with `judge: commit-range`.
-2. Call MCP tool `ws.convention.read` with `{"name":"spec-conventions"}`.
+2. Call MCP tool `ws/convention.read` with `{"name":"spec-conventions"}`.
 3. Run `git log <range> --oneline` and inspect commit bodies when needed.
 4. Apply `judge: spec-impact` to each commit.
 5. For each impacting commit, identify the affected spec domain and read the relevant files.
-6. Add a missing implemented entry using `Templates / Implemented Entry` and `ws.spec_stem.generate`.
+6. Add a missing implemented entry using `Templates / Implemented Entry` and `ws/spec_stem.generate`.
 7. Scan existing `🚧` entries and Planned callouts for stems completed by the range.
 8. Strip completed `🚧` markers only after confirming implementation.
 9. Handle `removed: <stem>` markers with `judge: removal-handling`.
-10. Call MCP tool `ws.spec_index.verify` if any spec changed.
+10. Call MCP tool `ws/spec_index.verify` if any spec changed.
 11. Commit only the changed spec files and directly required index changes.
 12. Report `Spec: <N entries added, M markers stripped, K removals handled>` or `Spec: no changes.`
 
@@ -47,7 +47,7 @@ Do not add spec entries for internal refactors, documentation-only edits, test-o
 
 ### judge: anchor-generation
 
-Call `ws.spec_stem.generate` with `{"slug":"<descriptive-slug>"}` and use the returned `YYMMDD-slug` exactly.
+Call `ws/spec_stem.generate` with `{"slug":"<descriptive-slug>"}` and use the returned `YYMMDD-slug` exactly.
 
 ### judge: removal-handling
 

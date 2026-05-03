@@ -47,7 +47,7 @@ Permanent behavioral invariants belong in body prose, not in any callout. Write 
 ## Anchors
 
 - Every named feature carries a `{#YYMMDD-slug}` anchor — authored once, stable forever.
-- Call MCP tool `ws.spec_stem.generate` with a descriptive slug to obtain a collision-free stem before inserting.
+- Call MCP tool `ws/spec_stem.generate` with a descriptive slug to obtain a collision-free stem before inserting.
 - Anchors may appear on any line (heading or body text), not heading-only.
 - Slugs are clean identifiers: lowercase, hyphens, no spaces.
 - When a slug changes, the commit message must include `renamed-spec: <old-stem> → <new-stem>`.
@@ -60,7 +60,7 @@ When a commit removes a feature from the codebase, include `removed: <spec-stem>
 
 ## Frontmatter
 
-Call MCP tool `ws.spec_index.verify` after every spec write or update. It scans the
+Call MCP tool `ws/spec_index.verify` after every spec write or update. It scans the
 full corpus and reports spec health issues such as duplicate stems. Mutation-capable
 index repair can be added behind the same MCP boundary without changing shared skill
 text.
