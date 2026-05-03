@@ -28,7 +28,7 @@ func TestEnsureCreatesStableProjectAndWorktreeLayout(t *testing.T) {
 	}
 
 	canonRepo := canonicalForTest(t, repo)
-	wantProjectKey := wantKey(canonRepo, filepath.Base(canonRepo))
+	wantProjectKey := wantKey(canonRepo)
 	if project.ProjectKey != wantProjectKey {
 		t.Fatalf("project key = %q, want %q", project.ProjectKey, wantProjectKey)
 	}
@@ -47,8 +47,14 @@ func TestEnsureCreatesStableProjectAndWorktreeLayout(t *testing.T) {
 			t.Fatalf("expected directory %s, stat=%v err=%v", dir, info, err)
 		}
 	}
-	if !strings.HasPrefix(layout.ProjectDir, filepath.Join(cache, "projects")+string(os.PathSeparator)) {
-		t.Fatalf("project dir %q is not under cache projects", layout.ProjectDir)
+	if layout.ProjectDir != filepath.Join(cache, "proj", wantProjectKey) {
+		t.Fatalf("project dir = %q, want flat project dir", layout.ProjectDir)
+	}
+	if layout.WorktreeDir != layout.ProjectDir {
+		t.Fatalf("normal repo worktree dir = %q, want project dir %q", layout.WorktreeDir, layout.ProjectDir)
+	}
+	if !strings.HasPrefix(layout.ProjectDir, filepath.Join(cache, "proj")+string(os.PathSeparator)) {
+		t.Fatalf("project dir %q is not under cache proj", layout.ProjectDir)
 	}
 
 	var projectFile ProjectMetadata
@@ -135,7 +141,7 @@ func TestLinkedWorktreeSharesProjectIdentityAndSeparatesWorktreeState(t *testing
 	}
 
 	canonWorktree := canonicalForTest(t, worktreePath)
-	wantWorktreeKey := wantKey(canonWorktree, filepath.Base(canonWorktree))
+	wantWorktreeKey := wantKey(canonicalForTest(t, repo)) + "@" + wantKey(canonWorktree)
 	if linkedWorktree.WorktreeKey != wantWorktreeKey {
 		t.Fatalf("linked worktree key = %q, want %q", linkedWorktree.WorktreeKey, wantWorktreeKey)
 	}
@@ -195,13 +201,9 @@ func TestCacheRootUsesExplicitOptionThenEnvThenHome(t *testing.T) {
 	}
 }
 
-func TestKeySanitizesReadableSuffixButKeepsHashStable(t *testing.T) {
-	got := key("abcdef123456", "feature/test branch")
-	if got != "abcdef123456-feature-test-branch" {
-		t.Fatalf("key sanitized = %q", got)
-	}
-	if key("abcdef123456", "***") != "abcdef123456-unnamed" {
-		t.Fatalf("empty sanitized key fallback failed")
+func TestShortHashUsesEightCharacters(t *testing.T) {
+	if got := shortHash("/tmp/example"); len(got) != 8 {
+		t.Fatalf("short hash length = %d, value %q", len(got), got)
 	}
 }
 
@@ -253,7 +255,7 @@ func canonicalForTest(t *testing.T, path string) string {
 	return got
 }
 
-func wantKey(path, name string) string {
+func wantKey(path string) string {
 	sum := sha256.Sum256([]byte(path))
-	return hex.EncodeToString(sum[:])[:12] + "-" + name
+	return hex.EncodeToString(sum[:])[:8]
 }

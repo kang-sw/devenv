@@ -464,6 +464,8 @@ Behavior:
   directory.
 - Stems are sanitized before path use.
 - Returned paths are reserved as empty writable files and preserve input order.
+- Filenames use `<seed8>-<index>-<stem>.md`; invocation time is intentionally
+  omitted from the filename to reduce prompt and review-path context cost.
 
 ### `ws/agents.register`
 

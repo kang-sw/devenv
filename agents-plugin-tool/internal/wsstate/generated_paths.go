@@ -38,16 +38,15 @@ func (m Manager) GeneratePaths(repoPath, kind string, stems []string) ([]Generat
 		return nil, fmt.Errorf("create generated path dir %s: %w", dir, err)
 	}
 
-	runID, err := randomHex(6)
+	runID, err := randomHex(4)
 	if err != nil {
 		return nil, err
 	}
-	prefix := m.now().UTC().Format("20060102T150405Z") + "-" + runID
 
 	paths := make([]GeneratedPath, 0, len(stems))
 	for index, stem := range stems {
 		safeStem := sanitizeGeneratedPathStem(stem)
-		path := filepath.Join(dir, fmt.Sprintf("%s-%02d-%s%s", prefix, index+1, safeStem, ext))
+		path := filepath.Join(dir, fmt.Sprintf("%s-%02d-%s%s", runID, index+1, safeStem, ext))
 		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
 		if err != nil {
 			return nil, fmt.Errorf("reserve generated path %s: %w", path, err)

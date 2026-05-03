@@ -41,35 +41,40 @@ Agent runtime state uses the project-state layout from
 
 ```text
 ~/.cache/ws@kang-sw-devenv/
-  projects/
-    <project-key>/
+  proj/
+    <project-hash8>/
       project.json
       shared/
         locks/
-      worktrees/
-        <worktree-key>/
-          worktree.json
-          agents/
-            <agent-name>/
-              agent.json
-              inbox/
-                000001.json
-              outbox/
-              current/
-                state.json
-                stdout
-                stderr
-              output.md
-              events.jsonl
-          review-paths/
-          sessions/
-          tmp/
+      worktree.json
+      agents/
+        <agent-name>/
+          agent.json
+          inbox/
+            000001.json
+          outbox/
+          current/
+            state.json
+            stdout
+            stderr
+          output.md
+          events.jsonl
+      review-paths/
+      sessions/
+      tmp/
+    <project-hash8>@<worktree-hash8>/
+      worktree.json
+      agents/
+      review-paths/
+      sessions/
+      tmp/
 ```
 
-The project key is `sha256(canonical-root-path)[:12]-<repo-basename>`. The
-worktree key is `sha256(canonical-worktree-path)[:12]-<worktree-basename>`.
-Linked worktrees share the common/root repository identity and keep separate
-worktree-local agent state.
+The project key is `sha256(canonical-root-path)[:8]`. The main worktree uses
+that key directly. Linked worktrees share the common/root repository identity
+and use `<project-hash8>@<worktree-hash8>`, where `worktree-hash8` is
+`sha256(canonical-worktree-path)[:8]`. The shorter flat layout reduces prompt
+and review-path context cost while preserving stable project/worktree lookup.
 
 ## Agent Directory
 

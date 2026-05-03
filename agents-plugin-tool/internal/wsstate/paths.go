@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -19,8 +18,6 @@ const (
 	envCacheHome        = "WS_CACHE_HOME"
 	schemaVersion       = 1
 )
-
-var unsafeKeyChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 type Clock func() time.Time
 
@@ -105,8 +102,11 @@ func (m Manager) Resolve(repoPath string) (Layout, ProjectMetadata, WorktreeMeta
 
 	rootID := shortHash(commonRoot)
 	worktreeID := shortHash(root)
-	projectKey := key(rootID, filepath.Base(commonRoot))
-	worktreeKey := key(worktreeID, filepath.Base(root))
+	projectKey := rootID
+	worktreeKey := projectKey
+	if root != commonRoot {
+		worktreeKey = projectKey + "@" + worktreeID
+	}
 	now := m.now().UTC().Format(time.RFC3339)
 
 	layout := layoutFor(cacheRoot, projectKey, worktreeKey)
@@ -167,10 +167,10 @@ func (m Manager) now() time.Time {
 }
 
 func layoutFor(cacheRoot, projectKey, worktreeKey string) Layout {
-	projectDir := filepath.Join(cacheRoot, "projects", projectKey)
+	projectDir := filepath.Join(cacheRoot, "proj", projectKey)
 	sharedDir := filepath.Join(projectDir, "shared")
-	worktreesDir := filepath.Join(projectDir, "worktrees")
-	worktreeDir := filepath.Join(worktreesDir, worktreeKey)
+	worktreesDir := filepath.Join(cacheRoot, "proj")
+	worktreeDir := filepath.Join(cacheRoot, "proj", worktreeKey)
 	return Layout{
 		CacheRoot:    cacheRoot,
 		ProjectKey:   projectKey,
@@ -254,16 +254,7 @@ func canonicalPath(path string) (string, error) {
 
 func shortHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])[:12]
-}
-
-func key(id, name string) string {
-	name = unsafeKeyChars.ReplaceAllString(name, "-")
-	name = strings.Trim(name, "-")
-	if name == "" {
-		name = "unnamed"
-	}
-	return id + "-" + name
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 func upsertJSON(path string, next any) error {

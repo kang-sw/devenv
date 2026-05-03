@@ -41,6 +41,9 @@ func TestGeneratePathsAllocatesReviewPathsInStableOrder(t *testing.T) {
 		if !strings.HasSuffix(generated.Path, "-"+generated.Stem+".md") {
 			t.Fatalf("path %q does not end with sanitized stem %q", generated.Path, generated.Stem)
 		}
+		if strings.Contains(filepath.Base(generated.Path), "T") {
+			t.Fatalf("path %q unexpectedly includes timestamp", generated.Path)
+		}
 		if info, err := os.Stat(generated.Path); err != nil || info.IsDir() {
 			t.Fatalf("reserved path %q stat=%v err=%v", generated.Path, info, err)
 		}
