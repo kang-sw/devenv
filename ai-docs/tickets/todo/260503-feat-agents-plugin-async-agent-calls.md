@@ -59,6 +59,10 @@ asynchronous inside the retained `ws-mcp` runtime.
 - Public async operations should be keyed by agent name. Internal execution ids,
   sequence numbers, or state file names may exist for crash recovery, but they
   should not become the primary user-facing contract.
+- Codex assigns thread ids after session creation, but `codex exec --json`
+  streams `thread.started` before the turn completes. The async implementation
+  should parse JSONL incrementally and persist the thread id as soon as that
+  event arrives.
 - The async layer must reuse the existing `wsstate` and `wsagent` path managers.
 - The initial implementation may target Codex backend only, but schemas should
   leave room for Claude and future backends.
@@ -91,6 +95,23 @@ The current Go runtime already stores `agent.json`, `output.md`, and
 current-call state layer under each agent directory.
 
 ## Phases
+
+### Phase 0: Streaming thread-id registration
+
+Prove and encode the Codex JSONL streaming assumption before building the async
+state machine. Unlike Claude, Codex cannot accept a caller-chosen session UUID
+before the first turn. The runtime must therefore treat `session_id` as initially
+unknown, then update agent/current-call state as soon as the child Codex process
+emits `thread.started`.
+
+Success criteria:
+
+- Add or update Codex backend tests around incremental JSONL event handling so
+  `thread.started` updates session state before final `turn.completed`.
+- Document that `status` may briefly show a running call with no `session_id`
+  until the first streamed event arrives.
+- Preserve final-output extraction from the last `agent_message`.
+- Existing synchronous `ws.agents.call` behavior remains unchanged.
 
 ### Phase 1: Current call state model
 
