@@ -117,6 +117,30 @@ Success criteria:
 - The path manager can return stable locations for `agents`, `review-paths`,
   `sessions`, `locks`, and `tmp`.
 
+### Result (f2d29f4) - 2026-05-03
+
+Added `agents-plugin-tool/internal/wsstate` as the reusable project-state path
+manager for future workflow runtime features. The package resolves the workflow
+cache root, detects the canonical worktree root and common repository root through
+git, derives hash-based project and worktree keys, and returns stable directories
+for root-shared locks plus worktree-local agents, review paths, sessions, and
+temporary files.
+
+The implementation writes `project.json` and `worktree.json` metadata with schema
+version, canonical paths, ids, display names, and `created_at`/`last_seen_at`
+timestamps. Repeated `Ensure` calls preserve `created_at` and update
+`last_seen_at`, so future active-project and active-agent tooling can scan the
+cache root without relying on human-readable path reconstruction.
+
+Tests cover normal repositories, repositories with no origin remote, linked
+worktree identity sharing, worktree-local state separation, cache-root override
+precedence, metadata timestamp behavior, and readable key sanitization. The new Go
+surface does not write under `.git/ws@...`.
+
+Verification:
+
+- `go test ./...` from `agents-plugin-tool/`
+
 ### Phase 2: Host-neutral agent session contract
 
 Extract the shared session surface from the current `ws-named-agent` behavior and
