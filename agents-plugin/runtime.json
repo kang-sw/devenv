@@ -14,6 +14,7 @@
     "mental_models.list": ">=0.1.0-dev <0.2.0",
     "agents.register": ">=0.1.0-dev <0.2.0",
     "agents.call": ">=0.1.0-dev <0.2.0",
+    "agents.call_async": ">=0.1.0-dev <0.2.0",
     "agents.oneshot": ">=0.1.0-dev <0.2.0",
     "agents.print": ">=0.1.0-dev <0.2.0",
     "agents.erase": ">=0.1.0-dev <0.2.0"
@@ -21,6 +22,8 @@
   "commands": {
     "agents.register": ">=0.1.0-dev <0.2.0",
     "agents.call": ">=0.1.0-dev <0.2.0",
+    "agents.call-async": ">=0.1.0-dev <0.2.0",
+    "agents.run-current": ">=0.1.0-dev <0.2.0",
     "agents.oneshot": ">=0.1.0-dev <0.2.0",
     "agents.print": ">=0.1.0-dev <0.2.0",
     "agents.erase": ">=0.1.0-dev <0.2.0"

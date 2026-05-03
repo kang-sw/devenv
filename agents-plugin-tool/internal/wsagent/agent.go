@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -36,9 +37,10 @@ var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 type Clock func() time.Time
 
 type Options struct {
-	CacheHome string
-	Now       Clock
-	Runner    Runner
+	CacheHome     string
+	Now           Clock
+	Runner        Runner
+	WorkerStarter WorkerStarter
 }
 
 type RegisterOptions struct {
@@ -57,6 +59,34 @@ type CallOptions struct {
 	Prompt string
 }
 
+type CallAsyncOptions struct {
+	Root   string
+	Name   string
+	Prompt string
+}
+
+type CallAsyncResult struct {
+	AgentName  string
+	Status     string
+	PID        int
+	SessionID  string
+	PromptPath string
+	StdoutPath string
+	StderrPath string
+}
+
+type AsyncWorkerRequest struct {
+	Root       string
+	Name       string
+	PromptPath string
+	StdoutPath string
+	StderrPath string
+}
+
+type WorkerStarter interface {
+	StartAsyncCall(AsyncWorkerRequest) (int, error)
+}
+
 type OneShotOptions struct {
 	Root             string
 	Name             string
@@ -66,6 +96,31 @@ type OneShotOptions struct {
 	PromptRefs       []string
 	SystemPromptText string
 	Prompt           string
+}
+
+type SelfWorkerStarter struct{}
+
+func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, fmt.Errorf("locate ws-mcp executable: %w", err)
+	}
+	cmd := exec.Command(exe, "agents", "run-current", "--root", req.Root, "--name", req.Name)
+	if req.StderrPath != "" {
+		stderr, err := os.OpenFile(req.StderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return 0, fmt.Errorf("open async worker stderr: %w", err)
+		}
+		defer stderr.Close()
+		cmd.Stderr = stderr
+	}
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("start async worker: %w", err)
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return cmd.Process.Pid, nil
 }
 
 type Agent struct {
@@ -225,30 +280,52 @@ func (m Manager) Call(opts CallOptions) (Agent, string, error) {
 		return agent, "", errors.New("prompt is required")
 	}
 
+	text, agent, err := m.executeCall(layout, agent, opts.Prompt, false)
+	return agent, text, err
+}
+
+func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureStreams bool) (string, Agent, error) {
 	now := m.now().UTC().Format(time.RFC3339)
 	agent.Status = StatusRunning
 	agent.LastSeenAt = now
 	agent.LastCallAt = now
 	if err := writeAgent(layout.AgentFile, agent); err != nil {
-		return agent, "", err
+		return "", agent, err
 	}
 	if err := appendEvent(layout.EventsFile, m.now(), "call.started", map[string]any{
 		"backend": agent.Backend,
 		"resume":  agent.SessionID != "",
 	}); err != nil {
-		return agent, "", err
+		return "", agent, err
 	}
 
+	var stdoutFile *os.File
+	var stderrFile *os.File
+	if captureStreams {
+		var err error
+		stdoutFile, err = os.OpenFile(layout.CurrentStdout, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return "", agent, fmt.Errorf("open current stdout: %w", err)
+		}
+		defer stdoutFile.Close()
+		stderrFile, err = os.OpenFile(layout.CurrentStderr, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return "", agent, fmt.Errorf("open current stderr: %w", err)
+		}
+		defer stderrFile.Close()
+	}
 	runner := m.opts.Runner
 	if runner == nil {
 		runner = CodexRunner{}
 	}
 	result, err := runner.Call(RunnerRequest{
-		Root:             opts.Root,
-		Prompt:           opts.Prompt,
+		Root:             layout.Root,
+		Prompt:           prompt,
 		Model:            agent.Model,
 		SessionID:        agent.SessionID,
 		SystemPromptPath: absOptional(layout.AgentDir, agent.SystemPromptPath),
+		Stdout:           stdoutFile,
+		Stderr:           stderrFile,
 		OnSessionID: func(sessionID string) error {
 			if strings.TrimSpace(sessionID) == "" {
 				return nil
@@ -257,6 +334,11 @@ func (m Manager) Call(opts CallOptions) (Agent, string, error) {
 			agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
 			if err := writeAgent(layout.AgentFile, agent); err != nil {
 				return err
+			}
+			if captureStreams {
+				if _, err := m.MarkCurrentCallRunning(layout, os.Getpid(), sessionID); err != nil {
+					return err
+				}
 			}
 			return appendEvent(layout.EventsFile, m.now(), "call.session_started", map[string]any{
 				"session_id": sessionID,
@@ -268,7 +350,7 @@ func (m Manager) Call(opts CallOptions) (Agent, string, error) {
 		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
 		_ = writeAgent(layout.AgentFile, agent)
 		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": err.Error()})
-		return agent, "", err
+		return "", agent, err
 	}
 	if result.SessionID != "" {
 		agent.SessionID = result.SessionID
@@ -278,17 +360,159 @@ func (m Manager) Call(opts CallOptions) (Agent, string, error) {
 	if err := os.WriteFile(layout.OutputFile, []byte(result.Text), 0o644); err != nil {
 		agent.Status = StatusFailed
 		_ = writeAgent(layout.AgentFile, agent)
-		return agent, "", fmt.Errorf("write output: %w", err)
+		return "", agent, fmt.Errorf("write output: %w", err)
 	}
 	if err := writeAgent(layout.AgentFile, agent); err != nil {
-		return agent, "", err
+		return "", agent, err
 	}
 	if err := appendEvent(layout.EventsFile, m.now(), "call.completed", map[string]any{
 		"session_id": agent.SessionID,
 	}); err != nil {
-		return agent, "", err
+		return "", agent, err
 	}
-	return agent, result.Text, nil
+	return result.Text, agent, nil
+}
+
+func (m Manager) CallAsync(opts CallAsyncOptions) (CallAsyncResult, error) {
+	if strings.TrimSpace(opts.Root) == "" {
+		opts.Root = "."
+	}
+	layout, err := m.layout(opts.Root, opts.Name, false)
+	if err != nil {
+		return CallAsyncResult{}, err
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		return CallAsyncResult{}, err
+	}
+	if agent.Backend != "codex" {
+		return CallAsyncResult{}, fmt.Errorf("unsupported agent backend %q", agent.Backend)
+	}
+	if strings.TrimSpace(opts.Prompt) == "" {
+		return CallAsyncResult{}, errors.New("prompt is required")
+	}
+
+	call, err := m.BeginCurrentCall(layout, agent)
+	if err != nil {
+		return CallAsyncResult{}, err
+	}
+	promptPath := filepath.Join(layout.CurrentDir, "prompt.md")
+	if err := os.WriteFile(promptPath, []byte(opts.Prompt), 0o644); err != nil {
+		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("write prompt snapshot: %v", err), nil)
+		return CallAsyncResult{}, fmt.Errorf("write prompt snapshot: %w", err)
+	}
+	call.PromptPath = "current/prompt.md"
+	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
+		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("record prompt snapshot: %v", err), nil)
+		return CallAsyncResult{}, err
+	}
+
+	now := m.now().UTC().Format(time.RFC3339)
+	agent.Status = StatusRunning
+	agent.LastSeenAt = now
+	agent.LastCallAt = now
+	if err := writeAgent(layout.AgentFile, agent); err != nil {
+		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("mark agent running: %v", err), nil)
+		return CallAsyncResult{}, err
+	}
+	if err := appendEvent(layout.EventsFile, m.now(), "call_async.queued", map[string]any{
+		"backend":      agent.Backend,
+		"resume":       agent.SessionID != "",
+		"execution_id": call.ExecutionID,
+	}); err != nil {
+		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("append async queue event: %v", err), nil)
+		return CallAsyncResult{}, err
+	}
+
+	starter := m.opts.WorkerStarter
+	if starter == nil {
+		starter = SelfWorkerStarter{}
+	}
+	pid, err := starter.StartAsyncCall(AsyncWorkerRequest{
+		Root:       opts.Root,
+		Name:       agent.Name,
+		PromptPath: promptPath,
+		StdoutPath: layout.CurrentStdout,
+		StderrPath: layout.CurrentStderr,
+	})
+	if err != nil {
+		agent.Status = StatusFailed
+		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
+		_ = writeAgent(layout.AgentFile, agent)
+		_, _ = m.FailCurrentCall(layout, err.Error(), nil)
+		_ = appendEvent(layout.EventsFile, m.now(), "call_async.failed", map[string]any{"error": err.Error()})
+		return CallAsyncResult{}, err
+	}
+	call, err = m.MarkCurrentCallRunning(layout, pid, "")
+	if err != nil {
+		return CallAsyncResult{}, err
+	}
+	if err := appendEvent(layout.EventsFile, m.now(), "call_async.started", map[string]any{
+		"pid":          pid,
+		"execution_id": call.ExecutionID,
+	}); err != nil {
+		return CallAsyncResult{}, err
+	}
+	return CallAsyncResult{
+		AgentName:  agent.Name,
+		Status:     call.Status,
+		PID:        call.PID,
+		SessionID:  call.SessionID,
+		PromptPath: call.PromptPath,
+		StdoutPath: call.StdoutPath,
+		StderrPath: call.StderrPath,
+	}, nil
+}
+
+func (m Manager) RunCurrent(root, name string) error {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	layout, err := m.layout(root, name, false)
+	if err != nil {
+		return err
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		return err
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		return err
+	}
+	if !isActiveCallStatus(call.Status) {
+		return fmt.Errorf("agent %q current call is not active: %s", agent.Name, call.Status)
+	}
+	promptPath := absOptional(layout.AgentDir, call.PromptPath)
+	if promptPath == "" {
+		return errors.New("current call missing prompt_path")
+	}
+	prompt, err := os.ReadFile(promptPath)
+	if err != nil {
+		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("read prompt snapshot: %v", err), nil)
+		return fmt.Errorf("read prompt snapshot: %w", err)
+	}
+
+	pid := os.Getpid()
+	if _, err := m.MarkCurrentCallRunning(layout, pid, ""); err != nil {
+		return err
+	}
+	if err := appendEvent(layout.EventsFile, m.now(), "call_async.worker_started", map[string]any{
+		"pid":          pid,
+		"execution_id": call.ExecutionID,
+	}); err != nil {
+		return err
+	}
+	text, resultAgent, runErr := m.executeCall(layout, agent, string(prompt), true)
+	if runErr != nil {
+		_, _ = m.FailCurrentCall(layout, runErr.Error(), nil)
+		return runErr
+	}
+	if _, err := m.CompleteCurrentCall(layout, resultAgent.SessionID, 0); err != nil {
+		return err
+	}
+	_ = text
+	return nil
 }
 
 func (m Manager) OneShot(opts OneShotOptions) (string, error) {
@@ -370,6 +594,9 @@ func (m Manager) MarkCurrentCallRunning(layout Layout, pid int, sessionID string
 	call, err := readCurrentCall(layout.CurrentStateFile)
 	if err != nil {
 		return CurrentCall{}, err
+	}
+	if !isActiveCallStatus(call.Status) {
+		return call, nil
 	}
 	call.Status = CallStatusRunning
 	call.PID = pid

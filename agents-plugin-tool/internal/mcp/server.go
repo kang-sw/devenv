@@ -173,6 +173,22 @@ func (s *Server) callTool(req request) response {
 			Prompt: prompt,
 		})
 		return toolTextResponse(req.ID, text, err)
+	case "agents.call_async":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		prompt, _ := params.Arguments["prompt"].(string)
+		result, err := wsagent.NewManager(wsagent.Options{}).CallAsync(wsagent.CallAsyncOptions{
+			Root:   root,
+			Name:   name,
+			Prompt: prompt,
+		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\n", result.AgentName, result.Status, result.PID), nil)
 	case "agents.oneshot":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -345,6 +361,19 @@ func tools() []map[string]any {
 		{
 			"name":        "agents.call",
 			"description": "Call a registered ws agent and resume its stored backend session when available.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"name":   stringProperty("Agent name."),
+					"prompt": stringProperty("Prompt to send to the agent."),
+				},
+				"required": []string{"name", "prompt"},
+			},
+		},
+		{
+			"name":        "agents.call_async",
+			"description": "Start an asynchronous call for a registered ws agent and return immediately.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

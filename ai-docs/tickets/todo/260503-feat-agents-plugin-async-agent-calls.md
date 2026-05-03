@@ -202,6 +202,29 @@ Success criteria:
 - Failure marks the current call failed and preserves diagnostics without
   corrupting MCP stdout.
 
+### Result (pending) - 2026-05-03
+
+Implemented the first asynchronous execution path for Codex-backed ws agents.
+The runtime now exposes `ws/agents.call_async` and CLI fallback
+`ws-mcp agents call-async`. A call writes the prompt to `current/prompt.md`,
+creates or updates `current/state.json`, starts a separate
+`ws-mcp agents run-current` worker process, records the worker pid, and returns
+immediately with the named agent and running status.
+
+The worker owns the actual backend call. It reads the prompt snapshot, resumes
+the registered agent session, captures Codex JSONL stdout and stderr into
+`current/stdout` and `current/stderr`, persists streamed `session_id` updates,
+writes the final `output.md`, appends lifecycle events, and transitions the
+current call to `completed` or `failed`. Busy rejection remains agent-name keyed:
+a second `call_async` against an agent whose current call is `queued` or
+`running` fails with an active-call error.
+
+The implementation deliberately keeps `wait`, `status`, `tail`, and `cancel` out
+of this phase. Tests verify prompt snapshotting, worker launch, busy rejection,
+worker completion, stream capture, and output persistence. A real Codex smoke
+confirmed that `call-async` returned in zero seconds, then the worker completed
+and `agents print` returned `WS_ASYNC_PHASE2_OK`.
+
 ### Phase 3: Wait, status, tail, and cancel tools
 
 Expose the operational async surfaces:

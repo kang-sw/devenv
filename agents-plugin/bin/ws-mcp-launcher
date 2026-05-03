@@ -19,7 +19,8 @@ json_string_value() {
 
 runtime_tools() {
   sed -n '/^[[:space:]]*"tools"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}/p' "$runtime_contract" |
-    sed -n 's/^[[:space:]]*"\(ws\.[^"]*\)"[[:space:]]*:.*/\1/p'
+    sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*:.*/\1/p' |
+    sed '/^tools$/d'
 }
 
 runtime_commands() {

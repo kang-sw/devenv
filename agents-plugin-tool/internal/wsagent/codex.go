@@ -19,6 +19,8 @@ type RunnerRequest struct {
 	Model            string
 	SessionID        string
 	SystemPromptPath string
+	Stdout           io.Writer
+	Stderr           io.Writer
 	OnSessionID      func(string) error
 }
 
@@ -49,13 +51,26 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	cmd := exec.Command("codex", args...)
 	cmd.Dir = req.Root
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	if req.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(&stderr, req.Stderr)
+	} else {
+		cmd.Stderr = &stderr
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return RunnerResult{}, fmt.Errorf("open codex stdout: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
 		return RunnerResult{}, fmt.Errorf("start codex: %w", err)
+	}
+	if req.Stdout != nil {
+		stdout = struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: io.TeeReader(stdout, req.Stdout),
+			Closer: stdout,
+		}
 	}
 	result, parseErr := parseCodexJSONLStream(stdout, req.OnSessionID)
 	if err := cmd.Wait(); err != nil {

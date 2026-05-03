@@ -370,6 +370,48 @@ Output:
 
 - MCP text content containing a compact `mental-models:` catalog.
 
+### `ws/agents.call_async`
+
+Start an asynchronous call for a registered ws agent and return immediately.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    },
+    "name": {
+      "type": "string",
+      "description": "Agent name."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Prompt to send to the agent."
+    }
+  },
+  "required": ["name", "prompt"]
+}
+```
+
+Output:
+
+- MCP text content containing the agent name, current-call status, and worker pid.
+
+Behavior:
+
+- The tool writes the prompt snapshot to the named agent's `current/prompt.md`.
+- The runtime starts a separate `ws-mcp agents run-current` worker process and
+  returns before the backend finishes.
+- Backend stdout and stderr are captured in the agent's `current/stdout` and
+  `current/stderr` files.
+- Completion updates `agent.json`, `output.md`, `events.jsonl`, and
+  `current/state.json`.
+- A second active call for the same named agent is rejected as busy.
+
 ## Deferred Write-Capable Operations
 
 The following behavior is intentionally out of scope for the first MCP contract:
@@ -378,7 +420,9 @@ The following behavior is intentionally out of scope for the first MCP contract:
 - mutating spec indexes beyond verification
 - writing mental-model updates
 - branch management, merge helpers, release helpers, and ship automation
-- spawning or coordinating implementation/review agents
+- advanced agent operations beyond the current register/call/call_async/oneshot/
+  print/erase prototype, including wait, status, tail, cancel, list, interrupts,
+  runtime locks, review-path allocation, and message queues
 
 These operations have workflow semantics beyond file access. They should be
 designed only after the read surfaces and plugin-managed MCP distribution path are

@@ -51,6 +51,23 @@ func (r sessionPersistRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	return RunnerResult{SessionID: "thread-streamed", Text: "done\n"}, nil
 }
 
+type fakeWorkerStarter struct {
+	requests []AsyncWorkerRequest
+	pid      int
+	err      error
+}
+
+func (f *fakeWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
+	f.requests = append(f.requests, req)
+	if f.err != nil {
+		return 0, f.err
+	}
+	if f.pid == 0 {
+		f.pid = 4321
+	}
+	return f.pid, nil
+}
+
 func TestRegisterCreatesAgentDirectory(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
@@ -155,6 +172,131 @@ func TestCallPersistsStreamedSessionIDBeforeCompletion(t *testing.T) {
 	if agent.SessionID != "thread-streamed" || text != "done\n" || agent.Status != StatusIdle {
 		t.Fatalf("final call mismatch: agent=%+v text=%q", agent, text)
 	}
+}
+
+func TestCallAsyncStartsWorkerAndRejectsBusyAgent(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 4567}
+	manager := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := manager.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "do work"})
+	if err != nil {
+		t.Fatalf("CallAsync returned error: %v", err)
+	}
+	if result.AgentName != "impl" || result.Status != CallStatusRunning || result.PID != 4567 {
+		t.Fatalf("async result mismatch: %+v", result)
+	}
+	if len(starter.requests) != 1 || starter.requests[0].Name != "impl" || starter.requests[0].PromptPath == "" {
+		t.Fatalf("worker request mismatch: %+v", starter.requests)
+	}
+	rawPrompt, err := os.ReadFile(starter.requests[0].PromptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rawPrompt) != "do work" {
+		t.Fatalf("prompt snapshot = %q", rawPrompt)
+	}
+	layout, err := manager.layout(repo, "impl", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call.Status != CallStatusRunning || call.PID != 4567 || call.PromptPath != "current/prompt.md" {
+		t.Fatalf("current call mismatch: %+v", call)
+	}
+	if _, err := manager.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "again"}); err == nil || !strings.Contains(err.Error(), "active call") {
+		t.Fatalf("expected busy rejection, got %v", err)
+	}
+}
+
+func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 4567}
+	base := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &streamingFakeRunner{}
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    runner,
+	})
+	if err := manager.RunCurrent(repo, "impl"); err != nil {
+		t.Fatalf("RunCurrent returned error: %v", err)
+	}
+	layout, err := manager.layout(repo, "impl", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call.Status != CallStatusCompleted || call.SessionID != "thread-async" || call.ExitCode == nil || *call.ExitCode != 0 {
+		t.Fatalf("completed current call mismatch: %+v", call)
+	}
+	printed, err := manager.Print(repo, "impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if printed != "async reply\n" {
+		t.Fatalf("printed = %q", printed)
+	}
+	stdout, err := os.ReadFile(layout.CurrentStdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := os.ReadFile(layout.CurrentStderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stdout), "jsonl") || !strings.Contains(string(stderr), "diagnostic") {
+		t.Fatalf("streams not captured: stdout=%q stderr=%q", stdout, stderr)
+	}
+	if len(runner.calls) != 1 || runner.calls[0].Prompt != "async prompt" {
+		t.Fatalf("runner prompt mismatch: %+v", runner.calls)
+	}
+}
+
+type streamingFakeRunner struct {
+	calls []RunnerRequest
+}
+
+func (f *streamingFakeRunner) Call(req RunnerRequest) (RunnerResult, error) {
+	f.calls = append(f.calls, req)
+	if req.Stdout != nil {
+		_, _ = req.Stdout.Write([]byte("jsonl\n"))
+	}
+	if req.Stderr != nil {
+		_, _ = req.Stderr.Write([]byte("diagnostic\n"))
+	}
+	if req.OnSessionID != nil {
+		if err := req.OnSessionID("thread-async"); err != nil {
+			return RunnerResult{}, err
+		}
+	}
+	return RunnerResult{SessionID: "thread-async", Text: "async reply\n"}, nil
 }
 
 func TestCurrentCallLifecycleAndBusyRejection(t *testing.T) {

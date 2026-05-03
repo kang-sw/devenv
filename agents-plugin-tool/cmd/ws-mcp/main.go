@@ -82,6 +82,10 @@ func agents(args []string) {
 		agentsRegister(args[1:])
 	case "call":
 		agentsCall(args[1:])
+	case "call-async":
+		agentsCallAsync(args[1:])
+	case "run-current":
+		agentsRunCurrent(args[1:])
 	case "oneshot":
 		agentsOneShot(args[1:])
 	case "print":
@@ -95,7 +99,7 @@ func agents(args []string) {
 }
 
 func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|oneshot|print|erase>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|call-async|run-current|oneshot|print|erase>")
 }
 
 type multiFlag []string
@@ -160,6 +164,39 @@ func agentsCall(args []string) {
 		fatal("agents call", err)
 	}
 	fmt.Print(text)
+}
+
+func agentsCallAsync(args []string) {
+	fs := flag.NewFlagSet("agents call-async", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
+	_ = fs.Parse(args)
+
+	prompt, err := promptFromArgs(fs.Args(), *promptFile)
+	if err != nil {
+		fatal("agents call-async", err)
+	}
+	result, err := wsagent.NewManager(wsagent.Options{}).CallAsync(wsagent.CallAsyncOptions{
+		Root:   defaultRoot(*root),
+		Name:   *name,
+		Prompt: prompt,
+	})
+	if err != nil {
+		fatal("agents call-async", err)
+	}
+	fmt.Printf("%s\t%s\tpid=%d\n", result.AgentName, result.Status, result.PID)
+}
+
+func agentsRunCurrent(args []string) {
+	fs := flag.NewFlagSet("agents run-current", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	_ = fs.Parse(args)
+
+	if err := wsagent.NewManager(wsagent.Options{}).RunCurrent(defaultRoot(*root), *name); err != nil {
+		fatal("agents run-current", err)
+	}
 }
 
 func agentsOneShot(args []string) {

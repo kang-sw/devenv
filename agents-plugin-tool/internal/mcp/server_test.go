@@ -43,6 +43,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(lines[1], "project_tree") {
 		t.Fatalf("tools/list missing project_tree: %s", lines[1])
 	}
+	if !strings.Contains(lines[1], "agents.call_async") {
+		t.Fatalf("tools/list missing agents.call_async: %s", lines[1])
+	}
 	if !strings.Contains(lines[2], "tickets:") {
 		t.Fatalf("project_tree response missing tickets: %s", lines[2])
 	}

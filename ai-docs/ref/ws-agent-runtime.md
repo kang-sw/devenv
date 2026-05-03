@@ -222,6 +222,9 @@ MCP tools use server `ws` and the following tool names:
 
 - `agents.register` — create or replace one named agent registry entry. Implemented.
 - `agents.call` — call a registered agent and resume existing session state when possible. Implemented.
+- `agents.call_async` — start a current call for a registered agent and return immediately. Implemented.
+- `agents.wait` — wait for the current async call to finish. Planned.
+- `agents.status` — report the current async call and agent registry state. Planned.
 - `agents.oneshot` — register, call, and erase an ephemeral agent. Implemented.
 - `agents.interrupt` — enqueue a lead-to-agent message. Planned.
 - `agents.print` — return `output.md` for a named agent. Implemented.
@@ -244,6 +247,9 @@ Implemented prototype commands:
 ws-mcp agents register --root <repo> --name <name> [--backend codex] [--tier light|core|deep] [--model <model>] [--prompt-ref <logical-name>] [--system-prompt-file <path>]
 ws-mcp agents call --root <repo> --name <name> <prompt>
 ws-mcp agents call --root <repo> --name <name> --prompt-file -
+ws-mcp agents call-async --root <repo> --name <name> <prompt>
+ws-mcp agents call-async --root <repo> --name <name> --prompt-file -
+ws-mcp agents run-current --root <repo> --name <name>
 ws-mcp agents oneshot --root <repo> [--name <temporary-name>] <prompt>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
@@ -251,8 +257,16 @@ ws-mcp agents erase --root <repo> --name <name>
 
 The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 `events.jsonl` layout described above. Shared skill text should prefer the MCP
-tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.oneshot`,
-`ws/agents.print`, and `ws/agents.erase`.
+tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.call_async`,
+`ws/agents.oneshot`, `ws/agents.print`, and `ws/agents.erase`.
+
+`agents.call_async` writes the prompt snapshot to `current/prompt.md`, starts an
+internal `agents run-current` worker process, records the worker pid in
+`current/state.json`, and returns before the backend finishes. The worker owns
+the actual backend call, captures backend stdout and stderr to `current/stdout`
+and `current/stderr`, persists streamed Codex `session_id` updates, writes the
+final `output.md`, and transitions the current call to `completed` or `failed`.
+Only one active call is allowed per named agent.
 
 ## Prompt Resolution
 
