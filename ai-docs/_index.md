@@ -252,59 +252,22 @@ Agent suggests next step at each point; user decides. `/proceed` is the explicit
 
 ## Tickets
 
-Status directories: `idea/` → `todo/` → `.done/` (or `.dropped/`).
+Status directories: `idea/` → `todo` → `wip` → `.done/` (or `.dropped/`).
 Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
+This index lists active tickets only; completed tickets live under
+`ai-docs/tickets/.done/` and are discoverable by filename or git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260419-chore-blueprint-plugin-extraction` | done | Package claude-plugin/ as a Claude Code plugin (now named "ws"); all phases complete and validated |
-| `260420-feat-spec-driven-workflow` | done | Spec-driven workflow infrastructure; all phases done (phase 6 migration cancelled) |
-| `260421-feat-global-spec-stems` | done | Global unique YYMMDD-slug stems; all phases done (phase 5 migration cancelled) |
-| `260421-feat-forge-spec` | done | /forge-spec skill — from-scratch spec reconstruction; all 3 phases complete |
-| `260421-feat-delegate-implement-feature-branch` | done | /implement feature-branch auto-merge mode; all phases complete — **reverted in f4b11f7** (approval gate now unconditional) |
-| `260422-chore-write-ticket-workflow-drift` | done | Fix stale /write-spec suggestion in write-ticket + workflow-skills.md chain drift |
-| `260422-chore-workflow-chain-drift` | done | Fix remaining chain drift in discuss/SKILL.md, write-spec/SKILL.md, write-skeleton/SKILL.md |
-| `260422-feat-write-ticket-review` | done | Add mandatory document-reviewer step to write-ticket after intent review |
-| `260422-feat-proceed-full-pipeline` | done | Extend /proceed to full-pipeline routing — add judge: needs-spec and auto-invoke judge: needs-ticket |
-| `260422-chore-rename-implement-to-edit` | done | Rename /implement skill to /edit; phase 1 of two-phase skill rename |
-| `260422-chore-rename-delegate-implement-to-implement` | done | Rename /delegate-implement skill to /implement; phase 2 of skill rename |
-| `260423-feat-proceed-mandatory-ticket` | done | Tighten /proceed judge: needs-ticket — always invoke /write-ticket for inline descriptions |
-| `260423-feat-doc-system-gap-fixes` | done | Documentation system gap fixes — feature removal protocol, spec diff signal, discuss staleness warning, cross-reference convention |
-| `260423-feat-doc-tooling-restructure` | done | Doc tooling restructure — forge-mental-model new skill, write-mental-model removal, forge-spec palette flag, bootstrap legacy detection |
-| `260424-feat-project-survey-agent` | done | project-survey Haiku agent + auto-invoke integration into edit/implement/parallel-implement/discuss |
-| `260424-feat-domain-rules-layering` | done | Architecture Rules split + /add-rule skill; domain rules in mental-model docs |
-| `260424-feat-polish-plugin-docs` | done | /polish-plugin-docs local skill + polish-writer agent + ws-call-named-agent context-fill hotfix |
-| `260424-refactor-proceed-gate-suppression` | done | judge:idea-level demoted to reminder + /proceed gate-suppression context in prefix-stage invocations |
-| `260424-feat-infra-path-portability` | done | ws-infra-path portability script; all bare claude-plugin/infra/ paths replaced with $(ws-infra-path) |
-| `260424-feat-discuss-on-demand-survey` | done | /discuss on-demand survey via judge:needs-survey; project-survey enriched output (titles + summaries) |
-| `260424-refactor-implement-file-based-review` | done | File-based review loop in /implement; reviewers write to ws-review-path files, implementer reads directly |
-| `260425-feat-sprint-skill` | done | /sprint session-container skill — branch-as-state persistence, deferred doc pipeline, sprint-aware survey, 2-reviewer delegation |
-| `260425-feat-ws-agent-registry-compression` | done | ws-call-named-agent redesign: named agent registry (ws-new-named-agent) + auto-compression at 100K tokens |
-| `260425-chore-implementation-gap-staleness-flagging` | done | Reactive doc-staleness reporting — removed misplaced guideline from spec-conventions + spec-system; reactive one-liner added to impl-playbook, survey-writer, plan-writer, code-review-correctness |
-| `260426-feat-claude-watch` | done | claude-watch Rust TUI — session history browser and live subprocess monitor for Claude CLI; all 4 phases complete |
-| `260426-feat-claude-watch-mouse` | done | claude-watch mouse support — scroll wheel + left-click session selection + event-drain loop perf fix |
-| `260426-perf-claude-watch-scroll-cache` | done | claude-watch scroll perf — cache total visual rows; Phase 2 (Arc clone) dropped (ratatui ownership constraint) |
-| `260426-feat-claude-watch-features` | done | claude-watch sprint — token count display, headless/-p color distinction, worktree session discovery, vertical scrollbar, on-demand background parsing; ws-orchestration output persistence + background mode |
-| `260426-feat-claude-dash` | done | claude-dash Rust TUI multiplexer — worktree tabs, interactive PTY terminal, named agent read-only panel, process lifecycle modal; all 4 phases complete |
-| `260502-feat-agents-plugin-codex-port-scaffold` | done | `agents-plugin/` Codex-first `ws` candidate scaffold — Codex marketplace/install verified, Claude manifest validation passes, broad skill porting deferred |
-| `260502-feat-agents-plugin-workflow-skill-drafts` | done | Harden `skill-authoring`; add draft host-neutral `write-ticket` and `discuss` skills with helper/MCP runtime reconstruction deferred |
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
-| `260503-feat-agents-plugin-agent-session-runtime` | done | Host-neutral agent session runtime: wsstate paths, wsagent registry, Codex resume backend, minimum ws/agents.* tools, and write-skeleton port |
-| `260503-feat-agents-plugin-async-agent-calls` | done | Async ws agent calls: streaming Codex session-id registration, current-call state, call_async/wait/status/tail/cancel, MCP/CLI subquery correction, and real Codex-backed smoke |
-| `260503-feat-agents-plugin-edit-port` | done | Ported `edit` into `agents-plugin/` as lead-owned direct edit plus one async reviewer; Codex visibility confirmed after plugin refresh |
-| `260503-feat-agents-plugin-write-code-port` | done | Ported `write-code` into `agents-plugin/`: embedded implementer/survey/reviewer prompts, delegated commit smoke, reviewer fanout, async relay loop, and Codex visibility closeout |
-| `260503-feat-ws-agent-lifecycle-hardening` | done | Split Phase 1 child for ws agent lifecycle fields, wait timeout semantics, and process-tree cancellation hardening |
-| `260503-feat-ws-agent-debug-diagnostics` | done | Split Phase 2 child for `agents.debug.*` diagnostic surfaces and raw-output containment |
-| `260503-feat-ws-agent-config-show-dogfood` | done | Split Phase 3 child for `config.show` regression dogfood and named-agent reviewer recovery |
-| `260503-feat-ws-mcp-nonblocking-orchestration` | done | Split Phase 4 child for concurrent MCP stdio, async `agents.call`, short-poll waits, and initial tool profiles |
-| `260503-feat-ws-agent-tier-config` | done | Split Phase 5 child for user-local tier model config, backend inference, and `config.agents_tier` |
 | `260503-epic-ws-agent-workflow-stability` | todo | Live stabilization epic for named-agent workflow; completed phases split into child tickets, active child is worktree orchestrator lock |
 | `260503-feat-ws-mcp-worktree-orchestrator-lock` | todo | Worktree-local MCP orchestrator lock so only the first live MCP server for a worktree receives lead authority |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
-| `260503-feat-ws-mcp-git-read-primitives` | done | Added read-only `ws/git.*` MCP primitives for status, diff, log, and merge-base using native Git argument-array execution |
-| `260503-feat-agents-plugin-sidecar-skill-drafts` | done | Ported lead-run sidecar skills `add-rule`, `ship`, and `exit-session`; deferred `manual-think` and `workflow` |
-| `260503-feat-agents-plugin-spec-skill-drafts` | done | Ported `write-spec` and `update-spec` into `agents-plugin/` as host-neutral draft skills with convention/stem/index helpers called through MCP |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
+| `260429-feat-api-deps` | todo | ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt, pre-router prompt, bin tools, workflow integration |
+| `260427-chore-claude-dash-windows` | todo | Verify native Windows build/runtime behavior for claude-dash |
+| `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
+| `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
 ## Ticket Queue
 
@@ -327,12 +290,11 @@ do not add `spec:` frontmatter, run `ws:update-spec`, or update
 
 `write-code` is ported and closed in `agents-plugin/skills/write-code`; Codex
 plugin visibility and installed MCP runtime metadata were confirmed after plugin
-refresh. `260503-epic-ws-agent-workflow-stability` Phases 1, 2, 4, and 5 now
-cover lifecycle hardening, `agents.debug.*` diagnostics, concurrent MCP stdio,
-`agents.call` as the async start primitive, removal of `agents.call_async` and
-generic `agents.oneshot`, short-poll waits, MCP tool profiles
-`lead`/`delegate`/`leaf`, and user-local tier model config. Next cursor: run a
-small named-agent smoke, then dogfood `ws:write-code` on `config.show`.
+refresh. Completed agent workflow stability slices have been split into `.done`
+child tickets; active containment work is
+`260503-feat-ws-mcp-worktree-orchestrator-lock`. `config.show` dogfood showed
+plugin-managed Codex implementers can still call `agents.*`, so env-only leaf
+profiles are insufficient.
 Post-refresh cancellation smoke showed Codex UI interrupt does not currently
 arrive as MCP `notifications/cancelled`; it only aborts the wait call from the
 lead's perspective, so agent task cancellation must remain explicit through

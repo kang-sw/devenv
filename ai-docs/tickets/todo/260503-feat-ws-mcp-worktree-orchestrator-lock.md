@@ -25,6 +25,14 @@ claim lead orchestration authority with a worktree-local lock. Later MCP
 servers for the same worktree become delegates even if their environment asks
 for `lead`.
 
+There is also a prompt-orientation gap. The Claude-era
+`claude-plugin/infra/workflow-for-agent.md` document is not currently embedded
+or injected into the Codex `agents-plugin` prompt bundle; `write-code`
+implementers currently receive `implementer` plus `impl-playbook`. That may
+contribute to delegated agents not understanding that they are subagents, but
+prompt orientation is not a sufficient enforcement boundary. The lock must
+enforce tool availability independently of whether the agent follows the prompt.
+
 ## Decisions
 
 - Orchestration authority is worktree-local, not repository-global. Linked
@@ -118,3 +126,21 @@ Success criteria:
   and verifies both when feasible.
 - The stability epic records the observed result and any host-specific
   limitation that remains.
+
+### Phase 4: Host-neutral agent workflow orientation
+
+Decide how to port the useful parts of `workflow-for-agent.md` into the
+Codex/open-conventions prompt bundle without reintroducing Claude-only CLI
+commands or stale helper names.
+
+Success criteria:
+
+- Delegated implementer/reviewer prompts explicitly state that they are
+  subagents and must not perform lead-owned orchestration, reviewer fanout,
+  branch/merge control, ticket lifecycle management, or spec/mental-model
+  lifecycle work unless the lead explicitly delegates that exact operation.
+- The prompt text uses host-neutral MCP notation and current surfaces
+  (`agents.register` + `agents.call` + `agents.wait/status/print/erase`) rather
+  than Claude-only `ws-new-named-agent` or `ws-call-named-agent` commands.
+- The prompt orientation complements the lock-based enforcement but does not
+  replace it.
