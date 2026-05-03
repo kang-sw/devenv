@@ -165,7 +165,7 @@ Success criteria:
   reset behavior, and recovery from existing current-call files.
 - Existing synchronous `ws/agents.call` behavior remains unchanged.
 
-### Result (pending) - 2026-05-03
+### Result (429a718) - 2026-05-03
 
 Added the current-call state model to the Go wsagent runtime. Agent layouts now
 include `current/state.json`, `current/stdout`, and `current/stderr`, with a
