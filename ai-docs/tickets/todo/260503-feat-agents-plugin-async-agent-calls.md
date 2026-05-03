@@ -317,7 +317,7 @@ Success criteria:
 - Preserve the prior `--deep-research` behavior as a workload-tier switch.
 - Keep `ask-api` deferred as a distinct specialized workflow.
 
-### Result (pending) - 2026-05-03
+### Result (cc8eee9) - 2026-05-03
 
 Corrected the subquery surface from a user-facing skill to a runtime primitive.
 The mistaken `agents-plugin/skills/subquery` skill was removed. The runtime now
