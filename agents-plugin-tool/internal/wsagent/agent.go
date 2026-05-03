@@ -53,14 +53,15 @@ type Options struct {
 }
 
 type RegisterOptions struct {
-	Root             string
-	Name             string
-	Backend          string
-	Tier             string
-	Model            string
-	Prompts          []string
-	PromptRefs       []string
-	SystemPromptText string
+	Root                string
+	Name                string
+	Backend             string
+	Tier                string
+	Model               string
+	Prompts             []string
+	PromptRefs          []string
+	SystemPromptText    string
+	SuppressOrientation bool
 }
 
 type CallOptions struct {
@@ -123,16 +124,17 @@ type syncCallOptions struct {
 }
 
 type oneShotOptions struct {
-	Root             string
-	Name             string
-	Backend          string
-	Tier             string
-	Model            string
-	Prompts          []string
-	PromptRefs       []string
-	SystemPromptText string
-	Prompt           string
-	Timeout          time.Duration
+	Root                string
+	Name                string
+	Backend             string
+	Tier                string
+	Model               string
+	Prompts             []string
+	PromptRefs          []string
+	SystemPromptText    string
+	Prompt              string
+	Timeout             time.Duration
+	SuppressOrientation bool
 }
 
 type SubqueryOptions struct {
@@ -256,6 +258,9 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	}
 	explicitBackend := strings.TrimSpace(opts.Backend)
 	promptSpecs := promptSpecs(opts.Prompts, opts.PromptRefs)
+	if !opts.SuppressOrientation && (len(promptSpecs) == 0 || promptSpecs[0] != "delegate-orientation") {
+		promptSpecs = append([]string{"delegate-orientation"}, promptSpecs...)
+	}
 	resolved, err := wsprompt.Resolve(promptSpecs, opts.SystemPromptText, opts.Tier, opts.Model)
 	if err != nil {
 		return Agent{}, Layout{}, err
@@ -650,14 +655,15 @@ func (m Manager) oneShot(opts oneShotOptions) (string, error) {
 		name = fmt.Sprintf("oneshot-%d", m.now().UTC().UnixNano())
 	}
 	_, _, err := m.Register(RegisterOptions{
-		Root:             opts.Root,
-		Name:             name,
-		Backend:          opts.Backend,
-		Tier:             opts.Tier,
-		Model:            opts.Model,
-		Prompts:          opts.Prompts,
-		PromptRefs:       opts.PromptRefs,
-		SystemPromptText: opts.SystemPromptText,
+		Root:                opts.Root,
+		Name:                name,
+		Backend:             opts.Backend,
+		Tier:                opts.Tier,
+		Model:               opts.Model,
+		Prompts:             opts.Prompts,
+		PromptRefs:          opts.PromptRefs,
+		SystemPromptText:    opts.SystemPromptText,
+		SuppressOrientation: opts.SuppressOrientation,
 	})
 	if err != nil {
 		return "", err
@@ -692,12 +698,13 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 		timeout = defaultSubqueryTimeout
 	}
 	return m.oneShot(oneShotOptions{
-		Root:             opts.Root,
-		Backend:          "codex",
-		Tier:             tier,
-		SystemPromptText: SubquerySystemPrompt,
-		Prompt:           opts.Question,
-		Timeout:          timeout,
+		Root:                opts.Root,
+		Backend:             "codex",
+		Tier:                tier,
+		SystemPromptText:    SubquerySystemPrompt,
+		Prompt:              opts.Question,
+		Timeout:             timeout,
+		SuppressOrientation: true,
 	})
 }
 

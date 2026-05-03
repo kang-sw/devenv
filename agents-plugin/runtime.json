@@ -7,7 +7,7 @@
   "release_tag": "v0.1.0",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "c68893663ac91db1fb5b186bb3f4b62762099defa69ec703302035e67512cb26",
+    "content_sha256": "03d4995b7dd7f960aeeea98525f57efa838e927a9968a0f9fb0859de29facfc6",
     "prompts": [
       "code-reviewer",
       "implementer",
@@ -18,6 +18,7 @@
       "code-review-correctness",
       "code-review-fit",
       "code-review-test",
+      "delegate-orientation",
       "impl-playbook"
     ]
   },

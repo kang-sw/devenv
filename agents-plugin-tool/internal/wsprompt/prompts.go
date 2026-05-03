@@ -24,6 +24,7 @@ var embeddedPromptPaths = []string{
 	"infra/code-review-correctness.md",
 	"infra/code-review-fit.md",
 	"infra/code-review-test.md",
+	"infra/delegate-orientation.md",
 	"infra/impl-playbook.md",
 }
 
@@ -93,6 +94,7 @@ func Bundle(sourceCommit string) (BundleInfo, error) {
 		"code-review-correctness",
 		"code-review-fit",
 		"code-review-test",
+		"delegate-orientation",
 		"impl-playbook",
 	}
 	hash, err := ContentSHA256()

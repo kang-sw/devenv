@@ -94,6 +94,7 @@ func TestResolveWriteCodePromptSet(t *testing.T) {
 		{"plan-populator-survey", "core", "You are conducting a codebase survey"},
 		{"plan-populator-research", "deep", "You are drafting a step-by-step implementation plan"},
 		{"code-review-test", "", "Test Partition"},
+		{"delegate-orientation", "", "You are a delegated worker"},
 		{"impl-playbook", "", "Implementation Playbook"},
 	}
 	for _, tc := range cases {
@@ -149,6 +150,7 @@ func TestBundleMetadata(t *testing.T) {
 		"code-review-correctness",
 		"code-review-fit",
 		"code-review-test",
+		"delegate-orientation",
 		"impl-playbook",
 	} {
 		found := false

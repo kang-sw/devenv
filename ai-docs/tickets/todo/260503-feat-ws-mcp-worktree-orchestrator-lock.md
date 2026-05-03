@@ -155,6 +155,23 @@ Success criteria:
 - The stability epic records the observed result and any host-specific
   limitation that remains.
 
+### Result (manual smoke) - 2026-05-04
+
+After reinstall/cache refresh, plugin-managed Codex delegation was smoke-tested
+from the lead session. The lead MCP server could call `runtime.info`,
+`config.show`, and `agents.*`. A lead-spawned delegated Codex agent reported
+`config.show` and `agents.status` as unavailable while `subquery` remained
+available. This confirms the worktree lock enforces the practical
+lead-to-delegate containment boundary that blocks recursive `agents.*`
+orchestration in the observed failure mode.
+
+The smoke also showed a remaining host-specific gap: the async worker still sets
+`WS_MCP_TOOL_PROFILE=leaf`, but plugin-managed Codex did not appear to propagate
+that env restriction into the child MCP tool surface. The effective runtime
+boundary is therefore delegate-level containment, not leaf-level containment,
+until a durable role assignment mechanism replaces environment propagation for
+leaf workers.
+
 ### Phase 4: Host-neutral agent workflow orientation
 
 Decide how to port the useful parts of `workflow-for-agent.md` into the
@@ -172,3 +189,24 @@ Success criteria:
   than Claude-only `ws-new-named-agent` or `ws-call-named-agent` commands.
 - The prompt orientation complements the lock-based enforcement but does not
   replace it.
+
+### Result - 2026-05-04
+
+Added a host-neutral embedded `delegate-orientation` prompt and made public
+`agents.register` prepend it before caller prompt material. The orientation
+states that delegated workers must not spawn/manage agents, perform reviewer
+fanout, or own ticket/spec/mental-model/release/merge lifecycle unless the lead
+explicitly assigns that exact operation. This gives lead-spawned implementers
+and reviewers a prompt-level first defense while keeping the worktree lock as
+the enforcement boundary.
+
+`subquery` intentionally does not receive the orientation. It uses the internal
+`SubquerySystemPrompt` through `Subquery -> oneShot -> Register` with orientation
+suppressed, because subquery is a scoped one-question helper and should not load
+workflow orchestration instructions or self-reference subquery/ask-api guidance.
+
+Follow-up: `current/prompt.md` is safe for a single call because workers start
+after prompt write and state update, but same-agent concurrent `agents.call`
+requests are not serialized by a file lock. A later stability slice should add a
+per-agent current-call claim lock around `BeginCurrentCall` and prompt snapshot
+creation.

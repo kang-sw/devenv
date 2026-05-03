@@ -335,13 +335,20 @@ stems resolve from the embedded runtime prompt bundle; absolute paths read the
 specified file directly. Ambiguous relative paths are rejected until a later
 root-relative contract exists.
 
+Public `agents.register` calls prepend the embedded `delegate-orientation`
+prompt before caller material. The orientation is a host-neutral role boundary
+for lead-spawned delegates; it tells implementers and reviewers not to perform
+lead-owned orchestration, reviewer fanout, or documentation lifecycle work
+unless explicitly assigned. Internal helpers such as `subquery` suppress this
+orientation and keep their scoped system prompt self-contained.
+
 The runtime strips YAML frontmatter from each resolved prompt and concatenates
 prompt bodies in caller order with `---` separators. `system_prompt_text`, when
 provided, is appended after resolved prompt bodies so existing materialized
 prompt callers remain compatible.
 
-The first embedded bundle contains `code-reviewer`, `skeleton-writer`,
-`code-review-correctness`, and `code-review-fit`. Frontmatter `model: haiku`,
+The first embedded bundle contains role prompts, review partition prompts,
+`delegate-orientation`, and `impl-playbook`. Frontmatter `model: haiku`,
 `model: sonnet`, and `model: opus` map to shared tiers `light`, `core`, and
 `deep` when the caller did not pass an explicit `tier` or `model`. Frontmatter
 may also use shared tiers directly. Unknown frontmatter model names become

@@ -17,11 +17,18 @@ import (
 var testNow = time.Date(2026, 5, 3, 14, 0, 0, 0, time.UTC)
 
 type fakeRunner struct {
-	calls []RunnerRequest
+	calls         []RunnerRequest
+	systemPrompts []string
 }
 
 func (f *fakeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	f.calls = append(f.calls, req)
+	if req.SystemPromptPath != "" {
+		raw, err := os.ReadFile(req.SystemPromptPath)
+		if err == nil {
+			f.systemPrompts = append(f.systemPrompts, string(raw))
+		}
+	}
 	session := req.SessionID
 	if session == "" {
 		session = "thread-1"
@@ -167,13 +174,46 @@ func TestRegisterResolvesPromptChain(t *testing.T) {
 	if strings.Contains(text, "model: sonnet") {
 		t.Fatalf("frontmatter was not stripped:\n%s", text)
 	}
-	if !strings.Contains(text, "You are a code reviewer.") ||
+	if !strings.Contains(text, "You are a delegated worker") ||
+		!strings.Contains(text, "You are a code reviewer.") ||
 		!strings.Contains(text, "Correctness Partition") ||
 		!strings.Contains(text, "Fit Partition") {
 		t.Fatalf("materialized prompt missing expected sections:\n%s", text)
 	}
-	if len(agent.PromptRefs) != 3 || agent.PromptRefs[0] != "code-reviewer" {
+	if len(agent.PromptRefs) != 4 || agent.PromptRefs[0] != "delegate-orientation" || agent.PromptRefs[1] != "code-reviewer" {
 		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
+	}
+}
+
+func TestRegisterInjectsDelegateOrientationForInlineSystemPrompt(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, layout, err := manager.Register(RegisterOptions{
+		Root:             repo,
+		Name:             "inline",
+		SystemPromptText: "inline system",
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if len(agent.PromptRefs) != 1 || agent.PromptRefs[0] != "delegate-orientation" {
+		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
+	}
+	raw, err := os.ReadFile(layout.SystemFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "You are a delegated worker") || !strings.Contains(text, "inline system") {
+		t.Fatalf("missing delegate orientation or inline system prompt:\n%s", text)
+	}
+	if strings.Index(text, "You are a delegated worker") > strings.Index(text, "inline system") {
+		t.Fatalf("delegate orientation did not precede inline system prompt:\n%s", text)
 	}
 }
 
@@ -804,7 +844,7 @@ func TestRegisterResetsExistingAgentUnlessCurrentCallActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != "new" {
+	if !strings.Contains(string(raw), "You are a delegated worker") || !strings.Contains(string(raw), "new") {
 		t.Fatalf("system prompt after reset = %q", raw)
 	}
 
@@ -859,6 +899,15 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 	}
 	if len(runner.calls) != 1 || !strings.Contains(runner.calls[0].SystemPromptPath, "system.md") {
 		t.Fatalf("subquery runner call mismatch: %+v", runner.calls)
+	}
+	if len(runner.systemPrompts) != 1 {
+		t.Fatalf("runner system prompts = %d", len(runner.systemPrompts))
+	}
+	if strings.Contains(runner.systemPrompts[0], "You are a delegated worker") {
+		t.Fatalf("subquery prompt included delegate orientation:\n%s", runner.systemPrompts[0])
+	}
+	if !strings.Contains(runner.systemPrompts[0], "You are a scoped sub-query worker") {
+		t.Fatalf("subquery prompt missing scoped worker prompt:\n%s", runner.systemPrompts[0])
 	}
 
 	if _, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Trace history", DeepResearch: true}); err != nil {

@@ -556,6 +556,9 @@ Prompt resolution:
 - YAML frontmatter is stripped before materialization.
 - Prompt bodies are concatenated in input order with `---` separators.
 - The materialized prompt is written to the agent's `system.md`.
+- Public `agents.register` calls prepend `delegate-orientation`; internal
+  helpers such as `subquery` suppress that orientation and use their own scoped
+  system prompt.
 
 Current embedded prompt stems:
 
@@ -568,6 +571,7 @@ Current embedded prompt stems:
 - `code-review-correctness`
 - `code-review-fit`
 - `code-review-test`
+- `delegate-orientation`
 - `impl-playbook`
 
 ### `ws/agents.call`
