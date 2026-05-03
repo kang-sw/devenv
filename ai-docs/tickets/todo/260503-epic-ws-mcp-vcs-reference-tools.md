@@ -1,12 +1,12 @@
 ---
-title: ws-mcp VCS and reference tooling
+title: ws-mcp Git and reference tooling
 related:
   260503-feat-agents-plugin-runtime-boundary: MCP runtime and launcher baseline that will host the new tools
   260503-feat-agents-plugin-write-code-port: core workflow that still needs portable diff, commit, review, and reference lookup primitives
   260503-epic-agents-plugin-skill-porting: skill migration roadmap that should eventually depend on MCP tools instead of host shell wording
 ---
 
-# ws-mcp VCS and reference tooling
+# ws-mcp Git and reference tooling
 
 ## Background
 
@@ -19,7 +19,7 @@ ticket stems through ad hoc file search. That is workable on Unix-like developer
 machines, but it weakens Windows compatibility and leaves too much
 workflow-critical reference tracking to natural-language instructions.
 
-This epic captures the next tooling track: add MCP primitives for VCS status,
+This epic captures the next tooling track: add MCP primitives for Git status,
 diff, log, commit, and workflow document reference lookup so shared skills can
 depend on explicit `ws/<tool>` calls rather than shell command wording. The goal
 is not to hide every project-specific build or test command. The goal is to make
@@ -33,6 +33,15 @@ inspectable, and composable across Codex, Claude, and future hosts.
   from existing.
 - Prefer MCP tools for ws-owned workflow operations: ticket lookup, spec stem
   lookup, reference graph queries, Git status/diff/log, and commit creation.
+- Use the `ws/git.*` namespace for Git operations. It is more direct than a
+  generic `ws/vcs.*` namespace and better matches the existing workflow history,
+  including the old `ws-merge-commit` idea of composing a specialized workflow
+  commit command rather than wrapping raw `git commit`.
+- Treat `ws/git.commit` as a workflow-aware commit builder, not a thin Git
+  wrapper. It should accept structured fields such as title, description,
+  detailed AI context, explicit paths, and optional ticket/spec/mental-model
+  update summaries, then assemble a compliant commit message and stage only the
+  requested files.
 - Keep project-specific verification commands out of scope for the first pass.
   Build/test/publish commands are inherently repository-defined and can remain
   explicit until a later command-runner policy exists.
@@ -59,13 +68,15 @@ inspectable, and composable across Codex, Claude, and future hosts.
 
 ## Planned Child Tickets
 
-- VCS status and diff primitives: add `ws/vcs.status`, `ws/vcs.diff`, and
-  `ws/vcs.log` plus CLI fallbacks. These should cover current skill needs such
+- Git status and diff primitives: add `ws/git.status`, `ws/git.diff`, and
+  `ws/git.log` plus CLI fallbacks. These should cover current skill needs such
   as start-commit capture, changed-file discovery, diff range inspection, merge
   base lookup, and commit-body inspection.
-- VCS commit primitive: add a constrained `ws/vcs.commit` that accepts explicit
-  paths and a full commit message body, refuses unrelated staged changes unless
-  instructed by a narrow policy, and preserves readable multi-paragraph commit
+- Git commit primitive: add a constrained `ws/git.commit` that accepts explicit
+  paths plus structured commit fields such as `title`, `description`,
+  `ai_context`, `updated_tickets`, `updated_specs`, and
+  `updated_mental_models`. It should refuse unrelated staged changes unless
+  instructed by a narrow policy and preserve readable multi-paragraph commit
   messages without shell quoting issues.
 - Ticket catalog and reference primitives: add tools for listing active tickets,
   reading a ticket by stem, locating tickets that mention a stem, and validating
@@ -85,7 +96,7 @@ inspectable, and composable across Codex, Claude, and future hosts.
 
 ## Open Questions
 
-- Should commit creation be a single `ws/vcs.commit` tool, or should staging and
+- Should commit creation be a single `ws/git.commit` tool, or should staging and
   commit be split into separate tools to make ownership boundaries more visible?
 - How much of ticket/spec lookup should be backed by generated indexes versus
   direct file scans on each call?
