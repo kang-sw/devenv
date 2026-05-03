@@ -147,7 +147,7 @@ Success criteria:
   relative path rejection, frontmatter stripping, prompt ordering, tier/model
   precedence, prompt metadata, and drift detection.
 
-### Result (pending) - 2026-05-03
+### Result (6d9e697) - 2026-05-03
 
 Implemented the embedded prompt bundle resolver in `ws-mcp`. The runtime now
 embeds the prompt presets needed by the first `edit` slice:
