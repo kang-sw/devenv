@@ -126,6 +126,41 @@ func TestServeStdioAgentDebugToolCalls(t *testing.T) {
 	}
 }
 
+func TestServeStdioLogsCancellationNotificationsWhenEnabled(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	debugLog := filepath.Join(t.TempDir(), "mcp-debug.jsonl")
+	t.Setenv("WS_MCP_DEBUG_LOG", debugLog)
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":"wait-1","method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"wait-1","reason":"user interrupt"}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected notification to produce no response, got %d lines\n%s", len(lines), out.String())
+	}
+
+	logBytes, err := os.ReadFile(debugLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logText := string(logBytes)
+	if !strings.Contains(logText, `"event":"request.received"`) ||
+		!strings.Contains(logText, `"id":"wait-1"`) ||
+		!strings.Contains(logText, `"event":"notification.cancelled"`) ||
+		!strings.Contains(logText, `"request_id":"wait-1"`) ||
+		!strings.Contains(logText, `"reason":"user interrupt"`) {
+		t.Fatalf("debug log missing cancellation evidence:\n%s", logText)
+	}
+}
+
 func mustWrite(t *testing.T, root, rel, text string) {
 	t.Helper()
 	path := filepath.Join(root, rel)

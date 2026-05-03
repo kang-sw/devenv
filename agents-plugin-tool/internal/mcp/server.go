@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -29,6 +30,11 @@ type request struct {
 	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+type cancelledNotificationParams struct {
+	RequestID json.RawMessage `json:"requestId"`
+	Reason    string          `json:"reason,omitempty"`
 }
 
 type response struct {
@@ -66,19 +72,41 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		}
 		var req request
 		if err := json.Unmarshal(line, &req); err != nil {
+			appendDebugEvent("parse_error", map[string]any{"error": err.Error()})
 			if err := encoder.Encode(errorResponse(nil, -32700, "parse error")); err != nil {
 				return err
 			}
 			continue
 		}
 		if len(req.ID) == 0 {
+			s.handleNotification(req)
 			continue
 		}
+		appendDebugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
 		if err := encoder.Encode(s.handle(req)); err != nil {
 			return err
 		}
 	}
 	return scanner.Err()
+}
+
+func (s *Server) handleNotification(req request) {
+	switch req.Method {
+	case "notifications/cancelled":
+		var params cancelledNotificationParams
+		fields := map[string]any{"method": req.Method}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			fields["error"] = err.Error()
+		} else {
+			fields["request_id"] = rawMessageString(params.RequestID)
+			if params.Reason != "" {
+				fields["reason"] = params.Reason
+			}
+		}
+		appendDebugEvent("notification.cancelled", fields)
+	default:
+		appendDebugEvent("notification.ignored", map[string]any{"method": req.Method})
+	}
 }
 
 func (s *Server) handle(req request) response {
@@ -101,6 +129,41 @@ func (s *Server) handle(req request) response {
 	default:
 		return errorResponse(req.ID, -32601, "method not found")
 	}
+}
+
+func appendDebugEvent(event string, fields map[string]any) {
+	path := strings.TrimSpace(os.Getenv("WS_MCP_DEBUG_LOG"))
+	if path == "" {
+		return
+	}
+	record := map[string]any{
+		"ts":    time.Now().UTC().Format(time.RFC3339Nano),
+		"event": event,
+	}
+	for key, value := range fields {
+		record[key] = value
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		return
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	_, _ = file.Write(append(raw, '\n'))
+}
+
+func rawMessageString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	return string(raw)
 }
 
 func (s *Server) callTool(req request) response {
