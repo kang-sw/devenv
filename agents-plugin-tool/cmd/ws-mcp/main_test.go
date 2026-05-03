@@ -5,7 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
 func TestDefaultRootUsesExplicitRoot(t *testing.T) {
@@ -108,6 +111,68 @@ func TestGitCLICommandsReturnJSON(t *testing.T) {
 			}
 			tc.check(t, out)
 		})
+	}
+}
+
+func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "ws-mcp")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init")
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cache)
+	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWriteCLITest(t, layout.CurrentStdout, "stdout old\nstdout new\n")
+	mustWriteCLITest(t, layout.CurrentStderr, "stderr old\nstderr new\n")
+	mustWriteCLITest(t, layout.CurrentRuntimeLog, "runtime old\nruntime new\n")
+	mustWriteCLITest(t, layout.EventsFile, "event old\nevent new\n")
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "stdout", args: []string{"agents", "debug", "stdout", "--root", root, "--name", "impl", "--lines", "1"}, want: "stdout new\n"},
+		{name: "stderr", args: []string{"agents", "debug", "stderr", "--root", root, "--name", "impl", "--lines", "1"}, want: "stderr new\n"},
+		{name: "runtime-log", args: []string{"agents", "debug", "runtime-log", "--root", root, "--name", "impl", "--lines", "1"}, want: "runtime new\n"},
+		{name: "events", args: []string{"agents", "debug", "events", "--root", root, "--name", "impl", "--lines", "1"}, want: "event new\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.args...)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("ws-mcp %v failed: %v\n%s", tc.args, err, string(out))
+			}
+			if string(out) != tc.want {
+				t.Fatalf("ws-mcp %v = %q, want %q", tc.args, out, tc.want)
+			}
+		})
+	}
+
+	cmd := exec.Command(bin, "agents", "debug", "tail", "--root", root, "--name", "impl", "--lines", "1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp agents debug tail failed: %v\n%s", err, string(out))
+	}
+	if text := string(out); !strings.Contains(text, "== events ==") || !strings.Contains(text, "event new") || !strings.Contains(text, "== stdout ==") {
+		t.Fatalf("debug tail output mismatch: %q", text)
+	}
+}
+
+func mustWriteCLITest(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

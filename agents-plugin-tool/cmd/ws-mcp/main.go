@@ -284,6 +284,8 @@ func agents(args []string) {
 		agentsStatus(args[1:])
 	case "tail":
 		agentsTail(args[1:])
+	case "debug":
+		agentsDebug(args[1:])
 	case "cancel":
 		agentsCancel(args[1:])
 	case "oneshot":
@@ -299,7 +301,7 @@ func agents(args []string) {
 }
 
 func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|call-async|run-current|wait|status|tail|cancel|oneshot|print|erase>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|call-async|run-current|wait|status|tail|debug|cancel|oneshot|print|erase>")
 }
 
 type multiFlag []string
@@ -447,6 +449,51 @@ func agentsTail(args []string) {
 	})
 	if err != nil {
 		fatal("agents tail", err)
+	}
+	fmt.Print(text)
+}
+
+func agentsDebug(args []string) {
+	if len(args) < 1 {
+		agentsDebugUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "tail":
+		agentsTail(args[1:])
+	case "stdout":
+		agentsDebugStream("stdout", args[1:])
+	case "stderr":
+		agentsDebugStream("stderr", args[1:])
+	case "runtime-log":
+		agentsDebugStream("runtime_log", args[1:])
+	case "events":
+		agentsDebugStream("events", args[1:])
+	default:
+		agentsDebugUsage()
+		os.Exit(2)
+	}
+}
+
+func agentsDebugUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents debug <tail|stdout|stderr|runtime-log|events>")
+}
+
+func agentsDebugStream(stream string, args []string) {
+	fs := flag.NewFlagSet("agents debug "+stream, flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	lines := fs.Int("lines", 40, "number of lines")
+	_ = fs.Parse(args)
+
+	text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
+		Root:   defaultRoot(*root),
+		Name:   *name,
+		Stream: stream,
+		Lines:  *lines,
+	})
+	if err != nil {
+		fatal("agents debug "+stream, err)
 	}
 	fmt.Print(text)
 }

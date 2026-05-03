@@ -97,6 +97,13 @@ type TailOptions struct {
 	Lines int
 }
 
+type DiagnosticStreamOptions struct {
+	Root   string
+	Name   string
+	Stream string
+	Lines  int
+}
+
 type AsyncWorkerRequest struct {
 	Root       string
 	Name       string
@@ -874,6 +881,52 @@ func (m Manager) Tail(opts TailOptions) (string, error) {
 		b.WriteByte('\n')
 	}
 	return b.String(), nil
+}
+
+func (m Manager) DiagnosticStream(opts DiagnosticStreamOptions) (string, error) {
+	if strings.TrimSpace(opts.Root) == "" {
+		opts.Root = "."
+	}
+	if opts.Lines <= 0 {
+		opts.Lines = 40
+	}
+	layout, err := m.layout(opts.Root, opts.Name, false)
+	if err != nil {
+		return "", err
+	}
+	if _, err := readAgent(layout.AgentFile); err != nil {
+		return "", err
+	}
+	path, err := diagnosticStreamPath(layout, opts.Stream)
+	if err != nil {
+		return "", err
+	}
+	lines, err := tailLines(path, opts.Lines)
+	if errors.Is(err, os.ErrNotExist) {
+		return "(missing)\n", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if len(lines) == 0 {
+		return "(empty)\n", nil
+	}
+	return strings.Join(lines, "\n") + "\n", nil
+}
+
+func diagnosticStreamPath(layout Layout, stream string) (string, error) {
+	switch stream {
+	case "stdout":
+		return layout.CurrentStdout, nil
+	case "stderr":
+		return layout.CurrentStderr, nil
+	case "runtime_log":
+		return layout.CurrentRuntimeLog, nil
+	case "events":
+		return layout.EventsFile, nil
+	default:
+		return "", fmt.Errorf("unknown diagnostic stream %q", stream)
+	}
 }
 
 func (m Manager) Cancel(root, name string) (string, error) {

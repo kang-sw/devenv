@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
@@ -306,6 +307,34 @@ func (s *Server) callTool(req request) response {
 			Root:  root,
 			Name:  name,
 			Lines: lines,
+		})
+		return toolTextResponse(req.ID, text, err)
+	case "agents.debug.tail":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		lines := intFromArgument(params.Arguments["lines"], 40)
+		text, err := wsagent.NewManager(wsagent.Options{}).Tail(wsagent.TailOptions{
+			Root:  root,
+			Name:  name,
+			Lines: lines,
+		})
+		return toolTextResponse(req.ID, text, err)
+	case "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		lines := intFromArgument(params.Arguments["lines"], 40)
+		stream := strings.TrimPrefix(params.Name, "agents.debug.")
+		text, err := wsagent.NewManager(wsagent.Options{}).DiagnosticStream(wsagent.DiagnosticStreamOptions{
+			Root:   root,
+			Name:   name,
+			Stream: stream,
+			Lines:  lines,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.cancel":
@@ -658,6 +687,31 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "agents.debug.tail",
+			"description": "Debug only: return raw diagnostic tail sections for a registered ws agent.",
+			"inputSchema": agentDebugSchema("Number of lines per section. Defaults to 40."),
+		},
+		{
+			"name":        "agents.debug.stdout",
+			"description": "Debug only: return recent raw stdout lines for the current agent call.",
+			"inputSchema": agentDebugSchema("Number of stdout lines. Defaults to 40."),
+		},
+		{
+			"name":        "agents.debug.stderr",
+			"description": "Debug only: return recent raw stderr lines for the current agent call.",
+			"inputSchema": agentDebugSchema("Number of stderr lines. Defaults to 40."),
+		},
+		{
+			"name":        "agents.debug.runtime_log",
+			"description": "Debug only: return recent raw runtime log lines for the current agent call.",
+			"inputSchema": agentDebugSchema("Number of runtime log lines. Defaults to 40."),
+		},
+		{
+			"name":        "agents.debug.events",
+			"description": "Debug only: return recent raw agent events log lines.",
+			"inputSchema": agentDebugSchema("Number of event log lines. Defaults to 40."),
+		},
+		{
 			"name":        "agents.cancel",
 			"description": "Best-effort cancel the current async call for a registered ws agent.",
 			"inputSchema": map[string]any{
@@ -712,6 +766,18 @@ func tools() []map[string]any {
 				"required": []string{"name"},
 			},
 		},
+	}
+}
+
+func agentDebugSchema(linesDescription string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"root":  stringProperty("Repository root. Defaults to the server root."),
+			"name":  stringProperty("Agent name."),
+			"lines": integerProperty(linesDescription),
+		},
+		"required": []string{"name"},
 	}
 }
 

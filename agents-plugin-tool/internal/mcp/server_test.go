@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
 func TestServeStdioToolsListAndCall(t *testing.T) {
@@ -64,7 +66,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(lines[1], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", lines[1])
 	}
-	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base"} {
+	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base"} {
 		if !strings.Contains(lines[1], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, lines[1])
 		}
@@ -83,6 +85,44 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if !strings.Contains(lines[6], "changed_files") || !strings.Contains(lines[6], "branch") {
 		t.Fatalf("git.status response missing status JSON: %s", lines[6])
+	}
+}
+
+func TestServeStdioAgentDebugToolCalls(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cache)
+	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Dir(layout.CurrentStdout), filepath.Base(layout.CurrentStdout), "stdout old\nstdout new\n")
+	mustWrite(t, filepath.Dir(layout.CurrentRuntimeLog), filepath.Base(layout.CurrentRuntimeLog), "runtime old\nruntime new\n")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.debug.stdout","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.debug.runtime_log","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.debug.tail","arguments":{"name":"impl","lines":1}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
+	}
+	if got := toolText(t, lines[0]); got != "stdout new\n" {
+		t.Fatalf("stdout debug response = %q", got)
+	}
+	if got := toolText(t, lines[1]); got != "runtime new\n" {
+		t.Fatalf("runtime debug response = %q", got)
+	}
+	if got := toolText(t, lines[2]); !strings.Contains(got, "== stdout ==") || !strings.Contains(got, "stdout new") || !strings.Contains(got, "== runtime ==") {
+		t.Fatalf("debug tail response mismatch: %q", got)
 	}
 }
 

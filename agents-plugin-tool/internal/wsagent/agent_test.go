@@ -928,6 +928,60 @@ func TestAgentJSONRoundTripIncludesContractFields(t *testing.T) {
 	}
 }
 
+func TestDiagnosticStreamSelectsRawFilesAndBoundsLines(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	_, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWriteAgentTest(t, layout.CurrentStdout, "old stdout\nnew stdout\n")
+	mustWriteAgentTest(t, layout.CurrentStderr, "stderr one\nstderr two\n")
+	mustWriteAgentTest(t, layout.CurrentRuntimeLog, "runtime one\nruntime two\n")
+	mustWriteAgentTest(t, layout.EventsFile, "event one\nevent two\n")
+
+	stdout, err := manager.DiagnosticStream(DiagnosticStreamOptions{Root: repo, Name: "impl", Stream: "stdout", Lines: 1})
+	if err != nil {
+		t.Fatalf("DiagnosticStream stdout returned error: %v", err)
+	}
+	if stdout != "new stdout\n" {
+		t.Fatalf("stdout stream = %q", stdout)
+	}
+
+	for _, tc := range []struct {
+		stream string
+		want   string
+	}{
+		{stream: "stderr", want: "stderr two\n"},
+		{stream: "runtime_log", want: "runtime two\n"},
+		{stream: "events", want: "event two\n"},
+	} {
+		t.Run(tc.stream, func(t *testing.T) {
+			got, err := manager.DiagnosticStream(DiagnosticStreamOptions{Root: repo, Name: "impl", Stream: tc.stream, Lines: 1})
+			if err != nil {
+				t.Fatalf("DiagnosticStream returned error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("%s stream = %q, want %q", tc.stream, got, tc.want)
+			}
+		})
+	}
+}
+
+func mustWriteAgentTest(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "repo")
