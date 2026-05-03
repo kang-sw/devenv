@@ -262,10 +262,10 @@ host-specific reference search, ASCII check, and `claude plugin validate
 agents-plugin`. A `ws/subquery` audit attempt timed out after 120 seconds, so no
 independent delegate audit result was incorporated in this phase.
 
-### Phase 5: Runtime smoke and documentation closeout
+### Phase 5: Local runtime smoke and documentation closeout
 
-Smoke the new `write-code` surface enough to prove that the runtime primitives
-and prompt bundle can support the skill.
+Smoke the new `write-code` surface enough to prove that the local runtime
+primitives and prompt bundle can support the skill.
 
 Success criteria:
 
@@ -274,6 +274,46 @@ Success criteria:
 - Prompt bundle metadata includes every embedded prompt stem named by the skill.
 - A controlled Codex run exercises implementer registration, at least one
   reviewer registration, review path allocation, output recovery, and cleanup.
-- A host plugin refresh confirms `ws:write-code` is visible when available.
 - Any unverified Claude compatibility, Windows behavior, or delegate commit
   limitation is documented rather than implied.
+
+### Result (a386ae1, 1a9f5aa) - 2026-05-03
+
+Completed the local smoke surface for the new `write-code` skill. Validation
+covered `claude plugin validate agents-plugin`, `go test ./...`,
+`git diff --check`, prompt bundle metadata for every prompt stem named by the
+skill, MCP `tools/list` coverage for every runtime primitive named by the
+skill, `ws/path.generate` allocation for correctness/fit/test review files, and
+Codex-backed async calls for one implementer and one reviewer. The smoke
+confirmed `ws/agents.wait`, `ws/agents.print`, and `ws/agents.tail` can recover
+the expected output and lifecycle diagnostics, and the smoke agents were erased.
+
+The independent `ws/subquery` audit that previously timed out was retried after
+the user restarted the MCP server. A small smoke query completed in about seven
+seconds, and a bounded `write-code` skill audit completed in about twenty-two
+seconds with no orphaned `codex exec` or nested `ws-mcp` process left behind.
+The audit found one completion-report gap: the report recorded agent cleanup but
+not generated review-file cleanup. The skill now includes `Review files:
+deleted | <remaining cleanup issue>` in `Templates / Completion Report`.
+
+The timeout incident also produced runtime hardening in `a386ae1`: `ws/subquery`
+now has a default 90 second backend timeout, synchronous oneshot/call paths can
+carry a timeout, and Codex backend processes are launched in a cancellable
+process group so timeout cleanup can kill nested child processes without
+disabling recursive MCP. A fuller recursion-depth and remaining-budget policy is
+still future work rather than part of this phase.
+
+### Phase 6: Host plugin visibility closeout
+
+Confirm the installed host plugin cache sees the new skill and document any
+remaining compatibility gaps.
+
+Success criteria:
+
+- A user-performed Codex plugin refresh or restart confirms `ws:write-code` is
+  visible in the installed skill list.
+- The installed MCP runtime reports the prompt bundle and tool surface expected
+  by the local smoke.
+- Any unverified Claude compatibility, Windows behavior, recursive MCP budget
+  policy, or delegate commit limitation is documented before closing this
+  ticket.

@@ -314,3 +314,8 @@ On `topic/open-conventions-mcp-skills`, defer all spec and mental-model updates
 until the branch merges. Tickets may reference known spec context in prose, but
 do not add `spec:` frontmatter, run `ws:update-spec`, or update
 `ai-docs/spec/` / `ai-docs/mental-model/` on this branch.
+
+`write-code` is ported locally in `agents-plugin/skills/write-code` and local
+runtime smoke passed. Next closeout is host visibility: user refreshes Codex
+plugin cache and confirms `ws:write-code`, then update Phase 6 of
+`260503-feat-agents-plugin-write-code-port`.
