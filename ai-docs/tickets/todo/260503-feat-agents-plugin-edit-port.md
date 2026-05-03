@@ -193,6 +193,23 @@ Success criteria:
 - The skill avoids downstream-breaking references to this repository's
   `claude-plugin/` source paths.
 
+### Result (bd31673) - 2026-05-03
+
+Added `agents-plugin/skills/edit/SKILL.md` as the first host-neutral core
+implementation orchestration skill. The port preserves the direct-edit shape:
+the lead owns source edits and commits, verification runs before and after
+review-driven fixes, one reviewer delegate uses the embedded correctness-and-fit
+prompt chain, review findings are written to a generated review path, non-clean
+relay is capped at two cycles, and the final commit range is handed to
+`ws:update-spec`.
+
+The skill uses shared MCP notation for `ws/mental_models.list`, `ws/infra.read`,
+`ws/path.generate`, and `ws/agents.*` instead of Claude-only helper commands.
+It does not reference downstream-breaking `claude-plugin/` source paths. Local
+validation covered plugin manifest validation, stale-helper string search, Go
+runtime tests, and whitespace checks. Host-loaded Codex visibility still belongs
+to Phase 4 because it requires the normal plugin cache refresh.
+
 ### Phase 4: Codex smoke and documentation
 
 Smoke the new `edit` surface enough to prove that Codex can load the skill and

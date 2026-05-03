@@ -215,6 +215,7 @@ agents-plugin/skills/
   exit-session/    — draft host-neutral session handoff workflow for ai-docs/_index.md
   workflow/        — host-neutral session-resident reference for MCP notation and orchestration primitive boundaries
   write-skeleton/  — draft host-neutral skeleton workflow using ws/agents.* delegate sessions
+  edit/            — draft host-neutral direct-edit workflow using generated review paths and one async reviewer
 ```
 
 ## Canonical Flows
@@ -295,7 +296,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
-`260503-feat-agents-plugin-edit-port` — first core implementation orchestration port; add `ws/path.generate` for review findings, then port lead-owned direct edit plus reviewer relay
+`260503-feat-agents-plugin-edit-port` — first core implementation orchestration port; skill draft is committed, remaining work is Codex/plugin visibility smoke and documentation
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
