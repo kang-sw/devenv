@@ -282,7 +282,7 @@ Success criteria:
 - The ticket records which session-runtime gaps remain before `write-code`,
   `edit`, `implement`, `proceed`, and `sprint` can be ported.
 
-### Result (pending) - 2026-05-03
+### Result (4a80f86) - 2026-05-03
 
 Exposed the Phase 3 runtime package through MCP tools
 `ws.agents.register`, `ws.agents.call`, `ws.agents.oneshot`,
