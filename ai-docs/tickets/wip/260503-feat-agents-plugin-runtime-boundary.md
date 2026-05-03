@@ -225,7 +225,7 @@ Success criteria:
 - The ticket records whether relative command paths and platform-specific
   launchers are viable for production.
 
-### Result (pending commit) - 2026-05-03
+### Result (d1ab6b0) - 2026-05-03
 
 Completed the macOS plugin-managed MCP POC for Codex.
 
