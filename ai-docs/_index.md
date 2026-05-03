@@ -259,8 +259,9 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
-`260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; current child is the runtime/MCP boundary slice
-`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 4 release asset/checksum/cache-local runtime/GH Actions scaffold is done; remaining host item is Windows plugin-managed launcher verification
+`260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; current child sequence is agent session runtime before write-skeleton
+`260503-feat-agents-plugin-agent-session-runtime` — build Go project-state path management and host-neutral durable agent session contract before delegation skill ports
+`260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 

@@ -119,19 +119,23 @@ the full orchestration runtime. `workflow` remains deferred because its Claude
 source is a named-agent/PATH primitive reference and the shared delegation
 contract does not exist yet.
 
-### 6. Delegation contract prototype
+### 6. Agent session runtime and delegation contract
 
-Planned child ticket:
+Active/planned child tickets:
 
+- `260503-feat-agents-plugin-agent-session-runtime`
 - `feat-agents-plugin-write-skeleton-port`
 
 Covered skill:
 
 - `write-skeleton`
 
-Purpose: define the first production delegation contract for Codex: what the lead
-decides, what the delegate writes, how outputs are reviewed, and how commit
-ownership works without assuming Claude's named-agent registry.
+Purpose: define the host-neutral sustainable session runtime before porting the
+first production delegation skill. The runtime should generalize Claude's
+`ws-named-agent` prior art into project-state path management, named/oneshot
+session registration, resume-backed calls, queued follow-ups, output lookup, and
+workload-depth tiers. `write-skeleton` is the first consumer after that contract
+exists.
 
 ### 7. Core implementation orchestration
 
