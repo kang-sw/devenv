@@ -4,6 +4,7 @@ parent: 260503-epic-agents-plugin-skill-porting
 related:
   260429-research-host-neutral-ws-plugin: research anchor for host-neutral ws plugin architecture
   260503-feat-agents-plugin-runtime-boundary: MCP/runtime boundary that unblocks draft helper references
+completed: 2026-05-03
 ---
 
 # agents-plugin spec skill drafts
@@ -47,6 +48,20 @@ Success criteria:
 - The skill does not depend on `$ARGUMENTS`, Claude slash commands, or implicit
   plugin PATH injection.
 
+### Result (TBD) - 2026-05-03
+
+Added `agents-plugin/skills/write-spec/SKILL.md` as a host-neutral draft.
+
+The draft preserves the Claude skill's durable behavior: load spec conventions,
+route non-public behavior away from spec authoring, create or update specs,
+generate stable anchors, gate `🚧` markers on todo-or-higher tickets, verify
+implemented behavior before removing planned markers, run spec index verification
+when available, and commit only directly related files.
+
+The draft removes Claude-specific assumptions: no `$ARGUMENTS`, no slash-command
+chains, no shell interpolation, and no implicit `ws-*` PATH dependency. Spec stem
+generation and spec index verification are explicit MCP/fallback boundaries.
+
 ### Phase 2: update-spec draft
 
 Add `agents-plugin/skills/update-spec/SKILL.md` as a host-neutral draft that:
@@ -63,6 +78,19 @@ Success criteria:
 - The skill makes helper requirements explicit and does not assume Claude named
   agents or plugin PATH injection.
 
+### Result (TBD) - 2026-05-03
+
+Added `agents-plugin/skills/update-spec/SKILL.md` as a host-neutral draft.
+
+The draft preserves the lead-driven commit-range audit: resolve range, scan
+commits, classify spec-impact, add missing implemented entries, strip completed
+`🚧` markers only after confirmation, handle `removed: <stem>` markers, run spec
+index verification when available, and commit spec changes together.
+
+The draft is self-contained and does not read the sibling `write-spec` skill at
+runtime. It carries its own implemented-entry template and makes anchor
+generation and spec index verification explicit MCP/fallback boundaries.
+
 ### Phase 3: port verification
 
 Verify the draft skills as plugin content.
@@ -75,3 +103,17 @@ Success criteria:
   compatibility.
 - Codex visibility remains a human-in-the-loop plugin cache refresh item, not a
   local CLI claim.
+
+### Result (TBD) - 2026-05-03
+
+Verified the draft skill files and plugin manifests.
+
+Verification:
+
+- inspected `agents-plugin/skills/write-spec/SKILL.md`
+- inspected `agents-plugin/skills/update-spec/SKILL.md`
+- `jq . agents-plugin/.codex-plugin/plugin.json`
+- `jq . agents-plugin/.claude-plugin/plugin.json`
+- `jq . agents-plugin/.mcp.json`
+- `claude plugin validate agents-plugin`
+- `git diff --check`

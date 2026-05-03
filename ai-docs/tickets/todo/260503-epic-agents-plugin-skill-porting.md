@@ -77,7 +77,7 @@ with documented fallbacks; it should not block the next skill-porting slice.
 
 ### 4. Spec/doc direct track
 
-Planned child ticket:
+Completed:
 
 - `260503-feat-agents-plugin-spec-skill-drafts`
 
