@@ -353,7 +353,7 @@ Success criteria:
 - Incompatible runtime binary triggers replacement or a clear stderr failure.
 - Level 1 and Level 2 verification still pass.
 
-### Result (TBD) - 2026-05-03
+### Result (9502c69) - 2026-05-03
 
 Implemented the production download branch in the POSIX launcher.
 
