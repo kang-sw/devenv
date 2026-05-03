@@ -50,6 +50,13 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+const maxDebugEvents = 256
+
+var debugEvents = struct {
+	sync.Mutex
+	events []map[string]any
+}{}
+
 func NewServer(root, version string, sourceCommit ...string) *Server {
 	commit := "dev"
 	if len(sourceCommit) > 0 && sourceCommit[0] != "" {
@@ -162,16 +169,23 @@ func (s *Server) handle(ctx context.Context, req request) response {
 }
 
 func appendDebugEvent(event string, fields map[string]any) {
-	path := strings.TrimSpace(os.Getenv("WS_MCP_DEBUG_LOG"))
-	if path == "" {
-		return
-	}
 	record := map[string]any{
 		"ts":    time.Now().UTC().Format(time.RFC3339Nano),
 		"event": event,
 	}
 	for key, value := range fields {
 		record[key] = value
+	}
+	debugEvents.Lock()
+	debugEvents.events = append(debugEvents.events, record)
+	if len(debugEvents.events) > maxDebugEvents {
+		debugEvents.events = append([]map[string]any(nil), debugEvents.events[len(debugEvents.events)-maxDebugEvents:]...)
+	}
+	debugEvents.Unlock()
+
+	path := strings.TrimSpace(os.Getenv("WS_MCP_DEBUG_LOG"))
+	if path == "" {
+		return
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {
@@ -183,6 +197,34 @@ func appendDebugEvent(event string, fields map[string]any) {
 	}
 	defer file.Close()
 	_, _ = file.Write(append(raw, '\n'))
+}
+
+func recentDebugEvents(limit int) []map[string]any {
+	if limit <= 0 || limit > maxDebugEvents {
+		limit = maxDebugEvents
+	}
+	debugEvents.Lock()
+	defer debugEvents.Unlock()
+	start := len(debugEvents.events) - limit
+	if start < 0 {
+		start = 0
+	}
+	out := make([]map[string]any, len(debugEvents.events[start:]))
+	copy(out, debugEvents.events[start:])
+	return out
+}
+
+func debugEventsJSONL(limit int) (string, error) {
+	var b strings.Builder
+	for _, event := range recentDebugEvents(limit) {
+		raw, err := json.Marshal(event)
+		if err != nil {
+			return "", err
+		}
+		b.Write(raw)
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
 }
 
 func rawMessageString(raw json.RawMessage) string {
@@ -219,6 +261,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		return toolTextResponse(req.ID, string(raw)+"\n", nil)
+	case "runtime.debug_events":
+		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
+		return toolTextResponse(req.ID, text, err)
 
 	case "git.status":
 		root := s.root
@@ -503,6 +548,16 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
+			},
+		},
+		{
+			"name":        "runtime.debug_events",
+			"description": "Return recent in-process MCP debug events as JSONL.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"limit": integerProperty("Maximum number of events to return. Defaults to 80 and is capped."),
+				},
 			},
 		},
 		{

@@ -36,6 +36,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"path.generate","arguments":{"kind":"review","stems":["direct"]}}}`,
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.status","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":10}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -45,8 +46,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 7 {
-		t.Fatalf("expected 7 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 8 {
+		t.Fatalf("expected 8 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -97,6 +98,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if !strings.Contains(byID["7"], "changed_files") || !strings.Contains(byID["7"], "branch") {
 		t.Fatalf("git.status response missing status JSON: %s", byID["7"])
+	}
+	if !strings.Contains(toolText(t, byID["8"]), `"event":"request.received"`) {
+		t.Fatalf("runtime.debug_events missing request evidence: %s", byID["8"])
 	}
 }
 
@@ -171,6 +175,28 @@ func TestServeStdioLogsCancellationNotificationsWhenEnabled(t *testing.T) {
 		!strings.Contains(logText, `"request_id":"wait-1"`) ||
 		!strings.Contains(logText, `"reason":"user interrupt"`) {
 		t.Fatalf("debug log missing cancellation evidence:\n%s", logText)
+	}
+}
+
+func TestServeStdioExposesCancellationNotificationsInDebugEvents(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":"wait-2","method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"wait-2","reason":"user interrupt"}}`,
+		`{"jsonrpc":"2.0","id":"debug","method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":5}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	debugText := toolText(t, byID["debug"])
+	if !strings.Contains(debugText, `"event":"notification.cancelled"`) ||
+		!strings.Contains(debugText, `"request_id":"wait-2"`) ||
+		!strings.Contains(debugText, `"reason":"user interrupt"`) {
+		t.Fatalf("runtime.debug_events missing cancellation evidence:\n%s", debugText)
 	}
 }
 
