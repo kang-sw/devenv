@@ -127,6 +127,24 @@ Success criteria:
 - The epic references this child ticket as the runtime boundary implementation
   slice instead of a planned placeholder.
 
+### Result (pending) - 2026-05-03
+
+Added `ai-docs/ref/ws-mcp.md` as the first explicit runtime contract for the
+`agents-plugin` MCP boundary. The document records:
+
+- stdio process model for `ws-mcp serve --stdio --root <repo-root>`
+- current host-independent commands: `version`, `doctor`, and `serve`
+- plugin-managed MCP configuration shape for Codex plugins
+- HITM Codex plugin cache refresh boundary for validating installed MCP config
+- implemented tool contracts for `ws.project_tree` and `ws.infra.read`
+- Claude-compatible fallback helpers: `ws-proj-tree` and `ws-print-infra`
+- reserved candidate surfaces for project index, ticket queue, spec stems, and
+  mental-model listing
+- deferred write-capable operations and version drift design boundary
+
+Updated `ai-docs/ref/codex-integration.md` and `_index.md` so future sessions can
+find the new MCP contract from the normal recovery path.
+
 ### Phase 3: Distribution design
 
 Define the portable binary distribution plan:

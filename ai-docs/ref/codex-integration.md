@@ -86,6 +86,9 @@ cache refresh step before validating plugin-managed MCP changes. Agents should
 explicitly ask the user to perform that refresh when a verification step depends on
 the installed plugin cache.
 
+For the `ws` plugin candidate's own MCP runtime contract, see
+`ai-docs/ref/ws-mcp.md`.
+
 ## Invocation
 
 ```bash

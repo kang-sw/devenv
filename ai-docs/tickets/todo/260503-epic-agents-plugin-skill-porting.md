@@ -64,14 +64,15 @@ deferring helper execution and MCP reconstruction.
 
 ### 3. Runtime boundary and MCP design
 
-Next child ticket:
+Active child ticket:
 
 - `260503-feat-agents-plugin-runtime-boundary`
 
 Purpose: decide what `agents-plugin` skills perform directly, what MCP
 tools/resources/prompts must provide, and what remains as CLI fallback behavior.
-The first MCP slice should prefer read-oriented surfaces: project memory, ticket
-conventions, ticket queue, spec conventions, and spec stem lookup.
+The first MCP slice has established the Go stdio baseline and the v0.1 read
+surface contract; distribution, install/update behavior, and version drift
+detection remain in the child ticket.
 
 ### 4. Spec/doc direct track
 

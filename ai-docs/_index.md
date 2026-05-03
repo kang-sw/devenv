@@ -31,6 +31,7 @@ Read before authoring or modifying skills, agents, or infra:
 |----------|---------|
 | `ai-docs/ref/skill-authoring.md` | Skill & agent document layout, invariant/constraint checklist, doctrine format |
 | `ai-docs/ref/codex-integration.md` | Probed codex CLI behavior: invocation, JSONL output format, session management, hook config |
+| `ai-docs/ref/ws-mcp.md` | Host-neutral `ws-mcp` process model, MCP tool contracts, CLI fallbacks, and distribution boundary |
 | `ai-docs/ship/ws.md` | Ship config for the `ws` plugin: version strategy, changelog, tag, push |
 | `claude-plugin/infra/impl-playbook.md` | Implementation discipline: test strategy, verify, deviation protocol. Access via `ws-print-infra impl-playbook.md`. |
 | `claude-plugin/infra/subagent-rules.md` | Subagent dispatch rules: exploration, branches, general rules. Access via `ws-print-infra subagent-rules.md`. |
@@ -107,6 +108,10 @@ agents-plugin-tool/
   internal/mcp/     — minimal JSON-RPC/MCP stdio loop
   internal/wsdoc/   — project document helper logic used by MCP tools
 ```
+
+Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
+`ws.project_tree` and `ws.infra.read`; current Claude-compatible fallbacks are
+`ws-proj-tree` and `ws-print-infra`.
 
 ## Skill Inventory
 
@@ -208,13 +213,13 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 | `260502-feat-agents-plugin-codex-port-scaffold` | done | `agents-plugin/` Codex-first `ws` candidate scaffold — Codex marketplace/install verified, Claude manifest validation passes, broad skill porting deferred |
 | `260502-feat-agents-plugin-workflow-skill-drafts` | done | Harden `skill-authoring`; add draft host-neutral `write-ticket` and `discuss` skills with helper/MCP runtime reconstruction deferred |
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
-| `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phase 1 complete |
+| `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
 
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
-`260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child should define Codex runtime/MCP boundary
-`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 2 should document the MCP tool/resource contract and CLI fallback names
+`260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; current child is the runtime/MCP boundary slice
+`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 3 should define binary distribution, install/update skill behavior, plugin MCP config path, and version drift detection
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 
