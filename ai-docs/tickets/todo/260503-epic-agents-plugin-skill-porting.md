@@ -114,10 +114,10 @@ Excluded from this slice:
 
 Purpose: port useful skills outside the core implementation track before tackling
 heavy delegation. These are mostly direct-execution skills and should not require
-the full orchestration runtime. `workflow` was not bulk-ported from Claude's
-PATH primitive reference; the `agents-plugin` version is a partial
-session-resident notation and migration-boundary reference until the shared
-delegation contract exists.
+the full orchestration runtime. `workflow` begins as a host-neutral
+session-resident notation reference rather than a bulk port of Claude's
+PATH primitive list; it can absorb shared orchestration primitive contracts as
+the agent session runtime lands.
 
 ### 6. Agent session runtime and delegation contract
 
