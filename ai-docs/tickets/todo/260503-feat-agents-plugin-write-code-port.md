@@ -237,6 +237,31 @@ Success criteria:
 - The skill avoids downstream-breaking references to this repository's
   `claude-plugin/` source paths.
 
+### Result (39f3fb4) - 2026-05-03
+
+Added `agents-plugin/skills/write-code/SKILL.md` as a host-neutral draft of the
+delegated implementation primitive. The skill preserves the Claude prior-art
+shape: target parsing, project survey, brief writing, optional plan population,
+skeleton gate, async implementer delegation, partitioned reviewer fanout,
+file-backed findings, bounded relay loop, cleanup, and completion reporting.
+
+The port uses `ws/agents.oneshot` for project survey and plan population,
+`ws/agents.register` with embedded prompt stems for all named agents,
+`ws/agents.call_async` plus wait/status/tail/print for long-running turns, and
+`ws/path.generate` for correctness, fit, and test review files. It records the
+Phase 2 commit policy by allowing the implementer to commit logical checkpoints
+on the current branch, while leaving branch creation, approval gates, merge, and
+spec updates to the caller or later harness skills.
+
+Direct Git operations for recording the start commit and committing brief/plan
+checkpoints remain lead actions because `ws/git.*` tools are now tracked by the
+separate `260503-epic-ws-mcp-vcs-reference-tools` roadmap rather than available
+runtime primitives. The skill does not reference `claude-plugin/` source paths
+or PATH-injected `ws-*` helpers. Validation covered skill-authoring review,
+host-specific reference search, ASCII check, and `claude plugin validate
+agents-plugin`. A `ws/subquery` audit attempt timed out after 120 seconds, so no
+independent delegate audit result was incorporated in this phase.
+
 ### Phase 5: Runtime smoke and documentation closeout
 
 Smoke the new `write-code` surface enough to prove that the runtime primitives
