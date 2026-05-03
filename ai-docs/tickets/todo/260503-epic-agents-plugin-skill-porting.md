@@ -147,6 +147,7 @@ prompt-bundle resolution.
 Planned child ticket group:
 
 - `260503-feat-agents-plugin-async-agent-calls`
+- `260503-feat-agents-plugin-edit-port`
 - `feat-agents-plugin-write-code-port`
 - `feat-agents-plugin-implement-proceed-port`
 - `feat-agents-plugin-sprint-port`
@@ -160,8 +161,10 @@ Covered skills:
 - `sprint`
 
 Purpose: port the main production track only after the runtime boundary and
-delegation contract are proven. These skills depend on branch management,
-implementation/reviewer relay, doc pipeline, approval gates, and task continuity.
+delegation contract are proven. Start with `edit` because it keeps
+implementation lead-owned while validating the reviewer relay and review-path
+primitive. The later skills depend on branch management, implementation/reviewer
+relay, doc pipeline, approval gates, and task continuity.
 
 ### 8. Reconstruction and bootstrap
 
