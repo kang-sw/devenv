@@ -129,6 +129,11 @@ release assets only for pushed `v*` tags. Runtime binaries remain plugin cache-l
 `.runtime/<os>-<arch>/ws-mcp[.exe]`; Windows plugin-managed startup still needs a
 native launcher or adapter-specific manifest verification.
 
+`ws-mcp` development verification levels are documented in
+`ai-docs/ref/ws-mcp.md`: Level 1 Go/MCP tests, Level 2 local release asset and
+checksum build, Level 3 Codex plugin-managed MCP smoke after user-refreshed plugin
+cache.
+
 ## Skill Inventory
 
 ```

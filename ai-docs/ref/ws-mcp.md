@@ -327,3 +327,48 @@ can verify that `ws-mcp-windows-amd64.exe` runs `version`, `doctor`, and stdio
 MCP smoke tests. Plugin-managed Windows startup additionally needs a Windows
 launcher artifact at `bin/ws-mcp-launcher.exe` or an adapter-specific manifest;
 the POSIX `sh` launcher only proves the macOS/Linux path.
+
+## Development Verification
+
+Use three verification levels while developing `ws-mcp` and the plugin-managed
+runtime.
+
+Level 1 validates the Go runtime and host-independent MCP server:
+
+```bash
+cd agents-plugin-tool
+go test ./...
+scripts/smoke-ws-mcp.sh ..
+```
+
+Level 2 validates the local release assets without waiting for GitHub Actions:
+
+```bash
+cd agents-plugin-tool
+scripts/build-release-assets.sh 0.1.0-dev
+dist/ws-mcp-darwin-arm64 version
+cd dist
+shasum -a 256 -c SHA256SUMS
+```
+
+This is the same build/checksum path used by the GitHub Actions workflow. CI is
+a wrapper around the local script, not the only way to validate release assets.
+
+Level 3 validates Codex plugin-managed MCP startup from the installed plugin
+cache. This level requires a human-in-the-loop Codex plugin cache refresh when
+plugin files change: uninstall/install `ws` in the Codex UI or start a fresh
+session after cache refresh is available. Then run:
+
+```bash
+codex mcp get ws
+codex exec --dangerously-bypass-approvals-and-sandbox --json \
+  'There is an enabled MCP server named ws. Use its tool named ws.project_tree with arguments {"root":"/Users/kang-sw/devenv"}. Do not use shell commands. Reply with the exact server name, exact tool name, and the first non-empty line of the tool result.' \
+  < /dev/null
+```
+
+Success means the JSONL output contains an MCP tool call with server `ws`, tool
+`ws.project_tree`, and a result whose first non-empty line is `ai-docs/`.
+
+Use Level 1 for ordinary Go/MCP changes, Level 2 for release/build changes, and
+Level 3 whenever `.codex-plugin/plugin.json`, `.mcp.json`, launcher behavior, or
+installed plugin packaging changes.
