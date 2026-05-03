@@ -76,6 +76,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "runtime.info") {
 		t.Fatalf("tools/list missing runtime.info: %s", byID["2"])
 	}
+	if !strings.Contains(byID["2"], "config.agents_tier") {
+		t.Fatalf("tools/list missing config.agents_tier: %s", byID["2"])
+	}
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
@@ -140,6 +143,38 @@ func TestServeStdioAgentDebugToolCalls(t *testing.T) {
 	}
 	if got := toolText(t, byID["3"]); !strings.Contains(got, "== stdout ==") || !strings.Contains(got, "stdout new") || !strings.Contains(got, "== runtime ==") {
 		t.Fatalf("debug tail response mismatch: %q", got)
+	}
+}
+
+func TestServeStdioConfigAgentsTier(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"light","model":"gemini-3-1-pro"}}}`+"\n",
+	), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	configText := toolText(t, byID["1"])
+	if !strings.Contains(configText, `"backend":"gemini"`) || !strings.Contains(configText, `"model":"gemini-3-1-pro"`) {
+		t.Fatalf("config response missing tier mapping: %s", byID["1"])
+	}
+
+	out.Reset()
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"survey","tier":"light"}}}`+"\n",
+	), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "survey")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, "backend: gemini") || !strings.Contains(status, "model: gemini-3-1-pro") {
+		t.Fatalf("registered status missing configured backend/model:\n%s", status)
 	}
 }
 
@@ -208,6 +243,7 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"light","model":"gpt-5.2"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -215,7 +251,7 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "subquery") {
+	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "subquery") || strings.Contains(byID["1"], "config.agents_tier") {
 		t.Fatalf("leaf tools/list exposed recursive tools: %s", byID["1"])
 	}
 	if !strings.Contains(byID["1"], "runtime.info") {
@@ -226,6 +262,9 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 	}
 	if !strings.Contains(byID["3"], "prompt_bundle") {
 		t.Fatalf("leaf tools/call rejected runtime.info: %s", byID["3"])
+	}
+	if !strings.Contains(byID["4"], "tool not available") {
+		t.Fatalf("leaf tools/call did not reject config.agents_tier: %s", byID["4"])
 	}
 }
 

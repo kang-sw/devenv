@@ -24,6 +24,7 @@
   "tools": {
     "runtime.info": ">=0.1.0-dev <0.2.0",
     "runtime.debug_events": ">=0.1.0-dev <0.2.0",
+    "config.agents_tier": ">=0.1.0-dev <0.2.0",
     "project_tree": ">=0.1.0-dev <0.2.0",
     "infra.read": ">=0.1.0-dev <0.2.0",
     "convention.read": ">=0.1.0-dev <0.2.0",
@@ -52,6 +53,7 @@
   },
   "commands": {
     "runtime.info": ">=0.1.0-dev <0.2.0",
+    "config.agents-tier": ">=0.1.0-dev <0.2.0",
     "subquery": ">=0.1.0-dev <0.2.0",
     "path.generate": ">=0.1.0-dev <0.2.0",
     "agents.register": ">=0.1.0-dev <0.2.0",

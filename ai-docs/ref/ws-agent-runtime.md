@@ -218,25 +218,28 @@ Shared skills use workload-depth tiers, not provider model names:
 - `core` — normal implementation, review, synthesis, and document updates.
 - `deep` — broad architecture, contract design, reconstruction, or high-risk work.
 
-Backend adapters map tiers to concrete models. A concrete `model` may override the
-tier mapping for one agent registration.
+Backend adapters map tiers to concrete models through user-local configuration
+in `~/.cache/ws@kang-sw-devenv/config.json`. A concrete `model` may override
+the tier mapping for one agent registration; when `backend` is omitted, ws
+infers the backend from recognizable model names (`gpt-*`/`codex` → `codex`,
+`gemini*` → `gemini`, `haiku`/`sonnet`/`opus`/`claude` → `claude`) and otherwise
+falls back to `codex`.
 
 ## Tool Surface
 
 MCP tools use server `ws` and the following tool names:
 
 - `agents.register` — create or replace one named agent registry entry. Implemented.
-- `agents.call` — call a registered agent and resume existing session state when possible. Implemented.
-- `agents.call_async` — start a current call for a registered agent and return immediately. Implemented.
+- `agents.call` — start an async call for a registered agent and return follow-up state. Implemented.
 - `agents.wait` — wait for the current async call to finish, with timeout support. Implemented.
 - `agents.status` — report the current async call and agent registry state. Implemented.
-- `agents.oneshot` — register, call, and erase an ephemeral agent. Implemented.
 - `agents.interrupt` — enqueue a lead-to-agent message. Planned.
 - `agents.print` — return `output.md` for a named agent. Implemented.
 - `agents.tail` — summarize recent session/event state without invoking the backend. Implemented.
 - `agents.cancel` — best-effort terminate the active worker pid and mark the current call cancelled. Implemented.
 - `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
+- `config.agents_tier` — configure the user-local backend/model mapping for a workload tier. Implemented.
 - `path.generate` — allocate worktree-scoped writable workflow artifact paths. Implemented for `kind: "review"`.
 - `runtime.info` — return runtime metadata, including embedded prompt bundle hash. Implemented.
 
@@ -255,28 +258,26 @@ Implemented prototype commands:
 ws-mcp agents register --root <repo> --name <name> [--backend codex] [--tier light|core|deep] [--model <model>] [--prompt <stem-or-absolute-path>] [--prompt-ref <logical-name>] [--system-prompt-file <path>]
 ws-mcp agents call --root <repo> --name <name> <prompt>
 ws-mcp agents call --root <repo> --name <name> --prompt-file -
-ws-mcp agents call-async --root <repo> --name <name> <prompt>
-ws-mcp agents call-async --root <repo> --name <name> --prompt-file -
 ws-mcp agents run-current --root <repo> --name <name>
 ws-mcp agents wait --root <repo> --name <name> [--timeout 30s]
 ws-mcp agents status --root <repo> --name <name>
 ws-mcp agents tail --root <repo> --name <name> [--lines 40]
 ws-mcp agents cancel --root <repo> --name <name>
-ws-mcp agents oneshot --root <repo> [--name <temporary-name>] [--prompt <stem-or-absolute-path>] <prompt>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
+ws-mcp config agents-tier --tier <light|core|deep> [--backend <backend>] [--model <model>]
 ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
 ws-mcp runtime info
 ```
 
 The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 `events.jsonl` layout described above. Shared skill text should prefer the MCP
-tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.call_async`,
-`ws/agents.wait`, `ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`,
-`ws/agents.oneshot`, `ws/agents.print`, `ws/agents.erase`,
-`ws/path.generate`, and `ws/runtime.info`.
+tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
+`ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`, `ws/agents.print`,
+`ws/agents.erase`, `ws/config.agents_tier`, `ws/path.generate`, and
+`ws/runtime.info`.
 
-`agents.call_async` writes the prompt snapshot to `current/prompt.md`, starts an
+`agents.call` writes the prompt snapshot to `current/prompt.md`, starts an
 internal `agents run-current` worker process, records the worker pid in
 `current/state.json`, and returns before the backend finishes. The worker owns
 the actual backend call, captures backend stdout and stderr to `current/stdout`

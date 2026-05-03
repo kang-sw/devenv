@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsprompt"
@@ -264,6 +265,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	case "runtime.debug_events":
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
+	case "config.agents_tier":
+		tier, _ := params.Arguments["tier"].(string)
+		backend, _ := params.Arguments["backend"].(string)
+		model, _ := params.Arguments["model"].(string)
+		cfg, err := wsconfig.SetAgentsTier(wsconfig.Options{}, tier, backend, model)
+		return toolJSONResponse(req.ID, cfg, err)
 
 	case "git.status":
 		root := s.root
@@ -558,6 +565,19 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"limit": integerProperty("Maximum number of events to return. Defaults to 80 and is capped."),
 				},
+			},
+		},
+		{
+			"name":        "config.agents_tier",
+			"description": "Configure the default backend/model mapping for a ws agent workload tier.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"tier":    enumStringProperty("Workload tier to configure.", []string{"light", "core", "deep"}),
+					"backend": stringProperty("Optional backend name. When omitted, ws infers it from the model when possible."),
+					"model":   stringProperty("Concrete model for this tier."),
+				},
+				"required": []string{"tier"},
 			},
 		},
 		{
@@ -873,9 +893,9 @@ func toolAllowed(name string) bool {
 	case "", "lead":
 		return true
 	case "delegate":
-		return !strings.HasPrefix(name, "agents.")
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case "leaf":
-		return !strings.HasPrefix(name, "agents.") && name != "subquery"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && name != "subquery"
 	default:
 		return true
 	}

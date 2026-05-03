@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -249,13 +250,11 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		opts.Root = "."
 	}
-	if strings.TrimSpace(opts.Backend) == "" {
-		opts.Backend = "codex"
-	}
 	name := strings.TrimSpace(opts.Name)
 	if name == "" {
 		return Agent{}, Layout{}, errors.New("agent name is required")
 	}
+	explicitBackend := strings.TrimSpace(opts.Backend)
 	promptSpecs := promptSpecs(opts.Prompts, opts.PromptRefs)
 	resolved, err := wsprompt.Resolve(promptSpecs, opts.SystemPromptText, opts.Tier, opts.Model)
 	if err != nil {
@@ -269,6 +268,10 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	}
 	if strings.TrimSpace(opts.Tier) == "" {
 		opts.Tier = "core"
+	}
+	opts.Backend, opts.Model, err = wsconfig.ResolveAgent(wsconfig.Options{CacheHome: m.opts.CacheHome}, opts.Tier, explicitBackend, opts.Model)
+	if err != nil {
+		return Agent{}, Layout{}, err
 	}
 	existingLayout, err := m.layout(opts.Root, name, false)
 	if err != nil {

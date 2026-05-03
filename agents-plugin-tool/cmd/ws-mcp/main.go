@@ -11,6 +11,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsprompt"
@@ -37,6 +38,8 @@ func main() {
 		serve(os.Args[2:])
 	case "subquery":
 		subquery(os.Args[2:])
+	case "config":
+		configCommand(os.Args[2:])
 	case "path":
 		path(os.Args[2:])
 	case "agents":
@@ -50,7 +53,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|path|agents|git>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git>")
 }
 
 func doctor(args []string) {
@@ -141,6 +144,35 @@ func subquery(args []string) {
 		fatal("subquery", err)
 	}
 	fmt.Print(text)
+}
+
+func configCommand(args []string) {
+	if len(args) < 1 {
+		configUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "agents-tier":
+		configAgentsTier(args[1:])
+	default:
+		configUsage()
+		os.Exit(2)
+	}
+}
+
+func configUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp config <agents-tier>")
+}
+
+func configAgentsTier(args []string) {
+	fs := flag.NewFlagSet("config agents-tier", flag.ExitOnError)
+	tier := fs.String("tier", "", "workload tier: light, core, or deep")
+	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
+	model := fs.String("model", "", "concrete model for this tier")
+	_ = fs.Parse(args)
+
+	cfg, err := wsconfig.SetAgentsTier(wsconfig.Options{}, *tier, *backend, *model)
+	printJSONOrFatal("config agents-tier", cfg, err)
 }
 
 func path(args []string) {
@@ -315,7 +347,7 @@ func agentsRegister(args []string) {
 	fs := flag.NewFlagSet("agents register", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
-	backend := fs.String("backend", "codex", "agent backend")
+	backend := fs.String("backend", "", "agent backend")
 	tier := fs.String("tier", "", "workload tier")
 	model := fs.String("model", "", "backend model override")
 	systemFile := fs.String("system-prompt-file", "", "system prompt file")

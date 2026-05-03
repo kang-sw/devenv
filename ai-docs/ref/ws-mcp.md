@@ -467,6 +467,29 @@ Behavior:
 - Filenames use `<seed8>-<index>-<stem>.md`; invocation time is intentionally
   omitted from the filename to reduce prompt and review-path context cost.
 
+### `ws/config.agents_tier`
+
+Configure the user-local backend/model mapping for a workload tier.
+
+Input fields:
+
+- `tier` is required and accepts `light`, `core`, or `deep`.
+- `model` is the concrete model to use when an agent registration resolves to
+  that tier.
+- `backend` is optional. When omitted, ws infers it from recognizable model
+  names: `gpt-*` or names containing `codex` use `codex`; names containing
+  `gemini` use `gemini`; names containing `haiku`, `sonnet`, `opus`, or
+  `claude` use `claude`.
+
+Behavior:
+
+- Configuration is written to `~/.cache/ws@kang-sw-devenv/config.json`, or to
+  `$WS_CACHE_HOME/config.json` when `WS_CACHE_HOME` is set.
+- `agents.register` applies this mapping after prompt frontmatter tier
+  resolution and before defaulting to backend `codex`.
+- Explicit `model` on `agents.register` bypasses tier configuration while still
+  allowing backend inference when `backend` is omitted.
+
 ### `ws/agents.register`
 
 Register or replace one task-scoped named agent.
@@ -474,10 +497,12 @@ Register or replace one task-scoped named agent.
 Important input fields:
 
 - `name` is required.
-- `backend` defaults to `codex`.
+- `backend` is optional; when omitted, ws uses tier configuration or infers a
+  backend from recognizable concrete model names before falling back to `codex`.
 - `tier` may be `light`, `core`, or `deep`; omitted tier may be inferred from a
-  prompt frontmatter model.
-- `model` is an optional concrete backend model override.
+  prompt frontmatter model and defaults to `core`.
+- `model` is an optional concrete backend model override. If `model` is present,
+  it takes precedence over tier configuration.
 - `prompts` is the canonical prompt chain field.
 - `prompt_refs` is a migration alias for older callers.
 - `system_prompt_text` appends materialized system instructions after resolved
@@ -495,19 +520,17 @@ Prompt resolution:
 Current embedded prompt stems:
 
 - `code-reviewer`
+- `implementer`
+- `plan-populator-research`
+- `plan-populator-survey`
+- `project-survey`
 - `skeleton-writer`
 - `code-review-correctness`
 - `code-review-fit`
+- `code-review-test`
+- `impl-playbook`
 
-### `ws/agents.oneshot`
-
-Register, call, and erase a temporary agent.
-
-The tool accepts the same prompt resolution fields as `ws/agents.register`, plus
-required `prompt` text for the delegate turn. It uses the same materialized
-`system.md` path during the temporary call and removes the task agent afterward.
-
-### `ws/agents.call_async`
+### `ws/agents.call`
 
 Start an asynchronous call for a registered ws agent and return immediately.
 

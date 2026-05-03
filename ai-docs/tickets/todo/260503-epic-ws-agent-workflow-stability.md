@@ -366,3 +366,68 @@ showed no `notification.cancelled` event after the Codex UI interrupt; only
 ordinary `request.received` events appeared. Therefore, for the current Codex
 behavior, ws must not rely on MCP `notifications/cancelled` for user-triggered
 wait cancellation. Explicit task cancellation remains `agents.cancel`.
+
+### Phase 5: User-local tier model configuration
+
+Make workload tiers configurable without baking provider-specific model choices
+into shared skill text or embedded prompt files. Prompt frontmatter may keep the
+Claude-flavored `model: haiku`, `model: sonnet`, and `model: opus` aliases
+because they remain useful human shorthand, but shared runtime state should
+normalize them to `light`, `core`, and `deep`.
+
+The runtime should store user-local tier mappings in
+`~/.cache/ws@kang-sw-devenv/config.json` (or `$WS_CACHE_HOME/config.json` in
+tests and custom installs). A new MCP configuration tool should let the lead set
+the backend/model pair for a tier, for example mapping `light` to
+`gemini-3-1-pro`. Backend may be omitted when the model name is recognizable:
+names containing `gemini` infer `gemini`, names with `gpt-` or `codex` infer
+`codex`, and names containing `haiku`, `sonnet`, `opus`, or `claude` infer
+`claude`.
+
+Registration precedence:
+
+- Explicit `backend` and `model` on `agents.register` win.
+- Explicit `model` with omitted `backend` infers backend from the model name,
+  then falls back to `codex`.
+- Tier configuration applies when no explicit model is supplied.
+- Prompt frontmatter tier aliases apply before tier configuration.
+- Missing tier defaults to `core`; missing backend defaults to `codex`.
+
+Success criteria:
+
+- `agents.register` applies configured tier mappings to the stored
+  `backend`/`model` fields.
+- Explicit model overrides bypass tier configuration and still infer backend
+  when possible.
+- `config.agents_tier` is exposed through MCP and a CLI fallback.
+- Delegate and leaf MCP tool profiles reject global configuration mutation.
+- Tests cover config persistence, backend inference, registration precedence,
+  and MCP profile filtering.
+
+### Result - 2026-05-03
+
+Implemented user-local workload tier configuration. The new `wsconfig` package
+reads and writes `config.json` under the ws cache root and exposes
+`SetAgentsTier`, `ResolveAgent`, and model-name backend inference. `agents.register`
+now resolves prompt frontmatter and caller tier first, then applies tier config
+unless the caller supplied an explicit concrete model. Missing backend defaults
+to an inferred backend when possible and then to `codex`.
+
+MCP now exposes `config.agents_tier`; the CLI fallback is
+`ws-mcp config agents-tier --tier <light|core|deep> [--backend <backend>]
+[--model <model>]`. Runtime metadata advertises both surfaces. `delegate` and
+`leaf` MCP profiles reject `config.*` tools so global configuration remains a
+lead-level operation.
+
+The implementation preserves Claude-flavored prompt shorthand:
+`haiku`/`sonnet`/`opus` still normalize to `light`/`core`/`deep`, while explicit
+model names containing `haiku`, `sonnet`, `opus`, or `claude` infer backend
+`claude`. Names containing `gemini` infer `gemini`, and `gpt-*` or names
+containing `codex` infer `codex`.
+
+Verification covered `go test ./...` in `agents-plugin-tool`, focused package
+tests for `cmd/ws-mcp`, `wsconfig`, `wsagent`, and `mcp`, runtime JSON parsing,
+`claude plugin validate agents-plugin`, `git diff --check`, rebuilding the
+Darwin ARM64 runtime binary, and a real CLI smoke that configured
+`light -> gemini-3-1-pro` and confirmed a registered agent stored
+`backend: gemini` and `model: gemini-3-1-pro`.

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
 var testNow = time.Date(2026, 5, 3, 14, 0, 0, 0, time.UTC)
@@ -194,6 +196,55 @@ func TestRegisterPromptRefsAliasAndExplicitTierWins(t *testing.T) {
 	}
 	if agent.Tier != "deep" {
 		t.Fatalf("tier = %q", agent.Tier)
+	}
+}
+
+func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "core", "", "gemini-3-1-pro"); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, _, err := manager.Register(RegisterOptions{
+		Root:    repo,
+		Name:    "reviewer",
+		Prompts: []string{"code-reviewer"},
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if agent.Tier != "core" || agent.Backend != "gemini" || agent.Model != "gemini-3-1-pro" {
+		t.Fatalf("tier/backend/model = %q/%q/%q", agent.Tier, agent.Backend, agent.Model)
+	}
+}
+
+func TestRegisterExplicitModelBypassesTierConfig(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{CacheHome: cache}, "core", "gemini", "gemini-3-1-pro"); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, _, err := manager.Register(RegisterOptions{
+		Root:  repo,
+		Name:  "reviewer",
+		Tier:  "core",
+		Model: "gpt-5.2",
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if agent.Backend != "codex" || agent.Model != "gpt-5.2" {
+		t.Fatalf("backend/model = %q/%q", agent.Backend, agent.Model)
 	}
 }
 
