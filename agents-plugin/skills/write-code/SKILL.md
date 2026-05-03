@@ -228,6 +228,7 @@ Plan: <plan-path or none>
 Test status: pass | fail | skipped
 Review: clean | non-clean
 Escalation: <unresolved findings after relay cap, or none>
+Review files: deleted | <remaining cleanup issue>
 Agents: erased | <remaining cleanup issue>
 ```
 
