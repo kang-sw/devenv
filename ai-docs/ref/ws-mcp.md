@@ -93,9 +93,25 @@ The command name can stay stable even though the selected binary differs.
 Windows remains a separate production risk. The `.mcp.json` format does not
 provide an OS selector, so the production path depends on whether Codex on
 Windows resolves `command: "./bin/ws-mcp-launcher"` to
-`./bin/ws-mcp-launcher.exe`. If it does not, the project must choose a Windows
-adapter such as an OS-specific plugin artifact/manifest or a one-time global MCP
-setup path.
+`./bin/ws-mcp-launcher.exe`. Windows verification is deferred until a host is
+available; it should not block Unix/macOS skill migration.
+
+If Windows does not resolve the extensionless launcher command to `.exe`, use
+this fallback order:
+
+1. Prefer a native Go launcher at `bin/ws-mcp-launcher.exe` plus the existing
+   release-download/runtime-check logic. Keep the POSIX launcher for macOS/Linux.
+2. If Codex still cannot select the Windows launcher from the shared
+   plugin-local `.mcp.json`, split the installed adapter artifact: keep shared
+   skills/runtime metadata, but publish host-specific `.mcp.json` manifests for
+   Windows and Unix-like hosts.
+3. If plugin-managed Windows MCP remains blocked by Codex host behavior, provide
+   a repair/setup skill or documented one-time `codex mcp add` path that points
+   directly at the downloaded `ws-mcp-windows-<arch>.exe`.
+
+All fallback paths must preserve the same `runtime.json` compatibility contract,
+cache-local runtime location, release asset naming, and checksum verification
+policy.
 
 Current launcher inputs:
 
@@ -336,11 +352,13 @@ file exists on the default branch. The workflow currently uses official GitHub
 actions `actions/checkout@v5`, `actions/setup-go@v6`, and
 `actions/upload-artifact@v7`.
 
-Windows host verification remains separate from Go cross-compilation. Parallels
-can verify that `ws-mcp-windows-amd64.exe` runs `version`, `doctor`, and stdio
-MCP smoke tests. Plugin-managed Windows startup additionally needs a Windows
-launcher artifact at `bin/ws-mcp-launcher.exe` or an adapter-specific manifest;
-the POSIX `sh` launcher only proves the macOS/Linux path.
+Windows host verification remains separate from Go cross-compilation and is a
+deferred host-smoke item. Parallels can verify that `ws-mcp-windows-amd64.exe`
+runs `version`, `doctor`, and stdio MCP smoke tests. Plugin-managed Windows
+startup additionally needs either extensionless `.exe` resolution, a native
+launcher artifact at `bin/ws-mcp-launcher.exe`, an adapter-specific manifest, or
+a documented one-time global MCP setup fallback; the POSIX `sh` launcher only
+proves the macOS/Linux path.
 
 ## Development Verification
 

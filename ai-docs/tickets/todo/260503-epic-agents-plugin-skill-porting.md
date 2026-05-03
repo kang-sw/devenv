@@ -70,9 +70,10 @@ Active child ticket:
 
 Purpose: decide what `agents-plugin` skills perform directly, what MCP
 tools/resources/prompts must provide, and what remains as CLI fallback behavior.
-The first MCP slice has established the Go stdio baseline and the v0.1 read
-surface contract; distribution, install/update behavior, and version drift
-detection remain in the child ticket.
+The Go stdio baseline, v0.1 read surface, Codex plugin-managed launcher path,
+release asset build, checksum verification, and production download branch are
+implemented. Windows plugin-managed startup remains a deferred host-smoke item
+with documented fallbacks; it should not block the next skill-porting slice.
 
 ### 4. Spec/doc direct track
 

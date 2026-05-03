@@ -54,6 +54,13 @@ mechanisms, and keep the runtime free of user-installed language dependencies.
   the stable `claude-plugin/` package, plugin update timing, and `bin/`/PATH
   helper behavior. Shared runtime contracts may converge later, but installation
   and update mechanics should not be forced into one path during this ticket.
+- Windows plugin-managed launcher behavior is a deferred host-smoke item, not a
+  blocker for continuing Unix/macOS skill migration. If Codex on Windows does not
+  resolve `./bin/ws-mcp-launcher` to `./bin/ws-mcp-launcher.exe`, fallback in this
+  order: native Go launcher with shared runtime behavior, host-specific
+  `.mcp.json` adapter artifacts, then a documented one-time `codex mcp add` or
+  repair/setup skill path that points directly at the downloaded Windows
+  `ws-mcp` binary.
 
 ## Phases
 
@@ -384,3 +391,24 @@ Verification:
 - launcher compatible-binary reuse with a deliberately invalid release base URL
 - launcher incompatible-binary replacement from local release assets
 - launcher `serve --stdio` smoke through the verified download path
+
+### Phase 6: Windows host smoke [deferred]
+
+Verify the Windows runtime and plugin-managed startup assumptions when a Windows
+host is available.
+
+Scope:
+
+- Run `ws-mcp-windows-amd64.exe version`.
+- Run `ws-mcp-windows-amd64.exe doctor --root <repo>`.
+- Run a stdio MCP smoke test against `ws-mcp-windows-amd64.exe serve --stdio`.
+- Test whether Codex plugin-managed MCP resolves
+  `command: "./bin/ws-mcp-launcher"` to `./bin/ws-mcp-launcher.exe`.
+- If extensionless resolution fails, choose the documented fallback path:
+  native Go launcher, host-specific `.mcp.json` adapter artifact, or one-time
+  global MCP setup/repair skill.
+
+This phase is deliberately deferred. The runtime contract is considered adequate
+to resume skill migration on macOS/Linux because the Go MCP baseline, plugin
+cache launcher path, release asset build, checksum verification, and production
+download branch have all been implemented and locally verified.
