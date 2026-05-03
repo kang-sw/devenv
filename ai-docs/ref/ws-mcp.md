@@ -63,7 +63,8 @@ The plugin-local `.mcp.json` uses an MCP server map:
   "mcpServers": {
     "ws": {
       "command": "./bin/ws-mcp-launcher",
-      "args": []
+      "cwd": ".",
+      "args": ["serve", "--stdio"]
     }
   }
 }
@@ -78,6 +79,11 @@ install skill. The launcher runs from the installed plugin cache, reads a
 plugin-local runtime contract, downloads or copies and verifies the prebuilt
 `ws-mcp` binary when missing or incompatible, then execs
 `ws-mcp serve --stdio`.
+
+Codex does not resolve plugin-managed MCP `command` relative paths against the
+plugin cache by default. The POC must set `"cwd": "."`; Codex normalizes that
+value to the installed plugin cache directory, after which
+`command: "./bin/ws-mcp-launcher"` starts successfully.
 
 For macOS and Linux, `./bin/ws-mcp-launcher` is the canonical entrypoint and may
 remain a POSIX `sh` script. A single script can branch internally on `uname -s`
@@ -101,14 +107,11 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 
-This is still a Phase 3 design/POC boundary. The implementation must verify
-whether Codex accepts relative command paths, what working directory it uses for
-plugin-managed MCP servers, and whether Windows extensionless `.exe` resolution
-works for the stable launcher command. The current macOS POC verified the launcher
-through a temporary global MCP registration, but plugin-managed MCP verification
-still requires a user-performed Codex plugin cache refresh. Do not treat that host
-path as proven until a fresh Codex session can call `ws.project_tree` from the
-installed plugin-managed MCP server.
+The macOS plugin-managed MCP POC is proven for `codex exec` when `.mcp.json`
+sets `cwd: "."`. Without that field, Codex registers the server but startup fails
+with `No such file or directory` because the relative command is interpreted from
+the workspace process context, not the plugin cache. Windows extensionless `.exe`
+resolution remains a later host verification item.
 
 For repo-local Codex plugin iteration, changed plugin-managed MCP configuration
 requires a human-in-the-loop cache refresh: the user must uninstall/install the

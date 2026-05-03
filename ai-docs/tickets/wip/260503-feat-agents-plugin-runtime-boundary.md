@@ -194,7 +194,7 @@ Initial dev POC status:
 
 - `agents-plugin/.codex-plugin/plugin.json` now references plugin-local
   `.mcp.json`.
-- `agents-plugin/.mcp.json` runs `./bin/ws-mcp-launcher`.
+- `agents-plugin/.mcp.json` runs `./bin/ws-mcp-launcher` with `cwd: "."`.
 - `agents-plugin/runtime.json` records the plugin/runtime compatibility contract.
 - `agents-plugin/bin/ws-mcp-launcher` can copy a local bootstrap binary or download
   a runtime binary, verify basic version compatibility, and exec
@@ -205,8 +205,9 @@ Initial dev POC status:
   MCP transport docs do not show a standard OS/platform selector for `.mcp.json`.
   Platform variance should live inside the launcher or in host-specific plugin
   artifacts, not in the MCP config schema.
-- Plugin-managed MCP verification is still pending the required user-performed
-  Codex plugin cache refresh.
+- User refreshed the Codex plugin cache through uninstall/install. Installed
+  plugin-managed MCP verification succeeded after adding `cwd: "."` to
+  `.mcp.json`.
 
 `install-ws-plugin` is no longer a required setup skill if the launcher POC works.
 It may be dropped, deferred, or re-scoped later as a repair/doctor skill for
@@ -223,6 +224,39 @@ Success criteria:
   refreshes the installed plugin cache.
 - The ticket records whether relative command paths and platform-specific
   launchers are viable for production.
+
+### Result (pending commit) - 2026-05-03
+
+Completed the macOS plugin-managed MCP POC for Codex.
+
+Key findings:
+
+- Codex installs the local `ws` plugin cache with `.mcp.json`,
+  `bin/ws-mcp-launcher`, `runtime.json`, and the ignored dev runtime binary when
+  the user refreshes the plugin through UI uninstall/install.
+- `command: "./bin/ws-mcp-launcher"` without `cwd` is not sufficient. Codex
+  registers the MCP server, but startup fails with `No such file or directory`
+  because the relative command is not resolved from the plugin cache.
+- Adding `cwd: "."` to plugin-local `.mcp.json` makes Codex normalize cwd to the
+  installed plugin cache directory. With that field, a fresh `codex exec` called
+  server `ws`, tool `ws.project_tree`, arguments
+  `{"root":"/Users/kang-sw/devenv"}`, and received project-tree output beginning
+  with `ai-docs/`.
+- The installed launcher itself also passes direct JSON-RPC smoke from the plugin
+  cache and exposes `ws.project_tree` and `ws.infra.read`.
+- macOS/Linux production can continue with the POSIX `sh` launcher direction.
+  Windows remains a Phase 4 or separate host-smoke risk: verify whether Codex on
+  Windows can use `./bin/ws-mcp-launcher.exe` or needs a Windows-specific
+  manifest/artifact path.
+
+Verification:
+
+- `find ~/.codex/plugins/cache/kang-sw-devenv/ws/0.1.0 -maxdepth 4 -type f`
+- `codex mcp get ws`
+- direct installed-cache JSON-RPC smoke through
+  `~/.codex/plugins/cache/kang-sw-devenv/ws/0.1.0/bin/ws-mcp-launcher`
+- `codex exec --dangerously-bypass-approvals-and-sandbox --json` tool call to
+  `ws.project_tree`
 
 ### Phase 4: Release distribution design
 

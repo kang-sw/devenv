@@ -2,6 +2,7 @@
   "mcpServers": {
     "ws": {
       "command": "./bin/ws-mcp-launcher",
+      "cwd": ".",
       "args": ["serve", "--stdio"]
     }
   }

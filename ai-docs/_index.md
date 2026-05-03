@@ -114,10 +114,11 @@ Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
 `ws-proj-tree` and `ws-print-infra`.
 
 Codex launcher POC status: `agents-plugin` now contains plugin-local `.mcp.json`,
-`runtime.json`, and `bin/ws-mcp-launcher`. Host-free launcher smoke and temporary
-global Codex MCP registration work; installed plugin-managed MCP verification is
-pending user-performed Codex plugin cache refresh. The Unix launcher direction is
-POSIX `sh` with internal OS/arch selection; Windows remains blocked on verifying
+`runtime.json`, and `bin/ws-mcp-launcher`. Host-free launcher smoke, temporary
+global Codex MCP registration, and installed plugin-managed Codex MCP startup
+work on macOS when `.mcp.json` sets `cwd: "."`; without cwd, Codex registers the
+server but relative command startup fails. The Unix launcher direction is POSIX
+`sh` with internal OS/arch selection; Windows remains blocked on verifying
 whether `./bin/ws-mcp-launcher` resolves to `./bin/ws-mcp-launcher.exe`.
 
 ## Skill Inventory
@@ -226,7 +227,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; current child is the runtime/MCP boundary slice
-`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 3 should test plugin-local launcher MCP startup, relative paths, auto-download fallback, and Windows command handling
+`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 3 macOS plugin-managed launcher POC is verified with `cwd: "."`; Phase 4 should define release assets, checksums, runtime location, update policy, and Windows host smoke
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 
