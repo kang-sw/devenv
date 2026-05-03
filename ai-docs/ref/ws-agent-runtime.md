@@ -233,6 +233,7 @@ MCP tools use server `ws` and the following tool names:
 - `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
 - `path.generate` — allocate worktree-scoped writable workflow artifact paths. Implemented for `kind: "review"`.
+- `runtime.info` — return runtime metadata, including embedded prompt bundle hash. Implemented.
 
 ## CLI Prototype
 
@@ -246,7 +247,7 @@ are repaired when the CLI surface drifts even if the MCP tool list is unchanged.
 Implemented prototype commands:
 
 ```text
-ws-mcp agents register --root <repo> --name <name> [--backend codex] [--tier light|core|deep] [--model <model>] [--prompt-ref <logical-name>] [--system-prompt-file <path>]
+ws-mcp agents register --root <repo> --name <name> [--backend codex] [--tier light|core|deep] [--model <model>] [--prompt <stem-or-absolute-path>] [--prompt-ref <logical-name>] [--system-prompt-file <path>]
 ws-mcp agents call --root <repo> --name <name> <prompt>
 ws-mcp agents call --root <repo> --name <name> --prompt-file -
 ws-mcp agents call-async --root <repo> --name <name> <prompt>
@@ -256,18 +257,19 @@ ws-mcp agents wait --root <repo> --name <name> [--timeout 30s]
 ws-mcp agents status --root <repo> --name <name>
 ws-mcp agents tail --root <repo> --name <name> [--lines 40]
 ws-mcp agents cancel --root <repo> --name <name>
-ws-mcp agents oneshot --root <repo> [--name <temporary-name>] <prompt>
+ws-mcp agents oneshot --root <repo> [--name <temporary-name>] [--prompt <stem-or-absolute-path>] <prompt>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
 ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
+ws-mcp runtime info
 ```
 
 The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 `events.jsonl` layout described above. Shared skill text should prefer the MCP
 tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.call_async`,
 `ws/agents.wait`, `ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`,
-`ws/agents.oneshot`, `ws/agents.print`, `ws/agents.erase`, and
-`ws/path.generate`.
+`ws/agents.oneshot`, `ws/agents.print`, `ws/agents.erase`,
+`ws/path.generate`, and `ws/runtime.info`.
 
 `agents.call_async` writes the prompt snapshot to `current/prompt.md`, starts an
 internal `agents run-current` worker process, records the worker pid in
@@ -292,13 +294,33 @@ backend-specific process-group cleanup.
 
 ## Prompt Resolution
 
-Prompt references are logical names, not repository-local file paths. The runtime
-should resolve role prompts from the installed plugin/runtime bundle. Shared skill
-text must not point at `claude-plugin/infra/prompts/`.
+Prompt references are logical names or absolute prompt paths, not
+repository-local plugin source paths. Shared skill text must not point at
+`claude-plugin/infra/prompts/`.
 
-Registration stores enough prompt metadata for backend re-entry and future
-compression handoff, but the first Codex prototype may store a materialized system
-prompt file in the agent directory.
+`agents.register` and `agents.oneshot` accept `prompts` as the canonical prompt
+chain field. `prompt_refs` remains a migration alias for older callers. Bare
+stems resolve from the embedded runtime prompt bundle; absolute paths read the
+specified file directly. Ambiguous relative paths are rejected until a later
+root-relative contract exists.
+
+The runtime strips YAML frontmatter from each resolved prompt and concatenates
+prompt bodies in caller order with `---` separators. `system_prompt_text`, when
+provided, is appended after resolved prompt bodies so existing materialized
+prompt callers remain compatible.
+
+The first embedded bundle contains `code-reviewer`, `code-review-correctness`,
+and `code-review-fit` for the `edit` port. Frontmatter `model: haiku`,
+`model: sonnet`, and `model: opus` map to shared tiers `light`, `core`, and
+`deep` when the caller did not pass an explicit `tier` or `model`. Unknown
+frontmatter model names become concrete backend model overrides only when no
+explicit model was supplied.
+
+Registration writes the materialized prompt to `system.md` in the agent
+directory and stores the requested prompt chain in `agent.json` as `prompt_refs`
+for compatibility with the current registry schema. `runtime.info` reports the
+prompt bundle source commit, content SHA-256, and embedded prompt stem list so a
+plugin launcher can detect runtime drift against `agents-plugin/runtime.json`.
 
 ## Backend Contract
 

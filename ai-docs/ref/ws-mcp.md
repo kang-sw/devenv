@@ -18,6 +18,7 @@ agents-plugin-tool/
   cmd/ws-mcp/       # command entry point
   internal/mcp/     # stdio JSON-RPC/MCP loop
   internal/wsdoc/   # project document helper logic
+  internal/wsprompt/ # embedded prompt bundle and resolver
 ```
 
 The plugin distribution candidate remains `agents-plugin/`. The native tooling
@@ -40,6 +41,7 @@ Supported local commands:
 ```bash
 ws-mcp version
 ws-mcp doctor --root <repo-root>
+ws-mcp runtime info
 ws-mcp serve --stdio --root <repo-root>
 ws-mcp subquery --root <repo-root> [--deep-research] <question>
 ```
@@ -164,6 +166,23 @@ verification. Agents should explicitly ask for that refresh when validation
 depends on the installed plugin cache.
 
 ## MCP Tool Contract
+
+### `ws/runtime.info`
+
+Return runtime metadata used for plugin compatibility checks.
+
+Output:
+
+- MCP text content containing JSON with `version`, `source_commit`, and
+  `prompt_bundle`.
+- `prompt_bundle` contains `source_commit`, `content_sha256`, and `prompts`.
+
+Behavior:
+
+- The POSIX plugin launcher compares `prompt_bundle.content_sha256` with
+  `agents-plugin/runtime.json`.
+- A mismatch causes the launcher to repair the cache-local runtime binary just
+  as tool or command drift does.
 
 ### `ws/project_tree`
 
@@ -445,6 +464,45 @@ Behavior:
   directory.
 - Stems are sanitized before path use.
 - Returned paths are reserved as empty writable files and preserve input order.
+
+### `ws/agents.register`
+
+Register or replace one task-scoped named agent.
+
+Important input fields:
+
+- `name` is required.
+- `backend` defaults to `codex`.
+- `tier` may be `light`, `core`, or `deep`; omitted tier may be inferred from a
+  prompt frontmatter model.
+- `model` is an optional concrete backend model override.
+- `prompts` is the canonical prompt chain field.
+- `prompt_refs` is a migration alias for older callers.
+- `system_prompt_text` appends materialized system instructions after resolved
+  prompt bodies.
+
+Prompt resolution:
+
+- Bare prompt stems resolve from the embedded runtime prompt bundle.
+- Absolute paths read directly from the local filesystem.
+- Ambiguous relative paths and traversal-like prompt specs are rejected.
+- YAML frontmatter is stripped before materialization.
+- Prompt bodies are concatenated in input order with `---` separators.
+- The materialized prompt is written to the agent's `system.md`.
+
+Current embedded prompt stems:
+
+- `code-reviewer`
+- `code-review-correctness`
+- `code-review-fit`
+
+### `ws/agents.oneshot`
+
+Register, call, and erase a temporary agent.
+
+The tool accepts the same prompt resolution fields as `ws/agents.register`, plus
+required `prompt` text for the delegate turn. It uses the same materialized
+`system.md` path during the temporary call and removes the task agent afterward.
 
 ### `ws/agents.call_async`
 

@@ -94,7 +94,7 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 		Backend:          "codex",
 		Tier:             "core",
 		Model:            "gpt-test",
-		PromptRefs:       []string{"skeleton-writer"},
+		PromptRefs:       []string{"code-reviewer"},
 		SystemPromptText: "system prompt\n",
 	})
 	if err != nil {
@@ -114,6 +114,68 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
+	}
+}
+
+func TestRegisterResolvesPromptChain(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, layout, err := manager.Register(RegisterOptions{
+		Root:    repo,
+		Name:    "reviewer",
+		Prompts: []string{"code-reviewer", "code-review-correctness", "code-review-fit"},
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if agent.Tier != "core" || agent.Model != "" {
+		t.Fatalf("tier/model = %q/%q", agent.Tier, agent.Model)
+	}
+	if agent.SystemPromptPath != "system.md" {
+		t.Fatalf("system prompt path = %q", agent.SystemPromptPath)
+	}
+	raw, err := os.ReadFile(layout.SystemFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "model: sonnet") {
+		t.Fatalf("frontmatter was not stripped:\n%s", text)
+	}
+	if !strings.Contains(text, "You are a code reviewer.") ||
+		!strings.Contains(text, "Correctness Partition") ||
+		!strings.Contains(text, "Fit Partition") {
+		t.Fatalf("materialized prompt missing expected sections:\n%s", text)
+	}
+	if len(agent.PromptRefs) != 3 || agent.PromptRefs[0] != "code-reviewer" {
+		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
+	}
+}
+
+func TestRegisterPromptRefsAliasAndExplicitTierWins(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, _, err := manager.Register(RegisterOptions{
+		Root:       repo,
+		Name:       "reviewer",
+		Tier:       "deep",
+		PromptRefs: []string{"code-reviewer"},
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if agent.Tier != "deep" {
+		t.Fatalf("tier = %q", agent.Tier)
 	}
 }
 

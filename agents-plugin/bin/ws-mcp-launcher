@@ -25,7 +25,14 @@ runtime_tools() {
 
 runtime_commands() {
   sed -n '/^[[:space:]]*"commands"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}/p' "$runtime_contract" |
-    sed -n 's/^[[:space:]]*"\([^"]*\.[^"]*\)"[[:space:]]*:.*/\1/p'
+    sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*:.*/\1/p' |
+    sed '/^commands$/d'
+}
+
+runtime_prompt_bundle_sha256() {
+  sed -n '/^[[:space:]]*"prompt_bundle"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}/p' "$runtime_contract" |
+    sed -n 's/^[[:space:]]*"content_sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+    sed -n '1p'
 }
 
 resolve_link() {
@@ -141,6 +148,17 @@ commands_compatible() {
   return 0
 }
 
+prompt_bundle_compatible() {
+  expected=$(runtime_prompt_bundle_sha256)
+  [ -n "$expected" ] || return 0
+  output=$("$binary" runtime info 2>/dev/null || true)
+  [ -n "$output" ] || return 1
+  case "$output" in
+    *"\"content_sha256\":\"$expected\""*) return 0 ;;
+    *) note "runtime prompt bundle hash mismatch"; return 1 ;;
+  esac
+}
+
 parent_env_value() {
   key=$1
   if [ -r "/proc/$PPID/environ" ]; then
@@ -218,7 +236,7 @@ install_local_devenv_runtime() {
     if [ -x "$candidate" ]; then
       cp "$candidate" "$binary"
       chmod 755 "$binary"
-      if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible; then
+      if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible && prompt_bundle_compatible; then
         note "installed local devenv runtime from $candidate"
         return 0
       fi
@@ -232,7 +250,7 @@ install_local_devenv_runtime() {
       go build -o "$binary" ./cmd/ws-mcp
     ) || return 1
     chmod 755 "$binary"
-    if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible; then
+    if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible && prompt_bundle_compatible; then
       note "built local devenv runtime from $HOME/devenv/agents-plugin-tool"
       return 0
     fi
@@ -299,6 +317,17 @@ if ! commands_compatible; then
   version_compatible "$version" || fail "incompatible ws-mcp version after command-surface repair: ${version:-unknown}"
   tools_compatible || fail "incompatible ws-mcp tool surface after command-surface repair"
   commands_compatible || fail "incompatible ws-mcp command surface after repair"
+fi
+
+if ! prompt_bundle_compatible; then
+  note "replacing runtime with incompatible prompt bundle"
+  rm -f "$binary"
+  install_runtime
+  version=$("$binary" version 2>/dev/null || true)
+  version_compatible "$version" || fail "incompatible ws-mcp version after prompt-bundle repair: ${version:-unknown}"
+  tools_compatible || fail "incompatible ws-mcp tool surface after prompt-bundle repair"
+  commands_compatible || fail "incompatible ws-mcp command surface after prompt-bundle repair"
+  prompt_bundle_compatible || fail "incompatible ws-mcp prompt bundle after repair"
 fi
 
 detect_project_root

@@ -109,13 +109,15 @@ agents-plugin-tool/
   internal/mcp/     — minimal JSON-RPC/MCP stdio loop
   internal/wsagent/ — host-neutral agent registry/session prototype used by `ws-mcp agents`
   internal/wsdoc/   — project document helper logic used by MCP tools
+  internal/wsprompt/ — embedded prompt bundle and resolver for agent prompt chains
   internal/wsstate/ — cache-root project/worktree path manager for workflow state
 ```
 
 Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
 `ws/project_tree`, `ws/infra.read`, `ws/convention.read`,
 `ws/spec_stem.generate`, `ws/spec_index.verify`, and
-`ws/mental_models.list`, plus scoped delegate helper `ws/subquery`. Shared
+`ws/mental_models.list`, plus runtime helper `ws/runtime.info`, scoped delegate
+helper `ws/subquery`, and generated path helper `ws/path.generate`. Shared
 `agents-plugin` skills assume MCP availability and should not reference
 repo-local `claude-plugin/infra/*` paths; convention text is bundled into the
 runtime and read through `ws/convention.read`.
@@ -128,8 +130,12 @@ and `ws/agents.erase`, plus matching CLI fallback subcommands under
 `ws-mcp agents`. Both surfaces are backed by `internal/wsagent`. The Codex
 backend stores thread ids in `agent.json`, resumes with
 `codex exec resume --json <thread-id>`, and persists plain-text output in
-`output.md`. `ws/agents.call_async` writes a current prompt snapshot, starts a
-cache-local `agents run-current` worker, and captures backend streams under
+`output.md`. Agent registration now accepts runtime-resolved prompt chains
+through `prompts` with `prompt_refs` retained as a migration alias; the first
+embedded prompt bundle contains `code-reviewer`, `code-review-correctness`, and
+`code-review-fit`, and `runtime.json` records the expected bundle hash for
+launcher drift detection. `ws/agents.call_async` writes a current prompt
+snapshot, starts a cache-local `agents run-current` worker, and captures backend streams under
 `current/` while the lead regains control. The wait/status/tail/cancel tools
 inspect or mark that current-call state without invoking another backend turn.
 Shared skill text should use `ws/agents.*` notation rather than the CLI command

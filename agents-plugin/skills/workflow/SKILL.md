@@ -47,9 +47,10 @@ minimum delegate tools `ws/subquery`, `ws/agents.register`, `ws/agents.call`,
 `ws/agents.erase` are available. The async inspection tools `ws/agents.wait`,
 `ws/agents.status`, `ws/agents.tail`, and `ws/agents.cancel` are available for
 the current named agent call. `ws/path.generate` is available for generated
-workflow artifact paths; its initial supported kind is `review`. Treat
-interrupts, active-agent listing, message queues, and runtime locks as planned
-surfaces until the runtime implements them.
+workflow artifact paths; its initial supported kind is `review`. `ws/runtime.info`
+is available for runtime compatibility metadata. Treat interrupts, active-agent
+listing, message queues, and runtime locks as planned surfaces until the runtime
+implements them.
 When a skill needs a planned surface, state the required server/tool contract
 instead of naming a host-specific helper command as the shared primitive.
 
@@ -85,14 +86,15 @@ Call MCP tool `ws/agents.oneshot` with:
 - `name`: optional descriptive temporary name
 - `backend`: `codex`
 - `tier`: `light` for narrow lookup, `core` for normal survey, `deep` for broad tracing
-- `system_prompt_text`: self-contained delegate instructions
+- `prompts`: embedded prompt stems or absolute prompt paths when a preset chain exists
+- `system_prompt_text`: self-contained delegate instructions when no preset chain exists
 - `prompt`: the exact scoped question or task
 ```
 
 ### Persistent Synchronous Delegate
 
 ```text
-1. Call MCP tool `ws/agents.register` with a stable task name and self-contained `system_prompt_text`.
+1. Call MCP tool `ws/agents.register` with a stable task name and either `prompts` or self-contained `system_prompt_text`.
 2. Call MCP tool `ws/agents.call` for each turn that must complete before the lead proceeds.
 3. Call MCP tool `ws/agents.print` when the latest output must be recovered.
 4. Call MCP tool `ws/agents.erase` after the task-scoped session is no longer needed.
@@ -101,7 +103,7 @@ Call MCP tool `ws/agents.oneshot` with:
 ### Persistent Asynchronous Delegate
 
 ```text
-1. Call MCP tool `ws/agents.register` with a stable task name and self-contained `system_prompt_text`.
+1. Call MCP tool `ws/agents.register` with a stable task name and either `prompts` or self-contained `system_prompt_text`.
 2. Call MCP tool `ws/agents.call_async` for a long-running delegate turn.
 3. Call MCP tool `ws/agents.status` to inspect current state without blocking.
 4. Call MCP tool `ws/agents.tail` to inspect recent events, stdout, stderr, and output.

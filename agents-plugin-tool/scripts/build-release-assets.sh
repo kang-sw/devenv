@@ -13,6 +13,7 @@ if [ -z "$version" ]; then
   fi
 fi
 version=${version#v}
+source_commit=$(git -C "$tool_dir" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')
 
 dist_dir=$tool_dir/dist
 rm -rf "$dist_dir"
@@ -28,7 +29,7 @@ build_one() {
     cd "$tool_dir"
     CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build \
       -trimpath \
-      -ldflags "-s -w -X main.version=$version" \
+      -ldflags "-s -w -X main.version=$version -X main.sourceCommit=$source_commit" \
       -o "$dist_dir/$asset" \
       ./cmd/ws-mcp
   )

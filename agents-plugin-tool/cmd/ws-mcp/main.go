@@ -11,10 +11,12 @@ import (
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 var version = "0.1.0-dev"
+var sourceCommit = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -27,6 +29,8 @@ func main() {
 		fmt.Println(version)
 	case "doctor":
 		doctor(os.Args[2:])
+	case "runtime":
+		runtime(os.Args[2:])
 	case "serve":
 		serve(os.Args[2:])
 	case "subquery":
@@ -42,7 +46,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|serve|subquery|path|agents>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|path|agents>")
 }
 
 func doctor(args []string) {
@@ -70,11 +74,47 @@ func serve(args []string) {
 		os.Exit(2)
 	}
 
-	server := mcp.NewServer(defaultRoot(*root), version)
+	server := mcp.NewServer(defaultRoot(*root), version, sourceCommit)
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runtime(args []string) {
+	if len(args) < 1 {
+		runtimeUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "info":
+		runtimeInfo(args[1:])
+	default:
+		runtimeUsage()
+		os.Exit(2)
+	}
+}
+
+func runtimeUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp runtime <info>")
+}
+
+func runtimeInfo(args []string) {
+	fs := flag.NewFlagSet("runtime info", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	bundle, err := wsprompt.Bundle(sourceCommit)
+	if err != nil {
+		fatal("runtime info", err)
+	}
+	fmt.Printf("{\"version\":%q,\"source_commit\":%q,\"prompt_bundle\":{\"source_commit\":%q,\"content_sha256\":%q,\"prompts\":[", version, sourceCommit, bundle.SourceCommit, bundle.ContentSHA256)
+	for i, prompt := range bundle.Prompts {
+		if i > 0 {
+			fmt.Print(",")
+		}
+		fmt.Printf("%q", prompt)
+	}
+	fmt.Println("]}}")
 }
 
 func subquery(args []string) {
@@ -186,10 +226,12 @@ func agentsRegister(args []string) {
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	backend := fs.String("backend", "codex", "agent backend")
-	tier := fs.String("tier", "core", "workload tier")
+	tier := fs.String("tier", "", "workload tier")
 	model := fs.String("model", "", "backend model override")
 	systemFile := fs.String("system-prompt-file", "", "system prompt file")
+	var prompts multiFlag
 	var promptRefs multiFlag
+	fs.Var(&prompts, "prompt", "embedded prompt stem or absolute prompt path")
 	fs.Var(&promptRefs, "prompt-ref", "logical prompt reference")
 	_ = fs.Parse(args)
 
@@ -203,6 +245,7 @@ func agentsRegister(args []string) {
 		Backend:          *backend,
 		Tier:             *tier,
 		Model:            *model,
+		Prompts:          prompts,
 		PromptRefs:       promptRefs,
 		SystemPromptText: systemText,
 	})
@@ -334,11 +377,13 @@ func agentsOneShot(args []string) {
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "temporary agent name")
 	backend := fs.String("backend", "codex", "agent backend")
-	tier := fs.String("tier", "core", "workload tier")
+	tier := fs.String("tier", "", "workload tier")
 	model := fs.String("model", "", "backend model override")
 	systemFile := fs.String("system-prompt-file", "", "system prompt file")
 	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
+	var prompts multiFlag
 	var promptRefs multiFlag
+	fs.Var(&prompts, "prompt", "embedded prompt stem or absolute prompt path")
 	fs.Var(&promptRefs, "prompt-ref", "logical prompt reference")
 	_ = fs.Parse(args)
 
@@ -356,6 +401,7 @@ func agentsOneShot(args []string) {
 		Backend:          *backend,
 		Tier:             *tier,
 		Model:            *model,
+		Prompts:          prompts,
 		PromptRefs:       promptRefs,
 		SystemPromptText: systemText,
 		Prompt:           prompt,

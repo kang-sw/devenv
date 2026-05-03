@@ -147,6 +147,35 @@ Success criteria:
   relative path rejection, frontmatter stripping, prompt ordering, tier/model
   precedence, prompt metadata, and drift detection.
 
+### Result (pending) - 2026-05-03
+
+Implemented the embedded prompt bundle resolver in `ws-mcp`. The runtime now
+embeds the prompt presets needed by the first `edit` slice:
+`code-reviewer`, `code-review-correctness`, and `code-review-fit`.
+`ws/agents.register` and `ws/agents.oneshot` accept `prompts` as the canonical
+prompt-chain field while keeping `prompt_refs` as a migration alias. Bare stems
+resolve from the embedded bundle; absolute paths read directly; relative and
+traversal-like specs are rejected.
+
+Prompt materialization strips YAML frontmatter, concatenates prompt bodies in
+input order with the existing `---` separator convention, appends
+`system_prompt_text` for compatibility, maps legacy Claude frontmatter model
+names to shared tiers when no explicit tier or model is supplied, and writes the
+result to each agent's `system.md`.
+
+Added `ws/runtime.info` and `ws-mcp runtime info` so runtime metadata exposes
+the prompt bundle source commit, content SHA-256, and embedded prompt list.
+`agents-plugin/runtime.json` records the expected bundle hash, and the POSIX
+launcher now repairs stale binaries when prompt bundle drift is detected in
+addition to tool or command surface drift. Release builds inject the source
+commit through `-ldflags`.
+
+Validation covered Go tests, MCP smoke, plugin validation, runtime JSON parsing,
+shell syntax checks, launcher positive smoke, launcher prompt-bundle drift
+failure smoke, and whitespace checks. The plugin cache still requires the normal
+user reinstall/restart path before the new runtime surface is visible in a host
+session.
+
 ### Phase 3: Port `edit` skill draft
 
 Create `agents-plugin/skills/edit/SKILL.md` as a host-neutral port of the Claude

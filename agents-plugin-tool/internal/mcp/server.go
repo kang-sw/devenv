@@ -12,12 +12,14 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
+	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 type Server struct {
-	root    string
-	version string
+	root         string
+	version      string
+	sourceCommit string
 }
 
 type request struct {
@@ -39,8 +41,12 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-func NewServer(root, version string) *Server {
-	return &Server{root: filepath.Clean(root), version: version}
+func NewServer(root, version string, sourceCommit ...string) *Server {
+	commit := "dev"
+	if len(sourceCommit) > 0 && sourceCommit[0] != "" {
+		commit = sourceCommit[0]
+	}
+	return &Server{root: filepath.Clean(root), version: version, sourceCommit: commit}
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -105,6 +111,16 @@ func (s *Server) callTool(req request) response {
 	}
 
 	switch params.Name {
+	case "runtime.info":
+		info, err := runtimeInfo(s.version, s.sourceCommit)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		raw, err := json.Marshal(info)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, string(raw)+"\n", nil)
 	case "project_tree":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -189,6 +205,7 @@ func (s *Server) callTool(req request) response {
 			Backend:          backend,
 			Tier:             tier,
 			Model:            model,
+			Prompts:          stringList(params.Arguments["prompts"]),
 			PromptRefs:       stringList(params.Arguments["prompt_refs"]),
 			SystemPromptText: systemPromptText,
 		})
@@ -280,6 +297,7 @@ func (s *Server) callTool(req request) response {
 			Backend:          backend,
 			Tier:             tier,
 			Model:            model,
+			Prompts:          stringList(params.Arguments["prompts"]),
 			PromptRefs:       stringList(params.Arguments["prompt_refs"]),
 			SystemPromptText: systemPromptText,
 			Prompt:           prompt,
@@ -306,6 +324,18 @@ func (s *Server) callTool(req request) response {
 	}
 }
 
+func runtimeInfo(version, sourceCommit string) (map[string]any, error) {
+	bundle, err := wsprompt.Bundle(sourceCommit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"version":       version,
+		"source_commit": sourceCommit,
+		"prompt_bundle": bundle,
+	}, nil
+}
+
 func toolTextResponse(id json.RawMessage, text string, err error) response {
 	if err != nil {
 		return response{JSONRPC: "2.0", ID: id, Result: map[string]any{
@@ -330,6 +360,14 @@ func errorResponse(id json.RawMessage, code int, message string) response {
 
 func tools() []map[string]any {
 	return []map[string]any{
+		{
+			"name":        "runtime.info",
+			"description": "Return ws-mcp runtime metadata for compatibility checks.",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
 		{
 			"name":        "project_tree",
 			"description": "Render the ws project document map, spec inventory, and active ticket queue.",
@@ -452,6 +490,7 @@ func tools() []map[string]any {
 					"backend":            stringProperty("Backend name. Defaults to codex."),
 					"tier":               stringProperty("Workload tier: light, core, or deep. Defaults to core."),
 					"model":              stringProperty("Optional concrete backend model override."),
+					"prompts":            stringArrayProperty("Embedded prompt stems or absolute prompt paths."),
 					"prompt_refs":        stringArrayProperty("Logical role prompt references."),
 					"system_prompt_text": stringProperty("Optional materialized system prompt text."),
 				},
@@ -545,6 +584,7 @@ func tools() []map[string]any {
 					"backend":            stringProperty("Backend name. Defaults to codex."),
 					"tier":               stringProperty("Workload tier: light, core, or deep. Defaults to core."),
 					"model":              stringProperty("Optional concrete backend model override."),
+					"prompts":            stringArrayProperty("Embedded prompt stems or absolute prompt paths."),
 					"prompt_refs":        stringArrayProperty("Logical role prompt references."),
 					"system_prompt_text": stringProperty("Optional materialized system prompt text."),
 					"prompt":             stringProperty("Prompt to send to the temporary agent."),

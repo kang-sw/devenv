@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -51,6 +52,7 @@ type RegisterOptions struct {
 	Backend          string
 	Tier             string
 	Model            string
+	Prompts          []string
 	PromptRefs       []string
 	SystemPromptText string
 }
@@ -108,6 +110,7 @@ type OneShotOptions struct {
 	Backend          string
 	Tier             string
 	Model            string
+	Prompts          []string
 	PromptRefs       []string
 	SystemPromptText string
 	Prompt           string
@@ -218,12 +221,23 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if strings.TrimSpace(opts.Backend) == "" {
 		opts.Backend = "codex"
 	}
-	if strings.TrimSpace(opts.Tier) == "" {
-		opts.Tier = "core"
-	}
 	name := strings.TrimSpace(opts.Name)
 	if name == "" {
 		return Agent{}, Layout{}, errors.New("agent name is required")
+	}
+	promptSpecs := promptSpecs(opts.Prompts, opts.PromptRefs)
+	resolved, err := wsprompt.Resolve(promptSpecs, opts.SystemPromptText, opts.Tier, opts.Model)
+	if err != nil {
+		return Agent{}, Layout{}, err
+	}
+	if strings.TrimSpace(opts.Tier) == "" {
+		opts.Tier = resolved.Tier
+	}
+	if strings.TrimSpace(opts.Model) == "" {
+		opts.Model = resolved.Model
+	}
+	if strings.TrimSpace(opts.Tier) == "" {
+		opts.Tier = "core"
 	}
 	existingLayout, err := m.layout(opts.Root, name, false)
 	if err != nil {
@@ -255,7 +269,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		CreatedAt:        now,
 		LastSeenAt:       now,
 		LastOutputPath:   "output.md",
-		PromptRefs:       append([]string(nil), opts.PromptRefs...),
+		PromptRefs:       append([]string(nil), promptSpecs...),
 		SystemPromptPath: "",
 		Capabilities: map[string]bool{
 			"resume":      true,
@@ -263,8 +277,8 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 			"compression": false,
 		},
 	}
-	if strings.TrimSpace(opts.SystemPromptText) != "" {
-		if err := os.WriteFile(layout.SystemFile, []byte(opts.SystemPromptText), 0o644); err != nil {
+	if strings.TrimSpace(resolved.Text) != "" {
+		if err := os.WriteFile(layout.SystemFile, []byte(resolved.Text), 0o644); err != nil {
 			return Agent{}, Layout{}, fmt.Errorf("write system prompt: %w", err)
 		}
 		agent.SystemPromptPath = "system.md"
@@ -553,6 +567,7 @@ func (m Manager) OneShot(opts OneShotOptions) (string, error) {
 		Backend:          opts.Backend,
 		Tier:             opts.Tier,
 		Model:            opts.Model,
+		Prompts:          opts.Prompts,
 		PromptRefs:       opts.PromptRefs,
 		SystemPromptText: opts.SystemPromptText,
 	})
@@ -565,6 +580,13 @@ func (m Manager) OneShot(opts OneShotOptions) (string, error) {
 		return "", callErr
 	}
 	return text, eraseErr
+}
+
+func promptSpecs(prompts, promptRefs []string) []string {
+	if len(prompts) > 0 {
+		return append([]string(nil), prompts...)
+	}
+	return append([]string(nil), promptRefs...)
 }
 
 func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
