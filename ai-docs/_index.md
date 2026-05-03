@@ -216,6 +216,7 @@ agents-plugin/skills/
   workflow/        — host-neutral session-resident reference for MCP notation and orchestration primitive boundaries
   write-skeleton/  — draft host-neutral skeleton workflow using ws/agents.* delegate sessions
   edit/            — draft host-neutral direct-edit workflow using generated review paths and one async reviewer
+  write-code/      — draft host-neutral delegated implementation workflow using brief/plan, async implementer, partitioned reviewers, and bounded relay
   forge-spec/      — draft host-neutral from-scratch spec reconstruction using ws/subquery surveys and user-confirmed domain gates
   forge-mental-model/ — draft host-neutral mental-model reconstruction using ws/subquery survey/verify loops and visible domain tasks
 ```
