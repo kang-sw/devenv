@@ -37,7 +37,7 @@ Success criteria:
 - `tools/list` advertises `ws.mental_models.list`.
 - A direct JSON-RPC smoke call returns this repository's mental-model documents.
 
-### Result (TBD) - 2026-05-03
+### Result (97403b0) - 2026-05-03
 
 Added `ws.mental_models.list` to `ws-mcp`. The tool renders a compact
 `mental-models:` catalog with file paths, domains, descriptions, and sources.
@@ -59,7 +59,7 @@ Success criteria:
 - `workflow` and `manual-think` are not added in this slice.
 - Source workflow wording and step shape are preserved where possible.
 
-### Result (TBD) - 2026-05-03
+### Result (97403b0) - 2026-05-03
 
 Added draft MCP-first sidecar skills:
 
@@ -88,7 +88,7 @@ Success criteria:
 - `claude plugin validate agents-plugin` passes.
 - `git diff --check` passes.
 
-### Result (TBD) - 2026-05-03
+### Result (97403b0) - 2026-05-03
 
 Verification:
 
