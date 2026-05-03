@@ -203,6 +203,34 @@ Success criteria:
 - Failure, timeout, and cancellation paths provide enough state and pointers for
   recovery without requiring immediate raw transcript inspection.
 
+### Result (481dd78) - 2026-05-03
+
+Implemented the first raw-output containment slice by adding debug-namespaced
+agent diagnostic surfaces. MCP now advertises `agents.debug.tail`,
+`agents.debug.stdout`, `agents.debug.stderr`, `agents.debug.runtime_log`, and
+`agents.debug.events`; CLI fallbacks are available under `ws-mcp agents debug
+<tail|stdout|stderr|runtime-log|events>`. The existing `agents.tail` MCP and CLI
+surfaces remain as compatibility aliases.
+
+The implementation adds a small `wsagent.DiagnosticStream` API so MCP and CLI
+routes share the same agent layout and bounded tailing helper instead of reading
+diagnostic files directly. Runtime metadata now advertises the debug tools and
+commands. Tests cover diagnostic stream selection, bounded output, MCP
+tools/list and calls, and CLI debug subcommands.
+
+Dogfooding exposed another runtime issue: the implementer used `ws:edit`
+internally and launched a reviewer, then blocked on `agents.wait`. Because the
+current `ws-mcp` stdio server handles requests sequentially, that long wait
+blocked later `agents.status` calls on the same MCP server. The source commit
+and verification completed, but the lead had to inspect files and processes
+directly, then manually terminate the stuck implementer/reviewer process tree.
+This confirms that raw-output containment is not enough; the MCP server and
+agent API must avoid long-running tool calls.
+
+Verification covered `go test ./...` from `agents-plugin-tool`, runtime JSON
+parsing, `claude plugin validate agents-plugin`, and `git diff --check`. No
+spec or mental-model updates were made on this branch.
+
 ### Phase 3: Workflow regression dogfood
 
 Re-run `write-code` on a small but real implementation after Phase 1 and Phase 2
@@ -215,3 +243,50 @@ Success criteria:
   diagnostic logs.
 - Remaining workflow gaps are captured as new child tickets or later phases
   before this epic closes.
+
+### Phase 4: Nonblocking MCP orchestration
+
+Make ws MCP request handling and agent workflow calls safe under host tool-call
+timeouts. The runtime should not let one long `agents.wait`, `agents.oneshot`,
+or synchronous `agents.call` monopolize the stdio server and block unrelated
+status/debug calls.
+
+This phase should also introduce MCP tool profiles for delegated Codex
+subprocesses. The runtime needs three practical layers:
+
+- `lead`: full tool surface for the primary session.
+- `delegate`: mid-level delegated agents may use read/document/reference tools
+  and limited delegation helpers such as `subquery` or future `ask-api`, but
+  should not freely create durable named agents or run the full workflow stack.
+- `leaf`: terminal worker/reviewer agents cannot spawn further agents; recursive
+  orchestration tools such as `agents.*`, `subquery`, and future `ask-api` are
+  hidden from `tools/list` and rejected by `tools/call`.
+
+Use environment-driven profiles so `CodexRunner` can set the intended profile
+when spawning subprocesses. `WS_MCP_TOOL_PROFILE` should select the default
+profile, and an explicit allowlist such as `WS_MCP_ALLOWED_TOOLS` can override
+or narrow it for tests and special adapters. Tool filtering must apply both to
+`tools/list` and `tools/call`; prompt instructions alone are not enough because
+the purpose is to prevent accidental recursive orchestration by changing the
+available tool prior.
+
+Success criteria:
+
+- `ServeStdio` can process multiple JSON-RPC requests concurrently while writes
+  to stdout remain atomic and response IDs remain correct.
+- Long-running agent work is represented as async state, not a long MCP call.
+- `agents.wait` becomes a short poll operation by default: it returns completed
+  output when ready, otherwise returns running/failed/cancelled state and a
+  follow-up hint without blocking for host-scale timeouts.
+- `agents.oneshot` is reworked or deprecated in favor of a register +
+  `call_async` pair with generated temporary names and explicit cleanup.
+- `agents.call` is deprecated or constrained so shared workflow skills do not
+  depend on synchronous long-running calls.
+- MCP tool profiles exist for `lead`, `delegate`, and `leaf`; `leaf` hides and
+  rejects recursive delegation tools, while `delegate` can retain bounded helper
+  delegation such as `subquery` or future `ask-api`.
+- Codex-backed agent subprocesses receive an appropriate MCP tool profile
+  through their environment.
+- A regression smoke proves that a running or waiting agent call does not block
+  a separate `agents.status` or `agents.debug.*` call through the same MCP
+  server.
