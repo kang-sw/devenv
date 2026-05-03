@@ -127,7 +127,7 @@ Success criteria:
 - The epic references this child ticket as the runtime boundary implementation
   slice instead of a planned placeholder.
 
-### Result (pending) - 2026-05-03
+### Result (8a0c6ae) - 2026-05-03
 
 Added `ai-docs/ref/ws-mcp.md` as the first explicit runtime contract for the
 `agents-plugin` MCP boundary. The document records:
