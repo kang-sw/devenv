@@ -113,7 +113,7 @@ Success criteria:
 - Preserve final-output extraction from the last `agent_message`.
 - Existing synchronous `ws/agents.call` behavior remains unchanged.
 
-### Result (pending) - 2026-05-03
+### Result (9e7420e) - 2026-05-03
 
 Implemented incremental Codex JSONL parsing in the Go wsagent backend. The
 Codex runner now uses `StdoutPipe`, starts the child process, scans JSONL while
