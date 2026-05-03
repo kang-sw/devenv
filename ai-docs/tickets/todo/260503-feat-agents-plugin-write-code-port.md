@@ -189,6 +189,32 @@ Success criteria:
 - Re-run the controlled async implementer smoke enough to prove that failure
   states close cleanly, even if the delegate task itself fails.
 
+### Result (5351bb1) - 2026-05-03
+
+Fixed async worker finalization and diagnostics in `ws-mcp`. Each current call
+now owns `current/runtime.jsonl`, and `RunCurrent` logs worker entry, prompt
+read, backend call start, streamed session id, backend completion or error,
+state finalization, and panic recovery. `ws/agents.tail` includes a runtime
+section, while `ws/agents.wait` and `ws/agents.status` reconcile active
+current-call state before reporting it.
+
+The original stale-running symptom was reproduced with a local CLI smoke: the
+recorded worker pid died while current-call state remained active. The fix now
+marks dead worker pids as failed with an explicit error and updates agent state,
+so `wait` returns failure status instead of timing out indefinitely. The
+diagnostics then narrowed the remaining live smoke failure to the automatic
+worker launch path: `run-current` succeeded when invoked manually, but the
+child process launched by `call-async` could disappear before entering
+`RunCurrent`. `SelfWorkerStarter` now starts workers in a separate process group
+and redirects both stdout and stderr to current-call stream files.
+
+Validation covered focused unit tests for dead-worker reconciliation, backend
+failure diagnostics, panic diagnostics, runtime tail output, and full `go test
+./...`. A local `ws-mcp` binary smoke using `agents call-async` with embedded
+`implementer` and `impl-playbook` prompts completed successfully: `wait`
+returned `async smoke ok`, `tail` showed worker entry through finalization, and
+stdout captured Codex JSONL including the streamed thread id.
+
 ### Phase 4: Port `write-code` skill draft
 
 Create `agents-plugin/skills/write-code/SKILL.md` as a host-neutral port of the
