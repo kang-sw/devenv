@@ -3,10 +3,12 @@ package wsagent
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
+	"time"
 )
 
 type Runner interface {
@@ -22,6 +24,7 @@ type RunnerRequest struct {
 	Stdout           io.Writer
 	Stderr           io.Writer
 	OnSessionID      func(string) error
+	Timeout          time.Duration
 }
 
 type RunnerResult struct {
@@ -48,7 +51,14 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	}
 	args = append(args, req.Prompt)
 
-	cmd := exec.Command("codex", args...)
+	ctx := context.Background()
+	var cancel context.CancelFunc
+	if req.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, "codex", args...)
+	configureRunnerCommand(cmd)
 	cmd.Dir = req.Root
 	var stderr bytes.Buffer
 	if req.Stderr != nil {
@@ -74,6 +84,9 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	}
 	result, parseErr := parseCodexJSONLStream(stdout, req.OnSessionID)
 	if err := cmd.Wait(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return RunnerResult{}, fmt.Errorf("codex timed out after %s", req.Timeout)
+		}
 		if stderr.Len() > 0 {
 			return RunnerResult{}, fmt.Errorf("codex failed: %w: %s", err, stderr.String())
 		}

@@ -749,6 +749,35 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 	}
 }
 
+func TestSubqueryPassesDefaultAndCustomTimeout(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	runner := &fakeRunner{}
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    runner,
+	})
+
+	if _, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Default timeout?"}); err != nil {
+		t.Fatalf("Subquery returned error: %v", err)
+	}
+	if len(runner.calls) != 1 || runner.calls[0].Timeout != defaultSubqueryTimeout {
+		t.Fatalf("default timeout call mismatch: %+v", runner.calls)
+	}
+
+	if _, err := manager.Subquery(SubqueryOptions{
+		Root:     repo,
+		Question: "Custom timeout?",
+		Timeout:  3 * time.Second,
+	}); err != nil {
+		t.Fatalf("custom timeout Subquery returned error: %v", err)
+	}
+	if len(runner.calls) != 2 || runner.calls[1].Timeout != 3*time.Second {
+		t.Fatalf("custom timeout call mismatch: %+v", runner.calls)
+	}
+}
+
 func TestParseCodexJSONL(t *testing.T) {
 	raw := []byte(strings.Join([]string{
 		`{"type":"thread.started","thread_id":"019test"}`,

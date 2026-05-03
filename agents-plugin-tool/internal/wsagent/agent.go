@@ -33,6 +33,8 @@ const (
 	CallStatusCompleted = "completed"
 	CallStatusFailed    = "failed"
 	CallStatusCancelled = "cancelled"
+
+	defaultSubqueryTimeout = 90 * time.Second
 )
 
 var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
@@ -59,9 +61,10 @@ type RegisterOptions struct {
 }
 
 type CallOptions struct {
-	Root   string
-	Name   string
-	Prompt string
+	Root    string
+	Name    string
+	Prompt  string
+	Timeout time.Duration
 }
 
 type CallAsyncOptions struct {
@@ -117,12 +120,14 @@ type OneShotOptions struct {
 	PromptRefs       []string
 	SystemPromptText string
 	Prompt           string
+	Timeout          time.Duration
 }
 
 type SubqueryOptions struct {
 	Root         string
 	Question     string
 	DeepResearch bool
+	Timeout      time.Duration
 }
 
 type SelfWorkerStarter struct{}
@@ -328,11 +333,21 @@ func (m Manager) Call(opts CallOptions) (Agent, string, error) {
 		return agent, "", errors.New("prompt is required")
 	}
 
-	text, agent, err := m.executeCall(layout, agent, opts.Prompt, false)
+	text, agent, err := m.executeCall(layout, agent, executeCallOptions{
+		Prompt:         opts.Prompt,
+		CaptureStreams: false,
+		Timeout:        opts.Timeout,
+	})
 	return agent, text, err
 }
 
-func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureStreams bool) (string, Agent, error) {
+type executeCallOptions struct {
+	Prompt         string
+	CaptureStreams bool
+	Timeout        time.Duration
+}
+
+func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions) (string, Agent, error) {
 	now := m.now().UTC().Format(time.RFC3339)
 	agent.Status = StatusRunning
 	agent.LastSeenAt = now
@@ -349,14 +364,14 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 	_ = appendRuntimeLog(layout, m.now(), "backend.call.start", map[string]any{
 		"backend":         agent.Backend,
 		"resume":          agent.SessionID != "",
-		"capture_streams": captureStreams,
+		"capture_streams": opts.CaptureStreams,
 	})
 
 	var stdoutFile *os.File
 	var stderrFile *os.File
 	var stdoutWriter io.Writer
 	var stderrWriter io.Writer
-	if captureStreams {
+	if opts.CaptureStreams {
 		var err error
 		stdoutFile, err = os.OpenFile(layout.CurrentStdout, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
@@ -376,7 +391,7 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 		runner = CodexRunner{}
 	}
 	var onSessionID func(string) error
-	if captureStreams {
+	if opts.CaptureStreams {
 		onSessionID = func(sessionID string) error {
 			if strings.TrimSpace(sessionID) == "" {
 				return nil
@@ -399,13 +414,14 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 	}
 	result, err := runner.Call(RunnerRequest{
 		Root:             layout.Root,
-		Prompt:           prompt,
+		Prompt:           opts.Prompt,
 		Model:            agent.Model,
 		SessionID:        agent.SessionID,
 		SystemPromptPath: absOptional(layout.AgentDir, agent.SystemPromptPath),
 		Stdout:           stdoutWriter,
 		Stderr:           stderrWriter,
 		OnSessionID:      onSessionID,
+		Timeout:          opts.Timeout,
 	})
 	if err != nil {
 		agent.Status = StatusFailed
@@ -588,7 +604,10 @@ func (m Manager) RunCurrent(root, name string) (err error) {
 	}); err != nil {
 		return err
 	}
-	text, resultAgent, runErr := m.executeCall(layout, agent, string(prompt), true)
+	text, resultAgent, runErr := m.executeCall(layout, agent, executeCallOptions{
+		Prompt:         string(prompt),
+		CaptureStreams: true,
+	})
 	if runErr != nil {
 		_ = appendRuntimeLog(layout, m.now(), "state.finalize.begin", map[string]any{"status": CallStatusFailed})
 		_, _ = m.FailCurrentCall(layout, runErr.Error(), nil)
@@ -622,7 +641,12 @@ func (m Manager) OneShot(opts OneShotOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, text, callErr := m.Call(CallOptions{Root: opts.Root, Name: name, Prompt: opts.Prompt})
+	_, text, callErr := m.Call(CallOptions{
+		Root:    opts.Root,
+		Name:    name,
+		Prompt:  opts.Prompt,
+		Timeout: opts.Timeout,
+	})
 	eraseErr := m.Erase(opts.Root, name)
 	if callErr != nil {
 		return "", callErr
@@ -642,12 +666,17 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	if opts.DeepResearch {
 		tier = "deep"
 	}
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultSubqueryTimeout
+	}
 	return m.OneShot(OneShotOptions{
 		Root:             opts.Root,
 		Backend:          "codex",
 		Tier:             tier,
 		SystemPromptText: SubquerySystemPrompt,
 		Prompt:           opts.Question,
+		Timeout:          timeout,
 	})
 }
 
