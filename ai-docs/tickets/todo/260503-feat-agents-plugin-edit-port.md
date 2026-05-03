@@ -93,7 +93,7 @@ Success criteria:
 - `agents-plugin/skills/workflow` marks generated workflow path allocation as
   available after the primitive lands.
 
-### Result (pending) - 2026-05-03
+### Result (0569982) - 2026-05-03
 
 Implemented generated workflow path allocation as MCP tool `ws/path.generate`
 and CLI fallback `ws-mcp path generate`. The first supported kind is `review`,
