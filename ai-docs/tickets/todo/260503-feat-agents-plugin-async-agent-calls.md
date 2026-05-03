@@ -354,7 +354,7 @@ Success criteria:
 - Real Codex-backed `ws-mcp agents oneshot` smoke succeeds.
 - Real Codex-backed `ws-mcp subquery` smoke succeeds.
 
-### Result (pending) - 2026-05-03
+### Result (5fc87d3) - 2026-05-03
 
 Fixed a Go typed-nil writer bug in the synchronous agent call path. The runtime
 declared `*os.File` stream variables for optional stdout/stderr capture, then
