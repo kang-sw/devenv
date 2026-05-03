@@ -5,6 +5,7 @@ related:
   260425-feat-ws-agent-registry-compression: Claude-side named-agent registry and compression prior art
   260503-feat-agents-plugin-runtime-boundary: Go MCP/runtime foundation for host-neutral helper surfaces
   260503-epic-agents-plugin-skill-porting: parent roadmap; this ticket must precede write-skeleton and core orchestration ports
+completed: 2026-05-03
 ---
 
 # agents-plugin agent session runtime

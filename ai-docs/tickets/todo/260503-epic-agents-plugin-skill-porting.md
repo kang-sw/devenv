@@ -121,14 +121,15 @@ the agent session runtime lands.
 
 ### 6. Agent session runtime and delegation contract
 
-Active/planned child tickets:
+Completed child ticket:
 
 - `260503-feat-agents-plugin-agent-session-runtime`
-- `feat-agents-plugin-write-skeleton-port`
 
-Covered skill:
+Covered skill/runtime:
 
 - `write-skeleton`
+- minimum `ws.agents.register`, `ws.agents.call`, `ws.agents.oneshot`,
+  `ws.agents.print`, and `ws.agents.erase`
 
 Purpose: define the host-neutral sustainable session runtime before porting the
 first production delegation skill. The runtime should generalize Claude's
@@ -136,6 +137,10 @@ first production delegation skill. The runtime should generalize Claude's
 session registration, resume-backed calls, queued follow-ups, output lookup, and
 workload-depth tiers. `write-skeleton` is the first consumer after that contract
 exists.
+
+Remaining gaps before the core implementation track: interrupts, tail/list,
+review-path allocation, runtime locks, reviewer fanout, and shared prompt-bundle
+resolution.
 
 ### 7. Core implementation orchestration
 
