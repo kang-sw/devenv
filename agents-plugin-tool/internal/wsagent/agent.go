@@ -205,6 +205,19 @@ func (m Manager) Call(opts CallOptions) (Agent, string, error) {
 		Model:            agent.Model,
 		SessionID:        agent.SessionID,
 		SystemPromptPath: absOptional(layout.AgentDir, agent.SystemPromptPath),
+		OnSessionID: func(sessionID string) error {
+			if strings.TrimSpace(sessionID) == "" {
+				return nil
+			}
+			agent.SessionID = sessionID
+			agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
+			if err := writeAgent(layout.AgentFile, agent); err != nil {
+				return err
+			}
+			return appendEvent(layout.EventsFile, m.now(), "call.session_started", map[string]any{
+				"session_id": sessionID,
+			})
+		},
 	})
 	if err != nil {
 		agent.Status = StatusFailed

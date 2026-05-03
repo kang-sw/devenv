@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 )
 
@@ -18,6 +19,7 @@ type RunnerRequest struct {
 	Model            string
 	SessionID        string
 	SystemPromptPath string
+	OnSessionID      func(string) error
 }
 
 type RunnerResult struct {
@@ -46,26 +48,35 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 
 	cmd := exec.Command("codex", args...)
 	cmd.Dir = req.Root
-	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return RunnerResult{}, fmt.Errorf("open codex stdout: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return RunnerResult{}, fmt.Errorf("start codex: %w", err)
+	}
+	result, parseErr := parseCodexJSONLStream(stdout, req.OnSessionID)
+	if err := cmd.Wait(); err != nil {
 		if stderr.Len() > 0 {
 			return RunnerResult{}, fmt.Errorf("codex failed: %w: %s", err, stderr.String())
 		}
 		return RunnerResult{}, fmt.Errorf("codex failed: %w", err)
 	}
-	result, err := parseCodexJSONL(stdout.Bytes())
-	if err != nil {
-		return RunnerResult{}, err
+	if parseErr != nil {
+		return RunnerResult{}, parseErr
 	}
 	return result, nil
 }
 
 func parseCodexJSONL(raw []byte) (RunnerResult, error) {
+	return parseCodexJSONLStream(bytes.NewReader(raw), nil)
+}
+
+func parseCodexJSONLStream(r io.Reader, onSessionID func(string) error) (RunnerResult, error) {
 	var result RunnerResult
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		var event struct {
 			Type     string `json:"type"`
@@ -80,6 +91,11 @@ func parseCodexJSONL(raw []byte) (RunnerResult, error) {
 		}
 		if event.Type == "thread.started" && event.ThreadID != "" {
 			result.SessionID = event.ThreadID
+			if onSessionID != nil {
+				if err := onSessionID(event.ThreadID); err != nil {
+					return RunnerResult{}, fmt.Errorf("handle codex session id: %w", err)
+				}
+			}
 		}
 		if event.Type == "item.completed" && event.Item.Type == "agent_message" {
 			result.Text = event.Item.Text

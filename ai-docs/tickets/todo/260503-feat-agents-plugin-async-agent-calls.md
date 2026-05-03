@@ -113,6 +113,22 @@ Success criteria:
 - Preserve final-output extraction from the last `agent_message`.
 - Existing synchronous `ws/agents.call` behavior remains unchanged.
 
+### Result (pending) - 2026-05-03
+
+Implemented incremental Codex JSONL parsing in the Go wsagent backend. The
+Codex runner now uses `StdoutPipe`, starts the child process, scans JSONL while
+the process is running, and invokes a session-id callback immediately when
+`thread.started` arrives. `Manager.Call` uses that callback to persist
+`agent.json.session_id` and append `call.session_started` before the final
+agent message is available.
+
+Added tests proving that the parser notifies `thread.started` before reading
+later JSONL chunks, that `Manager.Call` persists the streamed session id while
+the agent is still marked `running`, and that final output extraction from the
+last `agent_message` remains intact. Updated the agent runtime reference to
+document the Codex-specific window where async status may briefly show a running
+call without a `session_id`.
+
 ### Phase 1: Current call state model
 
 Add current async-call state under each agent directory. The public API should be

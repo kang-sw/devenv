@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,28 @@ func (f *fakeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		SessionID: session,
 		Text:      "reply: " + req.Prompt + "\n",
 	}, nil
+}
+
+type sessionPersistRunner struct {
+	t         *testing.T
+	agentFile string
+}
+
+func (r sessionPersistRunner) Call(req RunnerRequest) (RunnerResult, error) {
+	if req.OnSessionID == nil {
+		r.t.Fatal("OnSessionID is nil")
+	}
+	if err := req.OnSessionID("thread-streamed"); err != nil {
+		r.t.Fatalf("OnSessionID returned error: %v", err)
+	}
+	agent, err := readAgent(r.agentFile)
+	if err != nil {
+		r.t.Fatalf("read streamed agent: %v", err)
+	}
+	if agent.SessionID != "thread-streamed" || agent.Status != StatusRunning {
+		r.t.Fatalf("session not persisted during call: %+v", agent)
+	}
+	return RunnerResult{SessionID: "thread-streamed", Text: "done\n"}, nil
 }
 
 func TestRegisterCreatesAgentDirectory(t *testing.T) {
@@ -108,6 +131,32 @@ func TestCallCreatesAndResumesSession(t *testing.T) {
 	}
 }
 
+func TestCallPersistsStreamedSessionIDBeforeCompletion(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	baseManager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	_, layout, err := baseManager.Register(RegisterOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    sessionPersistRunner{t: t, agentFile: layout.AgentFile},
+	})
+	agent, text, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "work"})
+	if err != nil {
+		t.Fatalf("Call returned error: %v", err)
+	}
+	if agent.SessionID != "thread-streamed" || text != "done\n" || agent.Status != StatusIdle {
+		t.Fatalf("final call mismatch: agent=%+v text=%q", agent, text)
+	}
+}
+
 func TestOneShotErasesAgentDirectory(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
@@ -145,6 +194,51 @@ func TestParseCodexJSONL(t *testing.T) {
 	if result.SessionID != "019test" || result.Text != "hello" {
 		t.Fatalf("result mismatch: %+v", result)
 	}
+}
+
+func TestParseCodexJSONLStreamNotifiesSessionBeforeFinalMessage(t *testing.T) {
+	sessionSeen := false
+	reader := &chunkReader{
+		t:    t,
+		seen: &sessionSeen,
+		chunks: [][]byte{
+			[]byte(`{"type":"thread.started","thread_id":"019test"}` + "\n"),
+			[]byte(`{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}` + "\n"),
+			[]byte(`{"type":"turn.completed"}` + "\n"),
+		},
+	}
+	result, err := parseCodexJSONLStream(reader, func(sessionID string) error {
+		if sessionID != "019test" {
+			t.Fatalf("session id = %q", sessionID)
+		}
+		sessionSeen = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("parseCodexJSONLStream returned error: %v", err)
+	}
+	if result.SessionID != "019test" || result.Text != "hello" {
+		t.Fatalf("result mismatch: %+v", result)
+	}
+}
+
+type chunkReader struct {
+	t      *testing.T
+	seen   *bool
+	chunks [][]byte
+	index  int
+}
+
+func (r *chunkReader) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	if r.index > 0 && !*r.seen {
+		r.t.Fatal("requested later JSONL before session callback")
+	}
+	chunk := r.chunks[r.index]
+	r.index++
+	return copy(p, chunk), nil
 }
 
 func TestAgentJSONRoundTripIncludesContractFields(t *testing.T) {

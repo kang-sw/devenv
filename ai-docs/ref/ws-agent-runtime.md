@@ -229,7 +229,7 @@ Backends are responsible for:
 - creating or resuming a host session from `session_id`
 - applying the materialized system prompt or equivalent instruction file
 - sending the new prompt plus pending inbox messages
-- updating `session_id` when the host assigns one on first call
+- updating `session_id` as soon as the host assigns one on first call
 - writing the plain-text response to `output.md`
 - appending lifecycle entries to `events.jsonl`
 - reporting host errors to stderr and marking the agent `failed`
@@ -241,6 +241,11 @@ The Codex CLI prototype starts sessions with `codex exec --json` and resumes the
 with `codex exec resume --json <thread-id>`. `codex exec resume` does not accept
 the same `--cd` option as `codex exec`, so the adapter sets the subprocess working
 directory instead of passing a command-line cwd flag.
+
+Codex does not allow callers to preassign a thread id. The adapter therefore
+parses `--json` stdout incrementally and persists `thread.started.thread_id` as
+soon as it appears. Asynchronous status surfaces may briefly show a running call
+with an empty `session_id` before the first streamed event arrives.
 
 ## Required For `write-skeleton`
 
