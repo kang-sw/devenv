@@ -105,3 +105,104 @@ func initGit(t *testing.T, root string) {
 		t.Fatalf("git init failed: %v\n%s", err, string(out))
 	}
 }
+
+func TestServeStdioGitToolCalls(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test User")
+	mustWrite(t, root, "file.txt", "one\n")
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-m", "initial", "-m", "body text")
+	mustWrite(t, root, "file.txt", "one\ntwo\n")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.diff","arguments":{"mode":"name_only","paths":["file.txt"]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.log","arguments":{"limit":1,"include_body":true}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.merge_base","arguments":{"base":"HEAD","head":"HEAD"}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
+	}
+
+	var diff struct {
+		Mode   string   `json:"mode"`
+		Paths  []string `json:"paths"`
+		Output string   `json:"output"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, lines[0])), &diff); err != nil {
+		t.Fatal(err)
+	}
+	if diff.Mode != "name_only" || !strings.Contains(diff.Output, "file.txt") || len(diff.Paths) != 1 || diff.Paths[0] != "file.txt" {
+		t.Fatalf("diff response = %#v", diff)
+	}
+
+	var log struct {
+		Limit       int  `json:"limit"`
+		IncludeBody bool `json:"include_body"`
+		Commits     []struct {
+			Subject string `json:"subject"`
+			Body    string `json:"body"`
+		} `json:"commits"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, lines[1])), &log); err != nil {
+		t.Fatal(err)
+	}
+	if log.Limit != 1 || !log.IncludeBody || len(log.Commits) != 1 || log.Commits[0].Subject != "initial" || log.Commits[0].Body != "body text" {
+		t.Fatalf("log response = %#v", log)
+	}
+
+	head := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+	var mergeBase struct {
+		Base      string `json:"base"`
+		Head      string `json:"head"`
+		MergeBase string `json:"merge_base"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, lines[2])), &mergeBase); err != nil {
+		t.Fatal(err)
+	}
+	if mergeBase.Base != "HEAD" || mergeBase.Head != "HEAD" || mergeBase.MergeBase != head {
+		t.Fatalf("merge-base response = %#v, want hash %s", mergeBase, head)
+	}
+}
+
+func toolText(t *testing.T, line string) string {
+	t.Helper()
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(line), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Result.Content) != 1 {
+		t.Fatalf("unexpected content in response: %s", line)
+	}
+	return resp.Result.Content[0].Text
+}
+
+func runGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	_ = runGitOutput(t, root, args...)
+}
+
+func runGitOutput(t *testing.T, root string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+	}
+	return out
+}

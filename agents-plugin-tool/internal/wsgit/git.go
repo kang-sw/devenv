@@ -215,6 +215,9 @@ func DiffArgs(opts DiffOptions) ([]string, string, error) {
 		return nil, "", fmt.Errorf("unsupported diff mode %q", opts.Mode)
 	}
 	if opts.Range != "" {
+		if err := validateRevision("range", opts.Range); err != nil {
+			return nil, "", err
+		}
 		args = append(args, opts.Range)
 	}
 	if len(opts.Paths) > 0 {
@@ -222,6 +225,13 @@ func DiffArgs(opts DiffOptions) ([]string, string, error) {
 		args = append(args, opts.Paths...)
 	}
 	return args, mode, nil
+}
+
+func validateRevision(name, value string) error {
+	if strings.HasPrefix(value, "-") {
+		return fmt.Errorf("%s must be a revision or range, not a git option", name)
+	}
+	return nil
 }
 
 type LogOptions struct {
@@ -246,7 +256,10 @@ type LogResult struct {
 }
 
 func (c Client) Log(ctx context.Context, root string, opts LogOptions) (LogResult, error) {
-	args, limit := LogArgs(opts)
+	args, limit, err := LogArgs(opts)
+	if err != nil {
+		return LogResult{}, err
+	}
 	out, err := c.runner().RunGit(ctx, root, args...)
 	if err != nil {
 		return LogResult{}, err
@@ -254,7 +267,7 @@ func (c Client) Log(ctx context.Context, root string, opts LogOptions) (LogResul
 	return LogResult{Range: opts.Range, Limit: limit, IncludeBody: opts.IncludeBody, Commits: ParseLog(out, opts.IncludeBody)}, nil
 }
 
-func LogArgs(opts LogOptions) ([]string, int) {
+func LogArgs(opts LogOptions) ([]string, int, error) {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 20
@@ -264,9 +277,12 @@ func LogArgs(opts LogOptions) ([]string, int) {
 	}
 	args := []string{"log", "-n", strconv.Itoa(limit), "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1e"}
 	if opts.Range != "" {
+		if err := validateRevision("range", opts.Range); err != nil {
+			return nil, 0, err
+		}
 		args = append(args, opts.Range)
 	}
-	return args, limit
+	return args, limit, nil
 }
 
 func ParseLog(out []byte, includeBody bool) []Commit {
@@ -299,6 +315,12 @@ type MergeBaseResult struct {
 func (c Client) MergeBase(ctx context.Context, root, base, head string) (MergeBaseResult, error) {
 	if base == "" || head == "" {
 		return MergeBaseResult{}, fmt.Errorf("base and head are required")
+	}
+	if err := validateRevision("base", base); err != nil {
+		return MergeBaseResult{}, err
+	}
+	if err := validateRevision("head", head); err != nil {
+		return MergeBaseResult{}, err
 	}
 	out, err := c.runner().RunGit(ctx, root, MergeBaseArgs(base, head)...)
 	if err != nil {

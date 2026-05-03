@@ -2,6 +2,7 @@ package wsgit
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -21,12 +22,33 @@ func TestDiffArgsAppendsPathFiltersAfterDoubleDash(t *testing.T) {
 }
 
 func TestLogArgsBoundsLimitAndKeepsRange(t *testing.T) {
-	args, limit := LogArgs(LogOptions{Range: "main..HEAD", Limit: 500})
+	args, limit, err := LogArgs(LogOptions{Range: "main..HEAD", Limit: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if limit != 100 {
 		t.Fatalf("limit = %d, want 100", limit)
 	}
 	if got, want := args[len(args)-1], "main..HEAD"; got != want {
 		t.Fatalf("last arg = %q, want %q; args=%#v", got, want, args)
+	}
+}
+
+func TestRevisionFieldsRejectGitOptions(t *testing.T) {
+	if _, _, err := DiffArgs(DiffOptions{Range: "--output=/tmp/ws-mcp-diff"}); err == nil {
+		t.Fatal("DiffArgs accepted option-like range")
+	}
+	if _, _, err := LogArgs(LogOptions{Range: "--output=/tmp/ws-mcp-log"}); err == nil {
+		t.Fatal("LogArgs accepted option-like range")
+	}
+	if _, err := (Client{}).MergeBase(context.Background(), "/repo", "--is-ancestor", "HEAD"); err == nil {
+		t.Fatal("MergeBase accepted option-like base")
+	}
+}
+
+func TestDiffArgsRejectsUnsupportedMode(t *testing.T) {
+	if _, _, err := DiffArgs(DiffOptions{Mode: "patch-with-stat"}); err == nil {
+		t.Fatal("DiffArgs accepted unsupported mode")
 	}
 }
 
@@ -70,12 +92,13 @@ type recordingRunner struct {
 	root string
 	args []string
 	out  []byte
+	err  error
 }
 
 func (r *recordingRunner) RunGit(_ context.Context, root string, args ...string) ([]byte, error) {
 	r.root = root
 	r.args = append([]string(nil), args...)
-	return r.out, nil
+	return r.out, r.err
 }
 
 func TestClientStatusUsesPorcelainBranchArgs(t *testing.T) {
@@ -87,5 +110,22 @@ func TestClientStatusUsesPorcelainBranchArgs(t *testing.T) {
 	want := []string{"status", "--porcelain=v2", "--branch"}
 	if runner.root != "/repo" || !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("root,args = %q,%#v; want /repo,%#v", runner.root, runner.args, want)
+	}
+}
+
+func TestClientPropagatesRunnerError(t *testing.T) {
+	runnerErr := errors.New("not a git repository")
+	runner := &recordingRunner{err: runnerErr}
+	if _, err := (Client{Runner: runner}).Status(context.Background(), "/repo"); !errors.Is(err, runnerErr) {
+		t.Fatalf("Status error = %v, want %v", err, runnerErr)
+	}
+}
+
+func TestMergeBaseRequiresRevisions(t *testing.T) {
+	if _, err := (Client{}).MergeBase(context.Background(), "/repo", "", "HEAD"); err == nil {
+		t.Fatal("MergeBase accepted missing base")
+	}
+	if _, err := (Client{}).MergeBase(context.Background(), "/repo", "main", ""); err == nil {
+		t.Fatal("MergeBase accepted missing head")
 	}
 }
