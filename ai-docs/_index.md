@@ -132,8 +132,10 @@ release assets only for pushed `v*` tags. Runtime binaries remain plugin
 cache-local under `.runtime/<os>-<arch>/ws-mcp[.exe]`. The POSIX launcher can
 derive the GitHub release URL from `runtime.json`, download the selected asset
 and `SHA256SUMS`, verify the matching checksum, and repair missing or
-incompatible cache-local binaries. Windows plugin-managed startup still needs a
-native launcher or adapter-specific manifest verification.
+incompatible cache-local binaries. It also checks `tools/list` against
+`runtime.json.tools` before exec so dev cache binaries with matching versions but
+missing tools are repaired. Windows plugin-managed startup still needs a native
+launcher or adapter-specific manifest verification.
 
 `ws-mcp` development verification levels are documented in
 `ai-docs/ref/ws-mcp.md`: Level 1 Go/MCP tests, Level 2 local release asset and

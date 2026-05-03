@@ -17,6 +17,11 @@ json_string_value() {
   sed -n 's/^[[:space:]]*"'$key'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$runtime_contract" | sed -n '1p'
 }
 
+runtime_tools() {
+  sed -n '/^[[:space:]]*"tools"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}/p' "$runtime_contract" |
+    sed -n 's/^[[:space:]]*"\(ws\.[^"]*\)"[[:space:]]*:.*/\1/p'
+}
+
 resolve_link() {
   target=$1
   while [ -L "$target" ]; do
@@ -87,6 +92,23 @@ sha256_file() {
   fi
 }
 
+tools_compatible() {
+  output=$(
+    printf '%s\n' \
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+      '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
+      "$binary" serve --stdio 2>/dev/null || true
+  )
+  [ -n "$output" ] || return 1
+  for tool in $(runtime_tools); do
+    case "$output" in
+      *"\"name\":\"$tool\""*) ;;
+      *) note "runtime missing required MCP tool: $tool"; return 1 ;;
+    esac
+  done
+  return 0
+}
+
 download_runtime() {
   [ -n "$release_base_url" ] || fail "missing runtime binary for $platform; set WS_MCP_BOOTSTRAP_BINARY, WS_MCP_BOOTSTRAP_URL, or release_repository/release_tag in runtime.json"
   command -v curl >/dev/null 2>&1 || fail "curl is required to download $release_base_url/$asset"
@@ -123,7 +145,7 @@ install_runtime() {
       fail "curl is required to download $WS_MCP_BOOTSTRAP_URL"
     fi
     if [ -n "${WS_MCP_BOOTSTRAP_SHA256:-}" ]; then
-      actual=$(shasum -a 256 "$tmp" | awk '{print $1}')
+      actual=$(sha256_file "$tmp") || fail "shasum or sha256sum is required to verify downloaded ws-mcp"
       [ "$actual" = "$WS_MCP_BOOTSTRAP_SHA256" ] || fail "checksum mismatch for downloaded ws-mcp"
     fi
     mv "$tmp" "$binary"
@@ -145,6 +167,15 @@ if ! version_compatible "$version"; then
   install_runtime
   version=$("$binary" version 2>/dev/null || true)
   version_compatible "$version" || fail "incompatible ws-mcp version after repair: ${version:-unknown}"
+fi
+
+if ! tools_compatible; then
+  note "replacing runtime with incompatible MCP tool surface"
+  rm -f "$binary"
+  install_runtime
+  version=$("$binary" version 2>/dev/null || true)
+  version_compatible "$version" || fail "incompatible ws-mcp version after tool-surface repair: ${version:-unknown}"
+  tools_compatible || fail "incompatible ws-mcp tool surface after repair"
 fi
 
 note "plugin_dir=$plugin_dir"

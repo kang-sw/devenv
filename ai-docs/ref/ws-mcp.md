@@ -431,8 +431,10 @@ Update/drift behavior:
 - Missing binary: download the release asset for the installed plugin/runtime
   contract when a release URL is configured.
 - Compatible binary: run without network access.
-- Incompatible binary: replace it if release download and checksum verification
+- Incompatible version: replace it if release download and checksum verification
   succeed; otherwise fail with an actionable stderr diagnostic.
+- Incompatible tool surface: call `tools/list` before exec and compare it against
+  `runtime.json.tools`; replace the binary if any required tool is missing.
 - Offline/proxy failure: keep stdout clean, fail startup, and tell the user which
   URL or runtime directory needs manual repair.
 
