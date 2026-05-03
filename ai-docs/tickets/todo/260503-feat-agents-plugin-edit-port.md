@@ -36,9 +36,10 @@ boundaries.
 - Preserve file-backed review findings instead of relying only on reviewer chat
   summaries, because the lead must be able to inspect complete findings after a
   non-clean review.
-- Treat review-path allocation as a runtime primitive, not skill-local temp-file
-  string construction, so future `write-code`, `implement`, and `sprint` ports
-  can reuse the same path manager.
+- Treat generated workflow paths as a runtime primitive, not skill-local
+  temp-file string construction. `edit` needs `kind: "review"` first, but future
+  workflow slices may need the same primitive for handoff notes, scratch
+  artifacts, or other retained text files.
 
 ## Constraints
 
@@ -70,22 +71,27 @@ Claude `edit`:
 
 ## Phases
 
-### Phase 1: Review-path primitive
+### Phase 1: Generated workflow paths
 
-Add a host-neutral review-path allocation surface to `ws-mcp`. The tool should
-use the existing project-state path manager instead of `/tmp/claude-reviews` so
-paths are scoped under the ws cache layout chosen for this migration.
+Add a host-neutral generated-path allocation surface to `ws-mcp`. The first
+supported path kind should be `review`, using the existing project-state path
+manager instead of `/tmp/claude-reviews` so paths are scoped under the ws cache
+layout chosen for this migration.
 
 Success criteria:
 
-- MCP exposes a review-path allocation tool usable from shared skill text.
-- CLI fallback exists for local smoke and Claude-compatibility planning.
+- MCP exposes `ws/path.generate` with required `kind` and `stems` arguments.
+- CLI fallback `ws-mcp path generate` exists for local smoke and
+  Claude-compatibility planning.
+- Initial supported kind is `review`, mapped to the worktree-local
+  `review-paths/` state directory.
 - Allocation accepts one or more logical stems and returns concrete writable
   paths in stable order.
 - Paths are unique per allocation and safe for concurrent workflow invocations.
-- Tests cover stem sanitization, multi-path allocation, and root/project scoping.
-- `agents-plugin/skills/workflow` marks review-path allocation as available
-  after the primitive lands.
+- Tests cover path kind validation, stem sanitization, multi-path allocation,
+  uniqueness, and root/project scoping.
+- `agents-plugin/skills/workflow` marks generated workflow path allocation as
+  available after the primitive lands.
 
 ### Phase 2: Reviewer prompt materialization
 
