@@ -115,6 +115,22 @@ func TestResolveWriteCodePromptSet(t *testing.T) {
 	}
 }
 
+func TestResolveWriteCodeImplementerPolicyChain(t *testing.T) {
+	resolved, err := Resolve([]string{"implementer", "impl-playbook"}, "", "", "")
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !strings.Contains(resolved.Text, "You are a code implementer.") {
+		t.Fatalf("missing implementer prompt:\n%s", resolved.Text)
+	}
+	if !strings.Contains(resolved.Text, "Implementation Playbook") {
+		t.Fatalf("missing implementation playbook:\n%s", resolved.Text)
+	}
+	if got := strings.Count(resolved.Text, "\n\n---\n\n"); got != 1 {
+		t.Fatalf("separator count = %d", got)
+	}
+}
+
 func TestBundleMetadata(t *testing.T) {
 	info, err := Bundle("dev")
 	if err != nil {
