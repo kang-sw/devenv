@@ -45,7 +45,7 @@ func doctor(args []string) {
 	root := fs.String("root", ".", "repository root")
 	_ = fs.Parse(args)
 
-	report := wsdoc.Doctor(*root)
+	report := wsdoc.Doctor(defaultRoot(*root))
 	for _, line := range report.Lines {
 		fmt.Println(line)
 	}
@@ -65,7 +65,7 @@ func serve(args []string) {
 		os.Exit(2)
 	}
 
-	server := mcp.NewServer(*root, version)
+	server := mcp.NewServer(defaultRoot(*root), version)
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)
@@ -126,7 +126,7 @@ func agentsRegister(args []string) {
 		fatal("agents register", err)
 	}
 	agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
-		Root:             *root,
+		Root:             defaultRoot(*root),
 		Name:             *name,
 		Backend:          *backend,
 		Tier:             *tier,
@@ -152,7 +152,7 @@ func agentsCall(args []string) {
 		fatal("agents call", err)
 	}
 	_, text, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
-		Root:   *root,
+		Root:   defaultRoot(*root),
 		Name:   *name,
 		Prompt: prompt,
 	})
@@ -184,7 +184,7 @@ func agentsOneShot(args []string) {
 		fatal("agents oneshot", err)
 	}
 	text, err := wsagent.NewManager(wsagent.Options{}).OneShot(wsagent.OneShotOptions{
-		Root:             *root,
+		Root:             defaultRoot(*root),
 		Name:             *name,
 		Backend:          *backend,
 		Tier:             *tier,
@@ -205,7 +205,7 @@ func agentsPrint(args []string) {
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
-	text, err := wsagent.NewManager(wsagent.Options{}).Print(*root, *name)
+	text, err := wsagent.NewManager(wsagent.Options{}).Print(defaultRoot(*root), *name)
 	if err != nil {
 		fatal("agents print", err)
 	}
@@ -218,7 +218,7 @@ func agentsErase(args []string) {
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
-	if err := wsagent.NewManager(wsagent.Options{}).Erase(*root, *name); err != nil {
+	if err := wsagent.NewManager(wsagent.Options{}).Erase(defaultRoot(*root), *name); err != nil {
 		fatal("agents erase", err)
 	}
 }
@@ -258,4 +258,14 @@ func readOptionalFile(path string) (string, error) {
 func fatal(prefix string, err error) {
 	fmt.Fprintf(os.Stderr, "ws-mcp %s: %v\n", prefix, err)
 	os.Exit(1)
+}
+
+func defaultRoot(root string) string {
+	if root != "" && root != "." {
+		return root
+	}
+	if env := os.Getenv("WS_MCP_PROJECT_ROOT"); env != "" {
+		return env
+	}
+	return root
 }

@@ -136,6 +136,9 @@ work on macOS when `.mcp.json` sets `cwd: "."`; without cwd, Codex registers the
 server but relative command startup fails. The Unix launcher direction is POSIX
 `sh` with internal OS/arch selection; Windows remains blocked on verifying
 whether `./bin/ws-mcp-launcher` resolves to `./bin/ws-mcp-launcher.exe`.
+Because that cwd is the plugin cache, the launcher derives `WS_MCP_PROJECT_ROOT`
+from the parent Codex process `PWD`; `ws-mcp` uses it as the default root when
+tools omit `root` or pass `"."`.
 
 `ws-mcp` release distribution: `agents-plugin-tool/scripts/build-release-assets.sh`
 cross-compiles `ws-mcp-<os>-<arch>[.exe]` assets plus `SHA256SUMS`. GitHub

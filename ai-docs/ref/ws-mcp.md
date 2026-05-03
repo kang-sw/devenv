@@ -141,12 +141,20 @@ Current launcher inputs:
 | `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.1.0`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
+| `WS_MCP_PROJECT_ROOT` | Project root used as the default when a tool or CLI command omits `root`; normally derived by the launcher from the parent Codex process. |
 
 The macOS plugin-managed MCP POC is proven for `codex exec` when `.mcp.json`
 sets `cwd: "."`. Without that field, Codex registers the server but startup fails
 with `No such file or directory` because the relative command is interpreted from
 the workspace process context, not the plugin cache. Windows extensionless `.exe`
 resolution remains a later host verification item.
+
+Because `cwd: "."` points the MCP process at the installed plugin cache, tools
+must not treat process cwd as the downstream project root. The POSIX launcher
+derives `WS_MCP_PROJECT_ROOT` from the parent Codex process `PWD` when possible,
+and `ws-mcp` uses that environment variable whenever a tool or command omits
+`root` or passes `"."`. Skills may still pass `root` explicitly, but omitted
+root should resolve to the active project in plugin-managed Codex sessions.
 
 For repo-local Codex plugin iteration, changed plugin-managed MCP configuration
 requires a human-in-the-loop cache refresh: the user must uninstall/install the

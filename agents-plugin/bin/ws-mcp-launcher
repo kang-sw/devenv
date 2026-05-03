@@ -133,6 +133,46 @@ commands_compatible() {
   return 0
 }
 
+parent_env_value() {
+  key=$1
+  if [ -r "/proc/$PPID/environ" ]; then
+    tr '\000' '\n' < "/proc/$PPID/environ" |
+      sed -n 's/^'"$key"'=//p' |
+      sed -n '1p'
+    return 0
+  fi
+  if command -v ps >/dev/null 2>&1; then
+    ps eww -p "$PPID" 2>/dev/null |
+      tr ' ' '\n' |
+      sed -n 's/^'"$key"'=//p' |
+      sed -n '1p'
+  fi
+}
+
+detect_project_root() {
+  [ -z "${WS_MCP_PROJECT_ROOT:-}" ] || return 0
+
+  for candidate in \
+    "$(parent_env_value PWD)" \
+    "$(parent_env_value OLDPWD)" \
+    "${OLDPWD:-}" \
+    "$(pwd -P)"
+  do
+    [ -n "$candidate" ] || continue
+    root=$(git -C "$candidate" rev-parse --show-toplevel 2>/dev/null || true)
+    [ -n "$root" ] || continue
+    root=$(CDPATH= cd -- "$root" && pwd -P)
+    case "$root" in
+      "$plugin_dir"|"$plugin_dir"/*) continue ;;
+    esac
+    WS_MCP_PROJECT_ROOT=$root
+    export WS_MCP_PROJECT_ROOT
+    note "detected project root: $WS_MCP_PROJECT_ROOT"
+    return 0
+  done
+  return 0
+}
+
 download_runtime() {
   [ -n "$release_base_url" ] || fail "missing runtime binary for $platform; set WS_MCP_BOOTSTRAP_BINARY, WS_MCP_BOOTSTRAP_URL, or release_repository/release_tag in runtime.json"
   command -v curl >/dev/null 2>&1 || fail "curl is required to download $release_base_url/$asset"
@@ -253,8 +293,11 @@ if ! commands_compatible; then
   commands_compatible || fail "incompatible ws-mcp command surface after repair"
 fi
 
+detect_project_root
+
 note "plugin_dir=$plugin_dir"
 note "runtime_dir=$runtime_dir"
 note "cwd=$(pwd -P)"
+note "project_root=${WS_MCP_PROJECT_ROOT:-}"
 
 exec "$binary" "$@"
