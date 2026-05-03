@@ -117,7 +117,7 @@ Success criteria:
 - The path manager can return stable locations for `agents`, `review-paths`,
   `sessions`, `locks`, and `tmp`.
 
-### Result (f2d29f4) - 2026-05-03
+### Result (d87e9f2) - 2026-05-03
 
 Added `agents-plugin-tool/internal/wsstate` as the reusable project-state path
 manager for future workflow runtime features. The package resolves the workflow
