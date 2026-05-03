@@ -96,6 +96,28 @@ Success criteria:
 - Verification covers Go tests, MCP smoke, plugin validation, runtime JSON
   parsing, and launcher drift behavior where practical.
 
+### Result (fd3b61f) - 2026-05-03
+
+Expanded the embedded `ws-mcp` prompt bundle with the prompt presets needed by
+the upcoming `write-code` port: `implementer`, `project-survey`,
+`plan-populator-survey`, `plan-populator-research`, `code-review-test`, and
+`impl-playbook`. The source material was copied from the Claude prior art, then
+lightly normalized away from host-specific helper command names, explicit
+`CLAUDE.md` dependence, and repo-local path assumptions.
+
+`impl-playbook` is now an embedded prompt stem so the `write-code` caller can
+materialize implementation policy through a prompt chain such as
+`prompts: ["implementer", "impl-playbook"]`, instead of requiring the
+implementer delegate to fetch policy through MCP at task start. Runtime metadata
+now records prompt bundle hash
+`c68893663ac91db1fb5b186bb3f4b62762099defa69ec703302035e67512cb26` and lists
+all ten embedded stems for launcher drift detection.
+
+Validation covered stale-helper searches across the embedded prompt bundle, Go
+tests, MCP smoke, plugin manifest validation, runtime JSON parsing, and
+whitespace checks. Host-loaded plugin sessions still need the normal cache
+refresh before the expanded prompt bundle is visible.
+
 ### Phase 2: Controlled delegated commit smoke
 
 Verify whether Codex-backed named implementer sessions can safely own commits
