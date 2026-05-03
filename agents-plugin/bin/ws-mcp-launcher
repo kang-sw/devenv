@@ -12,6 +12,11 @@ note() {
   fi
 }
 
+json_string_value() {
+  key=$1
+  sed -n 's/^[[:space:]]*"'$key'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$runtime_contract" | sed -n '1p'
+}
+
 resolve_link() {
   target=$1
   while [ -L "$target" ]; do
@@ -52,10 +57,59 @@ runtime_dir=${WS_MCP_RUNTIME_DIR:-"$plugin_dir/.runtime/$platform"}
 binary_name=ws-mcp
 [ "$os" = "windows" ] && binary_name=ws-mcp.exe
 binary=$runtime_dir/$binary_name
+asset=ws-mcp-$platform
+[ "$os" = "windows" ] && asset=$asset.exe
+
+release_repository=${WS_MCP_RELEASE_REPOSITORY:-$(json_string_value release_repository)}
+release_tag=${WS_MCP_RELEASE_TAG:-$(json_string_value release_tag)}
+release_base_url=${WS_MCP_RELEASE_BASE_URL:-}
+if [ -z "$release_base_url" ] && [ -n "$release_repository" ] && [ -n "$release_tag" ]; then
+  release_base_url=https://github.com/$release_repository/releases/download/$release_tag
+fi
 
 mkdir -p "$runtime_dir"
 
-if [ ! -x "$binary" ]; then
+version_compatible() {
+  case "$1" in
+    0.1.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+sha256_file() {
+  file=$1
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+download_runtime() {
+  [ -n "$release_base_url" ] || fail "missing runtime binary for $platform; set WS_MCP_BOOTSTRAP_BINARY, WS_MCP_BOOTSTRAP_URL, or release_repository/release_tag in runtime.json"
+  command -v curl >/dev/null 2>&1 || fail "curl is required to download $release_base_url/$asset"
+
+  tmp=$runtime_dir/$binary_name.download
+  sums_tmp=$runtime_dir/SHA256SUMS.download
+  rm -f "$tmp" "$sums_tmp"
+
+  curl -fsSL "$release_base_url/$asset" -o "$tmp" || fail "failed to download $release_base_url/$asset"
+  curl -fsSL "$release_base_url/SHA256SUMS" -o "$sums_tmp" || fail "failed to download $release_base_url/SHA256SUMS"
+
+  expected=$(awk -v asset="$asset" '$2 == asset {print $1}' "$sums_tmp" | sed -n '1p')
+  [ -n "$expected" ] || fail "missing checksum entry for $asset"
+  actual=$(sha256_file "$tmp") || fail "shasum or sha256sum is required to verify downloaded ws-mcp"
+  [ "$actual" = "$expected" ] || fail "checksum mismatch for downloaded $asset"
+
+  mv "$tmp" "$binary"
+  chmod 755 "$binary"
+  rm -f "$sums_tmp"
+  note "downloaded runtime binary into $binary"
+}
+
+install_runtime() {
   if [ -n "${WS_MCP_BOOTSTRAP_BINARY:-}" ]; then
     [ -f "$WS_MCP_BOOTSTRAP_BINARY" ] || fail "bootstrap binary not found: $WS_MCP_BOOTSTRAP_BINARY"
     cp "$WS_MCP_BOOTSTRAP_BINARY" "$binary"
@@ -76,15 +130,22 @@ if [ ! -x "$binary" ]; then
     chmod 755 "$binary"
     note "downloaded runtime binary into $binary"
   else
-    fail "missing runtime binary for $platform; set WS_MCP_BOOTSTRAP_BINARY or WS_MCP_BOOTSTRAP_URL"
+    download_runtime
   fi
+}
+
+if [ ! -x "$binary" ]; then
+  install_runtime
 fi
 
 version=$("$binary" version 2>/dev/null || true)
-case "$version" in
-  0.1.*) ;;
-  *) fail "incompatible ws-mcp version: ${version:-unknown}" ;;
-esac
+if ! version_compatible "$version"; then
+  note "replacing incompatible runtime version: ${version:-unknown}"
+  rm -f "$binary"
+  install_runtime
+  version=$("$binary" version 2>/dev/null || true)
+  version_compatible "$version" || fail "incompatible ws-mcp version after repair: ${version:-unknown}"
+fi
 
 note "plugin_dir=$plugin_dir"
 note "runtime_dir=$runtime_dir"

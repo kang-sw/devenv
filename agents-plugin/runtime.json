@@ -3,6 +3,8 @@
   "plugin_version": "0.1.0",
   "required_mcp": ">=0.1.0-dev <0.2.0",
   "mcp_protocol": "2025-03-26",
+  "release_repository": "kang-sw/devenv",
+  "release_tag": "v0.1.0",
   "tools": {
     "ws.project_tree": ">=0.1.0-dev <0.2.0",
     "ws.infra.read": ">=0.1.0-dev <0.2.0"

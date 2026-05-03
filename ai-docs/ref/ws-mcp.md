@@ -105,6 +105,9 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_BINARY` | Copy a prebuilt local binary into the runtime directory. Used by the current dev POC. |
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
+| `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`, for example `kang-sw/devenv`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.1.0`. |
+| `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 
 The macOS plugin-managed MCP POC is proven for `codex exec` when `.mcp.json`
@@ -284,6 +287,17 @@ SHA256SUMS
 `SHA256SUMS` is a plain `shasum -a 256` manifest covering every release binary.
 The launcher should download the selected binary and `SHA256SUMS`, verify the
 matching checksum line before chmod/exec, and print failures to stderr only.
+
+`agents-plugin/runtime.json` currently carries `release_repository` and
+`release_tag`. The POSIX launcher derives the release base URL as:
+
+```text
+https://github.com/<release_repository>/releases/download/<release_tag>
+```
+
+It then downloads `ws-mcp-<os>-<arch>[.exe]` and `SHA256SUMS`. The launcher
+checks an existing cache-local binary first; compatible `0.1.x` binaries run
+without network access, while missing or incompatible binaries trigger repair.
 
 Runtime binaries live in the installed plugin cache by default:
 

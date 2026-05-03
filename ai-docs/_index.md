@@ -125,8 +125,11 @@ whether `./bin/ws-mcp-launcher` resolves to `./bin/ws-mcp-launcher.exe`.
 cross-compiles `ws-mcp-<os>-<arch>[.exe]` assets plus `SHA256SUMS`. GitHub
 Actions workflow `.github/workflows/ws-mcp-release.yml` runs tests, builds
 assets, and uploads workflow artifacts on branch/PR validation; it publishes
-release assets only for pushed `v*` tags. Runtime binaries remain plugin cache-local under
-`.runtime/<os>-<arch>/ws-mcp[.exe]`; Windows plugin-managed startup still needs a
+release assets only for pushed `v*` tags. Runtime binaries remain plugin
+cache-local under `.runtime/<os>-<arch>/ws-mcp[.exe]`. The POSIX launcher can
+derive the GitHub release URL from `runtime.json`, download the selected asset
+and `SHA256SUMS`, verify the matching checksum, and repair missing or
+incompatible cache-local binaries. Windows plugin-managed startup still needs a
 native launcher or adapter-specific manifest verification.
 
 `ws-mcp` development verification levels are documented in

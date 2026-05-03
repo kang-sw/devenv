@@ -328,3 +328,59 @@ Verification:
 - `dist/ws-mcp-darwin-arm64 version`
 - `shasum -a 256 -c SHA256SUMS` from `agents-plugin-tool/dist/`
 - `git diff --check`
+
+### Phase 5: Launcher release download
+
+Implement the production download branch of the POSIX launcher now that Phase 4
+has fixed the release asset naming and checksum format.
+
+The launcher should:
+
+- derive the default GitHub release asset base URL from `runtime.json`
+- allow environment overrides for local smoke tests and emergency repair
+- download `ws-mcp-<os>-<arch>[.exe]` and `SHA256SUMS`
+- verify the matching checksum entry before installing the runtime binary
+- skip network access when a compatible cache-local binary already exists
+- replace an incompatible cache-local binary only after successful download and
+  checksum verification
+- keep stdout reserved for MCP JSON-RPC
+
+Success criteria:
+
+- Missing runtime binary can be repaired from a local release-asset directory
+  using the same asset names and `SHA256SUMS` format as the GitHub release path.
+- Existing compatible runtime binary runs without download.
+- Incompatible runtime binary triggers replacement or a clear stderr failure.
+- Level 1 and Level 2 verification still pass.
+
+### Result (TBD) - 2026-05-03
+
+Implemented the production download branch in the POSIX launcher.
+
+Changes:
+
+- Added `release_repository` and `release_tag` to `agents-plugin/runtime.json`.
+- The launcher now derives the default GitHub release asset base URL from those
+  fields, with `WS_MCP_RELEASE_REPOSITORY`, `WS_MCP_RELEASE_TAG`, and
+  `WS_MCP_RELEASE_BASE_URL` overrides for local smoke tests and repair workflows.
+- Missing runtime binaries download `ws-mcp-<os>-<arch>[.exe]` and `SHA256SUMS`,
+  verify the matching checksum line, install the binary under the cache-local
+  runtime directory, and then exec it.
+- Compatible cache-local `0.1.x` binaries run without network access.
+- Incompatible cache-local binaries are replaced only through the same verified
+  download path.
+- Checksum verification supports `shasum` and `sha256sum`.
+
+Verification:
+
+- `go test ./...` from `agents-plugin-tool/`
+- `scripts/smoke-ws-mcp.sh ..` from `agents-plugin-tool/`
+- `jq . agents-plugin/runtime.json`
+- `jq . agents-plugin/.mcp.json`
+- `sh -n agents-plugin/bin/ws-mcp-launcher`
+- `agents-plugin-tool/scripts/build-release-assets.sh 0.1.0-dev`
+- `shasum -a 256 -c SHA256SUMS` from `agents-plugin-tool/dist/`
+- launcher missing-binary repair from `file:///Users/kang-sw/devenv/agents-plugin-tool/dist`
+- launcher compatible-binary reuse with a deliberately invalid release base URL
+- launcher incompatible-binary replacement from local release assets
+- launcher `serve --stdio` smoke through the verified download path
