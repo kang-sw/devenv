@@ -278,3 +278,26 @@ Success criteria:
 - `ai-docs/ref/ws-agent-runtime.md` documents async run state and tool contracts.
 - The skill-porting epic records that core implementation orchestration can now
   choose between synchronous and async delegate calls.
+
+### Result (pending) - 2026-05-03
+
+Updated the host-neutral workflow skill with concrete usage patterns for the
+implemented agent primitives. The workflow reference now distinguishes one-shot
+delegates, persistent synchronous delegates, and persistent asynchronous
+delegates, and it names the available inspection tools for async work:
+`ws/agents.wait`, `ws/agents.status`, `ws/agents.tail`, and
+`ws/agents.cancel`.
+
+Added a `subquery` skill as an immediate composition over `ws/agents.oneshot`.
+The skill embeds the subquery worker instructions directly as
+`system_prompt_text`, so it does not depend on prompt-bundle resolution before
+the runtime implements a shared prompt catalog. The port preserves the prior-art
+shape: one scoped question, read-only exploration, cited English output,
+assumptions when inferred, and gaps when evidence is missing. The Claude
+`haiku`/`sonnet` model split is normalized to workload tiers: `light` by default
+and `deep` for broad tracing or research.
+
+`ask-api` remains intentionally deferred because the prior-art workflow is not
+just a one-shot helper. It needs pre-routing, persistent per-domain agents,
+stale-check/fetch behavior, and lock semantics before it can be represented as a
+stable shared workflow contract.

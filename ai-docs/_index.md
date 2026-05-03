@@ -207,6 +207,7 @@ agents-plugin/skills/
   exit-session/    — draft host-neutral session handoff workflow for ai-docs/_index.md
   workflow/        — host-neutral session-resident reference for MCP notation and orchestration primitive boundaries
   write-skeleton/  — draft host-neutral skeleton workflow using ws/agents.* delegate sessions
+  subquery/        — scoped one-turn fact-finding workflow using ws/agents.oneshot
 ```
 
 ## Canonical Flows

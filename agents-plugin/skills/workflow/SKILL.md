@@ -21,6 +21,8 @@ description: Load the ws workflow reference for host-neutral MCP notation and or
 1. Read this document as the session-resident reference for ws workflow notation.
 2. Use `judge: mcp-reference-form` before adding MCP tool references to shared skill text.
 3. Use `judge: primitive-availability` before naming an orchestration primitive.
+4. Use `judge: delegate-pattern` before selecting an agent orchestration shape.
+5. Apply `judge: specialized-workflow-gap` when a workflow is not expressible with available primitives.
 
 ## Judgments
 
@@ -49,6 +51,61 @@ review-path allocation, message queues, and runtime locks as planned surfaces
 until the runtime implements them.
 When a skill needs a planned surface, state the required server/tool contract
 instead of naming a host-specific helper command as the shared primitive.
+
+### judge: delegate-pattern
+
+Use `ws/agents.oneshot` for one-turn fact finding, scoped surveys, and subquery-style
+answers where no future resume is needed. Use `ws/agents.register` plus
+`ws/agents.call` when a named task agent needs conversational continuity and each
+turn should complete before the lead proceeds. Use `ws/agents.register` plus
+`ws/agents.call_async` when the delegate may run long enough that the lead needs
+control back before completion. Use `ws/agents.wait` to collect final async
+output, `ws/agents.status` to decide whether to wait or continue, `ws/agents.tail`
+to inspect evidence and diagnostics, and `ws/agents.cancel` only when stopping the
+current task is more valuable than preserving backend continuity.
+
+### judge: specialized-workflow-gap
+
+Treat `ws:subquery` as an available composition over `ws/agents.oneshot`. Treat
+API documentation routing as planned until the runtime provides the pre-router,
+domain agent, stale-check, fetch, and lock contracts. Treat interrupts, active
+agent listing, review-path allocation, message queues, and runtime locks as
+planned even though basic async cancellation is available.
+
+## Templates
+
+### One-Shot Delegate
+
+```text
+Call MCP tool `ws/agents.oneshot` with:
+- `root`: current repository root when the host does not supply it automatically
+- `name`: optional descriptive temporary name
+- `backend`: `codex`
+- `tier`: `light` for narrow lookup, `core` for normal survey, `deep` for broad tracing
+- `system_prompt_text`: self-contained delegate instructions
+- `prompt`: the exact scoped question or task
+```
+
+### Persistent Synchronous Delegate
+
+```text
+1. Call MCP tool `ws/agents.register` with a stable task name and self-contained `system_prompt_text`.
+2. Call MCP tool `ws/agents.call` for each turn that must complete before the lead proceeds.
+3. Call MCP tool `ws/agents.print` when the latest output must be recovered.
+4. Call MCP tool `ws/agents.erase` after the task-scoped session is no longer needed.
+```
+
+### Persistent Asynchronous Delegate
+
+```text
+1. Call MCP tool `ws/agents.register` with a stable task name and self-contained `system_prompt_text`.
+2. Call MCP tool `ws/agents.call_async` for a long-running delegate turn.
+3. Call MCP tool `ws/agents.status` to inspect current state without blocking.
+4. Call MCP tool `ws/agents.tail` to inspect recent events, stdout, stderr, and output.
+5. Call MCP tool `ws/agents.wait` with a bounded timeout when final output is needed.
+6. Call MCP tool `ws/agents.cancel` only when the current async task should be stopped.
+7. Call MCP tool `ws/agents.erase` after the task-scoped session is no longer needed.
+```
 
 ## Doctrine
 
