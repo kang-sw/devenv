@@ -68,6 +68,35 @@ Success criteria:
 - The implementation does not require Python or shell helper scripts for the
   initial tools.
 
+### Result (d6a3d1b) - 2026-05-03
+
+Created `agents-plugin-tool/` as the contained Go source tree for native
+MCP/tooling work, leaving `agents-plugin/` as the plugin distribution candidate
+and avoiding loose root-level Go module files. Added `ws-mcp` with `version`,
+`doctor --root`, and `serve --stdio`.
+
+Implemented a minimal dependency-free stdio JSON-RPC/MCP loop for initialize,
+tools/list, and tools/call. The first tools are read-only:
+
+- `ws.project_tree` renders the current project document map, spec inventory, and
+  active ticket queue without invoking the existing Python helper.
+- `ws.infra.read` reads a `claude-plugin/infra/` convention document by bare stem
+  or filename.
+
+Added Go tests for the MCP loop and project document helpers, plus
+`agents-plugin-tool/scripts/smoke-ws-mcp.sh` for a host-free JSONL smoke test.
+Added Go to `install.sh` and `ai-docs/spec/personal-devenv.md` for local
+development. Target deployment still expects prebuilt binaries; users should not
+need Go installed.
+
+Verification:
+
+- `go test ./...` from `agents-plugin-tool/`
+- `go build -o /tmp/ws-mcp ./cmd/ws-mcp` from `agents-plugin-tool/`
+- `/tmp/ws-mcp doctor --root ..`
+- `scripts/smoke-ws-mcp.sh ..`
+- `git diff --check`
+
 ### Phase 2: Tool surface inventory
 
 Document the first MCP contract for `agents-plugin` skills:
