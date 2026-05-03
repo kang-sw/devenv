@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,19 +63,12 @@ type RegisterOptions struct {
 }
 
 type CallOptions struct {
-	Root    string
-	Name    string
-	Prompt  string
-	Timeout time.Duration
-}
-
-type CallAsyncOptions struct {
 	Root   string
 	Name   string
 	Prompt string
 }
 
-type CallAsyncResult struct {
+type CallResult struct {
 	AgentName  string
 	Status     string
 	PID        int
@@ -89,6 +83,7 @@ type WaitOptions struct {
 	Name    string
 	Timeout time.Duration
 	Poll    time.Duration
+	Context context.Context
 }
 
 type TailOptions struct {
@@ -119,7 +114,14 @@ type WorkerStarter interface {
 type ProcessAliveFunc func(pid int) (bool, error)
 type ProcessCancelFunc func(pid int) error
 
-type OneShotOptions struct {
+type syncCallOptions struct {
+	Root    string
+	Name    string
+	Prompt  string
+	Timeout time.Duration
+}
+
+type oneShotOptions struct {
 	Root             string
 	Name             string
 	Backend          string
@@ -325,7 +327,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	return agent, layout, nil
 }
 
-func (m Manager) Call(opts CallOptions) (Agent, string, error) {
+func (m Manager) syncCall(opts syncCallOptions) (Agent, string, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		opts.Root = "."
 	}
@@ -348,6 +350,7 @@ func (m Manager) Call(opts CallOptions) (Agent, string, error) {
 		Prompt:         opts.Prompt,
 		CaptureStreams: false,
 		Timeout:        opts.Timeout,
+		ToolProfile:    "delegate",
 	})
 	return agent, text, err
 }
@@ -356,6 +359,7 @@ type executeCallOptions struct {
 	Prompt         string
 	CaptureStreams bool
 	Timeout        time.Duration
+	ToolProfile    string
 }
 
 func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions) (string, Agent, error) {
@@ -434,6 +438,7 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 		OnSessionID:         onSessionID,
 		Timeout:             opts.Timeout,
 		InheritProcessGroup: opts.CaptureStreams,
+		ToolProfile:         opts.ToolProfile,
 	})
 	if err != nil {
 		agent.Status = StatusFailed
@@ -470,38 +475,38 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	return result.Text, agent, nil
 }
 
-func (m Manager) CallAsync(opts CallAsyncOptions) (CallAsyncResult, error) {
+func (m Manager) Call(opts CallOptions) (CallResult, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		opts.Root = "."
 	}
 	layout, err := m.layout(opts.Root, opts.Name, false)
 	if err != nil {
-		return CallAsyncResult{}, err
+		return CallResult{}, err
 	}
 	agent, err := readAgent(layout.AgentFile)
 	if err != nil {
-		return CallAsyncResult{}, err
+		return CallResult{}, err
 	}
 	if agent.Backend != "codex" {
-		return CallAsyncResult{}, fmt.Errorf("unsupported agent backend %q", agent.Backend)
+		return CallResult{}, fmt.Errorf("unsupported agent backend %q", agent.Backend)
 	}
 	if strings.TrimSpace(opts.Prompt) == "" {
-		return CallAsyncResult{}, errors.New("prompt is required")
+		return CallResult{}, errors.New("prompt is required")
 	}
 
 	call, err := m.BeginCurrentCall(layout, agent)
 	if err != nil {
-		return CallAsyncResult{}, err
+		return CallResult{}, err
 	}
 	promptPath := filepath.Join(layout.CurrentDir, "prompt.md")
 	if err := os.WriteFile(promptPath, []byte(opts.Prompt), 0o644); err != nil {
 		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("write prompt snapshot: %v", err), nil)
-		return CallAsyncResult{}, fmt.Errorf("write prompt snapshot: %w", err)
+		return CallResult{}, fmt.Errorf("write prompt snapshot: %w", err)
 	}
 	call.PromptPath = "current/prompt.md"
 	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
 		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("record prompt snapshot: %v", err), nil)
-		return CallAsyncResult{}, err
+		return CallResult{}, err
 	}
 
 	now := m.now().UTC().Format(time.RFC3339)
@@ -510,15 +515,15 @@ func (m Manager) CallAsync(opts CallAsyncOptions) (CallAsyncResult, error) {
 	agent.LastCallAt = now
 	if err := writeAgent(layout.AgentFile, agent); err != nil {
 		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("mark agent running: %v", err), nil)
-		return CallAsyncResult{}, err
+		return CallResult{}, err
 	}
-	if err := appendEvent(layout.EventsFile, m.now(), "call_async.queued", map[string]any{
+	if err := appendEvent(layout.EventsFile, m.now(), "call.queued", map[string]any{
 		"backend":      agent.Backend,
 		"resume":       agent.SessionID != "",
 		"execution_id": call.ExecutionID,
 	}); err != nil {
 		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("append async queue event: %v", err), nil)
-		return CallAsyncResult{}, err
+		return CallResult{}, err
 	}
 
 	starter := m.opts.WorkerStarter
@@ -537,20 +542,20 @@ func (m Manager) CallAsync(opts CallAsyncOptions) (CallAsyncResult, error) {
 		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
 		_ = writeAgent(layout.AgentFile, agent)
 		_, _ = m.FailCurrentCall(layout, err.Error(), nil)
-		_ = appendEvent(layout.EventsFile, m.now(), "call_async.failed", map[string]any{"error": err.Error()})
-		return CallAsyncResult{}, err
+		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": err.Error()})
+		return CallResult{}, err
 	}
 	call, err = m.MarkCurrentCallRunning(layout, pid, "")
 	if err != nil {
-		return CallAsyncResult{}, err
+		return CallResult{}, err
 	}
-	if err := appendEvent(layout.EventsFile, m.now(), "call_async.started", map[string]any{
+	if err := appendEvent(layout.EventsFile, m.now(), "call.started_async", map[string]any{
 		"pid":          pid,
 		"execution_id": call.ExecutionID,
 	}); err != nil {
-		return CallAsyncResult{}, err
+		return CallResult{}, err
 	}
-	return CallAsyncResult{
+	return CallResult{
 		AgentName:  agent.Name,
 		Status:     call.Status,
 		PID:        call.PID,
@@ -610,7 +615,7 @@ func (m Manager) RunCurrent(root, name string) (err error) {
 	if _, err := m.MarkCurrentCallRunning(layout, pid, ""); err != nil {
 		return err
 	}
-	if err := appendEvent(layout.EventsFile, m.now(), "call_async.worker_started", map[string]any{
+	if err := appendEvent(layout.EventsFile, m.now(), "call.worker_started", map[string]any{
 		"pid":          pid,
 		"execution_id": call.ExecutionID,
 	}); err != nil {
@@ -619,6 +624,7 @@ func (m Manager) RunCurrent(root, name string) (err error) {
 	text, resultAgent, runErr := m.executeCall(layout, agent, executeCallOptions{
 		Prompt:         string(prompt),
 		CaptureStreams: true,
+		ToolProfile:    "leaf",
 	})
 	if runErr != nil {
 		_ = appendRuntimeLog(layout, m.now(), "state.finalize.begin", map[string]any{"status": CallStatusFailed})
@@ -635,7 +641,7 @@ func (m Manager) RunCurrent(root, name string) (err error) {
 	return nil
 }
 
-func (m Manager) OneShot(opts OneShotOptions) (string, error) {
+func (m Manager) oneShot(opts oneShotOptions) (string, error) {
 	name := strings.TrimSpace(opts.Name)
 	if name == "" {
 		name = fmt.Sprintf("oneshot-%d", m.now().UTC().UnixNano())
@@ -653,7 +659,7 @@ func (m Manager) OneShot(opts OneShotOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, text, callErr := m.Call(CallOptions{
+	_, text, callErr := m.syncCall(syncCallOptions{
 		Root:    opts.Root,
 		Name:    name,
 		Prompt:  opts.Prompt,
@@ -682,7 +688,7 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	if timeout <= 0 {
 		timeout = defaultSubqueryTimeout
 	}
-	return m.OneShot(OneShotOptions{
+	return m.oneShot(oneShotOptions{
 		Root:             opts.Root,
 		Backend:          "codex",
 		Tier:             tier,
@@ -723,6 +729,16 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 		deadline = time.Now().Add(opts.Timeout)
 	}
 	for {
+		if opts.Context != nil {
+			select {
+			case <-opts.Context.Done():
+				_ = appendRuntimeLog(layout, m.now(), "wait.cancelled", map[string]any{
+					"error": opts.Context.Err().Error(),
+				})
+				return m.Status(opts.Root, opts.Name)
+			default:
+			}
+		}
 		call, err := m.reconcileActiveCall(layout)
 		if err != nil {
 			return "", err
@@ -736,6 +752,16 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 			return text, nil
 		case CallStatusFailed, CallStatusCancelled:
 			return m.Status(opts.Root, opts.Name)
+		}
+		if opts.Timeout <= 0 {
+			status, err := m.Status(opts.Root, opts.Name)
+			if err != nil {
+				return "", err
+			}
+			return "wait_pending: true\n" +
+				"timeout_status: call may still be running\n" +
+				"follow_up: agents.wait --timeout <duration> | agents.status | agents.cancel | agents.tail\n" +
+				status, nil
 		}
 		if !deadline.IsZero() && !time.Now().Before(deadline) {
 			_ = appendRuntimeLog(layout, m.now(), "wait.timeout", map[string]any{
@@ -752,7 +778,20 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 				"follow_up: agents.wait | agents.status | agents.cancel | agents.tail\n" +
 				status, nil
 		}
-		time.Sleep(opts.Poll)
+		if opts.Context != nil {
+			timer := time.NewTimer(opts.Poll)
+			select {
+			case <-opts.Context.Done():
+				timer.Stop()
+				_ = appendRuntimeLog(layout, m.now(), "wait.cancelled", map[string]any{
+					"error": opts.Context.Err().Error(),
+				})
+				return m.Status(opts.Root, opts.Name)
+			case <-timer.C:
+			}
+		} else {
+			time.Sleep(opts.Poll)
+		}
 	}
 }
 
@@ -983,7 +1022,7 @@ func (m Manager) Cancel(root, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := appendEvent(layout.EventsFile, m.now(), "call_async.cancelled", map[string]any{
+	if err := appendEvent(layout.EventsFile, m.now(), "call.cancelled", map[string]any{
 		"pid":            cancelledPID,
 		"error":          errText,
 		"cleanup_needed": cleanupNeeded,

@@ -35,11 +35,11 @@ description: Directly implement a narrow code change on the current branch, then
 12. Diagnose failures before editing tests; only change tests when the expected behavior or skeleton contract changed.
 13. Call MCP tool `ws/path.generate` with `kind: "review"` and `stems: ["direct"]`; store the returned path as `<review-path>`.
 14. Call MCP tool `ws/agents.register` with `name: "reviewer"`, `backend: "codex"`, `tier: "core"`, and `prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"]`.
-15. Call MCP tool `ws/agents.call_async` for `reviewer` using `Templates / Reviewer Prompt`.
+15. Call MCP tool `ws/agents.call` for `reviewer` using `Templates / Reviewer Prompt`.
 16. Call MCP tool `ws/agents.wait` for `reviewer` when the reviewer result is needed.
 17. Call MCP tool `ws/agents.print` for `reviewer` if the wait result does not include a usable summary.
 18. If the reviewer reports clean, proceed to cleanup.
-19. If the reviewer reports non-clean, read `<review-path>`, apply required fixes, verify again, and call `ws/agents.call_async` with `Templates / Re-Review Prompt`.
+19. If the reviewer reports non-clean, read `<review-path>`, apply required fixes, verify again, and call `ws/agents.call` with `Templates / Re-Review Prompt`.
 20. Repeat the relay until the reviewer reports clean or two non-clean cycles have completed.
 21. Call MCP tool `ws/agents.erase` for `reviewer`.
 22. Delete `<review-path>` after its findings are no longer needed.

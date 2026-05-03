@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
@@ -60,9 +61,20 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
 	encoder := json.NewEncoder(out)
+	var writeMu sync.Mutex
+	var wg sync.WaitGroup
+	var requests sync.Map
+
+	writeResponse := func(resp response) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return encoder.Encode(resp)
+	}
+
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
+			wg.Wait()
 			return ctx.Err()
 		default:
 		}
@@ -73,24 +85,35 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		var req request
 		if err := json.Unmarshal(line, &req); err != nil {
 			appendDebugEvent("parse_error", map[string]any{"error": err.Error()})
-			if err := encoder.Encode(errorResponse(nil, -32700, "parse error")); err != nil {
+			if err := writeResponse(errorResponse(nil, -32700, "parse error")); err != nil {
 				return err
 			}
 			continue
 		}
 		if len(req.ID) == 0 {
-			s.handleNotification(req)
+			s.handleNotification(req, &requests)
 			continue
 		}
 		appendDebugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
-		if err := encoder.Encode(s.handle(req)); err != nil {
-			return err
-		}
+		reqCtx, cancel := context.WithCancel(ctx)
+		id := rawMessageString(req.ID)
+		requests.Store(id, cancel)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer cancel()
+			defer requests.Delete(id)
+			if err := writeResponse(s.handle(reqCtx, req)); err != nil {
+				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+			}
+		}()
 	}
-	return scanner.Err()
+	err := scanner.Err()
+	wg.Wait()
+	return err
 }
 
-func (s *Server) handleNotification(req request) {
+func (s *Server) handleNotification(req request, requests *sync.Map) {
 	switch req.Method {
 	case "notifications/cancelled":
 		var params cancelledNotificationParams
@@ -98,9 +121,16 @@ func (s *Server) handleNotification(req request) {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			fields["error"] = err.Error()
 		} else {
-			fields["request_id"] = rawMessageString(params.RequestID)
+			requestID := rawMessageString(params.RequestID)
+			fields["request_id"] = requestID
 			if params.Reason != "" {
 				fields["reason"] = params.Reason
+			}
+			if cancelValue, ok := requests.Load(requestID); ok {
+				if cancel, ok := cancelValue.(context.CancelFunc); ok {
+					cancel()
+					fields["matched"] = true
+				}
 			}
 		}
 		appendDebugEvent("notification.cancelled", fields)
@@ -109,7 +139,7 @@ func (s *Server) handleNotification(req request) {
 	}
 }
 
-func (s *Server) handle(req request) response {
+func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
@@ -123,9 +153,9 @@ func (s *Server) handle(req request) response {
 			},
 		}}
 	case "tools/list":
-		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": tools()}}
+		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": filteredTools()}}
 	case "tools/call":
-		return s.callTool(req)
+		return s.callTool(ctx, req)
 	default:
 		return errorResponse(req.ID, -32601, "method not found")
 	}
@@ -166,13 +196,16 @@ func rawMessageString(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func (s *Server) callTool(req request) response {
+func (s *Server) callTool(ctx context.Context, req request) response {
 	var params struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, -32602, "invalid params")
+	}
+	if !toolAllowed(params.Name) {
+		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current ws MCP profile: %s", params.Name))
 	}
 
 	switch params.Name {
@@ -317,20 +350,7 @@ func (s *Server) callTool(req request) response {
 		}
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
-		_, text, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
-			Root:   root,
-			Name:   name,
-			Prompt: prompt,
-		})
-		return toolTextResponse(req.ID, text, err)
-	case "agents.call_async":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
-		}
-		name, _ := params.Arguments["name"].(string)
-		prompt, _ := params.Arguments["prompt"].(string)
-		result, err := wsagent.NewManager(wsagent.Options{}).CallAsync(wsagent.CallAsyncOptions{
+		result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
 			Root:   root,
 			Name:   name,
 			Prompt: prompt,
@@ -338,7 +358,7 @@ func (s *Server) callTool(req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\n", result.AgentName, result.Status, result.PID), nil)
+		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.wait | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
 	case "agents.wait":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -349,6 +369,7 @@ func (s *Server) callTool(req request) response {
 			Root:    root,
 			Name:    name,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
+			Context: ctx,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.status":
@@ -407,29 +428,6 @@ func (s *Server) callTool(req request) response {
 		}
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
-		return toolTextResponse(req.ID, text, err)
-	case "agents.oneshot":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
-		}
-		name, _ := params.Arguments["name"].(string)
-		backend, _ := params.Arguments["backend"].(string)
-		tier, _ := params.Arguments["tier"].(string)
-		model, _ := params.Arguments["model"].(string)
-		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
-		prompt, _ := params.Arguments["prompt"].(string)
-		text, err := wsagent.NewManager(wsagent.Options{}).OneShot(wsagent.OneShotOptions{
-			Root:             root,
-			Name:             name,
-			Backend:          backend,
-			Tier:             tier,
-			Model:            model,
-			Prompts:          stringList(params.Arguments["prompts"]),
-			PromptRefs:       stringList(params.Arguments["prompt_refs"]),
-			SystemPromptText: systemPromptText,
-			Prompt:           prompt,
-		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.print":
 		root := s.root
@@ -687,19 +685,6 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agents.call",
-			"description": "Call a registered ws agent and resume its stored backend session when available.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
-					"name":   stringProperty("Agent name."),
-					"prompt": stringProperty("Prompt to send to the agent."),
-				},
-				"required": []string{"name", "prompt"},
-			},
-		},
-		{
-			"name":        "agents.call_async",
 			"description": "Start an asynchronous call for a registered ws agent and return immediately.",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -787,25 +772,6 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "agents.oneshot",
-			"description": "Register, call, and erase a temporary ws agent.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root":               stringProperty("Repository root. Defaults to the server root."),
-					"name":               stringProperty("Optional temporary agent name."),
-					"backend":            stringProperty("Backend name. Defaults to codex."),
-					"tier":               stringProperty("Workload tier: light, core, or deep. Defaults to core."),
-					"model":              stringProperty("Optional concrete backend model override."),
-					"prompts":            stringArrayProperty("Embedded prompt stems or absolute prompt paths."),
-					"prompt_refs":        stringArrayProperty("Logical role prompt references."),
-					"system_prompt_text": stringProperty("Optional materialized system prompt text."),
-					"prompt":             stringProperty("Prompt to send to the temporary agent."),
-				},
-				"required": []string{"prompt"},
-			},
-		},
-		{
 			"name":        "agents.print",
 			"description": "Return the last plain-text output for a registered ws agent.",
 			"inputSchema": map[string]any{
@@ -830,6 +796,49 @@ func tools() []map[string]any {
 			},
 		},
 	}
+}
+
+func filteredTools() []map[string]any {
+	base := tools()
+	filtered := make([]map[string]any, 0, len(base))
+	for _, tool := range base {
+		name, _ := tool["name"].(string)
+		if toolAllowed(name) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+func toolAllowed(name string) bool {
+	if allowed := explicitAllowedTools(); len(allowed) > 0 {
+		return allowed[name]
+	}
+	switch strings.TrimSpace(os.Getenv("WS_MCP_TOOL_PROFILE")) {
+	case "", "lead":
+		return true
+	case "delegate":
+		return !strings.HasPrefix(name, "agents.")
+	case "leaf":
+		return !strings.HasPrefix(name, "agents.") && name != "subquery"
+	default:
+		return true
+	}
+}
+
+func explicitAllowedTools() map[string]bool {
+	raw := strings.TrimSpace(os.Getenv("WS_MCP_ALLOWED_TOOLS"))
+	if raw == "" {
+		return nil
+	}
+	allowed := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		name := strings.TrimSpace(part)
+		if name != "" {
+			allowed[name] = true
+		}
+	}
+	return allowed
 }
 
 func agentDebugSchema(linesDescription string) map[string]any {

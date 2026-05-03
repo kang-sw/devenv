@@ -16,7 +16,7 @@ description: Reconstruct specs from scratch by surveying the project, confirming
 - Call `ws/spec_stem.generate` before every anchor insertion.
 - Call `ws/spec_index.verify` after every spec file write or update.
 - Dispatch all survey delegates for a phase in one response turn when the host supports parallel calls.
-- Use `ws/agents.oneshot` only for the clerk-style ticket association step, and pass self-contained inline instructions.
+- Use `ws/subquery` only for the clerk-style ticket association step, and pass self-contained inline instructions.
 - Commit generated spec and ticket association changes once per completed domain.
 - Keep all AI-authored spec, ticket, and commit text in English.
 - Do not read convention files from host-local plugin source paths.
@@ -120,7 +120,7 @@ Wait for all four survey results before synthesizing.
 
 1. Collect relevant `wip/` and `todo/` tickets from the domain survey output.
 2. If no relevant active tickets exist, commit the domain spec changes and skip to **7. Complete domain**.
-3. Call MCP tool `ws/agents.oneshot` for clerk-style ticket association with a self-contained inline prompt using `Templates / Ticket Association Prompt`.
+3. Call MCP tool `ws/subquery` for clerk-style ticket association with a self-contained inline prompt using `Templates / Ticket Association Prompt`.
 4. Do not pass a prompt preset or `prompt_refs`; include all conventions and task instructions in the inline prompt.
 5. Review the ticket association report.
 6. Resolve any open questions with the user before committing ticket association changes.

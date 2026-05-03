@@ -12,7 +12,7 @@ description: Delegate a ticket or inline implementation target through a brief, 
 - The implementer reads only the brief and optional plan; it must not read the ticket directly.
 - The implementer may commit logical implementation checkpoints on the current branch.
 - Register every named agent through `ws/agents.register` with embedded prompt stems.
-- Use `ws/agents.call_async` for implementer and reviewer turns that may run long.
+- Use `ws/agents.call` for implementer and reviewer turns that may run long.
 - Use `ws/path.generate` for reviewer finding files.
 - Reviewers write complete findings to files and return only compact clean or non-clean summaries.
 - Fit reviewers may consult the ticket for architectural headroom; correctness and test reviewers stay scoped to diff, brief, and tests.
@@ -26,12 +26,12 @@ description: Delegate a ticket or inline implementation target through a brief, 
 1. Parse the request as either a ticket path, ticket stem, or inline implementation target.
 2. Record `<start-commit>` from the current `HEAD`.
 3. If ticket-driven, read the ticket and identify the target phase, scope, constraints, skeleton metadata, and ticket stem.
-4. Call MCP tool `ws/agents.oneshot` with `prompts: ["project-survey"]` and `Templates / Project Survey Prompt`.
+4. Call MCP tool `ws/subquery` with `Templates / Project Survey Prompt`.
 5. Write `<brief-path>` using `Templates / Brief` under `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`.
 6. Commit the brief as a lead-owned checkpoint before delegating implementation.
 7. Apply `judge: plan-depth`; default to `survey` when uncertain between `as-is` and `survey`.
-8. If plan depth is `survey`, call `ws/agents.oneshot` with `prompts: ["plan-populator-survey"]` and `Templates / Plan Population Prompt`.
-9. If plan depth is `research`, call `ws/agents.oneshot` with `prompts: ["plan-populator-research"]` and `Templates / Plan Population Prompt`.
+8. If plan depth is `survey`, call `ws/subquery` with `Templates / Plan Population Prompt`.
+9. If plan depth is `research`, call `ws/subquery` with `deep_research: true` and `Templates / Plan Population Prompt`.
 10. If a plan was written, review it and commit the plan as a lead-owned checkpoint before implementation.
 11. Apply `judge: skeleton-gate`; stop and suggest `ws:write-skeleton` when skeleton work is required first.
 12. Identify the verification commands or test targets the implementer must run, using existing project documentation when available.
@@ -41,16 +41,16 @@ description: Delegate a ticket or inline implementation target through a brief, 
 16. Call MCP tool `ws/agents.register` for `reviewer-correctness` with `prompts: ["code-reviewer", "code-review-correctness"]`.
 17. Call MCP tool `ws/agents.register` for `reviewer-fit` with `prompts: ["code-reviewer", "code-review-fit"]`.
 18. Call MCP tool `ws/agents.register` for `reviewer-test` with `prompts: ["code-reviewer", "code-review-test"]`.
-19. Call MCP tool `ws/agents.call_async` for `implementer` using `Templates / Implementer Prompt`.
+19. Call MCP tool `ws/agents.call` for `implementer` using `Templates / Implementer Prompt`.
 20. Use `ws/agents.status` or `ws/agents.tail` while the implementer is running only when progress or diagnostics are needed.
 21. Call MCP tool `ws/agents.wait` for `implementer` when final implementation output is needed.
 22. If the wait result lacks a usable summary, call MCP tool `ws/agents.print` for `implementer`.
 23. Determine `<implementation-range>` from commits created after `<start-commit>` and the implementer report.
 24. Apply `judge: partition-allocation`; default to all three reviewer partitions for non-trivial implementation.
-25. For every selected reviewer, call MCP tool `ws/agents.call_async` with the matching reviewer prompt template.
+25. For every selected reviewer, call MCP tool `ws/agents.call` with the matching reviewer prompt template.
 26. Use `ws/agents.wait` for each selected reviewer and call `ws/agents.print` for any reviewer whose wait output is incomplete.
 27. If every reviewer summary is `[clean]`, proceed to cleanup.
-28. If any reviewer summary is `[non-clean]`, increment `<relay-cycle>` and call `ws/agents.call_async` for `implementer` using `Templates / Fix Prompt`.
+28. If any reviewer summary is `[non-clean]`, increment `<relay-cycle>` and call `ws/agents.call` for `implementer` using `Templates / Fix Prompt`.
 29. After each implementer fix turn, call `ws/agents.wait` for `implementer` and update `<implementation-range>` through `HEAD`.
 30. Re-run selected reviewers with `Templates / Re-Review Prompts`; reviewers overwrite their existing finding files.
 31. At relay cycle 2, read maintained disputes from review files and decide whether to accept the implementer disposition or override it.

@@ -283,11 +283,22 @@ func upsertJSON(path string, next any) error {
 	if err != nil {
 		return fmt.Errorf("marshal metadata %s: %w", path, err)
 	}
-	tmp := fmt.Sprintf("%s.%d.%d.tmp", path, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create metadata temp %s: %w", path, err)
+	}
+	tmp := tmpFile.Name()
+	if _, err := tmpFile.Write(append(data, '\n')); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write metadata %s: %w", tmp, err)
 	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close metadata %s: %w", tmp, err)
+	}
 	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("replace metadata %s: %w", path, err)
 	}
 	return nil

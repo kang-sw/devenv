@@ -210,7 +210,7 @@ func TestCallCreatesAndResumesSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agent, text, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "first"})
+	agent, text, err := manager.syncCall(syncCallOptions{Root: repo, Name: "impl", Prompt: "first"})
 	if err != nil {
 		t.Fatalf("first Call returned error: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestCallCreatesAndResumesSession(t *testing.T) {
 		t.Fatalf("sync call passed stream writers: stdout=%T stderr=%T", runner.calls[0].Stdout, runner.calls[0].Stderr)
 	}
 
-	agent, text, err = manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "second"})
+	agent, text, err = manager.syncCall(syncCallOptions{Root: repo, Name: "impl", Prompt: "second"})
 	if err != nil {
 		t.Fatalf("second Call returned error: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestCallStoresSessionIDAfterSynchronousCompletion(t *testing.T) {
 		Now:       func() time.Time { return testNow },
 		Runner:    sessionPersistRunner{t: t, agentFile: layout.AgentFile},
 	})
-	agent, text, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "work"})
+	agent, text, err := manager.syncCall(syncCallOptions{Root: repo, Name: "impl", Prompt: "work"})
 	if err != nil {
 		t.Fatalf("Call returned error: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestCallStoresSessionIDAfterSynchronousCompletion(t *testing.T) {
 	}
 }
 
-func TestCallAsyncStartsWorkerAndRejectsBusyAgent(t *testing.T) {
+func TestCallStartsWorkerAndRejectsBusyAgent(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	starter := &fakeWorkerStarter{pid: 4567}
@@ -282,9 +282,9 @@ func TestCallAsyncStartsWorkerAndRejectsBusyAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := manager.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "do work"})
+	result, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "do work"})
 	if err != nil {
-		t.Fatalf("CallAsync returned error: %v", err)
+		t.Fatalf("Call returned error: %v", err)
 	}
 	if result.AgentName != "impl" || result.Status != CallStatusRunning || result.PID != 4567 {
 		t.Fatalf("async result mismatch: %+v", result)
@@ -310,7 +310,7 @@ func TestCallAsyncStartsWorkerAndRejectsBusyAgent(t *testing.T) {
 	if call.Status != CallStatusRunning || call.PID != 4567 || call.PromptPath != "current/prompt.md" {
 		t.Fatalf("current call mismatch: %+v", call)
 	}
-	if _, err := manager.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "again"}); err == nil || !strings.Contains(err.Error(), "active call") {
+	if _, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "again"}); err == nil || !strings.Contains(err.Error(), "active call") {
 		t.Fatalf("expected busy rejection, got %v", err)
 	}
 }
@@ -327,7 +327,7 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -413,7 +413,7 @@ func TestWaitFinalizesDeadAsyncWorker(t *testing.T) {
 	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+	if _, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,7 +452,7 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -482,7 +482,7 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "panic-impl"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.CallAsync(CallAsyncOptions{Root: repo, Name: "panic-impl", Prompt: "panic prompt"}); err != nil {
+	if _, err := base.Call(CallOptions{Root: repo, Name: "panic-impl", Prompt: "panic prompt"}); err != nil {
 		t.Fatal(err)
 	}
 	panicManager := NewManager(Options{
@@ -591,7 +591,7 @@ func TestCancelReportsCleanupNeededWhenOwnedProcessSurvives(t *testing.T) {
 	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "long review"}); err != nil {
+	if _, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "long review"}); err != nil {
 		t.Fatal(err)
 	}
 	status, err := manager.Cancel(repo, "impl")
@@ -735,7 +735,7 @@ func TestRegisterResetsExistingAgentUnlessCurrentCallActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "first"}); err != nil {
+	if _, _, err := manager.syncCall(syncCallOptions{Root: repo, Name: "impl", Prompt: "first"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -765,7 +765,7 @@ func TestRegisterResetsExistingAgentUnlessCurrentCallActive(t *testing.T) {
 	}
 }
 
-func TestOneShotErasesAgentDirectory(t *testing.T) {
+func TestInternalOneShotErasesAgentDirectory(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	manager := NewManager(Options{
@@ -773,9 +773,9 @@ func TestOneShotErasesAgentDirectory(t *testing.T) {
 		Now:       func() time.Time { return testNow },
 		Runner:    &fakeRunner{},
 	})
-	text, err := manager.OneShot(OneShotOptions{Root: repo, Name: "tmp", Prompt: "hello"})
+	text, err := manager.oneShot(oneShotOptions{Root: repo, Name: "tmp", Prompt: "hello"})
 	if err != nil {
-		t.Fatalf("OneShot returned error: %v", err)
+		t.Fatalf("oneShot returned error: %v", err)
 	}
 	if text != "reply: hello\n" {
 		t.Fatalf("oneshot text = %q", text)

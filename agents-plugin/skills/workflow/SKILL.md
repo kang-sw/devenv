@@ -43,8 +43,7 @@ Examples:
 
 Use MCP tools only when they are available in the current `ws` runtime. The
 minimum delegate tools `ws/subquery`, `ws/agents.register`, `ws/agents.call`,
-`ws/agents.call_async`, `ws/agents.oneshot`, `ws/agents.print`, and
-`ws/agents.erase` are available. The async inspection tools `ws/agents.wait`,
+`ws/agents.print`, and `ws/agents.erase` are available. The async inspection tools `ws/agents.wait`,
 `ws/agents.status`, `ws/agents.tail`, and `ws/agents.cancel` are available for
 the current named agent call. `ws/path.generate` is available for generated
 workflow artifact paths; its initial supported kind is `review`. `ws/runtime.info`
@@ -56,19 +55,18 @@ instead of naming a host-specific helper command as the shared primitive.
 
 ### judge: delegate-pattern
 
-Use `ws/agents.oneshot` for one-turn fact finding, scoped surveys, and subquery-style
+Use `ws/subquery` for one-turn fact finding, scoped surveys, and subquery-style
 answers where no future resume is needed. Use `ws/agents.register` plus
-`ws/agents.call` when a named task agent needs conversational continuity and each
-turn should complete before the lead proceeds. Use `ws/agents.register` plus
-`ws/agents.call_async` when the delegate may run long enough that the lead needs
-control back before completion. Use `ws/agents.wait` to collect final async
-output, `ws/agents.status` to decide whether to wait or continue, `ws/agents.tail`
-to inspect evidence and diagnostics, and `ws/agents.cancel` only when stopping the
-current task is more valuable than preserving backend continuity.
+`ws/agents.call` when a named task agent needs conversational continuity.
+`ws/agents.call` starts the turn asynchronously and returns control promptly.
+Use `ws/agents.wait` to collect final output, `ws/agents.status` to decide
+whether to wait or continue, `ws/agents.tail` to inspect evidence and
+diagnostics, and `ws/agents.cancel` only when stopping the current task is more
+valuable than preserving backend continuity.
 
 ### judge: specialized-workflow-gap
 
-Treat `ws/subquery` as an available MCP tool composed over `ws/agents.oneshot`.
+Treat `ws/subquery` as an available purpose-specific one-turn delegation tool.
 Treat `ws/path.generate` as the available path allocation primitive for
 file-backed workflow artifacts such as review findings.
 Treat API documentation routing as planned until the runtime provides the
@@ -78,33 +76,20 @@ even though basic async cancellation is available.
 
 ## Templates
 
-### One-Shot Delegate
+### One-Turn Delegate
 
 ```text
-Call MCP tool `ws/agents.oneshot` with:
+Call MCP tool `ws/subquery` with:
 - `root`: current repository root when the host does not supply it automatically
-- `name`: optional descriptive temporary name
-- `backend`: `codex`
-- `tier`: `light` for narrow lookup, `core` for normal survey, `deep` for broad tracing
-- `prompts`: embedded prompt stems or absolute prompt paths when a preset chain exists
-- `system_prompt_text`: self-contained delegate instructions when no preset chain exists
-- `prompt`: the exact scoped question or task
+- `question`: the exact scoped question
+- `deep_research`: true only for broad tracing
 ```
 
-### Persistent Synchronous Delegate
+### Persistent Delegate
 
 ```text
 1. Call MCP tool `ws/agents.register` with a stable task name and either `prompts` or self-contained `system_prompt_text`.
-2. Call MCP tool `ws/agents.call` for each turn that must complete before the lead proceeds.
-3. Call MCP tool `ws/agents.print` when the latest output must be recovered.
-4. Call MCP tool `ws/agents.erase` after the task-scoped session is no longer needed.
-```
-
-### Persistent Asynchronous Delegate
-
-```text
-1. Call MCP tool `ws/agents.register` with a stable task name and either `prompts` or self-contained `system_prompt_text`.
-2. Call MCP tool `ws/agents.call_async` for a long-running delegate turn.
+2. Call MCP tool `ws/agents.call` for the next delegate turn.
 3. Call MCP tool `ws/agents.status` to inspect current state without blocking.
 4. Call MCP tool `ws/agents.tail` to inspect recent events, stdout, stderr, and output.
 5. Call MCP tool `ws/agents.wait` with a bounded timeout when final output is needed.

@@ -31,15 +31,14 @@ rather than expensive dogfood exercises.
 
 In scope:
 
-- Stabilize `ws/agents.*` process lifecycle for Codex-backed named and oneshot
-  agents.
+- Stabilize `ws/agents.*` process lifecycle for Codex-backed named agents.
 - Make async calls observable without forcing the lead to repeatedly inspect
   raw tail output.
 - Ensure cancellation, timeout, and cleanup semantics match the process tree.
 - Reduce lead context usage by returning concise structured status and final
   summaries.
 - Preserve the durable named-agent conversation model: `agents.register` resets
-  or creates a task-scoped agent name, and repeated `agents.call_async` calls on
+  or creates a task-scoped agent name, and repeated `agents.call` calls on
   that name continue the conversation.
 - Keep the runtime host-neutral where possible while allowing Codex-specific
   adapter behavior where Codex CLI semantics require it.
@@ -56,9 +55,8 @@ Out of scope:
 
 - Treat `write-code` dogfood failures as runtime blockers before porting heavier
   orchestration skills such as `implement`, `proceed`, or `sprint`.
-- Keep `call_async` as the explicit asynchronous verb. `call` remains the
-  synchronous operation, and `oneshot` remains a convenience route that should be
-  implemented in terms of lower-level runtime primitives where practical.
+- Make `agents.call` the asynchronous start operation and remove the temporary
+  `agents.call_async` and generic `agents.oneshot` surfaces before release.
 - Prefer structured lifecycle fields over model interpretation of raw logs:
   process state, backend state, session id, started/completed timestamps,
   cancellation result, exit code, and final-output availability should be visible
@@ -247,9 +245,18 @@ Success criteria:
 ### Phase 4: Nonblocking MCP orchestration
 
 Make ws MCP request handling and agent workflow calls safe under host tool-call
-timeouts. The runtime should not let one long `agents.wait`, `agents.oneshot`,
-or synchronous `agents.call` monopolize the stdio server and block unrelated
-status/debug calls.
+timeouts. The runtime should not let one long `agents.wait` monopolize the stdio
+server and block unrelated status/debug calls.
+
+The public agent API should remove the temporary middle state before release.
+`agents.call` becomes the asynchronous enqueue/start operation currently named
+`agents.call`: it returns promptly with running state, PID, and follow-up
+commands. `agents.call` is removed rather than kept as a compatibility
+alias because this surface has not shipped. `agents.oneshot` is also removed
+from the generic agent API; callers that need one-turn behavior should compose
+`agents.register` + `agents.call` + bounded `agents.wait`/`agents.print` +
+`agents.erase`, while purpose-specific helpers such as `subquery` may keep a
+separate tool name.
 
 This phase should also introduce MCP tool profiles for delegated Codex
 subprocesses. The runtime needs three practical layers:
@@ -270,18 +277,29 @@ or narrow it for tests and special adapters. Tool filtering must apply both to
 the purpose is to prevent accidental recursive orchestration by changing the
 available tool prior.
 
+Bounded blocking waits remain useful for ergonomics, but they must be
+implemented as cancellable per-request work after the stdio loop can process
+other messages concurrently. A pre-concurrency smoke showed that cancelling a
+long `agents.wait` from Codex does not prove whether Codex sends
+`notifications/cancelled`: the sequential server is still inside the wait
+handler and cannot read queued notifications or later `agents.status` calls.
+Cancellation notification verification must therefore happen after concurrent
+request handling and request-id-scoped contexts exist.
+
 Success criteria:
 
 - `ServeStdio` can process multiple JSON-RPC requests concurrently while writes
   to stdout remain atomic and response IDs remain correct.
 - Long-running agent work is represented as async state, not a long MCP call.
-- `agents.wait` becomes a short poll operation by default: it returns completed
-  output when ready, otherwise returns running/failed/cancelled state and a
-  follow-up hint without blocking for host-scale timeouts.
-- `agents.oneshot` is reworked or deprecated in favor of a register +
-  `call_async` pair with generated temporary names and explicit cleanup.
-- `agents.call` is deprecated or constrained so shared workflow skills do not
-  depend on synchronous long-running calls.
+- `agents.call` is the asynchronous start operation and returns promptly with
+  running state and follow-up commands.
+- `agents.call_async` and `agents.oneshot` are removed from MCP tools, CLI
+  runtime metadata, and shared skill text before release.
+- `agents.wait` supports short polling by default and bounded blocking waits
+  when a timeout is explicitly requested; either mode must leave the MCP server
+  responsive to status/debug calls.
+- `notifications/cancelled` is logged and, after concurrent request handling,
+  cancels the matching in-flight request context when the host sends it.
 - MCP tool profiles exist for `lead`, `delegate`, and `leaf`; `leaf` hides and
   rejects recursive delegation tools, while `delegate` can retain bounded helper
   delegation such as `subquery` or future `ask-api`.
@@ -290,3 +308,44 @@ Success criteria:
 - A regression smoke proves that a running or waiting agent call does not block
   a separate `agents.status` or `agents.debug.*` call through the same MCP
   server.
+
+### Result - 2026-05-03
+
+Implemented the nonblocking orchestration slice in `ws-mcp`. `ServeStdio` now
+dispatches JSON-RPC requests concurrently while serializing stdout writes, and
+tracks in-flight request IDs with cancellable contexts. ID-less
+`notifications/cancelled` messages are logged through `WS_MCP_DEBUG_LOG` and
+cancel the matching request context when the notification is read. This does
+not prove Codex sends cancellation notifications on user interrupt; the earlier
+pre-concurrency smoke showed only that a sequential wait handler prevented the
+server from reading queued notifications or later status calls.
+
+The generic agent API surface was simplified before release. `agents.call` now
+starts the async worker and returns promptly with running state, PID, and
+follow-up commands. The temporary `agents.call_async` and generic
+`agents.oneshot` surfaces were removed from MCP tools, CLI commands,
+`runtime.json`, and shared skill text. One-turn scoped lookup remains available
+as the purpose-specific `subquery` tool, while persistent delegates use
+`agents.register` + `agents.call` + `agents.wait/status/print` + `agents.erase`.
+
+`agents.wait` now short-polls by default: when a call is still active and no
+timeout is supplied, it returns running state and follow-up guidance instead of
+blocking indefinitely. Supplying `timeout_seconds` keeps bounded blocking wait
+ergonomics, and the concurrent MCP server keeps unrelated status/debug/list
+requests responsive while that wait is active.
+
+MCP tool profiles were added through `WS_MCP_TOOL_PROFILE` and
+`WS_MCP_ALLOWED_TOOLS`. `lead` exposes the full surface. `delegate` hides and
+rejects durable `agents.*` orchestration while retaining helper tools such as
+`subquery`. `leaf` also hides and rejects `subquery`. Filtering applies to both
+`tools/list` and `tools/call`. Codex-backed async worker turns now receive
+`WS_MCP_TOOL_PROFILE=leaf`, while the internal sync path used by `subquery`
+receives `delegate`.
+
+Verification covered `cd agents-plugin-tool && go test ./...`, runtime JSON
+parsing, rebuilding `agents-plugin/.runtime/darwin-arm64/ws-mcp`, direct MCP
+tool-surface smoke, leaf-profile smoke, installed Codex cache launcher smoke,
+`claude plugin validate agents-plugin`, and `git diff --check`. The current
+Codex plugin cache binary, launcher, and runtime metadata were refreshed
+manually for this development machine; a fresh Codex session is still needed to
+load the new tool surface.

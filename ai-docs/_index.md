@@ -126,9 +126,8 @@ runtime and read through `ws/convention.read`.
 
 Agent runtime prototype: `ai-docs/ref/ws-agent-runtime.md`. `ws-mcp` exposes
 minimum MCP tools `ws/agents.register`, `ws/agents.call`,
-`ws/agents.call_async`, `ws/agents.wait`, `ws/agents.status`,
-`ws/agents.tail`, `ws/agents.cancel`, `ws/agents.oneshot`, `ws/agents.print`,
-and `ws/agents.erase`, plus matching CLI fallback subcommands under
+`ws/agents.wait`, `ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`,
+`ws/agents.print`, and `ws/agents.erase`, plus matching CLI fallback subcommands under
 `ws-mcp agents`. Both surfaces are backed by `internal/wsagent`. The Codex
 backend stores thread ids in `agent.json`, resumes with
 `codex exec resume --json <thread-id>`, and persists plain-text output in
@@ -136,7 +135,7 @@ backend stores thread ids in `agent.json`, resumes with
 through `prompts` with `prompt_refs` retained as a migration alias. The first
 embedded prompt bundle contains `code-reviewer`, `code-review-correctness`,
 `code-review-fit`, and `skeleton-writer`; `runtime.json` records the expected
-bundle hash for launcher drift detection. `ws/agents.call_async` writes a
+bundle hash for launcher drift detection. `ws/agents.call` writes a
 current prompt snapshot, starts a cache-local `agents run-current` worker, and
 captures backend streams under
 `current/` while the lead regains control. The wait/status/tail/cancel tools
@@ -321,8 +320,10 @@ do not add `spec:` frontmatter, run `ws:update-spec`, or update
 
 `write-code` is ported and closed in `agents-plugin/skills/write-code`; Codex
 plugin visibility and installed MCP runtime metadata were confirmed after plugin
-refresh. `260503-epic-ws-agent-workflow-stability` Phases 1-2 added lifecycle
-hardening and `agents.debug.*` diagnostics, but dogfood showed that long
-`agents.wait`/`oneshot` calls can still block the single stdio MCP server; the
-next critical slice is nonblocking MCP orchestration, async-only agent flows,
-and three MCP tool profiles: `lead`, `delegate`, and `leaf`.
+refresh. `260503-epic-ws-agent-workflow-stability` Phases 1, 2, and 4 now cover
+lifecycle hardening, `agents.debug.*` diagnostics, concurrent MCP stdio
+handling, `agents.call` as the async start primitive, removal of
+`agents.call_async`/generic `agents.oneshot`, short-poll default wait behavior,
+and MCP tool profiles `lead`, `delegate`, and `leaf`. The next critical slice is
+a small regression dogfood of `write-code` or a simpler named-agent workflow
+after refreshing the active Codex session.

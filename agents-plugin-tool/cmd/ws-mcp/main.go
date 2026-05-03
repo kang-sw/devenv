@@ -274,8 +274,6 @@ func agents(args []string) {
 		agentsRegister(args[1:])
 	case "call":
 		agentsCall(args[1:])
-	case "call-async":
-		agentsCallAsync(args[1:])
 	case "run-current":
 		agentsRunCurrent(args[1:])
 	case "wait":
@@ -288,8 +286,6 @@ func agents(args []string) {
 		agentsDebug(args[1:])
 	case "cancel":
 		agentsCancel(args[1:])
-	case "oneshot":
-		agentsOneShot(args[1:])
 	case "print":
 		agentsPrint(args[1:])
 	case "erase":
@@ -301,7 +297,7 @@ func agents(args []string) {
 }
 
 func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|call-async|run-current|wait|status|tail|debug|cancel|oneshot|print|erase>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|run-current|wait|status|tail|debug|cancel|print|erase>")
 }
 
 type multiFlag []string
@@ -360,7 +356,7 @@ func agentsCall(args []string) {
 	if err != nil {
 		fatal("agents call", err)
 	}
-	_, text, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
+	result, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
 		Root:   defaultRoot(*root),
 		Name:   *name,
 		Prompt: prompt,
@@ -368,29 +364,7 @@ func agentsCall(args []string) {
 	if err != nil {
 		fatal("agents call", err)
 	}
-	fmt.Print(text)
-}
-
-func agentsCallAsync(args []string) {
-	fs := flag.NewFlagSet("agents call-async", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
-	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
-	_ = fs.Parse(args)
-
-	prompt, err := promptFromArgs(fs.Args(), *promptFile)
-	if err != nil {
-		fatal("agents call-async", err)
-	}
-	result, err := wsagent.NewManager(wsagent.Options{}).CallAsync(wsagent.CallAsyncOptions{
-		Root:   defaultRoot(*root),
-		Name:   *name,
-		Prompt: prompt,
-	})
-	if err != nil {
-		fatal("agents call-async", err)
-	}
-	fmt.Printf("%s\t%s\tpid=%d\n", result.AgentName, result.Status, result.PID)
+	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: agents.wait | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID)
 }
 
 func agentsRunCurrent(args []string) {
@@ -507,46 +481,6 @@ func agentsCancel(args []string) {
 	text, err := wsagent.NewManager(wsagent.Options{}).Cancel(defaultRoot(*root), *name)
 	if err != nil {
 		fatal("agents cancel", err)
-	}
-	fmt.Print(text)
-}
-
-func agentsOneShot(args []string) {
-	fs := flag.NewFlagSet("agents oneshot", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "temporary agent name")
-	backend := fs.String("backend", "codex", "agent backend")
-	tier := fs.String("tier", "", "workload tier")
-	model := fs.String("model", "", "backend model override")
-	systemFile := fs.String("system-prompt-file", "", "system prompt file")
-	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
-	var prompts multiFlag
-	var promptRefs multiFlag
-	fs.Var(&prompts, "prompt", "embedded prompt stem or absolute prompt path")
-	fs.Var(&promptRefs, "prompt-ref", "logical prompt reference")
-	_ = fs.Parse(args)
-
-	systemText, err := readOptionalFile(*systemFile)
-	if err != nil {
-		fatal("agents oneshot", err)
-	}
-	prompt, err := promptFromArgs(fs.Args(), *promptFile)
-	if err != nil {
-		fatal("agents oneshot", err)
-	}
-	text, err := wsagent.NewManager(wsagent.Options{}).OneShot(wsagent.OneShotOptions{
-		Root:             defaultRoot(*root),
-		Name:             *name,
-		Backend:          *backend,
-		Tier:             *tier,
-		Model:            *model,
-		Prompts:          prompts,
-		PromptRefs:       promptRefs,
-		SystemPromptText: systemText,
-		Prompt:           prompt,
-	})
-	if err != nil {
-		fatal("agents oneshot", err)
 	}
 	fmt.Print(text)
 }

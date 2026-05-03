@@ -1,14 +1,19 @@
 package mcp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 )
@@ -43,48 +48,55 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if len(lines) != 7 {
 		t.Fatalf("expected 7 responses, got %d\n%s", len(lines), out.String())
 	}
+	byID := responseLinesByID(t, lines)
 
 	var listResp map[string]any
-	if err := json.Unmarshal([]byte(lines[1]), &listResp); err != nil {
+	if err := json.Unmarshal([]byte(byID["2"]), &listResp); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(lines[1], "project_tree") {
-		t.Fatalf("tools/list missing project_tree: %s", lines[1])
+	if !strings.Contains(byID["2"], "project_tree") {
+		t.Fatalf("tools/list missing project_tree: %s", byID["2"])
 	}
-	if !strings.Contains(lines[1], "agents.call_async") {
-		t.Fatalf("tools/list missing agents.call_async: %s", lines[1])
+	if !strings.Contains(byID["2"], "agents.call") {
+		t.Fatalf("tools/list missing agents.call: %s", byID["2"])
 	}
-	if !strings.Contains(lines[1], "subquery") {
-		t.Fatalf("tools/list missing subquery: %s", lines[1])
+	if strings.Contains(byID["2"], "agents.call_async") {
+		t.Fatalf("tools/list still includes agents.call_async: %s", byID["2"])
 	}
-	if !strings.Contains(lines[1], "path.generate") {
-		t.Fatalf("tools/list missing path.generate: %s", lines[1])
+	if strings.Contains(byID["2"], "agents.oneshot") {
+		t.Fatalf("tools/list still includes agents.oneshot: %s", byID["2"])
 	}
-	if !strings.Contains(lines[1], "runtime.info") {
-		t.Fatalf("tools/list missing runtime.info: %s", lines[1])
+	if !strings.Contains(byID["2"], "subquery") {
+		t.Fatalf("tools/list missing subquery: %s", byID["2"])
 	}
-	if !strings.Contains(lines[1], "\"prompts\"") {
-		t.Fatalf("tools/list missing prompts field: %s", lines[1])
+	if !strings.Contains(byID["2"], "path.generate") {
+		t.Fatalf("tools/list missing path.generate: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "runtime.info") {
+		t.Fatalf("tools/list missing runtime.info: %s", byID["2"])
+	}
+	if !strings.Contains(byID["2"], "\"prompts\"") {
+		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
 	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base"} {
-		if !strings.Contains(lines[1], tool) {
-			t.Fatalf("tools/list missing %s: %s", tool, lines[1])
+		if !strings.Contains(byID["2"], tool) {
+			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
 	}
-	if !strings.Contains(lines[2], "tickets:") {
-		t.Fatalf("project_tree response missing tickets: %s", lines[2])
+	if !strings.Contains(byID["3"], "tickets:") {
+		t.Fatalf("project_tree response missing tickets: %s", byID["3"])
 	}
-	if !strings.Contains(lines[3], "example") {
-		t.Fatalf("infra response missing example: %s", lines[3])
+	if !strings.Contains(byID["4"], "example") {
+		t.Fatalf("infra response missing example: %s", byID["4"])
 	}
-	if !strings.Contains(lines[4], "review-paths") || !strings.Contains(lines[4], "-direct.md") {
-		t.Fatalf("path.generate response missing review path: %s", lines[4])
+	if !strings.Contains(byID["5"], "review-paths") || !strings.Contains(byID["5"], "-direct.md") {
+		t.Fatalf("path.generate response missing review path: %s", byID["5"])
 	}
-	if !strings.Contains(lines[5], "prompt_bundle") || !strings.Contains(lines[5], "code-reviewer") {
-		t.Fatalf("runtime.info response missing prompt bundle: %s", lines[5])
+	if !strings.Contains(byID["6"], "prompt_bundle") || !strings.Contains(byID["6"], "code-reviewer") {
+		t.Fatalf("runtime.info response missing prompt bundle: %s", byID["6"])
 	}
-	if !strings.Contains(lines[6], "changed_files") || !strings.Contains(lines[6], "branch") {
-		t.Fatalf("git.status response missing status JSON: %s", lines[6])
+	if !strings.Contains(byID["7"], "changed_files") || !strings.Contains(byID["7"], "branch") {
+		t.Fatalf("git.status response missing status JSON: %s", byID["7"])
 	}
 }
 
@@ -115,13 +127,14 @@ func TestServeStdioAgentDebugToolCalls(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
 	}
-	if got := toolText(t, lines[0]); got != "stdout new\n" {
+	byID := responseLinesByID(t, lines)
+	if got := toolText(t, byID["1"]); got != "stdout new\n" {
 		t.Fatalf("stdout debug response = %q", got)
 	}
-	if got := toolText(t, lines[1]); got != "runtime new\n" {
+	if got := toolText(t, byID["2"]); got != "runtime new\n" {
 		t.Fatalf("runtime debug response = %q", got)
 	}
-	if got := toolText(t, lines[2]); !strings.Contains(got, "== stdout ==") || !strings.Contains(got, "stdout new") || !strings.Contains(got, "== runtime ==") {
+	if got := toolText(t, byID["3"]); !strings.Contains(got, "== stdout ==") || !strings.Contains(got, "stdout new") || !strings.Contains(got, "== runtime ==") {
 		t.Fatalf("debug tail response mismatch: %q", got)
 	}
 }
@@ -161,6 +174,91 @@ func TestServeStdioLogsCancellationNotificationsWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestServeStdioFiltersToolsByProfile(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_MCP_TOOL_PROFILE", "leaf")
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "subquery") {
+		t.Fatalf("leaf tools/list exposed recursive tools: %s", byID["1"])
+	}
+	if !strings.Contains(byID["1"], "runtime.info") {
+		t.Fatalf("leaf tools/list hid runtime.info: %s", byID["1"])
+	}
+	if !strings.Contains(byID["2"], "tool not available") {
+		t.Fatalf("leaf tools/call did not reject agents.status: %s", byID["2"])
+	}
+	if !strings.Contains(byID["3"], "prompt_bundle") {
+		t.Fatalf("leaf tools/call rejected runtime.info: %s", byID["3"])
+	}
+}
+
+func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	agent, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := wsagent.NewManager(wsagent.Options{}).BeginCurrentCall(layout, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.Status = wsagent.CallStatusRunning
+	call.PID = os.Getpid()
+	if err := os.WriteFile(layout.CurrentStateFile, mustMarshalForTest(t, call), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer := io.Pipe()
+	outReader, outWriter := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		done <- NewServer(root, "test").ServeStdio(context.Background(), reader, outWriter)
+		_ = outWriter.Close()
+	}()
+
+	fmt.Fprintln(writer, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.wait","arguments":{"name":"impl","timeout_seconds":2}}}`)
+	fmt.Fprintln(writer, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
+
+	lineCh := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(outReader)
+		for scanner.Scan() {
+			select {
+			case lineCh <- scanner.Text():
+			default:
+			}
+		}
+	}()
+	select {
+	case line := <-lineCh:
+		if !strings.Contains(line, `"id":2`) || !strings.Contains(line, "tools") {
+			t.Fatalf("first response was not tools/list while wait was running: %s", line)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("tools/list was blocked behind agents.wait")
+	}
+	_ = writer.Close()
+	_ = reader.Close()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ServeStdio did not exit after input close")
+	}
+}
+
 func mustWrite(t *testing.T, root, rel, text string) {
 	t.Helper()
 	path := filepath.Join(root, rel)
@@ -170,6 +268,15 @@ func mustWrite(t *testing.T, root, rel, text string) {
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func mustMarshalForTest(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func initGit(t *testing.T, root string) {
@@ -206,13 +313,14 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
 	}
+	byID := responseLinesByID(t, lines)
 
 	var diff struct {
 		Mode   string   `json:"mode"`
 		Paths  []string `json:"paths"`
 		Output string   `json:"output"`
 	}
-	if err := json.Unmarshal([]byte(toolText(t, lines[0])), &diff); err != nil {
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &diff); err != nil {
 		t.Fatal(err)
 	}
 	if diff.Mode != "name_only" || !strings.Contains(diff.Output, "file.txt") || len(diff.Paths) != 1 || diff.Paths[0] != "file.txt" {
@@ -227,7 +335,7 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 			Body    string `json:"body"`
 		} `json:"commits"`
 	}
-	if err := json.Unmarshal([]byte(toolText(t, lines[1])), &log); err != nil {
+	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &log); err != nil {
 		t.Fatal(err)
 	}
 	if log.Limit != 1 || !log.IncludeBody || len(log.Commits) != 1 || log.Commits[0].Subject != "initial" || log.Commits[0].Body != "body text" {
@@ -240,12 +348,40 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		Head      string `json:"head"`
 		MergeBase string `json:"merge_base"`
 	}
-	if err := json.Unmarshal([]byte(toolText(t, lines[2])), &mergeBase); err != nil {
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &mergeBase); err != nil {
 		t.Fatal(err)
 	}
 	if mergeBase.Base != "HEAD" || mergeBase.Head != "HEAD" || mergeBase.MergeBase != head {
 		t.Fatalf("merge-base response = %#v, want hash %s", mergeBase, head)
 	}
+}
+
+func responseLinesByID(t *testing.T, lines []string) map[string]string {
+	t.Helper()
+	byID := make(map[string]string, len(lines))
+	for _, line := range lines {
+		var resp struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			t.Fatal(err)
+		}
+		byID[rawIDForTest(t, resp.ID)] = line
+	}
+	return byID
+}
+
+func rawIDForTest(t *testing.T, raw json.RawMessage) string {
+	t.Helper()
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	var number int
+	if err := json.Unmarshal(raw, &number); err == nil {
+		return strconv.Itoa(number)
+	}
+	return string(raw)
 }
 
 func toolText(t *testing.T, line string) string {
