@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 )
 
@@ -139,6 +140,77 @@ func (s *Server) callTool(req request) response {
 		}
 		text, err := wsdoc.MentalModelsList(root)
 		return toolTextResponse(req.ID, text, err)
+	case "ws.agents.register":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		backend, _ := params.Arguments["backend"].(string)
+		tier, _ := params.Arguments["tier"].(string)
+		model, _ := params.Arguments["model"].(string)
+		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
+		agent, _, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{
+			Root:             root,
+			Name:             name,
+			Backend:          backend,
+			Tier:             tier,
+			Model:            model,
+			PromptRefs:       stringList(params.Arguments["prompt_refs"]),
+			SystemPromptText: systemPromptText,
+		})
+		return toolTextResponse(req.ID, agent.Name+"\n", err)
+	case "ws.agents.call":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		prompt, _ := params.Arguments["prompt"].(string)
+		_, text, err := wsagent.NewManager(wsagent.Options{}).Call(wsagent.CallOptions{
+			Root:   root,
+			Name:   name,
+			Prompt: prompt,
+		})
+		return toolTextResponse(req.ID, text, err)
+	case "ws.agents.oneshot":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		backend, _ := params.Arguments["backend"].(string)
+		tier, _ := params.Arguments["tier"].(string)
+		model, _ := params.Arguments["model"].(string)
+		systemPromptText, _ := params.Arguments["system_prompt_text"].(string)
+		prompt, _ := params.Arguments["prompt"].(string)
+		text, err := wsagent.NewManager(wsagent.Options{}).OneShot(wsagent.OneShotOptions{
+			Root:             root,
+			Name:             name,
+			Backend:          backend,
+			Tier:             tier,
+			Model:            model,
+			PromptRefs:       stringList(params.Arguments["prompt_refs"]),
+			SystemPromptText: systemPromptText,
+			Prompt:           prompt,
+		})
+		return toolTextResponse(req.ID, text, err)
+	case "ws.agents.print":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
+		return toolTextResponse(req.ID, text, err)
+	case "ws.agents.erase":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		err := wsagent.NewManager(wsagent.Options{}).Erase(root, name)
+		return toolTextResponse(req.ID, "erased\n", err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
@@ -252,6 +324,110 @@ func tools() []map[string]any {
 					},
 				},
 			},
+		},
+		{
+			"name":        "ws.agents.register",
+			"description": "Register a durable ws agent session for the current worktree.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":               stringProperty("Repository root. Defaults to the server root."),
+					"name":               stringProperty("Agent name."),
+					"backend":            stringProperty("Backend name. Defaults to codex."),
+					"tier":               stringProperty("Workload tier: light, core, or deep. Defaults to core."),
+					"model":              stringProperty("Optional concrete backend model override."),
+					"prompt_refs":        stringArrayProperty("Logical role prompt references."),
+					"system_prompt_text": stringProperty("Optional materialized system prompt text."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "ws.agents.call",
+			"description": "Call a registered ws agent and resume its stored backend session when available.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"name":   stringProperty("Agent name."),
+					"prompt": stringProperty("Prompt to send to the agent."),
+				},
+				"required": []string{"name", "prompt"},
+			},
+		},
+		{
+			"name":        "ws.agents.oneshot",
+			"description": "Register, call, and erase a temporary ws agent.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":               stringProperty("Repository root. Defaults to the server root."),
+					"name":               stringProperty("Optional temporary agent name."),
+					"backend":            stringProperty("Backend name. Defaults to codex."),
+					"tier":               stringProperty("Workload tier: light, core, or deep. Defaults to core."),
+					"model":              stringProperty("Optional concrete backend model override."),
+					"prompt_refs":        stringArrayProperty("Logical role prompt references."),
+					"system_prompt_text": stringProperty("Optional materialized system prompt text."),
+					"prompt":             stringProperty("Prompt to send to the temporary agent."),
+				},
+				"required": []string{"prompt"},
+			},
+		},
+		{
+			"name":        "ws.agents.print",
+			"description": "Return the last plain-text output for a registered ws agent.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Repository root. Defaults to the server root."),
+					"name": stringProperty("Agent name."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "ws.agents.erase",
+			"description": "Erase a registered ws agent directory for the current worktree.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Repository root. Defaults to the server root."),
+					"name": stringProperty("Agent name."),
+				},
+				"required": []string{"name"},
+			},
+		},
+	}
+}
+
+func stringList(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		text, ok := item.(string)
+		if ok && text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func stringProperty(description string) map[string]string {
+	return map[string]string{
+		"type":        "string",
+		"description": description,
+	}
+}
+
+func stringArrayProperty(description string) map[string]any {
+	return map[string]any{
+		"type":        "array",
+		"description": description,
+		"items": map[string]string{
+			"type": "string",
 		},
 	}
 }

@@ -176,28 +176,22 @@ tier mapping for one agent registration.
 
 ## Tool Surface
 
-Planned MCP tools use server `ws` and the following tool names:
+MCP tools use server `ws` and the following tool names:
 
-- `agents.register` — create or replace one named agent registry entry.
-- `agents.call` — call a registered agent and resume existing session state when possible.
-- `agents.oneshot` — register, call, and erase an ephemeral agent.
-- `agents.interrupt` — enqueue a lead-to-agent message.
-- `agents.print` — return `output.md` for a named agent.
-- `agents.tail` — summarize recent session/event state without invoking the backend.
-- `agents.erase` — remove or mark erased a named agent and clean backend session state where possible.
-- `agents.list` — list active agents for the current worktree or all cached worktrees.
-
-Phase 3 should implement only the smallest subset needed to prove backend resume
-and support `write-skeleton`: `agents.register`, `agents.call`,
-`agents.oneshot`, `agents.print`, and `agents.erase`. `agents.interrupt`,
-`agents.tail`, and `agents.list` may be implemented when the queue and UI surfaces
-need them.
+- `agents.register` — create or replace one named agent registry entry. Implemented.
+- `agents.call` — call a registered agent and resume existing session state when possible. Implemented.
+- `agents.oneshot` — register, call, and erase an ephemeral agent. Implemented.
+- `agents.interrupt` — enqueue a lead-to-agent message. Planned.
+- `agents.print` — return `output.md` for a named agent. Implemented.
+- `agents.tail` — summarize recent session/event state without invoking the backend. Planned.
+- `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
+- `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
 
 ## CLI Prototype
 
-The Phase 3 prototype exposes the minimum runtime through `ws-mcp agents ...`
-subcommands before publishing MCP `agents.*` tools. This keeps the MCP stdio
-stdout contract isolated while the backend adapter and state files settle.
+The Phase 3 prototype also exposes the minimum runtime through `ws-mcp agents ...`
+subcommands. The CLI remains useful for local smoke tests and fallback debugging
+without a host MCP client.
 The plugin launcher treats these subcommands as part of the runtime command
 surface recorded in `agents-plugin/runtime.json`, so local plugin cache binaries
 are repaired when the CLI surface drifts even if the MCP tool list is unchanged.
@@ -214,10 +208,9 @@ ws-mcp agents erase --root <repo> --name <name>
 ```
 
 The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
-`events.jsonl` layout described above. It is an implementation proving ground, not
-the final shared skill notation. Shared skill text should still refer to the
-planned MCP tools with `ws/agents.register`, `ws/agents.call`,
-`ws/agents.oneshot`, `ws/agents.print`, and `ws/agents.erase`.
+`events.jsonl` layout described above. Shared skill text should prefer the MCP
+tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.oneshot`,
+`ws/agents.print`, and `ws/agents.erase`.
 
 ## Prompt Resolution
 

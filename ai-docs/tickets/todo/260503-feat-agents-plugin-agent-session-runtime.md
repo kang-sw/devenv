@@ -263,13 +263,17 @@ Verification:
 - `claude plugin validate agents-plugin`
 - `git diff --check`
 
-### Phase 4: First consumer skill
+### Phase 4: MCP wrappers and first consumer skill
 
-Port `write-skeleton` only after the session runtime has enough contract surface
-for delegate ownership and amendment rounds.
+Expose the Phase 3 runtime through the minimum `ws.agents.*` MCP tools, then port
+`write-skeleton` after the session runtime has enough contract surface for
+delegate ownership and amendment rounds.
 
 Success criteria:
 
+- `ws.agents.register`, `ws.agents.call`, `ws.agents.oneshot`,
+  `ws.agents.print`, and `ws.agents.erase` wrap the same internal runtime used by
+  the CLI prototype.
 - `agents-plugin/skills/write-skeleton/SKILL.md` uses the shared agent session
   runtime rather than naming Claude `ws-new-named-agent` or Codex native
   `spawn_agent` directly.
@@ -277,3 +281,38 @@ Success criteria:
   directives, delegate owns skeleton design, lead reviews, lead commits.
 - The ticket records which session-runtime gaps remain before `write-code`,
   `edit`, `implement`, `proceed`, and `sprint` can be ported.
+
+### Result (pending) - 2026-05-03
+
+Exposed the Phase 3 runtime package through MCP tools
+`ws.agents.register`, `ws.agents.call`, `ws.agents.oneshot`,
+`ws.agents.print`, and `ws.agents.erase`. The tools wrap the same
+`internal/wsagent` package as the CLI prototype, so shared skills can use the
+MCP notation while local development can still smoke the CLI fallback.
+
+Added `agents-plugin/skills/write-skeleton/SKILL.md` as the first
+delegate-driven skill port. The port preserves the source workflow shape:
+the lead reads the ticket, writes only binding contract directives, registers
+one `skeleton-writer` delegate, resumes it for amendments, reviews the diff,
+runs build/syntax verification instead of expected-failing tests, commits the
+skeleton, records the skeleton hash in ticket frontmatter, and erases the
+delegate after completion.
+
+The port avoids Claude `ws-new-named-agent` / `ws-call-named-agent` commands and
+does not use Codex native subagents directly. Because prompt-bundle resolution is
+not implemented yet, the skill passes a self-contained `system_prompt_text` to
+`ws.agents.register`. Remaining gaps before core implementation-skill ports:
+interrupt delivery, active-agent listing, tailing, review-path allocation,
+runtime locks, reviewer fanout, and shared prompt-bundle resolution.
+
+Verification:
+
+- `go test ./...` from `agents-plugin-tool/`
+- direct JSON-RPC smoke for `ws.agents.register` → `ws.agents.call` → resumed
+  `ws.agents.call` → `ws.agents.print` → `ws.agents.erase`
+- direct JSON-RPC smoke for `ws.agents.oneshot`
+- `scripts/smoke-ws-mcp.sh ..` from `agents-plugin-tool/`
+- `claude plugin validate agents-plugin`
+- `rg` check for Claude helper commands, Codex native subagent calls, `$ARGUMENTS`,
+  and repo-local infra paths in the new skill
+- `git diff --check`

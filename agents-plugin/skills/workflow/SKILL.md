@@ -39,11 +39,13 @@ Examples:
 
 ### judge: primitive-availability
 
-Use MCP tools only when they are available in the current `ws` runtime. Treat
-agent session tools, review-path allocation, message queues, and runtime locks as
-planned surfaces until the runtime implements them. When a skill needs a planned
-surface, state the required server/tool contract instead of naming a host-specific
-helper command as the shared primitive.
+Use MCP tools only when they are available in the current `ws` runtime. The
+minimum agent session tools `ws/agents.register`, `ws/agents.call`,
+`ws/agents.oneshot`, `ws/agents.print`, and `ws/agents.erase` are available.
+Treat interrupts, active-agent listing, tailing, review-path allocation, message
+queues, and runtime locks as planned surfaces until the runtime implements them.
+When a skill needs a planned surface, state the required server/tool contract
+instead of naming a host-specific helper command as the shared primitive.
 
 ## Doctrine
 

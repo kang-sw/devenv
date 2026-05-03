@@ -11,7 +11,12 @@
     "ws.convention.read": ">=0.1.0-dev <0.2.0",
     "ws.spec_stem.generate": ">=0.1.0-dev <0.2.0",
     "ws.spec_index.verify": ">=0.1.0-dev <0.2.0",
-    "ws.mental_models.list": ">=0.1.0-dev <0.2.0"
+    "ws.mental_models.list": ">=0.1.0-dev <0.2.0",
+    "ws.agents.register": ">=0.1.0-dev <0.2.0",
+    "ws.agents.call": ">=0.1.0-dev <0.2.0",
+    "ws.agents.oneshot": ">=0.1.0-dev <0.2.0",
+    "ws.agents.print": ">=0.1.0-dev <0.2.0",
+    "ws.agents.erase": ">=0.1.0-dev <0.2.0"
   },
   "commands": {
     "agents.register": ">=0.1.0-dev <0.2.0",

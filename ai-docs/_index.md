@@ -119,15 +119,15 @@ Current MCP contract: `ai-docs/ref/ws-mcp.md`. Implemented tools are
 and should not reference repo-local `claude-plugin/infra/*` paths; convention
 text is bundled into the runtime and read through `ws.convention.read`.
 
-Agent runtime prototype: `ai-docs/ref/ws-agent-runtime.md`. `ws-mcp agents`
-currently exposes CLI-only `register`, `call`, `oneshot`, `print`, and `erase`
-subcommands backed by `internal/wsagent`. The Codex backend stores thread ids in
-`agent.json`, resumes with `codex exec resume --json <thread-id>`, and persists
-plain-text output in `output.md`. MCP `agents.*` tools are still planned and
-should wrap this internal package later; shared skill text should use
-`ws/agents.*` notation rather than the CLI command names. `runtime.json` records
-this CLI command surface so the plugin launcher can repair stale local cache
-binaries even when the MCP tool list has not changed.
+Agent runtime prototype: `ai-docs/ref/ws-agent-runtime.md`. `ws-mcp` exposes
+minimum MCP tools `ws.agents.register`, `ws.agents.call`,
+`ws.agents.oneshot`, `ws.agents.print`, and `ws.agents.erase`, plus matching
+CLI fallback subcommands under `ws-mcp agents`. Both surfaces are backed by
+`internal/wsagent`. The Codex backend stores thread ids in `agent.json`, resumes
+with `codex exec resume --json <thread-id>`, and persists plain-text output in
+`output.md`. Shared skill text should use `ws/agents.*` notation rather than the
+CLI command names. `runtime.json` records both MCP tool and CLI command surfaces
+so the plugin launcher can repair stale local cache binaries.
 
 Codex launcher POC status: `agents-plugin` now contains plugin-local `.mcp.json`,
 `runtime.json`, and `bin/ws-mcp-launcher`. Host-free launcher smoke, temporary
@@ -197,6 +197,7 @@ agents-plugin/skills/
   ship/            — draft host-neutral release workflow driven by ai-docs/ship config
   exit-session/    — draft host-neutral session handoff workflow for ai-docs/_index.md
   workflow/        — host-neutral session-resident reference for MCP notation and orchestration primitive boundaries
+  write-skeleton/  — draft host-neutral skeleton workflow using ws.agents.* delegate sessions
 ```
 
 ## Canonical Flows
