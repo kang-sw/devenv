@@ -369,7 +369,7 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 	if !strings.Contains(string(stdout), "jsonl") || !strings.Contains(string(stderr), "diagnostic") {
 		t.Fatalf("streams not captured: stdout=%q stderr=%q", stdout, stderr)
 	}
-	if len(runner.calls) != 1 || runner.calls[0].Prompt != "async prompt" {
+	if len(runner.calls) != 1 || runner.calls[0].Prompt != "async prompt" || !runner.calls[0].InheritProcessGroup {
 		t.Fatalf("runner prompt mismatch: %+v", runner.calls)
 	}
 
@@ -505,15 +505,26 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
+	var cancelledPID int
+	processAlive := true
 	manager := NewManager(Options{
 		CacheHome: cache,
 		Now:       func() time.Time { return testNow },
+		ProcessCancel: func(pid int) error {
+			cancelledPID = pid
+			processAlive = false
+			return nil
+		},
+		ProcessAlive: func(int) (bool, error) { return processAlive, nil },
 	})
 	agent, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := manager.BeginCurrentCall(layout, agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.MarkCurrentCallRunning(layout, 2468, ""); err != nil {
 		t.Fatal(err)
 	}
 	timeoutText, err := manager.Wait(WaitOptions{
@@ -525,22 +536,80 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Wait timeout returned error: %v", err)
 	}
-	if !strings.Contains(timeoutText, "timeout") || !strings.Contains(timeoutText, "call_status: queued") {
+	if !strings.Contains(timeoutText, "wait_timeout: true") ||
+		!strings.Contains(timeoutText, "call_status: running") ||
+		!strings.Contains(timeoutText, "active: true") ||
+		!strings.Contains(timeoutText, "follow_up: agents.wait | agents.status | agents.cancel | agents.tail") {
 		t.Fatalf("timeout text mismatch:\n%s", timeoutText)
+	}
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	if !strings.Contains(tail, "wait.timeout") {
+		t.Fatalf("tail missing wait timeout diagnostic:\n%s", tail)
 	}
 	cancelled, err := manager.Cancel(repo, "impl")
 	if err != nil {
 		t.Fatalf("Cancel returned error: %v", err)
 	}
-	if !strings.Contains(cancelled, "call_status: cancelled") {
+	if cancelledPID != 2468 {
+		t.Fatalf("cancelled pid = %d, want 2468", cancelledPID)
+	}
+	if !strings.Contains(cancelled, "call_status: cancelled") ||
+		!strings.Contains(cancelled, "active: false") ||
+		!strings.Contains(cancelled, "cancel_pid: 2468") ||
+		!strings.Contains(cancelled, "cleanup_needed: false") {
 		t.Fatalf("cancel status mismatch:\n%s", cancelled)
 	}
 	call, err := readCurrentCall(layout.CurrentStateFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if call.Status != CallStatusCancelled || call.FinishedAt == "" {
+	if call.Status != CallStatusCancelled || call.FinishedAt == "" || call.CancelPID != 2468 || call.CleanupNeeded {
 		t.Fatalf("cancelled call mismatch: %+v", call)
+	}
+	tail, err = manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	if !strings.Contains(tail, "cancel.begin") || !strings.Contains(tail, "cancel.end") {
+		t.Fatalf("tail missing cancel diagnostics:\n%s", tail)
+	}
+}
+
+func TestCancelReportsCleanupNeededWhenOwnedProcessSurvives(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		ProcessCancel: func(int) error { return nil },
+		ProcessAlive:  func(int) (bool, error) { return true, nil },
+		WorkerStarter: &fakeWorkerStarter{pid: 1357},
+	})
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "long review"}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Cancel(repo, "impl")
+	if err != nil {
+		t.Fatalf("Cancel returned error: %v", err)
+	}
+	if !strings.Contains(status, "call_status: cancelled") ||
+		!strings.Contains(status, "cancel_pid: 1357") ||
+		!strings.Contains(status, "cleanup_needed: true") ||
+		!strings.Contains(status, "follow_up: inspect runtime log | manual cleanup | agents.erase") {
+		t.Fatalf("cleanup-needed status mismatch:\n%s", status)
+	}
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	if !strings.Contains(tail, "cancel.cleanup_needed") {
+		t.Fatalf("tail missing cleanup-needed diagnostic:\n%s", tail)
 	}
 }
 

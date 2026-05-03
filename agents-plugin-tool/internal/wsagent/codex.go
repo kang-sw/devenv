@@ -16,15 +16,16 @@ type Runner interface {
 }
 
 type RunnerRequest struct {
-	Root             string
-	Prompt           string
-	Model            string
-	SessionID        string
-	SystemPromptPath string
-	Stdout           io.Writer
-	Stderr           io.Writer
-	OnSessionID      func(string) error
-	Timeout          time.Duration
+	Root                string
+	Prompt              string
+	Model               string
+	SessionID           string
+	SystemPromptPath    string
+	Stdout              io.Writer
+	Stderr              io.Writer
+	OnSessionID         func(string) error
+	Timeout             time.Duration
+	InheritProcessGroup bool
 }
 
 type RunnerResult struct {
@@ -58,7 +59,9 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, "codex", args...)
-	configureRunnerCommand(cmd)
+	if !req.InheritProcessGroup {
+		configureRunnerCommand(cmd)
+	}
 	cmd.Dir = req.Root
 	var stderr bytes.Buffer
 	if req.Stderr != nil {

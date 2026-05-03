@@ -47,6 +47,7 @@ type Options struct {
 	Runner        Runner
 	WorkerStarter WorkerStarter
 	ProcessAlive  ProcessAliveFunc
+	ProcessCancel ProcessCancelFunc
 }
 
 type RegisterOptions struct {
@@ -109,6 +110,7 @@ type WorkerStarter interface {
 }
 
 type ProcessAliveFunc func(pid int) (bool, error)
+type ProcessCancelFunc func(pid int) error
 
 type OneShotOptions struct {
 	Root             string
@@ -206,6 +208,8 @@ type CurrentCall struct {
 	ExitCode      *int   `json:"exit_code,omitempty"`
 	SessionID     string `json:"session_id,omitempty"`
 	Error         string `json:"error,omitempty"`
+	CleanupNeeded bool   `json:"cleanup_needed,omitempty"`
+	CancelPID     int    `json:"cancel_pid,omitempty"`
 }
 
 type Layout struct {
@@ -413,15 +417,16 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 		}
 	}
 	result, err := runner.Call(RunnerRequest{
-		Root:             layout.Root,
-		Prompt:           opts.Prompt,
-		Model:            agent.Model,
-		SessionID:        agent.SessionID,
-		SystemPromptPath: absOptional(layout.AgentDir, agent.SystemPromptPath),
-		Stdout:           stdoutWriter,
-		Stderr:           stderrWriter,
-		OnSessionID:      onSessionID,
-		Timeout:          opts.Timeout,
+		Root:                layout.Root,
+		Prompt:              opts.Prompt,
+		Model:               agent.Model,
+		SessionID:           agent.SessionID,
+		SystemPromptPath:    absOptional(layout.AgentDir, agent.SystemPromptPath),
+		Stdout:              stdoutWriter,
+		Stderr:              stderrWriter,
+		OnSessionID:         onSessionID,
+		Timeout:             opts.Timeout,
+		InheritProcessGroup: opts.CaptureStreams,
 	})
 	if err != nil {
 		agent.Status = StatusFailed
@@ -726,11 +731,19 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 			return m.Status(opts.Root, opts.Name)
 		}
 		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			_ = appendRuntimeLog(layout, m.now(), "wait.timeout", map[string]any{
+				"timeout_seconds": opts.Timeout.Seconds(),
+				"call_status":     call.Status,
+				"pid":             call.PID,
+			})
 			status, err := m.Status(opts.Root, opts.Name)
 			if err != nil {
 				return "", err
 			}
-			return "timeout\n" + status, nil
+			return "wait_timeout: true\n" +
+				"timeout_status: call may still be running\n" +
+				"follow_up: agents.wait | agents.status | agents.cancel | agents.tail\n" +
+				status, nil
 		}
 		time.Sleep(opts.Poll)
 	}
@@ -768,12 +781,14 @@ func (m Manager) Status(root, name string) (string, error) {
 	call, err := readCurrentCall(layout.CurrentStateFile)
 	if errors.Is(err, os.ErrNotExist) {
 		b.WriteString("call_status: none\n")
+		b.WriteString("active: false\n")
 		return b.String(), nil
 	}
 	if err != nil {
 		return "", err
 	}
 	fmt.Fprintf(&b, "call_status: %s\n", call.Status)
+	fmt.Fprintf(&b, "active: %t\n", isActiveCallStatus(call.Status))
 	if call.ExecutionID != "" {
 		fmt.Fprintf(&b, "execution_id: %s\n", call.ExecutionID)
 	}
@@ -798,6 +813,21 @@ func (m Manager) Status(root, name string) (string, error) {
 	if call.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", call.Error)
 	}
+	if call.CancelPID != 0 {
+		fmt.Fprintf(&b, "cancel_pid: %d\n", call.CancelPID)
+	}
+	fmt.Fprintf(&b, "cleanup_needed: %t\n", call.CleanupNeeded)
+	if call.StdoutPath != "" {
+		fmt.Fprintf(&b, "stdout_path: %s\n", call.StdoutPath)
+	}
+	if call.StderrPath != "" {
+		fmt.Fprintf(&b, "stderr_path: %s\n", call.StderrPath)
+	}
+	fmt.Fprintf(&b, "runtime_log_path: %s\n", "current/runtime.jsonl")
+	if call.Status == CallStatusCompleted {
+		fmt.Fprintf(&b, "output_path: %s\n", agent.LastOutputPath)
+	}
+	fmt.Fprintf(&b, "follow_up: %s\n", followUpForCall(call))
 	return b.String(), nil
 }
 
@@ -865,13 +895,25 @@ func (m Manager) Cancel(root, name string) (string, error) {
 	if !isActiveCallStatus(call.Status) {
 		return m.Status(root, name)
 	}
-	var cancelErr error
-	if call.PID != 0 {
-		process, err := os.FindProcess(call.PID)
-		if err != nil {
-			cancelErr = err
-		} else if err := process.Kill(); err != nil {
-			cancelErr = err
+	cancelledPID := call.PID
+	_ = appendRuntimeLog(layout, m.now(), "cancel.begin", map[string]any{
+		"pid":          cancelledPID,
+		"execution_id": call.ExecutionID,
+	})
+	cancelErr := m.cancelProcessTree(cancelledPID)
+	cleanupNeeded := false
+	if cancelledPID != 0 {
+		if alive, err := m.processAliveAfterCancel(cancelledPID); err != nil {
+			cleanupNeeded = true
+			_ = appendRuntimeLog(layout, m.now(), "cancel.liveness.error", map[string]any{
+				"pid":   cancelledPID,
+				"error": err.Error(),
+			})
+		} else if alive {
+			cleanupNeeded = true
+			_ = appendRuntimeLog(layout, m.now(), "cancel.cleanup_needed", map[string]any{
+				"pid": cancelledPID,
+			})
 		}
 	}
 	now := m.now().UTC().Format(time.RFC3339)
@@ -884,17 +926,22 @@ func (m Manager) Cancel(root, name string) (string, error) {
 	if cancelErr != nil {
 		errText = cancelErr.Error()
 	}
-	cancelledPID := call.PID
-	call, err = m.CancelCurrentCall(layout, errText)
+	call, err = m.CancelCurrentCall(layout, errText, cancelledPID, cleanupNeeded)
 	if err != nil {
 		return "", err
 	}
 	if err := appendEvent(layout.EventsFile, m.now(), "call_async.cancelled", map[string]any{
-		"pid":   cancelledPID,
-		"error": errText,
+		"pid":            cancelledPID,
+		"error":          errText,
+		"cleanup_needed": cleanupNeeded,
 	}); err != nil {
 		return "", err
 	}
+	_ = appendRuntimeLog(layout, m.now(), "cancel.end", map[string]any{
+		"pid":            cancelledPID,
+		"error":          errText,
+		"cleanup_needed": cleanupNeeded,
+	})
 	return m.Status(root, name)
 }
 
@@ -1033,7 +1080,7 @@ func (m Manager) markAgentFailed(layout Layout, errText string) (Agent, error) {
 	return agent, nil
 }
 
-func (m Manager) CancelCurrentCall(layout Layout, errText string) (CurrentCall, error) {
+func (m Manager) CancelCurrentCall(layout Layout, errText string, cancelPID int, cleanupNeeded bool) (CurrentCall, error) {
 	call, err := readCurrentCall(layout.CurrentStateFile)
 	if err != nil {
 		return CurrentCall{}, err
@@ -1044,6 +1091,8 @@ func (m Manager) CancelCurrentCall(layout Layout, errText string) (CurrentCall, 
 	call.FinishedAt = now
 	call.PID = 0
 	call.Error = errText
+	call.CancelPID = cancelPID
+	call.CleanupNeeded = cleanupNeeded
 	if err := writeCurrentCall(layout.CurrentStateFile, call); err != nil {
 		return CurrentCall{}, err
 	}
@@ -1124,6 +1173,57 @@ func (m Manager) processAlive(pid int) (bool, error) {
 		return m.opts.ProcessAlive(pid)
 	}
 	return processAlive(pid)
+}
+
+func (m Manager) cancelProcessTree(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	if m.opts.ProcessCancel != nil {
+		return m.opts.ProcessCancel(pid)
+	}
+	return cancelAsyncProcessTree(pid)
+}
+
+func (m Manager) processAliveAfterCancel(pid int) (bool, error) {
+	if m.opts.ProcessAlive != nil {
+		return m.opts.ProcessAlive(pid)
+	}
+	var lastErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		alive, err := m.processAlive(pid)
+		if err != nil {
+			lastErr = err
+		}
+		if err == nil && !alive {
+			return false, nil
+		}
+		if attempt < 5 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	if lastErr != nil {
+		return false, lastErr
+	}
+	return true, nil
+}
+
+func followUpForCall(call CurrentCall) string {
+	switch call.Status {
+	case CallStatusQueued, CallStatusRunning:
+		return "agents.wait | agents.status | agents.cancel | agents.tail"
+	case CallStatusCompleted:
+		return "agents.print | agents.tail"
+	case CallStatusFailed:
+		return "agents.tail | agents.erase"
+	case CallStatusCancelled:
+		if call.CleanupNeeded {
+			return "inspect runtime log | manual cleanup | agents.erase"
+		}
+		return "agents.tail | agents.erase"
+	default:
+		return "agents.status"
+	}
 }
 
 func AgentKey(name string) string {
