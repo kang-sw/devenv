@@ -5,6 +5,7 @@ related:
   260503-feat-agents-plugin-agent-session-runtime: synchronous agent runtime baseline and write-skeleton consumer
   260503-feat-agents-plugin-runtime-boundary: ws-mcp retained process and plugin launcher boundary
   260503-epic-agents-plugin-skill-porting: parent roadmap; async calls should precede core implementation orchestration ports
+completed: 2026-05-03
 ---
 
 # agents-plugin async agent calls
