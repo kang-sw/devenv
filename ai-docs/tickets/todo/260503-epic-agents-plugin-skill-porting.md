@@ -79,7 +79,7 @@ with documented fallbacks; it should not block the next skill-porting slice.
 
 Planned child ticket:
 
-- `feat-agents-plugin-spec-skill-drafts`
+- `260503-feat-agents-plugin-spec-skill-drafts`
 
 Covered skills:
 
