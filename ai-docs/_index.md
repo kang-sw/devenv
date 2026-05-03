@@ -121,6 +121,14 @@ server but relative command startup fails. The Unix launcher direction is POSIX
 `sh` with internal OS/arch selection; Windows remains blocked on verifying
 whether `./bin/ws-mcp-launcher` resolves to `./bin/ws-mcp-launcher.exe`.
 
+`ws-mcp` release distribution: `agents-plugin-tool/scripts/build-release-assets.sh`
+cross-compiles `ws-mcp-<os>-<arch>[.exe]` assets plus `SHA256SUMS`. GitHub
+Actions workflow `.github/workflows/ws-mcp-release.yml` runs tests, builds
+assets, and uploads workflow artifacts on branch/PR validation; it publishes
+release assets only for pushed `v*` tags. Runtime binaries remain plugin cache-local under
+`.runtime/<os>-<arch>/ws-mcp[.exe]`; Windows plugin-managed startup still needs a
+native launcher or adapter-specific manifest verification.
+
 ## Skill Inventory
 
 ```
@@ -227,7 +235,7 @@ Reference by stem only (e.g., `260407-research-delegation-model-consolidation`).
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; current child is the runtime/MCP boundary slice
-`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 3 macOS plugin-managed launcher POC is verified with `cwd: "."`; Phase 4 should define release assets, checksums, runtime location, update policy, and Windows host smoke
+`260503-feat-agents-plugin-runtime-boundary` — wip; Phase 4 release asset/checksum/cache-local runtime/GH Actions scaffold is done; remaining host item is Windows plugin-managed launcher verification
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 

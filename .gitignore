@@ -14,3 +14,4 @@ ai-docs/**/*.local.md
 ai-docs/.deps/
 claude/infra/__pycache__/
 agents-plugin/.runtime/
+agents-plugin-tool/dist/

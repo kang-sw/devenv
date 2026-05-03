@@ -256,3 +256,74 @@ Expected direction:
 
 Until that exists, skill documents must not assume that installed plugin text and
 installed `ws-mcp` binary are automatically in sync.
+
+## Release Distribution
+
+`ws-mcp` is distributed as prebuilt native binaries produced from
+`agents-plugin-tool/`. End users should not need Go, Python, Node, Cargo, or
+Visual Studio Build Tools to run the MCP server.
+
+Release asset names follow this pattern:
+
+```text
+ws-mcp-<os>-<arch>[.exe]
+```
+
+Initial assets:
+
+```text
+ws-mcp-darwin-arm64
+ws-mcp-darwin-amd64
+ws-mcp-linux-amd64
+ws-mcp-linux-arm64
+ws-mcp-windows-amd64.exe
+ws-mcp-windows-arm64.exe
+SHA256SUMS
+```
+
+`SHA256SUMS` is a plain `shasum -a 256` manifest covering every release binary.
+The launcher should download the selected binary and `SHA256SUMS`, verify the
+matching checksum line before chmod/exec, and print failures to stderr only.
+
+Runtime binaries live in the installed plugin cache by default:
+
+```text
+<installed-plugin-cache>/.runtime/<os>-<arch>/ws-mcp[.exe]
+```
+
+This keeps plugin document updates and runtime binaries version-scoped together.
+When a plugin reinstall or plugin version update creates a fresh cache copy, the
+next MCP startup may redownload the binary for that plugin/runtime contract. If
+the binary already exists and `ws-mcp version` satisfies `runtime.json`, startup
+should not perform routine network work.
+
+Update/drift behavior:
+
+- Missing binary: download the release asset for the installed plugin/runtime
+  contract when a release URL is configured.
+- Compatible binary: run without network access.
+- Incompatible binary: replace it if release download and checksum verification
+  succeed; otherwise fail with an actionable stderr diagnostic.
+- Offline/proxy failure: keep stdout clean, fail startup, and tell the user which
+  URL or runtime directory needs manual repair.
+
+The local build script is:
+
+```bash
+agents-plugin-tool/scripts/build-release-assets.sh [version]
+```
+
+GitHub Actions workflow `.github/workflows/ws-mcp-release.yml` runs tests,
+cross-compiles assets, and uploads workflow artifacts on branch pushes and pull
+requests that touch the workflow or `agents-plugin-tool/`. It publishes assets to
+the GitHub release only for pushed `v*` tags. `workflow_dispatch` is present for
+post-merge manual runs, but GitHub only accepts that trigger when the workflow
+file exists on the default branch. The workflow currently uses official GitHub
+actions `actions/checkout@v5`, `actions/setup-go@v6`, and
+`actions/upload-artifact@v7`.
+
+Windows host verification remains separate from Go cross-compilation. Parallels
+can verify that `ws-mcp-windows-amd64.exe` runs `version`, `doctor`, and stdio
+MCP smoke tests. Plugin-managed Windows startup additionally needs a Windows
+launcher artifact at `bin/ws-mcp-launcher.exe` or an adapter-specific manifest;
+the POSIX `sh` launcher only proves the macOS/Linux path.

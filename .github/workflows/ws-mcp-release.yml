@@ -1,0 +1,70 @@
+name: ws-mcp release
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+    paths:
+      - ".github/workflows/ws-mcp-release.yml"
+      - "agents-plugin-tool/**"
+  pull_request:
+    paths:
+      - ".github/workflows/ws-mcp-release.yml"
+      - "agents-plugin-tool/**"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to embed in ws-mcp binaries, for example 0.1.0-dev"
+        required: false
+        default: "0.1.0-dev"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ws-mcp assets
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agents-plugin-tool
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: agents-plugin-tool/go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build release assets
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            scripts/build-release-assets.sh "${{ inputs.version }}"
+          elif [ -n "${GITHUB_REF_NAME:-}" ]; then
+            scripts/build-release-assets.sh "${GITHUB_REF_NAME}"
+          else
+            scripts/build-release-assets.sh 0.1.0-dev
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ws-mcp-assets
+          path: agents-plugin-tool/dist/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Automated ws-mcp release assets for ${GITHUB_REF_NAME}."
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes "$notes"
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
