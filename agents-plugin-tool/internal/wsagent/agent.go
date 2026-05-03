@@ -44,6 +44,7 @@ type Options struct {
 	Now           Clock
 	Runner        Runner
 	WorkerStarter WorkerStarter
+	ProcessAlive  ProcessAliveFunc
 }
 
 type RegisterOptions struct {
@@ -104,6 +105,8 @@ type WorkerStarter interface {
 	StartAsyncCall(AsyncWorkerRequest) (int, error)
 }
 
+type ProcessAliveFunc func(pid int) (bool, error)
+
 type OneShotOptions struct {
 	Root             string
 	Name             string
@@ -130,6 +133,15 @@ func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
 		return 0, fmt.Errorf("locate ws-mcp executable: %w", err)
 	}
 	cmd := exec.Command(exe, "agents", "run-current", "--root", req.Root, "--name", req.Name)
+	configureAsyncCommand(cmd)
+	if req.StdoutPath != "" {
+		stdout, err := os.OpenFile(req.StdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return 0, fmt.Errorf("open async worker stdout: %w", err)
+		}
+		defer stdout.Close()
+		cmd.Stdout = stdout
+	}
 	if req.StderrPath != "" {
 		stderr, err := os.OpenFile(req.StderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
@@ -192,18 +204,19 @@ type CurrentCall struct {
 }
 
 type Layout struct {
-	Root             string
-	AgentDir         string
-	AgentFile        string
-	InboxDir         string
-	OutboxDir        string
-	CurrentDir       string
-	CurrentStateFile string
-	CurrentStdout    string
-	CurrentStderr    string
-	OutputFile       string
-	EventsFile       string
-	SystemFile       string
+	Root              string
+	AgentDir          string
+	AgentFile         string
+	InboxDir          string
+	OutboxDir         string
+	CurrentDir        string
+	CurrentStateFile  string
+	CurrentStdout     string
+	CurrentStderr     string
+	CurrentRuntimeLog string
+	OutputFile        string
+	EventsFile        string
+	SystemFile        string
 }
 
 type Manager struct {
@@ -333,6 +346,11 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 	}); err != nil {
 		return "", agent, err
 	}
+	_ = appendRuntimeLog(layout, m.now(), "backend.call.start", map[string]any{
+		"backend":         agent.Backend,
+		"resume":          agent.SessionID != "",
+		"capture_streams": captureStreams,
+	})
 
 	var stdoutFile *os.File
 	var stderrFile *os.File
@@ -371,6 +389,9 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 			if _, err := m.MarkCurrentCallRunning(layout, os.Getpid(), sessionID); err != nil {
 				return err
 			}
+			_ = appendRuntimeLog(layout, m.now(), "backend.session_started", map[string]any{
+				"session_id": sessionID,
+			})
 			return appendEvent(layout.EventsFile, m.now(), "call.session_started", map[string]any{
 				"session_id": sessionID,
 			})
@@ -391,8 +412,12 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
 		_ = writeAgent(layout.AgentFile, agent)
 		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": err.Error()})
+		_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": err.Error()})
 		return "", agent, err
 	}
+	_ = appendRuntimeLog(layout, m.now(), "backend.call.complete", map[string]any{
+		"session_id": result.SessionID,
+	})
 	if result.SessionID != "" {
 		agent.SessionID = result.SessionID
 	}
@@ -411,6 +436,9 @@ func (m Manager) executeCall(layout Layout, agent Agent, prompt string, captureS
 	}); err != nil {
 		return "", agent, err
 	}
+	_ = appendRuntimeLog(layout, m.now(), "state.output.write.ok", map[string]any{
+		"output_path": "output.md",
+	})
 	return result.Text, agent, nil
 }
 
@@ -505,7 +533,7 @@ func (m Manager) CallAsync(opts CallAsyncOptions) (CallAsyncResult, error) {
 	}, nil
 }
 
-func (m Manager) RunCurrent(root, name string) error {
+func (m Manager) RunCurrent(root, name string) (err error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
@@ -521,6 +549,19 @@ func (m Manager) RunCurrent(root, name string) error {
 	if err != nil {
 		return err
 	}
+	_ = appendRuntimeLog(layout, m.now(), "worker.entry", map[string]any{
+		"pid":          os.Getpid(),
+		"execution_id": call.ExecutionID,
+	})
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			errText := fmt.Sprintf("panic: %v", recovered)
+			_ = appendRuntimeLog(layout, m.now(), "worker.panic", map[string]any{"error": errText})
+			_, _ = m.markAgentFailed(layout, errText)
+			_, _ = m.FailCurrentCall(layout, errText, nil)
+			err = errors.New(errText)
+		}
+	}()
 	if !isActiveCallStatus(call.Status) {
 		return fmt.Errorf("agent %q current call is not active: %s", agent.Name, call.Status)
 	}
@@ -530,9 +571,12 @@ func (m Manager) RunCurrent(root, name string) error {
 	}
 	prompt, err := os.ReadFile(promptPath)
 	if err != nil {
+		_ = appendRuntimeLog(layout, m.now(), "prompt.read.error", map[string]any{"error": err.Error()})
+		_, _ = m.markAgentFailed(layout, err.Error())
 		_, _ = m.FailCurrentCall(layout, fmt.Sprintf("read prompt snapshot: %v", err), nil)
 		return fmt.Errorf("read prompt snapshot: %w", err)
 	}
+	_ = appendRuntimeLog(layout, m.now(), "prompt.read.ok", map[string]any{"path": call.PromptPath})
 
 	pid := os.Getpid()
 	if _, err := m.MarkCurrentCallRunning(layout, pid, ""); err != nil {
@@ -546,12 +590,16 @@ func (m Manager) RunCurrent(root, name string) error {
 	}
 	text, resultAgent, runErr := m.executeCall(layout, agent, string(prompt), true)
 	if runErr != nil {
+		_ = appendRuntimeLog(layout, m.now(), "state.finalize.begin", map[string]any{"status": CallStatusFailed})
 		_, _ = m.FailCurrentCall(layout, runErr.Error(), nil)
+		_ = appendRuntimeLog(layout, m.now(), "state.finalize.end", map[string]any{"status": CallStatusFailed})
 		return runErr
 	}
+	_ = appendRuntimeLog(layout, m.now(), "state.finalize.begin", map[string]any{"status": CallStatusCompleted})
 	if _, err := m.CompleteCurrentCall(layout, resultAgent.SessionID, 0); err != nil {
 		return err
 	}
+	_ = appendRuntimeLog(layout, m.now(), "state.finalize.end", map[string]any{"status": CallStatusCompleted})
 	_ = text
 	return nil
 }
@@ -634,7 +682,7 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 		deadline = time.Now().Add(opts.Timeout)
 	}
 	for {
-		call, err := readCurrentCall(layout.CurrentStateFile)
+		call, err := m.reconcileActiveCall(layout)
 		if err != nil {
 			return "", err
 		}
@@ -665,6 +713,9 @@ func (m Manager) Status(root, name string) (string, error) {
 	}
 	layout, err := m.layout(root, name, false)
 	if err != nil {
+		return "", err
+	}
+	if _, err := m.reconcileActiveCall(layout); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
 	agent, err := readAgent(layout.AgentFile)
@@ -740,6 +791,7 @@ func (m Manager) Tail(opts TailOptions) (string, error) {
 		path string
 	}{
 		{name: "events", path: layout.EventsFile},
+		{name: "runtime", path: layout.CurrentRuntimeLog},
 		{name: "stdout", path: layout.CurrentStdout},
 		{name: "stderr", path: layout.CurrentStderr},
 		{name: "output", path: layout.OutputFile},
@@ -841,7 +893,7 @@ func (m Manager) BeginCurrentCall(layout Layout, agent Agent) (CurrentCall, erro
 	if err := os.MkdirAll(layout.CurrentDir, 0o755); err != nil {
 		return CurrentCall{}, fmt.Errorf("create current call dir: %w", err)
 	}
-	for _, path := range []string{layout.CurrentStdout, layout.CurrentStderr} {
+	for _, path := range []string{layout.CurrentStdout, layout.CurrentStderr, layout.CurrentRuntimeLog} {
 		if err := os.WriteFile(path, nil, 0o644); err != nil {
 			return CurrentCall{}, fmt.Errorf("reset current call stream: %w", err)
 		}
@@ -910,6 +962,48 @@ func (m Manager) FailCurrentCall(layout Layout, errText string, exitCode *int) (
 	return call, nil
 }
 
+func (m Manager) reconcileActiveCall(layout Layout) (CurrentCall, error) {
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		return call, err
+	}
+	if call.Status != CallStatusRunning || call.PID == 0 {
+		return call, nil
+	}
+	alive, err := m.processAlive(call.PID)
+	if err != nil {
+		_ = appendRuntimeLog(layout, m.now(), "worker.liveness.error", map[string]any{
+			"pid":   call.PID,
+			"error": err.Error(),
+		})
+		return call, nil
+	}
+	if alive {
+		return call, nil
+	}
+	errText := fmt.Sprintf("async worker process %d is not running", call.PID)
+	_ = appendRuntimeLog(layout, m.now(), "worker.dead", map[string]any{
+		"pid":   call.PID,
+		"error": errText,
+	})
+	_, _ = m.markAgentFailed(layout, errText)
+	return m.FailCurrentCall(layout, errText, nil)
+}
+
+func (m Manager) markAgentFailed(layout Layout, errText string) (Agent, error) {
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		return agent, err
+	}
+	agent.Status = StatusFailed
+	agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
+	if err := writeAgent(layout.AgentFile, agent); err != nil {
+		return agent, err
+	}
+	_ = appendEvent(layout.EventsFile, m.now(), "agent.failed", map[string]any{"error": errText})
+	return agent, nil
+}
+
 func (m Manager) CancelCurrentCall(layout Layout, errText string) (CurrentCall, error) {
 	call, err := readCurrentCall(layout.CurrentStateFile)
 	if err != nil {
@@ -965,18 +1059,19 @@ func (m Manager) layout(root, name string, create bool) (Layout, error) {
 	}
 	dir := filepath.Join(state.AgentsDir, key)
 	layout := Layout{
-		Root:             root,
-		AgentDir:         dir,
-		AgentFile:        filepath.Join(dir, "agent.json"),
-		InboxDir:         filepath.Join(dir, "inbox"),
-		OutboxDir:        filepath.Join(dir, "outbox"),
-		CurrentDir:       filepath.Join(dir, "current"),
-		CurrentStateFile: filepath.Join(dir, "current", "state.json"),
-		CurrentStdout:    filepath.Join(dir, "current", "stdout"),
-		CurrentStderr:    filepath.Join(dir, "current", "stderr"),
-		OutputFile:       filepath.Join(dir, "output.md"),
-		EventsFile:       filepath.Join(dir, "events.jsonl"),
-		SystemFile:       filepath.Join(dir, "system.md"),
+		Root:              root,
+		AgentDir:          dir,
+		AgentFile:         filepath.Join(dir, "agent.json"),
+		InboxDir:          filepath.Join(dir, "inbox"),
+		OutboxDir:         filepath.Join(dir, "outbox"),
+		CurrentDir:        filepath.Join(dir, "current"),
+		CurrentStateFile:  filepath.Join(dir, "current", "state.json"),
+		CurrentStdout:     filepath.Join(dir, "current", "stdout"),
+		CurrentStderr:     filepath.Join(dir, "current", "stderr"),
+		CurrentRuntimeLog: filepath.Join(dir, "current", "runtime.jsonl"),
+		OutputFile:        filepath.Join(dir, "output.md"),
+		EventsFile:        filepath.Join(dir, "events.jsonl"),
+		SystemFile:        filepath.Join(dir, "system.md"),
 	}
 	if create {
 		for _, path := range []string{layout.InboxDir, layout.OutboxDir, layout.CurrentDir} {
@@ -993,6 +1088,13 @@ func (m Manager) now() time.Time {
 		return m.opts.Now()
 	}
 	return time.Now()
+}
+
+func (m Manager) processAlive(pid int) (bool, error) {
+	if m.opts.ProcessAlive != nil {
+		return m.opts.ProcessAlive(pid)
+	}
+	return processAlive(pid)
 }
 
 func AgentKey(name string) string {
@@ -1093,6 +1195,10 @@ func appendEvent(path string, now time.Time, event string, fields map[string]any
 		return fmt.Errorf("append event: %w", err)
 	}
 	return nil
+}
+
+func appendRuntimeLog(layout Layout, now time.Time, event string, fields map[string]any) error {
+	return appendEvent(layout.CurrentRuntimeLog, now, event, fields)
 }
 
 func tailLines(path string, count int) ([]string, error) {

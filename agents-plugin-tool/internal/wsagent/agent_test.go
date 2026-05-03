@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -27,6 +28,23 @@ func (f *fakeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		SessionID: session,
 		Text:      "reply: " + req.Prompt + "\n",
 	}, nil
+}
+
+type errorRunner struct {
+	err error
+}
+
+func (r errorRunner) Call(RunnerRequest) (RunnerResult, error) {
+	if r.err != nil {
+		return RunnerResult{}, r.err
+	}
+	return RunnerResult{}, errors.New("runner failed")
+}
+
+type panicRunner struct{}
+
+func (panicRunner) Call(RunnerRequest) (RunnerResult, error) {
+	panic("runner panic")
 }
 
 type sessionPersistRunner struct {
@@ -369,12 +387,118 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 	if !strings.Contains(status, "call_status: completed") || !strings.Contains(status, "session_id: thread-async") {
 		t.Fatalf("status mismatch:\n%s", status)
 	}
-	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 5})
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
 	if err != nil {
 		t.Fatalf("Tail returned error: %v", err)
 	}
-	if !strings.Contains(tail, "== events ==") || !strings.Contains(tail, "jsonl") || !strings.Contains(tail, "async reply") {
+	if !strings.Contains(tail, "== events ==") ||
+		!strings.Contains(tail, "== runtime ==") ||
+		!strings.Contains(tail, "backend.call.start") ||
+		!strings.Contains(tail, "jsonl") ||
+		!strings.Contains(tail, "async reply") {
 		t.Fatalf("tail mismatch:\n%s", tail)
+	}
+}
+
+func TestWaitFinalizesDeadAsyncWorker(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 987654}
+	manager := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+		ProcessAlive:  func(int) (bool, error) { return false, nil },
+	})
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := manager.Wait(WaitOptions{
+		Root:    repo,
+		Name:    "impl",
+		Timeout: time.Second,
+		Poll:    time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Wait returned error: %v", err)
+	}
+	if !strings.Contains(status, "agent_status: failed") ||
+		!strings.Contains(status, "call_status: failed") ||
+		!strings.Contains(status, "async worker process 987654 is not running") {
+		t.Fatalf("dead worker status mismatch:\n%s", status)
+	}
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	if !strings.Contains(tail, "== runtime ==") || !strings.Contains(tail, "worker.dead") {
+		t.Fatalf("tail missing runtime dead-worker log:\n%s", tail)
+	}
+}
+
+func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 4567}
+	base := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.CallAsync(CallAsyncOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    errorRunner{err: errors.New("backend exploded")},
+	})
+	if err := manager.RunCurrent(repo, "impl"); err == nil || !strings.Contains(err.Error(), "backend exploded") {
+		t.Fatalf("RunCurrent error = %v", err)
+	}
+	status, err := manager.Status(repo, "impl")
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if !strings.Contains(status, "agent_status: failed") || !strings.Contains(status, "error: backend exploded") {
+		t.Fatalf("failure status mismatch:\n%s", status)
+	}
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	if !strings.Contains(tail, "backend.call.error") || !strings.Contains(tail, "state.finalize.end") {
+		t.Fatalf("tail missing failure runtime diagnostics:\n%s", tail)
+	}
+
+	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "panic-impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.CallAsync(CallAsyncOptions{Root: repo, Name: "panic-impl", Prompt: "panic prompt"}); err != nil {
+		t.Fatal(err)
+	}
+	panicManager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    panicRunner{},
+	})
+	if err := panicManager.RunCurrent(repo, "panic-impl"); err == nil || !strings.Contains(err.Error(), "panic") {
+		t.Fatalf("panic RunCurrent error = %v", err)
+	}
+	panicTail, err := panicManager.Tail(TailOptions{Root: repo, Name: "panic-impl", Lines: 20})
+	if err != nil {
+		t.Fatalf("panic Tail returned error: %v", err)
+	}
+	if !strings.Contains(panicTail, "worker.panic") {
+		t.Fatalf("tail missing panic runtime diagnostics:\n%s", panicTail)
 	}
 }
 
