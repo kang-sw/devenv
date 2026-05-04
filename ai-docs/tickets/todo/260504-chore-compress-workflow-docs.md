@@ -151,6 +151,26 @@ Acceptance criteria:
 - Prompt tests pass after any embedded prompt change.
 - Delegate-facing prompts remain self-contained.
 
+### Result (b375626) - 2026-05-04
+
+Compressed the delegate-facing prompt bundle and skill-authoring reference:
+`delegate-orientation`, all embedded prompt files under
+`agents-plugin-tool/internal/wsprompt/prompts/`, and
+`ai-docs/ref/skill-authoring.md`. Total line count moved from 718 to 693. The
+first pass shortened purpose blocks, doctrine paragraphs, route prose, and
+duplicated process explanation. The second pass restored or confirmed
+execution-sensitive items: output contracts, API docs citation and staleness
+requirements, `ws/api.ask` guidance, `lead-*` ownership boundary, prompt identity
+strings required by tests, and self-contained delegate instructions.
+
+Because embedded prompts changed, `agents-plugin/runtime.json` prompt bundle hash
+was updated and mirrored into the local Codex plugin cache runtime contract.
+Verification covered `git diff --check`,
+`cd agents-plugin-tool && go test ./...`, stale `ws:<lead-skill>` search, and
+legacy helper notation search across edited prompt docs. The initial prompt test
+run caught two wrapped-string regressions; both were restored before the passing
+full test run.
+
 ### Phase 4: Closeout
 
 Review the diff for meaning changes, then commit the compression pass.
