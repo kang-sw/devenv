@@ -102,12 +102,13 @@ Claude prior art with native runtime behavior:
 - dispatch multiple resolved domains in parallel and concatenate results in
   resolution order.
 
-Multi-domain partial failures should be handled primarily by the manager and
-lead-agent prompt contract rather than by elaborate result synthesis in the
-runtime. The runtime should preserve rule-based guarantees where cheap: keep
+Multi-domain synthesis should remain an agent responsibility, but the tooling
+layer should provide guardrails that keep per-domain calls from being blocked by
+formatting, aggregation, or partial-failure ambiguity. The runtime should keep
 domain result boundaries, report failed domains distinctly, return failure when
-every resolved domain fails, and allow partial success when at least one domain
-answers.
+every resolved domain fails, allow partial success when at least one domain
+answers, and preserve enough structured metadata for the lead agent to combine
+or qualify the returned material.
 
 ### Phase 3: Workflow exposure
 
@@ -133,6 +134,8 @@ Acceptance checks:
 - `api.list` works with no cache and with existing cache directories.
 - `api.ask` exact-hint path skips pre-router.
 - `api.ask` no-hint path invokes pre-router and dispatches one or more domains.
+- Multi-domain responses preserve per-domain boundaries and failure metadata so
+  callers can continue when only some domains fail.
 - The manager prompt instructs each per-domain session to create and run its
   staleness check before answering.
 - Per-domain locks prevent concurrent manager calls for the same domain.
