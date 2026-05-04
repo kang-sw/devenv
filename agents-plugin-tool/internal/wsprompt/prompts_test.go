@@ -91,9 +91,11 @@ func TestResolveWriteCodePromptSet(t *testing.T) {
 		want string
 	}{
 		{"implementer", "core", "You are a code implementer."},
+		{"mental-model-updater", "core", "You are updating mental-model documents"},
 		{"project-survey", "light", "You are project-survey"},
 		{"plan-populator-survey", "core", "You are conducting a codebase survey"},
 		{"plan-populator-research", "deep", "You are drafting a step-by-step implementation plan"},
+		{"sprint-survey", "core", "You are a sprint-context survey agent"},
 		{"code-review-test", "", "Test Partition"},
 		{"delegate-orientation", "", "You are a delegated worker"},
 		{"impl-playbook", "", "Implementation Playbook"},
@@ -144,10 +146,12 @@ func TestBundleMetadata(t *testing.T) {
 	for _, prompt := range []string{
 		"code-reviewer",
 		"implementer",
+		"mental-model-updater",
 		"plan-populator-research",
 		"plan-populator-survey",
 		"project-survey",
 		"skeleton-writer",
+		"sprint-survey",
 		"code-review-correctness",
 		"code-review-fit",
 		"code-review-test",
