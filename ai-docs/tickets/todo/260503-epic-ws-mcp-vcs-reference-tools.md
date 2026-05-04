@@ -78,13 +78,15 @@ inspectable, and composable across Codex, Claude, and future hosts.
   `updated_mental_models`. It should refuse unrelated staged changes unless
   instructed by a narrow policy and preserve readable multi-paragraph commit
   messages without shell quoting issues.
-- Ticket catalog and reference primitives: add tools for listing active tickets,
-  reading a ticket by stem, locating tickets that mention a stem, and validating
-  parent/related references. This should support `write-ticket`, `discuss`, and
-  future context-recovery flows.
+- Ticket catalog and reference primitives:
+  `260504-feat-ws-mcp-reference-discovery-tools` adds path-first tools for
+  listing ticket paths/status, locating tickets that mention a ticket stem, and
+  summarizing parent/related/spec references. It is not a ticket body read/edit
+  API.
 - Spec and stem reference primitives: extend the existing spec index surface so
-  callers can find anchors by stem, heading, source file, or text query, and can
-  trace ticket frontmatter references to spec stems without ad hoc search.
+  callers can find anchors by `spec_stem`, heading, source file, or text query,
+  and can trace ticket frontmatter references to spec stems without ad hoc
+  search.
 - Skill and prompt cleanup: after the VCS/reference tools exist, normalize
   `agents-plugin` skills and embedded prompts away from direct `git`, `Bash`,
   `Grep`, `Glob`, `sed`, and manual stem-search wording where those operations

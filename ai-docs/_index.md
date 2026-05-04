@@ -188,6 +188,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Portable `ws/git.*` plus reference lookup roadmap |
+| `260504-feat-ws-mcp-reference-discovery-tools` | todo | Path-first ticket/spec/mental-model reference discovery tools |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go stdio MCP/runtime boundary; Windows launcher smoke deferred |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
@@ -199,6 +200,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 `260503-epic-ws-agent-workflow-stability` - keep open for future observed runtime failures; no active blocker after worktree lock, interrupt, and leaf deferral.
 `260503-epic-ws-mcp-vcs-reference-tools` - replace direct shell wording in shared skills with portable MCP/git/reference tooling.
+`260504-feat-ws-mcp-reference-discovery-tools` - add direct-scan path/status/reference discovery for tickets, specs, and mental models; not document read/edit APIs.
 `260503-feat-agents-plugin-runtime-boundary` - wip; macOS/Codex launcher and release download are verified; Windows launcher verification deferred.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
