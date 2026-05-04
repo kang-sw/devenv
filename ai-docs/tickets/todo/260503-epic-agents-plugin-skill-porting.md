@@ -208,9 +208,12 @@ Status:
   agent session. The port keeps spec availability warning, domain confirmation,
   survey-before-write, verifier-before-write, and the
   `(mental-model-updated)` commit marker.
-- `bootstrap` remains deferred to a dedicated design ticket because it mixes
-  project scaffolding, install/update behavior, AGENTS/CLAUDE context, and
-  host-specific plugin bootstrap concerns.
+- `manual-think` is intentionally Claude-only while `claude-plugin/` remains
+  available as an out-of-support compatibility tree.
+- `bootstrap` has an initial Agents plugin draft centered on bundled
+  `AGENTS.template.md`, downstream `AGENTS.md` as the canonical managed root
+  context, and `CLAUDE.md` as an `@AGENTS.md` compatibility shim. It still needs
+  a dedicated design/implementation ticket before claiming operational parity.
 
 ## Completion Criteria
 
