@@ -1,6 +1,7 @@
 tt.*
 .claude/*.local.*
 .claude/**/*.local.*
+.codex
 .tests
 doc/tags
 debug
