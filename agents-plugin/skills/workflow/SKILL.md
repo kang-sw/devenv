@@ -80,8 +80,10 @@ Use for runtime compatibility checks and feature detection.
 `ws/api.list`
 `ws/api.ask`
 
+Use `ws/api.ask(prompt: "<prose question>")` for external API documentation
+lookup; pass the natural-language question directly.
 Use `ws/api.list` to inspect available third-party API documentation domains and
-`ws/api.ask(prompt: ..., domain_hint: ...)` to ask API documentation questions.
+`ws/api.ask(prompt: ..., domain_hint: ...)` when a domain hint is known.
 The runtime handles pre-routing, per-domain manager sessions, stale checks, and
 cache access; shared skills should keep callers on the MCP tool surface instead
 of local implementation details.
@@ -113,7 +115,8 @@ relay file paths, not full findings, to the implementer.
 
 API docs:
 call `ws/api.list()` when choosing among cached domains matters.
-call `ws/api.ask(prompt: "<API documentation question>", domain_hint: "<optional-domain>")`.
+call `ws/api.ask(prompt: "<prose API documentation question>")` for external API lookup.
+add `domain_hint: "<optional-domain>"` only when the intended domain is known.
 ```
 
 ## Doctrine
