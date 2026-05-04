@@ -15,6 +15,7 @@ spec:
 related-mental-model:
   - executor-wrapup
   - personal-devenv
+completed: 2026-05-04
 ---
 
 # agents-plugin API documentation MCP migration
@@ -141,3 +142,22 @@ Acceptance checks:
 - Per-domain locks prevent concurrent manager calls for the same domain.
 - Error reporting preserves non-zero behavior when all domain calls fail.
 - Plugin validation and local cache sync succeed.
+
+### Result (5705077, 232fdf6) - 2026-05-04
+
+Implemented the API documentation MCP surface in `agents-plugin-tool` with
+embedded `pre-router` and `api-doc-manager` prompts, `api.ask` and `api.list`
+MCP tools, per-domain dispatch boundaries, partial-failure reporting, and
+per-domain locking. The implementation preserves the existing hidden cache
+layout while exposing ordinary callers only to the `ws/api.*` tool contract.
+
+Workflow guidance, delegate orientation, runtime references, and prompt tests
+now describe the MCP-based API docs path. Review-cycle fixes tightened domain
+slug validation, removed worker-facing cache-path leakage, and added MCP
+dispatch/error-formatting and prompt-contract coverage.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./...`
+- `git diff --check`
+- correctness, fit, and test reviewer partitions re-reviewed cleanly.
