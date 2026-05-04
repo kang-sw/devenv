@@ -7,8 +7,9 @@
   "release_tag": "v0.1.0",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "f6204758d344442cd100c5bc319f6a7218f583fb3408d7b28261046851046bbc",
+    "content_sha256": "52fd1d98cdb5a7d2b6837bc96839e554f9f50842e567492148c78ca7fbb80a16",
     "prompts": [
+      "api-doc-manager",
       "code-review-correctness",
       "code-review-fit",
       "code-review-test",
@@ -19,6 +20,7 @@
       "mental-model-updater",
       "plan-populator-research",
       "plan-populator-survey",
+      "pre-router",
       "project-survey",
       "skeleton-writer",
       "sprint-survey"
@@ -54,7 +56,9 @@
     "git.status": ">=0.1.0-dev <0.2.0",
     "git.diff": ">=0.1.0-dev <0.2.0",
     "git.log": ">=0.1.0-dev <0.2.0",
-    "git.merge_base": ">=0.1.0-dev <0.2.0"
+    "git.merge_base": ">=0.1.0-dev <0.2.0",
+    "api.list": ">=0.1.0-dev <0.2.0",
+    "api.ask": ">=0.1.0-dev <0.2.0"
   },
   "commands": {
     "runtime.info": ">=0.1.0-dev <0.2.0",

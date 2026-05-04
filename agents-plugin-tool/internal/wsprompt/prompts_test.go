@@ -90,6 +90,8 @@ func TestResolveWriteCodePromptSet(t *testing.T) {
 		tier string
 		want string
 	}{
+		{"api-doc-manager", "core", "You are an API documentation manager"},
+		{"pre-router", "light", "You are an API documentation pre-router"},
 		{"implementer", "core", "You are a code implementer."},
 		{"mental-model-updater", "core", "You are updating mental-model documents"},
 		{"project-survey", "light", "You are project-survey"},
@@ -149,6 +151,8 @@ func TestBundleMetadata(t *testing.T) {
 		}
 	}
 	required := []string{
+		"api-doc-manager",
+		"pre-router",
 		"code-reviewer",
 		"implementer",
 		"mental-model-updater",

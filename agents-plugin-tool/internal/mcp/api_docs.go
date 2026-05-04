@@ -1,0 +1,245 @@
+package mcp
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsagent"
+)
+
+const (
+	apiDocManagerPrompt = "api-doc-manager"
+	apiPreRouterPrompt  = "pre-router"
+	apiManagerPrefix    = "api-doc-"
+	apiAskTimeout       = 10 * time.Minute
+)
+
+type apiRuntime interface {
+	Route(ctx context.Context, root, prompt string) (string, error)
+	AskManager(ctx context.Context, root, domain, prompt string) (string, error)
+}
+
+type wsagentAPIRuntime struct{}
+
+func (wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string, error) {
+	mgr := wsagent.NewManager(wsagent.Options{})
+	name := fmt.Sprintf("api-doc-pre-router-%d", time.Now().UTC().UnixNano())
+	_, _, err := mgr.Register(wsagent.RegisterOptions{
+		Root:                root,
+		Name:                name,
+		Backend:             "codex",
+		Tier:                "light",
+		Prompts:             []string{apiPreRouterPrompt},
+		SuppressOrientation: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = mgr.Erase(root, name) }()
+	if _, err := mgr.Call(wsagent.CallOptions{Root: root, Name: name, Prompt: prompt}); err != nil {
+		return "", err
+	}
+	return mgr.Wait(wsagent.WaitOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
+}
+
+func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
+	mgr := wsagent.NewManager(wsagent.Options{})
+	name := apiManagerName(domain)
+	if _, err := mgr.Status(root, name); err != nil {
+		if _, _, regErr := mgr.Register(wsagent.RegisterOptions{
+			Root:                root,
+			Name:                name,
+			Backend:             "codex",
+			Tier:                "core",
+			Prompts:             []string{apiDocManagerPrompt},
+			SuppressOrientation: true,
+		}); regErr != nil {
+			return "", regErr
+		}
+	}
+	if _, err := mgr.Call(wsagent.CallOptions{Root: root, Name: name, Prompt: prompt}); err != nil {
+		return "", err
+	}
+	return mgr.Wait(wsagent.WaitOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
+}
+
+var apiDomainLocks sync.Map // map[string]*sync.Mutex; process-local guard for same-domain MCP calls.
+
+func apiListDomains(root string) ([]string, error) {
+	entries, err := os.ReadDir(apiDepsDir(root))
+	if errors.Is(err, os.ErrNotExist) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	domains := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() || strings.HasPrefix(name, ".") {
+			continue
+		}
+		domains = append(domains, name)
+	}
+	sort.Strings(domains)
+	return domains, nil
+}
+
+func (s *Server) askAPI(ctx context.Context, root, prompt, hint string) (string, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", errors.New("prompt is required")
+	}
+	domains, err := s.resolveAPIDomains(ctx, root, prompt, hint)
+	if err != nil {
+		return "", err
+	}
+	if len(domains) == 0 {
+		return "", errors.New("api.ask resolved no domains")
+	}
+
+	type result struct {
+		domain string
+		text   string
+		err    error
+	}
+	results := make([]result, len(domains))
+	var wg sync.WaitGroup
+	for i, domain := range domains {
+		i, domain := i, domain
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i].domain = domain
+			if err := os.MkdirAll(filepath.Join(apiDepsDir(root), domain), 0o755); err != nil {
+				results[i].err = err
+				return
+			}
+			lock := apiLockFor(root, domain)
+			lock.Lock()
+			defer lock.Unlock()
+			text, err := s.apiRuntime().AskManager(ctx, root, domain, prompt)
+			results[i].text = text
+			results[i].err = err
+		}()
+	}
+	wg.Wait()
+
+	successes := 0
+	var b strings.Builder
+	b.WriteString("api.ask results\n")
+	for _, res := range results {
+		b.WriteString("\n## Domain: ")
+		b.WriteString(res.domain)
+		b.WriteString("\n")
+		if res.err != nil {
+			b.WriteString("ERROR: ")
+			b.WriteString(res.err.Error())
+			b.WriteByte('\n')
+			continue
+		}
+		successes++
+		b.WriteString(strings.TrimRight(res.text, "\n"))
+		b.WriteByte('\n')
+	}
+	if successes == 0 {
+		return b.String(), errors.New("api.ask failed for all resolved domains")
+	}
+	return b.String(), nil
+}
+
+func (s *Server) resolveAPIDomains(ctx context.Context, root, prompt, hint string) ([]string, error) {
+	existing, err := apiListDomains(root)
+	if err != nil {
+		return nil, err
+	}
+	hint = strings.TrimSpace(hint)
+	if hint != "" {
+		for _, domain := range existing {
+			if hint == domain {
+				return []string{domain}, nil
+			}
+		}
+	}
+	input := formatAPIPreRouterPrompt(hint, existing, prompt)
+	output, err := s.apiRuntime().Route(ctx, root, input)
+	if err != nil {
+		return nil, fmt.Errorf("api pre-router failed: %w", err)
+	}
+	return parseAPIRouterDomains(output)
+}
+
+func formatAPIPreRouterPrompt(hint string, existing []string, prompt string) string {
+	if strings.TrimSpace(hint) == "" {
+		hint = "(none)"
+	}
+	var b strings.Builder
+	b.WriteString("Hint: ")
+	b.WriteString(hint)
+	b.WriteString("\nExisting domains:\n")
+	for _, domain := range existing {
+		b.WriteString(domain)
+		b.WriteByte('\n')
+	}
+	b.WriteString("Prompt: ")
+	b.WriteString(prompt)
+	b.WriteByte('\n')
+	return b.String()
+}
+
+func parseAPIRouterDomains(output string) ([]string, error) {
+	seen := map[string]bool{}
+	var domains []string
+	for _, line := range strings.Split(output, "\n") {
+		domain := strings.TrimSpace(line)
+		if domain == "" {
+			continue
+		}
+		if !validAPIDomain(domain) {
+			return nil, fmt.Errorf("api pre-router returned invalid domain %q", domain)
+		}
+		if !seen[domain] {
+			seen[domain] = true
+			domains = append(domains, domain)
+		}
+	}
+	if len(domains) == 0 {
+		return nil, errors.New("api pre-router returned no domains")
+	}
+	return domains, nil
+}
+
+func validAPIDomain(domain string) bool {
+	if domain == "" || domain == "." || domain == ".." || strings.HasPrefix(domain, ".") {
+		return false
+	}
+	return !strings.ContainsAny(domain, `/\\`)
+}
+
+func apiDepsDir(root string) string {
+	return filepath.Join(root, "ai-docs", ".deps")
+}
+
+func apiManagerName(domain string) string {
+	return apiManagerPrefix + domain
+}
+
+func apiLockFor(root, domain string) *sync.Mutex {
+	key := filepath.Clean(root) + "\x00" + domain
+	lock, _ := apiDomainLocks.LoadOrStore(key, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
+func (s *Server) apiRuntime() apiRuntime {
+	if s.api != nil {
+		return s.api
+	}
+	return wsagentAPIRuntime{}
+}

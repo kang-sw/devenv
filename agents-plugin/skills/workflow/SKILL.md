@@ -75,14 +75,20 @@ instead of copying large findings through the lead context.
 
 Use for runtime compatibility checks and feature detection.
 
+### API documentation
+
+`ws/api.list`
+`ws/api.ask`
+
+Use `ws/api.list` to inspect available third-party API documentation domains and
+`ws/api.ask(prompt: ..., domain_hint: ...)` to ask API documentation questions.
+The runtime handles pre-routing, per-domain manager sessions, stale checks, and
+cache access; shared skills should not tell workers to read `ai-docs/.deps/`
+directly.
+
 ## Planned Or Specialized
 
-API documentation routing is not yet a generic shared primitive. Until the
-runtime provides pre-router, domain agent, stale-check, fetch, and lock
-contracts, describe the needed contract instead of spelling a host-specific
-helper.
-
-Active-agent listing and broad message-queue semantics should also be treated as
+Active-agent listing and broad message-queue semantics should be treated as
 contract surfaces unless the current runtime exposes the exact MCP tool needed
 by the skill. Basic async cancellation exists through `ws/agents.cancel`; do not
 generalize that into a richer interrupt contract without checking the runtime.
@@ -104,6 +110,10 @@ Review artifacts:
 call `ws/path.generate(kind: "review", stems: ["<stem>"])`.
 tell reviewers to write full findings to those paths.
 relay file paths, not full findings, to the implementer.
+
+API docs:
+call `ws/api.list()` when choosing among cached domains matters.
+call `ws/api.ask(prompt: "<API documentation question>", domain_hint: "<optional-domain>")`.
 ```
 
 ## Doctrine

@@ -26,6 +26,7 @@ type Server struct {
 	version      string
 	sourceCommit string
 	role         toolRole
+	api          apiRuntime
 }
 
 type toolRole string
@@ -275,6 +276,25 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, string(raw)+"\n", nil)
 	case "runtime.debug_events":
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
+		return toolTextResponse(req.ID, text, err)
+	case "api.list":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		domains, err := apiListDomains(root)
+		return toolJSONResponse(req.ID, domains, err)
+	case "api.ask":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		prompt, _ := params.Arguments["prompt"].(string)
+		hint, _ := params.Arguments["domain_hint"].(string)
+		text, err := s.askAPI(ctx, root, prompt, hint)
+		if err != nil && text != "" {
+			return toolErrorTextResponse(req.ID, text+"\n"+err.Error())
+		}
 		return toolTextResponse(req.ID, text, err)
 	case "config.show":
 		view, err := wsconfig.Show(wsconfig.Options{})
@@ -557,15 +577,19 @@ func toolJSONResponse(id json.RawMessage, value any, err error) response {
 
 func toolTextResponse(id json.RawMessage, text string, err error) response {
 	if err != nil {
-		return response{JSONRPC: "2.0", ID: id, Result: map[string]any{
-			"isError": true,
-			"content": []map[string]string{{
-				"type": "text",
-				"text": err.Error(),
-			}},
-		}}
+		return toolErrorTextResponse(id, err.Error())
 	}
 	return response{JSONRPC: "2.0", ID: id, Result: map[string]any{
+		"content": []map[string]string{{
+			"type": "text",
+			"text": text,
+		}},
+	}}
+}
+
+func toolErrorTextResponse(id json.RawMessage, text string) response {
+	return response{JSONRPC: "2.0", ID: id, Result: map[string]any{
+		"isError": true,
 		"content": []map[string]string{{
 			"type": "text",
 			"text": text,
@@ -595,6 +619,29 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"limit": integerProperty("Maximum number of events to return. Defaults to 80 and is capped."),
 				},
+			},
+		},
+		{
+			"name":        "api.list",
+			"description": "Return sorted API documentation cache domain names under ai-docs/.deps.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Repository root. Defaults to the server root."),
+				},
+			},
+		},
+		{
+			"name":        "api.ask",
+			"description": "Ask cached or fetchable third-party API documentation through per-domain manager sessions.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":        stringProperty("Repository root. Defaults to the server root."),
+					"prompt":      stringProperty("API documentation question to answer."),
+					"domain_hint": stringProperty("Optional API documentation domain hint."),
+				},
+				"required": []string{"prompt"},
 			},
 		},
 		{
@@ -998,7 +1045,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 	case roleDelegate:
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && name != "subquery"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "api.") && name != "subquery"
 	default:
 		return false
 	}

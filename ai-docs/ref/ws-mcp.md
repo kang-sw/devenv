@@ -209,6 +209,82 @@ Behavior:
 - A mismatch causes the launcher to repair the cache-local runtime binary just
   as tool or command drift does.
 
+### `ws/api.list`
+
+Return sorted third-party API documentation cache domain names.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    }
+  }
+}
+```
+
+Output:
+
+- MCP text content containing a JSON array of domain directory names from
+  `ai-docs/.deps/`.
+- Dot-prefixed directories and non-directories are excluded. Missing `.deps`
+  returns an empty array.
+
+### `ws/api.ask`
+
+Ask third-party API documentation questions through runtime-managed per-domain
+manager sessions.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "API documentation question to answer."
+    },
+    "domain_hint": {
+      "type": "string",
+      "description": "Optional API documentation domain hint."
+    }
+  },
+  "required": ["prompt"]
+}
+```
+
+Behavior:
+
+- An exact `domain_hint` matching an existing `ai-docs/.deps/<domain>/`
+  directory skips routing and calls only that domain.
+- Otherwise the runtime invokes the embedded `pre-router` prompt with the hint,
+  existing domains, and original prompt; router output is parsed as one domain
+  slug per non-empty line.
+- Each resolved domain is handled by persistent manager `api-doc-<domain>` using
+  the embedded `api-doc-manager` prompt. The manager owns stale checking and any
+  official-documentation fetching inside its domain cache.
+- Same-process calls for the same domain serialize through a process-local
+  per-domain lock. Distinct domains may run concurrently.
+- Output preserves per-domain boundaries. If at least one domain succeeds, failed
+  domains are included as explicit error blocks; if all domains fail, the tool
+  returns a tool error.
+
+Constraints:
+
+- The public MCP surface intentionally exposes only `ws/api.list` and
+  `ws/api.ask`; refresh and stale-check operations remain manager-internal.
+- Worker-facing guidance should use these tools and should not direct ordinary
+  workers to read `ai-docs/.deps/` directly.
+
 ### `ws/project_tree`
 
 Render the ws project document map, spec inventory, and active ticket queue.

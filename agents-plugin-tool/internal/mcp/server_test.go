@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -640,4 +641,158 @@ func runGitOutput(t *testing.T, root string, args ...string) []byte {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
 	}
 	return out
+}
+
+type fakeAPIRuntime struct {
+	mu          sync.Mutex
+	routeCalls  []string
+	managerHits []string
+	answers     map[string]string
+	errs        map[string]error
+	active      map[string]int
+	maxActive   map[string]int
+	delay       time.Duration
+}
+
+func (f *fakeAPIRuntime) Route(ctx context.Context, root, prompt string) (string, error) {
+	f.mu.Lock()
+	f.routeCalls = append(f.routeCalls, prompt)
+	f.mu.Unlock()
+	return "go\npython\n", nil
+}
+
+func (f *fakeAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
+	f.mu.Lock()
+	if f.active == nil {
+		f.active = map[string]int{}
+	}
+	if f.maxActive == nil {
+		f.maxActive = map[string]int{}
+	}
+	f.managerHits = append(f.managerHits, domain+":"+prompt)
+	f.active[domain]++
+	if f.active[domain] > f.maxActive[domain] {
+		f.maxActive[domain] = f.active[domain]
+	}
+	f.mu.Unlock()
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
+	f.mu.Lock()
+	f.active[domain]--
+	answer := "answer for " + domain
+	if f.answers != nil && f.answers[domain] != "" {
+		answer = f.answers[domain]
+	}
+	err := error(nil)
+	if f.errs != nil {
+		err = f.errs[domain]
+	}
+	f.mu.Unlock()
+	return answer, err
+}
+
+func TestAPIListDomains(t *testing.T) {
+	root := t.TempDir()
+	useLeadProfile(t)
+	initGit(t, root)
+	server := NewServer(root, "test")
+	domains, err := apiListDomains(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(domains) != 0 {
+		t.Fatalf("empty deps domains = %v", domains)
+	}
+	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
+	mustWrite(t, root, "ai-docs/.deps/.hidden/README.md", "hidden")
+	mustWrite(t, root, "ai-docs/.deps/python/README.md", "python")
+	mustWrite(t, root, "ai-docs/.deps/file.txt", "not dir")
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api.list","arguments":{}}}` + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	got := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
+	if got != "[\"go\",\"python\"]\n" {
+		t.Fatalf("api.list = %q", got)
+	}
+}
+
+func TestAPIAskExactHintSkipsRouter(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
+	fake := &fakeAPIRuntime{answers: map[string]string{"go": "go answer"}}
+	server := NewServer(root, "test")
+	server.api = fake
+	text, err := server.askAPI(context.Background(), root, "How do modules work?", "go")
+	if err != nil {
+		t.Fatalf("askAPI returned error: %v\n%s", err, text)
+	}
+	if len(fake.routeCalls) != 0 {
+		t.Fatalf("exact hint invoked pre-router: %v", fake.routeCalls)
+	}
+	if !strings.Contains(text, "## Domain: go") || !strings.Contains(text, "go answer") {
+		t.Fatalf("api.ask response missing boundary/answer:\n%s", text)
+	}
+}
+
+func TestAPIAskPreRouterPartialFailureBoundaries(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
+	mustWrite(t, root, "ai-docs/.deps/python/README.md", "python")
+	fake := &fakeAPIRuntime{answers: map[string]string{"go": "go ok"}, errs: map[string]error{"python": fmt.Errorf("python unavailable")}}
+	server := NewServer(root, "test")
+	server.api = fake
+	text, err := server.askAPI(context.Background(), root, "Compare clients", "")
+	if err != nil {
+		t.Fatalf("partial success should not error: %v\n%s", err, text)
+	}
+	if len(fake.routeCalls) != 1 || !strings.Contains(fake.routeCalls[0], "Existing domains:\ngo\npython\nPrompt: Compare clients") {
+		t.Fatalf("pre-router input mismatch: %#v", fake.routeCalls)
+	}
+	if !strings.Contains(text, "## Domain: go\ngo ok") || !strings.Contains(text, "## Domain: python\nERROR: python unavailable") {
+		t.Fatalf("partial response missing boundaries:\n%s", text)
+	}
+}
+
+func TestAPIAskAllDomainFailureReturnsToolError(t *testing.T) {
+	root := t.TempDir()
+	fake := &fakeAPIRuntime{errs: map[string]error{"go": fmt.Errorf("go failed"), "python": fmt.Errorf("python failed")}}
+	server := NewServer(root, "test")
+	server.api = fake
+	text, err := server.askAPI(context.Background(), root, "question", "")
+	if err == nil {
+		t.Fatalf("expected all-domain failure, got success:\n%s", text)
+	}
+	if !strings.Contains(text, "## Domain: go\nERROR: go failed") || !strings.Contains(text, "## Domain: python\nERROR: python failed") {
+		t.Fatalf("all failure text missing metadata:\n%s", text)
+	}
+}
+
+func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
+	fake := &fakeAPIRuntime{delay: 50 * time.Millisecond}
+	server := NewServer(root, "test")
+	server.api = fake
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := server.askAPI(context.Background(), root, "question", "go")
+			if err != nil {
+				t.Errorf("askAPI returned error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	fake.mu.Lock()
+	max := fake.maxActive["go"]
+	fake.mu.Unlock()
+	if max != 1 {
+		t.Fatalf("same-domain calls were not serialized; max active = %d", max)
+	}
 }
