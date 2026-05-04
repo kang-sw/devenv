@@ -5,136 +5,81 @@ description: Author or audit ws workflow skills and agent prompts using the repo
 
 # Skill Authoring
 
-## Invariants
+Use this reference when authoring or auditing ws skills and agent prompts. Apply
+the principles below directly; do not expand them into local paraphrase unless
+the target document needs a concrete procedure.
 
-- Put directives before rationale; put rationale only in Doctrine.
-- Keep each invariant or constraint short enough to audit as one standalone rule.
-- Keep skills self-contained; do not require tickets, session history, or sibling skills to understand the rule text.
-- Keep agent prompts self-contained; do not require conversation history or caller session state.
-- Replace broken host-specific tool calls with exact ws MCP tool calls.
-- Do not read convention files from host-local plugin source paths.
-- Mechanize repeatedly violated behavior with handlers, templates, or structured output blocks.
-- Separate soft judgment from mechanical procedure; handlers reference named judgments instead of embedding criteria.
-- Re-read added text at the end of every authoring pass and cut redundant or non-executable prose.
+## Principles
 
-## On: Author Skill
+These apply to both skill and agent documents.
 
-1. Write frontmatter with only `name` and `description`.
-2. Put all trigger conditions in `description`, because the body loads only after selection.
-3. Start the body with `## Invariants` when the skill has hard universal rules.
-4. Add `## On: <event>` handlers for entry points that require ordered execution.
-5. Add `## Judgments` only for soft decisions that handlers must reference by name.
-6. Add `## Templates` only for reusable output formats or invocation shapes.
-7. End with `## Doctrine`, naming the finite resource and the ambiguity rule.
+- The audience is the model re-reading under attention pressure, not a human reading fresh.
+- One-liners survive pressure; paragraphs dissolve. Every rule fits one line.
+- Directives at top, rationale (if any) as a single Doctrine paragraph at bottom. Never interleave.
+- Self-contained. Skills: no references to tickets, sessions, or sibling skills except `/`-prefixed invocations and CLAUDE.md. Agents: no references to session state or conversation history.
+- Repeatedly violated rule -> mechanize (structured output block at entry point), do not repeat louder.
+- Mechanical rules and soft judgments do not mix. Soft decision points must be separated and stated explicitly.
+- After restructuring, request an authorized fresh audit: contradictions, duplication, orphan references, closure gaps.
+- At every authoring turn's end, re-read additions and cut.
 
-## On: Author Agent
+### Invariant / Constraint checklist
 
-1. Start with `## Identity`, one sentence that states what the agent is and does.
-2. Add `## Constraints` for hard scope boundaries and universal rules.
-3. Add `## Process` for the agent's linear work sequence.
-4. Add `## Heuristics` only when the agent has non-mechanical decisions.
-5. Add `## Output` defining the exact response contract.
-6. End with `## Doctrine`, naming the finite resource and the ambiguity rule.
+Run against each invariant (skills) or constraint (agents) line after drafting.
+Every item is yes/no.
 
-## On: Audit
+- **Falsifiable?** - Can you describe a concrete violation? If not, it is a wish, not a rule.
+- **Actionable?** - Does it say what to *do*, not just what to *avoid*?
+- **One line?** - If it needs a paragraph to state, it is not yet distilled.
+- **Context-free?** - Understandable without reading the surrounding file?
+- **Non-redundant?** - Does it say something no other line already covers?
+- **Universal?** - Is it a constraint that holds in all situations, not a step at a specific point?
+- **Derivable?** - Can it be regenerated from the Doctrine paragraph?
 
-1. Classify the document as skill or agent.
-2. Check top-to-bottom section order against the matching layout.
-3. Run `judge: invariant-quality` on every invariant or constraint line.
-4. Run `judge: doctrine-quality` on the Doctrine paragraph.
-5. Verify handlers contain procedure, judgments contain criteria, and Doctrine contains only the generator rationale.
-6. When independent validation is available and authorized, request a fresh audit for contradictions, duplication, orphan references, and closure gaps.
-7. Report contradictions, duplicate rules, orphan references, missing output contracts, and closure gaps.
+### Doctrine format
 
-## Judgments
+Two jobs: (1) name the single finite resource the document optimizes for, (2)
+provide a generator clause: "When a rule is ambiguous, apply whichever
+interpretation better preserves <resource>." Anchor concretely - measurable
+nouns ("context window"), not fuzzy ones ("quality", "focus"). Test: can the
+invariants' priorities and shape re-derive from this paragraph? The Doctrine
+names the axis along which rules rank, not every rule verbatim.
 
-### judge: invariant-quality
+## Skill Layout
 
-Accept a line only when every answer is yes:
+Top-to-bottom order. Simpler skills use the subset they need.
 
-- Can a concrete violation be described?
-- Does it say what to do?
-- Does it fit on one line?
-- Does it make sense without surrounding prose?
-- Does it add a rule not already present?
-- Does it hold in every situation for this document?
-- Can it be regenerated from the Doctrine paragraph?
+1. **Invariants** - unambiguous imperatives, zero interpretation cost, skimmable.
+2. **Event handlers** (`On: X`) - numbered step lists per entry point. Consistent sub-structure across siblings.
+3. **Judgments** - soft decision points extracted from handlers. Name them (`judge: <name>`) and centralize criteria here; handlers reference by name. A fixed lookup table with unambiguous triggers is a routing rule in the handler, not a judgment.
+4. **Templates** - structured output formats: brief formats, spawn signatures, addenda. Procedures belong in handlers.
+5. **Doctrine** - one paragraph, the generator.
 
-### judge: doctrine-quality
+Adapt section types to the document's reading pattern (e.g., named procedures
+instead of event handlers for reference material) - the principles are
+universal, the specific sections are not.
 
-Accept Doctrine only when it names one finite resource and includes this generator: when a rule is ambiguous, apply whichever interpretation better preserves that resource.
+## Agent Layout
 
-Concrete finite resources include context window, attention budget, execution steps, review time, and user turns. Reject fuzzy resources such as quality, focus, clarity, and robustness unless the sentence anchors them to a measurable constraint.
+Top-to-bottom order. Simpler agents use the subset they need.
 
-## Templates
+1. **Identity** - one sentence: what you are and what you do. Not a persona essay.
+2. **Constraints** - scope boundaries, hard rules, what you never do. Same checklist as skill invariants.
+3. **Process** - how you work, step by step. Equivalent to skill handlers but typically a single linear flow rather than multiple event-driven entry points.
+4. **Heuristics** - decision tables, escalation criteria. Equivalent to skill judgments. Omit if the agent's decisions are purely mechanical.
+5. **Output** - structured return format. Every agent must define what it sends back to the caller.
+6. **Doctrine** - one paragraph, the generator.
 
-### Skill Skeleton
-
-```markdown
----
-name: <skill-name>
-description: <what the skill does and all trigger conditions>
----
-
-# <Title>
-
-## Invariants
-
-- <hard universal rule>
-
-## On: <event>
-
-1. <ordered step>
-
-## Judgments
-
-### judge: <name>
-
-<criteria>
-
-## Templates
-
-### <template name>
-
-<format>
+Agents are spawned into zero-context environments - self-containedness is even
+more critical than for skills. Team communication rules (SendMessage protocol,
+idle handling) are not part of the agent definition; they are injected by the
+calling skill when the agent is spawned into a team.
 
 ## Doctrine
 
-<one paragraph naming the finite resource and ambiguity rule>
-```
-
-### Agent Skeleton
-
-```markdown
-# <Title>
-
-## Identity
-
-<one sentence>
-
-## Constraints
-
-- <hard universal rule>
-
-## Process
-
-1. <ordered step>
-
-## Heuristics
-
-### judge: <name>
-
-<criteria>
-
-## Output
-
-<exact return format>
-
-## Doctrine
-
-<one paragraph naming the finite resource and ambiguity rule>
-```
-
-## Doctrine
-
-Skill and agent documents optimize for the model's limited attention budget while executing under context pressure: directives stay skimmable, procedures stay mechanical, judgments stay named, and rationale stays isolated. When a rule is ambiguous, apply whichever interpretation better preserves the model's limited attention budget while executing under context pressure.
+Skill and agent files are consulted by the model under attention pressure
+mid-session. Every authoring choice optimizes for **executability under that
+pressure**: skimmable imperatives where attention lands first, mechanical
+structure where judgment fails, preserved judgment language where mechanism
+would lose signal, rationale collapsed into a single generator at the end. When
+an authoring decision is ambiguous, apply whichever choice the model under
+pressure would execute more reliably.
