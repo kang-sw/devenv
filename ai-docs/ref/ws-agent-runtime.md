@@ -292,7 +292,7 @@ ws-mcp agents wait --root <repo> --name <name> [--timeout 30s]
 ws-mcp agents status --root <repo> --name <name>
 ws-mcp agents interrupt --root <repo> --name <name> <message>
 ws-mcp agents check-inbox --root <repo> --name <name>
-ws-mcp agents tail --root <repo> --name <name> [--lines 40]
+ws-mcp agents tail --root <repo> --name <name> [--lines 3]
 ws-mcp agents cancel --root <repo> --name <name>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
@@ -348,12 +348,13 @@ status text produced by `agents.status`. Failed and cancelled calls also return
 status text so workflow skills can branch without opening state files directly.
 
 `agents.tail` reads recent lines from `events.jsonl`, `current/stdout`,
-`current/stderr`, and `output.md` without invoking a backend. `agents.cancel`
-uses the stored worker pid for a best-effort local process kill and marks the
-current call `cancelled`. After process restart, `wait`, `status`, `tail`, and
-`print` still work from disk state; `cancel` can only terminate a process when
-the stored pid still refers to a live local worker, and it does not yet provide
-backend-specific process-group cleanup.
+`current/stderr`, and `output.md` without invoking a backend. Routine progress
+checks should request `--lines 3`; larger tails are for concrete failure
+diagnosis. `agents.cancel` uses the stored worker pid for a best-effort local
+process kill and marks the current call `cancelled`. After process restart,
+`wait`, `status`, `tail`, and `print` still work from disk state; `cancel` can
+only terminate a process when the stored pid still refers to a live local worker,
+and it does not yet provide backend-specific process-group cleanup.
 
 ## Prompt Resolution
 

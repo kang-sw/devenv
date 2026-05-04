@@ -744,6 +744,10 @@ Return recent diagnostic lines without invoking a backend.
 Input adds optional `lines` per section, defaulting to `40`. Output contains
 sections for `events`, `stdout`, `stderr`, and `output`.
 
+Workflow skills should pass `lines: 3` for routine progress checks. Larger
+tails are reserved for diagnosing concrete failures where recent timestamps and
+status lines are insufficient.
+
 ### `ws/agents.cancel`
 
 Best-effort cancel the current async call for a registered ws agent.

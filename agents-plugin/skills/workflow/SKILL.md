@@ -56,10 +56,10 @@ is needed. Set `deep_research: true` only for broad tracing.
 Register a stable task name with prompt stems or a self-contained system prompt,
 then call it for each turn that needs continuity. `ws/agents.call` starts the
 turn asynchronously and returns promptly. Use `wait` when final output is needed,
-`status` to decide whether to wait or continue, `tail` for evidence and
-diagnostics, `print` for the last plain-text output, `cancel` only when stopping
-the current task is more valuable than backend continuity, and `erase` when the
-task-scoped session is no longer needed.
+`status` to decide whether to wait or continue, `tail(lines: 3)` only for small
+diagnostic snapshots, `print` for the last plain-text output, `cancel` only when
+stopping the current task is more valuable than backend continuity, and `erase`
+when the task-scoped session is no longer needed.
 
 ### Artifact paths
 
@@ -103,7 +103,7 @@ call `ws/subquery(deep_research: true, question: <block below>)` only for broad 
 Persistent task:
 call `ws/agents.register(name: "<agent-name>", prompts: ["<prompt-stem>"])`.
 call `ws/agents.call(name: "<agent-name>", prompt: <block below>)`.
-wait, inspect status, tail diagnostics, or print output as needed.
+wait, inspect status, tail with `lines: 3`, or print output as needed.
 erase the task-scoped agent when cleanup matters.
 
 Review artifacts:
