@@ -8,10 +8,14 @@ on:
       - "v*"
     paths:
       - ".github/workflows/ws-mcp-release.yml"
+      - ".agents/plugins/marketplace.json"
+      - "agents-plugin/**"
       - "agents-plugin-tool/**"
   pull_request:
     paths:
       - ".github/workflows/ws-mcp-release.yml"
+      - ".agents/plugins/marketplace.json"
+      - "agents-plugin/**"
       - "agents-plugin-tool/**"
   workflow_dispatch:
     inputs:
@@ -42,15 +46,30 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      - name: Validate plugin release contract
+        run: |
+          plugin_version=$(jq -r '.plugin_version' ../agents-plugin/runtime.json)
+          release_tag=$(jq -r '.release_tag' ../agents-plugin/runtime.json)
+          test "$release_tag" = "v$plugin_version"
+          jq . ../agents-plugin/.codex-plugin/plugin.json >/dev/null
+          jq . ../agents-plugin/.mcp.json >/dev/null
+          jq . ../agents-plugin/runtime.json >/dev/null
+          jq . ../.agents/plugins/marketplace.json >/dev/null
+
       - name: Build release assets
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             scripts/build-release-assets.sh "${{ inputs.version }}"
-          elif [ -n "${GITHUB_REF_NAME:-}" ]; then
+          elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
             scripts/build-release-assets.sh "${GITHUB_REF_NAME}"
           else
             scripts/build-release-assets.sh 0.1.0-dev
           fi
+
+      - name: Verify release asset checksums
+        run: |
+          cd dist
+          shasum -a 256 -c SHA256SUMS
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
@@ -68,3 +87,41 @@ jobs:
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
             gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes "$notes"
           gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+
+  windows-smoke:
+    name: Windows ws-mcp smoke
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: agents-plugin-tool
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: agents-plugin-tool/go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build Windows executable
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          go build -trimpath -ldflags "-s -w -X main.version=0.1.0-dev" -o dist/ws-mcp-windows-amd64.exe ./cmd/ws-mcp
+
+      - name: Run Windows executable smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Resolve-Path ".\dist\ws-mcp-windows-amd64.exe"
+          $root = Resolve-Path ".."
+          & $exe version
+          & $exe doctor --root $root
+          @(
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}'
+            '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project_tree","arguments":{}}}'
+          ) | & $exe serve --stdio --root $root

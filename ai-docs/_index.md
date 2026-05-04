@@ -18,10 +18,8 @@ Native MCP/tooling source: `agents-plugin-tool/`.
 
 ## Current Branch Rules
 
-- Branch: `topic/open-conventions-mcp-skills`.
-- Defer spec and mental-model updates until this branch merges.
-- Do not add `spec:` frontmatter, run `ws:lead-update-spec`, or edit
-  `ai-docs/spec/` / `ai-docs/mental-model/`.
+- Branch: `main`.
+- No branch-specific spec or mental-model freeze is active.
 - Keep `.codex` untracked unless the user explicitly asks to stage it.
 
 ## Plugin Topology
@@ -202,7 +200,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260503-epic-ws-agent-workflow-stability` - keep open for future observed runtime failures; no active blocker after worktree lock, interrupt, and leaf deferral.
-`260503-feat-agents-plugin-runtime-boundary` - wip; macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; native Windows plugin-managed launcher verification deferred.
+`260503-feat-agents-plugin-runtime-boundary` - wip; macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; CI now runs release asset checks and Windows executable smoke; native Windows plugin-managed launcher verification deferred.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
 
@@ -214,8 +212,8 @@ bootstrap template, active `lead-*` skills, delegate prompts, and
 `ai-docs/ref/skill-authoring.md`.
 
 In-flight: none.
-Next: pick from the active queue. Likely candidates are
-`260429-feat-api-deps` or native Windows plugin-managed launcher closeout under
+Next: push `main` and create `v0.1.0` when ready to publish release assets, then
+verify native Windows plugin-managed launcher startup under
 `260503-feat-agents-plugin-runtime-boundary`.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,

@@ -440,6 +440,8 @@ host is available.
 
 Scope:
 
+- Use GitHub Actions `windows-latest` smoke as a preflight for the Windows
+  executable before native plugin testing.
 - Test whether Codex plugin-managed MCP resolves
   `command: "./bin/ws-mcp-launcher"` to `./bin/ws-mcp-launcher.exe`.
 - If extensionless resolution fails, choose the documented fallback path:
