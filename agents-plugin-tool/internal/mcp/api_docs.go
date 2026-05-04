@@ -171,15 +171,12 @@ func (s *Server) resolveAPIDomains(ctx context.Context, root, prompt, hint strin
 			}
 		}
 	}
-	if matched := matchExistingAPIDomains(prompt, existing); len(matched) > 0 {
-		return matched, nil
-	}
 	input := formatAPIPreRouterPrompt(hint, existing, prompt)
 	output, err := s.apiRuntime().Route(ctx, root, input)
 	if err != nil {
 		return nil, fmt.Errorf("api pre-router failed: %w", err)
 	}
-	return parseAPIRouterDomains(output)
+	return parseAPIRouterDomains(output, existing)
 }
 
 func formatAPIPreRouterPrompt(hint string, existing []string, prompt string) string {
@@ -200,16 +197,18 @@ func formatAPIPreRouterPrompt(hint string, existing []string, prompt string) str
 	return b.String()
 }
 
-func parseAPIRouterDomains(output string) ([]string, error) {
+func parseAPIRouterDomains(output string, existing []string) ([]string, error) {
 	seen := map[string]bool{}
 	var domains []string
+	var invalid []string
 	for _, line := range strings.Split(output, "\n") {
 		domain := strings.TrimSpace(line)
 		if domain == "" {
 			continue
 		}
 		if !validAPIDomain(domain) {
-			return nil, fmt.Errorf("api pre-router returned invalid domain %q", domain)
+			invalid = append(invalid, domain)
+			continue
 		}
 		if !seen[domain] {
 			seen[domain] = true
@@ -217,6 +216,12 @@ func parseAPIRouterDomains(output string) ([]string, error) {
 		}
 	}
 	if len(domains) == 0 {
+		domains = matchExistingAPIDomains(output, existing)
+	}
+	if len(domains) == 0 {
+		if len(invalid) > 0 {
+			return nil, fmt.Errorf("api pre-router returned invalid domain %q", invalid[0])
+		}
 		return nil, errors.New("api pre-router returned no domains")
 	}
 	return domains, nil

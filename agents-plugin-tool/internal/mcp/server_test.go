@@ -770,21 +770,42 @@ func TestAPIAskMCPExactHintSkipsRouter(t *testing.T) {
 	}
 }
 
-func TestAPIAskExistingDomainMentionSkipsRouter(t *testing.T) {
+func TestAPIAskExistingDomainMentionStillUsesRouter(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/.deps/ratatui/README.md", "ratatui")
-	fake := &fakeAPIRuntime{answers: map[string]string{"ratatui": "ratatui answer"}}
+	fake := &fakeAPIRuntime{
+		routeOutput: "ratatui\n",
+		answers:     map[string]string{"ratatui": "ratatui answer"},
+	}
 	server := NewServer(root, "test")
 	server.api = fake
 	text, err := server.askAPI(context.Background(), root, "For ratatui, how do I render a widget?", "")
 	if err != nil {
 		t.Fatalf("askAPI returned error: %v\n%s", err, text)
 	}
-	if len(fake.routeCalls) != 0 {
-		t.Fatalf("existing domain mention invoked pre-router: %v", fake.routeCalls)
+	if len(fake.routeCalls) != 1 {
+		t.Fatalf("existing domain mention did not invoke pre-router: %v", fake.routeCalls)
 	}
 	if !strings.Contains(text, "## Domain: ratatui\nratatui answer") {
 		t.Fatalf("api.ask response missing existing domain answer:\n%s", text)
+	}
+}
+
+func TestAPIAskRecoversExistingDomainFromRouterProse(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/.deps/ratatui/README.md", "ratatui")
+	fake := &fakeAPIRuntime{
+		routeOutput: "Use frame.render_widget for ratatui widgets.\n",
+		answers:     map[string]string{"ratatui": "ratatui answer"},
+	}
+	server := NewServer(root, "test")
+	server.api = fake
+	text, err := server.askAPI(context.Background(), root, "For ratatui, how do I render a widget?", "")
+	if err != nil {
+		t.Fatalf("askAPI returned error: %v\n%s", err, text)
+	}
+	if !strings.Contains(text, "## Domain: ratatui\nratatui answer") {
+		t.Fatalf("api.ask response missing recovered existing domain answer:\n%s", text)
 	}
 }
 
