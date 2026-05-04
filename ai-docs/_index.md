@@ -273,6 +273,7 @@ This index lists active tickets only; completed tickets live under
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is remaining core implementation orchestration after `write-code`
+`260504-feat-agents-plugin-lead-skill-namespace` — rename Agents plugin skills to a `lead-*` namespace before merge so delegated agents do not see ambiguous orchestration entry points
 `260503-epic-ws-agent-workflow-stability` — stabilization parent remains open for future observed runtime failures; no active blocker after worktree lock, hook-driven interrupt, and leaf deferral
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
