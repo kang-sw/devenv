@@ -6,13 +6,12 @@ description: Load the ws workflow reference for host-neutral MCP notation and or
 # Workflow
 
 > **Session invariant:** Keep this reference active while writing or executing ws
-> workflow skills. After compaction, re-invoke `ws:lead-workflow` if primitive names
-> or orchestration boundaries matter.
+> workflow skills. After compaction, re-invoke `ws:lead-workflow` when primitive
+> names or orchestration boundaries matter.
 
 ## On: invoke
 
-No action is required. Reading this file is the invocation; it loads the ws
-workflow primitive reference into session context.
+Reading this file is the invocation; it loads the primitive reference.
 
 ---
 
@@ -61,10 +60,10 @@ Use for scoped fact-finding, surveys, and one-turn answers. Set
 `ws/agents.erase`
 
 Register a stable task name with prompt stems or a self-contained system prompt.
-Call it for each turn that needs continuity. `ws/agents.call` starts async and
-returns promptly. Use `wait` for final output, `status` before waiting,
-`tail(lines: 3)` for small diagnostics, `print` for last output, `cancel` to stop
-active work, and `erase` when the task-scoped session is done.
+Call it for each continuity turn. `ws/agents.call` starts async and returns
+promptly. Use `wait` for final output, `status` before waiting, `tail(lines: 3)`
+for small diagnostics, `print` for last output, `cancel` to stop active work,
+and `erase` when task-scoped state should be removed.
 
 ### Artifact paths
 
@@ -85,8 +84,7 @@ Use for runtime compatibility checks and feature detection.
 `ws/api.ask`
 
 Use `ws/api.ask(prompt: "<prose question>")` for external API documentation.
-Pass the natural-language question directly.
-Use `ws/api.list` to inspect cached domains.
+Pass the natural-language question directly. Use `ws/api.list` to inspect cached domains.
 Use `domain_hint` only when the intended domain is known.
 The runtime owns pre-routing, per-domain sessions, stale checks, and cache access.
 
@@ -123,7 +121,6 @@ add `domain_hint: "<optional-domain>"` only when the intended domain is known.
 
 ## Doctrine
 
-Workflow notation optimizes for limited execution attention during cross-host
-work. References must be short enough to survive skill execution and explicit
-enough to map to each host's tool display. When ambiguous, preserve execution
-attention.
+Workflow notation optimizes for **limited execution attention** during cross-host
+work. References must survive skill execution and map to each host's tool
+display. When ambiguous, preserve execution attention.

@@ -18,7 +18,7 @@ Target: user request
 
 ### 1. Resolve config
 
-Config files follow two naming conventions:
+Config naming:
 - `ai-docs/ship/<proj>.md` - committed; for public publish targets.
 - `ai-docs/ship/<proj>.local.md` - gitignored; for private or sensitive deploy targets (internal registries, SSH deploys, credentials). Takes precedence over the `.md` variant when both exist for the same `<proj>`.
 
@@ -46,17 +46,15 @@ Report what was done: version, tag, publish targets, any deviations.
 
 ## On: no config
 
-The project has no ship config. Consult the user to establish one.
+The project has no ship config. Ask for:
+- Sub-project/component, which determines `<proj>`.
+- Public vs private/sensitive target; private targets use `<proj>.local.md`.
+- Version strategy: manual semver, auto-increment patch, date-based (`YYYY.MM.DD`), `git describe`, or another explicit strategy.
+- Build/package steps, publish/deploy commands, and post-ship steps.
 
-1. Ask:
-   - Which sub-project or component is being shipped (determines `<proj>` name and file path).
-   - Whether the deploy target is public or private/sensitive. Private targets (internal registries, SSH deploys, credentials that must not be committed) go in `<proj>.local.md`; public targets go in `<proj>.md`.
-   - Version strategy: options include semantic versioning with manual bump, auto-increment patch, date-based (`YYYY.MM.DD`), or `git describe`.
-   - Build and package steps.
-   - Publish or deploy targets and commands.
-   - Post-ship steps (e.g. update changelog, notify).
-2. Write the config to `ai-docs/ship/<proj>.md` or `ai-docs/ship/<proj>.local.md` depending on the answer above.
-3. Confirm the written config with the user before proceeding to **Execute**.
+Then:
+1. Write the config to `ai-docs/ship/<proj>.md` or `ai-docs/ship/<proj>.local.md` depending on the answer above.
+2. Confirm the written config with the user before proceeding to **Execute**.
 
 ## Ship Config Format
 
@@ -87,9 +85,6 @@ Omit sections that do not apply.
 
 ## Doctrine
 
-Ship optimizes for **zero-surprise releases** - every step is either
-prescribed in the config or confirmed by the user before execution.
-The config is written once and reused, so the first invocation is the
-only time judgment is required. When a rule is ambiguous, apply
-whichever interpretation makes the next ship invocation require less
-human input, not more.
+Ship optimizes for **zero-surprise releases**: every step is config-prescribed
+or user-confirmed before execution. The first invocation captures judgment so
+future invocations need less human input. When ambiguous, reduce future judgment.

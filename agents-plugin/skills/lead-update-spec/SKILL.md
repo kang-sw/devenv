@@ -10,7 +10,7 @@ Target: user request
 ## Invariants
 
 - Lead-driven - no subagent delegation.
-- Load spec-conventions before any write or read.
+- Call `ws/convention.read(name: "spec-conventions")` before any write or read.
 - Only add entries for confirmed-implemented features - no [planned] entries unless explicitly directed.
 - Call `ws/spec_index.verify()` after any file modification.
 - Commit all spec changes in a single `docs(spec): ...` commit.
@@ -34,14 +34,14 @@ Run `git log <range> --oneline`. Apply **judge: spec-impact** to each commit.
 
 ### 4. Add new entries
 
-For each commit with spec-impact:
+For each spec-impact commit:
 1. Identify the affected spec domain. Read the relevant file(s) from `ai-docs/spec/`.
 2. Check whether an entry already covers the new or changed behavior.
 3. If missing: call `ws/spec_stem.generate(slug: "<slug>")` and insert an entry following the `spec-format` template from `write-spec/SKILL.md`.
 
 ### 5. Strip [planned]
 
-For each `[planned]` entry in any spec file:
+For each `[planned]` entry:
 1. Extract the stem.
 2. Run `git log <range> --oneline | grep <stem>`. If matching commits exist and the feature is confirmed implemented: strip `[planned] ` from the heading and remove any `> [!note] Planned [planned]` callout block beneath it.
 
@@ -85,8 +85,7 @@ Spec: <N entries added, M [planned] stripped, K removed> | no changes
 
 ## Doctrine
 
-Update-spec optimizes for **spec coverage at commit boundaries** - every caller-visible
-behavior change that lands in source should land in spec within the same sprint or
-implement run. The lead's inline judgment on spec-impact is the gate; no delegation,
-no suggestion mode. When a rule is ambiguous, apply whichever interpretation produces
-spec entries a caller could verify without reading source code.
+Update-spec optimizes for **spec coverage at commit boundaries**. Caller-visible
+source behavior should land in spec within the same sprint or implement run.
+The lead's inline spec-impact judgment is the gate: no delegation, no suggestion
+mode. When ambiguous, produce entries callers can verify without source.

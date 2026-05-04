@@ -27,15 +27,11 @@ Call `ws/mental_models.list()` to load the current mental-model catalog.
 1. Parse the rule from `user request`. If `user request` is empty, ask the user for the rule description and wait.
 2. Read `CLAUDE.md` to see current `## Architecture Rules` entries and avoid near-duplicates.
 3. Use the `ws/mental_models.list()` result for the current domain catalog and hierarchy.
-4. Ancestor loading (one-level hierarchies - `<domain>/<sub>.md` only): for domain-scoped candidates, if any candidate target is a direct-child sub-domain doc (`mental-model/<domain>/<sub>.md`), read its parent `mental-model/<domain>/index.md` first - inherited `## Domain Rules` may already cover the rule.
+4. For direct-child sub-domain candidates (`mental-model/<domain>/<sub>.md`), read `mental-model/<domain>/index.md` first; inherited `## Domain Rules` may already cover the rule.
 
 ### 2. Classify
 
-Apply `judge: classification`. The decision is one of:
-
-- **cross-cutting** - applies everywhere regardless of domain.
-- **domain-scoped** - applies when working in a specific domain area.
-- **ambiguous** - both plausible; user input required.
+Apply `judge: classification`: **cross-cutting**, **domain-scoped**, or **ambiguous**.
 
 ### 3. Route
 
@@ -45,7 +41,7 @@ Apply `judge: classification`. The decision is one of:
 | domain-scoped | Enumerate candidate domain docs; apply `judge: domain-match`. |
 | ambiguous | Stop. Prompt the user with the two plausible classifications plus the best-match domain candidate; wait for selection. |
 
-For domain-scoped rules, `judge: domain-match` yields one of:
+For domain-scoped rules, apply `judge: domain-match`:
 
 | Match | Action |
 |---|---|
@@ -55,7 +51,7 @@ For domain-scoped rules, `judge: domain-match` yields one of:
 
 ### 4. Propose or prompt
 
-1. If the handler above resolved to a clear single target: state the target and the rule text verbatim in one line (`Target: <path> section <section>; rule: "<rule>".`). Proceed to section 5.
+1. If a clear target exists: state `Target: <path> section <section>; rule: "<rule>".` Proceed to section 5.
 2. Otherwise: surface the ambiguity, list options, and stop. Do not write. Resume from section 5 once the user selects.
 
 ### 5. Write
@@ -165,12 +161,8 @@ scaffolding skill. `ws:lead-forge-mental-model` owns full-doc authorship.
 
 ## Doctrine
 
-`ws:lead-add-rule` optimizes for **classification accuracy at the moment a rule
-is captured** - a mis-routed rule either dilutes `## Architecture Rules`
-with domain trivia or hides a cross-cutting invariant inside a domain
-doc where cross-domain work never sees it. The skill is autonomous when
-the classification is unambiguous and paused on ambiguity; it never
-modifies existing rule content, so every write is purely additive and
-git-history recoverable. When a rule is ambiguous, apply whichever
-interpretation better preserves classification accuracy - ask the user
-when in doubt, never guess. Preserve the user's original phrasing - tighten only grammar and active voice.
+`ws:lead-add-rule` optimizes for **classification accuracy at capture time**.
+A mis-routed rule either dilutes `## Architecture Rules` or hides a cross-cutting
+invariant in a domain doc. The skill writes autonomously only when classification
+is unambiguous, asks on ambiguity, never edits existing rule content, and
+preserves the user's phrasing except grammar and active voice.

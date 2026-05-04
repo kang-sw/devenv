@@ -16,7 +16,7 @@ Target: user request
 
 ## On: invoke
 
-1. **judge: spec-impact** - does this work introduce or modify behavior a caller can observe?
+1. **judge: spec-impact** - does this work introduce or modify caller-observable behavior?
    - no  -> output "No public behavior affected."
        - While `ws:lead-proceed` -> continue with appropriate next step.
        - Otherwise -> suggest `ws:lead-write-ticket`. Exit.
@@ -35,18 +35,18 @@ Target: user request
    e. Call `ws/spec_index.verify()` for cleanup and verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
 6. Accuracy check - confirm every heading without [planned] exists in the codebase. Use `ws/subquery(question: "<focused verification question>")` if uncertain. Never remove [planned] without confirmation.
-7. **Commit** - in a single shell command, stage the spec file(s) updated in this run (and `ai-docs/_index.md` if the listing changed) then commit:
+7. **Commit** - in one shell command, stage updated spec file(s) and `ai-docs/_index.md` if listing changed, then commit:
    `git add <file(s)> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
 
 ## Judgments
 
 ### judge: spec-impact
 
-Evaluate whether the work introduces or modifies behavior a caller can observe from outside the implementation. Internal restructuring, refactors that preserve external behavior, or tooling changes with no public-facing surface are not spec-relevant. Any addition to or change of a callable interface, user-visible output, or documented convention qualifies.
+Evaluate whether work introduces or modifies behavior observable outside the implementation. Internal restructuring, behavior-preserving refactors, and tooling with no public-facing surface do not qualify. Callable interfaces, user-visible output, and documented conventions qualify.
 
 ### judge: idea-level
 
-When about to write a `[planned]` entry: write it. Then emit this session reminder: "Session reminder: a `todo/`-or-higher ticket must be created before this session ends for this `[planned]` entry to be valid per spec-conventions." Do not ask the user whether to defer - write the entry and remind.
+When about to write a `[planned]` entry: write it, then emit: "Session reminder: a `todo/`-or-higher ticket must be created before this session ends for this `[planned]` entry to be valid per spec-conventions." Do not ask whether to defer.
 
 ### judge: directory-vs-flat
 
@@ -111,4 +111,7 @@ Anchoring rules:
 
 ## Doctrine
 
-Spec documents are the pivot for discussion sessions - when the topic is "what does this currently do from the outside," the spec must answer without requiring source exploration. Every authoring choice optimizes for **drift resistance at the behavioral level**: describe what callers observe, not what the implementation does, so that internal refactors preserving behavior do not invalidate the spec. When a rule is ambiguous, apply whichever interpretation a reader could verify without reading source code.
+Spec documents answer "what does this do from the outside" without source
+exploration. Every choice optimizes for **behavioral drift resistance**:
+describe caller observations, not implementation mechanics. When ambiguous,
+choose what a reader can verify without source.

@@ -21,9 +21,9 @@ Target: user request
 
 ### 1. Identify contract directives
 
-1. Read the ticket. Note ambiguities that need lead judgment - scope boundaries, design choices between alternatives, integration constraints not obvious from the ticket alone.
+1. Read the ticket. Note ambiguities requiring lead judgment: scope boundaries, design choices, and non-obvious integration constraints.
 2. Skim relevant mental-model docs only if needed to resolve those ambiguities.
-3. Formulate **contract directives**: 2-5 binding decisions. Not a full design - just fences and choices the delegate must follow.
+3. Formulate **contract directives**: 2-5 binding decisions, not a full design.
 
 ### 2. Delegate
 
@@ -61,12 +61,12 @@ Ticket: <ticket-path>
 
 ### 5. Suggest next step
 
-Based on implementation complexity and session warmth on the target:
+Recommend the next step from implementation width and session warmth:
 - **Wide** (multiple independent modules): suggest `ws:lead-write-code` (one scope at a time) or ask the user to split into separate tickets.
 - **Narrow + warm** (single module, main agent already engaged the code): suggest `ws:lead-edit`.
 - **Narrow + cold** (single module, main agent is cold on the target): suggest `ws:lead-write-code`.
 
-Warmth is a property of the current session - has the main agent read files in the target scope this session, or did the user explicitly signal direct authorship? If ambiguous, suggest `ws:lead-proceed` and let its routing judges decide.
+Warmth means the main agent has read target files this session or the user explicitly signaled direct authorship. If ambiguous, suggest `ws:lead-proceed`.
 
 Present the recommendation with brief rationale. Do not auto-invoke.
 
@@ -89,10 +89,7 @@ Present the recommendation with brief rationale. Do not auto-invoke.
 
 ## Doctrine
 
-The skeleton optimizes for **contract-first delegation with minimal
-coordinator overhead** - the lead passes only binding decisions the
-delegate cannot derive, the delegate owns design and exploration. This
-keeps the coordinator's context light while locking public interfaces
-and acceptance criteria in code before implementation begins. When a rule
-is ambiguous, apply whichever interpretation better preserves contract
-stability while minimizing what the coordinator must serialize.
+The skeleton optimizes for **contract-first delegation with minimal coordinator
+overhead**. The lead passes only binding decisions the delegate cannot derive;
+the delegate owns design and exploration. When ambiguous, preserve contract
+stability while minimizing coordinator serialization.

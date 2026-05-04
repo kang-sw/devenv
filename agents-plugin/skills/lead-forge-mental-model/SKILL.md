@@ -49,11 +49,9 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 ```text
 Survey the project's directory and module structure.
 
-Steps:
-1. Enumerate the source tree: find top-level modules, packages, or service boundaries. Use find/glob as needed.
-2. For each boundary: identify its apparent responsibility and whether it has outward-facing interfaces (APIs, CLI commands, config options).
-
-Return: a bullet list of module/area names with a one-line responsibility description each. Include file count per area as a rough size signal.
+Enumerate top-level modules/packages/service boundaries. For each, identify
+responsibility, outward-facing interfaces, and file count as a size signal.
+Return markdown bullets by module/area.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -61,12 +59,9 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 ```text
 Survey the project for entry points and cross-module contracts.
 
-Steps:
-1. Find main entry points (e.g., main.rs, __main__.py, index.ts, bin/).
-2. For each entry point: identify what it orchestrates, what modules it depends on, and what outputs it produces.
-3. Identify shared contracts: trait impls, protocols, interface files, plugin registries, or configuration schemas that cross module boundaries.
-
-Return: a bullet list of entry points and contracts with coupling direction (who depends on whom).
+Find main entry points and cross-module contracts: trait impls, protocols,
+interfaces, plugin registries, configuration schemas. Return entry points and
+contracts with coupling direction.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -76,20 +71,16 @@ Survey the project for coupling hotspots and implicit contracts - areas that cau
 
 Look for: shared mutable state, ordering dependencies, sync points, extension registries, global config reads, event buses, or any code that must be called in a specific order.
 
-For each hotspot: note the modules involved, the contract, and the failure mode if violated.
-
-Return: a bullet list of hotspots with modules, contract, and failure mode.
+For each hotspot, return modules, contract, and failure mode.
 ```
 
 Wait for all three to return before synthesizing.
 
 ### 3. Synthesize domain candidates
 
-Combine the three survey returns:
-
 1. Cross-reference module boundaries, entry points, and coupling hotspots.
-2. Produce a candidate domain list - one domain per coherent operational area.
-3. For each candidate: note the source paths, the coupling it owns, and any existing mental-model file that covers it.
+2. Produce one candidate domain per coherent operational area.
+3. For each candidate, list source paths, owned coupling, and existing mental-model coverage.
 
 ### 4. User domain confirmation
 
@@ -139,8 +130,7 @@ Focus on what would cause wrong outcomes if unknown:
 5. Common mistakes (forgetting required steps, wrong outcomes)
 6. Distinguish existing patterns from scaffolded/planned features.
 
-Be concrete: cite file paths, function names, specific types.
-Do NOT produce type/field listings or paraphrase what functions do.
+Be concrete: cite paths, functions, and types. Do not list fields or paraphrase functions.
 ```
 
 Wait for the result before drafting.
@@ -172,7 +162,7 @@ Domain file draft:
 
 Source paths to check: <paths from task description>
 
-For each claim in the draft, assign a severity:
+For each claim, assign a severity:
 - [HIGH] Factually wrong - misnames a function, inverts a dependency, states a constraint that is not enforced.
 - [LOW] Incomplete - a relevant contract or coupling is missing.
 - [STALE] References removed code or an old API.
@@ -232,8 +222,6 @@ Check `ai-docs/spec/` on cold-start. If absent or empty: warn and proceed. Do no
 
 ## Doctrine
 
-Forge-mental-model optimizes for **confirmed operational knowledge per domain** -
-every domain file reflects a completed survey-and-verify cycle before being written.
-Spec stems are embedded opportunistically when available; their absence does not
-block authoring. When a rule is ambiguous, apply whichever interpretation ensures
-the domain survey and verifier steps complete before any file write begins.
+Forge-mental-model optimizes for **confirmed operational knowledge per domain**:
+each file follows a survey-and-verify cycle before writing. Spec stems are
+opportunistic. When ambiguous, complete survey and verification before any write.

@@ -24,8 +24,8 @@ Mode: user request
 2. Read downstream `AGENTS.md` if it exists.
 3. Read downstream `CLAUDE.md` if it exists.
 4. Detect mode:
-   - **fresh** - neither `AGENTS.md` nor `CLAUDE.md` exists.
-   - **upgrade** - `AGENTS.md` exists with `<!-- Template Version: vNNNN -->`.
+   - **fresh** - neither root file exists.
+   - **upgrade** - `AGENTS.md` has `<!-- Template Version: vNNNN -->`.
    - **adopt** - `AGENTS.md` exists without a version tag.
    - **claude-migrate** - `CLAUDE.md` exists and `AGENTS.md` does not.
 5. Execute the matching handler.
@@ -96,8 +96,7 @@ Mode: user request
 
 ## Doctrine
 
-Bootstrap optimizes for **idempotent downstream migration**: every run preserves
-project-specific content, applies only missing versioned migrations, and keeps
-Claude compatibility as a shim over the host-neutral root context. When a rule
-is ambiguous, apply whichever interpretation better preserves idempotency and
-downstream project content.
+Bootstrap optimizes for **idempotent downstream migration**: preserve
+project-specific content, apply only missing versioned migrations, and keep
+Claude compatibility as a shim over host-neutral `AGENTS.md`. When ambiguous,
+preserve idempotency and downstream content.

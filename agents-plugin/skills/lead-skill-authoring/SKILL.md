@@ -71,9 +71,8 @@ communication rules from the calling skill, not the agent definition.
 
 ## Doctrine
 
-Skill and agent files are reread under attention pressure. Every authoring
-choice optimizes for **executability under that pressure**: skimmable
-imperatives first, mechanical structure where judgment fails, preserved judgment
-language where mechanism would lose signal, rationale collapsed into one
-generator. When ambiguous, choose what the pressured model will execute more
-reliably.
+Skill and agent files are reread under attention pressure. Every choice
+optimizes for **executability under pressure**: skimmable imperatives first,
+mechanical structure where judgment fails, preserved judgment where mechanism
+would lose signal, rationale collapsed into one generator. When ambiguous,
+choose what the pressured model will execute reliably.

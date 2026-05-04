@@ -47,12 +47,9 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 ```text
 Survey the project's directory and module structure.
 
-Steps:
-1. Run `find . -type f` to enumerate the source tree layout.
-2. Identify top-level modules, packages, or service boundaries.
-3. Return a structured summary: module names, paths, brief description of purpose derived from file names and directory layout.
-
-Format your response as a markdown bullet list grouped by module/area.
+Enumerate source files, identify top-level modules/packages/service boundaries,
+and return module names, paths, and purpose inferred from names/layout.
+Format: markdown bullets grouped by module/area.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -60,12 +57,9 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 ```text
 Survey all tickets under ai-docs/tickets/ (all statuses: idea/, todo/, wip/, .done/, .dropped/).
 
-Steps:
-1. Glob ai-docs/tickets/**/*.md and read each file.
-2. Extract: ticket title, status directory, and any behavior or feature described as public-facing or user-visible.
-3. Group by apparent behavioral domain (infer from ticket title and content).
-
-Return a grouped list: domain -> behaviors/features mentioned in tickets.
+Glob ai-docs/tickets/**/*.md. Extract title, status directory, and public-facing
+or user-visible behavior. Group by inferred behavioral domain.
+Return: domain -> behaviors/features mentioned in tickets.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -73,12 +67,9 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 ```text
 Survey the archived spec files in ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory).
 
-Steps:
-1. Glob ai-docs/ref/old-spec/**/*.md and read each file.
-2. For each file: extract the title, summary, and all ## headings.
-3. Note which features are marked [planned] (planned) vs unmarked (implemented).
-
-Return: a flat list of domain names found, with their heading topics. These are reference candidates only - do not treat them as authoritative.
+Glob ai-docs/ref/old-spec/**/*.md. Extract title, summary, `##` headings, and
+[planned] status. Return domain names and heading topics as reference candidates
+only; do not treat archived specs as authoritative.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -86,23 +77,19 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 ```text
 Survey recent commit history for behavioral signals.
 
-Steps:
-1. Run `git log --oneline -100`.
-2. Identify commits that mention user-visible features, API changes, CLI changes, or spec updates (feat:, fix:, spec: prefixes and commit bodies referencing spec-stems).
-3. Group commit messages by apparent behavioral area.
-
-Return: a grouped list of behavioral areas -> representative commit messages. Omit chore/docs/refactor commits unless they reference spec-stems.
+Run `git log --oneline -100`. Identify user-visible features, API changes, CLI
+changes, or spec updates (`feat:`, `fix:`, `spec:`, spec-stems in bodies).
+Return behavioral areas -> representative commits. Omit chore/docs/refactor
+unless they reference spec-stems.
 ```
 
 Wait for all four to return before synthesizing.
 
 ### 3. Synthesize domain candidates
 
-Combine the four survey returns:
-
-1. Cross-reference module structure with ticket domains and commit areas.
-2. Produce a candidate domain list - one domain per significant caller-visible surface.
-3. For each candidate: note the spec files that covered it (if any) and representative behaviors.
+1. Cross-reference module structure, ticket domains, archived specs, and commits.
+2. Produce one candidate domain per significant caller-visible surface.
+3. For each candidate, list covering archived spec files and representative behaviors.
 
 ### 4. User domain confirmation
 
@@ -145,12 +132,9 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 Survey source code for the <domain> domain.
 Module paths: <paths from task description>
 
-Steps:
-1. Read all source files under the listed paths.
-2. Identify caller-visible behaviors: public functions, CLI commands, HTTP endpoints, config options, output formats, events, or any interface a consumer can observe.
-3. For each behavior: note whether it appears fully implemented or partially implemented (stubs, TODOs, feature flags).
-
-Return: bullet list of caller-visible behaviors with implementation status (implemented / partial / none visible).
+Read listed source paths. Identify caller-visible public functions, CLI commands,
+HTTP endpoints, config options, output formats, events, and observable interfaces.
+Return behaviors with status: implemented / partial / none visible.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -159,12 +143,8 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 Find tickets relevant to the <domain> domain.
 Module paths: <paths from task description>
 
-Steps:
-1. Glob ai-docs/tickets/**/*.md.
-2. Filter to tickets whose title or body mentions <domain> keywords or the module paths.
-3. For each match: extract the feature or behavior described and its ticket status (todo/wip/.done/.dropped).
-
-Return: list of features -> ticket status. Wip/todo items are candidates for [planned] planned markers.
+Glob ai-docs/tickets/**/*.md. Filter by <domain> keywords or module paths.
+Return features -> ticket status. todo/wip items are [planned] candidates.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -174,12 +154,9 @@ Survey the archived spec files for the <domain> domain.
 Archived location: ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory)
 Old spec files for this domain: <files from task description, or scan all>
 
-Steps:
-1. Read the relevant archived spec files.
-2. For each ## heading: note the feature name and [planned] status.
-3. Flag any behaviors in the old spec not visible in current source.
-
-Return: feature list from old spec with [planned] status and a note on current-source presence.
+Read relevant archived specs. For each `##` heading, note feature name,
+[planned] status, and whether current source shows it.
+Return features with archived status and current-source presence.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -188,23 +165,18 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 Survey commit history for the <domain> domain.
 Module paths: <paths from task description>
 
-Steps:
-1. Run `git log --oneline -- <paths>`.
-2. Identify commits that added or changed caller-visible behavior (feat:, fix:, spec: prefixes or spec-stem references in body).
-3. For each significant commit: note the behavior changed and whether it appears implemented or still in-flight.
-
-Return: chronological list of behavioral changes, newest first.
+Run `git log --oneline -- <paths>`. Identify commits that added or changed
+caller-visible behavior (`feat:`, `fix:`, `spec:`, spec-stems).
+Return behavioral changes newest first, with implementation status when visible.
 ```
 
 Wait for all four to return before synthesizing.
 
 ### 3. Synthesize behavior brief
 
-Combine the four returns into a behavior brief:
-
-- One bullet per distinct caller-visible behavior.
-- Each bullet: behavior description, evidence source (code / ticket / old-spec / commit), and candidate classification (implemented / planned).
-- Flag any item where the classification is uncertain.
+Combine the four returns into one bullet per distinct caller-visible behavior:
+description, evidence source (code / ticket / old-spec / commit), candidate
+classification (implemented / planned), and uncertainty flags.
 
 ### 4. User classification loop
 
@@ -213,9 +185,8 @@ Present the behavior brief to the user. For each item, establish:
 1. **Caller-visible or internal-only?** - Internal behaviors are excluded from spec per `spec-conventions.md`. Ask on every ambiguous item.
 2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Planned -> `[planned] {#slug}`.
 
-Ask on every ambiguous item. Do not classify without confirmation.
-
-Collect the confirmed list before writing anything.
+Ask on every ambiguous item. Do not classify without confirmation. Collect the
+confirmed list before writing anything.
 
 ### 5. Write spec entries
 
@@ -249,10 +220,10 @@ Tickets to update (wip/todo only):
 <list: ai-docs/tickets/<status>/<stem>.md - one-line description>
 
 For each ticket:
-1. Read the ticket file.
-2. Add or update the `spec:` frontmatter field with the stems relevant to this ticket. Merge with any existing `spec:` entries - never overwrite.
-3. Check the ticket body against loaded conventions. Fix any issues in place.
-4. Do not commit - the caller handles all git operations.
+1. Read the ticket.
+2. Merge relevant stems into `spec:` frontmatter; never overwrite existing entries.
+3. Check body against conventions and fix issues in place.
+4. Do not commit; caller owns git.
 ```
 
 3. Review the `## Clerk report`. Resolve any open questions with the user before committing.
@@ -268,11 +239,7 @@ For each ticket:
 
 ### 1. Final index pass
 
-Call `ws/spec_index.verify()` as an idempotent safety pass over all spec files:
-
-```text
-ws/spec_index.verify()
-```
+Call `ws/spec_index.verify()` as an idempotent safety pass over all spec files.
 
 ### 2. Summary report
 
@@ -330,8 +297,6 @@ TaskCreate(
 
 ## Doctrine
 
-Forge-spec optimizes for **confirmed spec entries per domain** - every entry
-in the produced spec reflects an explicit user decision on caller-visibility
-and implementation status. When a rule is ambiguous, apply whichever
-interpretation more reliably requires explicit user confirmation before any
-spec content is written.
+Forge-spec optimizes for **confirmed spec entries per domain** - every produced
+entry reflects an explicit user decision on caller-visibility and implementation
+status. When ambiguous, require confirmation before writing spec content.

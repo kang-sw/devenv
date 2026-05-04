@@ -15,8 +15,8 @@ Call `ws/project_tree()` to load the current project map.
 
 - No source edits. Only documentation writes, only in the capture step.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phases with a `### Result` section are frozen - do not edit them.
-- read mental-model docs on-demand as topics emerge.
-- read spec docs in `ai-docs/spec/` on-demand as topics emerge - the Project Map above lists available specs.
+- Read mental-model docs on-demand as topics emerge.
+- Read spec docs in `ai-docs/spec/` on-demand as topics emerge; Project Map lists available specs.
 - Use `ws/subquery(question: "<focused implementation-detail question>")` for implementation details beyond mental-model docs.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
@@ -33,11 +33,11 @@ Call `ws/project_tree()` to load the current project map.
 
 ## On: discussion loop
 
-1. Apply **judge: needs-survey** - identify every named component, skill, agent, spec, or ticket the current question touches.
+1. Apply **judge: needs-survey** to every named component, skill, agent, spec, or ticket.
    For each unloaded doc, call `ws/agents.register(name: "project-survey", prompts: ["project-survey"])`, then `ws/agents.call(name: "project-survey", prompt: "<topic brief>")`.
    Incorporate the returned reference list before responding.
 2. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-3. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; use `ws/subquery(question: "<focused implementation-detail question>")` for implementation details.
+3. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery(question: "<focused implementation-detail question>")` for implementation details.
    When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."
 4. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 5. Continue until the user signals done.
@@ -70,15 +70,13 @@ Triggers when the user requests a ticket status change - promoting an idea ticke
 
 ## Workflow Context
 
-Interface and scope decisions made in discussion become downstream inputs:
-- Approach direction -> spec update (`ws:lead-write-spec` - always the next step after discuss)
-- Scope, phases, acceptance criteria -> ticket structure (`ws:lead-write-ticket`)
-- Type shapes, module boundaries, public API -> skeleton contract directives (`ws:lead-write-skeleton`)
-The canonical chain is: `ws:lead-discuss` -> `ws:lead-write-spec` -> `ws:lead-write-ticket` -> `ws:lead-proceed` -> `ws:lead-write-skeleton`? -> `ws:lead-edit` | `ws:lead-write-code`.
-Write-spec's judge handles the no-op case; the chain is uniform regardless of topic type.
+Discussion outputs feed downstream skills:
+- Approach direction -> `ws:lead-write-spec` (always next; its judge handles no-op)
+- Scope, phases, acceptance criteria -> `ws:lead-write-ticket`
+- Type shapes, module boundaries, public API -> `ws:lead-write-skeleton`
 
-When discussion converges on a decision in any of these categories, frame
-the conclusion in terms its downstream consumer can directly act on.
+Canonical chain: `ws:lead-discuss` -> `ws:lead-write-spec` -> `ws:lead-write-ticket` -> `ws:lead-proceed` -> `ws:lead-write-skeleton`? -> `ws:lead-edit` | `ws:lead-write-code`.
+Frame conclusions as directives the downstream consumer can execute.
 
 ## Judgments
 
@@ -94,4 +92,6 @@ Include integration-test criteria in a ticket phase when the change has end-to-e
 
 ## Doctrine
 
-This skill optimizes for **decision quality per conversation turn**. The user is here to think, not to produce artifacts - so the agent's job is to sharpen reasoning by surfacing risks, reuse opportunities, and concrete alternatives, then capture only what the user approves. When a rule is ambiguous, apply whichever interpretation better preserves decision quality per turn.
+This skill optimizes for **decision quality per conversation turn**. Sharpen
+reasoning with risks, reuse opportunities, and concrete alternatives; capture
+only what the user approves. When ambiguous, preserve decision quality per turn.

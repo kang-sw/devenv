@@ -28,7 +28,7 @@ Target: user request
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
    c. For moves, `git mv` and add `completed:` date in frontmatter (-> `.done/`).
-4. **Phase content** - carry everything from discussion that informs implementation: goals, constraints, rationale, rejected alternatives, suggested approaches (pseudo code, struct shapes, data formats, algorithm sketches). Leave to the plan: codebase-derived details (file paths, existing type reuse, integration patterns, function signatures, testing classifications).
+4. **Phase content** - capture goals, constraints, rationale, rejected alternatives, and suggested approaches. Leave codebase-derived details (paths, type reuse, integration patterns, signatures, testing classifications) to the plan.
 5. **Intent review** - re-read the written/edited ticket against the preceding conversation:
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
@@ -41,7 +41,7 @@ Target: user request
    `git add <file> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
 8. **Proceed prompt** - suggest `ws:lead-proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
-   Emit the created ticket path as a completion artifact on its own line at the end of output, in the form `Ticket: ai-docs/tickets/<status>/<stem>.md`. This allows callers (e.g. `ws:lead-proceed`) to capture the path when invoking `ws:lead-write-ticket` as a prefix stage.
+   Emit the created ticket path on its own final line: `Ticket: ai-docs/tickets/<status>/<stem>.md`. Callers such as `ws:lead-proceed` capture this path from prefix-stage output.
 
 ## Judgments
 
@@ -71,10 +71,7 @@ Fires when a phase implements caller-visible behavior with no entry in any spec 
 
 ## Doctrine
 
-A ticket is the primary context-recovery artifact - a fresh session with no
-prior conversation must reconstruct the full decision context from the ticket
-and its linked plans. Every authoring choice optimizes for **recoverability
-of intent**: decisions, constraints, and rejected alternatives are captured
-at the point of writing so that downstream skills (`ws:lead-write-code`)
-never re-derive what was already settled. When a rule is
-ambiguous, apply whichever interpretation better preserves recoverability.
+A ticket is the primary context-recovery artifact. Every choice optimizes for
+**recoverability of intent**: capture decisions, constraints, and rejected
+alternatives when writing so downstream skills never re-derive settled context.
+When ambiguous, preserve recoverability.

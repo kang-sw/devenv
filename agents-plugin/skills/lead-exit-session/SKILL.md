@@ -25,13 +25,13 @@ description: Write and commit a next-session handoff note in ai-docs/_index.md. 
 
 ### Phase 2 - Context write
 
-Without issuing any information-gathering tool calls, replace the entire `## Session Notes` section in `ai-docs/_index.md` (including any HTML comments) with a context note following the **Context Note** template.
+Without information-gathering calls, replace the entire `## Session Notes` section in `ai-docs/_index.md` (including HTML comments) with the **Context Note** template.
 
 ### Phase 3 - User approval
 
 Present the written `## Session Notes` section. Wait for explicit approval before committing.
 
-On change requests: apply edits inline (a read call is permitted only if the user explicitly requests one to inform a correction). Re-present and wait again.
+On change requests, edit inline. A read call is permitted only when the user explicitly requests it for a correction. Re-present and wait again.
 
 ### Phase 4 - Commit
 
@@ -73,8 +73,6 @@ Append `(uncertain)` after any item the next session should verify before acting
 
 ## Doctrine
 
-Exit-session optimizes for **next-session orientation cost** - every authoring
-choice minimizes the time a fresh session needs to reach working context.
-File-path citations and `(uncertain)` markers make the note actionable without
-requiring re-derivation. When a rule is ambiguous, apply whichever interpretation
-produces a more directly actionable context note.
+Exit-session optimizes for **next-session orientation cost**. File-path
+citations and `(uncertain)` markers make the note actionable without
+re-derivation. When ambiguous, produce the more actionable context note.
