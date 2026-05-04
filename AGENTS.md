@@ -1,75 +1,65 @@
 # AGENTS.md - devenv
 
-## Current Migration State
+## Current Authority
 
-This repository is in transition from a Claude-centered workflow to a
-host-neutral Agents/open-conventions workflow.
+This repo is mid-migration from Claude-centered workflow to host-neutral
+Agents/open-conventions workflow. Treat these as authoritative until a ticket
+replaces them:
 
-The durable workflow knowledge still lives primarily in:
+- `CLAUDE.md` - compatibility rules and legacy repo discipline.
+- `ai-docs/_index.md` - project memory, inventory, specs, tickets, queue.
+- `claude-plugin/infra/` - convention documents.
+- `claude-plugin/skills/` - legacy workflow skills.
+- `claude-plugin/bin/ws-*` - helper command fallbacks.
 
-- `CLAUDE.md` for repository-level operating rules.
-- `ai-docs/_index.md` for project memory, inventory, specs, tickets, and current queue.
-- `claude-plugin/infra/` for convention documents.
-- `claude-plugin/skills/` for workflow skills.
-- `claude-plugin/bin/ws-*` for helper commands used by the skills.
-
-Treat those files as authoritative until a ticket explicitly replaces them with
-host-neutral equivalents. Do not assume the migration is complete just because
-this file exists.
+If `AGENTS.md` and `CLAUDE.md` conflict, follow the more conservative rule and
+surface the conflict before changing workflow semantics.
 
 ## Session Start
 
-At the start of a session, load context in this order:
+Load context in order:
 
 1. Read `ai-docs/_index.md`.
 2. Read `ai-docs/_index.local.md` if it exists.
 3. Run `git log --oneline --graph -50`.
 4. Run `git log -10`.
-5. For this migration branch, read
-   `ai-docs/tickets/idea/260429-research-host-neutral-ws-plugin.md`.
-
-Use `CLAUDE.md` as the compatibility source for existing repository rules when
-this file is incomplete. If `AGENTS.md` and `CLAUDE.md` conflict, prefer the
-more conservative rule and surface the conflict before changing workflow
-semantics.
+5. Read `ai-docs/tickets/idea/260429-research-host-neutral-ws-plugin.md`.
 
 ## Project Scope
 
-This is a meta-workflow repository. It defines workflow documents, skills,
-agents, plugin packaging, helper commands, and development environment templates.
+This is a meta-workflow repo: workflow docs, skills, agents, plugin packaging,
+helper commands, and dev-environment templates. Specs, tickets, and mental
+models here describe the workflow system itself; do not add downstream
+application-domain material.
 
-Domain specs, tickets, and mental models in this repository describe the
-workflow system itself. Do not add downstream application-domain material here.
+Root migration artifacts stay grouped by deliverable:
 
-Keep root-level workflow migration artifacts grouped by deliverable. During the
-Agents/Codex migration, `agents-plugin/` is the plugin distribution candidate and
-`agents-plugin-tool/` is the companion native tooling/MCP source tree. Do not add
-loose root-level `cmd/`, `internal/`, `scripts/`, or language module files for
-this migration unless a ticket explicitly changes the repository layout.
+- `agents-plugin/` - Codex-first plugin distribution candidate.
+- `agents-plugin-tool/` - native tooling and MCP source tree.
+
+Do not add loose root-level `cmd/`, `internal/`, `scripts/`, or language module
+files for this migration unless a ticket changes the layout.
 
 ## Documentation System
 
-Use these locations as the current document system:
-
-- Project memory and inventory: `ai-docs/_index.md`
+- Project memory and queue: `ai-docs/_index.md`
 - Tickets: `ai-docs/tickets/`
 - Specs: `ai-docs/spec/`
 - Mental models: `ai-docs/mental-model/`
 - Conventions: `claude-plugin/infra/*-conventions.md`
-- Skill and agent authoring rules: `ai-docs/ref/skill-authoring.md`
+- Skill/agent authoring: `ai-docs/ref/skill-authoring.md`
 - Codex behavior notes: `ai-docs/ref/codex-integration.md`
 
-Before authoring or auditing any skill, agent prompt, or convention document,
-read `ai-docs/ref/skill-authoring.md`.
+Before editing:
 
-Before editing tickets, read `claude-plugin/infra/ticket-conventions.md`.
-Before editing specs, read `claude-plugin/infra/spec-conventions.md`.
-Before editing mental models, read
-`claude-plugin/infra/mental-model-conventions.md`.
+- Skills, agents, or convention docs: read `ai-docs/ref/skill-authoring.md`.
+- Tickets: read `claude-plugin/infra/ticket-conventions.md`.
+- Specs: read `claude-plugin/infra/spec-conventions.md`.
+- Mental models: read `claude-plugin/infra/mental-model-conventions.md`.
 
 ## Ticket System
 
-Ticket status is directory-based:
+Status is directory-based:
 
 ```text
 ai-docs/tickets/idea/
@@ -79,77 +69,60 @@ ai-docs/tickets/.done/
 ai-docs/tickets/.dropped/
 ```
 
-Use ticket stems as stable references, not full paths. A ticket stem is the file
-name without `.md`, for example `260429-research-host-neutral-ws-plugin`.
+- Reference tickets by stem, not path: `260429-research-host-neutral-ws-plugin`.
+- Creation-date prefixes are stable; never rename to change the date.
+- Move status with `git mv` when possible.
+- Research tickets use freeform topic sections and no phases.
+- Actionable tickets use `## Phases` and stable `### Phase N: <title>`.
+- Do not edit a phase after it has a `### Result` section.
+- All AI-authored ticket content must be English.
 
-Creation-date prefixes are stable. Do not rename a ticket to change its date.
-Move status changes with `git mv` when possible.
+## Migration Priority
 
-Research tickets have freeform topic sections and no phases. Actionable tickets
-use `## Phases` with stable `### Phase N: <title>` sections. Do not edit a phase
-after it has a `### Result` section.
+Current priority: make the project and ticket system usable from Agents/Codex
+while preserving Claude compatibility.
 
-All AI-authored ticket content must be in English.
+- Keep `AGENTS.md` honest about the mixed state.
+- Move durable rules toward shared, host-neutral conventions.
+- Prefer precise MCP tool/resource names in shared skill text.
+- Treat Claude-specific commands and paths as adapter or fallback behavior.
 
-## Current Migration Priority
-
-The current priority is to make the project and ticket system usable from
-Agents/Codex before broad skill migration:
-
-1. Establish `AGENTS.md` as the honest root context for the current mixed state.
-2. Preserve Claude compatibility while moving durable rules toward shared,
-   host-neutral conventions.
-3. Prefer precise MCP tool/resource names in future shared skill text instead of
-   vague capability descriptions.
-4. Keep Claude-specific commands and path assumptions as adapter or fallback
-   behavior, not as the long-term shared contract.
-
-The current research anchor is
-`260429-research-host-neutral-ws-plugin`. Promote or split that research into
-actionable tickets before making broad structural changes.
+Research anchor: `260429-research-host-neutral-ws-plugin`. Promote or split it
+before broad structural changes.
 
 ## Helper Commands
 
-Many existing workflows still assume `ws-*` commands are available on `PATH`.
-Important current helpers include:
+Existing workflows still assume `ws-*` on `PATH`. Key fallbacks:
 
-- `ws-print-infra <doc>`: print convention or infra documents.
-- `ws-list-mental-model [paths...]`: list relevant mental-model documents.
-- `ws-proj-tree`: render a project map for discussion.
-- `ws-list-spec-stems [spec-file]`: list spec anchors.
-- `ws-generate-spec-stem <slug>`: generate a collision-free spec stem.
-- `ws-spec-build-index`: rebuild spec metadata and run spec checks.
+- `ws-print-infra <doc>` - print convention or infra docs.
+- `ws-list-mental-model [paths...]` - list relevant mental-model docs.
+- `ws-proj-tree` - render project map.
+- `ws-list-spec-stems [spec-file]` - list spec anchors.
+- `ws-generate-spec-stem <slug>` - mint a collision-free spec stem.
+- `ws-spec-build-index` - rebuild spec metadata and run checks.
 
-During the open-conventions migration, prefer designing shared skill text around
-canonical MCP names, with these CLI helpers retained as Claude-compatible
-fallbacks. Do not remove a CLI fallback until the relevant MCP replacement and
-Claude compatibility path are documented.
+Shared skill text should prefer canonical MCP names. Keep CLI fallbacks until the
+MCP replacement and Claude compatibility path are documented.
 
 ## Implementation Discipline
 
-Follow the existing repository discipline:
-
-- Evidence before claims: run verification commands and read output before
-  reporting success.
+- Evidence before claims: run verification and read output before reporting
+  success.
 - Keep edits scoped to the requested workflow or ticket.
 - Do not revert user changes or unrelated worktree changes.
-- All AI-authored artifacts in this repository must be in English, including
-  docs, comments, and commit messages.
+- All AI-authored artifacts here must be English, including docs, comments, and
+  commit messages.
 - When touching `claude-plugin/skills/`, `claude-plugin/infra/`, or
-  `claude-plugin/infra/prompts/`, apply the checklist in
-  `ai-docs/ref/skill-authoring.md`.
+  `claude-plugin/infra/prompts/`, apply `ai-docs/ref/skill-authoring.md`.
 
 ## Commit Rules
 
-Create commits for logical units of work unless the user asks not to commit.
-Include an `## AI Context` section in each commit message explaining why the
-approach was chosen and any compatibility trade-offs.
-Write `## AI Context` with enough detail for future agents to recover the
-reasoning from git history: include the user intent, rejected alternatives,
-verification limits, and migration or compatibility implications when relevant.
-Prefer a heredoc or temporary commit-message file over long `git commit -m`
-chains when writing multi-paragraph commit messages, so paragraph spacing remains
-readable in git history.
+Create commits for logical units unless the user asks not to commit.
 
-Keep unrelated untracked files out of commits. In this workspace, `.codex` may
-exist as an untracked local file; do not stage it unless explicitly requested.
+Every commit message includes `## AI Context` with user intent, approach,
+rejected alternatives, verification limits, and migration or compatibility
+trade-offs when relevant. Prefer a heredoc or temporary commit-message file over
+long `git commit -m` chains.
+
+Keep unrelated untracked files out of commits. `.codex` may exist locally; do not
+stage it unless explicitly requested.
