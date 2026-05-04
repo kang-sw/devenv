@@ -110,6 +110,26 @@ non-lead `ws:<skill>` reference search, dotted/CLI helper notation search across
 edited files, line counts, and repo-vs-cache comparison. Go tests were not run
 because no embedded prompt or tooling files changed.
 
+### Result (014ef12) - 2026-05-04
+
+Compressed the remaining active `lead-*` skill docs:
+`lead-add-rule`, `lead-bootstrap`, `lead-discuss`, `lead-exit-session`,
+`lead-forge-mental-model`, `lead-forge-spec`, `lead-ship`,
+`lead-skill-authoring`, `lead-update-spec`, `lead-workflow`,
+`lead-write-skeleton`, `lead-write-spec`, and `lead-write-ticket`. Total line
+count for those files moved from 1719 to 1648. The first pass shortened long
+survey prompts, doctrine paragraphs, route prose, and repeated setup text. The
+second pass restored or confirmed execution-sensitive items: `Target:`/`Topic:`
+input markers, explicit confirmation gates, task-name resume prefixes,
+convention-load requirements, spec index verification, ship approval gates, and
+host-neutral MCP notation.
+
+Edited skill files were mirrored into the local Codex plugin cache and compared
+against the repository copies. Verification covered `git diff --check`, old
+non-lead `ws:<skill>` reference search, stale helper notation search across
+edited files, line counts, and repo-vs-cache comparison. Go tests were not run
+because no embedded prompt or tooling files changed.
+
 ### Phase 3: Audit prompts and infra docs
 
 Compress prompt and infra docs that delegated agents read directly:
