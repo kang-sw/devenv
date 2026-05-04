@@ -137,6 +137,39 @@ func TestResolveWriteCodeImplementerPolicyChain(t *testing.T) {
 	}
 }
 
+func TestAPIDocsPromptContracts(t *testing.T) {
+	preRouter, err := Resolve([]string{"pre-router"}, "", "", "")
+	if err != nil {
+		t.Fatalf("Resolve pre-router returned error: %v", err)
+	}
+	for _, want := range []string{
+		"Return only canonical API documentation domain slugs",
+		"one per non-empty line",
+		"Do not include prose",
+		"letters, digits, dot, underscore, or hyphen",
+	} {
+		if !strings.Contains(preRouter.Text, want) {
+			t.Fatalf("pre-router prompt missing %q:\n%s", want, preRouter.Text)
+		}
+	}
+
+	manager, err := Resolve([]string{"api-doc-manager"}, "", "", "")
+	if err != nil {
+		t.Fatalf("Resolve api-doc-manager returned error: %v", err)
+	}
+	for _, want := range []string{
+		"At the start of each session",
+		"scripts/check-stale",
+		"Run the staleness check",
+		"before answering",
+		"Cite the cached file paths and/or official source URLs",
+	} {
+		if !strings.Contains(manager.Text, want) {
+			t.Fatalf("api-doc-manager prompt missing %q:\n%s", want, manager.Text)
+		}
+	}
+}
+
 func TestBundleMetadata(t *testing.T) {
 	info, err := Bundle("dev")
 	if err != nil {

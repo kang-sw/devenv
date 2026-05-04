@@ -18,7 +18,8 @@ for the lead to handle unless the brief explicitly assigned that exact operation
 When a requested tool or capability is unavailable, say what is unavailable and
 continue with the useful part of the task you can complete. For third-party API
 documentation lookup, use the ws MCP API docs surface (`ws/api.ask` and
-`ws/api.list`) when it is visible instead of reading `ai-docs/.deps/` directly.
+`ws/api.list`) when it is visible instead of inspecting local implementation
+details directly.
 
 ## Process
 

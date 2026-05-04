@@ -609,6 +609,19 @@ func rawIDForTest(t *testing.T, raw json.RawMessage) string {
 	return string(raw)
 }
 
+func toolIsError(t *testing.T, line string) bool {
+	t.Helper()
+	var resp struct {
+		Result struct {
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(line), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp.Result.IsError
+}
+
 func toolText(t *testing.T, line string) string {
 	t.Helper()
 	var resp struct {
@@ -646,6 +659,8 @@ func runGitOutput(t *testing.T, root string, args ...string) []byte {
 type fakeAPIRuntime struct {
 	mu          sync.Mutex
 	routeCalls  []string
+	routeOutput string
+	routeErr    error
 	managerHits []string
 	answers     map[string]string
 	errs        map[string]error
@@ -657,8 +672,13 @@ type fakeAPIRuntime struct {
 func (f *fakeAPIRuntime) Route(ctx context.Context, root, prompt string) (string, error) {
 	f.mu.Lock()
 	f.routeCalls = append(f.routeCalls, prompt)
+	output := f.routeOutput
+	err := f.routeErr
 	f.mu.Unlock()
-	return "go\npython\n", nil
+	if output == "" {
+		output = "go\npython\n"
+	}
+	return output, err
 }
 
 func (f *fakeAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
@@ -720,16 +740,28 @@ func TestAPIListDomains(t *testing.T) {
 	}
 }
 
-func TestAPIAskExactHintSkipsRouter(t *testing.T) {
+func TestAPIAskMCPExactHintSkipsRouter(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
+	initGit(t, root)
 	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
 	fake := &fakeAPIRuntime{answers: map[string]string{"go": "go answer"}}
 	server := NewServer(root, "test")
 	server.api = fake
-	text, err := server.askAPI(context.Background(), root, "How do modules work?", "go")
-	if err != nil {
-		t.Fatalf("askAPI returned error: %v\n%s", err, text)
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api.ask","arguments":{"prompt":"How do modules work?","domain_hint":"go"}}}` + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
 	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(byID["1"], "api.ask") || !strings.Contains(byID["1"], "api.list") {
+		t.Fatalf("tools/list missing api tools: %s", byID["1"])
+	}
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("api.ask returned tool error: %s", byID["2"])
+	}
+	text := toolText(t, byID["2"])
 	if len(fake.routeCalls) != 0 {
 		t.Fatalf("exact hint invoked pre-router: %v", fake.routeCalls)
 	}
@@ -757,17 +789,41 @@ func TestAPIAskPreRouterPartialFailureBoundaries(t *testing.T) {
 	}
 }
 
-func TestAPIAskAllDomainFailureReturnsToolError(t *testing.T) {
+func TestAPIAskMCPAllDomainFailureReturnsToolErrorWithMetadata(t *testing.T) {
+	useLeadProfile(t)
 	root := t.TempDir()
+	initGit(t, root)
 	fake := &fakeAPIRuntime{errs: map[string]error{"go": fmt.Errorf("go failed"), "python": fmt.Errorf("python failed")}}
 	server := NewServer(root, "test")
 	server.api = fake
-	text, err := server.askAPI(context.Background(), root, "question", "")
-	if err == nil {
-		t.Fatalf("expected all-domain failure, got success:\n%s", text)
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api.ask","arguments":{"prompt":"question"}}}` + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
 	}
-	if !strings.Contains(text, "## Domain: go\nERROR: go failed") || !strings.Contains(text, "## Domain: python\nERROR: python failed") {
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["1"]) {
+		t.Fatalf("expected api.ask tool error: %s", byID["1"])
+	}
+	text := toolText(t, byID["1"])
+	if !strings.Contains(text, "## Domain: go\nERROR: go failed") ||
+		!strings.Contains(text, "## Domain: python\nERROR: python failed") ||
+		!strings.Contains(text, "api.ask failed for all resolved domains") {
 		t.Fatalf("all failure text missing metadata:\n%s", text)
+	}
+}
+
+func TestAPIAskRejectsMalformedRouterDomainSlug(t *testing.T) {
+	root := t.TempDir()
+	fake := &fakeAPIRuntime{routeOutput: "1. go\ngo docs\ngo:latest\n"}
+	server := NewServer(root, "test")
+	server.api = fake
+	_, err := server.askAPI(context.Background(), root, "question", "")
+	if err == nil || !strings.Contains(err.Error(), "invalid domain") {
+		t.Fatalf("expected invalid domain error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "ai-docs", ".deps", "1. go")); !os.IsNotExist(statErr) {
+		t.Fatalf("malformed router output created cache directory, stat err=%v", statErr)
 	}
 }
 

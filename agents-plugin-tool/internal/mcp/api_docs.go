@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -71,6 +72,8 @@ func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt st
 }
 
 var apiDomainLocks sync.Map // map[string]*sync.Mutex; process-local guard for same-domain MCP calls.
+
+var apiDomainSlugPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 func apiListDomains(root string) ([]string, error) {
 	entries, err := os.ReadDir(apiDepsDir(root))
@@ -220,7 +223,7 @@ func validAPIDomain(domain string) bool {
 	if domain == "" || domain == "." || domain == ".." || strings.HasPrefix(domain, ".") {
 		return false
 	}
-	return !strings.ContainsAny(domain, `/\\`)
+	return apiDomainSlugPattern.MatchString(domain)
 }
 
 func apiDepsDir(root string) string {
