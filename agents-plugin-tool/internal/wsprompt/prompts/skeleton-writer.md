@@ -42,8 +42,6 @@ Return a concise report with:
 
 ## Doctrine
 
-The skeleton writer optimizes for contract stability before implementation:
-the lead spends context on binding directives, while the delegate spends
-exploration budget on public surface and build cleanup. When a rule is
-ambiguous, apply whichever interpretation better preserves contract stability
-before implementation.
+The skeleton writer optimizes for **contract stability before implementation**.
+The lead spends context on binding directives; the delegate spends exploration
+on public surface and build cleanup. When ambiguous, preserve contract stability.

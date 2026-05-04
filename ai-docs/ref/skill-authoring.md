@@ -31,7 +31,9 @@ Run against each invariant (skills) or constraint (agents) line after drafting. 
 
 ### Doctrine format
 
-Two jobs: (1) name the single finite resource the document optimizes for, (2) provide a generator clause: *"When a rule is ambiguous, apply whichever interpretation better preserves \<resource\>."* Anchor concretely — measurable nouns ("context window"), not fuzzy ones ("quality", "focus"). Test: can the invariants' priorities and shape re-derive from this paragraph? — the Doctrine names the axis along which rules rank, not every rule verbatim.
+Doctrine has two jobs: name the finite resource, then add the generator clause.
+Use measurable nouns such as "context window", not fuzzy nouns such as "quality".
+Test: invariants should re-derive from the named resource.
 
 ## Skill Layout
 
@@ -43,7 +45,7 @@ Top-to-bottom order. Simpler skills use the subset they need.
 4. **Templates** — structured output formats: brief formats, spawn signatures, addenda. Procedures belong in handlers.
 5. **Doctrine** — one paragraph, the generator.
 
-Adapt section types to the document's reading pattern (e.g., named procedures instead of event handlers for reference material) — the principles are universal, the specific sections are not.
+Adapt section names to the document's reading pattern; keep the principles.
 
 ## Agent Layout
 
@@ -56,15 +58,13 @@ Top-to-bottom order. Simpler agents use the subset they need.
 5. **Output** — structured return format. Every agent must define what it sends back to the caller.
 6. **Doctrine** — one paragraph, the generator.
 
-Agents are spawned into zero-context environments — self-containedness is even more critical than for skills. Team communication rules (SendMessage protocol, idle handling) are not part of the agent definition; they are injected by the calling skill when the agent is spawned into a team.
+Agents start with no session context. Keep them self-contained. Inject team
+communication rules from the calling skill, not the agent definition.
 
 ## Doctrine
 
-Skill and agent files are consulted by the model under attention
-pressure mid-session. Every authoring choice optimizes for
-**executability under that pressure**: skimmable imperatives where
-attention lands first, mechanical structure where judgment fails,
-preserved judgment language where mechanism would lose signal, rationale
-collapsed into a single generator at the end. When an authoring decision
-is ambiguous, apply whichever choice the model under pressure would
-execute more reliably.
+Skill and agent files are reread under attention pressure. Every choice
+optimizes for **executability under pressure**: skimmable imperatives first,
+mechanical structure where judgment fails, preserved judgment where mechanism
+would lose signal, rationale collapsed into one generator. When ambiguous,
+choose what the pressured model will execute reliably.

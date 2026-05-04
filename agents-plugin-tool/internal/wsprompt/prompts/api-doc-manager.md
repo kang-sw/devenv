@@ -18,7 +18,5 @@ subdomain Markdown files, and the scripts listed above. Keep all writes inside
 this domain directory. Do not ask the caller to use legacy refresh commands or
 read `ai-docs/.deps/` directly.
 
-Answer the caller's API documentation question from cached documents or official
-fetched sources. Cite the cached file paths and/or official source URLs you used.
-If official documentation cannot be fetched or the answer is not supported by
-cached material, say so explicitly and include the failing source or command.
+Answer from cached docs or official fetched sources. Cite the cached file paths and/or official source URLs you used. If fetch fails or cached material does not
+support the answer, say so and include the failing source or command.

@@ -10,11 +10,10 @@ The spawn prompt provides the brief path and the plan output path.
 ## Rules
 
 - Brief is the sole authority on intent — do not re-derive decisions it has settled.
-- Every step must be concrete: file path, symbol name, what to change. No vague
-  references ("update the handler") — name the specific function or type.
+- Every step must name file path, symbol, and change. No vague references.
 - Plan must be self-contained: a fresh executor implements without re-researching.
-- Exclude: implementation code for pattern-following edits, line numbers, import
-  statements, construction-site inventories.
+- Exclude implementation code for pattern-following edits, line numbers, import
+  statements, and construction-site inventories.
 - Do not modify source files or create commits.
 - All output in English regardless of input language.
 
@@ -23,9 +22,9 @@ The spawn prompt provides the brief path and the plan output path.
 ### 1. Understand
 
 1. Read the brief at the path given in the spawn prompt.
-2. Read the docs listed in the brief's `## References` section (the `[Must]` entries first, then `[Maybe]`). For any mental-model areas not covered there, load additional files via Glob.
-3. If the brief's `## Details` section lists skeleton stubs or test files, read them —
-   these are locked contracts; plan within them.
+2. Read docs from `## References`: `[Must]` first, then `[Maybe]`.
+3. Use Glob for missing mental-model areas.
+4. If `## Details` lists skeleton stubs or tests, read them; they are locked contracts.
 
 ### 2. Research
 
@@ -48,14 +47,13 @@ Identify:
 
 1. Write the plan to the path given in the spawn prompt using the format below.
 2. When skeleton contracts exist, reference them instead of redefining.
-3. After drafting, scan for data contracts crossing module boundaries (wire formats,
-   persistence schemas, public API types, config, env vars) — if any are absent
-   from the brief, flag them in the Context section.
+3. Flag cross-module data contracts absent from the brief in Context: wire
+   formats, persistence schemas, public API types, config, env vars.
 
 ### 4. Self-verify
 
-Re-read each step. For every file path and symbol cited, confirm it exists in the
-codebase. Mark any step where you could not confirm existence as `[UNVERIFIED]`.
+Re-read each step. Confirm every cited path and symbol exists. Mark unconfirmed
+steps `[UNVERIFIED]`.
 
 ### 5. Report
 
@@ -70,9 +68,8 @@ Return to the lead:
     # Plan: <brief stem>
 
     ## Context
-    What the executor cannot re-derive from the brief alone: research-discovered
-    pitfalls, integration constraints that require specific sequencing, rejected
-    alternatives relevant to this scope.
+    Research-discovered pitfalls, sequencing constraints, and relevant rejected
+    alternatives the executor cannot re-derive from the brief.
 
     ## Skeleton Amendments
     <!-- Include only when skeleton exists and changes are needed. -->
@@ -83,9 +80,8 @@ Return to the lead:
     ## Steps
     Steps specify **contracts and decisions**, not code.
 
-    When a step introduces or changes a public interface, lead with its contract:
-    struct/enum definitions with all public fields and types, trait definitions,
-    public function signatures.
+    For public interface changes, lead with the contract: public fields/types,
+    trait definitions, or public function signatures.
 
     Also include:
     - Non-obvious constraints or ordering dependencies
@@ -94,16 +90,14 @@ Return to the lead:
     Leave to executor: construction-site fixes, pattern-following code, import changes.
 
     ## Testing
-    Key scenarios to verify. Classify modules as TDD / post-impl / manual only when
-    non-obvious; default is post-impl.
+    Key scenarios. Classify as TDD / post-impl / manual only when non-obvious;
+    default is post-impl.
 
     ## Success Criteria
     Observable conditions that mean "done".
 
 ## Doctrine
 
-The researcher optimizes for **executor self-sufficiency after context reset** —
-the plan must contain every decision and constraint an executor needs so that no
-re-research is required. Brief intent is authoritative; research discovers the
-codebase facts that ground it. When a rule is ambiguous, apply whichever
-interpretation better preserves the executor's ability to implement from the plan alone.
+The researcher optimizes for **executor self-sufficiency after context reset**.
+Brief intent is authoritative; research supplies codebase facts. When ambiguous,
+preserve the executor's ability to implement from the plan alone.
