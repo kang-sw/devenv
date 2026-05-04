@@ -5,96 +5,98 @@ description: Load the ws workflow reference for host-neutral MCP notation and or
 
 # Workflow
 
-## Invariants
+> **Session invariant:** Keep this reference active while writing or executing ws
+> workflow skills. After compaction, re-invoke `ws:workflow` if primitive names
+> or orchestration boundaries matter.
 
-- Keep this skill's content active when writing or executing ws workflow skills.
-- Re-invoke this skill after compaction when workflow primitive names matter.
-- Treat available and planned workflow primitives as separate surfaces.
-- Do not name host-specific helper commands as shared workflow primitives.
-- Do not invent host-qualified MCP names in shared skill text.
-- Use `ws/<tool-name>` as the shared shorthand for MCP server `ws`, tool `<tool-name>`.
-- Define the exact MCP server and tool separately when ambiguity would affect execution.
-- Keep `ws:` reserved for plugin skill names such as `ws:write-ticket`.
+## On: invoke
 
-## On: Invoke
+No action is required. Reading this file is the invocation; it loads the ws
+workflow primitive reference into session context.
 
-1. Read this document as the session-resident reference for ws workflow notation.
-2. Use `judge: mcp-reference-form` before adding MCP tool references to shared skill text.
-3. Use `judge: primitive-availability` before naming an orchestration primitive.
-4. Use `judge: delegate-pattern` before selecting an agent orchestration shape.
-5. Apply `judge: specialized-workflow-gap` when a workflow is not expressible with available primitives.
+---
 
-## Judgments
+# WS Workflow Primitives
 
-### judge: mcp-reference-form
+This is the host-neutral reference for ws plugin skill text. Use the compact form
+`ws/<tool-name>` for MCP server `ws`, tool `<tool-name>`. Use `ws:` only for
+plugin skills such as `ws:write-ticket`; do not use it for MCP tools.
 
-Use `ws/<tool-name>` when a shared skill needs a compact MCP reference. Expand it
-as "MCP server `ws`, tool `<tool-name>`" when teaching, debugging, or writing a
-contract. Do not use `ws:<tool-name>` because `ws:` is the plugin skill prefix.
-Do not assume the shorthand is the literal host-qualified tool name.
+When writing shared skill text, name only primitives that exist in the ws runtime.
+If a workflow needs a surface that is still planned, state the required MCP
+contract instead of naming a Claude helper command or another host-specific
+fallback.
 
-Examples:
+## Available
 
-- `ws/convention.read` means MCP server `ws`, tool `convention.read`.
-- `ws/agents.call` means MCP server `ws`, tool `agents.call`.
-- `ws/project_tree` means MCP server `ws`, tool `project_tree`.
+### One-turn query
 
-### judge: primitive-availability
+`ws/subquery`
 
-Use MCP tools only when they are available in the current `ws` runtime. The
-minimum delegate tools `ws/subquery`, `ws/agents.register`, `ws/agents.call`,
-`ws/agents.print`, and `ws/agents.erase` are available. The async inspection tools `ws/agents.wait`,
-`ws/agents.status`, `ws/agents.tail`, and `ws/agents.cancel` are available for
-the current named agent call. `ws/path.generate` is available for generated
-workflow artifact paths; its initial supported kind is `review`. `ws/runtime.info`
-is available for runtime compatibility metadata. Treat interrupts, active-agent
-listing, message queues, and runtime locks as planned surfaces until the runtime
-implements them.
-When a skill needs a planned surface, state the required server/tool contract
-instead of naming a host-specific helper command as the shared primitive.
+Use for scoped fact-finding, surveys, and one-turn answers where no future resume
+is needed. Set `deep_research: true` only for broad tracing.
 
-### judge: delegate-pattern
+### Persistent agents
 
-Use `ws/subquery` for one-turn fact finding, scoped surveys, and subquery-style
-answers where no future resume is needed. Use `ws/agents.register` plus
-`ws/agents.call` when a named task agent needs conversational continuity.
-`ws/agents.call` starts the turn asynchronously and returns control promptly.
-Use `ws/agents.wait` to collect final output, `ws/agents.status` to decide
-whether to wait or continue, `ws/agents.tail` to inspect evidence and
-diagnostics, and `ws/agents.cancel` only when stopping the current task is more
-valuable than preserving backend continuity.
+`ws/agents.register`
+`ws/agents.call`
+`ws/agents.wait`
+`ws/agents.status`
+`ws/agents.tail`
+`ws/agents.print`
+`ws/agents.cancel`
+`ws/agents.erase`
 
-### judge: specialized-workflow-gap
+Register a stable task name with prompt stems or a self-contained system prompt,
+then call it for each turn that needs continuity. `ws/agents.call` starts the
+turn asynchronously and returns promptly. Use `wait` when final output is needed,
+`status` to decide whether to wait or continue, `tail` for evidence and
+diagnostics, `print` for the last plain-text output, `cancel` only when stopping
+the current task is more valuable than backend continuity, and `erase` when the
+task-scoped session is no longer needed.
 
-Treat `ws/subquery` as an available purpose-specific one-turn delegation tool.
-Treat `ws/path.generate` as the available path allocation primitive for
-file-backed workflow artifacts such as review findings.
-Treat API documentation routing as planned until the runtime provides the
-pre-router, domain agent, stale-check, fetch, and lock contracts. Treat
-interrupts, active agent listing, message queues, and runtime locks as planned
-even though basic async cancellation is available.
+### Artifact paths
 
-## Templates
+`ws/path.generate`
 
-### One-Turn Delegate
+Use for generated workflow artifact paths, currently review files. Capture the
+returned paths and pass file paths between lead, implementer, and reviewers
+instead of copying large findings through the lead context.
 
-```text
-Call MCP tool `ws/subquery` with:
-- `root`: current repository root when the host does not supply it automatically
-- `question`: the exact scoped question
-- `deep_research`: true only for broad tracing
-```
+### Runtime metadata
 
-### Persistent Delegate
+`ws/runtime.info`
+
+Use for runtime compatibility checks and feature detection.
+
+## Planned Or Specialized
+
+API documentation routing is not yet a generic shared primitive. Until the
+runtime provides pre-router, domain agent, stale-check, fetch, and lock
+contracts, describe the needed contract instead of spelling a host-specific
+helper.
+
+Active-agent listing and broad message-queue semantics should also be treated as
+contract surfaces unless the current runtime exposes the exact MCP tool needed
+by the skill. Basic async cancellation exists through `ws/agents.cancel`; do not
+generalize that into a richer interrupt contract without checking the runtime.
+
+## Usage Pattern
 
 ```text
-1. Call MCP tool `ws/agents.register` with a stable task name and either `prompts` or self-contained `system_prompt_text`.
-2. Call MCP tool `ws/agents.call` for the next delegate turn.
-3. Call MCP tool `ws/agents.status` to inspect current state without blocking.
-4. Call MCP tool `ws/agents.tail` to inspect recent events, stdout, stderr, and output.
-5. Call MCP tool `ws/agents.wait` with a bounded timeout when final output is needed.
-6. Call MCP tool `ws/agents.cancel` only when the current async task should be stopped.
-7. Call MCP tool `ws/agents.erase` after the task-scoped session is no longer needed.
+One-turn survey:
+call `ws/subquery` with the exact scoped question.
+
+Persistent task:
+register `<agent-name>` with prompt stems or a self-contained system prompt.
+call `<agent-name>` with the next task prompt.
+wait, inspect status, tail diagnostics, or print output as needed.
+erase the task-scoped agent when cleanup matters.
+
+Review artifacts:
+generate review paths with `ws/path.generate`.
+tell reviewers to write full findings to those paths.
+relay file paths, not full findings, to the implementer.
 ```
 
 ## Doctrine
@@ -102,5 +104,5 @@ Call MCP tool `ws/subquery` with:
 Workflow notation optimizes for the model's limited execution attention during
 cross-host execution: references must be short enough to survive skill execution
 while explicit enough to map to each host's actual tool display. When a rule is
-ambiguous, apply whichever interpretation better preserves the model's limited
-execution attention during cross-host execution.
+ambiguous, apply whichever interpretation better preserves that execution
+attention.
