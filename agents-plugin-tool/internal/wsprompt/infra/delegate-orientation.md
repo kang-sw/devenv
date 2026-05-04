@@ -15,6 +15,9 @@ ticket movement, spec updates, mental-model updates, release steps, branch
 management, reviewer fanout, or additional agent orchestration, report that need
 for the lead to handle unless the brief explicitly assigned that exact operation.
 
+Treat `lead-*` skills as lead-owned orchestration entry points; do not invoke
+them unless the caller explicitly assigned lead-session work.
+
 When a requested tool or capability is unavailable, say what is unavailable and
 continue with the useful part of the task you can complete.
 

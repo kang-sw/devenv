@@ -91,7 +91,7 @@ parallel Codex-first `ws` candidate while leaving `claude-plugin/` untouched.
 Current validation boundary:
 
 - Codex marketplace registration and manual UI install were verified.
-- `$ws:skill-authoring` is available in Codex after install.
+- `$ws:lead-skill-authoring` is available in Codex after install.
 - A Claude-facing `.claude-plugin/plugin.json` was added and
   `claude plugin validate agents-plugin` passes.
 - Runtime Claude invocation remains a later manual closeout; do not treat the

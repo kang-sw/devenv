@@ -1,4 +1,0 @@
-interface:
-  display_name: "Discuss"
-  short_description: "Explore ws workflow decisions before editing"
-  default_prompt: "Use $ws:discuss to reason through a workflow design or migration direction."

@@ -25,8 +25,8 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Use $ws:skill-authoring to draft a portable ws skill.",
-      "Use $ws:skill-authoring to audit a skill or agent prompt."
+      "Use $ws:lead-skill-authoring to draft a portable ws skill.",
+      "Use $ws:lead-skill-authoring to audit a skill or agent prompt."
     ]
   }
 }

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Write Ticket"
-  short_description: "Create and update ws workflow tickets"
-  default_prompt: "Use $ws:write-ticket to create or update a workflow ticket."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Authoring"
+  short_description: "Author ws skills and agent prompts"
+  default_prompt: "Use $ws:lead-skill-authoring to draft or audit a ws skill."
