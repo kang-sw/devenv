@@ -9,55 +9,40 @@ Target: user request
 
 ## Invariants
 
-- This skill routes. It does not implement, plan, or write skeletons itself.
-- Every routing decision is announced with rationale before execution begins.
-- Each pipeline sub-skill is invoked with the appropriate arguments.
+- Route only; do not implement, plan, or write skeletons here.
+- Assess from conversation state and artifacts only; do not read source code.
 - Pipeline order is fixed: spec -> ticket -> skeleton -> implementation.
-- Execution mode is always single. Split multi-scope work into separate tickets.
-- Routing assessment uses conversation state and artifacts only. Do not read source code during assessment.
-- Warmth is a property of the current session, not of the target itself.
-- Always invoke `ws:lead-implement` for implementation; implement applies its own execution-mode judgment.
-- If the target is an actionable inline description, auto-invoke `ws:lead-write-ticket` and continue.
-- If the target is an existing ticket path, skip `ws:lead-write-ticket`.
-- If the target is exploratory, stop and suggest `ws:lead-discuss`.
-- Never skip announce.
-- Announce reflects routing decisions, not post-hoc outcomes.
-- Chain pipeline stages without pausing for user confirmation between stages.
-- Prefix stages receive gate-suppression context in their arguments.
+- Execution mode is single; split multi-scope work into separate tickets.
+- Always route implementation through `ws:lead-implement`.
+- Existing ticket path skips `ws:lead-write-ticket`.
+- Actionable inline target invokes `ws:lead-write-ticket`, captures `Ticket:`, then continues.
+- Exploratory target stops and suggests `ws:lead-discuss`.
+- Announce routing before execution; chain stages without pausing for confirmation.
+- Prefix stages receive gate-suppression context in arguments.
+- Warmth is current-session context, not target identity.
 
 ## On: invoke
 
 ### 1. Assess
 
-Gather routing facts. Do not read source code; read only artifacts and metadata.
-
-1. Parse the target: ticket path or inline description.
-2. If ticket path: read the ticket. Extract scope, phases, and artifact references (`plans:`, `skeletons:` frontmatter).
-3. Check for existing artifacts:
-   - Plan exists? Check ticket frontmatter `plans:` or scan `ai-docs/.plans/` for matching files.
-   - Skeleton exists? Check ticket frontmatter `skeletons:` or grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs in relevant paths.
-4. If inline description: assess from the description alone.
-5. Assess context warmth from conversation state only.
-6. Assess whether the target is exploratory vs. actionable; this feeds `judge: needs-ticket`.
+1. Parse target: ticket path or inline description.
+2. If ticket path: read ticket; extract scope, phases, `plans:`, and `skeletons:`.
+3. Check artifacts: ticket frontmatter, `ai-docs/.plans/`, skeleton stubs, or integration tests.
+4. If inline: assess from description only.
+5. Classify warmth from conversation state.
+6. Classify exploratory vs actionable for `judge: needs-ticket`.
 
 ### 2. Route
 
-Prefix judges fire in order:
-
-1. Invoke `ws:lead-write-spec`. Continue to `judge: needs-ticket` regardless of outcome.
+1. Invoke `ws:lead-write-spec` with:
+   `Chained from ws:lead-proceed - write any planned entries without asking; the session reminder will still emit.`
 2. Apply `judge: needs-ticket`.
-
-Prefix-stage gate-suppression context applies in all routing paths:
-
-- For `ws:lead-write-spec`: append `Chained from ws:lead-proceed - write any planned entries without asking; the session reminder will still emit.`
-- For `ws:lead-write-ticket`: append `Chained from ws:lead-proceed - treat spec coverage as satisfied whether ws:lead-write-spec wrote anything or exited early.`
-
-Then apply `judge: needs-skeleton`.
-
-| needs-skeleton | Pipeline |
-|----------------|----------|
-| no | `ws:lead-implement` |
-| yes | `ws:lead-write-skeleton` then `ws:lead-implement` |
+3. If invoking `ws:lead-write-ticket`, append:
+   `Chained from ws:lead-proceed - treat spec coverage as satisfied whether ws:lead-write-spec wrote anything or exited early.`
+4. Apply `judge: needs-skeleton`.
+5. Build pipeline:
+   - No skeleton: `ws:lead-implement`.
+   - Skeleton: `ws:lead-write-skeleton` -> `ws:lead-implement`.
 
 ### 3. Announce
 
@@ -73,20 +58,15 @@ Then apply `judge: needs-skeleton`.
 Proceeding.
 ```
 
-When prefix stages fire, include them in the pipeline line:
-
-- Spec and ticket: `## Pipeline: ws:lead-write-spec -> ws:lead-write-ticket -> <implementation stages>`
-- Spec only: `## Pipeline: ws:lead-write-spec -> <implementation stages>`
-
-Do not ask for confirmation - announce and proceed. The user can interrupt if the routing is wrong.
+Include prefix stages in the pipeline line when they fire.
+Do not ask for confirmation; the user can interrupt.
 
 ### 4. Execute
 
-Invoke each pipeline stage sequentially, passing the target as arguments.
-
-- After each stage, verify it completed by checking committed artifacts or stage output.
-- If a stage fails or the user interrupts, stop.
-- After `judge: needs-ticket` auto-invokes, capture the ticket path from `ws:lead-write-ticket` output and use it downstream.
+1. Invoke stages sequentially with the current target.
+2. After each stage, verify completion from committed artifacts or stage output.
+3. Stop on failure or user interruption.
+4. If `ws:lead-write-ticket` ran, use its `Ticket:` path downstream.
 
 ## Judgments
 
@@ -94,25 +74,22 @@ Invoke each pipeline stage sequentially, passing the target as arguments.
 
 | Decision | When |
 |----------|------|
-| Stop, suggest `ws:lead-discuss` | Target is exploratory - user is weighing approaches, not requesting implementation |
+| Stop, suggest `ws:lead-discuss` | Target is exploratory; user is weighing approaches |
 | Proceed | Target is an existing ticket path |
-| Invoke `ws:lead-write-ticket`, capture `Ticket:` output, continue | Target is an inline description - any scope |
+| Invoke `ws:lead-write-ticket` | Target is an actionable inline description |
 
 ### judge: needs-skeleton
 
 | Decision | When |
 |----------|------|
-| Skip | Skeleton already exists for this scope |
-| Skip | Change is small and isolated - single file, no new public contracts |
-| Skeleton | Change introduces or modifies public interfaces, cross-module boundaries, or new type contracts |
+| Skip | Skeleton exists for this scope |
+| Skip | Small isolated change: single file, no new public contracts |
+| Skeleton | Public interface, cross-module boundary, or new type contract changes |
 
 ## Doctrine
 
-Proceed optimizes for **full-pipeline routing accuracy** - spanning spec,
-ticket, and implementation stages. The signal available from conversation
-state and artifacts is the finite resource: use it to select the right
-sub-skill at each stage, not to replicate logic already owned by that
-sub-skill's gate. Warmth improves briefing precision - a warm session
-writes sharper directives, not fewer delegation steps. When a rule is
-ambiguous, apply whichever interpretation better preserves the user's
+Proceed optimizes for **full-pipeline routing accuracy**. Conversation state and
+artifacts are the finite signal: use them to choose sub-skills, not to replicate
+sub-skill gates. Warmth sharpens directives; it does not skip stages. When a
+rule is ambiguous, apply whichever interpretation better preserves the user's
 ability to intervene at any pipeline stage.

@@ -9,24 +9,23 @@ Target: user request
 
 ## Invariants
 
-- This skill harnesses - it routes and merges; it does not implement or review code itself.
-- User approves the report before merge - no code reaches the target branch without user confirmation.
-- Follow CLAUDE.md commit rules for the merge commit, including `## AI Context`.
-- Task list is created at prepare and tracked to completion - no task may be skipped or reordered.
+- Harness only: route, run doc pipeline, report, and merge; do not implement or review code here.
+- User approval gates merge to the target branch.
+- Merge commits follow CLAUDE.md commit rules and include `## AI Context`.
+- Create the task list at prepare; every task is mandatory and ordered.
 
 ## On: invoke
 
 ### 1. Assess
 
-Parse `user request`: extract ticket path or inline description.
-If ticket-driven: read the ticket. Extract scope, stem, and existing artifact references.
-
-Apply `judge: execution-mode`.
+1. Parse target: ticket path or inline description.
+2. If ticket-driven: read ticket; extract scope, stem, artifacts.
+3. Apply `judge: execution-mode`.
 
 ### 2. Prepare
 
-1. Record current branch as `<original-branch>`.
-2. Create task list. All tasks are mandatory - do not skip or reorder.
+1. Record `<original-branch>`.
+2. Create and maintain this task list:
 
 ```text
 [ ] Execute - invoke ws:lead-edit or ws:lead-write-code; capture commit range
@@ -39,52 +38,55 @@ Apply `judge: execution-mode`.
 
 ### 3. Execute
 
-**Direct-edit:** Invoke `ws:lead-edit` with the target as arguments.
+- Direct edit: invoke `ws:lead-edit` with the target.
+- Delegated: create `implement/<scope>`, then invoke `ws:lead-write-code`.
+- Capture commit range from the completion report.
 
-**Delegated:** Create `implement/<scope>` branch. Invoke `ws:lead-write-code` with the target as arguments.
+### 4. Doc Pre-Pass
 
-Capture the commit range from the skill's completion report.
+1. Invoke `ws:lead-update-spec` with `<commit-range>`.
+2. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
+3. Call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <commit-range>")`.
+4. Wait for completion; commit file changes.
 
-### 4. Doc pre-pass
+Run mental-model-updater after update-spec so it sees implemented-marker changes.
 
-1. Invoke `ws:lead-update-spec` with args `<commit-range>`. Lead-driven; runs inline.
-2. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`, then call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <commit-range>")`.
-3. Wait for completion. Commit any file changes.
+### 5. Report And Approval
 
-Run mental-model-updater after update-spec so it sees any implemented spec marker changes.
+Report:
 
-### 5. Report and approval
+- implemented changes from edit/write-code output;
+- review result from edit `Review:` or write-code reviewer summaries;
+- test status;
+- deviations or open items;
+- cycle-3 unresolved disputes, if any.
 
-Report to the user:
+Wait for approval.
 
-- What was implemented from the edit/write-code completion report.
-- Review result from edit's `Review:` line or write-code's reviewer summaries.
-- Test status.
-- Deviations or open items.
-- If write-code escalated at cycle 3: list each unresolved dispute; the user decides fix or accept.
+If tweaks requested:
 
-Wait for user approval. If tweaks requested:
+- Direct edit: fix directly and re-verify.
+- Delegated: call `ws/agents.call(name: "implementer", prompt: <block below>)`; re-review using write-code reviewer pattern.
+- Re-run update-spec and mental-model-updater for the new range; commit each.
+- Re-report until approved.
 
-- For direct-edit: apply fixes directly and re-verify.
-- For delegated: call `ws/agents.call(name: "implementer", prompt: <block below>)`; re-review with the write-code reviewer prompt pattern.
-- Re-invoke `ws:lead-update-spec` with the new commit range; re-dispatch mental-model-updater; commit each.
-- Re-report. Loop until approved.
+### 6. Merge
 
-### 6. Merge (delegated path only)
+Delegated path only. Merge `implement/<scope>` to `<original-branch>` with the
+repository merge helper or equivalent non-interactive git sequence.
 
-Merge `implement/<scope>` to `<original-branch>` using the repository merge helper or the equivalent non-interactive git sequence.
-The merge strategy is squash for one commit and `--no-ff` for two or more commits.
-Compose the commit message per CLAUDE.md commit rules.
+Use squash for one commit; use `--no-ff` for two or more commits.
+Write the merge commit per CLAUDE.md.
 
-### 7. Doc commit gate
+### 7. Doc Commit Gate
 
-Call `ws/infra.read(name: "executor-wrapup")`. Follow Doc Commit Gate and, if ticket-driven, Ticket Update.
-Do not re-run Doc Pipeline - update-spec and mental-model-updater already ran in step 4.
+Call `ws/infra.read(name: "executor-wrapup")`. Follow Doc Commit Gate and, if
+ticket-driven, Ticket Update. Do not re-run Doc Pipeline.
 
-### 8. Update project docs
+### 8. Project Docs
 
-Refresh `ai-docs/_index.md` if new skills, agents, or major patterns were introduced.
-Update ticket status if ticket-driven.
+Refresh `ai-docs/_index.md` for new skills, agents, or major patterns.
+Update ticket status when ticket-driven.
 
 ## Judgments
 
@@ -92,12 +94,12 @@ Update ticket status if ticket-driven.
 
 | Decision | When |
 |----------|------|
-| Direct edit -> `ws:lead-edit` | Change is confined to a single file AND purely internal (no callers affected, no new public symbols, no new test files) AND user has not explicitly requested delegation |
-| Delegated -> `ws:lead-write-code` | Any condition above is unmet - cross-file touch, new public contract, new test file, or explicit delegation requested |
+| Direct edit -> `ws:lead-edit` | Single file, internal-only, no callers affected, no new public symbols, no new test files, and no explicit delegation request |
+| Delegated -> `ws:lead-write-code` | Any direct-edit condition is unmet |
 
 ## Doctrine
 
-Implement optimizes for **verified code reaching the target branch** - routing,
-doc pipeline, and merge are the harness concerns; code quality is owned by
+Implement optimizes for **verified code reaching the target branch**. Routing,
+doc pipeline, approval, and merge are harness concerns; code quality belongs to
 write-code and edit. When a rule is ambiguous, apply whichever interpretation
-keeps harness logic out of the primitives and primitive logic out of the harness.
+keeps harness logic out of primitives and primitive logic out of the harness.

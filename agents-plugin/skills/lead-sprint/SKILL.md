@@ -3,7 +3,7 @@ name: lead-sprint
 description: Multi-task session container for feature-branch work. Defers the doc pipeline to wrap-up while each task commits only source changes.
 ---
 
-# Sprint Session Container
+# Sprint
 
 Target: user request
 
@@ -13,39 +13,41 @@ Call `ws/project_tree()`.
 
 ## Invariants
 
-- Sprint operates only on `sprint/`-prefixed branches; do not enter the loop or run wrap-up elsewhere.
-- Doc pipeline is suppressed during task execution; it runs once at wrap-up only.
-- All written artifacts must be in English regardless of conversation language.
-- At wrap-up, commit each doc update immediately after it completes.
+- Operate only on `sprint/` branches; do not loop or wrap up elsewhere.
+- Suppress doc pipeline during tasks; run it once at wrap-up.
+- Commit each wrap-up doc update immediately after it completes.
+- All written artifacts are English.
 
 ## On: invoke
 
 1. Invoke `ws:lead-workflow`.
 2. Read `git branch --show-current`.
-3. If branch starts with `sprint/`: detect sprint name from branch. Present options: continue, wrap-up, abandon.
-4. If branch does not start with `sprint/`: infer a branch name without asking.
-   - Clear topic exists: derive a short kebab-case slug from it.
-   - Topic is vague or absent: generate a random three-word name in `<adjective>-<noun>-<noun>` form.
-   - Run `git checkout -b sprint/<name>`. Enter session loop.
+3. On `sprint/` branch: detect sprint name; present continue, wrap-up, abandon.
+4. Outside `sprint/`: infer name without asking, then `git checkout -b sprint/<name>`.
+   - Clear topic: short kebab-case slug.
+   - Vague/absent topic: random `<adjective>-<noun>-<noun>`.
+5. Enter session loop.
 
 ## On: session loop
 
-1. Apply `judge: needs-survey`; if warranted, run the Sprint-Aware Survey Call and incorporate the returned tier list.
+1. Apply `judge: needs-survey`; run Sprint-Aware Survey Call when warranted.
 2. Accept user request.
-3. Apply `judge: delegate`; route and execute per the routing table.
+3. Apply `judge: delegate`; execute the first matching route.
 4. Return to step 2.
 
 ## On: wrap-up
 
-Triggers on explicit user done signal: "done", "wrap up", "finish sprint", or equivalent.
+Trigger: explicit done signal such as "done", "wrap up", or "finish sprint".
 
-1. Determine parent: `git merge-base HEAD main`.
-2. Invoke `ws:lead-update-spec` with args `<parent>..HEAD`.
-3. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`, then call `ws/agents.call(name: "mental-model-updater", prompt: <block below>)`.
-4. Wait for completion. Commit any file changes. Run after update-spec so the updater sees updated spec entries.
-5. Call `ws/infra.read(name: "executor-wrapup")`. Follow Doc Pipeline and Doc Commit Gate. If ticket-driven, update existing tickets only; do not create new tickets.
-6. Report to user: spec entries added, removed, and implemented markers stripped; mental-model sections updated.
-7. Merge: merge `sprint/<name>` to `main` using the repository merge helper or equivalent non-interactive git sequence. If no source changes were made, skip merge and delete the branch.
+1. Set `<parent>` to `git merge-base HEAD main`.
+2. Invoke `ws:lead-update-spec` with `<parent>..HEAD`; commit changes.
+3. Register `mental-model-updater`: `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
+4. Call it with the wrap-up prompt below; wait; commit changes.
+5. Call `ws/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate.
+6. If ticket-driven, update existing tickets only; do not create new tickets.
+7. Report spec entries added/removed/stripped and mental-model updates.
+8. Merge `sprint/<name>` to `main` with repository helper or equivalent non-interactive git sequence.
+9. If no source changes exist, skip merge and delete the branch.
 
 ```text
 Commit range: <parent>..HEAD.
@@ -56,32 +58,33 @@ Note: docs may be stale from accumulated sprint commits - explore thoroughly.
 
 ### judge: delegate
 
-Pick the first matching row, execute it, and return to the session loop.
+Pick first match, execute, return to loop.
 
 | Request type | Routing |
 |---|---|
-| Question about behavior, concept, or status | Answer inline; call `ws/subquery(question: <block below>)` if codebase search is needed |
+| Behavior, concept, or status question | Answer inline; use `ws/subquery(question: <block below>)` if codebase search is needed |
 | Codebase exploration | Call `ws/subquery(question: <block below>)` |
-| Design discussion | Inline discussion; do not auto-chain to `ws:lead-write-spec` |
+| Design discussion | Discuss inline; do not auto-chain to `ws:lead-write-spec` |
 | Single-file edit or clear isolated change | Invoke `ws:lead-edit` |
 | Multi-file or new-pattern implementation | Invoke `ws:lead-write-code` |
-| Exploration required before routing is possible | Run sprint-aware survey; re-apply judge |
+| Exploration required before routing | Run sprint-aware survey; re-apply judge |
 
 ### judge: needs-survey
 
-Fire the Sprint-Aware Survey Call when:
+Fire when:
 
-- Session loop is entered for the first time this session.
-- Request touches a domain or component not yet surveyed this session.
-- Domain shifts mid-session.
+- first session-loop entry this session;
+- request touches an unsurveyed domain/component;
+- domain shifts mid-session.
 
-Do not fire for follow-up turns within an established domain, or for status / continuity queries.
+Skip for follow-ups in an established domain, status, or continuity queries.
 
 ## Templates
 
 ### Sprint-Aware Survey Call
 
-Call `ws/agents.register(name: "sprint-survey", prompts: ["sprint-survey"])`, then call `ws/agents.call(name: "sprint-survey", prompt: <block below>)`.
+Call `ws/agents.register(name: "sprint-survey", prompts: ["sprint-survey"])`,
+then `ws/agents.call(name: "sprint-survey", prompt: <block below>)`.
 
 ```text
 Sprint: <sprint-name>
@@ -96,8 +99,8 @@ Project map:
 
 ## Doctrine
 
-Sprint optimizes for **sustained implementation throughput across a feature branch** -
-by deferring the doc pipeline to a single wrap-up pass and delegating
-implementation to write-code and edit primitives, the session maintains momentum
-without accumulating documentation debt or managing internal agent state. When a
-rule is ambiguous, apply whichever interpretation better preserves throughput.
+Sprint optimizes for **sustained implementation throughput across a feature
+branch**. It keeps task execution moving by delegating to edit/write-code and
+deferring documentation to one wrap-up pass. When a rule is ambiguous, apply
+whichever interpretation better preserves throughput without losing wrap-up
+accountability.

@@ -9,83 +9,80 @@ Target: user request
 
 ## Invariants
 
-- Operates on the current branch - branch creation is the caller's responsibility.
-- Implementer reads only the brief - never the ticket directly.
-- Fit reviewer may reference the ticket for architectural headroom checks; correctness and test reviewers do not.
-- When skeleton exists, its stubs and integration tests are the acceptance criteria.
-- Ancestor loading: when implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first. Lead propagates this rule in the implementer spawn prompt.
-- Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
-- Implementer and reviewer sessions persist via `ws/agents.call` auto-resume throughout the review loop.
-- Review cycle cap: 3 relays maximum. Lead adjudicates at cycle 2; caller escalation at cycle 3.
-- Self-cleanup: review path files are deleted before returning.
-- On completion, output the commit range, test status, and brief path in the format defined in Templates.
+- Operate on current branch; caller owns branch creation.
+- Implementer reads only the brief, plus plan when provided; never the ticket directly.
+- Fit reviewer may read the ticket for architectural headroom; correctness/test reviewers may not.
+- Existing skeleton stubs and integration tests are acceptance criteria.
+- Lead puts ancestor-loading rule in implementer prompt.
+- Reviewers write findings to files and return summaries only.
+- Lead relays review file paths, not findings content, to implementer.
+- Implementer and reviewer sessions persist through `ws/agents.call` auto-resume.
+- Relay cap is 3 cycles; lead adjudicates at cycle 2; caller escalation at cycle 3.
+- Delete review path files before returning.
+- Output commit range, test status, and brief path in completion format.
 
 ## On: invoke
 
-### 0. Orient
+### 1. Read Target
 
-### 1. Read target
-
-Parse `user request`: extract ticket path or inline description, and optional `--ticket <stem>`.
-If ticket-driven: read the ticket. Extract scope, stem, and phase context.
-
-Call `ws/agents.register(name: "project-survey", prompts: ["project-survey"])`, then call `ws/agents.call(name: "project-survey", prompt: <block below>)`:
+1. Parse ticket path or inline description; accept optional `--ticket <stem>`.
+2. If ticket-driven: read ticket; extract scope, stem, phase context.
+3. Survey project:
 
 ```text
-<ticket path or inline description>
+ws/agents.register(name: "project-survey", prompts: ["project-survey"])
+ws/agents.call(name: "project-survey", prompt: <ticket path or inline description>)
 ```
 
-Capture the returned `[Must|Maybe]` reference list - it informs the brief's `## References` section.
+4. Capture `[Must|Maybe]` references for brief `## References`.
 
-### 2. Write brief
+### 2. Write Brief
 
-Write `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using the **brief template** (see Templates).
-Strip ticket noise - this file is the implementer's sole context source.
-Populate `## References` from the project-survey output.
+1. Write `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` with the brief template.
+2. Strip ticket noise; the brief is the implementer's sole context source.
+3. Populate `## References` from project-survey output.
+4. Commit the brief before plan-depth.
 
-Commit the brief file before proceeding to plan depth.
+### 3. Plan Depth
 
-### 3. Plan depth
+Apply `judge: plan-depth`; default to survey when uncertain between as-is and survey.
 
-Apply `judge: plan-depth`. Default to survey when uncertain between as-is and survey.
+- **as-is:** continue to Prepare.
+- **survey:** register/call `plan-surveyor` with `prompts: ["plan-populator-survey"]`.
+- **research:** register/call `plan-researcher` with `prompts: ["plan-populator-research"]`.
 
-**as-is** - proceed to step 4.
-
-**survey** - call `ws/agents.register(name: "plan-surveyor", prompts: ["plan-populator-survey"])`, then call `ws/agents.call(name: "plan-surveyor", prompt: <block below>)`:
-
-```text
-Brief path: <brief-path>
-Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
-```
-
-**research** - call `ws/agents.register(name: "plan-researcher", prompts: ["plan-populator-research"])`, then call `ws/agents.call(name: "plan-researcher", prompt: <block below>)`:
+Population prompt:
 
 ```text
 Brief path: <brief-path>
 Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
 ```
 
-After the population agent returns, commit the plan file before proceeding.
+Commit the plan file before Prepare.
 
 ### 4. Prepare
 
-1. Verify skeleton: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests referencing target contracts. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `ws:lead-write-skeleton`.
-2. Collect integration test context: identify test file paths and the run command. Flows into the implementer spawn prompt.
-3. Register agent slots with pseudo-calls.
-   Implementer: `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
-   Reviewers: `ws/agents.register(name: "<reviewer-name>", prompts: ["code-reviewer", "<partition-prompt>"])`.
-4. Call `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`; store the returned paths as `<correctness-path>`, `<fit-path>`, and `<test-path>`.
+1. Verify skeleton by frontmatter, integration tests, or stubs: `todo!()`, `unimplemented`, `NotImplementedError`.
+2. Apply `judge: skeleton-check`; stop and suggest `ws:lead-write-skeleton` if required skeleton is absent.
+3. Identify integration test paths and run command.
+4. Register implementer:
+   `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
+5. Register selected reviewers:
+   `ws/agents.register(name: "<reviewer-name>", prompts: ["code-reviewer", "<partition-prompt>"])`.
+6. Generate review paths:
+   `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
+7. Store `<correctness-path>`, `<fit-path>`, `<test-path>`.
 
-### 5. Spawn implementer
+### 5. Spawn Implementer
 
 Call `ws/agents.call(name: "implementer", prompt: <block below>)`.
-Read output with `ws/agents.print(name: "implementer")` only if the async result did not include a usable summary.
+Read `ws/agents.print(name: "implementer")` only if async result lacks usable summary.
 
 ```text
 Brief path: <brief-path>
 <if plan exists:> Plan path: <plan-path>
 
-read only the brief (and plan if provided). Do not read the ticket directly.
+Read only the brief (and plan if provided). Do not read the ticket directly.
 
 Acceptance criteria: skeleton integration tests must pass.
 - Test files: <integration test paths>
@@ -95,25 +92,26 @@ Ancestor loading: when you read `ai-docs/mental-model/<domain>/<sub>.md`,
 read `ai-docs/mental-model/<domain>/index.md` first.
 
 Instructions:
-- Verify integration tests pass before reporting completion or after each fix.
+- Verify integration tests pass before reporting completion and after each fix.
 - Report completion in plain text. Include test results.
-- For fix cycles, a follow-up call will arrive with review findings - fix and report back.
-- Commit at logical checkpoints on the current branch.
+- For fix cycles, a follow-up call will arrive with review findings; fix and report back.
+- Commit logical checkpoints on the current branch.
 ```
 
-After notification, read `implementer` output with `ws/agents.print(name: "implementer")` only when needed.
-Note the commit range from the report.
+Capture commit range from implementer output.
 
 ### 6. Review
 
-#### 6a. Partition allocation
+#### 6a. Allocate
 
-Apply `judge: partition-allocation` based on the implementer's report and the nature of changes.
+Apply `judge: partition-allocation` from implementer report and changed files.
 
-#### 6b. Spawn reviewers
+#### 6b. Spawn Reviewers
 
-Call `ws/agents.call(name: "<reviewer-name>", prompt: <block below>)` once per selected reviewer name in parallel. After all
-notifications, read summaries with `ws/agents.print(name: "<reviewer-name>")` only when needed.
+Call selected reviewers in parallel with `ws/agents.call`.
+Read `ws/agents.print(name: "<reviewer-name>")` only if needed.
+
+Correctness:
 
 ```text
 Diff range: <first-commit>..<last-commit>
@@ -123,16 +121,20 @@ Instructions:
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 ```
 
+Fit:
+
 ```text
 Diff range: <first-commit>..<last-commit>
 Brief path: <brief-path>
 
 Instructions:
-- Judge whether the implementation achieves what the brief intended and leaves room for future phases.
+- Judge whether the implementation achieves the brief and leaves room for future phases.
 - You may reference the ticket at <ticket-path> for architectural headroom checks (optional).
 - Write your full findings to: <fit-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 ```
+
+Test:
 
 ```text
 Diff range: <first-commit>..<last-commit>
@@ -142,13 +144,14 @@ Instructions:
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 ```
 
-#### 6c. Relay and loop
+#### 6c. Relay Loop
 
-Track relay cycle count starting at 0. Maximum 3 relay cycles.
+Start relay cycle count at 0.
 
-**Entry:** All `[clean]` -> exit loop, proceed to cleanup.
+- All `[clean]`: exit loop.
+- Any `[non-clean]`: increment cycle before relay.
 
-**Relay.** Increment cycle counter before each relay.
+Relay prompt:
 
 ```text
 Review cycle <N>: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
@@ -157,15 +160,10 @@ Won't-fix allowed: style suggestions conflicting with established codebase patte
 Won't-fix not allowed: correctness, security, or contract violations - fix or escalate these.
 ```
 
-After notification, read `implementer` output with `ws/agents.print(name: "implementer")` only when needed. Extract the won't-fix list.
+After implementer returns, extract won't-fix list and re-review in parallel.
+Reviewers overwrite the same files.
 
-**Re-review** (parallel, same paths - reviewers overwrite):
-
-```text
-Re-review. Updated diff: <diff>
-Implementer won't-fix items: <list with reasons>
-For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
-```
+Re-review prompt:
 
 ```text
 Re-review. Updated diff: <diff>
@@ -173,20 +171,13 @@ Implementer won't-fix items: <list with reasons>
 For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
 ```
 
-```text
-Re-review. Updated diff: <diff>
-Implementer won't-fix items: <list with reasons>
-For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
-```
+Branch:
 
-After all notifications, read summaries.
-
-**Branch on cycle and result:**
-
-- All `[clean]` -> exit loop, proceed to cleanup.
-- Cycle <= 2 and non-clean -> go to relay.
-- Cycle = 2 and maintained items exist: lead reads review files directly. For each maintained dispute: accept the won't-fix or override it. If any overrides: relay override list to implementer (counts as cycle 3 relay). Otherwise advance to cycle 3 re-review directly.
-- Cycle = 3 and non-clean remain: collect unresolved findings. Proceed to cleanup, surface escalation in output.
+- All `[clean]`: exit loop.
+- Cycle <= 2 and non-clean: relay again.
+- Cycle = 2 and maintained items exist: lead reads review files; accept won't-fix or override.
+- Overrides count as cycle 3 relay.
+- Cycle = 3 and non-clean remains: collect unresolved findings and continue to cleanup.
 
 ### 7. Cleanup
 
@@ -194,38 +185,37 @@ After all notifications, read summaries.
 rm -f <correctness-path> <fit-path> <test-path>
 ```
 
-Agent registry entries need no teardown - created fresh per run via `ws/agents.register`.
-
-Output the **completion report** (see Templates).
+Agent registry entries need no teardown; `ws/agents.register` creates fresh task slots per run.
+Output completion report.
 
 ## Judgments
 
 ### judge: plan-depth
 
-Soft judgment. Default to survey when uncertain between as-is and survey.
+Default to survey when uncertain between as-is and survey.
 
 | Signal | Suggests |
 |--------|----------|
-| Brief names concrete change points; single-file or single-function scope | as-is |
-| Multi-module span; cold implementer; reuse points likely but unconfirmed | survey |
+| Concrete change points; single-file/function scope | as-is |
+| Multi-module span; cold implementer; likely reuse points unconfirmed | survey |
 | Multiple viable strategies; non-obvious cross-module side effects | research |
 
 ### judge: partition-allocation
 
 | Partition | Assign when |
 |-----------|-------------|
-| **Correctness** | New logic introduced, error paths modified, contracts or security surface touched |
-| **Fit** | Existing components reused or modified, new patterns others will follow |
-| **Test** | Test files added or modified, or new code paths added without existing coverage |
-| **Default** | New feature or non-trivial cross-module change -> all three partitions |
-| **Floor** | Purely mechanical change (format, rename with no semantic change) -> Correctness only |
+| Correctness | New logic, modified error paths, contract/security surface |
+| Fit | Existing components reused/modified, or new pattern others will follow |
+| Test | Tests added/modified, or new code paths lack existing coverage |
+| Default | New feature or non-trivial cross-module change -> all three |
+| Floor | Pure mechanical change -> Correctness only |
 
 ### judge: skeleton-check
 
 | Decision | When |
 |----------|------|
-| Proceed without skeleton | Brief is a small isolated change (single file, no public contracts) |
-| Require skeleton | Change touches public interfaces or cross-module boundaries |
+| Proceed without skeleton | Small isolated change: single file, no public contracts |
+| Require skeleton | Public interface or cross-module boundary changes |
 
 ## Templates
 
@@ -260,7 +250,7 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 
 ### Completion report format
 
-```
+```text
 Implementation complete.
 Commit range: <first>..<last>
 Brief: <brief-path>
@@ -270,9 +260,8 @@ Test status: pass | fail | skipped
 
 ## Doctrine
 
-Write-code optimizes for **brief-to-commit throughput within a branch** -
-every step exists to move a target from intent (brief) to verified code
-(commits) without the caller managing internal agent state. Self-cleanup
-of review paths keeps the caller's context clean. When a rule is ambiguous,
-apply whichever interpretation advances the commit without widening the
-caller's coordination surface.
+Write-code optimizes for **brief-to-commit throughput within a branch**. The
+brief isolates intent, persistent agents carry implementation and review state,
+file paths keep findings out of lead context, and cleanup closes the loop. When
+a rule is ambiguous, apply whichever interpretation advances the commit without
+widening the caller's coordination surface.
