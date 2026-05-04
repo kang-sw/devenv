@@ -277,7 +277,6 @@ This index lists active tickets only; completed tickets live under
 `260503-epic-ws-agent-workflow-stability` — stabilization parent remains open for future observed runtime failures; no active blocker after worktree lock, hook-driven interrupt, and leaf deferral
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
-`260504-feat-agents-plugin-api-docs-mcp` — migrate ws-ask-api prior art into Agents MCP tools, embedded prompts, and worker workflow guidance
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 

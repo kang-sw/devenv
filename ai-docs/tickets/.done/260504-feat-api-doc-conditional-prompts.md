@@ -5,6 +5,7 @@ related:
   260429-feat-api-deps: Claude prior art for ws-ask-api and prompt-conditioned cargo-brief guidance
   260503-feat-agents-plugin-agent-session-runtime: RegisterOptions and named-agent metadata surface used by API docs workers
 parent: 260503-epic-agents-plugin-skill-porting
+completed: 2026-05-04
 ---
 
 # API docs conditional prompt injection
@@ -114,9 +115,31 @@ Acceptance criteria:
   reuses the active worker for that call or fails with a clear retryable error;
   it must not erase an active call.
 
-## Open Questions
+### Result (a714918) - 2026-05-04
+
+Implemented the conditional prompt path directly during API docs dogfooding.
+`wsagent.RegisterOptions` now supports internal conditional prompt refs, the
+embedded prompt bundle includes `api-doc-cargo-brief`, and API docs managers add
+that prompt when `cargo-brief` is available on `PATH`.
+
+API docs manager workers now use a five-minute hot-cache TTL. Idle expired
+workers are erased and re-registered before the next call, while active workers
+are not erased.
+
+The spec mismatch noted above remains intentionally deferred because this branch
+does not edit `ai-docs/spec/`; the user plans a later forge-spec pass.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./internal/wsagent ./internal/mcp ./internal/wsprompt`
+- `cd agents-plugin-tool && go test ./...`
+- `git diff --check`
+- `go build -o <tmp>/ws-mcp ./cmd/ws-mcp && <tmp>/ws-mcp runtime info`
+- `go run ./cmd/ws-mcp serve --stdio --root /home/swkang/devenv` with a no-hint `api.ask` smoke for `ratatui`
+
+## Deferred Spec Follow-up
 
 - The TTL behavior changes the existing API deps spec, which currently says
-  per-domain executor sessions persist until explicit erase. Before promoting
-  this ticket to `todo`, update the spec to describe short-lived hot-cache
-  workers.
+  per-domain executor sessions persist until explicit erase. The mismatch is
+  intentionally deferred because this branch does not edit `ai-docs/spec/`; the
+  user plans a later forge-spec pass.
