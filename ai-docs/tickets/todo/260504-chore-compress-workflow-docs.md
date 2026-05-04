@@ -94,6 +94,22 @@ Acceptance criteria:
 - `cd agents-plugin-tool && go test ./...` passes if embedded prompts or tooling
   are touched; otherwise `git diff --check` is enough.
 
+### Result (043779b) - 2026-05-04
+
+Compressed priority items 1-5: `lead-proceed`, `lead-implement`,
+`lead-sprint`, `lead-write-code`, and `lead-edit`. Total line count for those
+files moved from 728 to 693. The first pass shortened invariants, handlers,
+judgments, and doctrine. The second pass restored or confirmed execution
+contracts: proceed gate suppression and `Ticket:` capture, implement approval and
+doc pipeline ordering, sprint wrap-up commit order, write-code review-file relay
+and cycle caps, edit adjudication, cleanup, and exact MCP notation.
+
+Edited skill files were mirrored into the local Codex plugin cache and compared
+against the repository copies. Verification covered `git diff --check`, old
+non-lead `ws:<skill>` reference search, dotted/CLI helper notation search across
+edited files, line counts, and repo-vs-cache comparison. Go tests were not run
+because no embedded prompt or tooling files changed.
+
 ### Phase 3: Audit prompts and infra docs
 
 Compress prompt and infra docs that delegated agents read directly:
