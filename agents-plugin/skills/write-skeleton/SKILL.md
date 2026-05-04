@@ -5,83 +5,96 @@ description: Crystallize ticket contracts as public interface stubs and integrat
 
 # Write Skeleton
 
+Target: user request
+
 ## Invariants
 
-- Skeleton means the first code change for a ticket: public stubs plus integration tests only.
-- Keep implementation logic out of skeletons except placeholder bodies required for compilation.
-- The lead owns ticket interpretation, contract directives, review, ticket metadata, and commits.
-- The skeleton delegate owns codebase exploration, API shape selection, stub writing, and build cleanup.
+- Skeleton = the first code change for a ticket. No implementation code - only interface stubs and integration tests.
+- Lead is a lightweight coordinator: identify the ticket, pass contract directives, review, commit.
+- The delegate owns design: reads the ticket, explores the codebase, decides type shapes and test structure.
+- Contract directives = lead's judgment on points the delegate cannot derive from ticket + code alone.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
-- Register `skeleton-writer` once per invocation and resume it for amendment rounds.
-- Keep all AI-authored ticket and commit text in English.
-- Use `git commit -F` for multi-paragraph commit messages.
+- The delegate does not commit - lead reviews and commits.
+- Register the skeleton-writer agent once per invocation via `ws/agents.register`; resume via `ws/agents.call` for amendment rounds.
 
-## On: Write Skeleton
+## On: invoke
 
-1. Read the target ticket and identify the implementation phase that needs a skeleton.
-2. Inspect only the code and docs needed to form contract directives.
-3. Write 2-5 contract directives covering choices the delegate cannot derive from the ticket and codebase.
-4. Call MCP tool `ws/agents.register` with `root`, `name: "skeleton-writer"`, `backend: "codex"`, `tier: "deep"`, and `prompts: ["skeleton-writer"]`.
-5. Call MCP tool `ws/agents.call` with `name: "skeleton-writer"` and a prompt using `Templates / Delegate Prompt`.
-6. Review `git diff HEAD` and `git status --short`; read changed files where contract or build correctness is uncertain.
-7. Run the project build or syntax check required for compilation; do not run tests that are expected to fail against stubs.
-8. Apply `judge: review-outcome`; fix minor issues directly and send structural amendments through `ws/agents.call`.
-9. Commit stubs and tests together with a `feat(<scope>): skeleton - <contract>` message.
-10. Add `## AI Context` with the key contract decisions and delegation amendments.
-11. Add `## Ticket Updates` with the ticket stem and future implementation notes.
-12. Update the ticket `skeletons:` frontmatter for the implemented phase after the commit hash exists.
-13. Call MCP tool `ws/agents.erase` for `skeleton-writer` after the skeleton commit and ticket metadata are complete.
-14. Suggest the next execution path using `judge: next-step`.
+### 1. Identify contract directives
+
+1. Read the ticket. Note ambiguities that need lead judgment - scope boundaries, design choices between alternatives, integration constraints not obvious from the ticket alone.
+2. Skim relevant mental-model docs only if needed to resolve those ambiguities.
+3. Formulate **contract directives**: 2-5 binding decisions. Not a full design - just fences and choices the delegate must follow.
+
+### 2. Delegate
+
+Register `skeleton-writer` with prompt `skeleton-writer`.
+
+Call `skeleton-writer`:
+
+```text
+Ticket: <ticket-path>
+
+## Contract directives
+- <binding decisions only - things not derivable from ticket + codebase>
+PROMPT
+```
+
+### 3. Review
+
+1. Run `git diff HEAD` and `git status --short` to review the skeleton output. Read specific files only if a reported deviation warrants deeper inspection.
+2. Verify contracts match the ticket intent and honor the directives.
+3. Run build to confirm compilation. Do not run tests - tests will fail by design because stubs are unimplemented. Passing tests is the implementor's responsibility, not the skeleton's.
+4. If issues found:
+   - **Minor** - fix directly.
+   - **Structural** - relay amended directives via a follow-up call (session resumes with full context):
+     ```text
+     Amend: <issues and revised directives>
+     PROMPT
+     ```
+     Re-review after each round.
+
+### 4. Commit
+
+1. Commit stubs and tests together as one logical unit.
+2. Commit message: `feat(<scope>): skeleton - <what contracts are established>`
+3. Include `## AI Context` with key contract decisions.
+4. Include `## Ticket Updates` with the ticket stem and what future phases must know.
+5. Update the ticket's `skeletons:` frontmatter with the phase and commit hash (e.g., `phase-1: abc1234`). Only add entries for phases that have a skeleton - no null placeholders.
+
+### 5. Suggest next step
+
+Based on implementation complexity and session warmth on the target:
+- **Wide** (multiple independent modules): suggest `ws:write-code` (one scope at a time) or ask the user to split into separate tickets.
+- **Narrow + warm** (single module, main agent already engaged the code): suggest `ws:edit`.
+- **Narrow + cold** (single module, main agent is cold on the target): suggest `ws:write-code`.
+
+Warmth is a property of the current session - has the main agent read files in the target scope this session, or did the user explicitly signal direct authorship? If ambiguous, suggest `ws:proceed` and let its routing judges decide.
+
+Present the recommendation with brief rationale. Do not auto-invoke.
 
 ## Judgments
 
-### judge: review-outcome
-
-Minor issues are local naming, formatting, imports, or obvious compile fixes. Structural issues are wrong API shape, wrong test layer, missing contract coverage, or directive violations.
-
 ### judge: test-scope
 
-Always include structural seam tests for cross-module boundaries. Include behavioral tests for behavior stated by the ticket. Include error and edge tests only when the ticket states those contracts.
+| Layer | Default | Condition |
+|---|---|---|
+| Structural seam tests | Always | Every cross-module boundary |
+| Behavioral tests | Include when ticket specifies behavior | Any behavior the ticket describes - drop the "complex" qualifier |
+| Error / edge case tests | Opt-in | Only when the ticket explicitly specifies error contracts or edge conditions |
 
 ### judge: stub-granularity
 
-Use module-level stubs for most tickets. Stub all public methods only when the ticket specifies a detailed method surface or the language requires complete interface implementation.
-
-### judge: next-step
-
-Suggest `ws:implement` or a split when the remaining work spans independent modules. Suggest `ws:edit` when the remaining work is narrow and the lead is warm on the files. Suggest `ws:proceed` when routing is ambiguous. Name a skill only when it is available in the current host; otherwise name the equivalent configured workflow.
-
-## Templates
-
-### Delegate Prompt
-
-```markdown
-Ticket: <ticket-path>
-Phase: <phase-id-or-name>
-
-## Contract directives
-- <binding decision>
-- <binding decision>
-
-## Output required
-- Files created or modified
-- Key contract decisions
-- Build or syntax verification performed
-- Deviations or unresolved questions
-```
-
-### Amendment Prompt
-
-```markdown
-Amend skeleton output:
-
-## Issues
-- <contract, build, or directive issue>
-
-## Revised directives
-- <binding revision>
-```
+| Level | When |
+|-------|------|
+| Module-level (types + top-level functions) | Most cases |
+| Method-level (all public methods stubbed) | When the ticket specifies detailed API surface |
 
 ## Doctrine
 
-Write-skeleton optimizes for contract stability before implementation consumes the context window: the lead serializes only binding directives, the delegate spends the exploration budget, and the commit records the public surface. When a rule is ambiguous, apply whichever interpretation better preserves contract stability before implementation consumes the context window.
+The skeleton optimizes for **contract-first delegation with minimal
+coordinator overhead** - the lead passes only binding decisions the
+delegate cannot derive, the delegate owns design and exploration. This
+keeps the coordinator's context light while locking public interfaces
+and acceptance criteria in code before implementation begins. When a rule
+is ambiguous, apply whichever interpretation better preserves contract
+stability while minimizing what the coordinator must serialize.

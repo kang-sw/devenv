@@ -5,76 +5,75 @@ description: Create or update behavioral spec documents for caller-visible workf
 
 # Write Spec
 
+Target: user request
+
 ## Invariants
 
-- Call `ws/convention.read` for `spec-conventions` before creating or changing spec files.
-- Write specs from the external caller perspective, not from implementation structure.
-- Keep all AI-authored spec content in English.
-- Add `🚧` only when the feature has or will receive a `todo/`-or-higher ticket in the same session.
-- Never remove `🚧` without confirming the feature is implemented.
-- Give every named feature a stable `{#YYMMDD-slug}` anchor.
-- Call `ws/spec_index.verify` after every spec edit.
-- Do not read convention files from host-local plugin source paths.
+- Call MCP tool `ws/convention.read` for `spec-conventions` before any write or update - conventions are canonical there.
+- Location follows `judge: directory-vs-flat`.
+- Run `ws/spec_index.verify` (no args) after every write or update.
+- Accuracy check: for every heading without [planned], confirm the feature exists. Use an Explore agent if uncertain.
 
-## On: Write Spec
+## On: invoke
 
-1. Identify the target behavior, area name, or existing spec file from the user request.
-2. Apply `judge: spec-impact`; if there is no caller-visible behavior, report `No public behavior affected.` and stop.
-3. Call MCP tool `ws/convention.read` with `{"name":"spec-conventions"}`.
-4. Inspect `ai-docs/spec/` and any likely target spec before choosing create versus update.
-5. If creating a spec, choose the file shape with `judge: directory-vs-flat`.
-6. Call MCP tool `ws/spec_stem.generate` before inserting each new named feature.
-7. Write or update the spec using `Templates / Spec Entry`.
-8. Apply `judge: planned-marker` before adding any `🚧` heading or Planned callout.
-9. Apply `judge: split-trigger` after writing; split sections only when the criteria are met.
-10. Verify implemented entries with `judge: accuracy-check`.
-11. Call MCP tool `ws/spec_index.verify`.
-12. Commit only the spec files and directly required index changes.
-13. Report the changed spec paths and any deferred verification.
+1. **judge: spec-impact** - does this work introduce or modify behavior a caller can observe?
+   - no  -> output "No public behavior affected."
+       - While `ws:proceed` -> continue with appropriate next step.
+       - Otherwise -> suggest `ws:write-ticket`. Exit.
+   - yes -> proceed with steps below.
+2. Identify the target from `user request` - area name, file path, or description.
+3. If creating a new spec:
+   a. Apply `judge: directory-vs-flat` to choose the file structure.
+   b. Write the spec body following the `spec-format` template. Apply `judge: idea-level` before inserting any `[planned]` entries.
+   c. Run `ws/spec_index.verify` (no args) for cleanup and verification.
+   d. Add the spec to the listing in `ai-docs/_index.md`.
+4. If updating an existing spec:
+   a. Read the target file first.
+   b. For each new anchor: run `ws/spec_stem.generate` with the descriptive slug to get a collision-free `{#YYMMDD-slug}`.
+   c. Insert the anchor - on a heading line or anywhere in body text (not heading-only).
+   d. Apply `judge: idea-level` before adding any `[planned]` Planned callouts. Remove [planned] from confirmed-implemented features as needed.
+   e. Run `ws/spec_index.verify` (no args) for cleanup and verification.
+5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
+6. Accuracy check - confirm every heading without [planned] exists in the codebase. Use an Explore agent if uncertain. Never remove [planned] without confirmation.
+7. **Commit** - in a single shell command, stage the spec file(s) updated in this run (and `ai-docs/_index.md` if the listing changed) then commit:
+   `git add <file(s)> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
 
 ## Judgments
 
 ### judge: spec-impact
 
-Spec-impact exists when the work creates or changes behavior a caller can observe: commands, options, outputs, files, documented conventions, plugin surfaces, MCP tools, or workflow contracts.
+Evaluate whether the work introduces or modifies behavior a caller can observe from outside the implementation. Internal restructuring, refactors that preserve external behavior, or tooling changes with no public-facing surface are not spec-relevant. Any addition to or change of a callable interface, user-visible output, or documented convention qualifies.
+
+### judge: idea-level
+
+When about to write a `[planned]` entry: write it. Then emit this session reminder: "Session reminder: a `todo/`-or-higher ticket must be created before this session ends for this `[planned]` entry to be valid per spec-conventions." Do not ask the user whether to defer - write the entry and remind.
 
 ### judge: directory-vs-flat
 
-Use `ai-docs/spec/<area>/index.md` only when the area already has or clearly needs multiple child files; otherwise use `ai-docs/spec/<area>.md`.
-
-### judge: anchor-generation
-
-Call `ws/spec_stem.generate` with `{"slug":"<descriptive-slug>"}` and use the returned `YYMMDD-slug` exactly.
-
-### judge: planned-marker
-
-Use a `🚧` heading for a new unimplemented feature and a Planned callout for planned change to existing behavior; ensure a `todo/`-or-higher ticket exists before session end.
+Use a directory (`<area>/index.md` + child files) when the area has or will have sub-sections split across multiple files. Use a flat file (`<area>.md`) for a single, self-contained feature surface. When uncertain, start flat - convert to directory when the split trigger fires.
 
 ### judge: split-trigger
 
-Split a section into its own file when it has an independent ticket lifecycle, repeated constraints callouts, or a distinct reader audience.
+Extract a section into its own file when it has:
+- Its own [planned] markers with a distinct ticket lifecycle, OR
+- More than one `> [!note] Constraints` block, OR
+- A distinct audience from the parent doc
 
-### judge: accuracy-check
-
-For every heading without `🚧`, confirm the behavior exists through code, tests, docs, or an available focused delegate; if confirmation is missing, keep or add the planned/gap marker instead.
+Any one condition is sufficient.
 
 ## Templates
 
-### Spec Entry
+### ws/spec_index.verify
 
-```markdown
-## <Feature Name> {#YYMMDD-feature-name}
+After writing or updating a spec file:
 
-Behavioral description of what users, callers, hosts, or tools observe.
-
-> [!note] Implementation Gap · YYYY-MM-DD
-> Known-but-unscheduled incomplete behavior. No ticket yet.
-
-> [!note] Planned 🚧
-> Planned behavior. Current behavior remains unchanged until implemented.
+```text
+ws/spec_index.verify
 ```
 
-### New Spec
+Scans all `*.md` files under `ai-docs/spec/` automatically. Removes any `features:` and `stems:` frontmatter blocks. No file arguments accepted. Output: `[fix]` for auto-applied cleanup (e.g. `features: removed - <path>`), `[warn]` for items needing human judgment (duplicate stems, staleness, anchor integrity). Parse failures and missing directory emit `[error]` to stderr. Always exits 0.
+
+### spec-format
 
 ```markdown
 ---
@@ -84,9 +83,32 @@ summary: <One-line external-perspective summary>
 
 # <Area / Feature Name>
 
-<One-two sentence summary of what this provides to users or callers.>
+<One-two sentence summary.>
+
+## Implemented Feature {#YYMMDD-implemented-feature}
+
+Behavioral description. Pseudo-code where it aids clarity.
+
+A specific sub-concept within a section can also carry an anchor. {#YYMMDD-sub-concept}
+
+> [!note] Constraints
+> - Intentional limitation or out-of-scope boundary.
+
+> [!note] Planned [planned]
+> Will gain X capability. Current behavior unchanged until implemented.
+
+## [planned] New Feature {#YYMMDD-new-feature}
+
+Planned behavior description - what the caller will observe once implemented.
 ```
+
+Anchoring rules:
+- Run `ws/spec_stem.generate` with the descriptive slug to obtain a `{#YYMMDD-slug}` before inserting any anchor.
+- Anchors may appear on any line (heading or body text), not heading-only.
+- Slugs are clean identifiers: lowercase, hyphens, no spaces.
+- No ticket references (`[stem/pN]`) in headings or `[planned]` markers - implementation traceability is via commits referencing spec-stems.
+- Rename: when a slug changes, the commit message must include `renamed-spec: <old-stem> -> <new-stem>`.
 
 ## Doctrine
 
-Spec writing optimizes for behavioral drift resistance: a future reader should learn what callers can rely on without reverse-engineering source code. When a rule is ambiguous, apply whichever interpretation makes the documented behavior easier to verify from outside the implementation.
+Spec documents are the pivot for discussion sessions - when the topic is "what does this currently do from the outside," the spec must answer without requiring source exploration. Every authoring choice optimizes for **drift resistance at the behavioral level**: describe what callers observe, not what the implementation does, so that internal refactors preserving behavior do not invalidate the spec. When a rule is ambiguous, apply whichever interpretation a reader could verify without reading source code.

@@ -5,75 +5,76 @@ description: Create or update repository workflow tickets. Use when the user ask
 
 # Write Ticket
 
+Target: user request
+
 ## Invariants
 
-- Read the repository ticket conventions before creating or changing tickets.
-- Treat ticket stems as stable identifiers and avoid renaming stems to change dates.
-- Move ticket status by moving files between status directories.
-- Do not edit a phase after it contains a `### Result` section.
-- Preserve user intent, constraints, rejected alternatives, and verification limits in ticket text.
-- Keep implementation-plan details out of tickets unless they are needed to explain scope.
-- Keep all AI-authored ticket content in English.
-- Use `ws/convention.read` for ticket conventions.
+- Ticket conventions: Call MCP tool `ws/convention.read` for `ticket-conventions` - path format, status flow, phase rules, stem rules, templates.
+- Never `read` a ticket file other than the current target - delegate any other ticket inspection to an Explore subagent.
 
-## On: Create Ticket
+## On: invoke
 
-1. Call MCP tool `ws/convention.read` with `{"name":"ticket-conventions"}`.
-2. Classify the request with `judge: ticket-kind`.
-3. Choose initial status with `judge: initial-status`.
-4. Generate a `YYMMDD-<category>-<slug>.md` stem using today's date and a short stable slug.
-5. Write frontmatter with `title` and any concrete `related` references.
-6. Write `## Background` with the problem, goal, and reason this ticket exists.
-7. Add `## Decisions`, `## Constraints`, or `## Prior Art` only when they preserve settled context.
-8. For actionable tickets, add stable `### Phase N: <title>` sections with success criteria.
-9. For research tickets, add freeform topic headings instead of phases.
-10. Add the ticket to `ai-docs/_index.md` `## Ticket Queue` when the initial status is `todo`.
-11. Commit only the created ticket and directly required index change.
-12. Report the created path as `Ticket: ai-docs/tickets/<status>/<stem>.md`.
+0. Apply **judge: spec-gate** (CREATE path only).
+1. If `user request` references an existing ticket, read it.
+2. **Create** (new ticket):
+   a. Determine category from the topic.
+   b. Choose initial status directory (`idea/` for vague, `todo/` for actionable - see `judge: initial-status`).
+   c. Write the ticket using the **frontmatter template** and a clear problem/goal statement. Populate `related-mental-model` with the mental-model stems (filename without `.md`) that were consulted or arose during the current session - recovery hint for future sessions, not a validated link. Omit if no mental-model docs were relevant.
+   d. If category is `epic`: body defines scope and decomposition (not implementation spec); list child ticket stems; completion means child work is done.
+   e. If multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
+   f. After drafting, verify scope - see `judge: ticket-scope`.
+   g. If status is `todo/`: add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` - one-line purpose and dependency notes ``.
+3. **Edit** (existing ticket):
+   a. Read the ticket first.
+   b. Apply the requested changes (update phase, move status).
+   c. For moves, `git mv` and add `completed:` date in frontmatter (-> `.done/`).
+4. **Phase content** - carry everything from discussion that informs implementation: goals, constraints, rationale, rejected alternatives, suggested approaches (pseudo code, struct shapes, data formats, algorithm sketches). Leave to the plan: codebase-derived details (file paths, existing type reuse, integration patterns, function signatures, testing classifications).
+5. **Intent review** - re-read the written/edited ticket against the preceding conversation:
+   - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
+   - Does the ticket distort or omit any discussed intent?
+   - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
+6. **Spec-stem check** - confirm ticket↔spec linkage:
+   a. Run direct inspection of the relevant spec file anchors on the relevant spec file(s) to confirm canonical stems.
+   b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
+   c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
+7. **Commit** - in a single shell command, stage the ticket file (if `git mv` was used, `git add <new-path>` is sufficient) then commit:
+   `git add <file> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
+8. **Proceed prompt** - suggest `ws:proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
-## On: Edit Ticket
-
-1. Call MCP tool `ws/convention.read` with `{"name":"ticket-conventions"}`.
-2. Read the target ticket before editing it.
-3. Apply only the requested change and any required consistency update.
-4. Use `git mv` for status transitions when possible.
-5. Add `completed: YYYY-MM-DD` when moving a ticket to `.done`.
-6. Update `ai-docs/_index.md` when queue membership changes.
-7. Commit only the changed ticket and directly required index change.
-8. Report the updated path as `Ticket: ai-docs/tickets/<status>/<stem>.md`.
+   Emit the created ticket path as a completion artifact on its own line at the end of output, in the form `Ticket: ai-docs/tickets/<status>/<stem>.md`. This allows callers (e.g. `ws:proceed`) to capture the path when invoking `ws:write-ticket` as a prefix stage.
 
 ## Judgments
 
-### judge: ticket-kind
+### judge: spec-gate
 
-Use `research` when the work is exploratory and has no implementation phases. Use `epic` when the body decomposes broad scope into child tickets. Use `feat`, `bug`, `refactor`, or `chore` when the work is actionable and phaseable.
+Fires on any action that results in `todo/`-or-higher status: direct `todo/` creation and `idea/` -> `todo/` promotion moves. `idea/` creation is ungated.
+
+Identify the relevant spec file for the topic.
+Run direct inspection of the relevant spec file anchors (shell) if a spec file is identifiable.
+If no relevant spec file exists, or no entry covers this behavior -> stop. Name the uncovered behavior; suggest `ws:write-spec` before continuing.
 
 ### judge: initial-status
 
-Use `idea` when the goal, scope, or acceptance criteria are still unsettled. Use `todo` when the ticket is actionable without another design conversation. When uncertain, choose `idea`.
+Place in `idea/` when the topic is exploratory or underspecified; place in `todo/` when the scope and goal are actionable. When uncertain, prefer `idea/` - promotion is cheap.
 
-### judge: phase-size
+### judge: ticket-scope
 
-One phase should cover one cohesive component or reviewable behavior. Split phases when a single phase would mix unrelated files, unrelated risks, or separate verification surfaces.
+Over ~200 lines is a soft signal; over 300 lines, act. First, prune plan-level detail (file paths, function signatures, integration specifics) - that belongs in a plan document. If still large, the scope is too wide: introduce an epic and split into child tickets, each covering one independently reviewable unit of work.
 
-### judge: spec-linkage
+### judge: phase-need
 
-If a ticket affects caller-visible behavior, identify the relevant spec document and existing spec stems by direct document inspection. If no spec entry exists, state the missing behavior and ask whether to write or update the spec before continuing.
+Prefer more phases over fewer. An overly granular ticket is cheaper to merge than an oversized phase that stalls mid-implementation. Single-component, single-concern work may be one phase.
 
-## Templates
+### judge: missing-spec-entry
 
-### Ticket Path
-
-```text
-Ticket: ai-docs/tickets/<status>/<YYMMDD-category-slug>.md
-```
-
-### Todo Queue Entry
-
-```markdown
-`<stem>` — <one-line purpose and dependency notes>
-```
+Fires when a phase implements caller-visible behavior with no entry in any spec file. Stop the authoring flow, tell the user which phase surfaces un-specced behavior, and suggest `ws:write-spec` before continuing. Skipping this loses traceability for the new behavior and bypasses the canonical chain's spec-impact gate.
 
 ## Doctrine
 
-Ticket writing optimizes for the future session's limited recovery budget: the ticket must preserve the decisions, constraints, and unresolved risks that would otherwise require rereading the whole conversation. When a rule is ambiguous, apply whichever interpretation better preserves the future session's limited recovery budget.
+A ticket is the primary context-recovery artifact - a fresh session with no
+prior conversation must reconstruct the full decision context from the ticket
+and its linked plans. Every authoring choice optimizes for **recoverability
+of intent**: decisions, constraints, and rejected alternatives are captured
+at the point of writing so that downstream skills (`ws:write-code`)
+never re-derive what was already settled. When a rule is
+ambiguous, apply whichever interpretation better preserves recoverability.

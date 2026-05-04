@@ -5,247 +5,212 @@ description: Reconstruct mental-model documents from scratch by surveying operat
 
 # Forge Mental Model
 
+Target: user request
+
 ## Invariants
 
-- Call `ws/convention.read` for `mental-model-conventions` before any mental-model write.
-- Use `ws/subquery` with `deep_research: true` for every survey and verifier delegate call.
-- Warn and proceed when specs are absent; spec cross-references are opportunistic, not blocking.
-- Confirm the final domain list with the user before any domain file is written.
-- Maintain a visible task list with one `forge-mental-model-<domain>` item per confirmed domain.
-- Complete the domain survey before drafting any domain file content.
-- Complete the verifier pass before writing the final domain file.
-- Commit every mental-model document change with `(mental-model-updated)` in the commit message body.
-- Dispatch all cold-start survey delegates in one response turn when the host supports parallel calls.
-- Keep all AI-authored mental-model and commit text in English.
-- Write operational contracts, coupling, extension hazards, mistakes, and debt; do not write type listings or source paraphrases.
-- Do not read convention files from host-local plugin source paths.
+- Call MCP tool `ws/convention.read` for `mental-model-conventions` before any document write - conventions are canonical there.
+- All survey and verifier queries use `ws/subquery` with `deep_research: true`.
+- No domain file is written without completing the survey for that domain first.
+- Domain list must be explicitly confirmed by the user before any file is written.
+- Domain task names use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Renaming tasks breaks cross-compact resume detection.
+- All survey subagents for a phase are dispatched in a single response turn (parallel).
+- Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
-## On: Invoke
+## On: invoke
 
-1. Inspect the visible task list for items whose names begin with `forge-mental-model-`.
-2. If an incomplete matching item exists, resume **On: Per Domain** with the first incomplete item.
-3. If no matching item exists, start **On: Cold Start**.
+1. Call the visible task list and scan for tasks whose name begins with `forge-mental-model-`.
+2. If matching tasks exist -> skip to **On: per-domain** with the first task whose status is not `completed`.
+3. If no matching tasks exist -> proceed to **On: cold-start**.
 
-## On: Cold Start
+## On: cold-start
 
-### 1. Spec gate
+### 1. Spec gate (soft)
 
-1. Check whether `ai-docs/spec/` exists and contains at least one spec file.
-2. If absent or empty, tell the user: `No spec found — mental-model will be built without spec stem cross-references. Run the forge-spec workflow first for full cross-reference support.`
-3. Record whether specs are available for later stem inspection.
-4. Do not block mental-model authoring when specs are absent.
+Check whether `ai-docs/spec/` exists and contains at least one file:
 
-### 2. Existing catalog lookup
+```text
+ls ai-docs/spec/ 2>/dev/null | head -1
+```
 
-1. Call MCP tool `ws/mental_models.list` to inspect existing mental-model domains and source mappings.
-2. Use the catalog only as a coverage signal; do not extend stale content without re-surveying the code.
+If absent or empty: surface the warning below and proceed - do not block.
 
-### 3. Parallel codebase survey
+> No spec found - mental-model will be built without spec stem cross-references.
+> Run `ws:forge-spec` first for full cross-reference support.
 
-Call `ws/subquery` three times in the same response turn, each with `deep_research: true`:
+Record whether spec is available (drives step 4 per domain).
 
-1. Survey directory and module structure; return module or area names, responsibilities, outward-facing interfaces, and rough size signals.
-2. Survey entry points and cross-module contracts; return orchestration paths, dependency directions, outputs, protocols, registries, and configuration schemas.
-3. Survey coupling hotspots and implicit contracts; return involved modules, required ordering or data flow, and failure modes if violated.
+### 2. Parallel codebase survey
 
-Wait for all three survey results before synthesizing.
+Issue all three queries in a single response turn as parallel `ws/subquery` calls:
 
-### 4. Synthesize domain candidates
+```text
+ws/subquery with deep_research=true - <<'PROMPT'
+Survey the project's directory and module structure.
 
-1. Cross-reference module boundaries, entry points, coupling hotspots, and existing catalog coverage.
-2. Produce one candidate domain per coherent operational area.
-3. For each candidate, note source paths, coupling owned by the domain, and any existing mental-model file that may be replaced.
+Steps:
+1. Enumerate the source tree: find top-level modules, packages, or service boundaries. Use find/glob as needed.
+2. For each boundary: identify its apparent responsibility and whether it has outward-facing interfaces (APIs, CLI commands, config options).
 
-### 5. User domain confirmation
+Return: a bullet list of module/area names with a one-line responsibility description each. Include file count per area as a rough size signal.
+PROMPT
+```
 
-1. Present candidate domains as a numbered list.
-2. Tell the user they may reorder, merge, split, rename, or drop entries.
-3. Wait for the user's adjustments or confirmation.
-4. Do not proceed until the user explicitly confirms the final domain list.
+```text
+ws/subquery with deep_research=true - <<'PROMPT'
+Survey the project for entry points and cross-module contracts.
 
-### 6. Register domain work
+Steps:
+1. Find main entry points (e.g., main.rs, __main__.py, index.ts, bin/).
+2. For each entry point: identify what it orchestrates, what modules it depends on, and what outputs it produces.
+3. Identify shared contracts: trait impls, protocols, interface files, plugin registries, or configuration schemas that cross module boundaries.
 
-1. Create or update a visible task list with one item per confirmed domain in confirmed order.
-2. Name each item `forge-mental-model-<domain>`.
-3. Include the domain name, inferred source paths, spec availability, and existing file coverage in each item description.
-4. Mark the first domain `in_progress` and proceed to **On: Per Domain**.
+Return: a bullet list of entry points and contracts with coupling direction (who depends on whom).
+PROMPT
+```
 
-## On: Per Domain
+```text
+ws/subquery with deep_research=true - <<'PROMPT'
+Survey the project for coupling hotspots and implicit contracts - areas that cause wrong outcomes for a developer who modifies them without knowing the contract.
 
-For each visible task-list item named `forge-mental-model-<domain>`, in confirmed order, skip completed items.
+Look for: shared mutable state, ordering dependencies, sync points, extension registries, global config reads, event buses, or any code that must be called in a specific order.
 
-### 1. Mark in progress
+For each hotspot: note the modules involved, the contract, and the failure mode if violated.
 
-1. Mark the current domain task `in_progress` in the visible task list.
-2. Read the domain task description for source paths, spec availability, and existing file coverage.
+Return: a bullet list of hotspots with modules, contract, and failure mode.
+PROMPT
+```
+
+Wait for all three to return before synthesizing.
+
+### 3. Synthesize domain candidates
+
+Combine the three survey returns:
+
+1. Cross-reference module boundaries, entry points, and coupling hotspots.
+2. Produce a candidate domain list - one domain per coherent operational area.
+3. For each candidate: note the source paths, the coupling it owns, and any existing mental-model file that covers it.
+
+### 4. User domain confirmation
+
+Present the candidate domains to the user in a numbered list. Tell the user they may reorder, merge, split, rename, or drop entries before proceeding.
+
+Wait for user response. Apply any adjustments. Do not proceed until the user explicitly confirms the final list.
+
+### 5. Lock the task list
+
+Call `TaskCreate` once per confirmed domain, in confirmed order:
+
+```
+TaskCreate(
+  name = "forge-mental-model-<domain>",
+  description = """
+    Mental-model authoring for domain: <domain>
+    Source paths: <inferred module paths for this domain>
+    Spec available: <yes | no>
+  """
+)
+```
+
+Proceed immediately to **On: per-domain** with the first domain.
+
+## On: per-domain
+
+For each domain task in order, skipping tasks with status `completed`:
+
+### 1. Mark in-progress
+
+Call `TaskUpdate` to set the domain task status to `in_progress`.
 
 ### 2. Domain survey
 
-Call MCP tool `ws/subquery` with `deep_research: true` and a self-contained prompt using `Templates / Domain Survey Prompt`.
-
-Wait for the survey result before drafting any domain file content.
-
-### 3. Draft domain file
-
-1. Call MCP tool `ws/convention.read` with `{"name":"mental-model-conventions"}` and read the result.
-2. Apply the convention inclusion test to every candidate claim.
-3. Draft the domain content in memory using `Templates / Domain File`.
-4. Set frontmatter `domain` to the filename stem.
-5. Set frontmatter `description` to a one-line operational scope summary.
-6. Set frontmatter `sources` to directory-level patterns from the task description.
-7. Set frontmatter `related` only for domains with real coupling notes.
-8. Omit empty sections.
-
-### 4. Embed spec stems when available
-
-1. If specs are unavailable, skip this step and record `none (no spec found)` for the summary.
-2. If specs are available, inspect `ai-docs/spec/` with available file or search capabilities for existing `{#YYMMDD-slug}` anchors.
-3. Embed only stems that correspond to a concrete behavior discussed in the domain draft.
-4. Do not call `ws/spec_stem.generate` or `ws/spec_index.verify` for stem listing.
-
-### 5. Verify draft
-
-1. Call MCP tool `ws/subquery` with `deep_research: true` and a self-contained prompt using `Templates / Verifier Prompt`.
-2. Process verifier findings with `judge: verifier-finding`.
-3. Apply required corrections to the in-memory draft.
-4. Collect unresolved low-severity additions for the user summary.
-5. Do not write the final file until the verifier pass is complete.
-
-### 6. Write and commit domain file
-
-1. Write the verified draft to `ai-docs/mental-model/<domain>.md` or the directory shape required by loaded conventions.
-2. Commit the domain file change.
-3. Include `(mental-model-updated)` in the commit message body.
-
-### 7. Complete domain
-
-1. Mark the current domain task `completed` in the visible task list.
-2. If more incomplete domain tasks remain, continue with the next one.
-3. When all domain tasks are complete, proceed to **On: Wrap Up**.
-
-## On: Wrap Up
-
-### 1. Update mental-model index
-
-1. Update `ai-docs/mental-model.md` with rows for newly created or replaced domain files.
-2. Update shared cross-domain conventions only when the verified domain work exposed a real repeated pattern.
-3. Commit the index change.
-4. Include `(mental-model-updated)` in the commit message body.
-
-### 2. Summary report
-
-Report using `Templates / Completion Report`.
-
-### 3. Suggested next steps
-
-1. Suggest running the forge-spec workflow if specs were absent.
-2. Suggest using the configured mental-model update workflow after future code changes.
-
-## Judgments
-
-### judge: verifier-finding
-
-| Severity | Action |
-|----------|--------|
-| `[HIGH]` | Correct the draft before writing; factual inversions and wrong names cannot remain. |
-| `[LOW]` | Add the missing contract if it passes the inclusion test; otherwise report it for user review. |
-| `[STALE]` | Rewrite or remove the stale claim before writing. |
-| `[BLOAT]` | Remove the content; it fails the mental-model inclusion test. |
-
-### judge: inclusion-test
-
-Include a claim only when ignorance causes a wrong outcome and the fact is not derivable from entry-point files in under 30 seconds.
-
-## Templates
-
-### Domain Survey Prompt
-
-```markdown
+```text
+ws/subquery with deep_research=true - <<PROMPT
 Analyze domain: <domain>
 Source paths: <paths from task description>
 
 Analyze this domain for a developer who needs to modify it.
-Focus on facts whose absence would cause wrong outcomes:
-1. Implicit contracts between modules, including ordering, data flow, and synchronization.
-2. Coupling where changes in one place require changes elsewhere.
-3. Extension points such as registries, enums, plugin interfaces, and configuration schemas.
-4. Fragile areas, invariants that break silently, known debt, and planned scaffolds.
-5. Common mistakes where forgetting a step causes a wrong outcome.
-6. Distinctions between implemented patterns and scaffolded or planned features.
+Focus on what would cause wrong outcomes if unknown:
+1. Implicit contracts between modules (ordering, data flow, sync)
+2. Coupling (changes here -> must also change there)
+3. Extension points (registries, enums, plugin interfaces, config)
+4. Fragile areas (invariants that break silently or cause wrong results, known debt)
+5. Common mistakes (forgetting required steps, wrong outcomes)
+6. Distinguish existing patterns from scaffolded/planned features.
 
-Be concrete: cite file paths, function names, specific types, and failure modes.
-Do not produce type or field listings, function paraphrases, or exhaustive API inventories.
+Be concrete: cite file paths, function names, specific types.
+Do NOT produce type/field listings or paraphrase what functions do.
+PROMPT
 ```
 
-### Verifier Prompt
+Wait for the result before drafting.
 
-```markdown
-Verify this mental-model domain draft against the codebase.
+### 3. Draft domain file
+
+1. Call MCP tool `ws/convention.read` for `mental-model-conventions`. Read the output; apply the inclusion test to every claim before writing it.
+2. Draft the domain file content for `ai-docs/mental-model/<domain>.md` following the document format in `mental-model-conventions.md`.
+3. Set frontmatter: `domain` (filename stem), `description` (one-line scope summary), `sources` (directory patterns from task description), `related` (other domains with coupling to this one).
+
+### 4. Embed spec stems (conditional)
+
+If spec is available (recorded in cold-start step 1):
+
+1. Run `ws-list-spec-stems` (no args) to get all spec stems in the repo.
+2. For each section in the domain draft: identify spec stems whose behavior corresponds to the section's topic. Embed the stem inline in the relevant body text (e.g., `{#260421-feature-name}`).
+
+Skip if no spec exists.
+
+### 5. Verify
+
+```text
+ws/subquery with deep_research=true - <<PROMPT
+Verify the following mental-model domain document against the codebase.
 
 Domain file draft:
 <full draft content>
 
-Source paths to check:
-<paths from task description>
+Source paths to check: <paths from task description>
 
-For each claim in the draft, assign one severity:
-- [HIGH] Factually wrong: misnames code, inverts dependency direction, or states an unenforced constraint.
-- [LOW] Incomplete: a relevant operational contract or coupling is missing.
+For each claim in the draft, assign a severity:
+- [HIGH] Factually wrong - misnames a function, inverts a dependency, states a constraint that is not enforced.
+- [LOW] Incomplete - a relevant contract or coupling is missing.
 - [STALE] References removed code or an old API.
-- [BLOAT] Fails the inclusion test: type listing, source paraphrase, or cheaply derivable content.
+- [BLOAT] Fails the inclusion test - type/field listing, paraphrase of what a function does, or content derivable without cost.
 
-Return findings as bullets with severity, draft location, correction or removal, and evidence path.
+Return a finding list. Each finding: severity tag, location in draft, correction or suggested removal.
+PROMPT
 ```
 
-### Domain File
+Process verifier output:
+- **[HIGH]**: Apply corrections to the draft directly.
+- **[LOW]**: Add to draft if clearly relevant; otherwise collect for user summary.
+- **[STALE]**: Rewrite or remove the section.
+- **[BLOAT]**: Remove - content fails inclusion test.
 
-```markdown
----
-domain: <name>
-description: "<one-line operational scope summary>"
-sources:
-  - <directory-pattern>/
-related:
-  <domain>: "<coupling or contract>"
----
+### 6. Write file
 
-# <Domain Name>
+Write the verified draft to `ai-docs/mental-model/<domain>.md`. Commit with `(mental-model-updated)` in the message body.
 
-## Entry Points
-- <2-3 files that are useful starting points, not an exhaustive listing>
+### 7. Complete domain
 
-## Module Contracts
-- <component> guarantees <contract> to <consumer>; enforced by <mechanism or convention>.
+1. Call `TaskUpdate` to set the domain task status to `completed`.
+2. If more domain tasks remain, continue with the next incomplete task.
+3. When all domain tasks are `completed`, proceed to **On: wrap-up**.
 
-## Coupling
-- <A> ↔ <B>: coupled through <mechanism>; changing <A> requires <B> because <failure mode>.
+## On: wrap-up
 
-## Extension Points & Change Recipes
-- **Add or change <thing>**: touch <files>; preserve <contract>; avoid <pitfall>.
+### 1. Update mental-model index
 
-## Common Mistakes
-- When changing <area>, forgetting <step> causes <wrong outcome>.
+Update `ai-docs/mental-model.md`:
+- Add a row to the domains table for each newly created domain file.
+- Update shared conventions if new cross-domain patterns emerged.
 
-## Technical Debt
-- <issue>: current state, impact, and possible improvement.
+Commit with `(mental-model-updated)` in the message body.
+
+### 2. Summary report
+
 ```
-
-Omit empty sections. Omit `related` when no cross-domain coupling exists.
-
-### Visible Task Item
-
-```text
-forge-mental-model-<domain> — <status>
-  Domain: <domain>
-  Source paths: <comma-separated module paths>
-  Spec available: <yes | no>
-  Existing mental-model file: <path, or none>
-```
-
-### Completion Report
-
-```text
-## Forge Mental Model — Complete
+## Forge Mental Model - Complete
 
 Domains covered: <N>
 Domain files created: <list of paths>
@@ -254,6 +219,21 @@ Verifier corrections applied: <count>
 Items for user review: <LOW findings list, or 'none'>
 ```
 
+### 3. Suggested next steps
+
+- Run `ws:forge-spec` if spec was absent - mental-model was built without stem cross-references.
+- Run `mental-model-updater` agent after future code changes to keep domain files current.
+
+## Judgments
+
+### judge: spec-gate (soft)
+
+Check `ai-docs/spec/` on cold-start. If absent or empty: warn and proceed. Do not block.
+
 ## Doctrine
 
-Forge-mental-model optimizes for modification-relevant operational knowledge per domain: every domain file records contracts, coupling, hazards, and change recipes that prevent wrong outcomes during future edits. When a rule is ambiguous, apply whichever interpretation better preserves dense operational knowledge while excluding type listings, source paraphrases, and cheaply derivable facts.
+Forge-mental-model optimizes for **confirmed operational knowledge per domain** -
+every domain file reflects a completed survey-and-verify cycle before being written.
+Spec stems are embedded opportunistically when available; their absence does not
+block authoring. When a rule is ambiguous, apply whichever interpretation ensures
+the domain survey and verifier steps complete before any file write begins.

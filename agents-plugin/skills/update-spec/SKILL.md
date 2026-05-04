@@ -5,74 +5,88 @@ description: Audit recent commits for caller-visible behavior changes and update
 
 # Update Spec
 
+Target: user request
+
 ## Invariants
 
-- Lead the audit directly unless the user explicitly authorizes delegation.
-- Call `ws/convention.read` for `spec-conventions` before changing specs.
-- Add entries only for confirmed implemented behavior unless the user explicitly asks for planned spec text.
-- Strip `🚧` only after confirming the feature is implemented.
-- Keep all AI-authored spec content in English.
-- Call `ws/spec_index.verify` after any spec edit.
-- Commit all spec changes in one `docs(spec): ...` commit.
-- Do not read convention files from host-local plugin source paths.
+- Lead-driven - no subagent delegation.
+- Load spec-conventions before any write or read.
+- Only add entries for confirmed-implemented features - no [planned] entries unless explicitly directed.
+- Run `ws/spec_index.verify` after any file modification.
+- Commit all spec changes in a single `docs(spec): ...` commit.
+- All written content must be in English regardless of conversation language.
 
-## On: Update Spec
+## On: invoke
 
-1. Resolve the commit range with `judge: commit-range`.
-2. Call MCP tool `ws/convention.read` with `{"name":"spec-conventions"}`.
-3. Run `git log <range> --oneline` and inspect commit bodies when needed.
-4. Apply `judge: spec-impact` to each commit.
-5. For each impacting commit, identify the affected spec domain and read the relevant files.
-6. Add a missing implemented entry using `Templates / Implemented Entry` and `ws/spec_stem.generate`.
-7. Scan existing `🚧` entries and Planned callouts for stems completed by the range.
-8. Strip completed `🚧` markers only after confirming implementation.
-9. Handle `removed: <stem>` markers with `judge: removal-handling`.
-10. Call MCP tool `ws/spec_index.verify` if any spec changed.
-11. Commit only the changed spec files and directly required index changes.
-12. Report `Spec: <N entries added, M markers stripped, K removals handled>` or `Spec: no changes.`
+### 1. Load conventions
+
+Call MCP tool `ws/convention.read` for `spec-conventions`. Read `agents-plugin/skills/write-spec/SKILL.md`.
+
+### 2. Resolve commit range
+
+- If `user request` contains a `..` range: use it as-is.
+- If the calling skill recorded a `<start-commit>`: use `<start-commit>..HEAD`.
+- Otherwise: run `git merge-base HEAD main` and use `<merge-base>..HEAD`.
+
+### 3. Scan commits
+
+Run `git log <range> --oneline`. Apply **judge: spec-impact** to each commit.
+
+### 4. Add new entries
+
+For each commit with spec-impact:
+1. Identify the affected spec domain. Read the relevant file(s) from `ai-docs/spec/`.
+2. Check whether an entry already covers the new or changed behavior.
+3. If missing: call MCP tool `ws/spec_stem.generate` for `<slug>` and insert an entry following the `spec-format` template from `write-spec/SKILL.md`.
+
+### 5. Strip [planned]
+
+For each `[planned]` entry in any spec file:
+1. Extract the stem.
+2. Run `git log <range> --oneline | grep <stem>`. If matching commits exist and the feature is confirmed implemented: strip `[planned] ` from the heading and remove any `> [!note] Planned [planned]` callout block beneath it.
+
+### 6. Handle removals
+
+Run `git log <range> --format="%B" | grep "^removed:"`. For each `removed: <stem>` found: remove the corresponding spec entry from its file.
+
+### 7. Finalize
+
+If any spec file was modified:
+1. Run `ws/spec_index.verify`.
+2. Commit: `git add ai-docs/spec/ && git commit -m "docs(spec): ..."`.
+
+If no changes: output `Spec: no changes.`
 
 ## Judgments
 
-### judge: commit-range
-
-Use an explicit `A..B` range from the user when provided; otherwise use the caller-supplied start commit when available; otherwise use `git merge-base HEAD main` through `HEAD`.
-
 ### judge: spec-impact
 
-Qualifying changes alter caller-visible commands, options, outputs, files, plugin surfaces, MCP tools, documented conventions, or workflow contracts.
+**Qualifies (add or update an entry):**
+- New CLI flag, subcommand, option, or environment variable
+- Changed output format or return value
+- New convention or contract a caller must follow
+- Changed behavior in an existing documented feature
 
-### judge: non-impact
+**Does not qualify:**
+- Internal refactors that preserve all caller-visible behavior
+- Bug fixes that restore documented expected behavior (not introducing new observable behavior)
+- Doc-only or infra-only changes
+- Platform portability fixes that don't expose a new interface
 
-Do not add spec entries for internal refactors, documentation-only edits, test-only changes, or bug fixes that merely restore already documented behavior.
-
-### judge: anchor-generation
-
-Call `ws/spec_stem.generate` with `{"slug":"<descriptive-slug>"}` and use the returned `YYMMDD-slug` exactly.
-
-### judge: removal-handling
-
-For each `removed: <stem>` commit marker, find the matching spec entry, confirm the behavior was removed, and remove or mark the entry according to spec conventions.
+When borderline: err toward adding an entry. A false-positive entry is easier to remove than a missing one is to discover later.
 
 ## Templates
 
-### Completion Report
+### Completion report
 
-```text
-Spec: <N entries added, M markers stripped, K removals handled>
 ```
-
-```text
-Spec: no changes.
-```
-
-### Implemented Entry
-
-```markdown
-## <Feature Name> {#YYMMDD-feature-name}
-
-Behavioral description of what users, callers, hosts, or tools observe.
+Spec: <N entries added, M [planned] stripped, K removed> | no changes
 ```
 
 ## Doctrine
 
-Update-spec optimizes for spec coverage at commit boundaries: every caller-visible behavior change that lands in source should be represented in specs before the work is considered wrapped. When a rule is ambiguous, apply whichever interpretation leaves future readers less dependent on commit archaeology.
+Update-spec optimizes for **spec coverage at commit boundaries** - every caller-visible
+behavior change that lands in source should land in spec within the same sprint or
+implement run. The lead's inline judgment on spec-impact is the gate; no delegation,
+no suggestion mode. When a rule is ambiguous, apply whichever interpretation produces
+spec entries a caller could verify without reading source code.

@@ -5,54 +5,66 @@ description: Release a project by following its ai-docs/ship configuration. Use 
 
 # Ship
 
+Target: user request
+
 ## Invariants
 
-- Never infer a version number without an explicit version strategy in the ship config.
-- Never publish artifacts or push tags without explicit user approval at the final gate.
-- Treat the ship config as the single source of truth.
-- Do not improvise steps that are absent from the config.
-- Keep all AI-authored ship config content in English.
+- Never infer a version number without an explicit strategy in the ship config - ask if ambiguous.
+- Never publish or push tags without user confirmation at the final gate.
+- The ship config is the single source of truth; do not improvise steps not listed there.
+- All written artifacts (ship config, version files) must be in English regardless of conversation language.
 
-## On: Ship
+## On: invoke
 
-1. Resolve the ship config with `judge: config-resolution`.
-2. If no config exists, use `On: No Config`.
-3. Read the selected config fully before executing any release step.
-4. Run listed pre-flight checks.
-5. Derive or bump the version exactly as specified by the config.
-6. Create the configured tag locally; do not push it yet.
-7. Run listed build or package commands.
-8. Present version, tag, publish targets, and commands that will push or publish.
-9. Wait for explicit user approval.
-10. Run listed publish commands.
-11. Push the configured tag only when the config says to push.
-12. Run listed post-ship steps.
-13. Report version, tag, publish targets, and any deviations.
+### 1. Resolve config
 
-## On: No Config
+Config files follow two naming conventions:
+- `ai-docs/ship/<proj>.md` - committed; for public publish targets.
+- `ai-docs/ship/<proj>.local.md` - gitignored; for private or sensitive deploy targets (internal registries, SSH deploys, credentials). Takes precedence over the `.md` variant when both exist for the same `<proj>`.
 
-1. Ask which project or component is being shipped.
-2. Ask whether the deploy target is public or private/sensitive.
-3. Ask for the version strategy.
-4. Ask for pre-flight, build, publish, tag, and post-ship steps.
-5. Write `ai-docs/ship/<proj>.md` for public targets or `ai-docs/ship/<proj>.local.md` for private targets.
-6. Present the config and wait for user confirmation before executing it.
+1. Glob `ai-docs/ship/` for `*.md` and `*.local.md` files.
+2. If `user request` names a project, look for `<proj>.local.md` first, then `<proj>.md`. Stop with an error if neither is found.
+3. If no argument:
+   - One config found (either variant) -> load it.
+   - Multiple configs found -> list them (noting which are local) and ask the user which project to ship.
+   - No configs found -> go to **On: no config**.
 
-## Judgments
+### 2. Execute
 
-### judge: config-resolution
+Follow the loaded config exactly, section by section:
 
-If the user names a project, prefer `ai-docs/ship/<proj>.local.md` then `ai-docs/ship/<proj>.md`; without a project, use the only config when exactly one exists and ask when multiple exist.
+1. **Pre-flight** - run any listed checks (tests, lint, build).
+2. **Version** - derive or bump the version per the config's version strategy.
+3. **Tag** - create the git tag per the config. Do not push yet.
+4. **Build / package** - run listed build or package commands.
+5. **Confirm** - show the user: version string, tag, and publish targets. **Wait for explicit approval before proceeding.**
+6. **Publish** - run listed publish commands (e.g. `cargo publish`, `npm publish`, `docker push`).
+7. **Push tag** - `git push origin <tag>`.
+8. **Post-ship** - run any listed post-ship steps.
 
-## Templates
+Report what was done: version, tag, publish targets, any deviations.
 
-### Ship Config
+## On: no config
+
+The project has no ship config. Consult the user to establish one.
+
+1. Ask:
+   - Which sub-project or component is being shipped (determines `<proj>` name and file path).
+   - Whether the deploy target is public or private/sensitive. Private targets (internal registries, SSH deploys, credentials that must not be committed) go in `<proj>.local.md`; public targets go in `<proj>.md`.
+   - Version strategy: options include semantic versioning with manual bump, auto-increment patch, date-based (`YYYY.MM.DD`), or `git describe`.
+   - Build and package steps.
+   - Publish or deploy targets and commands.
+   - Post-ship steps (e.g. update changelog, notify).
+2. Write the config to `ai-docs/ship/<proj>.md` or `ai-docs/ship/<proj>.local.md` depending on the answer above.
+3. Confirm the written config with the user before proceeding to **Execute**.
+
+## Ship Config Format
 
 ```markdown
 # Ship: <proj>
 
 ## Version Strategy
-<how the version is derived or bumped>
+<how the version is derived or bumped - be specific enough that no judgment is needed at ship time>
 
 ## Pre-flight
 - <check command>
@@ -64,13 +76,20 @@ If the user names a project, prefer `ai-docs/ship/<proj>.local.md` then `ai-docs
 - <publish command and target>
 
 ## Tag
-Format: `<prefix><version>`
+Format: `<prefix><version>` (e.g. `v1.2.3` or `proj-2024.04.19`)
 Push: yes
 
 ## Post-ship
 - <optional post-ship steps>
 ```
 
+Omit sections that do not apply.
+
 ## Doctrine
 
-Ship optimizes for zero-surprise releases: every irreversible step is either prescribed in the config or confirmed by the user before execution. When a rule is ambiguous, apply whichever interpretation makes the next ship invocation require less judgment at release time.
+Ship optimizes for **zero-surprise releases** - every step is either
+prescribed in the config or confirmed by the user before execution.
+The config is written once and reused, so the first invocation is the
+only time judgment is required. When a rule is ambiguous, apply
+whichever interpretation makes the next ship invocation require less
+human input, not more.

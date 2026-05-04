@@ -5,95 +5,115 @@ description: Directly implement a narrow code change on the current branch, then
 
 # Edit
 
+Target: user request
+
 ## Invariants
 
-- The lead performs every source edit directly; delegates may review but never implement.
-- Keep the scope narrow enough for one lead-owned change and one reviewer session.
-- Escalate to the configured implementation workflow when scope becomes broad or cross-module without an established pattern.
-- Load relevant mental-model documents before editing files they describe.
-- Treat existing skeleton stubs and integration tests as binding acceptance criteria.
-- Commit logical units with `git commit -F` and a detailed `## AI Context`.
-- Run verification before review and after every review-driven fix.
-- Cap reviewer relay at two non-clean cycles.
-- Delete generated review files before returning.
-- Call the `ws:update-spec` skill with the edit commit range before the completion report.
-- End with the completion report format in `Templates / Completion Report`.
+- The lead edits directly - no subagent delegation for the edit itself.
+- Follow impl-playbook: call MCP tool `ws/infra.read` for `impl-playbook` for test strategy, verify, failure diagnosis, and mechanical-edit criteria.
+- Load relevant mental-model docs before editing: run `ws/mental_models.list` for the target paths and read every listed file.
+- Ancestor loading: when a read touches `mental-model/<domain>/<sub>.md`, load `mental-model/<domain>/index.md` first.
+- When skeleton exists for the target scope, its stubs and integration tests are the acceptance criteria.
+- Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
+- Review relay cap: 2 cycles maximum; proceed to cleanup regardless of status after the cap.
+- Escalate to `ws:write-code` if scope grows to multi-file with new public API or cross-module without established pattern.
+- Self-cleanup: review path file is deleted before returning.
+- Run `ws:update-spec` with the edit's commit range before outputting the completion report.
+- On completion, output the completion report in the format defined in Templates.
 
-## On: Edit
+## On: invoke
 
-1. Parse the request as either a ticket path, ticket stem, or inline brief.
-2. Record `<start-commit>` with `git rev-parse HEAD`.
-3. If ticket-driven, read the ticket and collect any skeleton references from frontmatter.
-4. Apply `judge: skeleton-gate`; stop and suggest `ws:write-skeleton` when skeleton work is required first.
-5. Identify target paths and call MCP tool `ws/mental_models.list` with those paths.
-6. Read every listed mental-model document, loading parent domain indexes before child documents.
-7. Call MCP tool `ws/infra.read` for `impl-playbook` when implementation or verification policy is uncertain.
-8. Identify the build, syntax, or test command that proves the requested change.
-9. Edit files directly, keeping each change within the request and existing project patterns.
-10. Commit completed logical units with a detailed `## AI Context`.
-11. Run the selected verification command and read enough output to defend the result.
-12. Diagnose failures before editing tests; only change tests when the expected behavior or skeleton contract changed.
-13. Call MCP tool `ws/path.generate` with `kind: "review"` and `stems: ["direct"]`; store the returned path as `<review-path>`.
-14. Call MCP tool `ws/agents.register` with `name: "reviewer"`, `backend: "codex"`, `tier: "core"`, and `prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"]`.
-15. Call MCP tool `ws/agents.call` for `reviewer` using `Templates / Reviewer Prompt`.
-16. Call MCP tool `ws/agents.wait` for `reviewer` when the reviewer result is needed.
-17. Call MCP tool `ws/agents.print` for `reviewer` if the wait result does not include a usable summary.
-18. If the reviewer reports clean, proceed to cleanup.
-19. If the reviewer reports non-clean, read `<review-path>`, apply required fixes, verify again, and call `ws/agents.call` with `Templates / Re-Review Prompt`.
-20. Repeat the relay until the reviewer reports clean or two non-clean cycles have completed.
-21. Call MCP tool `ws/agents.erase` for `reviewer`.
-22. Delete `<review-path>` after its findings are no longer needed.
-23. Call the `ws:update-spec` skill with `<start-commit>..HEAD`.
-24. Output `Templates / Completion Report`.
+### 1. Prepare
+
+1. Parse arguments: ticket path or inline brief.
+2. Record current HEAD as `<start-commit>`: `git rev-parse HEAD`.
+3. If ticket-driven: read the ticket; collect skeleton references from frontmatter.
+4. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `ws:write-skeleton`.
+5. Load mental-model docs: `ws/mental_models.list` for the target paths; read every listed file, ancestors first.
+6. Call MCP tool `ws/infra.read` for `impl-playbook`.
+7. Identify integration test file paths and the run command.
+
+### 2. Edit
+
+Edit files directly per the brief or ticket, following impl-playbook.md.
+Commit at logical checkpoints per CLAUDE.md rules. Include `## AI Context`.
+
+### 3. Verify
+
+1. Run the test suite and build step. Read full output - never claim pass from a skimmed tail.
+2. Resolve warnings per impl-playbook.md section Verify.
+3. On failure: diagnose per impl-playbook.md section Test Failure Diagnosis. Do not patch tests to match broken impl.
+4. Re-run until verify passes.
+
+### 4. Review
+
+Register `reviewer` with prompts `code-reviewer`, `code-review-correctness`,
+and `code-review-fit`. Generate one review path with `ws/path.generate`; store
+the returned path as `<review-path>`.
+
+Call `reviewer`:
+
+```text
+Diff range: <start-commit>..HEAD
+Scope: direct-edit - <brief scope description>
+
+Review for correctness and fit.
+Write full findings to: <review-path>
+Return only: [clean|non-clean]: <one-line summary>
+PROMPT
+```
+
+After notification, read the reviewer summary from `ws/agents.print` if needed.
+
+**If `[clean]`:** proceed to cleanup.
+
+**If `[non-clean]`:** read the review file directly. Apply fixes. Re-verify tests. Re-call reviewer:
+
+```text
+Re-review. Updated diff: <start-commit>..HEAD
+PROMPT
+```
+
+Repeat until `[clean]` or after 2 relay cycles - then proceed to cleanup regardless.
+
+### 5. Cleanup
+
+Delete `<review-path>`.
+
+### 6. Spec update
+
+Invoke `ws:update-spec` via Skill tool with args `<start-commit>..HEAD`.
+
+Output the **completion report** (see Templates).
 
 ## Judgments
 
-### judge: skeleton-gate
+### judge: skeleton-check
 
-Proceed without a skeleton for a small isolated edit that does not create or change public contracts. Require `ws:write-skeleton` first when the change adds public interfaces, crosses module boundaries without an established pattern, or depends on tests that should lock a contract before implementation.
-
-### judge: escalation
-
-Stay in `edit` when the lead can hold the whole change in context, the verification target is clear, and one reviewer can cover correctness and fit. Escalate to the configured implementation workflow when the work needs a delegated implementer, multiple independent reviewers, branch routing, or a multi-step plan that would outgrow one direct-edit loop.
+| Decision | When |
+|----------|------|
+| Proceed without skeleton | Change is a small isolated edit (single file, no new public contracts) |
+| Require skeleton | Change touches public interfaces or cross-module boundaries |
 
 ## Templates
 
-### Reviewer Prompt
+### Completion report format
 
-```markdown
-Diff range: <start-commit>..HEAD
-Scope: direct edit - <brief scope description>
-Review path: <review-path>
-
-Review for correctness and fit.
-Write complete findings to the review path.
-Return only: [clean|non-clean]: <one-line summary>
 ```
-
-### Re-Review Prompt
-
-```markdown
-Re-review the updated direct edit.
-
-Diff range: <start-commit>..HEAD
-Review path: <review-path>
-
-Focus on prior findings and any new regressions introduced by the fixes.
-Write complete findings to the review path.
-Return only: [clean|non-clean]: <one-line summary>
-```
-
-### Completion Report
-
-```text
 Edit complete.
 Commit range: <start-commit>..HEAD
 Test status: pass | fail | skipped
 Review: clean | non-clean (<one-line summary>)
-Spec: <N entries added, M planned markers stripped> | no changes
-Open issues: <remaining issues after relay cap, or none>
+Spec: <N entries added, M [planned] stripped> | no changes
+<if issues remain after cap:> Open issues: <list>
 ```
 
 ## Doctrine
 
-Edit optimizes for the lead's limited active implementation context during narrow code changes: the lead keeps source ownership, the reviewer spends independent review attention, and the relay cap prevents review negotiation from consuming the session. When a rule is ambiguous, apply whichever interpretation better preserves the lead's limited active implementation context during narrow code changes.
+Edit optimizes for **session-context preservation during code changes** -
+the lead retains accumulated understanding by editing directly rather than
+forking to a subagent. The reviewer fires in a fresh named-agent context so
+its judgment is uncommitted. The relay cap (2 cycles) keeps the loop bounded
+so the lead's context is not consumed by negotiation. When a rule is ambiguous,
+apply whichever interpretation keeps the lead's context continuous over the
+change's full lifecycle.

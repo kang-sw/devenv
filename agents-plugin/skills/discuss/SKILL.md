@@ -5,120 +5,92 @@ description: Explore a workflow design, migration direction, ticket scope, or im
 
 # Discuss
 
+Topic: user request
+
+## Project Map
+
+Load the current project map with MCP tool `ws/project_tree`.
+
 ## Invariants
 
-- Do not edit source files during discussion unless the user explicitly switches to implementation.
-- Write documentation only when the user explicitly asks to capture or update the outcome.
-- Treat unresolved risks as open questions instead of smoothing them into agreement.
-- Surface existing patterns before proposing new abstractions.
-- Keep Claude-specific commands and Codex-specific tooling out of shared conclusions.
-- Use ws MCP tools when the discussion needs project memory or convention text.
-- Keep all AI-authored captured artifacts in English.
-- Do not read convention files from host-local plugin source paths.
-- Do not declare design closure while top-level design domains remain open.
+- No source edits. Only documentation writes, only in the capture step.
+- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phases with a `### Result` section are frozen - do not edit them.
+- read mental-model docs on-demand as topics emerge.
+- read spec docs in `ai-docs/spec/` on-demand as topics emerge - the Project Map above lists available specs.
+- Dispatch Explore agents for implementation details beyond mental-model docs - never read source directly.
+- When docs are stale or insufficient, say so - do not speculate.
+- Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
+- Evaluate each claim independently - call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
+- Never proactively ask to wrap up or persist; wait for the user's explicit signal.
+- All written artifacts must be in English regardless of conversation language.
 
-## On: Start Discussion
+## On: invoke
 
-1. Identify the concrete topic, ticket, skill, spec, or decision under discussion.
-2. Call MCP tool `ws/project_tree` for current project memory.
-3. Read any named ticket, spec, skill, or convention document before making claims about it.
-4. Define the active boundary: design discussion, ticket shaping, skill porting, or implementation planning.
-5. Ask at most one blocking question when the boundary cannot be inferred safely.
-6. Enter the discussion loop.
+1. Invoke `ws:workflow` via Skill tool (loads orchestration primitives reference).
+2. Run `git branch --show-current`. If the result starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - `ws:sprint` provides session continuity."
+3. If `user request` references a ticket, read it.
+4. Enter discussion loop.
 
-## On: Design Discuss
+## On: discussion loop
 
-Use this handler when the topic concerns workflow semantics, interface naming,
-runtime behavior, migration policy, failure handling, or caller-visible
-contracts.
+1. Apply **judge: needs-survey** - identify every named component, skill, agent, spec, or ticket the current question touches. For each unloaded doc, register `project-survey` with prompt `project-survey` and call it with `<topic brief>`.
+   Incorporate the returned reference list before responding.
+2. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
+3. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
+   When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."
+4. When discussion changes unimplemented ticket phases, update them in place with user agreement.
+5. Continue until the user signals done.
 
-1. Apply `judge: design-domains` and create a top-level checklist.
-2. Mark each domain as `open`, `closed`, `delegated-detail`, `blocked`, or `irrelevant`.
-3. Question `open` domains actively with concrete alternatives and trade-offs.
-4. When a domain is too broad, split it into subdomains and repeat this handler.
-5. When the user delegates implementation detail, mark only that subdomain `delegated-detail`.
-6. After each answer, update the checklist before asking the next question.
-7. Ask one to five high-leverage questions per turn; prefer fewer when questions are difficult.
-8. Do not move to capture or implementation until `judge: design-closure` is not `open`.
+## On: Ticket Status Transition
 
-## On: Discussion Loop
+Triggers when the user requests a ticket status change - promoting an idea ticket to `todo/`, or dropping a ticket to `.dropped/`.
 
-1. Restate the current decision in one or two sentences when the thread shifts.
-2. Compare viable options with concrete trade-offs.
-3. Mark assumptions, verification gaps, and compatibility risks explicitly.
-4. Separate settled decisions from candidates and rejected alternatives.
-5. When a claim depends on code or docs not yet read, inspect the artifact or label the claim as unverified.
-6. Use `On: Design Discuss` before closure when the topic is a design discussion.
-7. When the user converges on a direction, summarize the capture target with `judge: capture-target`.
-8. Continue until the user asks to implement, write a ticket, update docs, or stop.
+1. Read the ticket file. Extract any `spec:` frontmatter field and body references to `{#YYMMDD-slug}` anchors.
+2. **Promotion (idea/ -> todo/)**:
+   a. Invoke `ws:write-spec` to add a `[planned]` entry for each caller-visible behavior in the ticket.
+   b. Perform `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
+   c. Invoke `ws:write-ticket` (Edit path) on the promoted ticket to populate the `spec:` frontmatter field with the stems created in step (a).
+   d. Add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` - one-line purpose and dependency notes ``.
+3. **Drop (-> .dropped/)**:
+   a. For each linked spec stem: check whether any other non-dropped ticket also references it.
+   b. No other ticket references this stem -> invoke `ws:write-spec` to remove the `[planned]` entry.
+   c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
+   d. Perform `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
+4. Create one commit covering the `git mv` and any spec changes together.
 
-## On: Capture Outcome
+## On: user signals done
 
-1. Choose the durable artifact with `judge: capture-target`.
-2. Capture only decisions the user approved or clearly accepted.
-3. Preserve rejected alternatives when they explain why the chosen direction matters.
-4. Record remaining risks and follow-up questions separately from settled decisions.
-5. If the capture target is a ticket, use the `write-ticket` skill.
-6. If the capture target is a spec or convention, call `ws/convention.read` for the relevant convention before editing.
-7. Commit only the captured documentation changes.
+1. Always suggest `ws:write-spec` as the next step - write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
+2. Then offer ticket persistence:
+   - **New ticket** - invoke `ws:write-ticket`.
+   - **Ticket update** - invoke `ws:write-ticket`, then append design notes to an existing ticket phase.
+3. Apply **judge: needs-integration-tests** to ticket writes.
+4. Write only what the user approves. No artifact needed for exploratory discussions.
+
+## Workflow Context
+
+Interface and scope decisions made in discussion become downstream inputs:
+- Approach direction -> spec update (`ws:write-spec` - always the next step after discuss)
+- Scope, phases, acceptance criteria -> ticket structure (`ws:write-ticket`)
+- Type shapes, module boundaries, public API -> skeleton contract directives (`ws:write-skeleton`)
+The canonical chain is: `ws:discuss` -> `ws:write-spec` -> `ws:write-ticket` -> `ws:proceed` -> `ws:write-skeleton`? -> `ws:edit` | `ws:write-code`.
+Write-spec's judge handles the no-op case; the chain is uniform regardless of topic type.
+
+When discussion converges on a decision in any of these categories, frame
+the conclusion in terms its downstream consumer can directly act on.
 
 ## Judgments
 
-### judge: capture-target
+### judge: needs-survey
+Spawn `project-survey` when any of the following hold:
+- The current question names a component, skill, agent, spec, or ticket whose doc has NOT been loaded in this session - regardless of whether the model feels confident it knows the answer.
+- The discussion direction shifts to a domain no doc for which has been loaded this session.
 
-Use a ticket when the outcome is scoped future work. Use a spec when the outcome changes caller-visible behavior. Use `ai-docs/_index.md` only for short-lived project memory needed at session start. Use a convention document when the outcome changes repeatable workflow rules.
+Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") - those draw from session state or git log.
 
-### judge: needs-artifact
-
-Create or edit an artifact only when the discussion produced a durable decision, actionable work item, or rule change. Do not create artifacts for unresolved brainstorming unless the user explicitly asks for a research note.
-
-### judge: tooling-boundary
-
-If an option requires named agents, hooks, or host-specific plugin behavior that is not part of the ws MCP contract, mark it as adapter work and keep it out of shared behavior.
-
-### judge: design-domains
-
-Start with these top-level domains and drop irrelevant ones: interface and naming; state and lifecycle; failure and recovery; compatibility and migration; security and permissions; host and platform variance; testing and verification; rollout and deprecation; documentation and ticket/spec impact; user ergonomics.
-
-### judge: design-closure
-
-Return `open` while any relevant top-level domain is unresolved. Return `closed` when all relevant domains are decided. Return `delegated-detail` only for domains the user explicitly delegates to implementation judgment. Return `blocked` for domains that need external verification before closure.
-
-### judge: question-pressure
-
-Ask aggressively when an unresolved domain changes user-facing behavior, workflow safety, or migration cost. Offer delegation when a domain is internal implementation detail. Stop questioning when the remaining domains are all `closed`, `delegated-detail`, `blocked`, or `irrelevant`.
-
-## Templates
-
-### Decision Summary
-
-```markdown
-Decision: <settled direction>
-Rationale: <why this direction won>
-Rejected: <important alternatives and why they were rejected>
-Risks: <unresolved verification or compatibility risks>
-Next: <ticket, spec, implementation, or no artifact>
-```
-
-### Design Closure Checklist
-
-```markdown
-Design closure:
-- Interface and naming: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- State and lifecycle: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- Failure and recovery: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- Compatibility and migration: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- Security and permissions: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- Host and platform variance: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- Testing and verification: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- Rollout and deprecation: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- Documentation and ticket/spec impact: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-- User ergonomics: <open|closed|delegated-detail|blocked|irrelevant> - <note>
-
-Questions:
-- <question tied to one open domain>
-```
+### judge: needs-integration-tests
+Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.
 
 ## Doctrine
 
-Discussion optimizes for the user's limited decision turns: each response should reduce ambiguity, expose real trade-offs, and preserve approved conclusions without forcing premature artifacts. When a rule is ambiguous, apply whichever interpretation better preserves the user's limited decision turns.
+This skill optimizes for **decision quality per conversation turn**. The user is here to think, not to produce artifacts - so the agent's job is to sharpen reasoning by surfacing risks, reuse opportunities, and concrete alternatives, then capture only what the user approves. When a rule is ambiguous, apply whichever interpretation better preserves decision quality per turn.

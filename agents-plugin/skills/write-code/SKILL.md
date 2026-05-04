@@ -5,233 +5,282 @@ description: Delegate a ticket or inline implementation target through a brief, 
 
 # Write Code
 
+Target: user request
+
 ## Invariants
 
-- Operate on the current branch; branch creation, approval gates, merge, and spec updates belong to the caller.
-- The lead writes the brief and optional plan before implementation starts.
-- The implementer reads only the brief and optional plan; it must not read the ticket directly.
-- The implementer may commit logical implementation checkpoints on the current branch.
-- Register every named agent through `ws/agents.register` with embedded prompt stems.
-- Use `ws/agents.call` for implementer and reviewer turns that may run long.
-- Use `ws/path.generate` for reviewer finding files.
-- Reviewers write complete findings to files and return only compact clean or non-clean summaries.
-- Fit reviewers may consult the ticket for architectural headroom; correctness and test reviewers stay scoped to diff, brief, and tests.
-- Relay review findings to the implementer by file path, not by copying full findings into the lead context.
-- Cap review relays at three implementer fix cycles.
-- Delete generated review files and erase named agents before returning.
-- End with `Templates / Completion Report`.
+- Operates on the current branch - branch creation is the caller's responsibility.
+- Implementer reads only the brief - never the ticket directly.
+- Fit reviewer may reference the ticket for architectural headroom checks; correctness and test reviewers do not.
+- When skeleton exists, its stubs and integration tests are the acceptance criteria.
+- Ancestor loading: when implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first. Lead propagates this rule in the implementer spawn prompt.
+- Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
+- Implementer and reviewer sessions persist via `ws/agents.call` auto-resume throughout the review loop.
+- Review cycle cap: 3 relays maximum. Lead adjudicates at cycle 2; caller escalation at cycle 3.
+- Self-cleanup: review path files are deleted before returning.
+- On completion, output the commit range, test status, and brief path in the format defined in Templates.
 
-## On: Write Code
+## On: invoke
 
-1. Parse the request as either a ticket path, ticket stem, or inline implementation target.
-2. Record `<start-commit>` from the current `HEAD`.
-3. If ticket-driven, read the ticket and identify the target phase, scope, constraints, skeleton metadata, and ticket stem.
-4. Call MCP tool `ws/subquery` with `Templates / Project Survey Prompt`.
-5. Write `<brief-path>` using `Templates / Brief` under `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`.
-6. Commit the brief as a lead-owned checkpoint before delegating implementation.
-7. Apply `judge: plan-depth`; default to `survey` when uncertain between `as-is` and `survey`.
-8. If plan depth is `survey`, call `ws/subquery` with `Templates / Plan Population Prompt`.
-9. If plan depth is `research`, call `ws/subquery` with `deep_research: true` and `Templates / Plan Population Prompt`.
-10. If a plan was written, review it and commit the plan as a lead-owned checkpoint before implementation.
-11. Apply `judge: skeleton-gate`; stop and suggest `ws:write-skeleton` when skeleton work is required first.
-12. Identify the verification commands or test targets the implementer must run, using existing project documentation when available.
-13. Call MCP tool `ws/path.generate` with `kind: "review"` and `stems: ["correctness", "fit", "test"]`.
-14. Store the returned paths as `<correctness-path>`, `<fit-path>`, and `<test-path>`.
-15. Call MCP tool `ws/agents.register` for `implementer` with `backend: "codex"`, `tier: "core"`, and `prompts: ["implementer", "impl-playbook"]`.
-16. Call MCP tool `ws/agents.register` for `reviewer-correctness` with `prompts: ["code-reviewer", "code-review-correctness"]`.
-17. Call MCP tool `ws/agents.register` for `reviewer-fit` with `prompts: ["code-reviewer", "code-review-fit"]`.
-18. Call MCP tool `ws/agents.register` for `reviewer-test` with `prompts: ["code-reviewer", "code-review-test"]`.
-19. Call MCP tool `ws/agents.call` for `implementer` using `Templates / Implementer Prompt`.
-20. Use `ws/agents.status` or `ws/agents.tail` while the implementer is running only when progress or diagnostics are needed.
-21. Call MCP tool `ws/agents.wait` for `implementer` when final implementation output is needed.
-22. If the wait result lacks a usable summary, call MCP tool `ws/agents.print` for `implementer`.
-23. Determine `<implementation-range>` from commits created after `<start-commit>` and the implementer report.
-24. Apply `judge: partition-allocation`; default to all three reviewer partitions for non-trivial implementation.
-25. For every selected reviewer, call MCP tool `ws/agents.call` with the matching reviewer prompt template.
-26. Use `ws/agents.wait` for each selected reviewer and call `ws/agents.print` for any reviewer whose wait output is incomplete.
-27. If every reviewer summary is `[clean]`, proceed to cleanup.
-28. If any reviewer summary is `[non-clean]`, increment `<relay-cycle>` and call `ws/agents.call` for `implementer` using `Templates / Fix Prompt`.
-29. After each implementer fix turn, call `ws/agents.wait` for `implementer` and update `<implementation-range>` through `HEAD`.
-30. Re-run selected reviewers with `Templates / Re-Review Prompts`; reviewers overwrite their existing finding files.
-31. At relay cycle 2, read maintained disputes from review files and decide whether to accept the implementer disposition or override it.
-32. At relay cycle 3, stop relaying and collect unresolved findings for the completion report.
-33. Delete `<correctness-path>`, `<fit-path>`, and `<test-path>` after their findings are no longer needed.
-34. Call MCP tool `ws/agents.erase` for `implementer`, `reviewer-correctness`, `reviewer-fit`, and `reviewer-test`.
-35. Output `Templates / Completion Report`.
+### 0. Orient
+
+### 1. Read target
+
+Parse `user request`: extract ticket path or inline description, and optional `--ticket <stem>`.
+If ticket-driven: read the ticket. Extract scope, stem, and phase context.
+
+Register `project-survey` with prompt `project-survey`, then call it:
+
+```text
+<ticket path or inline description>
+PROMPT
+```
+
+Capture the returned `[Must|Maybe]` reference list - it informs the brief's `## References` section.
+
+### 2. Write brief
+
+Write `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using the **brief template** (see Templates).
+Strip ticket noise - this file is the implementer's sole context source.
+Populate `## References` from the project-survey output.
+
+Commit the brief file before proceeding to plan depth.
+
+### 3. Plan depth
+
+Apply `judge: plan-depth`. Default to survey when uncertain between as-is and survey.
+
+**as-is** - proceed to step 4.
+
+**survey** - register `plan-surveyor` with prompt `plan-populator-survey`, then call it:
+
+```text
+Brief path: <brief-path>
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
+PROMPT
+```
+
+**research** - register `plan-researcher` with prompt `plan-populator-research`, then call it:
+
+```text
+Brief path: <brief-path>
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
+PROMPT
+```
+
+After the population agent returns, commit the plan file before proceeding.
+
+### 4. Prepare
+
+1. Verify skeleton: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests referencing target contracts. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `ws:write-skeleton`.
+2. Collect integration test context: identify test file paths and the run command. Flows into the implementer spawn prompt.
+3. Register agent slots: `implementer` with prompt `implementer`; reviewers with `code-reviewer` plus their partition prompt.
+4. Generate review paths with `ws/path.generate` for stems `correctness`, `fit`, and `test`; store them as `<correctness-path>`, `<fit-path>`, and `<test-path>`.
+
+### 5. Spawn implementer
+
+Call `implementer`. Read output after notification.
+
+```text
+Brief path: <brief-path>
+<if plan exists:> Plan path: <plan-path>
+
+read only the brief (and plan if provided). Do not read the ticket directly.
+
+Acceptance criteria: skeleton integration tests must pass.
+- Test files: <integration test paths>
+- Run: <command to execute them>
+
+Ancestor loading: when you read `ai-docs/mental-model/<domain>/<sub>.md`,
+read `ai-docs/mental-model/<domain>/index.md` first.
+
+Instructions:
+- Verify integration tests pass before reporting completion or after each fix.
+- Report completion in plain text. Include test results.
+- For fix cycles, a follow-up call will arrive with review findings - fix and report back.
+- Commit at logical checkpoints on the current branch.
+PROMPT
+```
+
+After notification, read `implementer` output through `ws/agents.print` if needed.
+Note the commit range from the report.
+
+### 6. Review
+
+#### 6a. Partition allocation
+
+Apply `judge: partition-allocation` based on the implementer's report and the nature of changes.
+
+#### 6b. Spawn reviewers
+
+Call one reviewer per selected partition in parallel. After all notifications,
+read each summary via `ws/agents.print` if needed.
+
+```text
+Diff range: <first-commit>..<last-commit>
+
+Instructions:
+- Write your full findings to: <correctness-path>
+- Return only: [clean|non-clean]: <one-line summary of most significant issues>
+PROMPT
+```
+
+```text
+Diff range: <first-commit>..<last-commit>
+Brief path: <brief-path>
+
+Instructions:
+- Judge whether the implementation achieves what the brief intended and leaves room for future phases.
+- You may reference the ticket at <ticket-path> for architectural headroom checks (optional).
+- Write your full findings to: <fit-path>
+- Return only: [clean|non-clean]: <one-line summary of most significant issues>
+PROMPT
+```
+
+```text
+Diff range: <first-commit>..<last-commit>
+
+Instructions:
+- Write your full findings to: <test-path>
+- Return only: [clean|non-clean]: <one-line summary of most significant issues>
+PROMPT
+```
+
+#### 6c. Relay and loop
+
+Track relay cycle count starting at 0. Maximum 3 relay cycles.
+
+**Entry:** All `[clean]` -> exit loop, proceed to cleanup.
+
+**Relay.** Increment cycle counter before each relay.
+
+```text
+Review cycle <N>: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
+For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
+Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
+Won't-fix not allowed: correctness, security, or contract violations - fix or escalate these.
+PROMPT
+```
+
+After notification, read `implementer` output through `ws/agents.print` if needed. Extract the won't-fix list.
+
+**Re-review** (parallel, same paths - reviewers overwrite):
+
+```text
+Re-review. Updated diff: <diff>
+Implementer won't-fix items: <list with reasons>
+For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+PROMPT
+```
+
+```text
+Re-review. Updated diff: <diff>
+Implementer won't-fix items: <list with reasons>
+For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+PROMPT
+```
+
+```text
+Re-review. Updated diff: <diff>
+Implementer won't-fix items: <list with reasons>
+For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+PROMPT
+```
+
+After all notifications, read summaries.
+
+**Branch on cycle and result:**
+
+- All `[clean]` -> exit loop, proceed to cleanup.
+- Cycle <= 2 and non-clean -> go to relay.
+- Cycle = 2 and maintained items exist: lead reads review files directly. For each maintained dispute: accept the won't-fix or override it. If any overrides: relay override list to implementer (counts as cycle 3 relay). Otherwise advance to cycle 3 re-review directly.
+- Cycle = 3 and non-clean remain: collect unresolved findings. Proceed to cleanup, surface escalation in output.
+
+### 7. Cleanup
+
+```text
+rm -f <correctness-path> <fit-path> <test-path>
+```
+
+Agent registry entries need no teardown - created fresh per run via `ws/agents.register`.
+
+Output the **completion report** (see Templates).
 
 ## Judgments
 
 ### judge: plan-depth
 
-Use `as-is` when the brief names concrete change points and the implementation is single-file or single-function. Use `survey` when the work spans multiple modules, likely reuse points are unconfirmed, or the implementer would be cold on the codebase. Use `research` when multiple viable strategies exist or cross-module side effects are non-obvious.
+Soft judgment. Default to survey when uncertain between as-is and survey.
 
-### judge: skeleton-gate
-
-Proceed without a skeleton for small isolated implementation that does not create public contracts. Require `ws:write-skeleton` first when the work adds public interfaces, crosses module boundaries without an established pattern, or needs integration tests to lock the contract before implementation.
+| Signal | Suggests |
+|--------|----------|
+| Brief names concrete change points; single-file or single-function scope | as-is |
+| Multi-module span; cold implementer; reuse points likely but unconfirmed | survey |
+| Multiple viable strategies; non-obvious cross-module side effects | research |
 
 ### judge: partition-allocation
 
-Use correctness when logic, contracts, errors, security, or data behavior changed. Use fit when the change reuses or extends existing architecture, introduces patterns others may follow, or affects future phase headroom. Use test when tests changed or new code paths lack obvious existing coverage. Use all three for non-trivial feature work. Use correctness only for purely mechanical changes.
+| Partition | Assign when |
+|-----------|-------------|
+| **Correctness** | New logic introduced, error paths modified, contracts or security surface touched |
+| **Fit** | Existing components reused or modified, new patterns others will follow |
+| **Test** | Test files added or modified, or new code paths added without existing coverage |
+| **Default** | New feature or non-trivial cross-module change -> all three partitions |
+| **Floor** | Purely mechanical change (format, rename with no semantic change) -> Correctness only |
 
-### judge: relay-outcome
+### judge: skeleton-check
 
-Treat `[clean]` from every selected reviewer as complete. Relay `[non-clean]` correctness, security, contract, or test-validity findings unless the lead proves they are outside the brief. Accept fit-only won't-fix dispositions when they cite established local patterns or explicit brief boundaries.
+| Decision | When |
+|----------|------|
+| Proceed without skeleton | Brief is a small isolated change (single file, no public contracts) |
+| Require skeleton | Change touches public interfaces or cross-module boundaries |
 
 ## Templates
 
-### Project Survey Prompt
+### Brief format
+
+Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 
 ```markdown
-Target:
-<ticket path, ticket stem, or inline implementation target>
-
-Return a `[Must]` and `[Maybe]` reference list for writing a brief.
-Prioritize documents and source files the implementer must read before editing.
-Do not implement.
-```
-
-### Brief
-
-```markdown
-# Brief: <stem-or-short-target>
+# Brief: <stem>
 
 ## Intent
-<what this achieves in one paragraph>
+<what this achieves - one paragraph>
 
 ## Approach
-- <implementation approach at ticket-level resolution>
+<macro-level how - bullets>
 
 ## Constraints
-- <must-hold condition>
+<must-hold conditions>
 
 ## Out of scope
-- <excluded behavior or follow-up>
+<explicitly excluded from this implementation>
 
 ## Details
-<interface, data, migration, or contract details needed when no skeleton exists>
+<interface specs, data types, public contracts at ticket-level resolution>
+<required when no skeleton has been run; may be omitted when skeleton provides contracts>
 
 ## References
-<!-- Populated from the project-survey [Must]/[Maybe] output. -->
-- `[Must]` `<path-or-stem>` - <why the implementer needs it>
-- `[Maybe]` `<path-or-stem>` - <when to consult it>
+<!-- Populated from project-survey [Must/Maybe] output. -->
+<!-- [Must] entries: read before starting. [Maybe] entries: consult if uncertain. -->
+- `ai-docs/mental-model/<path>` - <relevance>
 ```
 
-### Plan Population Prompt
+### Completion report format
 
-```markdown
-Brief path: <brief-path>
-Plan path: <plan-path>
-
-Populate the plan path with a concise implementation plan derived from the brief.
-Do not implement source changes.
 ```
-
-### Implementer Prompt
-
-```markdown
-Brief path: <brief-path>
-<if plan exists:> Plan path: <plan-path>
-
-Read only the brief and optional plan. Do not read the ticket directly.
-
-Acceptance criteria:
-- Existing skeleton stubs and integration tests are binding when present.
-- Verification targets: <commands or test targets>
-
-Instructions:
-- Implement on the current branch.
-- Commit logical checkpoints with detailed `## AI Context`.
-- Run the relevant verification before reporting completion.
-- Report commit hashes, changed files, verification results, and unresolved risks.
-- A later turn may send review finding file paths; read those files directly and respond with dispositions.
-```
-
-### Correctness Reviewer Prompt
-
-```markdown
-Diff range: <implementation-range>
-Brief path: <brief-path>
-Review path: <correctness-path>
-
-Review correctness, contracts, error paths, security, and regressions.
-Write complete findings to the review path.
-Return only: [clean|non-clean]: <one-line summary>
-```
-
-### Fit Reviewer Prompt
-
-```markdown
-Diff range: <implementation-range>
-Brief path: <brief-path>
-<if ticket-driven:> Ticket path: <ticket-path>
-Review path: <fit-path>
-
-Review whether the implementation fits the brief, existing architecture, naming, reuse patterns, and future phase headroom.
-You may consult the ticket only for architectural headroom checks.
-Write complete findings to the review path.
-Return only: [clean|non-clean]: <one-line summary>
-```
-
-### Test Reviewer Prompt
-
-```markdown
-Diff range: <implementation-range>
-Brief path: <brief-path>
-Review path: <test-path>
-
-Review test validity, coverage, missing assertions, mock integrity, and whether verification supports the brief.
-Write complete findings to the review path.
-Return only: [clean|non-clean]: <one-line summary>
-```
-
-### Fix Prompt
-
-```markdown
-Review cycle: <relay-cycle>
-Finding files:
-- Correctness: <correctness-path>
-- Fit: <fit-path>
-- Test: <test-path>
-
-Read the finding files directly.
-For each finding, fix it or report one disposition:
-- [fixed]
-- [won't fix: <specific reason tied to codebase pattern or brief scope>]
-- [deferred: <specific reason and required follow-up>]
-
-Commit logical fixes and rerun relevant verification before reporting.
-```
-
-### Re-Review Prompts
-
-```markdown
-Re-review the updated implementation.
-
-Diff range: <implementation-range>
-Brief path: <brief-path>
-Prior finding path: <partition-review-path>
-Implementer dispositions: <short disposition list or path to implementer output>
-
-Focus on whether prior findings were resolved and whether fixes introduced regressions.
-For each implementer won't-fix item in your partition, respond `[accepted]` or `[maintained: <brief reason>]`.
-Overwrite the review path with complete current findings.
-Return only: [clean|non-clean]: <one-line summary>
-```
-
-### Completion Report
-
-```text
 Implementation complete.
-Commit range: <start-commit>..HEAD
+Commit range: <first>..<last>
 Brief: <brief-path>
-Plan: <plan-path or none>
 Test status: pass | fail | skipped
-Review: clean | non-clean
-Escalation: <unresolved findings after relay cap, or none>
-Review files: deleted | <remaining cleanup issue>
-Agents: erased | <remaining cleanup issue>
+<if escalated:> Escalation: <list of unresolved disputes>
 ```
 
 ## Doctrine
 
-Write-code optimizes for delegated implementation throughput within the caller's limited coordination budget: the lead serializes intent into a brief, delegates implementation and review through resumable agents, and keeps only summaries and unresolved decisions in active context. When a rule is ambiguous, apply whichever interpretation better preserves the caller's limited coordination budget during delegated implementation.
+Write-code optimizes for **brief-to-commit throughput within a branch** -
+every step exists to move a target from intent (brief) to verified code
+(commits) without the caller managing internal agent state. Self-cleanup
+of review paths keeps the caller's context clean. When a rule is ambiguous,
+apply whichever interpretation advances the commit without widening the
+caller's coordination surface.
