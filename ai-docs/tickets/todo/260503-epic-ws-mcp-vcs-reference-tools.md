@@ -94,10 +94,16 @@ inspectable, and composable across Codex, Claude, and future hosts.
   validation. Include Windows compile-only checks and defer native Windows
   runtime smoke until an environment is available.
 
+## Implemented Slices
+
+- `dcaa0366` - Added `ws/git.commit` and `ws-mcp git commit` as a constrained
+  workflow commit builder. It stages only explicit paths, rejects unrelated
+  staged paths, requires structured `## AI Context`, updates `runtime.json`,
+  documents the MCP contract, and detects staged ticket moves plus added
+  `### Result` headings as `ticket_changes`.
+
 ## Open Questions
 
-- Should commit creation be a single `ws/git.commit` tool, or should staging and
-  commit be split into separate tools to make ownership boundaries more visible?
 - How much of ticket/spec lookup should be backed by generated indexes versus
   direct file scans on each call?
 - Should reference graph output be optimized first for model-readable summaries
