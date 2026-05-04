@@ -16,6 +16,7 @@ Target: user request
 - When skeleton exists for the target scope, its stubs and integration tests are the acceptance criteria.
 - Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
 - Review relay cap: 2 cycles maximum; proceed to cleanup regardless of status after the cap.
+- Lead adjudicates review findings: fix correctness, security, and contracts; reject style or scope expansion when appropriate.
 - Escalate to `ws:write-code` if scope grows to multi-file with new public API or cross-module without established pattern.
 - Self-cleanup: review path file is deleted before returning.
 - Run `ws:update-spec` with the edit's commit range before outputting the completion report.
@@ -65,11 +66,19 @@ After notification, read the reviewer summary from `ws/agents.print(name: "revie
 
 **If `[clean]`:** proceed to cleanup.
 
-**If `[non-clean]`:** read the review file directly. Apply fixes. Re-verify
+**If `[non-clean]`:** read the review file directly. Classify each finding:
+
+- Fix: correctness, security, contract, and clear regression findings.
+- Reject: style-only suggestions that conflict with established codebase patterns.
+- Reject: suggestions that expand scope beyond the brief.
+
+Apply accepted fixes. Keep a rejected-finding list with reasons. Re-verify
 tests. Re-call `ws/agents.call(name: "reviewer", prompt: <block below>)`:
 
 ```text
 Re-review. Updated diff: <start-commit>..HEAD
+Rejected findings: <list with reasons>
+For each rejected finding: respond [accepted] or [maintained: <brief reason>].
 ```
 
 Repeat until `[clean]` or after 2 relay cycles - then proceed to cleanup regardless.
