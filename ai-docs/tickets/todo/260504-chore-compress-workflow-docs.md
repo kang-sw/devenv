@@ -52,6 +52,20 @@ Acceptance criteria:
 - No durable rule is removed without an equivalent shorter rule.
 - `git diff --check` passes.
 
+### Result (90e8f5d) - 2026-05-04
+
+Compressed `AGENTS.md`, `agents-plugin/skills/lead-bootstrap/AGENTS.template.md`,
+and `ai-docs/_index.md` from 747 total lines to 516. The first pass removed
+repeated migration explanation and completed implementation detail. The second
+pass restored execution-sensitive items: one-line ticket queue entries, Codex
+plugin cache refresh boundaries, Claude compatibility refresh commands, MCP tool
+names, branch-level spec/mental-model deferral, and bootstrap migration wording.
+
+The bootstrap template was mirrored to the local Codex plugin cache for this
+workspace; only the repository copy is committed. Verification covered
+`git diff --check`, old non-lead `ws:<skill>` reference search, targeted
+branch-deferral search, line counts, and repo-vs-cache template comparison.
+
 ### Phase 2: Compress active Agents plugin skills
 
 Apply the same style to active `agents-plugin/skills/lead-*` docs.
