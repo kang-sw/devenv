@@ -18,7 +18,7 @@ Native MCP/tooling source: `agents-plugin-tool/`.
 
 ## Current Branch Rules
 
-- Branch: `implement/api-docs-mcp`.
+- Branch: `topic/open-conventions-mcp-skills`.
 - Defer spec and mental-model updates until this branch merges.
 - Do not add `spec:` frontmatter, run `ws:lead-update-spec`, or edit
   `ai-docs/spec/` / `ai-docs/mental-model/`.
@@ -192,7 +192,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
-| `260503-feat-agents-plugin-runtime-boundary` | wip | Go stdio MCP/runtime boundary; Windows launcher smoke deferred |
+| `260503-feat-agents-plugin-runtime-boundary` | wip | Go stdio MCP/runtime boundary; Windows runtime smoke verified, launcher startup deferred |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -202,7 +202,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260503-epic-ws-agent-workflow-stability` - keep open for future observed runtime failures; no active blocker after worktree lock, interrupt, and leaf deferral.
-`260503-feat-agents-plugin-runtime-boundary` - wip; macOS/Codex launcher and release download are verified; Windows launcher verification deferred.
+`260503-feat-agents-plugin-runtime-boundary` - wip; macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; native Windows plugin-managed launcher verification deferred.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
 
@@ -215,7 +215,7 @@ bootstrap template, active `lead-*` skills, delegate prompts, and
 
 In-flight: none.
 Next: pick from the active queue. Likely candidates are
-`260429-feat-api-deps` or Windows/runtime closeout under
+`260429-feat-api-deps` or native Windows plugin-managed launcher closeout under
 `260503-feat-agents-plugin-runtime-boundary`.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,

@@ -392,23 +392,61 @@ Verification:
 - launcher incompatible-binary replacement from local release assets
 - launcher `serve --stdio` smoke through the verified download path
 
-### Phase 6: Windows host smoke [deferred]
+### Phase 6: Windows Go runtime smoke
 
-Verify the Windows runtime and plugin-managed startup assumptions when a Windows
-host is available.
+Verify the cross-compiled Windows runtime through a native Windows process when a
+Windows host or WSL2 bridge is available.
 
 Scope:
 
 - Run `ws-mcp-windows-amd64.exe version`.
 - Run `ws-mcp-windows-amd64.exe doctor --root <repo>`.
 - Run a stdio MCP smoke test against `ws-mcp-windows-amd64.exe serve --stdio`.
+
+### Result (manual) - 2026-05-04
+
+Verified the cross-compiled Windows amd64 runtime from WSL2 by running the
+Windows executable through `cmd.exe`.
+
+Findings:
+
+- `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build` produced a PE32+ Windows
+  console executable.
+- Running the executable from Windows TEMP through `cmd.exe` returned
+  `0.1.0-dev` for `version`.
+- `doctor --root \\wsl.localhost\Ubuntu\home\swkang\devenv` passed and found the
+  repo root, `ai-docs`, `agents-plugin`, `claude-plugin`, and project index.
+- A JSONL stdio smoke through `cmd.exe` initialized the server, listed tools,
+  returned `runtime.info`, and called `project_tree`.
+
+Limits:
+
+- This verifies the Go runtime and MCP stdio path under a native Windows process.
+- This does not verify Codex on Windows resolving plugin-managed MCP command paths
+  or choosing a Windows launcher artifact.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./...`
+- `cd agents-plugin-tool && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o /tmp/ws-mcp-windows-amd64.exe ./cmd/ws-mcp`
+- `cmd.exe /C "C:\Users\user\AppData\Local\Temp\ws-mcp-windows-amd64.exe version"`
+- `cmd.exe /C "C:\Users\user\AppData\Local\Temp\ws-mcp-windows-amd64.exe doctor --root \\wsl.localhost\Ubuntu\home\swkang\devenv"`
+- `cmd.exe /C "type C:\Users\user\AppData\Local\Temp\ws-mcp-smoke.jsonl | C:\Users\user\AppData\Local\Temp\ws-mcp-windows-amd64.exe serve --stdio --root \\wsl.localhost\Ubuntu\home\swkang\devenv"`
+
+### Phase 7: Windows plugin-managed startup [deferred]
+
+Verify the Windows plugin-managed startup assumptions when a native Windows Codex
+host is available.
+
+Scope:
+
 - Test whether Codex plugin-managed MCP resolves
   `command: "./bin/ws-mcp-launcher"` to `./bin/ws-mcp-launcher.exe`.
 - If extensionless resolution fails, choose the documented fallback path:
   native Go launcher, host-specific `.mcp.json` adapter artifact, or one-time
   global MCP setup/repair skill.
 
-This phase is deliberately deferred. The runtime contract is considered adequate
-to resume skill migration on macOS/Linux because the Go MCP baseline, plugin
-cache launcher path, release asset build, checksum verification, and production
-download branch have all been implemented and locally verified.
+This phase remains deferred. The runtime contract is considered adequate to
+resume skill migration because the Go MCP baseline, plugin cache launcher path,
+release asset build, checksum verification, production download branch, and
+Windows Go runtime smoke have all been verified.
