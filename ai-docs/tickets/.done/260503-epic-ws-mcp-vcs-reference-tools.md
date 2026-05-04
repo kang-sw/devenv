@@ -4,6 +4,7 @@ related:
   260503-feat-agents-plugin-runtime-boundary: MCP runtime and launcher baseline that will host the new tools
   260503-feat-agents-plugin-write-code-port: core workflow that still needs portable diff, commit, review, and reference lookup primitives
   260503-epic-agents-plugin-skill-porting: skill migration roadmap that should eventually depend on MCP tools instead of host shell wording
+completed: 2026-05-04
 ---
 
 # ws-mcp Git and reference tooling
@@ -118,3 +119,24 @@ inspectable, and composable across Codex, Claude, and future hosts.
   or for structured downstream automation?
 - Where should project-specific verification command metadata live if a later
   phase decides to make build/test invocation more portable?
+
+## Result
+
+Closed after the Git and reference tooling roadmap reached its intended first
+host-neutral slice:
+
+- `ws/git.status`, `ws/git.diff`, `ws/git.log`, and `ws/git.merge_base` provide
+  structured read-side Git state and history.
+- `ws/git.commit` provides constrained workflow commits with explicit paths,
+  structured `## AI Context`, ticket move detection, and `### Result` detection.
+- `ws/tickets.*`, `ws/specs.*`, `ws/mental_models.*`, and
+  `ws/references.trace` provide path-first workflow document discovery without
+  document body read/edit APIs.
+- `agents-plugin` skills and embedded prompts now prefer MCP primitives for
+  ws-owned Git and reference operations, with detailed usage centralized in
+  `ws:lead-workflow`.
+
+The remaining runtime smoke concern belongs to
+`260503-feat-agents-plugin-runtime-boundary`, which already tracks Windows
+launcher and host verification. Project-specific verification command metadata
+remains a future command-runner policy topic, not part of this baseline.
