@@ -44,6 +44,10 @@ This ticket ports the behavior into the Agents/MCP runtime without mutating
   `agents-plugin-tool` prompts.
 - Keep per-domain locking in the runtime/tool layer, not inside the manager
   prompt.
+- Do not expose refresh or stale-check management commands as first-pass MCP
+  tools. Staleness is a per-domain manager responsibility: the manager creates
+  the check script during bootstrap and runs it at the start of each session
+  before answering.
 
 ## Constraints
 
@@ -71,6 +75,10 @@ Keep these contracts:
 - `api-doc-manager` owns exactly one `ai-docs/.deps/<domain>/` tree.
 - The manager can fetch official docs and write l1/l2/l3 cache files,
   subdomain drill-down docs, `README.md`, `meta.yaml`, and executable scripts.
+- The manager creates a staleness check script during bootstrap and runs it at
+  the start of each session. When stale, it refreshes or reports the stale cache
+  state according to the prompt contract instead of requiring a separate public
+  command.
 - The manager answers from cached docs and cites the files/sections used.
 
 ### Phase 2: MCP API docs tool surface
@@ -81,8 +89,6 @@ Suggested tool contracts:
 
 - `ws/api.ask(prompt: "...", domain_hint: "...")`
 - `ws/api.list()`
-- `ws/api.refresh(domain: "...")`
-- `ws/api.check_stale(domain: "...")`
 
 The tool implementation should replace the Python/Bash orchestration from the
 Claude prior art with native runtime behavior:
@@ -95,6 +101,13 @@ Claude prior art with native runtime behavior:
 - hold a per-domain lock around each domain manager call;
 - dispatch multiple resolved domains in parallel and concatenate results in
   resolution order.
+
+Multi-domain partial failures should be handled primarily by the manager and
+lead-agent prompt contract rather than by elaborate result synthesis in the
+runtime. The runtime should preserve rule-based guarantees where cheap: keep
+domain result boundaries, report failed domains distinctly, return failure when
+every resolved domain fails, and allow partial success when at least one domain
+answers.
 
 ### Phase 3: Workflow exposure
 
@@ -120,6 +133,8 @@ Acceptance checks:
 - `api.list` works with no cache and with existing cache directories.
 - `api.ask` exact-hint path skips pre-router.
 - `api.ask` no-hint path invokes pre-router and dispatches one or more domains.
+- The manager prompt instructs each per-domain session to create and run its
+  staleness check before answering.
 - Per-domain locks prevent concurrent manager calls for the same domain.
 - Error reporting preserves non-zero behavior when all domain calls fail.
 - Plugin validation and local cache sync succeed.
