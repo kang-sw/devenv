@@ -4,6 +4,7 @@ related:
   260503-epic-agents-plugin-skill-porting: parent migration context for Agents plugin workflow docs
   260504-feat-agents-plugin-lead-skill-namespace: recent skill namespace cleanup before this style pass
 parent: 260503-epic-agents-plugin-skill-porting
+completed: 2026-05-04
 ---
 
 # compress workflow documentation prose
@@ -180,3 +181,15 @@ Acceptance criteria:
 - Run `rg 'ws:(add-rule|bootstrap|discuss|edit|exit-session|forge-mental-model|forge-spec|implement|proceed|ship|skill-authoring|sprint|update-spec|workflow|write-code|write-skeleton|write-spec|write-ticket)\\b' agents-plugin agents-plugin-tool ai-docs/_index.md AGENTS.md`.
 - Run `git diff --check`.
 - Report files changed, verification run, and any deferred documents.
+
+### Result (83a90cc) - 2026-05-04
+
+Reviewed and closed the compression pass. The final scope covered root context,
+bootstrap template, project index, all active `lead-*` skill docs,
+delegate-facing embedded prompts, delegate orientation, and the skill-authoring
+reference. The work intentionally deferred specs and mental-model documents per
+branch rules, and did not edit Claude compatibility skill sources.
+
+Final verification covered the Phase 4 stale `ws:<lead-skill>` reference search,
+`git diff --check`, prompt bundle hash update, local Codex plugin cache runtime
+comparison, and `cd agents-plugin-tool && go test ./...`.

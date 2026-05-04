@@ -189,7 +189,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Portable `ws/git.*` plus reference lookup roadmap |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go stdio MCP/runtime boundary; Windows launcher smoke deferred |
-| `260504-chore-compress-workflow-docs` | todo | Compress workflow docs without semantic changes |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -198,7 +197,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-`260504-chore-compress-workflow-docs` - shorten AGENTS.md, bootstrap template, _index, active lead skills, and delegate prompts without changing semantics.
 `260503-epic-ws-agent-workflow-stability` - keep open for future observed runtime failures; no active blocker after worktree lock, interrupt, and leaf deferral.
 `260503-epic-ws-mcp-vcs-reference-tools` - replace direct shell wording in shared skills with portable MCP/git/reference tooling.
 `260503-feat-agents-plugin-runtime-boundary` - wip; macOS/Codex launcher and release download are verified; Windows launcher verification deferred.
@@ -207,16 +205,15 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Session Notes
 
-Agents plugin skill porting is complete and
-`260503-epic-agents-plugin-skill-porting` is closed. Recent work renamed
-Codex-first skills to `lead-*`, added API docs MCP and conditional prompt
-support, and established compressed documentation style in `lead-workflow` and
-`lead-skill-authoring`.
+Workflow documentation compression is complete:
+`260504-chore-compress-workflow-docs` is closed after compressing root context,
+bootstrap template, active `lead-*` skills, delegate prompts, and
+`ai-docs/ref/skill-authoring.md`.
 
-In-flight: `260504-chore-compress-workflow-docs`.
-Next: finish Phase 1 by compressing `AGENTS.md`,
-`agents-plugin/skills/lead-bootstrap/AGENTS.template.md`, and this index without
-changing workflow semantics.
+In-flight: none.
+Next: pick from the active queue. Likely candidates are
+`260503-epic-ws-mcp-vcs-reference-tools`, `260429-feat-api-deps`, or
+Windows/runtime closeout under `260503-feat-agents-plugin-runtime-boundary`.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
 `agents-plugin-tool/internal/mcp/server.go`,
