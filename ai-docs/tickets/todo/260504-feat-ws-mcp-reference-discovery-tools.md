@@ -108,6 +108,23 @@ Success criteria:
 - MCP tests cover query and exact-anchor calls.
 - Existing `ws/spec_stem.generate` and `ws/spec_index.verify` continue to pass.
 
+### Result (pending) - 2026-05-04
+
+Implemented the Phase 2 spec anchor discovery surface in the ws MCP runtime:
+
+- Added path-first `specs.list`, `specs.find`, and `specs.status` helpers that
+  scan `ai-docs/spec/` recursively and return metadata rather than full spec
+  bodies.
+- Returned spec file paths, duplicate-safe filenames, title/summary
+  frontmatter, anchor locations with line/nearest heading, ticket references,
+  and WIP/planned marker contexts.
+- Exposed the helpers through MCP schemas and `ws-mcp specs` CLI fallbacks.
+- Kept spec and ticket identifiers distinct: `spec_stem` selects anchors, while
+  `ticket_stem` filters references only on `specs.find`.
+
+Verification: `cd agents-plugin-tool && go test ./...`; CLI smoke with
+`go run ./cmd/ws-mcp specs find --root .. --spec-stem 260421-plugin-json`.
+
 ### Phase 3: Mental-model reference discovery tools
 
 Extend `ws/mental_models.list` with deterministic reference search and path

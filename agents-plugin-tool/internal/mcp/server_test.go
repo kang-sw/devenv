@@ -25,7 +25,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
-	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\n---\n# Demo\n")
+	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\nfeatures:\n  - planned [260503-feat-demo/p1]\n---\n# Demo\n\n## Feature {#260503-spec-demo}\n\nSpec discovery text.\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo ticket\n---\n# Demo\n\nMentions 260503-epic-demo.\n")
 	mustWrite(t, root, "claude-plugin/infra/example.md", "example")
 	initGit(t, root)
@@ -43,6 +43,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"runtime.debug_events","arguments":{"limit":10}}}`,
 		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.find","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
+		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.find","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -52,8 +53,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 10 {
-		t.Fatalf("expected 10 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 11 {
+		t.Fatalf("expected 11 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -91,7 +92,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
-	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status"} {
+	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
@@ -121,6 +122,10 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	ticketsText := toolText(t, byID["10"])
 	if !strings.Contains(ticketsText, `"stem":"260503-feat-demo"`) || !strings.Contains(ticketsText, `"mentions_ticket_stem":true`) {
 		t.Fatalf("tickets.find response missing mention result: %s", byID["10"])
+	}
+	specsText := toolText(t, byID["11"])
+	if !strings.Contains(specsText, `"path":"ai-docs/spec/demo.md"`) || !strings.Contains(specsText, `"matches_spec_stem":true`) || !strings.Contains(specsText, `"matches_ticket_ref":true`) {
+		t.Fatalf("specs.find response missing spec result: %s", byID["11"])
 	}
 }
 
@@ -621,6 +626,26 @@ func TestServeStdioTicketToolsRejectSpecStemArgument(t *testing.T) {
 	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
 	if !strings.Contains(text, "ticket_stem") || !strings.Contains(out.String(), `"isError":true`) {
 		t.Fatalf("tickets.find accepted spec_stem argument: %s", out.String())
+	}
+}
+
+func TestServeStdioSpecToolsRejectTicketOnlyArgument(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Feature {#260504-spec-demo}\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"specs.status","arguments":{"ticket_stem":"260504-ticket-demo"}}}` + "\n"
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
+	if !strings.Contains(text, "spec_stem") || !strings.Contains(out.String(), `"isError":true`) {
+		t.Fatalf("specs.status accepted ticket_stem argument: %s", out.String())
 	}
 }
 

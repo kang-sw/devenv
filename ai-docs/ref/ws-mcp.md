@@ -441,6 +441,101 @@ Compatibility fallback:
 ws-mcp tickets status <ticket-stem> [--include-done] [--include-dropped]
 ```
 
+### `ws/specs.list`
+
+List spec files with path-first metadata and anchor locations without returning
+full spec bodies.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" }
+  }
+}
+```
+
+Behavior:
+
+- Scans `ai-docs/spec/` recursively.
+- Returns JSON objects with relative path, duplicate-safe filename, title,
+  summary, anchors, ticket references found in frontmatter or feature entries,
+  and WIP/planned marker contexts.
+- Anchor entries include `spec_stem`, line number, nearest heading, and marker
+  context when detectable.
+- Does not return full document bodies.
+
+Compatibility fallback:
+
+```bash
+ws-mcp specs list
+```
+
+### `ws/specs.find`
+
+Find spec files by query, spec anchor stem, or ticket stem reference.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "query": { "type": "string" },
+    "spec_stem": { "type": "string" },
+    "ticket_stem": { "type": "string" }
+  }
+}
+```
+
+Behavior:
+
+- Uses `spec_stem` for spec anchors and `ticket_stem` for ticket references.
+- `query` is a case-insensitive match over path, filename, title, summary, and
+  spec text. Results include short snippets for disambiguation, not full bodies.
+- `ticket_stem` matches ticket references found in spec frontmatter or feature
+  entries, and also falls back to raw text containment for existing prose refs.
+
+Compatibility fallback:
+
+```bash
+ws-mcp specs find --spec-stem <spec-stem>
+ws-mcp specs find --ticket-stem <ticket-stem>
+```
+
+### `ws/specs.status`
+
+Return locations and file metadata for one spec anchor stem.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "spec_stem": { "type": "string" }
+  },
+  "required": ["spec_stem"]
+}
+```
+
+Behavior:
+
+- Looks up exact spec anchors by `spec_stem`.
+- Returns all locations so duplicate anchors remain visible to callers.
+- Rejects ticket-only parameters such as `ticket_stem`; ticket and spec
+  identifiers stay distinct.
+
+Compatibility fallback:
+
+```bash
+ws-mcp specs status <spec-stem>
+```
+
 ### `ws/project_tree`
 
 Render the ws project document map, spec inventory, and active ticket queue.

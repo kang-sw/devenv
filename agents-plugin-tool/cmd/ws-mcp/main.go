@@ -48,6 +48,8 @@ func main() {
 		gitCommand(os.Args[2:])
 	case "tickets":
 		ticketsCommand(os.Args[2:])
+	case "specs":
+		specsCommand(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -55,7 +57,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git|tickets>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git|tickets|specs>")
 }
 
 func doctor(args []string) {
@@ -417,6 +419,66 @@ func ticketsStatus(args []string) {
 		IncludeDropped: *includeDropped,
 	})
 	printJSONOrFatal("tickets status", result, err)
+}
+
+func specsCommand(args []string) {
+	if len(args) < 1 {
+		specsUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "list":
+		specsList(args[1:])
+	case "find":
+		specsFind(args[1:])
+	case "status":
+		specsStatus(args[1:])
+	default:
+		specsUsage()
+		os.Exit(2)
+	}
+}
+
+func specsUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp specs <list|find|status>")
+}
+
+func specsList(args []string) {
+	fs := flag.NewFlagSet("specs list", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	_ = fs.Parse(args)
+
+	result, err := wsdoc.SpecsList(defaultRoot(*root))
+	printJSONOrFatal("specs list", result, err)
+}
+
+func specsFind(args []string) {
+	fs := flag.NewFlagSet("specs find", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	query := fs.String("query", "", "case-insensitive text query")
+	specStem := fs.String("spec-stem", "", "exact spec anchor stem")
+	ticketStem := fs.String("ticket-stem", "", "ticket stem referenced by specs")
+	_ = fs.Parse(args)
+
+	result, err := wsdoc.SpecsFind(defaultRoot(*root), wsdoc.SpecFindOptions{
+		Query:      *query,
+		SpecStem:   *specStem,
+		TicketStem: *ticketStem,
+	})
+	printJSONOrFatal("specs find", result, err)
+}
+
+func specsStatus(args []string) {
+	fs := flag.NewFlagSet("specs status", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	specStem := fs.String("spec-stem", "", "spec anchor stem to inspect")
+	_ = fs.Parse(args)
+	if *specStem == "" && len(fs.Args()) > 0 {
+		*specStem = fs.Args()[0]
+	}
+
+	result, err := wsdoc.SpecsStatus(defaultRoot(*root), wsdoc.SpecStatusOptions{SpecStem: *specStem})
+	printJSONOrFatal("specs status", result, err)
 }
 
 func printJSONOrFatal(prefix string, value any, err error) {

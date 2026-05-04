@@ -387,6 +387,40 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsdoc.VerifySpecIndex(root)
 		return toolTextResponse(req.ID, text, err)
+	case "specs.list":
+		if hasTicketStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("specs.list does not accept ticket_stem parameters"))
+		}
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		result, err := wsdoc.SpecsList(root)
+		return toolJSONResponse(req.ID, result, err)
+	case "specs.find":
+		if _, ok := params.Arguments["mentions_ticket_stem"]; ok {
+			return toolTextResponse(req.ID, "", fmt.Errorf("specs.find uses ticket_stem, not mentions_ticket_stem"))
+		}
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		query, _ := params.Arguments["query"].(string)
+		specStem, _ := params.Arguments["spec_stem"].(string)
+		ticketStem, _ := params.Arguments["ticket_stem"].(string)
+		result, err := wsdoc.SpecsFind(root, wsdoc.SpecFindOptions{Query: query, SpecStem: specStem, TicketStem: ticketStem})
+		return toolJSONResponse(req.ID, result, err)
+	case "specs.status":
+		if hasTicketStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("specs.status uses spec_stem"))
+		}
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		specStem, _ := params.Arguments["spec_stem"].(string)
+		result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
+		return toolJSONResponse(req.ID, result, err)
 	case "mental_models.list":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -871,6 +905,41 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "specs.list",
+			"description": "List spec files with frontmatter, anchors, ticket refs, and marker context metadata.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Repository root. Defaults to the server root."),
+				},
+			},
+		},
+		{
+			"name":        "specs.find",
+			"description": "Find spec files by query, spec anchor stem, or ticket stem reference.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":        stringProperty("Repository root. Defaults to the server root."),
+					"query":       stringProperty("Optional case-insensitive text query."),
+					"spec_stem":   stringProperty("Optional exact spec anchor stem."),
+					"ticket_stem": stringProperty("Optional ticket stem referenced by spec frontmatter or feature entries."),
+				},
+			},
+		},
+		{
+			"name":        "specs.status",
+			"description": "Return locations and file metadata for one spec anchor stem.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":      stringProperty("Repository root. Defaults to the server root."),
+					"spec_stem": stringProperty("Spec anchor stem to inspect."),
+				},
+				"required": []string{"spec_stem"},
+			},
+		},
+		{
 			"name":        "mental_models.list",
 			"description": "List mental-model documents with domains, descriptions, and sources.",
 			"inputSchema": map[string]any{
@@ -1236,6 +1305,18 @@ func boolArgument(value any) bool {
 func hasSpecStemArgument(arguments map[string]any) bool {
 	_, ok := arguments["spec_stem"]
 	return ok
+}
+
+func hasTicketOnlyArgument(arguments map[string]any) bool {
+	_, ok := arguments["mentions_ticket_stem"]
+	return ok
+}
+
+func hasTicketStemArgument(arguments map[string]any) bool {
+	if _, ok := arguments["ticket_stem"]; ok {
+		return true
+	}
+	return hasTicketOnlyArgument(arguments)
 }
 
 func stringProperty(description string) map[string]string {

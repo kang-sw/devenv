@@ -70,7 +70,8 @@ Implemented MCP tools:
 
 - Context/docs: `ws/project_tree`, `ws/infra.read`, `ws/convention.read`,
   `ws/mental_models.list`
-- Specs: `ws/spec_stem.generate`, `ws/spec_index.verify`
+- Specs: `ws/spec_stem.generate`, `ws/spec_index.verify`, `ws/specs.list`,
+  `ws/specs.find`, `ws/specs.status`
 - Runtime: `ws/runtime.info`
 - Delegation: `ws/subquery`, `ws/path.generate`
 - Tickets: `ws/tickets.list`, `ws/tickets.find`, `ws/tickets.status`
