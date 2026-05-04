@@ -12,6 +12,7 @@ related:
   260503-feat-ws-mcp-nonblocking-orchestration: completed Phase 4 child
   260503-feat-ws-agent-tier-config: completed Phase 5 child
   260503-feat-ws-mcp-worktree-orchestrator-lock: active Phase 6 child ticket for worktree-local authority lock
+  260504-feat-ws-mcp-hook-driven-interrupt: follow-up for Codex hook-driven interrupt delivery without signal dependence
 ---
 
 # ws agent workflow stability
@@ -95,6 +96,9 @@ Out of scope:
   authority. The first live MCP server for a worktree becomes lead; later MCP
   servers for the same worktree become delegates; environment profiles can only
   further restrict the effective role.
+- `260504-feat-ws-mcp-hook-driven-interrupt` — Follow-up Codex interrupt fix:
+  make `agents.interrupt` use hook-injected mailbox delivery as the primary
+  active-turn path and keep process termination under `agents.cancel`.
 
 ## Remaining Failure Evidence
 
