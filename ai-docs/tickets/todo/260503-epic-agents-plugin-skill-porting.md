@@ -148,7 +148,7 @@ Planned child ticket group:
 
 - `260503-feat-agents-plugin-async-agent-calls`
 - `260503-feat-agents-plugin-edit-port`
-- `feat-agents-plugin-write-code-port`
+- `260503-feat-agents-plugin-write-code-port`
 - `feat-agents-plugin-implement-proceed-port`
 - `feat-agents-plugin-sprint-port`
 
@@ -165,6 +165,21 @@ delegation contract are proven. Start with `edit` because it keeps
 implementation lead-owned while validating the reviewer relay and review-path
 primitive. The later skills depend on branch management, implementation/reviewer
 relay, doc pipeline, approval gates, and task continuity.
+
+Status:
+
+- `edit` and `write-code` are ported and installed.
+- Runtime blockers found during `write-code` dogfood are resolved or deferred:
+  async lifecycle hardening, debug diagnostics, nonblocking orchestration,
+  worktree-local lead/delegate containment, current-call serialization, and
+  hook-driven `agents.interrupt` are implemented. Stricter durable leaf-level
+  role assignment is deferred to
+  `260504-research-durable-leaf-role-assignment` because delegate-level
+  containment blocks recursive named-agent orchestration and the remaining
+  `subquery` recursion policy does not currently justify blocking the skill
+  migration.
+- Next child work should port the remaining orchestration harnesses:
+  `implement`, `proceed`, and then `sprint`.
 
 ### 8. Reconstruction and bootstrap
 

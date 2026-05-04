@@ -11,8 +11,9 @@ related:
   260503-feat-ws-agent-config-show-dogfood: completed Phase 3 child
   260503-feat-ws-mcp-nonblocking-orchestration: completed Phase 4 child
   260503-feat-ws-agent-tier-config: completed Phase 5 child
-  260503-feat-ws-mcp-worktree-orchestrator-lock: active Phase 6 child ticket for worktree-local authority lock
+  260503-feat-ws-mcp-worktree-orchestrator-lock: completed Phase 6 child ticket for worktree-local authority lock
   260504-feat-ws-mcp-hook-driven-interrupt: follow-up for Codex hook-driven interrupt delivery without signal dependence
+  260504-research-durable-leaf-role-assignment: deferred lower-ROI research follow-up for stricter leaf containment
 ---
 
 # ws agent workflow stability
@@ -91,14 +92,17 @@ Out of scope:
 - `260504-feat-ws-mcp-hook-driven-interrupt` — Follow-up Codex interrupt fix:
   `agents.interrupt` now uses hook-injected mailbox delivery as the primary
   active-turn path, while process termination remains under `agents.cancel`.
+- `260503-feat-ws-mcp-worktree-orchestrator-lock` — Phase 6 containment fix:
+  worktree-local MCP lead authority, delegate containment, delegate
+  orientation, current-call serialization, and the initial interrupt surface.
+  Stricter leaf-level role assignment is deferred to
+  `260504-research-durable-leaf-role-assignment`.
 
 ## Active Children
 
-- `260503-feat-ws-mcp-worktree-orchestrator-lock` — Phase 6 containment fix:
-  replace env-only delegated profile containment with worktree-local MCP lead
-  authority. The first live MCP server for a worktree becomes lead; later MCP
-  servers for the same worktree become delegates; environment profiles can only
-  further restrict the effective role.
+None. Runtime stabilization is sufficient to return to the core orchestration
+skill migration; future runtime gaps should be promoted from observed failures
+or from the deferred idea queue.
 
 ## Remaining Failure Evidence
 
@@ -111,6 +115,8 @@ so the failure was workflow containment rather than output quality.
 
 The current hypothesis is that `CodexRunner` can set `WS_MCP_TOOL_PROFILE=leaf`
 for the nested Codex process, but plugin-managed MCP servers may be session-level
-or otherwise not governed by the subprocess environment. The active child ticket
-tracks the worktree-local lock design needed to make effective role selection
-state-based instead of env-only.
+or otherwise not governed by the subprocess environment. The completed
+worktree-local lock design now enforces lead/delegate containment independently
+of environment propagation. Stricter leaf-level role assignment is deferred to
+`260504-research-durable-leaf-role-assignment` because recursive helper policy
+does not currently block the remaining orchestration skill migration.

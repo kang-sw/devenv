@@ -260,21 +260,20 @@ This index lists active tickets only; completed tickets live under
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
-| `260503-epic-ws-agent-workflow-stability` | todo | Live stabilization epic for named-agent workflow; completed phases split into child tickets, active child is worktree orchestrator lock |
-| `260503-feat-ws-mcp-worktree-orchestrator-lock` | todo | Worktree-local MCP orchestrator lock; delegate containment, prompt orientation, current-call locking, initial interrupt surface, and hook-driven interrupt correction implemented; leaf/profile follow-up remains |
+| `260503-epic-ws-agent-workflow-stability` | todo | Stabilization epic for named-agent workflow; active blockers closed, future runtime work should come from observed failures or deferred idea tickets |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
 | `260429-feat-api-deps` | todo | ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt, pre-router prompt, bin tools, workflow integration |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows build/runtime behavior for claude-dash |
+| `260504-research-durable-leaf-role-assignment` | idea | Deferred research on stricter leaf/subquery recursion control beyond worktree delegate containment |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
-`260503-epic-ws-agent-workflow-stability` — active runtime quality gate for `write-code`; completed slices split into child tickets, current blocker is plugin-managed containment smoke
-`260503-feat-ws-mcp-worktree-orchestrator-lock` — Phase 6 child: delegate containment, host-neutral orientation, current-call locking, and initial interrupt surface implemented; remaining follow-up is durable leaf-profile assignment
-`260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
+`260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is remaining core implementation orchestration after `write-code`
+`260503-epic-ws-agent-workflow-stability` — stabilization parent remains open for future observed runtime failures; no active blocker after worktree lock, hook-driven interrupt, and leaf deferral
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
@@ -296,13 +295,16 @@ current WSL2/Linux session added same-agent `agents.call` setup serialization,
 durable `agents.interrupt`, and the hook-driven Codex interrupt correction.
 `agents.call` now uses `current/setup.lock`; `agents.interrupt` queues
 `inbox/<id>.json`; active Codex delivery uses `PostToolUse` hook feedback rather
-than signal/kill subprocess interruption.
+than signal/kill subprocess interruption. The worktree lock ticket is complete:
+lead/delegate containment is sufficient to resume orchestration skill
+migration. Stricter leaf-level role assignment and recursive `subquery` control
+are deferred to `260504-research-durable-leaf-role-assignment`.
 
 **In-flight:** none expected after the hook-driven interrupt slice commits.
 
-**Next actions:** Refresh the local Codex plugin cache before plugin-managed
-verification of the updated `agents.interrupt` surface. Remaining runtime gap:
-durable leaf-level role assignment beyond environment propagation.
+**Next actions:** Return to `260503-epic-agents-plugin-skill-porting`, starting
+with the remaining core orchestration skills after `write-code` (`implement`,
+`proceed`, then `sprint`) unless a new runtime failure appears.
 
 **Key artifacts:** `agents-plugin-tool/internal/wsagent/agent.go` — current-call
 and one-shot/subquery flow; `agents-plugin-tool/internal/mcp/server.go` — role
@@ -310,6 +312,5 @@ filtering; `agents-plugin-tool/internal/wsprompt/infra/delegate-orientation.md`
 — prompt-level delegate boundary; `ai-docs/ref/ws-agent-runtime.md` — runtime
 contract.
 
-**Open questions:** Whether leaf-level tool restriction needs durable role
-assignment beyond env propagation; whether Codex hook feedback semantics differ
-on macOS or a later CLI.
+**Open questions:** Whether Codex hook feedback semantics differ on macOS or a
+later CLI. Durable leaf-level role assignment is deferred rather than blocking.

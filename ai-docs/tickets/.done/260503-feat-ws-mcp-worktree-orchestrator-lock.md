@@ -4,6 +4,8 @@ parent: 260503-epic-ws-agent-workflow-stability
 related:
   260503-epic-ws-agent-workflow-stability: Phase 6 child ticket for delegated tool-profile containment
   260503-feat-agents-plugin-write-code-port: dogfood workflow that exposed recursive reviewer spawning
+  260504-research-durable-leaf-role-assignment: deferred research follow-up for stricter leaf-level containment
+completed: 2026-05-04
 ---
 
 # ws-mcp worktree orchestrator lock
@@ -263,3 +265,14 @@ signal to the active Codex subprocess. A live smoke registered a temporary
 agent, started a long-running shell instruction, queued `agents interrupt`, and
 observed the worker log `call.interrupted`, deliver inbox message `000001`,
 resume the same thread, and return `INTERRUPTED_DONE`.
+
+### Follow-up - 2026-05-04
+
+The signal-driven interrupt path was superseded by
+`260504-feat-ws-mcp-hook-driven-interrupt`, which made Codex interruption
+hook-driven and moved process termination concerns back under `agents.cancel`.
+The remaining durable leaf-level role assignment question is intentionally
+deferred to `260504-research-durable-leaf-role-assignment` because the current
+delegate-level containment blocks recursive named-agent orchestration, while
+stricter leaf/subquery recursion control does not currently justify its design
+complexity.
