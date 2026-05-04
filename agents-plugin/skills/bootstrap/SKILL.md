@@ -11,7 +11,7 @@ Mode: user request
 
 - Template source is `AGENTS.template.md` in this skill directory; read it before any action.
 - Canonical downstream workflow context is `AGENTS.md`.
-- `CLAUDE.md` is a compatibility shim; preserve Claude-only rules that cannot move to `AGENTS.md`.
+- `CLAUDE.md` is a compatibility shim whose body is `@AGENTS.md`.
 - Never overwrite project-specific sections: Architecture Rules, custom Code Standards entries, custom Project Knowledge entries.
 - Merge surgically; flag unresolved conflicts inline with `<!-- CONFLICT: ... -->`.
 - Every migration item is idempotent; re-running on an already-migrated project produces no changes.
@@ -37,7 +37,7 @@ Mode: user request
 3. Create `ai-docs/` structure per the template setup block.
 4. Add `ai-docs/**/*.local.md` to `.gitignore` if not present.
 5. Set `<!-- Template Version: vNNNN -->` to the latest version from the template.
-6. Write `CLAUDE.md` as a thin compatibility shim importing `@AGENTS.md`.
+6. Write `CLAUDE.md` with body `@AGENTS.md`.
 7. Commit scaffolding.
 8. Suggest `ws:forge-spec` and `ws:forge-mental-model` if baselines are absent.
 
@@ -48,7 +48,7 @@ Mode: user request
 3. Apply each item only when its condition is met.
 4. Update `AGENTS.md` template-managed sections from `AGENTS.template.md`.
 5. Preserve or merge project-specific sections.
-6. Ensure `CLAUDE.md` imports `@AGENTS.md`; preserve Claude-only compatibility notes.
+6. Ensure `CLAUDE.md` body is `@AGENTS.md`.
 7. Update the template version tag.
 8. Commit.
 
@@ -64,8 +64,8 @@ Mode: user request
 1. Create `AGENTS.md` from existing `CLAUDE.md` content.
 2. Preserve project-specific sections and all existing template-version evidence.
 3. Apply the AGENTS migration checklist in order.
-4. Replace `CLAUDE.md` with a compatibility shim importing `@AGENTS.md`.
-5. Preserve Claude-only rules in `CLAUDE.md` under `## Claude Compatibility`.
+4. Replace `CLAUDE.md` body with `@AGENTS.md`.
+5. Preserve no separate Claude-only section unless explicitly requested.
 6. Commit.
 
 ## Judgments
@@ -91,14 +91,7 @@ Mode: user request
 ### CLAUDE.md compatibility shim
 
 ```markdown
-# CLAUDE.md
-
-This project keeps host-neutral workflow instructions in @AGENTS.md.
-Claude Code must load and follow that file.
-
-## Claude Compatibility
-
-<only Claude-specific rules that cannot be expressed host-neutrally>
+@AGENTS.md
 ```
 
 ## Doctrine

@@ -100,8 +100,7 @@ When a spec heading's `{#slug}` changes, include `renamed-spec: <old-stem> → <
 - Check `## Ticket Queue` in `ai-docs/_index.md` for the intended implementation order before starting a ticket.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>`
   and look for `## Ticket Updates` sections in matching commits.
-- Claude Code compatibility is provided by `CLAUDE.md` importing `@AGENTS.md`;
-  keep Claude-only instructions in `CLAUDE.md ## Claude Compatibility`.
+- Claude Code compatibility is provided by `CLAUDE.md` containing `@AGENTS.md`.
 - **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,
   and inline code comments — must be in English regardless of conversation language.
   Human-facing UI strings are exempt.
@@ -119,14 +118,7 @@ ai-docs/
 
 CLAUDE.md should be a compatibility shim:
 
-  # CLAUDE.md
-
-  This project keeps host-neutral workflow instructions in @AGENTS.md.
-  Claude Code must load and follow that file.
-
-  ## Claude Compatibility
-
-  <only Claude-specific rules that cannot be expressed host-neutrally>
+  @AGENTS.md
 
 _index.md should cover:
   - Project summary (what it is, who it's for, current milestone)
@@ -284,17 +276,9 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          `ws-ask-api` / `ai-docs/.deps/` cache system.
          If `ai-docs/deps/` exists: `git mv ai-docs/deps ai-docs/ref/deps-old`.
 - v0032: If `AGENTS.md` does not exist and `CLAUDE.md` exists, create
-         `AGENTS.md` from the current `CLAUDE.md` content. Preserve
-         project-specific sections, including Architecture Rules, custom Code
-         Standards, and custom Project Knowledge. Add the latest Template
-         Version tag to `AGENTS.md` after applying all earlier migrations.
-- v0033: Ensure `CLAUDE.md` is a compatibility shim that imports `@AGENTS.md`.
-         Preserve only Claude-specific instructions in
-         `CLAUDE.md ## Claude Compatibility`. Do not duplicate host-neutral
-         workflow rules in both files.
-- v0034: Treat `AGENTS.md` as the canonical managed template target. Future
-         bootstrap upgrades synchronize `AGENTS.md`; `CLAUDE.md` receives only
-         compatibility-shim maintenance unless a Claude-specific rule changes.
+         `AGENTS.md` from the current `CLAUDE.md` content.
+- v0033: Replace the `CLAUDE.md` body with `@AGENTS.md`.
+- v0034: Treat `AGENTS.md` as the canonical managed template target.
 -->
 
 <!-- Template Version: v0034 -->
