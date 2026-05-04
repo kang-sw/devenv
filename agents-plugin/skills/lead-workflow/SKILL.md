@@ -1,6 +1,6 @@
 ---
 name: lead-workflow
-description: Load the ws workflow reference for host-neutral MCP notation and orchestration primitive boundaries.
+description: Load before writing or executing ws workflow skills; keeps host-neutral MCP notation and orchestration primitive boundaries in context.
 ---
 
 # Workflow
