@@ -428,6 +428,31 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsdoc.MentalModelsList(root)
 		return toolTextResponse(req.ID, text, err)
+	case "mental_models.find":
+		if hasTicketStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.find uses spec_stem, not ticket_stem"))
+		}
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		query, _ := params.Arguments["query"].(string)
+		specStem, _ := params.Arguments["spec_stem"].(string)
+		domain, _ := params.Arguments["domain"].(string)
+		result, err := wsdoc.MentalModelsFind(root, wsdoc.MentalModelFindOptions{Query: query, SpecStem: specStem, Domain: domain})
+		return toolJSONResponse(req.ID, result, err)
+	case "mental_models.status":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.status uses domain or path"))
+		}
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		domain, _ := params.Arguments["domain"].(string)
+		path, _ := params.Arguments["path"].(string)
+		result, err := wsdoc.MentalModelsStatus(root, wsdoc.MentalModelStatusOptions{Domain: domain, Path: path})
+		return toolJSONResponse(req.ID, result, err)
 	case "tickets.list":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -949,6 +974,31 @@ func tools() []map[string]any {
 						"type":        "string",
 						"description": "Repository root. Defaults to the server root.",
 					},
+				},
+			},
+		},
+		{
+			"name":        "mental_models.find",
+			"description": "Find mental-model paths by query, spec stem reference, or domain.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":      stringProperty("Repository root. Defaults to the server root."),
+					"query":     stringProperty("Optional case-insensitive text query."),
+					"spec_stem": stringProperty("Optional spec anchor stem referenced by the mental model."),
+					"domain":    stringProperty("Optional mental-model domain."),
+				},
+			},
+		},
+		{
+			"name":        "mental_models.status",
+			"description": "Return path-first metadata for mental-model documents selected by domain or path.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"domain": stringProperty("Optional mental-model domain."),
+					"path":   stringProperty("Optional relative path under ai-docs/mental-model."),
 				},
 			},
 		},

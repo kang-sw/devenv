@@ -41,6 +41,8 @@
     "specs.find": ">=0.1.0-dev <0.2.0",
     "specs.status": ">=0.1.0-dev <0.2.0",
     "mental_models.list": ">=0.1.0-dev <0.2.0",
+    "mental_models.find": ">=0.1.0-dev <0.2.0",
+    "mental_models.status": ">=0.1.0-dev <0.2.0",
     "tickets.list": ">=0.1.0-dev <0.2.0",
     "tickets.find": ">=0.1.0-dev <0.2.0",
     "tickets.status": ">=0.1.0-dev <0.2.0",
@@ -100,6 +102,8 @@
     "tickets.status": ">=0.1.0-dev <0.2.0",
     "specs.list": ">=0.1.0-dev <0.2.0",
     "specs.find": ">=0.1.0-dev <0.2.0",
-    "specs.status": ">=0.1.0-dev <0.2.0"
+    "specs.status": ">=0.1.0-dev <0.2.0",
+    "mental-models.find": ">=0.1.0-dev <0.2.0",
+    "mental-models.status": ">=0.1.0-dev <0.2.0"
   }
 }

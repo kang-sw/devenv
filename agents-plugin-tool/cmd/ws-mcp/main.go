@@ -50,6 +50,8 @@ func main() {
 		ticketsCommand(os.Args[2:])
 	case "specs":
 		specsCommand(os.Args[2:])
+	case "mental-models":
+		mentalModelsCommand(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -57,7 +59,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git|tickets|specs>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git|tickets|specs|mental-models>")
 }
 
 func doctor(args []string) {
@@ -479,6 +481,56 @@ func specsStatus(args []string) {
 
 	result, err := wsdoc.SpecsStatus(defaultRoot(*root), wsdoc.SpecStatusOptions{SpecStem: *specStem})
 	printJSONOrFatal("specs status", result, err)
+}
+
+func mentalModelsCommand(args []string) {
+	if len(args) < 1 {
+		mentalModelsUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "find":
+		mentalModelsFind(args[1:])
+	case "status":
+		mentalModelsStatus(args[1:])
+	default:
+		mentalModelsUsage()
+		os.Exit(2)
+	}
+}
+
+func mentalModelsUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp mental-models <find|status>")
+}
+
+func mentalModelsFind(args []string) {
+	fs := flag.NewFlagSet("mental-models find", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	query := fs.String("query", "", "case-insensitive text query")
+	specStem := fs.String("spec-stem", "", "spec anchor stem referenced by mental models")
+	domain := fs.String("domain", "", "mental-model domain")
+	_ = fs.Parse(args)
+
+	result, err := wsdoc.MentalModelsFind(defaultRoot(*root), wsdoc.MentalModelFindOptions{
+		Query:    *query,
+		SpecStem: *specStem,
+		Domain:   *domain,
+	})
+	printJSONOrFatal("mental-models find", result, err)
+}
+
+func mentalModelsStatus(args []string) {
+	fs := flag.NewFlagSet("mental-models status", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	domain := fs.String("domain", "", "mental-model domain")
+	path := fs.String("path", "", "relative path under ai-docs/mental-model")
+	_ = fs.Parse(args)
+	if *domain == "" && *path == "" && len(fs.Args()) > 0 {
+		*domain = fs.Args()[0]
+	}
+
+	result, err := wsdoc.MentalModelsStatus(defaultRoot(*root), wsdoc.MentalModelStatusOptions{Domain: *domain, Path: *path})
+	printJSONOrFatal("mental-models status", result, err)
 }
 
 func printJSONOrFatal(prefix string, value any, err error) {

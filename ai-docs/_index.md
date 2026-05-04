@@ -69,7 +69,8 @@ MCP contract: `ai-docs/ref/ws-mcp.md`.
 Implemented MCP tools:
 
 - Context/docs: `ws/project_tree`, `ws/infra.read`, `ws/convention.read`,
-  `ws/mental_models.list`
+  `ws/mental_models.list`, `ws/mental_models.find`,
+  `ws/mental_models.status`
 - Specs: `ws/spec_stem.generate`, `ws/spec_index.verify`, `ws/specs.list`,
   `ws/specs.find`, `ws/specs.status`
 - Runtime: `ws/runtime.info`

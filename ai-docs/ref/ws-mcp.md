@@ -742,6 +742,72 @@ Output:
 
 - MCP text content containing a compact `mental-models:` catalog.
 
+### `ws/mental_models.find`
+
+Find mental-model paths by query, spec anchor reference, or domain.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "query": { "type": "string" },
+    "spec_stem": { "type": "string" },
+    "domain": { "type": "string" }
+  }
+}
+```
+
+Behavior:
+
+- Scans `ai-docs/mental-model/` recursively.
+- Returns JSON objects with path, domain, description, sources, matching spec
+  refs, ancestor directory hints, nearby index hints, and short query snippets.
+- `spec_stem` matches explicit spec anchors in frontmatter sources/spec fields
+  or in document text.
+- Does not return full mental-model bodies.
+
+Compatibility fallback:
+
+```bash
+ws-mcp mental-models find --spec-stem <spec-stem>
+ws-mcp mental-models find --domain <domain>
+```
+
+### `ws/mental_models.status`
+
+Return path-first metadata for mental-model documents selected by domain or
+path.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "domain": { "type": "string" },
+    "path": { "type": "string" }
+  }
+}
+```
+
+Behavior:
+
+- Requires `domain` or a relative `path` under `ai-docs/mental-model/`.
+- Returns the same metadata shape as `ws/mental_models.find`.
+- Rejects spec-selection parameters; spec filtering belongs to
+  `ws/mental_models.find`.
+
+Compatibility fallback:
+
+```bash
+ws-mcp mental-models status --domain <domain>
+ws-mcp mental-models status --path ai-docs/mental-model/<file>.md
+```
+
 ### `ws/subquery`
 
 Run a scoped one-turn codebase or documentation query through a temporary ws

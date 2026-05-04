@@ -144,6 +144,24 @@ Success criteria:
 - Unit tests cover `domain` and `spec_stem` searches.
 - MCP tests cover path-first results without full document body output.
 
+### Result (pending) - 2026-05-04
+
+Implemented the Phase 3 mental-model discovery surface in the ws MCP runtime:
+
+- Added path-first `mental_models.find` and `mental_models.status` helpers that
+  scan `ai-docs/mental-model/` recursively and return metadata rather than full
+  mental-model bodies.
+- Returned mental-model paths, domain, description, source frontmatter, matched
+  spec refs, ancestor directory hints, nearby index hints, and short query
+  snippets.
+- Exposed the helpers through MCP schemas and `ws-mcp mental-models` CLI
+  fallbacks while leaving `mental_models.list` intact.
+- Kept filtering roles distinct: `spec_stem` is accepted on find, while status
+  selects by `domain` or relative `path`.
+
+Verification: `cd agents-plugin-tool && go test ./...`; CLI smoke with
+`go run ./cmd/ws-mcp mental-models find --root .. --domain workflow-routing`.
+
 ### Phase 4: Cross-reference trace and workflow cleanup
 
 Add one unified trace surface after the domain-specific tools are stable.

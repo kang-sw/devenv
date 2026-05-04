@@ -26,6 +26,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\nfeatures:\n  - planned [260503-feat-demo/p1]\n---\n# Demo\n\n## Feature {#260503-spec-demo}\n\nSpec discovery text.\n")
+	mustWrite(t, root, "ai-docs/mental-model/workflow.md", "---\ndomain: workflow\ndescription: Workflow model\nsources:\n  - ai-docs/spec/demo.md#260503-spec-demo\n---\n# Workflow\n\nReferences {#260503-spec-demo} with discovery text.\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo ticket\n---\n# Demo\n\nMentions 260503-epic-demo.\n")
 	mustWrite(t, root, "claude-plugin/infra/example.md", "example")
 	initGit(t, root)
@@ -44,6 +45,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.find","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
 		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.find","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
+		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -53,8 +55,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 11 {
-		t.Fatalf("expected 11 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 12 {
+		t.Fatalf("expected 12 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -92,7 +94,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
-	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status"} {
+	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
@@ -126,6 +128,10 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	specsText := toolText(t, byID["11"])
 	if !strings.Contains(specsText, `"path":"ai-docs/spec/demo.md"`) || !strings.Contains(specsText, `"matches_spec_stem":true`) || !strings.Contains(specsText, `"matches_ticket_ref":true`) {
 		t.Fatalf("specs.find response missing spec result: %s", byID["11"])
+	}
+	mentalModelsText := toolText(t, byID["12"])
+	if !strings.Contains(mentalModelsText, `"path":"ai-docs/mental-model/workflow.md"`) || !strings.Contains(mentalModelsText, `"matches_spec_stem":true`) || !strings.Contains(mentalModelsText, `"matches_domain":true`) {
+		t.Fatalf("mental_models.find response missing result: %s", byID["12"])
 	}
 }
 
@@ -646,6 +652,26 @@ func TestServeStdioSpecToolsRejectTicketOnlyArgument(t *testing.T) {
 	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
 	if !strings.Contains(text, "spec_stem") || !strings.Contains(out.String(), `"isError":true`) {
 		t.Fatalf("specs.status accepted ticket_stem argument: %s", out.String())
+	}
+}
+
+func TestServeStdioMentalModelToolsRejectSpecStemOnStatus(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/mental-model/workflow.md", "---\ndomain: workflow\n---\n# Workflow\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mental_models.status","arguments":{"spec_stem":"260504-spec-demo"}}}` + "\n"
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
+	if !strings.Contains(text, "domain or path") || !strings.Contains(out.String(), `"isError":true`) {
+		t.Fatalf("mental_models.status accepted spec_stem argument: %s", out.String())
 	}
 }
 
