@@ -17,8 +17,8 @@ affected domains and apply minimal, accurate updates.
 
 ## Process
 
-1. Determine changes: find the last checkpoint with `git log --grep="mental-model-updated" -1 --format="%H"`. Use it as base; if absent, use the caller-provided base. Run stat, then full diff.
-2. Run `git diff <base-commit> -- ai-docs/spec/` to identify spec headings or implemented marker changes that add assessment targets.
+1. Determine changes through `ws/git.log`, `ws/git.diff(mode: "stat")`, and the scoped full diff. Use the last `mental-model-updated` checkpoint as base; if absent, use the caller-provided base.
+2. Inspect the scoped spec diff to identify spec headings or implemented marker changes that add assessment targets.
 3. Read `ai-docs/mental-model.md`, then every file in `ai-docs/mental-model/`.
 4. Map changed files and spec changes to domains. A single file may affect multiple domains.
 5. For each affected domain, check changed contracts, new coupling, extension points, wrong-outcome risks, debt resolved, and cross-domain effects.

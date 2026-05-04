@@ -22,7 +22,7 @@ Config naming:
 - `ai-docs/ship/<proj>.md` - committed; for public publish targets.
 - `ai-docs/ship/<proj>.local.md` - gitignored; for private or sensitive deploy targets (internal registries, SSH deploys, credentials). Takes precedence over the `.md` variant when both exist for the same `<proj>`.
 
-1. Glob `ai-docs/ship/` for `*.md` and `*.local.md` files.
+1. List `ai-docs/ship/` for `*.md` and `*.local.md` files.
 2. If `user request` names a project, look for `<proj>.local.md` first, then `<proj>.md`. Stop with an error if neither is found.
 3. If no argument:
    - One config found (either variant) -> load it.

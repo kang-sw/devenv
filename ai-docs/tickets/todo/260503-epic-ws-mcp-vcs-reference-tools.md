@@ -108,6 +108,9 @@ inspectable, and composable across Codex, Claude, and future hosts.
   `260504-feat-ws-mcp-reference-discovery-tools` child ticket. The surface uses
   direct scans, returns structured path/status/reference metadata, and avoids
   document body read/edit APIs.
+- `260504-chore-skill-prompt-mcp-cleanup` - Centralized MCP primitive usage
+  guidance in `ws:lead-workflow` and normalized shared `agents-plugin` skills
+  plus embedded prompts away from ws-owned direct shell search/Git recipes.
 
 ## Open Questions
 

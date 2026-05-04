@@ -30,6 +30,8 @@ When writing shared skill text, name only primitives that exist in the ws runtim
 If a workflow needs a surface that is still planned, state the required MCP
 contract instead of naming a Claude helper command or another host-specific
 fallback.
+Centralize primitive usage here. Other skills should name the primitive and
+include only local arguments that affect the current step.
 
 ## How To Document
 
@@ -92,8 +94,21 @@ Use for runtime compatibility checks and feature detection.
 `ws/references.trace`
 
 Use these for ws-owned ticket, spec, and mental-model path/status/reference
-lookup before reaching for shell search. Use native file reads after a discovery
-tool returns the path to inspect or edit.
+lookup before shell search. Use native file reads after a discovery tool returns
+the path to inspect or edit.
+
+Prefer:
+- `ws/tickets.list(status: "todo")` for active queue and ticket path discovery.
+- `ws/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
+- `ws/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
+- `ws/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.
+- `ws/specs.find(spec_stem: "<stem>")` for anchor lookup.
+- `ws/specs.find(ticket_stem: "<stem>")` for ticket-linked specs.
+- `ws/specs.status(spec_stem: "<stem>")` for duplicate-safe anchor location.
+- `ws/mental_models.find(query: "<topic>")` for domain discovery.
+- `ws/mental_models.status(domain: "<domain>")` for known-domain docs.
+- `ws/references.trace(ticket_stem: "<stem>")` for ticket/spec/model links.
+- `ws/references.trace(spec_stem: "<stem>")` for spec/ticket/model links.
 
 ### Git
 
@@ -106,6 +121,17 @@ tool returns the path to inspect or edit.
 Use `ws/git.commit` for workflow commits when available. It stages explicit
 paths, builds the `## AI Context` message, detects ticket moves and `### Result`
 headings, and avoids shell quoting drift.
+
+Prefer:
+- `ws/git.status()` for branch, staged state, and changed-file discovery.
+- `ws/git.diff(mode: "stat")` before detailed review.
+- `ws/git.diff(mode: "full", paths: ["<path>"])` for scoped inspection.
+- `ws/git.log(range: "<base>..HEAD", include_body: true)` for commit audit.
+- `ws/git.merge_base(base: "main", head: "HEAD")` for branch ranges.
+- `ws/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])` for workflow commits.
+
+Use native Git only for operations without an exposed ws primitive, such as
+branch creation, tag push, merge execution, or path-filtered file history.
 
 ### API documentation
 

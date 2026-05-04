@@ -36,7 +36,7 @@ tested code that satisfies its contracts.
 4. **Implement**: Follow plan or outline contracts exactly. Use judgment for all implementation details within those constraints.
 5. **Explore when needed**: Use focused search and reads for local queries. For broader codebase questions, use `ws/subquery(deep_research: false)`; use `deep_research: true` only for broad tracing.
 6. **Test and verify**: Follow playbook test strategy and verify sections. When tests fail, diagnose and fix. If the fix requires plan deviation, escalate.
-7. **Mechanical edits**: When repetitive edits span 3+ locations, follow playbook mechanical-edit criteria. Use `sed`/`replace_all` for regex-expressible changes.
+7. **Mechanical edits**: When repetitive edits span 3+ locations, follow playbook mechanical-edit criteria. Use native regex replacement for regex-expressible changes.
 8. **Commit**: Commit at logical checkpoints on the current branch.
 
 ## Output

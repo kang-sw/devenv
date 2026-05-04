@@ -27,18 +27,17 @@ Target: user request
 3. **Edit** (existing ticket):
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
-   c. For moves, `git mv` and add `completed:` date in frontmatter (-> `.done/`).
+   c. For moves, use native `git mv` and add `completed:` date in frontmatter (-> `.done/`).
 4. **Phase content** - capture goals, constraints, rationale, rejected alternatives, and suggested approaches. Leave codebase-derived details (paths, type reuse, integration patterns, signatures, testing classifications) to the plan.
 5. **Intent review** - re-read the written/edited ticket against the preceding conversation:
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
 6. **Spec-stem check** - confirm ticket↔spec linkage:
-   a. Run direct inspection of the relevant spec file anchors on the relevant spec file(s) to confirm canonical stems.
+   a. Use `ws/specs.find` or `ws/specs.status` to confirm canonical stems.
    b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
-7. **Commit** - in a single shell command, stage the ticket file (if `git mv` was used, `git add <new-path>` is sufficient) then commit:
-   `git add <file> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
+7. **Commit** - call `ws/git.commit(paths: ["<ticket-path>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed.
 8. **Proceed prompt** - suggest `ws:lead-proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
    Emit the created ticket path on its own final line: `Ticket: ai-docs/tickets/<status>/<stem>.md`. Callers such as `ws:lead-proceed` capture this path from prefix-stage output.
@@ -50,7 +49,7 @@ Target: user request
 Fires on any action that results in `todo/`-or-higher status: direct `todo/` creation and `idea/` -> `todo/` promotion moves. `idea/` creation is ungated.
 
 Identify the relevant spec file for the topic.
-Run direct inspection of the relevant spec file anchors (shell) if a spec file is identifiable.
+Use `ws/specs.find` or `ws/specs.status` if a relevant spec file or stem is identifiable.
 If no relevant spec file exists, or no entry covers this behavior -> stop. Name the uncovered behavior; suggest `ws:lead-write-spec` before continuing.
 
 ### judge: initial-status

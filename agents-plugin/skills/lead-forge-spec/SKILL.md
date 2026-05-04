@@ -55,10 +55,10 @@ Format: markdown bullets grouped by module/area.
 Call `ws/subquery(deep_research: true, question: <block below>)`:
 
 ```text
-Survey all tickets under ai-docs/tickets/ (all statuses: idea/, todo/, wip/, .done/, .dropped/).
+Survey all tickets through `ws/tickets.list(include_done: true, include_dropped: true)`.
 
-Glob ai-docs/tickets/**/*.md. Extract title, status directory, and public-facing
-or user-visible behavior. Group by inferred behavioral domain.
+Extract title, status directory, and public-facing or user-visible behavior.
+Group by inferred behavioral domain.
 Return: domain -> behaviors/features mentioned in tickets.
 ```
 
@@ -77,7 +77,7 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 ```text
 Survey recent commit history for behavioral signals.
 
-Run `git log --oneline -100`. Identify user-visible features, API changes, CLI
+Use `ws/git.log`. Identify user-visible features, API changes, CLI
 changes, or spec updates (`feat:`, `fix:`, `spec:`, spec-stems in bodies).
 Return behavioral areas -> representative commits. Omit chore/docs/refactor
 unless they reference spec-stems.
@@ -143,7 +143,7 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 Find tickets relevant to the <domain> domain.
 Module paths: <paths from task description>
 
-Glob ai-docs/tickets/**/*.md. Filter by <domain> keywords or module paths.
+Use `ws/tickets.find(query: "<domain>")`; filter by module paths when needed.
 Return features -> ticket status. todo/wip items are [planned] candidates.
 ```
 
@@ -165,7 +165,7 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 Survey commit history for the <domain> domain.
 Module paths: <paths from task description>
 
-Run `git log --oneline -- <paths>`. Identify commits that added or changed
+Use path-filtered native Git history until ws exposes path-history. Identify commits that added or changed
 caller-visible behavior (`feat:`, `fix:`, `spec:`, spec-stems).
 Return behavioral changes newest first, with implementation status when visible.
 ```
@@ -202,7 +202,7 @@ confirmed list before writing anything.
 
 ### 6. Associate stems with tickets
 
-1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, commit the spec file changes now (`git add ai-docs/spec/ && git commit`) and skip to step 7.
+1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
 2. Dispatch clerk covering all collected tickets in a single call:
 
 Call `ws/subquery(deep_research: false, question: <block below>)`:

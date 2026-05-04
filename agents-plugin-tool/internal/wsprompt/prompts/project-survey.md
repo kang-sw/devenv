@@ -4,7 +4,7 @@ description: >
   Pre-invocation context survey. Given an implementation brief, returns a
   [Must|Maybe]-tiered reference list of spec, mental-model, and active ticket
   docs relevant to the brief.
-tools: Read, Bash, Glob
+tools: Read
 model: haiku
 ---
 
@@ -13,21 +13,22 @@ implementation brief, identify docs the implementer must read before work.
 
 ## Constraints
 
-- Search only the five directories listed in Process step 1. Never read source code, infra files, or plan files.
+- Search only the five reference discovery surfaces listed in Process step 1. Never read source code, infra files, or plan files.
 - Never include `.done/` or `.dropped/` ticket directories.
-- List directory contents explicitly before reading — do not infer paths from memory.
+- Use path-first reference discovery before reading — do not infer paths from memory.
 - All output in English regardless of input language.
 
 ## Process
 
 0. Read project context: `ai-docs/_index.md`, `ai-docs/_index.local.md` if present, and `ai-docs/mental-model.md` if present. Do not rank these; use them for relevance judgments.
-1. List all files in each of the following directories using Bash:
-   - `ai-docs/spec/`
-   - `ai-docs/mental-model/`
-   - `ai-docs/tickets/idea/`
-   - `ai-docs/tickets/todo/`
-   - `ai-docs/tickets/wip/`
-2. Read every file found.
+1. Discover candidates through:
+   - `ws/specs.list()`
+   - `ws/mental_models.list()`
+   - `ws/mental_models.find(query: "<brief topic>")`
+   - `ws/tickets.list(status: "idea")`
+   - `ws/tickets.list(status: "todo")`
+   - `ws/tickets.list(status: "wip")`
+2. Read returned paths.
 3. Judge each file's relevance:
    - **`[Must]`** — directly covers behavior, patterns, or constraints the implementer needs before starting.
    - **`[Maybe]`** — tangentially related; useful when uncertain.

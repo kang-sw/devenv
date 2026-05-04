@@ -21,7 +21,7 @@ Call `ws/project_tree()`.
 ## On: invoke
 
 1. Invoke `ws:lead-workflow`.
-2. Read `git branch --show-current`.
+2. Call `ws/git.status()`.
 3. On `sprint/` branch: detect sprint name; present continue, wrap-up, abandon.
 4. Outside `sprint/`: infer name without asking, then `git checkout -b sprint/<name>`.
    - Clear topic: short kebab-case slug.
@@ -39,7 +39,7 @@ Call `ws/project_tree()`.
 
 Trigger: explicit done signal such as "done", "wrap up", or "finish sprint".
 
-1. Set `<parent>` to `git merge-base HEAD main`.
+1. Set `<parent>` through `ws/git.merge_base(base: "main", head: "HEAD")`.
 2. Invoke `ws:lead-update-spec` with `<parent>..HEAD`; commit changes.
 3. Register `mental-model-updater`: `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
 4. Call it with the wrap-up prompt below; wait; commit changes.
@@ -91,7 +91,7 @@ Sprint: <sprint-name>
 Branch: <branch>
 Commit range: <parent>..HEAD
 Commits:
-<git log <parent>..HEAD --oneline>
+<ws/git.log(range: "<parent>..HEAD") output>
 
 Project map:
 <ws/project_tree() output>

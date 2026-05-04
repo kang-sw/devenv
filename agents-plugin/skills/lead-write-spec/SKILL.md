@@ -35,8 +35,7 @@ Target: user request
    e. Call `ws/spec_index.verify()` for cleanup and verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
 6. Accuracy check - confirm every heading without [planned] exists in the codebase. Use `ws/subquery(question: "<focused verification question>")` if uncertain. Never remove [planned] without confirmation.
-7. **Commit** - in one shell command, stage updated spec file(s) and `ai-docs/_index.md` if listing changed, then commit:
-   `git add <file(s)> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
+7. **Commit** - call `ws/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
 
 ## Judgments
 

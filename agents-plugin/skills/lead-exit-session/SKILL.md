@@ -7,7 +7,7 @@ description: Write and commit a next-session handoff note in ai-docs/_index.md. 
 
 ## Invariants
 
-- Phase 1 commits staged files only - never `git add -A`; exclude `ai-docs/_index.md`.
+- Phase 1 commits staged files only through `ws/git.status` and `ws/git.commit`; exclude `ai-docs/_index.md`.
 - Phase 2 issues no information-gathering tool calls - write context from conversation memory only.
 - Phase 3 may issue a read call only when the user explicitly requests one to inform a correction.
 - Every reference in the context note must include a file path; add `:line-range` when known.
@@ -19,7 +19,7 @@ description: Write and commit a next-session handoff note in ai-docs/_index.md. 
 
 ### Phase 1 - Commit pass
 
-1. Run `git status` to identify staged files.
+1. Call `ws/git.status()` to identify staged files.
 2. If staged files exist (excluding `ai-docs/_index.md`): commit in logical units per CLAUDE.md commit rules with `## AI Context`.
 3. If nothing staged (or only `_index.md`): skip to Phase 2.
 
@@ -35,15 +35,7 @@ On change requests, edit inline. A read call is permitted only when the user exp
 
 ### Phase 4 - Commit
 
-```text
-git add ai-docs/_index.md && git commit -m "$(cat <<'EOF'
-chore(session): exit context note
-
-## AI Context
-- Session context note; no design decisions.
-EOF
-)"
-```
+Call `ws/git.commit(paths: ["ai-docs/_index.md"], title: "chore(session): exit context note", ai_context: ["Session context note; no design decisions."])`.
 
 Report: "Session context committed. Prune ## Session Notes from _index.md once the next session has absorbed it."
 

@@ -5,6 +5,7 @@ spec:
   - 260428-workflow-skill
 related:
   260504-feat-ws-mcp-reference-discovery-tools: provides the reference discovery primitives used by this cleanup
+completed: 2026-05-04
 ---
 
 # Skill and prompt MCP primitive cleanup
@@ -46,3 +47,30 @@ Success criteria:
 - Embedded prompts prefer MCP primitives for workflow metadata where available.
 - Verification includes text search for remaining direct shell wording and a
   prompt bundle/runtime metadata check if embedded prompt files change.
+
+### Result (pending) - 2026-05-04
+
+Normalized shared `agents-plugin` skills and embedded prompt text around the new
+MCP Git and reference discovery primitives. `ws:lead-workflow` now carries the
+central usage guidance for ticket/spec/mental-model/reference lookup and
+`ws/git.*`; individual skills name those primitives with only local arguments.
+
+Updated workflow skills for exit-session, update-spec, write-ticket, discuss,
+write-skeleton, sprint, ship, write-spec, and forge-spec where the wording was
+about ws-owned metadata operations. Preserved native Git wording for operations
+without an exposed ws primitive, such as branch creation, tag push, merge
+execution, path-filtered file history, and explicit `git mv` moves.
+
+Updated embedded reviewer, implementer, project-survey, plan-populator, and
+mental-model-updater prompts to prefer `ws/git.*`, `ws/tickets.*`,
+`ws/specs.*`, and `ws/mental_models.*` for workflow metadata. Refreshed the
+prompt bundle hash in `agents-plugin/runtime.json` and mirrored `lead-workflow`
+plus `runtime.json` into the local Codex plugin cache.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./...`
+- `git diff --check`
+- Text scan for remaining direct shell wording in `agents-plugin/skills` and
+  `agents-plugin-tool/internal/wsprompt`
+- Local Codex plugin cache `cmp` for `lead-workflow/SKILL.md` and `runtime.json`

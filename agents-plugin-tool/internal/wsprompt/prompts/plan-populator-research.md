@@ -23,7 +23,7 @@ The spawn prompt provides the brief path and the plan output path.
 
 1. Read the brief at the path given in the spawn prompt.
 2. Read docs from `## References`: `[Must]` first, then `[Maybe]`.
-3. Use Glob for missing mental-model areas.
+3. Use `ws/mental_models.find` for missing mental-model areas.
 4. If `## Details` lists skeleton stubs or tests, read them; they are locked contracts.
 
 ### 2. Research

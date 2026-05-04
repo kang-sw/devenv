@@ -55,7 +55,7 @@ Delegation prompt must include: (1) before/after example, (2) target file list, 
 
 | Method | When |
 |---|---|
-| **sed / replace_all=true** | Pure text substitution expressible as regex |
+| **replace_all=true or native regex replacement** | Pure text substitution expressible as regex |
 | **Direct edit loop** | File-by-file judgment needed (Read → Edit per file) |
 
 On failure: stop and report the failed mechanical edit, affected files, and rollback recommendation.

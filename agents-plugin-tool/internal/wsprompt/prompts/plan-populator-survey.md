@@ -26,7 +26,7 @@ implementation; list only items that save exploratory search.
 
 1. Read the brief at the path given in the spawn prompt.
 2. Read docs from `## References`: `[Must]` first, then `[Maybe]`.
-3. Use Glob for missing mental-model areas.
+3. Use `ws/mental_models.find` for missing mental-model areas.
 4. If `## Details` lists skeleton stubs or tests, read them.
 
 ### 2. Survey
@@ -42,7 +42,8 @@ Search the codebase for:
 - **Non-obvious constraints**: edge cases, invariants, or coupling not visible
   from the brief alone.
 
-Use Grep and Glob for targeted searches. Read candidates to confirm relevance.
+Use focused search for project code and `ws/mental_models.find` for doc gaps.
+Read candidates to confirm relevance.
 Discard entries requiring more than two sentences.
 
 ### 3. Write

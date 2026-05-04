@@ -27,7 +27,7 @@ Call `ws/project_tree()` to load the current project map.
 ## On: invoke
 
 1. Invoke `ws:lead-workflow` via Skill tool (loads orchestration primitives reference).
-2. Run `git branch --show-current`. If the result starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - `ws:lead-sprint` provides session continuity."
+2. Call `ws/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - `ws:lead-sprint` provides session continuity."
 3. If `user request` references a ticket, read it.
 4. Enter discussion loop.
 
@@ -38,7 +38,7 @@ Call `ws/project_tree()` to load the current project map.
    Incorporate the returned reference list before responding.
 2. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
 3. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery(question: "<focused implementation-detail question>")` for implementation details.
-   When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."
+   For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
 4. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 5. Continue until the user signals done.
 
@@ -49,15 +49,15 @@ Triggers when the user requests a ticket status change - promoting an idea ticke
 1. Read the ticket file. Extract any `spec:` frontmatter field and body references to `{#YYMMDD-slug}` anchors.
 2. **Promotion (idea/ -> todo/)**:
    a. Invoke `ws:lead-write-spec` to add a `[planned]` entry for each caller-visible behavior in the ticket.
-   b. Perform `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
+   b. Perform native `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
    c. Invoke `ws:lead-write-ticket` (Edit path) on the promoted ticket to populate the `spec:` frontmatter field with the stems created in step (a).
    d. Add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` - one-line purpose and dependency notes ``.
 3. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
    b. No other ticket references this stem -> invoke `ws:lead-write-spec` to remove the `[planned]` entry.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
-   d. Perform `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
-4. Create one commit covering the `git mv` and any spec changes together.
+   d. Perform native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
+4. Commit through `ws/git.commit`.
 
 ## On: user signals done
 
@@ -85,7 +85,7 @@ Spawn `project-survey` when any of the following hold:
 - The current question names a component, skill, agent, spec, or ticket whose doc has NOT been loaded in this session - regardless of whether the model feels confident it knows the answer.
 - The discussion direction shifts to a domain no doc for which has been loaded this session.
 
-Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") - those draw from session state or git log.
+Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") - those draw from session state or `ws/git.log`.
 
 ### judge: needs-integration-tests
 Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.

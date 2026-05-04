@@ -7,7 +7,7 @@
   "release_tag": "v0.1.0",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "3ce2c9536fdfa3d603bddb839ab313b1da9a0a5f0980b601ded7ec366ec968fd",
+    "content_sha256": "38f51b8878ee380e36f2d6f20525d4b824006fcf0707a5f7734574576aa6df69",
     "prompts": [
       "api-doc-cargo-brief",
       "api-doc-manager",

@@ -21,7 +21,7 @@ Read-only: report findings, never edit code.
 
 1. Read project context from the available root context document and project docs.
 2. Use `ws/mental_models.find` or `ws/mental_models.status` when available; read returned paths.
-3. Read `git diff <range>` and `git diff --stat <range>`.
+3. Read `ws/git.diff(mode: "stat")` and the scoped full diff for the review range.
 4. Review against any loaded partition prompt; otherwise cover correctness, standards, contracts, security, tests, edge cases, and reuse.
 5. Produce findings using the output template below.
 
