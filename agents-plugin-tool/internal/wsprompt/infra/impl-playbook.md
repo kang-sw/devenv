@@ -2,7 +2,7 @@
 
 ## Invariants
 
-- Before implementing, load relevant mental-model docs; use `ws/mental_models.list` when available.
+- Before implementing, load relevant mental-model docs; use `ws/mental_models.find` or `ws/mental_models.status` when available.
 - Claim "pass" only after reading full test/build output — never "should pass" or "looks correct."
 - Diagnose blame (test vs implementation) before fixing any failure.
 - Structural deviations → escalate before proceeding. Cosmetic → adapt silently, note in report.

@@ -52,6 +52,8 @@ func main() {
 		specsCommand(os.Args[2:])
 	case "mental-models":
 		mentalModelsCommand(os.Args[2:])
+	case "references":
+		referencesCommand(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -59,7 +61,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git|tickets|specs|mental-models>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git|tickets|specs|mental-models|references>")
 }
 
 func doctor(args []string) {
@@ -531,6 +533,38 @@ func mentalModelsStatus(args []string) {
 
 	result, err := wsdoc.MentalModelsStatus(defaultRoot(*root), wsdoc.MentalModelStatusOptions{Domain: *domain, Path: *path})
 	printJSONOrFatal("mental-models status", result, err)
+}
+
+func referencesCommand(args []string) {
+	if len(args) < 1 {
+		referencesUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "trace":
+		referencesTrace(args[1:])
+	default:
+		referencesUsage()
+		os.Exit(2)
+	}
+}
+
+func referencesUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp references <trace>")
+}
+
+func referencesTrace(args []string) {
+	fs := flag.NewFlagSet("references trace", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	ticketStem := fs.String("ticket-stem", "", "ticket stem to trace")
+	specStem := fs.String("spec-stem", "", "spec anchor stem to trace")
+	_ = fs.Parse(args)
+
+	result, err := wsdoc.ReferencesTrace(defaultRoot(*root), wsdoc.ReferenceTraceOptions{
+		TicketStem: *ticketStem,
+		SpecStem:   *specStem,
+	})
+	printJSONOrFatal("references trace", result, err)
 }
 
 func printJSONOrFatal(prefix string, value any, err error) {

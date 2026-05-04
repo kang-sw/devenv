@@ -3,6 +3,7 @@ title: ws-mcp workflow reference discovery tools
 parent: 260503-epic-ws-mcp-vcs-reference-tools
 related:
   260503-epic-ws-mcp-vcs-reference-tools: parent roadmap for portable Git and workflow reference tooling
+completed: 2026-05-04
 ---
 
 # ws-mcp workflow reference discovery tools
@@ -184,3 +185,21 @@ Success criteria:
 - Tests cover trace results from ticket-to-spec and spec-to-mental-model links.
 - Skill/prompt cleanup removes direct shell-search wording where the new MCP
   tools cover the workflow operation.
+
+### Result (pending) - 2026-05-04
+
+Implemented the Phase 4 cross-reference trace and cleanup slice:
+
+- Added `references.trace` and `ws-mcp references trace`, requiring exactly one
+  of `ticket_stem` or `spec_stem`.
+- Composed the existing ticket, spec, and mental-model discovery helpers into a
+  compact JSON graph without returning document bodies.
+- Covered both ticket-to-spec-to-mental-model and spec-to-ticket-to-mental-model
+  trace paths in unit tests and MCP integration tests.
+- Updated `lead-workflow`, `lead-edit`, `code-reviewer`, and `impl-playbook`
+  guidance to prefer path-first discovery tools where they now cover the
+  workflow operation.
+
+Verification: `cd agents-plugin-tool && go test ./...`; `git diff --check`;
+CLI smoke with `go run ./cmd/ws-mcp references trace --root ..
+--ticket-stem 260504-feat-ws-mcp-reference-discovery-tools`.

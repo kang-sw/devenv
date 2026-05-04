@@ -7,7 +7,7 @@
   "release_tag": "v0.1.0",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "df1a6bbb2328505fef49f5494ebc13cf12c84575a51b0127d2440663a76a64a9",
+    "content_sha256": "3ce2c9536fdfa3d603bddb839ab313b1da9a0a5f0980b601ded7ec366ec968fd",
     "prompts": [
       "api-doc-cargo-brief",
       "api-doc-manager",
@@ -43,6 +43,7 @@
     "mental_models.list": ">=0.1.0-dev <0.2.0",
     "mental_models.find": ">=0.1.0-dev <0.2.0",
     "mental_models.status": ">=0.1.0-dev <0.2.0",
+    "references.trace": ">=0.1.0-dev <0.2.0",
     "tickets.list": ">=0.1.0-dev <0.2.0",
     "tickets.find": ">=0.1.0-dev <0.2.0",
     "tickets.status": ">=0.1.0-dev <0.2.0",
@@ -104,6 +105,7 @@
     "specs.find": ">=0.1.0-dev <0.2.0",
     "specs.status": ">=0.1.0-dev <0.2.0",
     "mental-models.find": ">=0.1.0-dev <0.2.0",
-    "mental-models.status": ">=0.1.0-dev <0.2.0"
+    "mental-models.status": ">=0.1.0-dev <0.2.0",
+    "references.trace": ">=0.1.0-dev <0.2.0"
   }
 }

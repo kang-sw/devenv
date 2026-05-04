@@ -453,6 +453,15 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		path, _ := params.Arguments["path"].(string)
 		result, err := wsdoc.MentalModelsStatus(root, wsdoc.MentalModelStatusOptions{Domain: domain, Path: path})
 		return toolJSONResponse(req.ID, result, err)
+	case "references.trace":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		ticketStem, _ := params.Arguments["ticket_stem"].(string)
+		specStem, _ := params.Arguments["spec_stem"].(string)
+		result, err := wsdoc.ReferencesTrace(root, wsdoc.ReferenceTraceOptions{TicketStem: ticketStem, SpecStem: specStem})
+		return toolJSONResponse(req.ID, result, err)
 	case "tickets.list":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -999,6 +1008,18 @@ func tools() []map[string]any {
 					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"domain": stringProperty("Optional mental-model domain."),
 					"path":   stringProperty("Optional relative path under ai-docs/mental-model."),
+				},
+			},
+		},
+		{
+			"name":        "references.trace",
+			"description": "Trace ticket/spec/mental-model references from exactly one ticket_stem or spec_stem.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":        stringProperty("Repository root. Defaults to the server root."),
+					"ticket_stem": stringProperty("Optional ticket stem to trace."),
+					"spec_stem":   stringProperty("Optional spec anchor stem to trace."),
 				},
 			},
 		},

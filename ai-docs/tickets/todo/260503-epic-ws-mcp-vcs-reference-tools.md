@@ -103,11 +103,14 @@ inspectable, and composable across Codex, Claude, and future hosts.
   staged paths, requires structured `## AI Context`, updates `runtime.json`,
   documents the MCP contract, and detects staged ticket moves plus added
   `### Result` headings as `ticket_changes`.
+- `c9d2810` / `5a2c7b7` / `8c17ccd` / Phase 4 follow-up - Added path-first
+  ticket, spec, mental-model, and cross-reference discovery tools through the
+  `260504-feat-ws-mcp-reference-discovery-tools` child ticket. The surface uses
+  direct scans, returns structured path/status/reference metadata, and avoids
+  document body read/edit APIs.
 
 ## Open Questions
 
-- How much of ticket/spec lookup should be backed by generated indexes versus
-  direct file scans on each call?
 - Should reference graph output be optimized first for model-readable summaries
   or for structured downstream automation?
 - Where should project-specific verification command metadata live if a later

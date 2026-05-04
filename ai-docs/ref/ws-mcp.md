@@ -808,6 +808,41 @@ ws-mcp mental-models status --domain <domain>
 ws-mcp mental-models status --path ai-docs/mental-model/<file>.md
 ```
 
+### `ws/references.trace`
+
+Trace ticket, spec, and mental-model references from one identifier.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "ticket_stem": { "type": "string" },
+    "spec_stem": { "type": "string" }
+  }
+}
+```
+
+Behavior:
+
+- Requires exactly one of `ticket_stem` or `spec_stem`.
+- From `ticket_stem`, returns the ticket, specs referenced by ticket
+  frontmatter or spec feature ticket refs, and mental models linked to those
+  spec anchors.
+- From `spec_stem`, returns spec anchor locations, tickets mentioning the spec
+  stem, and mental models linked to the spec anchor.
+- Composes the path-first metadata returned by the domain-specific discovery
+  tools; it does not return full document bodies or edit documents.
+
+Compatibility fallback:
+
+```bash
+ws-mcp references trace --ticket-stem <ticket-stem>
+ws-mcp references trace --spec-stem <spec-stem>
+```
+
 ### `ws/subquery`
 
 Run a scoped one-turn codebase or documentation query through a temporary ws

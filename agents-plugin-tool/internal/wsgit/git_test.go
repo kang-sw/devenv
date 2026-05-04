@@ -156,7 +156,7 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 	if len(result.TicketChanges) != 1 || !result.TicketChanges[0].ResultAdded {
 		t.Fatalf("ticket changes = %#v", result.TicketChanges)
 	}
-	wantFirst := []string{"add", "--", "src"}
+	wantFirst := []string{"add", "-A", "--", "src"}
 	if !reflect.DeepEqual(runner.calls[1].args, wantFirst) {
 		t.Fatalf("add args = %#v, want %#v", runner.calls[1].args, wantFirst)
 	}
@@ -197,6 +197,15 @@ func TestCommitExpandsTicketMovePathsByStem(t *testing.T) {
 	want := []string{"ai-docs/tickets/.done/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("paths = %#v, want %#v", paths, want)
+	}
+}
+
+func TestCommitStagesDeletedTicketMoveByParentDirectory(t *testing.T) {
+	preStatus := ParseStatus([]byte("1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/.done/260503-feat-demo.md\n"))
+	got := stagingPathsForCommit("/repo", []string{"ai-docs/tickets/.done/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"}, preStatus)
+	want := []string{"ai-docs/tickets/.done/260503-feat-demo.md", "ai-docs/tickets/todo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("staging paths = %#v, want %#v", got, want)
 	}
 }
 

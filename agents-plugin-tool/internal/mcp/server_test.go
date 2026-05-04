@@ -46,6 +46,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.find","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
 		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.find","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
 		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
+		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"references.trace","arguments":{"spec_stem":"260503-spec-demo"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -55,8 +56,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 12 {
-		t.Fatalf("expected 12 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 13 {
+		t.Fatalf("expected 13 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -94,7 +95,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
-	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status"} {
+	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
@@ -132,6 +133,10 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	mentalModelsText := toolText(t, byID["12"])
 	if !strings.Contains(mentalModelsText, `"path":"ai-docs/mental-model/workflow.md"`) || !strings.Contains(mentalModelsText, `"matches_spec_stem":true`) || !strings.Contains(mentalModelsText, `"matches_domain":true`) {
 		t.Fatalf("mental_models.find response missing result: %s", byID["12"])
+	}
+	referencesText := toolText(t, byID["13"])
+	if !strings.Contains(referencesText, `"input_type":"spec"`) || !strings.Contains(referencesText, `"tickets"`) || !strings.Contains(referencesText, `"mental_models"`) {
+		t.Fatalf("references.trace response missing graph result: %s", byID["13"])
 	}
 }
 
@@ -672,6 +677,28 @@ func TestServeStdioMentalModelToolsRejectSpecStemOnStatus(t *testing.T) {
 	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
 	if !strings.Contains(text, "domain or path") || !strings.Contains(out.String(), `"isError":true`) {
 		t.Fatalf("mental_models.status accepted spec_stem argument: %s", out.String())
+	}
+}
+
+func TestServeStdioReferencesTraceRejectsAmbiguousSelectors(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/todo/260504-ticket-demo.md", "---\ntitle: Demo\n---\n# Demo\n")
+	mustWrite(t, root, "ai-docs/spec/demo.md", "# Demo\n\n## Feature {#260504-spec-demo}\n")
+	mustWrite(t, root, "ai-docs/mental-model/demo.md", "---\ndomain: demo\n---\n# Demo\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"references.trace","arguments":{"ticket_stem":"260504-ticket-demo","spec_stem":"260504-spec-demo"}}}` + "\n"
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	text := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
+	if !strings.Contains(text, "exactly one") || !strings.Contains(out.String(), `"isError":true`) {
+		t.Fatalf("references.trace accepted ambiguous selectors: %s", out.String())
 	}
 }
 

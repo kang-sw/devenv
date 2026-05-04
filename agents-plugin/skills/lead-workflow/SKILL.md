@@ -78,6 +78,23 @@ not large findings, between lead, implementer, and reviewers.
 
 Use for runtime compatibility checks and feature detection.
 
+### Reference discovery
+
+`ws/tickets.list`
+`ws/tickets.find`
+`ws/tickets.status`
+`ws/specs.list`
+`ws/specs.find`
+`ws/specs.status`
+`ws/mental_models.list`
+`ws/mental_models.find`
+`ws/mental_models.status`
+`ws/references.trace`
+
+Use these for ws-owned ticket, spec, and mental-model path/status/reference
+lookup before reaching for shell search. Use native file reads after a discovery
+tool returns the path to inspect or edit.
+
 ### Git
 
 `ws/git.status`
@@ -129,6 +146,11 @@ API docs:
 call `ws/api.list()` when choosing among cached domains matters.
 call `ws/api.ask(prompt: "<prose API documentation question>")` for external API lookup.
 add `domain_hint: "<optional-domain>"` only when the intended domain is known.
+
+References:
+call `ws/references.trace(ticket_stem: "<ticket-stem>")` for ticket/spec/model links.
+call `ws/references.trace(spec_stem: "<spec-stem>")` for spec/ticket/model links.
+call domain discovery tools first when only paths or status metadata are needed.
 
 Commit:
 call `ws/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])`.

@@ -11,7 +11,7 @@ Target: user request
 
 - Lead edits directly; do not delegate implementation.
 - Load `ws/infra.read(name: "impl-playbook")` before editing.
-- Load `ws/mental_models.list(paths: <target-paths>)`; read every listed file.
+- Use `ws/mental_models.find` or `ws/mental_models.status`; read returned paths.
 - Ancestor loading: read `mental-model/<domain>/index.md` before `mental-model/<domain>/<sub>.md`.
 - Existing skeleton stubs and integration tests are acceptance criteria.
 - Commit logical units per CLAUDE.md; include `## AI Context`.
@@ -31,7 +31,7 @@ Target: user request
 2. Record `<start-commit>` with `git rev-parse HEAD`.
 3. If ticket-driven: read ticket; collect skeleton references.
 4. Apply `judge: skeleton-check`; stop and suggest `ws:lead-write-skeleton` if required skeleton is absent.
-5. Call `ws/mental_models.list(paths: <target-paths>)`; read listed docs, ancestors first.
+5. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 6. Call `ws/infra.read(name: "impl-playbook")`.
 7. Identify integration test paths and run command.
 

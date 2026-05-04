@@ -372,8 +372,10 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	if err != nil {
 		return CommitResult{}, err
 	}
-	opts.Paths = expandCommitPathsForTicketMoves(ParseStatus(preStatusOut), opts.Paths)
-	if _, err := runner.RunGit(ctx, root, append([]string{"add", "--"}, opts.Paths...)...); err != nil {
+	preStatus := ParseStatus(preStatusOut)
+	opts.Paths = expandCommitPathsForTicketMoves(preStatus, opts.Paths)
+	stagePaths := stagingPathsForCommit(root, opts.Paths, preStatus)
+	if _, err := runner.RunGit(ctx, root, append([]string{"add", "-A", "--"}, stagePaths...)...); err != nil {
 		return CommitResult{}, err
 	}
 	statusOut, err := runner.RunGit(ctx, root, StatusArgs()...)
@@ -426,6 +428,36 @@ func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 	}
 	opts.Paths = paths
 	return opts, nil
+}
+
+func stagingPathsForCommit(root string, paths []string, status StatusResult) []string {
+	deleted := deletedPathSet(status)
+	out := []string{}
+	seen := map[string]bool{}
+	for _, path := range paths {
+		stagePath := path
+		if deleted[filepath.ToSlash(filepath.Clean(path))] {
+			stagePath = filepath.ToSlash(filepath.Dir(path))
+		}
+		if !seen[stagePath] {
+			out = append(out, stagePath)
+			seen[stagePath] = true
+		}
+	}
+	return out
+}
+
+func deletedPathSet(status StatusResult) map[string]bool {
+	deleted := map[string]bool{}
+	for _, file := range status.ChangedFiles {
+		if file.WorktreeStatus == "D" || file.IndexStatus == "D" {
+			deleted[filepath.ToSlash(filepath.Clean(file.Path))] = true
+		}
+		if file.OldPath != "" && (file.WorktreeStatus == "D" || file.IndexStatus == "D" || strings.HasPrefix(file.Status, "R")) {
+			deleted[filepath.ToSlash(filepath.Clean(file.OldPath))] = true
+		}
+	}
+	return deleted
 }
 
 func validateCommitPath(path string) error {

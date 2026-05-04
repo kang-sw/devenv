@@ -10,6 +10,7 @@ import (
 )
 
 var specStemLooseRE = regexp.MustCompile(`(?:#|\{#)([0-9]{6}-[a-z0-9-]+)\}?`)
+var specStemExactRE = regexp.MustCompile(`^[0-9]{6}-[a-z0-9-]+$`)
 
 type MentalModelFindOptions struct {
 	Query    string
@@ -192,10 +193,11 @@ func mentalModelSpecRefs(fm map[string]any, text string) []string {
 }
 
 func collectSpecRefs(refs map[string]bool, text string) {
+	text = strings.TrimSpace(text)
 	for _, match := range specStemLooseRE.FindAllStringSubmatch(text, -1) {
 		refs[match[1]] = true
 	}
-	if specAnchorRE.MatchString("{#" + text + "}") {
+	if specStemExactRE.MatchString(text) {
 		refs[text] = true
 	}
 }
