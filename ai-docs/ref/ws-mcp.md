@@ -336,6 +336,111 @@ Constraints:
 - It does not reset, checkout, clean, merge, push, or mutate ticket files.
 - Leaf-role MCP servers cannot call `ws/git.commit`.
 
+### `ws/tickets.list`
+
+List ticket paths and structured status metadata without returning full document
+bodies.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "statuses": { "type": "array", "items": { "type": "string" } },
+    "include_done": { "type": "boolean" },
+    "include_dropped": { "type": "boolean" }
+  }
+}
+```
+
+Behavior:
+
+- Defaults to active ticket statuses: `idea`, `todo`, and `wip`.
+- `include_done` separately opts into `ai-docs/tickets/.done/`.
+- `include_dropped` separately opts into `ai-docs/tickets/.dropped/`.
+- Returns JSON objects with `stem`, `path`, directory-derived `status`, title,
+  parent, related ticket stems, spec/spec-remove frontmatter, plans, skeletons,
+  completed date, phase headings, unresolved phases, and result-present status.
+- Status filters may use `done`/`.done` and `dropped`/`.dropped`, but archived
+  statuses are still hidden unless their matching include flag is true.
+
+Compatibility fallback:
+
+```bash
+ws-mcp tickets list [--status todo] [--include-done] [--include-dropped]
+```
+
+### `ws/tickets.find`
+
+Find ticket paths by query, exact ticket stem, or mentions of another ticket
+stem.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "statuses": { "type": "array", "items": { "type": "string" } },
+    "include_done": { "type": "boolean" },
+    "include_dropped": { "type": "boolean" },
+    "query": { "type": "string" },
+    "ticket_stem": { "type": "string" },
+    "mentions_ticket_stem": { "type": "string" }
+  }
+}
+```
+
+Behavior:
+
+- Uses `ticket_stem`; ticket tools reject `spec_stem` to keep ticket and spec
+  anchor identifiers distinct.
+- `mentions_ticket_stem` finds tickets whose raw text references the supplied
+  ticket stem, avoiding ad hoc shell pipelines.
+- `query` is a case-insensitive match over stem, path, title, and ticket text.
+  Results include short matching snippets for disambiguation, not full bodies.
+
+Compatibility fallback:
+
+```bash
+ws-mcp tickets find --mentions-ticket-stem <ticket-stem>
+```
+
+### `ws/tickets.status`
+
+Return structured status metadata for one ticket stem.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "ticket_stem": { "type": "string" },
+    "include_done": { "type": "boolean" },
+    "include_dropped": { "type": "boolean" }
+  },
+  "required": ["ticket_stem"]
+}
+```
+
+Behavior:
+
+- Looks up a ticket by stable stem, not by path.
+- Active statuses are searched by default; `.done/` and `.dropped/` require the
+  matching include flag.
+- Returns the same path-first metadata shape as `ws/tickets.list`.
+
+Compatibility fallback:
+
+```bash
+ws-mcp tickets status <ticket-stem> [--include-done] [--include-dropped]
+```
+
 ### `ws/project_tree`
 
 Render the ws project document map, spec inventory, and active ticket queue.

@@ -70,6 +70,23 @@ Success criteria:
 - Integration tests cover MCP tool listing and calls.
 - CLI smoke verifies a ticket mention query without shell pipelines.
 
+### Result (pending) - 2026-05-04
+
+Implemented the Phase 1 ticket discovery surface in the ws MCP runtime:
+
+- Added path-first `tickets.list`, `tickets.find`, and `tickets.status` helpers
+  that scan `ai-docs/tickets/` directly and return structured metadata rather
+  than full document bodies.
+- Exposed the helpers through MCP schemas and `ws-mcp tickets` CLI fallbacks.
+- Kept ticket and spec identifiers distinct by using `ticket_stem` /
+  `mentions_ticket_stem` and rejecting `spec_stem` arguments on ticket tools.
+- Preserved separate archive gates: `include_done` controls `.done/`, and
+  `include_dropped` controls `.dropped/`.
+
+Verification: `cd agents-plugin-tool && go test ./...`; CLI smoke with
+`go run ./cmd/ws-mcp tickets find --root .. --mentions-ticket-stem
+260503-epic-ws-mcp-vcs-reference-tools`.
+
 ### Phase 2: Spec anchor discovery tools
 
 Extend the existing direct spec anchor scan into path-first discovery tools.

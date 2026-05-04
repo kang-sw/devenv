@@ -46,6 +46,8 @@ func main() {
 		agents(os.Args[2:])
 	case "git":
 		gitCommand(os.Args[2:])
+	case "tickets":
+		ticketsCommand(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -53,7 +55,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git|tickets>")
 }
 
 func doctor(args []string) {
@@ -334,6 +336,87 @@ func gitCommit(args []string) {
 		UpdatedMentalModels: updatedMentalModels,
 	})
 	printJSONOrFatal("git commit", result, err)
+}
+
+func ticketsCommand(args []string) {
+	if len(args) < 1 {
+		ticketsUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "list":
+		ticketsList(args[1:])
+	case "find":
+		ticketsFind(args[1:])
+	case "status":
+		ticketsStatus(args[1:])
+	default:
+		ticketsUsage()
+		os.Exit(2)
+	}
+}
+
+func ticketsUsage() {
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status>")
+}
+
+func ticketsList(args []string) {
+	fs := flag.NewFlagSet("tickets list", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	includeDone := fs.Bool("include-done", false, "include ai-docs/tickets/.done")
+	includeDropped := fs.Bool("include-dropped", false, "include ai-docs/tickets/.dropped")
+	var statuses multiFlag
+	fs.Var(&statuses, "status", "ticket status to scan; may be repeated")
+	_ = fs.Parse(args)
+
+	result, err := wsdoc.TicketsList(defaultRoot(*root), wsdoc.TicketListOptions{
+		Statuses:       statuses,
+		IncludeDone:    *includeDone,
+		IncludeDropped: *includeDropped,
+	})
+	printJSONOrFatal("tickets list", result, err)
+}
+
+func ticketsFind(args []string) {
+	fs := flag.NewFlagSet("tickets find", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	query := fs.String("query", "", "case-insensitive text query")
+	ticketStem := fs.String("ticket-stem", "", "exact ticket stem")
+	mentionsTicketStem := fs.String("mentions-ticket-stem", "", "ticket stem that result tickets must mention")
+	includeDone := fs.Bool("include-done", false, "include ai-docs/tickets/.done")
+	includeDropped := fs.Bool("include-dropped", false, "include ai-docs/tickets/.dropped")
+	var statuses multiFlag
+	fs.Var(&statuses, "status", "ticket status to scan; may be repeated")
+	_ = fs.Parse(args)
+
+	result, err := wsdoc.TicketsFind(defaultRoot(*root), wsdoc.TicketFindOptions{
+		Statuses:           statuses,
+		IncludeDone:        *includeDone,
+		IncludeDropped:     *includeDropped,
+		Query:              *query,
+		TicketStem:         *ticketStem,
+		MentionsTicketStem: *mentionsTicketStem,
+	})
+	printJSONOrFatal("tickets find", result, err)
+}
+
+func ticketsStatus(args []string) {
+	fs := flag.NewFlagSet("tickets status", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	ticketStem := fs.String("ticket-stem", "", "ticket stem to inspect")
+	includeDone := fs.Bool("include-done", false, "allow lookup under ai-docs/tickets/.done")
+	includeDropped := fs.Bool("include-dropped", false, "allow lookup under ai-docs/tickets/.dropped")
+	_ = fs.Parse(args)
+	if *ticketStem == "" && len(fs.Args()) > 0 {
+		*ticketStem = fs.Args()[0]
+	}
+
+	result, err := wsdoc.TicketsStatus(defaultRoot(*root), wsdoc.TicketStatusOptions{
+		TicketStem:     *ticketStem,
+		IncludeDone:    *includeDone,
+		IncludeDropped: *includeDropped,
+	})
+	printJSONOrFatal("tickets status", result, err)
 }
 
 func printJSONOrFatal(prefix string, value any, err error) {

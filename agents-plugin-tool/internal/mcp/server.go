@@ -394,6 +394,55 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		text, err := wsdoc.MentalModelsList(root)
 		return toolTextResponse(req.ID, text, err)
+	case "tickets.list":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		result, err := wsdoc.TicketsList(root, wsdoc.TicketListOptions{
+			Statuses:       stringList(params.Arguments["statuses"]),
+			IncludeDone:    boolArgument(params.Arguments["include_done"]),
+			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
+		})
+		return toolJSONResponse(req.ID, result, err)
+	case "tickets.find":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		query, _ := params.Arguments["query"].(string)
+		ticketStem, _ := params.Arguments["ticket_stem"].(string)
+		mentionsTicketStem, _ := params.Arguments["mentions_ticket_stem"].(string)
+		result, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
+			Statuses:           stringList(params.Arguments["statuses"]),
+			IncludeDone:        boolArgument(params.Arguments["include_done"]),
+			IncludeDropped:     boolArgument(params.Arguments["include_dropped"]),
+			Query:              query,
+			TicketStem:         ticketStem,
+			MentionsTicketStem: mentionsTicketStem,
+		})
+		return toolJSONResponse(req.ID, result, err)
+	case "tickets.status":
+		if hasSpecStemArgument(params.Arguments) {
+			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
+		}
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		ticketStem, _ := params.Arguments["ticket_stem"].(string)
+		result, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{
+			TicketStem:     ticketStem,
+			IncludeDone:    boolArgument(params.Arguments["include_done"]),
+			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
+		})
+		return toolJSONResponse(req.ID, result, err)
 	case "subquery":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -835,6 +884,41 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "tickets.list",
+			"description": "List ticket paths and structured status metadata without reading full document bodies.",
+			"inputSchema": ticketDiscoverySchema(false),
+		},
+		{
+			"name":        "tickets.find",
+			"description": "Find ticket paths by query, ticket stem, or mentions of another ticket stem.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":                 stringProperty("Repository root. Defaults to the server root."),
+					"statuses":             stringArrayProperty("Optional ticket statuses to scan: idea, todo, wip, done, dropped."),
+					"include_done":         boolProperty("Include ai-docs/tickets/.done when true."),
+					"include_dropped":      boolProperty("Include ai-docs/tickets/.dropped when true."),
+					"query":                stringProperty("Optional case-insensitive text query."),
+					"ticket_stem":          stringProperty("Optional exact ticket stem."),
+					"mentions_ticket_stem": stringProperty("Optional ticket stem that result tickets must mention."),
+				},
+			},
+		},
+		{
+			"name":        "tickets.status",
+			"description": "Return structured status metadata for a single ticket stem.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":            stringProperty("Repository root. Defaults to the server root."),
+					"ticket_stem":     stringProperty("Ticket stem to inspect."),
+					"include_done":    boolProperty("Allow lookup under ai-docs/tickets/.done when true."),
+					"include_dropped": boolProperty("Allow lookup under ai-docs/tickets/.dropped when true."),
+				},
+				"required": []string{"ticket_stem"},
+			},
+		},
+		{
 			"name":        "subquery",
 			"description": "Run a scoped one-turn codebase or documentation query through a temporary ws delegate.",
 			"inputSchema": map[string]any{
@@ -1113,6 +1197,22 @@ func agentDebugSchema(linesDescription string) map[string]any {
 	}
 }
 
+func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"root":            stringProperty("Repository root. Defaults to the server root."),
+			"statuses":        stringArrayProperty("Optional ticket statuses to scan: idea, todo, wip, done, dropped."),
+			"include_done":    boolProperty("Include ai-docs/tickets/.done when true."),
+			"include_dropped": boolProperty("Include ai-docs/tickets/.dropped when true."),
+		},
+	}
+	if requireTicketStem {
+		schema["required"] = []string{"ticket_stem"}
+	}
+	return schema
+}
+
 func stringList(value any) []string {
 	items, ok := value.([]any)
 	if !ok {
@@ -1126,6 +1226,16 @@ func stringList(value any) []string {
 		}
 	}
 	return out
+}
+
+func boolArgument(value any) bool {
+	result, _ := value.(bool)
+	return result
+}
+
+func hasSpecStemArgument(arguments map[string]any) bool {
+	_, ok := arguments["spec_stem"]
+	return ok
 }
 
 func stringProperty(description string) map[string]string {

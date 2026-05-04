@@ -73,7 +73,9 @@ Implemented MCP tools:
 - Specs: `ws/spec_stem.generate`, `ws/spec_index.verify`
 - Runtime: `ws/runtime.info`
 - Delegation: `ws/subquery`, `ws/path.generate`
-- Git: `ws/git.status`, `ws/git.diff`, `ws/git.log`, `ws/git.merge_base`
+- Tickets: `ws/tickets.list`, `ws/tickets.find`, `ws/tickets.status`
+- Git: `ws/git.status`, `ws/git.diff`, `ws/git.log`, `ws/git.merge_base`,
+  `ws/git.commit`
 - Agents: `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
   `ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`,
   `ws/agents.print`, `ws/agents.erase`
