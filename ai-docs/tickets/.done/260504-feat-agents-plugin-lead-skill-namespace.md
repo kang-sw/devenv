@@ -4,6 +4,7 @@ related:
   260503-epic-agents-plugin-skill-porting: parent roadmap for host-neutral skill migration
   260504-feat-agents-plugin-api-docs-mcp: dogfood run that showed delegated agents can see the available skill list
 parent: 260503-epic-agents-plugin-skill-porting
+completed: 2026-05-04
 ---
 
 # agents-plugin lead skill namespace
@@ -85,6 +86,12 @@ Acceptance criteria:
 - No `agents-plugin/skills/<old>/SKILL.md` directory remains for the old names.
 - The plugin cache skill directories mirror the repository skill directories.
 
+### Result (22251b5) - 2026-05-04
+
+Renamed every Agents plugin skill directory to `lead-*`, updated `SKILL.md`
+frontmatter, and mirrored the same directory set into the local Codex plugin
+cache. No alias directories were kept.
+
 ### Phase 2: Rewrite Agents plugin references
 
 Mechanically rewrite references in Agents plugin materials from `ws:<old>` to
@@ -109,6 +116,13 @@ Acceptance criteria:
 - `rg 'ws:(add-rule|bootstrap|discuss|edit|exit-session|forge-mental-model|forge-spec|implement|proceed|ship|skill-authoring|sprint|update-spec|workflow|write-code|write-skeleton|write-spec|write-ticket)\\b'` returns no in-scope hits.
 - `rg 'agents-plugin/skills/(add-rule|bootstrap|discuss|edit|exit-session|forge-mental-model|forge-spec|implement|proceed|ship|skill-authoring|sprint|update-spec|workflow|write-code|write-skeleton|write-spec|write-ticket)\\b'` returns no in-scope hits.
 
+### Result (22251b5) - 2026-05-04
+
+Rewrote Agents plugin skill invocations and path references to `lead-*` in the
+plugin candidate, prompt/reference text, active project memory, and the active
+host-neutral plugin research anchor. Historical Claude-plugin references and
+spec/mental-model documents were left untouched.
+
 ### Phase 3: Strengthen delegate boundary wording
 
 Update `delegate-orientation` so delegated workers are told that `lead-*`
@@ -122,6 +136,11 @@ Acceptance criteria:
 - The rule does not enumerate every skill name; the prefix carries the taxonomy.
 - Prompt bundle metadata is updated if embedded prompt text changes.
 
+### Result (22251b5) - 2026-05-04
+
+Added a concise `lead-*` boundary rule to `delegate-orientation` and updated the
+embedded prompt bundle hash in `agents-plugin/runtime.json`.
+
 ### Phase 4: Verify plugin and cache consistency
 
 Run repository checks and current-cache consistency checks after the rename.
@@ -134,3 +153,9 @@ Acceptance criteria:
 - No broad alias or compatibility shim is introduced.
 - Completion report notes that specs were intentionally deferred to a later
   forge-spec pass.
+
+### Result (22251b5) - 2026-05-04
+
+Verified the rename with `go test ./...`, `git diff --check`, old-name rg
+checks, and a repository-vs-cache skill directory comparison. Spec updates are
+intentionally deferred to the later forge-spec pass for this branch.
