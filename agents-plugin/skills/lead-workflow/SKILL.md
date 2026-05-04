@@ -18,20 +18,27 @@ workflow primitive reference into session context.
 
 # WS Workflow Primitives
 
-This is the host-neutral reference for ws plugin skill text. Use the compact form
-`ws/<tool-name>` for MCP server `ws`, tool `<tool-name>`. Use `ws:` only for
-plugin skills such as `ws:lead-write-ticket`; do not use it for MCP tools.
+Host-neutral notation reference for ws plugin skill text.
 
-Use pseudo-call notation when writing MCP calls in skills: `ws/tool.name(arg:
-value)`. Show required arguments inline. Show optional arguments only when the
-skill depends on a non-default value. Omit `root` when the current repository
-root is intended. Prefer `prompt: <block below>` or `question: <block below>` for
-large text payloads.
+Use `ws/<tool-name>` for MCP server `ws`, tool `<tool-name>`.
+Use `ws:` only for plugin skills such as `ws:lead-write-ticket`.
+Write MCP calls as `ws/tool.name(arg: value)`.
+Show optional arguments only when the skill needs a non-default value.
+Omit `root` when the current repository root is intended.
+Use `prompt: <block below>` or `question: <block below>` for large text payloads.
 
 When writing shared skill text, name only primitives that exist in the ws runtime.
 If a workflow needs a surface that is still planned, state the required MCP
 contract instead of naming a Claude helper command or another host-specific
 fallback.
+
+## How To Document
+
+- Write compressed professional prose: short sentences, exact verbs, no filler.
+- Prefer `Do X through Y` over `Do not do X` when a positive action exists.
+- Use `Not:` / `Use:` examples only for recurring mistakes.
+- Keep procedure text command-shaped; move rationale to one short Doctrine paragraph.
+- Use full sentences when compression could blur order, ownership, or safety.
 
 ## Available
 
@@ -39,8 +46,8 @@ fallback.
 
 `ws/subquery`
 
-Use for scoped fact-finding, surveys, and one-turn answers where no future resume
-is needed. Set `deep_research: true` only for broad tracing.
+Use for scoped fact-finding, surveys, and one-turn answers. Set
+`deep_research: true` only for broad tracing.
 
 ### Persistent agents
 
@@ -53,21 +60,18 @@ is needed. Set `deep_research: true` only for broad tracing.
 `ws/agents.cancel`
 `ws/agents.erase`
 
-Register a stable task name with prompt stems or a self-contained system prompt,
-then call it for each turn that needs continuity. `ws/agents.call` starts the
-turn asynchronously and returns promptly. Use `wait` when final output is needed,
-`status` to decide whether to wait or continue, `tail(lines: 3)` only for small
-diagnostic snapshots, `print` for the last plain-text output, `cancel` only when
-stopping the current task is more valuable than backend continuity, and `erase`
-when the task-scoped session is no longer needed.
+Register a stable task name with prompt stems or a self-contained system prompt.
+Call it for each turn that needs continuity. `ws/agents.call` starts async and
+returns promptly. Use `wait` for final output, `status` before waiting,
+`tail(lines: 3)` for small diagnostics, `print` for last output, `cancel` to stop
+active work, and `erase` when the task-scoped session is done.
 
 ### Artifact paths
 
 `ws/path.generate`
 
-Use for generated workflow artifact paths, currently review files. Capture the
-returned paths and pass file paths between lead, implementer, and reviewers
-instead of copying large findings through the lead context.
+Use for generated workflow artifact paths. Capture returned paths. Relay paths,
+not large findings, between lead, implementer, and reviewers.
 
 ### Runtime metadata
 
@@ -80,20 +84,18 @@ Use for runtime compatibility checks and feature detection.
 `ws/api.list`
 `ws/api.ask`
 
-Use `ws/api.ask(prompt: "<prose question>")` for external API documentation
-lookup; pass the natural-language question directly.
-Use `ws/api.list` to inspect available third-party API documentation domains and
-`ws/api.ask(prompt: ..., domain_hint: ...)` when a domain hint is known.
-The runtime handles pre-routing, per-domain manager sessions, stale checks, and
-cache access; shared skills should keep callers on the MCP tool surface instead
-of local implementation details.
+Use `ws/api.ask(prompt: "<prose question>")` for external API documentation.
+Pass the natural-language question directly.
+Use `ws/api.list` to inspect cached domains.
+Use `domain_hint` only when the intended domain is known.
+The runtime owns pre-routing, per-domain sessions, stale checks, and cache access.
 
 ## Planned Or Specialized
 
-Active-agent listing and broad message-queue semantics should be treated as
-contract surfaces unless the current runtime exposes the exact MCP tool needed
-by the skill. Basic async cancellation exists through `ws/agents.cancel`; do not
-generalize that into a richer interrupt contract without checking the runtime.
+Treat active-agent listing and broad message-queue semantics as planned contract
+surfaces unless the runtime exposes the exact tool. Basic async cancellation
+exists through `ws/agents.cancel`; check runtime before assuming richer
+interrupt behavior.
 
 ## Usage Pattern
 
@@ -121,8 +123,7 @@ add `domain_hint: "<optional-domain>"` only when the intended domain is known.
 
 ## Doctrine
 
-Workflow notation optimizes for the model's limited execution attention during
-cross-host execution: references must be short enough to survive skill execution
-while explicit enough to map to each host's actual tool display. When a rule is
-ambiguous, apply whichever interpretation better preserves that execution
+Workflow notation optimizes for limited execution attention during cross-host
+work. References must be short enough to survive skill execution and explicit
+enough to map to each host's tool display. When ambiguous, preserve execution
 attention.

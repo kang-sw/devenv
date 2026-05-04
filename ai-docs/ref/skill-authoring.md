@@ -12,6 +12,10 @@ These apply to both skill and agent documents.
 - Mechanical rules and soft judgments do not mix. Soft decision points must be separated and stated explicitly.
 - After restructuring, spawn a fresh delegate to audit: contradictions, duplication, orphan references, closure gaps.
 - At every authoring turn's end, re-read additions and cut.
+- Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
+- Prefer command-shaped fragments over explanatory paragraphs.
+- Use examples only when they prevent repeated wrong execution.
+- Preserve full grammar when compression could change order, ownership, or safety.
 
 ### Invariant / Constraint checklist
 

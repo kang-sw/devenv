@@ -263,6 +263,7 @@ This index lists active tickets only; completed tickets live under
 | `260503-epic-ws-agent-workflow-stability` | todo | Stabilization epic for named-agent workflow; active blockers closed, future runtime work should come from observed failures or deferred idea tickets |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
+| `260504-chore-compress-workflow-docs` | todo | Compress workflow docs and skill prose using the new compressed professional documentation rule |
 | `260429-feat-api-deps` | todo | ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt, pre-router prompt, bin tools, workflow integration |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows build/runtime behavior for claude-dash |
 | `260504-research-durable-leaf-role-assignment` | idea | Deferred research on stricter leaf/subquery recursion control beyond worktree delegate containment |
@@ -276,6 +277,7 @@ This index lists active tickets only; completed tickets live under
 `260503-epic-ws-agent-workflow-stability` — stabilization parent remains open for future observed runtime failures; no active blocker after worktree lock, hook-driven interrupt, and leaf deferral
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
+`260504-chore-compress-workflow-docs` — next-session pass to shorten AGENTS.md, bootstrap template, _index, active lead skills, and delegate-facing prompts without changing semantics
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 

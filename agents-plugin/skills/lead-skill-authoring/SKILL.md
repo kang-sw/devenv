@@ -5,9 +5,8 @@ description: Author or audit ws workflow skills and agent prompts using the repo
 
 # Skill Authoring
 
-Use this reference when authoring or auditing ws skills and agent prompts. Apply
-the principles below directly; do not expand them into local paraphrase unless
-the target document needs a concrete procedure.
+Use this reference when authoring or auditing ws skills and agent prompts.
+Apply rules directly; add local procedure only when the target needs it.
 
 ## Principles
 
@@ -21,11 +20,14 @@ These apply to both skill and agent documents.
 - Mechanical rules and soft judgments do not mix. Soft decision points must be separated and stated explicitly.
 - After restructuring, request an authorized fresh audit: contradictions, duplication, orphan references, closure gaps.
 - At every authoring turn's end, re-read additions and cut.
+- Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
+- Prefer command-shaped fragments over explanatory paragraphs.
+- Use examples only when they prevent repeated wrong execution.
+- Preserve full grammar when compression could change order, ownership, or safety.
 
 ### Invariant / Constraint checklist
 
-Run against each invariant (skills) or constraint (agents) line after drafting.
-Every item is yes/no.
+Check every invariant or constraint after drafting. Every answer is yes/no.
 
 - **Falsifiable?** - Can you describe a concrete violation? If not, it is a wish, not a rule.
 - **Actionable?** - Does it say what to *do*, not just what to *avoid*?
@@ -37,16 +39,13 @@ Every item is yes/no.
 
 ### Doctrine format
 
-Two jobs: (1) name the single finite resource the document optimizes for, (2)
-provide a generator clause: "When a rule is ambiguous, apply whichever
-interpretation better preserves <resource>." Anchor concretely - measurable
-nouns ("context window"), not fuzzy ones ("quality", "focus"). Test: can the
-invariants' priorities and shape re-derive from this paragraph? The Doctrine
-names the axis along which rules rank, not every rule verbatim.
+Doctrine has two jobs: name the finite resource, then add the generator clause.
+Use measurable nouns such as "context window", not fuzzy nouns such as "quality".
+Test: invariants should re-derive from the named resource.
 
 ## Skill Layout
 
-Top-to-bottom order. Simpler skills use the subset they need.
+Use this order. Omit sections the skill does not need.
 
 1. **Invariants** - unambiguous imperatives, zero interpretation cost, skimmable.
 2. **Event handlers** (`On: X`) - numbered step lists per entry point. Consistent sub-structure across siblings.
@@ -54,9 +53,7 @@ Top-to-bottom order. Simpler skills use the subset they need.
 4. **Templates** - structured output formats: brief formats, spawn signatures, addenda. Procedures belong in handlers.
 5. **Doctrine** - one paragraph, the generator.
 
-Adapt section types to the document's reading pattern (e.g., named procedures
-instead of event handlers for reference material) - the principles are
-universal, the specific sections are not.
+Adapt section names to the document's reading pattern; keep the principles.
 
 ## Agent Layout
 
@@ -69,17 +66,14 @@ Top-to-bottom order. Simpler agents use the subset they need.
 5. **Output** - structured return format. Every agent must define what it sends back to the caller.
 6. **Doctrine** - one paragraph, the generator.
 
-Agents are spawned into zero-context environments - self-containedness is even
-more critical than for skills. Team communication rules (SendMessage protocol,
-idle handling) are not part of the agent definition; they are injected by the
-calling skill when the agent is spawned into a team.
+Agents start with no session context. Keep them self-contained. Inject team
+communication rules from the calling skill, not the agent definition.
 
 ## Doctrine
 
-Skill and agent files are consulted by the model under attention pressure
-mid-session. Every authoring choice optimizes for **executability under that
-pressure**: skimmable imperatives where attention lands first, mechanical
-structure where judgment fails, preserved judgment language where mechanism
-would lose signal, rationale collapsed into a single generator at the end. When
-an authoring decision is ambiguous, apply whichever choice the model under
-pressure would execute more reliably.
+Skill and agent files are reread under attention pressure. Every authoring
+choice optimizes for **executability under that pressure**: skimmable
+imperatives first, mechanical structure where judgment fails, preserved judgment
+language where mechanism would lose signal, rationale collapsed into one
+generator. When ambiguous, choose what the pressured model will execute more
+reliably.
