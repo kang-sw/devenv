@@ -143,6 +143,7 @@ func TestAPIDocsPromptContracts(t *testing.T) {
 		t.Fatalf("Resolve pre-router returned error: %v", err)
 	}
 	for _, want := range []string{
+		"you never answer the question",
 		"Return only canonical API documentation domain slugs",
 		"one per non-empty line",
 		"Do not include prose",

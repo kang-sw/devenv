@@ -171,6 +171,9 @@ func (s *Server) resolveAPIDomains(ctx context.Context, root, prompt, hint strin
 			}
 		}
 	}
+	if matched := matchExistingAPIDomains(prompt, existing); len(matched) > 0 {
+		return matched, nil
+	}
 	input := formatAPIPreRouterPrompt(hint, existing, prompt)
 	output, err := s.apiRuntime().Route(ctx, root, input)
 	if err != nil {
@@ -217,6 +220,24 @@ func parseAPIRouterDomains(output string) ([]string, error) {
 		return nil, errors.New("api pre-router returned no domains")
 	}
 	return domains, nil
+}
+
+func matchExistingAPIDomains(prompt string, existing []string) []string {
+	var matched []string
+	for _, domain := range existing {
+		if apiDomainMentioned(prompt, domain) {
+			matched = append(matched, domain)
+		}
+	}
+	return matched
+}
+
+func apiDomainMentioned(prompt, domain string) bool {
+	if domain == "" {
+		return false
+	}
+	pattern := `(?i)(^|[^A-Za-z0-9._-])` + regexp.QuoteMeta(domain) + `($|[^A-Za-z0-9._-])`
+	return regexp.MustCompile(pattern).FindStringIndex(prompt) != nil
 }
 
 func validAPIDomain(domain string) bool {

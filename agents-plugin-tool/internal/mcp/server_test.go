@@ -770,6 +770,24 @@ func TestAPIAskMCPExactHintSkipsRouter(t *testing.T) {
 	}
 }
 
+func TestAPIAskExistingDomainMentionSkipsRouter(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/.deps/ratatui/README.md", "ratatui")
+	fake := &fakeAPIRuntime{answers: map[string]string{"ratatui": "ratatui answer"}}
+	server := NewServer(root, "test")
+	server.api = fake
+	text, err := server.askAPI(context.Background(), root, "For ratatui, how do I render a widget?", "")
+	if err != nil {
+		t.Fatalf("askAPI returned error: %v\n%s", err, text)
+	}
+	if len(fake.routeCalls) != 0 {
+		t.Fatalf("existing domain mention invoked pre-router: %v", fake.routeCalls)
+	}
+	if !strings.Contains(text, "## Domain: ratatui\nratatui answer") {
+		t.Fatalf("api.ask response missing existing domain answer:\n%s", text)
+	}
+}
+
 func TestAPIAskPreRouterPartialFailureBoundaries(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
