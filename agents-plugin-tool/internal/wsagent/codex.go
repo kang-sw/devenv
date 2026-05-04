@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"time"
 )
@@ -26,7 +25,6 @@ type RunnerRequest struct {
 	Stdout               io.Writer
 	Stderr               io.Writer
 	OnSessionID          func(string) error
-	InterruptPending     func() (bool, error)
 	Timeout              time.Duration
 	InheritProcessGroup  bool
 	ToolProfile          string
@@ -92,29 +90,6 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if err := cmd.Start(); err != nil {
 		return RunnerResult{}, fmt.Errorf("start codex: %w", err)
 	}
-	done := make(chan struct{})
-	if req.InterruptPending != nil {
-		go func() {
-			ticker := time.NewTicker(250 * time.Millisecond)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-done:
-					return
-				case <-ticker.C:
-					pending, err := req.InterruptPending()
-					if err != nil || !pending {
-						continue
-					}
-					if err := cmd.Process.Signal(os.Interrupt); err != nil {
-						_ = cmd.Process.Kill()
-					}
-					return
-				}
-			}
-		}()
-	}
-	defer close(done)
 	if req.Stdout != nil {
 		stdout = struct {
 			io.Reader
@@ -129,10 +104,6 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if waitErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return RunnerResult{}, fmt.Errorf("codex timed out after %s", req.Timeout)
-		}
-		if result.SessionID != "" && result.Text == "" {
-			result.Interrupted = true
-			return result, nil
 		}
 		if stderr.Len() > 0 {
 			return RunnerResult{}, fmt.Errorf("codex failed: %w: %s", waitErr, stderr.String())

@@ -316,16 +316,24 @@ call, captures backend stdout and stderr to `current/stdout` and
 `output.md`, and transitions the current call to `completed` or `failed`. Only
 one active call is allowed per named agent.
 
-`agents.interrupt` appends a durable pending message to `inbox/<id>.json`. An
-active Codex async worker configures the verified hook shape for compatibility,
-but also runs its own inbox watcher because Codex CLI 0.128.0 on WSL2 did not
-fire inline `PostToolUse` hooks during `codex exec` smoke testing. When the
-watcher sees pending inbox mail, it sends an interrupt signal to the active
-Codex subprocess. The worker treats the interrupted partial turn as resumable,
-drains pending inbox messages, marks them `delivered`, and resumes the same
-Codex thread with the lead messages before waiting for a final response. If no
-call is active, pending messages are delivered at the start of the next backend
-call.
+`agents.interrupt` appends a durable pending message to `inbox/<id>.json`.
+Messages use a two-state contract: `pending` means the runtime has not injected
+the message into a backend input path, and `delivered` means it has. `delivered`
+does not claim that the model complied with the message.
+
+Active Codex async workers configure a `PostToolUse` hook that runs
+`agents check-inbox`. When pending inbox mail exists, the hook atomically marks
+messages `delivered`, writes the lead-message feedback to stderr, and exits 2.
+Codex CLI 0.128.0 injects that hook feedback into the next model step and
+continues the turn; the runtime does not signal or kill Codex for normal
+interrupt delivery. If no hook claims the messages during an active turn,
+pending messages are delivered at the start of the next backend call by adding
+them to the lead prompt. Delivery route details are recorded in event/runtime
+logs such as `inbox.delivered_via_hook` and `inbox.delivered_via_resume`.
+
+Use `agents.cancel` for urgent process termination. Cancellation may interrupt
+or kill owned subprocesses and can require partial-output recovery; it is not
+the normal `agents.interrupt` delivery path.
 
 `agents.wait` polls `current/state.json` and returns `output.md` when the call is
 completed. If a timeout expires, it returns `timeout` plus the same structured

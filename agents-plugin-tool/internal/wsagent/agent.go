@@ -242,6 +242,7 @@ type Layout struct {
 	AgentDir          string
 	AgentFile         string
 	InboxDir          string
+	InboxLockFile     string
 	OutboxDir         string
 	CurrentDir        string
 	CurrentLockFile   string
@@ -428,12 +429,8 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 		runner = CodexRunner{}
 	}
 	hookCommand := ""
-	var interruptPending func() (bool, error)
 	if opts.CaptureStreams {
 		hookCommand = interruptHookCommand(layout.Root, agent.Name)
-		interruptPending = func() (bool, error) {
-			return m.InboxPending(layout.Root, agent.Name)
-		}
 	}
 	var onSessionID func(string) error
 	if opts.CaptureStreams {
@@ -460,53 +457,27 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	prompt := opts.Prompt
 	var result RunnerResult
 	var err error
-	for attempt := 0; attempt < 8; attempt++ {
-		var messages []Message
-		messages, err = m.drainPendingInbox(layout)
-		if err != nil {
-			return "", agent, err
-		}
-		if len(messages) > 0 {
-			prompt = composeLeadMessagePrompt(messages, prompt)
-			_ = appendRuntimeLog(layout, m.now(), "inbox.delivered", map[string]any{
-				"count": len(messages),
-			})
-			_ = appendEvent(layout.EventsFile, m.now(), "inbox.delivered", map[string]any{
-				"count": len(messages),
-			})
-		}
-		result, err = runner.Call(RunnerRequest{
-			Root:                 layout.Root,
-			Prompt:               prompt,
-			Model:                agent.Model,
-			SessionID:            agent.SessionID,
-			SystemPromptPath:     absOptional(layout.AgentDir, agent.SystemPromptPath),
-			InterruptHookCommand: hookCommand,
-			Stdout:               stdoutWriter,
-			Stderr:               stderrWriter,
-			OnSessionID:          onSessionID,
-			InterruptPending:     interruptPending,
-			Timeout:              opts.Timeout,
-			InheritProcessGroup:  opts.CaptureStreams,
-			ToolProfile:          opts.ToolProfile,
-		})
-		if err != nil {
-			break
-		}
-		if result.SessionID != "" {
-			agent.SessionID = result.SessionID
-		}
-		if !result.Interrupted {
-			break
-		}
-		_ = appendRuntimeLog(layout, m.now(), "backend.call.interrupted", map[string]any{
-			"session_id": result.SessionID,
-		})
-		_ = appendEvent(layout.EventsFile, m.now(), "call.interrupted", map[string]any{
-			"session_id": result.SessionID,
-		})
-		prompt = ""
+	messages, err := m.deliverPendingInbox(layout, "resume")
+	if err != nil {
+		return "", agent, err
 	}
+	if len(messages) > 0 {
+		prompt = composeLeadMessagePrompt(messages, prompt)
+	}
+	result, err = runner.Call(RunnerRequest{
+		Root:                 layout.Root,
+		Prompt:               prompt,
+		Model:                agent.Model,
+		SessionID:            agent.SessionID,
+		SystemPromptPath:     absOptional(layout.AgentDir, agent.SystemPromptPath),
+		InterruptHookCommand: hookCommand,
+		Stdout:               stdoutWriter,
+		Stderr:               stderrWriter,
+		OnSessionID:          onSessionID,
+		Timeout:              opts.Timeout,
+		InheritProcessGroup:  opts.CaptureStreams,
+		ToolProfile:          opts.ToolProfile,
+	})
 	if err != nil {
 		agent.Status = StatusFailed
 		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
@@ -515,14 +486,8 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 		_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": err.Error()})
 		return "", agent, err
 	}
-	if result.Interrupted {
-		err := errors.New("codex call interrupted repeatedly without producing a final response")
-		agent.Status = StatusFailed
-		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
-		_ = writeAgent(layout.AgentFile, agent)
-		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": err.Error()})
-		_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": err.Error()})
-		return "", agent, err
+	if result.SessionID != "" {
+		agent.SessionID = result.SessionID
 	}
 	_ = appendRuntimeLog(layout, m.now(), "backend.call.complete", map[string]any{
 		"session_id": result.SessionID,
@@ -1427,7 +1392,13 @@ func nextInboxSeq(dir string) int {
 	return maxSeq + 1
 }
 
-func (m Manager) drainPendingInbox(layout Layout) ([]Message, error) {
+func (m Manager) deliverPendingInbox(layout Layout, route string) ([]Message, error) {
+	unlock, err := m.acquireInboxDeliveryLock(layout)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	matches, err := filepath.Glob(filepath.Join(layout.InboxDir, "*.json"))
 	if err != nil {
 		return nil, fmt.Errorf("list inbox: %w", err)
@@ -1448,31 +1419,76 @@ func (m Manager) drainPendingInbox(layout Layout) ([]Message, error) {
 		}
 		messages = append(messages, msg)
 	}
+	if len(messages) > 0 {
+		fields := map[string]any{
+			"count":       len(messages),
+			"message_ids": messageIDs(messages),
+		}
+		_ = appendRuntimeLog(layout, m.now(), "inbox.delivered_via_"+route, fields)
+		_ = appendEvent(layout.EventsFile, m.now(), "inbox.delivered_via_"+route, fields)
+	}
 	return messages, nil
 }
 
-func (m Manager) InboxPending(root, name string) (bool, error) {
+func (m Manager) DeliverPendingInbox(root, name, route string) ([]Message, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
+	if route == "" {
+		route = "manual"
+	}
 	layout, err := m.layout(root, name, false)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	matches, err := filepath.Glob(filepath.Join(layout.InboxDir, "*.json"))
-	if err != nil {
-		return false, fmt.Errorf("list inbox: %w", err)
+	return m.deliverPendingInbox(layout, route)
+}
+
+func (m Manager) acquireInboxDeliveryLock(layout Layout) (func(), error) {
+	if err := os.MkdirAll(layout.InboxDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create inbox dir: %w", err)
 	}
-	for _, path := range matches {
-		msg, err := readMessage(path)
-		if err != nil {
-			return false, err
+	for attempt := 0; attempt < 2; attempt++ {
+		file, err := os.OpenFile(layout.InboxLockFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			payload := map[string]any{
+				"schema_version": schemaVersion,
+				"pid":            os.Getpid(),
+				"started_at":     m.now().UTC().Format(time.RFC3339),
+			}
+			raw, _ := json.Marshal(payload)
+			_, _ = file.Write(append(raw, '\n'))
+			_ = file.Close()
+			return func() { _ = os.Remove(layout.InboxLockFile) }, nil
 		}
-		if msg.Status == "pending" {
-			return true, nil
+		if !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("create inbox delivery lock: %w", err)
 		}
+		stale, staleErr := m.currentCallLockStale(layout.InboxLockFile)
+		if staleErr != nil {
+			return nil, staleErr
+		}
+		if !stale {
+			return nil, fmt.Errorf("agent inbox delivery is already in progress")
+		}
+		_ = os.Remove(layout.InboxLockFile)
 	}
-	return false, nil
+	return nil, fmt.Errorf("agent inbox delivery is already in progress")
+}
+
+func messageIDs(messages []Message) []string {
+	ids := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		ids = append(ids, msg.ID)
+	}
+	return ids
+}
+
+func ComposeLeadMessageFeedback(messages []Message) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	return composeLeadMessagePrompt(messages, "")
 }
 
 func composeLeadMessagePrompt(messages []Message, prompt string) string {
@@ -1521,6 +1537,7 @@ func (m Manager) layout(root, name string, create bool) (Layout, error) {
 		AgentDir:          dir,
 		AgentFile:         filepath.Join(dir, "agent.json"),
 		InboxDir:          filepath.Join(dir, "inbox"),
+		InboxLockFile:     filepath.Join(dir, "inbox", "delivery.lock"),
 		OutboxDir:         filepath.Join(dir, "outbox"),
 		CurrentDir:        filepath.Join(dir, "current"),
 		CurrentLockFile:   filepath.Join(dir, "current", "setup.lock"),

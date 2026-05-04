@@ -88,6 +88,9 @@ Out of scope:
 - `260503-feat-ws-agent-tier-config` — Phase 5 user-local tier model config:
   `config.agents_tier`, backend inference, registration precedence, and CLI
   fallback.
+- `260504-feat-ws-mcp-hook-driven-interrupt` — Follow-up Codex interrupt fix:
+  `agents.interrupt` now uses hook-injected mailbox delivery as the primary
+  active-turn path, while process termination remains under `agents.cancel`.
 
 ## Active Children
 
@@ -96,9 +99,6 @@ Out of scope:
   authority. The first live MCP server for a worktree becomes lead; later MCP
   servers for the same worktree become delegates; environment profiles can only
   further restrict the effective role.
-- `260504-feat-ws-mcp-hook-driven-interrupt` — Follow-up Codex interrupt fix:
-  make `agents.interrupt` use hook-injected mailbox delivery as the primary
-  active-turn path and keep process termination under `agents.cancel`.
 
 ## Remaining Failure Evidence
 

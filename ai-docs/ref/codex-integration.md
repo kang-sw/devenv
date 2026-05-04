@@ -176,12 +176,10 @@ but `model_instructions_file` is simpler.
 Enable via `-c features.codex_hooks=true`.
 
 Update from 2026-05-04 on Codex CLI 0.128.0 / WSL2 Linux: the inline
-`hooks.PostToolUse` form below was accepted without a parse error but did not
-fire during `codex exec --json` smoke tests, even with `--enable codex_hooks`.
-Treat this surface as host/version-sensitive and verify with a minimal hook that
-exits 2 before relying on it for active interruption. The ws agent runtime keeps
-the hook-shaped configuration for compatibility but also uses a worker-side
-inbox watcher for Codex async interrupt delivery.
+`hooks.PostToolUse` form below fires during `codex exec --json`. The important
+host difference from the Claude prior art is semantic rather than configurational:
+`PostToolUse` `exit 2` injects hook feedback into the next model step instead
+of stopping the Codex subprocess and returning control to the wrapper.
 
 ### Injecting Hooks via `-c`
 
@@ -204,7 +202,7 @@ The full event key must take an array value directly.
 
 | Event | Fires | Useful for |
 |---|---|---|
-| `PostToolUse` | After each tool execution | Interrupt/mailbox check (exit 2 stops turn) |
+| `PostToolUse` | After each tool execution | Interrupt/mailbox check (exit 2 injects feedback) |
 | `SessionStart` | On session start and resume | Developer context injection |
 | `PreToolUse` | Before each tool execution | Blocking commands |
 | `Stop` | When turn concludes | Drain-loop alternative via `decision: "block"` |
@@ -214,10 +212,16 @@ The full event key must take an array value directly.
 | Exit code | Effect |
 |---|---|
 | 0 | Continue normally |
-| 2 + stderr | Blocks the tool; agent sees "blocked by environment hook" and stops turn |
+| 2 + stderr | For `PostToolUse`, inject stderr as hook feedback into the next model step and continue the turn |
 
-The `WS_AGENT_OUTBOX` env var is inherited by the hook shell. Hook scripts can
-read it directly without any per-call configuration.
+For `PostToolUse`, plain stdout text was ignored in smoke testing. JSON stdout
+with `decision: "block"` and `hookSpecificOutput.additionalContext` also reached
+the next model step. Use stderr plus exit 2 for the simple mailbox delivery
+path unless a structured hook result is needed.
+
+Codex hook commands receive hook metadata as JSON on stdin. The ws Codex
+adapter passes the repository root and agent name in the configured hook command
+instead of relying on a Claude-style `WS_AGENT_OUTBOX` environment variable.
 
 ## Model Flag Behavior
 

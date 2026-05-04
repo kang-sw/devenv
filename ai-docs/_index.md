@@ -261,8 +261,7 @@ This index lists active tickets only; completed tickets live under
 |------|--------|---------|
 | `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
 | `260503-epic-ws-agent-workflow-stability` | todo | Live stabilization epic for named-agent workflow; completed phases split into child tickets, active child is worktree orchestrator lock |
-| `260503-feat-ws-mcp-worktree-orchestrator-lock` | todo | Worktree-local MCP orchestrator lock; delegate containment, prompt orientation, current-call locking, and initial interrupt surface implemented; leaf/profile and hook-driven interrupt follow-ups remain |
-| `260504-feat-ws-mcp-hook-driven-interrupt` | todo | Rework Codex interrupt delivery to use hook-injected inbox messages instead of signal-based subprocess interruption |
+| `260503-feat-ws-mcp-worktree-orchestrator-lock` | todo | Worktree-local MCP orchestrator lock; delegate containment, prompt orientation, current-call locking, initial interrupt surface, and hook-driven interrupt correction implemented; leaf/profile follow-up remains |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
 | `260429-feat-api-deps` | todo | ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt, pre-router prompt, bin tools, workflow integration |
@@ -275,7 +274,6 @@ This index lists active tickets only; completed tickets live under
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
 `260503-epic-ws-agent-workflow-stability` — active runtime quality gate for `write-code`; completed slices split into child tickets, current blocker is plugin-managed containment smoke
 `260503-feat-ws-mcp-worktree-orchestrator-lock` — Phase 6 child: delegate containment, host-neutral orientation, current-call locking, and initial interrupt surface implemented; remaining follow-up is durable leaf-profile assignment
-`260504-feat-ws-mcp-hook-driven-interrupt` — follow-up runtime slice: make Codex `agents.interrupt` hook-driven and keep signal/kill behavior under cancel semantics
 `260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is core implementation orchestration after resolving remaining runtime gaps
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
@@ -294,21 +292,17 @@ merges; do not add `spec:` frontmatter, run `ws:update-spec`, or edit
 `delegate-orientation` to public `agents.register`. Plugin-managed smoke showed
 delegated Codex agents cannot see `agents.*`/`config.*`; `subquery` remains
 available at delegate level and intentionally keeps its scoped prompt. The
-current WSL2/Linux session added same-agent `agents.call` setup serialization
-and durable `agents.interrupt` delivery with inbox-backed resume.
+current WSL2/Linux session added same-agent `agents.call` setup serialization,
+durable `agents.interrupt`, and the hook-driven Codex interrupt correction.
+`agents.call` now uses `current/setup.lock`; `agents.interrupt` queues
+`inbox/<id>.json`; active Codex delivery uses `PostToolUse` hook feedback rather
+than signal/kill subprocess interruption.
 
-**In-flight:** `260504-feat-ws-mcp-hook-driven-interrupt` captures the next
-runtime correction. `agents.call` now uses `current/setup.lock`;
-`agents.interrupt` queues `inbox/<id>.json`. Follow-up testing on Codex CLI
-0.128.0 / WSL2 showed inline `PostToolUse` hooks do fire, but `exit 2` injects
-hook feedback into the next model step instead of stopping the subprocess. The
-next slice should make hook-injected inbox delivery the primary interrupt path
-and keep signal/kill behavior under `agents.cancel`.
+**In-flight:** none expected after the hook-driven interrupt slice commits.
 
-**Next actions:** Implement `260504-feat-ws-mcp-hook-driven-interrupt`, then
-refresh the local Codex plugin cache before plugin-managed verification of the
-new `agents.interrupt` surface. Remaining runtime gap: durable leaf-level role
-assignment beyond environment propagation.
+**Next actions:** Refresh the local Codex plugin cache before plugin-managed
+verification of the updated `agents.interrupt` surface. Remaining runtime gap:
+durable leaf-level role assignment beyond environment propagation.
 
 **Key artifacts:** `agents-plugin-tool/internal/wsagent/agent.go` — current-call
 and one-shot/subquery flow; `agents-plugin-tool/internal/mcp/server.go` — role

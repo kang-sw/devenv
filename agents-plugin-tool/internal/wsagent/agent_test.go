@@ -3,7 +3,6 @@ package wsagent
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -565,7 +564,7 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 	}
 }
 
-func TestInterruptQueuesInboxAndRunCurrentDrainsAfterHookInterruption(t *testing.T) {
+func TestInterruptQueuesInboxAndHookDeliversMessages(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	starter := &fakeWorkerStarter{pid: 4567}
@@ -581,45 +580,33 @@ func TestInterruptQueuesInboxAndRunCurrentDrainsAfterHookInterruption(t *testing
 		t.Fatal(err)
 	}
 
-	runner := &interruptingRunner{
-		onFirst: func() error {
-			queued, err := base.Interrupt(InterruptOptions{Root: repo, Name: "impl", Message: "Switch to tests only."})
-			if err != nil {
-				return err
-			}
-			if queued.MessageID != "000001" || !queued.Queued {
-				return fmt.Errorf("queued interrupt mismatch: %+v", queued)
-			}
-			return nil
-		},
-	}
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-		Runner:    runner,
-	})
-	if err := manager.RunCurrent(repo, "impl"); err != nil {
-		t.Fatalf("RunCurrent returned error: %v", err)
-	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("runner calls = %d, want 2", len(runner.calls))
-	}
-	if runner.calls[0].InterruptHookCommand == "" {
-		t.Fatal("first runner call missing interrupt hook command")
-	}
-	if runner.calls[0].Prompt != "async prompt" {
-		t.Fatalf("first prompt = %q", runner.calls[0].Prompt)
-	}
-	if !strings.Contains(runner.calls[1].Prompt, "Switch to tests only.") ||
-		!strings.Contains(runner.calls[1].Prompt, "Lead messages queued") {
-		t.Fatalf("second prompt did not include interrupt:\n%s", runner.calls[1].Prompt)
-	}
-	pending, err := manager.InboxPending(repo, "impl")
+	queued, err := base.Interrupt(InterruptOptions{Root: repo, Name: "impl", Message: "Switch to tests only."})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending {
-		t.Fatal("inbox still has pending message after drain")
+	if queued.MessageID != "000001" || !queued.Queued {
+		t.Fatalf("queued interrupt mismatch: %+v", queued)
+	}
+	messages, err := base.DeliverPendingInbox(repo, "impl", "hook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Text != "Switch to tests only." {
+		t.Fatalf("delivered messages mismatch: %+v", messages)
+	}
+	feedback := ComposeLeadMessageFeedback(messages)
+	if !strings.Contains(feedback, "Switch to tests only.") ||
+		!strings.Contains(feedback, "Lead messages queued") {
+		t.Fatalf("feedback did not include interrupt:\n%s", feedback)
+	}
+
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    &fakeRunner{},
+	})
+	if err := manager.RunCurrent(repo, "impl"); err != nil {
+		t.Fatalf("RunCurrent returned error: %v", err)
 	}
 	layout, err := manager.layout(repo, "impl", false)
 	if err != nil {
@@ -636,14 +623,17 @@ func TestInterruptQueuesInboxAndRunCurrentDrainsAfterHookInterruption(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if printed != "resumed\n" {
+	if strings.Contains(printed, "Switch to tests only.") {
+		t.Fatalf("hook-delivered interrupt was unexpectedly re-delivered via resume:\n%s", printed)
+	}
+	if !strings.Contains(printed, "reply: async prompt") {
 		t.Fatalf("printed = %q", printed)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 40})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(tail, "call.interrupted") || !strings.Contains(tail, "inbox.delivered") {
+	if !strings.Contains(tail, "inbox.delivered_via_hook") || strings.Contains(tail, "call.interrupted") {
 		t.Fatalf("tail missing interrupt diagnostics:\n%s", tail)
 	}
 }

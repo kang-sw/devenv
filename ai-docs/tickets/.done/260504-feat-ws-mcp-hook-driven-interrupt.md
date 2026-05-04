@@ -5,6 +5,7 @@ related:
   260503-feat-ws-mcp-worktree-orchestrator-lock: introduced current-call serialization and initial inbox-backed agents.interrupt
   260503-feat-agents-plugin-async-agent-calls: async worker lifecycle and cancel surface
   260429-research-host-neutral-ws-plugin: host-neutral ws plugin architecture anchor
+completed: 2026-05-04
 ---
 
 # ws-mcp hook-driven interrupt delivery
@@ -92,6 +93,16 @@ Success criteria:
 - Inbox state remains two-state (`pending` and `delivered`) with route details
   in runtime/event logs.
 
+### Result - 2026-05-04
+
+Implemented hook-driven inbox delivery for active Codex turns. The internal
+`agents check-inbox` helper now claims pending messages through an inbox
+delivery lock, marks them `delivered`, writes lead-message feedback to stderr,
+and exits 2 so Codex injects the feedback into the next model step. Delivery
+routes are logged as `inbox.delivered_via_hook` or
+`inbox.delivered_via_resume`; the inbox state machine remains two-state and
+does not infer model compliance.
+
 ### Phase 2: Demote signal interruption to cancel-only behavior
 
 Remove signal-based active interrupt from the normal Codex runner path:
@@ -109,6 +120,14 @@ Success criteria:
 - `agents.interrupt` never relies on broken pipes or nonzero Codex process exit
   as its success condition.
 - Existing `agents.cancel` behavior remains available for stop-the-work cases.
+
+### Result - 2026-05-04
+
+Removed the normal interrupt path's worker-side inbox watcher and Codex
+subprocess signal/kill behavior. `RunnerRequest` no longer carries an
+`InterruptPending` callback, and `CodexRunner` no longer sends `os.Interrupt`
+for `agents.interrupt`. Nonzero Codex exits are treated as backend failures
+instead of resumable interrupt delivery.
 
 ### Phase 3: Documentation and smoke repair
 
@@ -128,3 +147,11 @@ Success criteria:
 - A local Codex smoke verifies hook-driven delivery for an active turn and a
   no-active-call smoke verifies next-call delivery.
 - Documentation no longer describes normal interrupt delivery as signal-driven.
+
+### Result - 2026-05-04
+
+Updated Codex and ws agent runtime docs to describe the tested hook semantics:
+inline `PostToolUse` hooks fire on WSL2/Codex CLI 0.128.0, and `exit 2` injects
+feedback instead of stopping the subprocess. Go tests now cover hook delivery,
+resume delivery, two-state inbox transitions, and the absence of signal-driven
+interrupt retry behavior.

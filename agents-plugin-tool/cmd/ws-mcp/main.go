@@ -483,11 +483,12 @@ func agentsCheckInbox(args []string) {
 	name := fs.String("name", "", "agent name")
 	_ = fs.Parse(args)
 
-	pending, err := wsagent.NewManager(wsagent.Options{}).InboxPending(defaultRoot(*root), *name)
+	messages, err := wsagent.NewManager(wsagent.Options{}).DeliverPendingInbox(defaultRoot(*root), *name, "hook")
 	if err != nil {
 		fatal("agents check-inbox", err)
 	}
-	if pending {
+	if len(messages) > 0 {
+		fmt.Fprint(os.Stderr, wsagent.ComposeLeadMessageFeedback(messages))
 		os.Exit(2)
 	}
 }
