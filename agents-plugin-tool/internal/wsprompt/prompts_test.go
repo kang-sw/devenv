@@ -91,6 +91,7 @@ func TestResolveWriteCodePromptSet(t *testing.T) {
 		want string
 	}{
 		{"api-doc-manager", "core", "You are an API documentation manager"},
+		{"api-doc-cargo-brief", "", "`cargo-brief` is available"},
 		{"pre-router", "light", "You are an API documentation pre-router"},
 		{"implementer", "core", "You are a code implementer."},
 		{"mental-model-updater", "core", "You are updating mental-model documents"},

@@ -54,15 +54,21 @@ type Options struct {
 }
 
 type RegisterOptions struct {
-	Root                string
-	Name                string
-	Backend             string
-	Tier                string
-	Model               string
-	Prompts             []string
-	PromptRefs          []string
-	SystemPromptText    string
-	SuppressOrientation bool
+	Root                  string
+	Name                  string
+	Backend               string
+	Tier                  string
+	Model                 string
+	Prompts               []string
+	PromptRefs            []string
+	ConditionalPromptRefs []ConditionalPromptRef
+	SystemPromptText      string
+	SuppressOrientation   bool
+}
+
+type ConditionalPromptRef struct {
+	Binary    string
+	PromptRef string
 }
 
 type CallOptions struct {
@@ -276,6 +282,11 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if !opts.SuppressOrientation && (len(promptSpecs) == 0 || promptSpecs[0] != "delegate-orientation") {
 		promptSpecs = append([]string{"delegate-orientation"}, promptSpecs...)
 	}
+	conditionalSpecs, err := m.resolveConditionalPromptRefs(opts.ConditionalPromptRefs)
+	if err != nil {
+		return Agent{}, Layout{}, err
+	}
+	promptSpecs = append(promptSpecs, conditionalSpecs...)
 	resolved, err := wsprompt.Resolve(promptSpecs, opts.SystemPromptText, opts.Tier, opts.Model)
 	if err != nil {
 		return Agent{}, Layout{}, err
@@ -348,6 +359,28 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		return Agent{}, Layout{}, err
 	}
 	return agent, layout, nil
+}
+
+func (m Manager) resolveConditionalPromptRefs(refs []ConditionalPromptRef) ([]string, error) {
+	var specs []string
+	for _, ref := range refs {
+		binary := strings.TrimSpace(ref.Binary)
+		if binary == "" {
+			return nil, errors.New("conditional prompt binary is required")
+		}
+		if _, err := exec.LookPath(binary); err != nil {
+			if errors.Is(err, exec.ErrNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("resolve conditional prompt binary %q: %w", binary, err)
+		}
+		promptRef := strings.TrimSpace(ref.PromptRef)
+		if promptRef == "" {
+			promptRef = binary
+		}
+		specs = append(specs, promptRef)
+	}
+	return specs, nil
 }
 
 func (m Manager) syncCall(opts syncCallOptions) (Agent, string, error) {
@@ -957,6 +990,31 @@ func (m Manager) Status(root, name string) (string, error) {
 	}
 	fmt.Fprintf(&b, "follow_up: %s\n", followUpForCall(call))
 	return b.String(), nil
+}
+
+func (m Manager) Inspect(root, name string) (Agent, bool, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	layout, err := m.layout(root, name, false)
+	if err != nil {
+		return Agent{}, false, err
+	}
+	if _, err := m.reconcileActiveCall(layout); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Agent{}, false, err
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		return Agent{}, false, err
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return agent, false, nil
+	}
+	if err != nil {
+		return Agent{}, false, err
+	}
+	return agent, isActiveCallStatus(call.Status), nil
 }
 
 func (m Manager) Tail(opts TailOptions) (string, error) {

@@ -273,6 +273,76 @@ func TestRegisterPromptRefsAliasAndExplicitTierWins(t *testing.T) {
 	}
 }
 
+func TestRegisterConditionalPromptRefPresent(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "ws-test-tool")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, layout, err := manager.Register(RegisterOptions{
+		Root:    repo,
+		Name:    "conditional",
+		Prompts: []string{"code-reviewer"},
+		ConditionalPromptRefs: []ConditionalPromptRef{
+			{Binary: "ws-test-tool", PromptRef: "code-review-fit"},
+		},
+		SuppressOrientation: true,
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if len(agent.PromptRefs) != 2 || agent.PromptRefs[0] != "code-reviewer" || agent.PromptRefs[1] != "code-review-fit" {
+		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
+	}
+	raw, err := os.ReadFile(layout.SystemFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "Fit Partition") {
+		t.Fatalf("conditional prompt was not materialized:\n%s", raw)
+	}
+}
+
+func TestRegisterConditionalPromptRefAbsent(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, layout, err := manager.Register(RegisterOptions{
+		Root:    repo,
+		Name:    "conditional",
+		Prompts: []string{"code-reviewer"},
+		ConditionalPromptRefs: []ConditionalPromptRef{
+			{Binary: "ws-test-tool-definitely-missing", PromptRef: "code-review-fit"},
+		},
+		SuppressOrientation: true,
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if len(agent.PromptRefs) != 1 || agent.PromptRefs[0] != "code-reviewer" {
+		t.Fatalf("prompt refs = %+v", agent.PromptRefs)
+	}
+	raw, err := os.ReadFile(layout.SystemFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "Fit Partition") {
+		t.Fatalf("absent conditional prompt was materialized:\n%s", raw)
+	}
+}
+
 func TestRegisterAppliesConfiguredTierModel(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")

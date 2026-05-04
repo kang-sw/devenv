@@ -866,6 +866,21 @@ func TestAPIAskRejectsMalformedRouterDomainSlug(t *testing.T) {
 	}
 }
 
+func TestAPIManagerExpiredUsesRecentUseTimestamp(t *testing.T) {
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-apiManagerTTL + time.Second).Format(time.RFC3339)
+	old := now.Add(-apiManagerTTL - time.Second).Format(time.RFC3339)
+	if apiManagerExpired(wsagent.Agent{LastCallAt: recent, CreatedAt: old}, now) {
+		t.Fatal("recent last call expired")
+	}
+	if !apiManagerExpired(wsagent.Agent{LastCallAt: old}, now) {
+		t.Fatal("old last call did not expire")
+	}
+	if !apiManagerExpired(wsagent.Agent{LastSeenAt: old}, now) {
+		t.Fatal("old last seen did not expire")
+	}
+}
+
 func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")

@@ -18,8 +18,10 @@ import (
 const (
 	apiDocManagerPrompt = "api-doc-manager"
 	apiPreRouterPrompt  = "pre-router"
+	apiCargoBriefPrompt = "api-doc-cargo-brief"
 	apiManagerPrefix    = "api-doc-"
 	apiAskTimeout       = 10 * time.Minute
+	apiManagerTTL       = 5 * time.Minute
 )
 
 type apiRuntime interface {
@@ -53,13 +55,23 @@ func (wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string
 func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
 	mgr := wsagent.NewManager(wsagent.Options{})
 	name := apiManagerName(domain)
-	if _, err := mgr.Status(root, name); err != nil {
+	agent, active, err := mgr.Inspect(root, name)
+	if err == nil && apiManagerExpired(agent, time.Now().UTC()) && !active {
+		if eraseErr := mgr.Erase(root, name); eraseErr != nil {
+			return "", eraseErr
+		}
+		err = os.ErrNotExist
+	}
+	if err != nil {
 		if _, _, regErr := mgr.Register(wsagent.RegisterOptions{
-			Root:                root,
-			Name:                name,
-			Backend:             "codex",
-			Tier:                "core",
-			Prompts:             []string{apiDocManagerPrompt},
+			Root:    root,
+			Name:    name,
+			Backend: "codex",
+			Tier:    "core",
+			Prompts: []string{apiDocManagerPrompt},
+			ConditionalPromptRefs: []wsagent.ConditionalPromptRef{
+				{Binary: "cargo-brief", PromptRef: apiCargoBriefPrompt},
+			},
 			SuppressOrientation: true,
 		}); regErr != nil {
 			return "", regErr
@@ -69,6 +81,20 @@ func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt st
 		return "", err
 	}
 	return mgr.Wait(wsagent.WaitOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
+}
+
+func apiManagerExpired(agent wsagent.Agent, now time.Time) bool {
+	for _, value := range []string{agent.LastCallAt, agent.LastSeenAt, agent.CreatedAt} {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			continue
+		}
+		return now.Sub(t) > apiManagerTTL
+	}
+	return false
 }
 
 var apiDomainLocks sync.Map // map[string]*sync.Mutex; process-local guard for same-domain MCP calls.
