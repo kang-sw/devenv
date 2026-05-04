@@ -38,13 +38,36 @@ func TestResolveAgentExplicitModelWinsAndInfersBackend(t *testing.T) {
 	}
 }
 
-func TestResolveAgentDefaultCodex(t *testing.T) {
+func TestResolveAgentDefaultCoreModel(t *testing.T) {
 	backend, model, err := ResolveAgent(Options{CacheHome: filepath.Join(t.TempDir(), "cache")}, "sonnet", "", "")
 	if err != nil {
 		t.Fatalf("ResolveAgent returned error: %v", err)
 	}
-	if backend != "codex" || model != "" {
+	if backend != "codex" || model != "gpt-5.5" {
 		t.Fatalf("resolved backend/model = %q/%q", backend, model)
+	}
+}
+
+func TestResolveAgentDefaultTierModels(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	tests := []struct {
+		tier  string
+		model string
+	}{
+		{tier: "light", model: "gpt-5.4-mini"},
+		{tier: "core", model: "gpt-5.5"},
+		{tier: "deep", model: "gpt-5.5"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.tier, func(t *testing.T) {
+			backend, model, err := ResolveAgent(Options{CacheHome: cache}, tc.tier, "", "")
+			if err != nil {
+				t.Fatalf("ResolveAgent returned error: %v", err)
+			}
+			if backend != "codex" || model != tc.model {
+				t.Fatalf("resolved backend/model = %q/%q", backend, model)
+			}
+		})
 	}
 }
 
@@ -61,8 +84,17 @@ func TestShowReturnsPathAndDefaultWithoutCreatingFile(t *testing.T) {
 	if view.Config.SchemaVersion != schemaVersion {
 		t.Fatalf("schema_version = %d", view.Config.SchemaVersion)
 	}
-	if len(view.Config.Agents.Tiers) != 0 {
+	if len(view.Config.Agents.Tiers) != 3 {
 		t.Fatalf("default tiers = %#v", view.Config.Agents.Tiers)
+	}
+	if light := view.Config.Agents.Tiers["light"]; light.Backend != "codex" || light.Model != "gpt-5.4-mini" {
+		t.Fatalf("default light tier = %#v", light)
+	}
+	if core := view.Config.Agents.Tiers["core"]; core.Backend != "codex" || core.Model != "gpt-5.5" {
+		t.Fatalf("default core tier = %#v", core)
+	}
+	if deep := view.Config.Agents.Tiers["deep"]; deep.Backend != "codex" || deep.Model != "gpt-5.5" {
+		t.Fatalf("default deep tier = %#v", deep)
 	}
 	if _, err := os.Stat(wantPath); !os.IsNotExist(err) {
 		t.Fatalf("Show created config file or stat failed: %v", err)
@@ -81,5 +113,44 @@ func TestShowReturnsConfiguredMapping(t *testing.T) {
 	mapping := view.Config.Agents.Tiers["light"]
 	if mapping.Backend != "gemini" || mapping.Model != "gemini-3-1-pro" {
 		t.Fatalf("light mapping = %#v", mapping)
+	}
+}
+
+func TestLoadBackfillsMissingDefaultTiers(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	path, err := Path(Options{CacheHome: cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{
+  "schema_version": 1,
+  "agents": {
+    "tiers": {
+      "light": {
+        "backend": "gemini",
+        "model": "gemini-3-1-pro"
+      }
+    }
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(Options{CacheHome: cache})
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if light := cfg.Agents.Tiers["light"]; light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
+		t.Fatalf("light mapping was overwritten: %#v", light)
+	}
+	if core := cfg.Agents.Tiers["core"]; core.Backend != "codex" || core.Model != "gpt-5.5" {
+		t.Fatalf("core mapping = %#v", core)
+	}
+	if deep := cfg.Agents.Tiers["deep"]; deep.Backend != "codex" || deep.Model != "gpt-5.5" {
+		t.Fatalf("deep mapping = %#v", deep)
 	}
 }

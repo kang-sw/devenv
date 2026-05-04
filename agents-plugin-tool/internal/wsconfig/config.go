@@ -57,6 +57,7 @@ func Load(opts Options) (Config, error) {
 	if cfg.Agents.Tiers == nil {
 		cfg.Agents.Tiers = map[string]AgentTier{}
 	}
+	applyDefaultTiers(cfg.Agents.Tiers)
 	return cfg, nil
 }
 
@@ -153,11 +154,26 @@ func Path(opts Options) (string, error) {
 }
 
 func defaultConfig() Config {
+	tiers := map[string]AgentTier{}
+	applyDefaultTiers(tiers)
 	return Config{
 		SchemaVersion: schemaVersion,
 		Agents: AgentsConfig{
-			Tiers: map[string]AgentTier{},
+			Tiers: tiers,
 		},
+	}
+}
+
+func applyDefaultTiers(tiers map[string]AgentTier) {
+	defaults := map[string]AgentTier{
+		"light": {Backend: "codex", Model: "gpt-5.4-mini"},
+		"core":  {Backend: "codex", Model: "gpt-5.5"},
+		"deep":  {Backend: "codex", Model: "gpt-5.5"},
+	}
+	for tier, mapping := range defaults {
+		if _, ok := tiers[tier]; !ok {
+			tiers[tier] = mapping
+		}
 	}
 }
 

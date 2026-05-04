@@ -194,7 +194,7 @@ func TestRegisterResolvesPromptChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Tier != "core" || agent.Model != "" {
+	if agent.Tier != "core" || agent.Model != "gpt-5.5" {
 		t.Fatalf("tier/model = %q/%q", agent.Tier, agent.Model)
 	}
 	if agent.SystemPromptPath != "system.md" {

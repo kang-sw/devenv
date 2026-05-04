@@ -501,8 +501,9 @@ Input fields: none.
 Behavior:
 
 - The tool is read-only and does not create or modify `config.json`.
-- If no config file exists, the response contains the default empty config shape
-  and the path where config would be read from.
+- If no config file exists, the response contains the default config shape and
+  the path where config would be read from. Default Codex tier mappings are
+  `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` → `gpt-5.5`.
 - The JSON response contains `path` and `config` fields.
 - Delegate and leaf MCP tool profiles hide and reject this tool together with
   the other `config.*` tools.
@@ -525,8 +526,11 @@ Behavior:
 
 - Configuration is written to `~/.cache/ws@kang-sw-devenv/config.json`, or to
   `$WS_CACHE_HOME/config.json` when `WS_CACHE_HOME` is set.
+- Missing tier mappings in an existing config are backfilled from the default
+  Codex tier mappings without overwriting user-provided entries.
 - `agents.register` applies this mapping after prompt frontmatter tier
-  resolution and before defaulting to backend `codex`.
+  resolution. If no concrete model is provided by the call or tier mapping, the
+  backend falls back to `codex`.
 - Explicit `model` on `agents.register` bypasses tier configuration while still
   allowing backend inference when `backend` is omitted.
 

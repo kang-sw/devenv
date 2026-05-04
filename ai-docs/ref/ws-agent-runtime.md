@@ -241,10 +241,13 @@ Shared skills use workload-depth tiers, not provider model names:
 - `core` — normal implementation, review, synthesis, and document updates.
 - `deep` — broad architecture, contract design, reconstruction, or high-risk work.
 
-Backend adapters map tiers to concrete models through user-local configuration
-in `~/.cache/ws@kang-sw-devenv/config.json`. A concrete `model` may override
-the tier mapping for one agent registration; when `backend` is omitted, ws
-infers the backend from recognizable model names (`gpt-*`/`codex` → `codex`,
+Backend adapters map tiers to concrete models through defaults and user-local
+configuration in `~/.cache/ws@kang-sw-devenv/config.json`. The default Codex
+mapping is `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` →
+`gpt-5.5`; missing entries in an existing config are backfilled from these
+defaults without overwriting user-provided mappings. A concrete `model` may
+override the tier mapping for one agent registration; when `backend` is omitted,
+ws infers the backend from recognizable model names (`gpt-*`/`codex` → `codex`,
 `gemini*` → `gemini`, `haiku`/`sonnet`/`opus`/`claude` → `claude`) and otherwise
 falls back to `codex`.
 

@@ -212,8 +212,17 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	if before.Path != wantConfigPath() {
 		t.Fatalf("config show path = %q", before.Path)
 	}
-	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 0 {
+	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 3 {
 		t.Fatalf("default config show = %#v", before.Config)
+	}
+	if light := before.Config.Agents.Tiers["light"]; light.Backend != "codex" || light.Model != "gpt-5.4-mini" {
+		t.Fatalf("default light tier = %#v", light)
+	}
+	if core := before.Config.Agents.Tiers["core"]; core.Backend != "codex" || core.Model != "gpt-5.5" {
+		t.Fatalf("default core tier = %#v", core)
+	}
+	if deep := before.Config.Agents.Tiers["deep"]; deep.Backend != "codex" || deep.Model != "gpt-5.5" {
+		t.Fatalf("default deep tier = %#v", deep)
 	}
 
 	show("config", "agents-tier", "--tier", "light", "--model", "gemini-3-1-pro")
