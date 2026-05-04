@@ -4,6 +4,7 @@ related:
   260429-research-host-neutral-ws-plugin: research anchor for host-neutral ws plugin architecture
   260502-feat-agents-plugin-codex-port-scaffold: completed scaffold prerequisite
   260502-feat-agents-plugin-workflow-skill-drafts: completed first draft skill slice
+completed: 2026-05-04
 ---
 
 # agents-plugin skill porting roadmap
@@ -225,3 +226,10 @@ Status:
   operational parity.
 - Bootstrap has a dedicated design ticket that separates AGENTS/CLAUDE context,
   plugin-local context, install/update behavior, and project document scaffolding.
+
+## Closeout
+
+The epic scope is complete as of 2026-05-04. The remaining broad work is no
+longer skill porting: use `260504-chore-compress-workflow-docs` for the next
+documentation pass and future dedicated tickets for bootstrap operational parity
+or host-specific runtime verification.

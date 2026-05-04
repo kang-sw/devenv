@@ -259,7 +259,6 @@ This index lists active tickets only; completed tickets live under
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260503-epic-agents-plugin-skill-porting` | todo | Roadmap for porting `claude-plugin/skills/` into `agents-plugin/`: front-of-pipeline first, runtime/MCP boundary before core orchestration, bootstrap last |
 | `260503-epic-ws-agent-workflow-stability` | todo | Stabilization epic for named-agent workflow; active blockers closed, future runtime work should come from observed failures or deferred idea tickets |
 | `260503-epic-ws-mcp-vcs-reference-tools` | todo | Roadmap for portable `ws/git.*` MCP tooling plus ticket/spec/stem reference lookup |
 | `260503-feat-agents-plugin-runtime-boundary` | wip | Go-based stdio MCP baseline and runtime boundary for replacing implicit ws helper PATH dependency; Phases 1-2 complete |
@@ -273,40 +272,31 @@ This index lists active tickets only; completed tickets live under
 ## Ticket Queue
 
 <!-- Implementation order for todo/ tickets. One line per ticket: `stem` — purpose and dependency notes. -->
-`260503-epic-agents-plugin-skill-porting` — active roadmap for staged `agents-plugin` skill porting; next child sequence is remaining core implementation orchestration after `write-code`
+`260504-chore-compress-workflow-docs` — shorten AGENTS.md, bootstrap template, _index, active lead skills, and delegate-facing prompts without changing semantics
 `260503-epic-ws-agent-workflow-stability` — stabilization parent remains open for future observed runtime failures; no active blocker after worktree lock, hook-driven interrupt, and leaf deferral
 `260503-epic-ws-mcp-vcs-reference-tools` — portable MCP roadmap for `ws/git.*` and ticket/spec/stem reference graph tooling; supports later replacement of direct shell wording in shared skills
 `260503-feat-agents-plugin-runtime-boundary` — wip; macOS/Codex runtime launcher and release download path are verified; Windows plugin-managed launcher verification is deferred
-`260504-chore-compress-workflow-docs` — next-session pass to shorten AGENTS.md, bootstrap template, _index, active lead skills, and delegate-facing prompts without changing semantics
 `260429-feat-api-deps` — ws-ask-api 2-layer API doc cache; phases: api-doc-manager prompt → pre-router prompt → bin tools → workflow integration
 `260427-chore-claude-dash-windows` — verify native Windows build/runtime behavior for claude-dash
 
 ## Session Notes
 
-**Branch:** `topic/open-conventions-mcp-skills` — Codex-first `ws` plugin and
+**Branch:** `implement/api-docs-mcp` — Codex-first `ws` plugin and
 MCP runtime migration. Defer all spec and mental-model updates until this branch
 merges; do not add `spec:` frontmatter, run `ws:lead-update-spec`, or edit
 `ai-docs/spec/` / `ai-docs/mental-model/`.
 
-**Accomplished:** `6203e71` added worktree-local MCP lead/delegate authority,
-`5596eec` fixed launcher tool-surface probing, and `6f022ed` added
-`delegate-orientation` to public `agents.register`. Plugin-managed smoke showed
-delegated Codex agents cannot see `agents.*`/`config.*`; `subquery` remains
-available at delegate level and intentionally keeps its scoped prompt. The
-current WSL2/Linux session added same-agent `agents.call` setup serialization,
-durable `agents.interrupt`, and the hook-driven Codex interrupt correction.
-`agents.call` now uses `current/setup.lock`; `agents.interrupt` queues
-`inbox/<id>.json`; active Codex delivery uses `PostToolUse` hook feedback rather
-than signal/kill subprocess interruption. The worktree lock ticket is complete:
-lead/delegate containment is sufficient to resume orchestration skill
-migration. Stricter leaf-level role assignment and recursive `subquery` control
-are deferred to `260504-research-durable-leaf-role-assignment`.
+**Accomplished:** Agents plugin skill porting is complete and
+`260503-epic-agents-plugin-skill-porting` is closed. Recent work renamed
+Codex-first skills to the `lead-*` namespace, added API docs MCP and conditional
+prompt support, and established the compressed documentation style rule in
+`lead-workflow` and `lead-skill-authoring`.
 
-**In-flight:** none expected after the hook-driven interrupt slice commits.
+**In-flight:** `260504-chore-compress-workflow-docs` is the next prepared work.
 
-**Next actions:** Return to `260503-epic-agents-plugin-skill-porting`, starting
-with the remaining core orchestration skills after `write-code` (`implement`,
-`proceed`, then `sprint`) unless a new runtime failure appears.
+**Next actions:** Start Phase 1 of `260504-chore-compress-workflow-docs`:
+compress `AGENTS.md`, `agents-plugin/skills/lead-bootstrap/AGENTS.template.md`,
+and this index without changing workflow semantics.
 
 **Key artifacts:** `agents-plugin-tool/internal/wsagent/agent.go` — current-call
 and one-shot/subquery flow; `agents-plugin-tool/internal/mcp/server.go` — role
