@@ -446,6 +446,22 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
 		return toolTextResponse(req.ID, text, err)
+	case "agents.interrupt":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		message, _ := params.Arguments["message"].(string)
+		result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
+			Root:    root,
+			Name:    name,
+			Message: message,
+		})
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, fmt.Sprintf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID), nil)
 	case "agents.tail":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -816,6 +832,19 @@ func tools() []map[string]any {
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "agents.interrupt",
+			"description": "Queue an interrupt or redirect message for a registered ws agent.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":    stringProperty("Repository root. Defaults to the server root."),
+					"name":    stringProperty("Agent name."),
+					"message": stringProperty("Interrupt or redirect message to deliver to the agent."),
+				},
+				"required": []string{"name", "message"},
 			},
 		},
 		{

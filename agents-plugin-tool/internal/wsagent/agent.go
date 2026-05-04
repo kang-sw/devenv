@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,6 +71,12 @@ type CallOptions struct {
 	Prompt string
 }
 
+type InterruptOptions struct {
+	Root    string
+	Name    string
+	Message string
+}
+
 type CallResult struct {
 	AgentName  string
 	Status     string
@@ -78,6 +85,12 @@ type CallResult struct {
 	PromptPath string
 	StdoutPath string
 	StderrPath string
+}
+
+type InterruptResult struct {
+	AgentName string
+	MessageID string
+	Queued    bool
 }
 
 type WaitOptions struct {
@@ -231,6 +244,7 @@ type Layout struct {
 	InboxDir          string
 	OutboxDir         string
 	CurrentDir        string
+	CurrentLockFile   string
 	CurrentStateFile  string
 	CurrentStdout     string
 	CurrentStderr     string
@@ -413,6 +427,14 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	if runner == nil {
 		runner = CodexRunner{}
 	}
+	hookCommand := ""
+	var interruptPending func() (bool, error)
+	if opts.CaptureStreams {
+		hookCommand = interruptHookCommand(layout.Root, agent.Name)
+		interruptPending = func() (bool, error) {
+			return m.InboxPending(layout.Root, agent.Name)
+		}
+	}
 	var onSessionID func(string) error
 	if opts.CaptureStreams {
 		onSessionID = func(sessionID string) error {
@@ -435,20 +457,66 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 			})
 		}
 	}
-	result, err := runner.Call(RunnerRequest{
-		Root:                layout.Root,
-		Prompt:              opts.Prompt,
-		Model:               agent.Model,
-		SessionID:           agent.SessionID,
-		SystemPromptPath:    absOptional(layout.AgentDir, agent.SystemPromptPath),
-		Stdout:              stdoutWriter,
-		Stderr:              stderrWriter,
-		OnSessionID:         onSessionID,
-		Timeout:             opts.Timeout,
-		InheritProcessGroup: opts.CaptureStreams,
-		ToolProfile:         opts.ToolProfile,
-	})
+	prompt := opts.Prompt
+	var result RunnerResult
+	var err error
+	for attempt := 0; attempt < 8; attempt++ {
+		var messages []Message
+		messages, err = m.drainPendingInbox(layout)
+		if err != nil {
+			return "", agent, err
+		}
+		if len(messages) > 0 {
+			prompt = composeLeadMessagePrompt(messages, prompt)
+			_ = appendRuntimeLog(layout, m.now(), "inbox.delivered", map[string]any{
+				"count": len(messages),
+			})
+			_ = appendEvent(layout.EventsFile, m.now(), "inbox.delivered", map[string]any{
+				"count": len(messages),
+			})
+		}
+		result, err = runner.Call(RunnerRequest{
+			Root:                 layout.Root,
+			Prompt:               prompt,
+			Model:                agent.Model,
+			SessionID:            agent.SessionID,
+			SystemPromptPath:     absOptional(layout.AgentDir, agent.SystemPromptPath),
+			InterruptHookCommand: hookCommand,
+			Stdout:               stdoutWriter,
+			Stderr:               stderrWriter,
+			OnSessionID:          onSessionID,
+			InterruptPending:     interruptPending,
+			Timeout:              opts.Timeout,
+			InheritProcessGroup:  opts.CaptureStreams,
+			ToolProfile:          opts.ToolProfile,
+		})
+		if err != nil {
+			break
+		}
+		if result.SessionID != "" {
+			agent.SessionID = result.SessionID
+		}
+		if !result.Interrupted {
+			break
+		}
+		_ = appendRuntimeLog(layout, m.now(), "backend.call.interrupted", map[string]any{
+			"session_id": result.SessionID,
+		})
+		_ = appendEvent(layout.EventsFile, m.now(), "call.interrupted", map[string]any{
+			"session_id": result.SessionID,
+		})
+		prompt = ""
+	}
 	if err != nil {
+		agent.Status = StatusFailed
+		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
+		_ = writeAgent(layout.AgentFile, agent)
+		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": err.Error()})
+		_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": err.Error()})
+		return "", agent, err
+	}
+	if result.Interrupted {
+		err := errors.New("codex call interrupted repeatedly without producing a final response")
 		agent.Status = StatusFailed
 		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
 		_ = writeAgent(layout.AgentFile, agent)
@@ -501,6 +569,12 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 	if strings.TrimSpace(opts.Prompt) == "" {
 		return CallResult{}, errors.New("prompt is required")
 	}
+
+	unlock, err := m.acquireCurrentCallLock(layout)
+	if err != nil {
+		return CallResult{}, err
+	}
+	defer unlock()
 
 	call, err := m.BeginCurrentCall(layout, agent)
 	if err != nil {
@@ -572,6 +646,39 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 		StdoutPath: call.StdoutPath,
 		StderrPath: call.StderrPath,
 	}, nil
+}
+
+func (m Manager) Interrupt(opts InterruptOptions) (InterruptResult, error) {
+	if strings.TrimSpace(opts.Root) == "" {
+		opts.Root = "."
+	}
+	layout, err := m.layout(opts.Root, opts.Name, false)
+	if err != nil {
+		return InterruptResult{}, err
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		return InterruptResult{}, err
+	}
+	message := strings.TrimSpace(opts.Message)
+	if message == "" {
+		return InterruptResult{}, errors.New("interrupt message is required")
+	}
+	msg, err := m.enqueueInboxMessage(layout, "interrupt", message)
+	if err != nil {
+		return InterruptResult{}, err
+	}
+	if err := appendEvent(layout.EventsFile, m.now(), "inbox.queued", map[string]any{
+		"message_id": msg.ID,
+		"kind":       msg.Kind,
+	}); err != nil {
+		return InterruptResult{}, err
+	}
+	_ = appendRuntimeLog(layout, m.now(), "inbox.queued", map[string]any{
+		"message_id": msg.ID,
+		"kind":       msg.Kind,
+	})
+	return InterruptResult{AgentName: agent.Name, MessageID: msg.ID, Queued: true}, nil
 }
 
 func (m Manager) RunCurrent(root, name string) (err error) {
@@ -1082,6 +1189,59 @@ func (m Manager) BeginCurrentCall(layout Layout, agent Agent) (CurrentCall, erro
 	return call, nil
 }
 
+func (m Manager) acquireCurrentCallLock(layout Layout) (func(), error) {
+	if err := os.MkdirAll(layout.CurrentDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create current call dir: %w", err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		file, err := os.OpenFile(layout.CurrentLockFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			payload := map[string]any{
+				"schema_version": schemaVersion,
+				"pid":            os.Getpid(),
+				"started_at":     m.now().UTC().Format(time.RFC3339),
+			}
+			raw, _ := json.Marshal(payload)
+			_, _ = file.Write(append(raw, '\n'))
+			_ = file.Close()
+			return func() { _ = os.Remove(layout.CurrentLockFile) }, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("create current call lock: %w", err)
+		}
+		stale, staleErr := m.currentCallLockStale(layout.CurrentLockFile)
+		if staleErr != nil {
+			return nil, staleErr
+		}
+		if !stale {
+			return nil, fmt.Errorf("agent current-call setup is already in progress")
+		}
+		_ = os.Remove(layout.CurrentLockFile)
+	}
+	return nil, fmt.Errorf("agent current-call setup is already in progress")
+}
+
+func (m Manager) currentCallLockStale(path string) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+		return false, fmt.Errorf("read current call lock: %w", err)
+	}
+	var payload struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.PID <= 0 {
+		return false, fmt.Errorf("current call lock exists but cannot be checked safely")
+	}
+	alive, err := m.processAlive(payload.PID)
+	if err != nil {
+		return false, fmt.Errorf("check current call lock owner: %w", err)
+	}
+	return !alive, nil
+}
+
 func (m Manager) MarkCurrentCallRunning(layout Layout, pid int, sessionID string) (CurrentCall, error) {
 	call, err := readCurrentCall(layout.CurrentStateFile)
 	if err != nil {
@@ -1211,6 +1371,124 @@ func ResetCurrentCall(layout Layout) error {
 	return nil
 }
 
+func (m Manager) enqueueInboxMessage(layout Layout, kind, text string) (Message, error) {
+	if err := os.MkdirAll(layout.InboxDir, 0o755); err != nil {
+		return Message{}, fmt.Errorf("create inbox dir: %w", err)
+	}
+	now := m.now().UTC().Format(time.RFC3339)
+	for seq := nextInboxSeq(layout.InboxDir); seq < 1000000; seq++ {
+		id := fmt.Sprintf("%06d", seq)
+		path := filepath.Join(layout.InboxDir, id+".json")
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return Message{}, fmt.Errorf("create inbox message: %w", err)
+		}
+		msg := Message{
+			SchemaVersion: schemaVersion,
+			ID:            id,
+			Kind:          kind,
+			CreatedAt:     now,
+			Status:        "pending",
+			Text:          text,
+		}
+		raw, err := json.MarshalIndent(msg, "", "  ")
+		if err != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return Message{}, fmt.Errorf("marshal inbox message: %w", err)
+		}
+		if _, err := file.Write(append(raw, '\n')); err != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return Message{}, fmt.Errorf("write inbox message: %w", err)
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(path)
+			return Message{}, fmt.Errorf("close inbox message: %w", err)
+		}
+		return msg, nil
+	}
+	return Message{}, fmt.Errorf("no inbox message id available")
+}
+
+func nextInboxSeq(dir string) int {
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	maxSeq := 0
+	for _, path := range matches {
+		base := strings.TrimSuffix(filepath.Base(path), ".json")
+		var seq int
+		if _, err := fmt.Sscanf(base, "%d", &seq); err == nil && seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	return maxSeq + 1
+}
+
+func (m Manager) drainPendingInbox(layout Layout) ([]Message, error) {
+	matches, err := filepath.Glob(filepath.Join(layout.InboxDir, "*.json"))
+	if err != nil {
+		return nil, fmt.Errorf("list inbox: %w", err)
+	}
+	sort.Strings(matches)
+	var messages []Message
+	for _, path := range matches {
+		msg, err := readMessage(path)
+		if err != nil {
+			return nil, err
+		}
+		if msg.Status != "pending" {
+			continue
+		}
+		msg.Status = "delivered"
+		if err := writeMessage(path, msg); err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+	return messages, nil
+}
+
+func (m Manager) InboxPending(root, name string) (bool, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	layout, err := m.layout(root, name, false)
+	if err != nil {
+		return false, err
+	}
+	matches, err := filepath.Glob(filepath.Join(layout.InboxDir, "*.json"))
+	if err != nil {
+		return false, fmt.Errorf("list inbox: %w", err)
+	}
+	for _, path := range matches {
+		msg, err := readMessage(path)
+		if err != nil {
+			return false, err
+		}
+		if msg.Status == "pending" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func composeLeadMessagePrompt(messages []Message, prompt string) string {
+	var b strings.Builder
+	b.WriteString("Lead messages queued for this agent:\n\n")
+	for _, msg := range messages {
+		fmt.Fprintf(&b, "[%s %s]\n%s\n\n", msg.Kind, msg.ID, strings.TrimSpace(msg.Text))
+	}
+	b.WriteString("Apply these lead messages immediately. If an interrupt redirects or narrows the task, stop the previous line of work and continue from the latest lead instruction.")
+	if strings.TrimSpace(prompt) != "" {
+		b.WriteString("\n\n---\n\nOriginal prompt:\n")
+		b.WriteString(prompt)
+	}
+	return b.String()
+}
+
 func (m Manager) Erase(root, name string) error {
 	if strings.TrimSpace(root) == "" {
 		root = "."
@@ -1245,6 +1523,7 @@ func (m Manager) layout(root, name string, create bool) (Layout, error) {
 		InboxDir:          filepath.Join(dir, "inbox"),
 		OutboxDir:         filepath.Join(dir, "outbox"),
 		CurrentDir:        filepath.Join(dir, "current"),
+		CurrentLockFile:   filepath.Join(dir, "current", "setup.lock"),
 		CurrentStateFile:  filepath.Join(dir, "current", "state.json"),
 		CurrentStdout:     filepath.Join(dir, "current", "stdout"),
 		CurrentStderr:     filepath.Join(dir, "current", "stderr"),
@@ -1328,6 +1607,21 @@ func followUpForCall(call CurrentCall) string {
 	}
 }
 
+func interruptHookCommand(root, name string) string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		exe = "ws-mcp"
+	}
+	return shellQuote(exe) + " agents check-inbox --root " + shellQuote(root) + " --name " + shellQuote(name)
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
 func AgentKey(name string) string {
 	name = strings.TrimSpace(name)
 	name = unsafeNameChars.ReplaceAllString(name, "-")
@@ -1361,6 +1655,33 @@ func writeAgent(path string, agent Agent) error {
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("replace agent: %w", err)
+	}
+	return nil
+}
+
+func readMessage(path string) (Message, error) {
+	var msg Message
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return msg, fmt.Errorf("read inbox message: %w", err)
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return msg, fmt.Errorf("parse inbox message: %w", err)
+	}
+	return msg, nil
+}
+
+func writeMessage(path string, msg Message) error {
+	raw, err := json.MarshalIndent(msg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal inbox message: %w", err)
+	}
+	tmp := uniqueTempPath(path)
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write inbox message: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("replace inbox message: %w", err)
 	}
 	return nil
 }

@@ -322,6 +322,10 @@ func agents(args []string) {
 		agentsWait(args[1:])
 	case "status":
 		agentsStatus(args[1:])
+	case "interrupt":
+		agentsInterrupt(args[1:])
+	case "check-inbox":
+		agentsCheckInbox(args[1:])
 	case "tail":
 		agentsTail(args[1:])
 	case "debug":
@@ -339,7 +343,7 @@ func agents(args []string) {
 }
 
 func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|run-current|wait|status|tail|debug|cancel|print|erase>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|run-current|wait|status|interrupt|check-inbox|tail|debug|cancel|print|erase>")
 }
 
 type multiFlag []string
@@ -449,6 +453,43 @@ func agentsStatus(args []string) {
 		fatal("agents status", err)
 	}
 	fmt.Print(text)
+}
+
+func agentsInterrupt(args []string) {
+	fs := flag.NewFlagSet("agents interrupt", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	messageFile := fs.String("message-file", "", "message file; use - for stdin")
+	_ = fs.Parse(args)
+
+	message, err := promptFromArgs(fs.Args(), *messageFile)
+	if err != nil {
+		fatal("agents interrupt", err)
+	}
+	result, err := wsagent.NewManager(wsagent.Options{}).Interrupt(wsagent.InterruptOptions{
+		Root:    defaultRoot(*root),
+		Name:    *name,
+		Message: message,
+	})
+	if err != nil {
+		fatal("agents interrupt", err)
+	}
+	fmt.Printf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID)
+}
+
+func agentsCheckInbox(args []string) {
+	fs := flag.NewFlagSet("agents check-inbox", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	_ = fs.Parse(args)
+
+	pending, err := wsagent.NewManager(wsagent.Options{}).InboxPending(defaultRoot(*root), *name)
+	if err != nil {
+		fatal("agents check-inbox", err)
+	}
+	if pending {
+		os.Exit(2)
+	}
 }
 
 func agentsTail(args []string) {

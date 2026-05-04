@@ -210,3 +210,56 @@ after prompt write and state update, but same-agent concurrent `agents.call`
 requests are not serialized by a file lock. A later stability slice should add a
 per-agent current-call claim lock around `BeginCurrentCall` and prompt snapshot
 creation.
+
+### Phase 5: Current-call serialization and interrupt delivery
+
+Implement the remaining named-agent runtime stability slice:
+
+- serialize same-agent `agents.call` setup around `BeginCurrentCall`,
+  `current/prompt.md`, and `current/state.json` updates so concurrent calls
+  cannot overwrite each other's prompt snapshot or current-call state;
+- expose `agents.interrupt` as a lead-owned MCP/CLI surface that writes durable
+  lead-to-agent inbox messages;
+- reuse the verified hook prior art where the host fires hooks, but keep a
+  worker-side inbox watcher fallback for Codex `exec` hosts that accept inline
+  hook config without firing it;
+- resume the same Codex thread with delivered inbox messages and preserve
+  file-backed status, tail, and recovery behavior.
+
+Success criteria:
+
+- A concurrent same-agent `agents.call` during setup is rejected before prompt
+  or current state can be overwritten.
+- `agents.interrupt` creates monotonic `inbox/<id>.json` messages and reports
+  the queued message id.
+- Active Codex async calls install an interrupt hook and, when interrupted,
+  drain pending inbox messages into a follow-up resume prompt. If inline hooks
+  do not fire on a host, the worker-side watcher still interrupts the Codex
+  subprocess and resumes with the delivered inbox messages.
+- `agents.wait`, `agents.status`, `agents.tail`, and `agents.print` continue to
+  work from disk state after interrupt delivery.
+
+### Result - 2026-05-04
+
+Implemented same-agent current-call setup serialization with
+`current/setup.lock`. `agents.call` now holds the setup lock around
+`BeginCurrentCall`, prompt snapshot creation, state writes, and worker start; a
+concurrent setup attempt is rejected before it can overwrite
+`current/prompt.md` or `current/state.json`. Stale setup locks whose recorded
+owner pid is no longer alive are recoverable.
+
+Implemented durable interrupt delivery through `agents.interrupt`. Interrupts
+append monotonic pending messages under `inbox/<id>.json`, and active workers
+drain pending inbox messages into a resume prompt, mark them `delivered`, and
+continue the same Codex thread. The MCP tool surface now includes
+`agents.interrupt`; the CLI surface includes `agents interrupt` and the internal
+`agents check-inbox` hook/check helper; `runtime.json` records both surfaces.
+
+The implementation keeps the `PostToolUse` hook configuration shape, but WSL2
+smoke on Codex CLI 0.128.0 showed inline hooks accepted through `-c` did not
+fire during `codex exec --json`. To keep active interruption working on this
+host, the Codex runner also watches durable inbox state and sends an interrupt
+signal to the active Codex subprocess. A live smoke registered a temporary
+agent, started a long-running shell instruction, queued `agents interrupt`, and
+observed the worker log `call.interrupted`, deliver inbox message `000001`,
+resume the same thread, and return `INTERRUPTED_DONE`.

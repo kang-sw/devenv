@@ -3,6 +3,7 @@ package wsagent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -105,6 +106,40 @@ func (f *fakeWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) 
 		f.pid = 4321
 	}
 	return f.pid, nil
+}
+
+type blockingWorkerStarter struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f blockingWorkerStarter) StartAsyncCall(AsyncWorkerRequest) (int, error) {
+	close(f.started)
+	<-f.release
+	return 8765, nil
+}
+
+type interruptingRunner struct {
+	calls   []RunnerRequest
+	onFirst func() error
+}
+
+func (r *interruptingRunner) Call(req RunnerRequest) (RunnerResult, error) {
+	r.calls = append(r.calls, req)
+	if len(r.calls) == 1 {
+		if r.onFirst != nil {
+			if err := r.onFirst(); err != nil {
+				return RunnerResult{}, err
+			}
+		}
+		if req.OnSessionID != nil {
+			if err := req.OnSessionID("thread-interrupt"); err != nil {
+				return RunnerResult{}, err
+			}
+		}
+		return RunnerResult{SessionID: "thread-interrupt", Interrupted: true}, nil
+	}
+	return RunnerResult{SessionID: "thread-interrupt", Text: "resumed\n"}, nil
 }
 
 func TestRegisterCreatesAgentDirectory(t *testing.T) {
@@ -406,6 +441,45 @@ func TestCallStartsWorkerAndRejectsBusyAgent(t *testing.T) {
 	}
 }
 
+func TestCallRejectsConcurrentSetupWithCurrentCallLock(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := blockingWorkerStarter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	manager := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "first"})
+		errCh <- err
+	}()
+	<-starter.started
+	if _, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "second"}); err == nil ||
+		!strings.Contains(err.Error(), "setup is already in progress") {
+		t.Fatalf("expected setup lock rejection, got %v", err)
+	}
+	close(starter.release)
+	if err := <-errCh; err != nil {
+		t.Fatalf("first Call returned error: %v", err)
+	}
+	layout, err := manager.layout(repo, "impl", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(layout.CurrentLockFile); !os.IsNotExist(err) {
+		t.Fatalf("current setup lock still exists or stat failed differently: %v", err)
+	}
+}
+
 func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
@@ -488,6 +562,89 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 		!strings.Contains(tail, "jsonl") ||
 		!strings.Contains(tail, "async reply") {
 		t.Fatalf("tail mismatch:\n%s", tail)
+	}
+}
+
+func TestInterruptQueuesInboxAndRunCurrentDrainsAfterHookInterruption(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 4567}
+	base := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &interruptingRunner{
+		onFirst: func() error {
+			queued, err := base.Interrupt(InterruptOptions{Root: repo, Name: "impl", Message: "Switch to tests only."})
+			if err != nil {
+				return err
+			}
+			if queued.MessageID != "000001" || !queued.Queued {
+				return fmt.Errorf("queued interrupt mismatch: %+v", queued)
+			}
+			return nil
+		},
+	}
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    runner,
+	})
+	if err := manager.RunCurrent(repo, "impl"); err != nil {
+		t.Fatalf("RunCurrent returned error: %v", err)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("runner calls = %d, want 2", len(runner.calls))
+	}
+	if runner.calls[0].InterruptHookCommand == "" {
+		t.Fatal("first runner call missing interrupt hook command")
+	}
+	if runner.calls[0].Prompt != "async prompt" {
+		t.Fatalf("first prompt = %q", runner.calls[0].Prompt)
+	}
+	if !strings.Contains(runner.calls[1].Prompt, "Switch to tests only.") ||
+		!strings.Contains(runner.calls[1].Prompt, "Lead messages queued") {
+		t.Fatalf("second prompt did not include interrupt:\n%s", runner.calls[1].Prompt)
+	}
+	pending, err := manager.InboxPending(repo, "impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending {
+		t.Fatal("inbox still has pending message after drain")
+	}
+	layout, err := manager.layout(repo, "impl", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := readMessage(filepath.Join(layout.InboxDir, "000001.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Status != "delivered" {
+		t.Fatalf("message status = %q, want delivered", msg.Status)
+	}
+	printed, err := manager.Print(repo, "impl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if printed != "resumed\n" {
+		t.Fatalf("printed = %q", printed)
+	}
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 40})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tail, "call.interrupted") || !strings.Contains(tail, "inbox.delivered") {
+		t.Fatalf("tail missing interrupt diagnostics:\n%s", tail)
 	}
 }
 

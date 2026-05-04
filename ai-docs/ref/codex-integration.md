@@ -175,6 +175,14 @@ but `model_instructions_file` is simpler.
 
 Enable via `-c features.codex_hooks=true`.
 
+Update from 2026-05-04 on Codex CLI 0.128.0 / WSL2 Linux: the inline
+`hooks.PostToolUse` form below was accepted without a parse error but did not
+fire during `codex exec --json` smoke tests, even with `--enable codex_hooks`.
+Treat this surface as host/version-sensitive and verify with a minimal hook that
+exits 2 before relying on it for active interruption. The ws agent runtime keeps
+the hook-shaped configuration for compatibility but also uses a worker-side
+inbox watcher for Codex async interrupt delivery.
+
 ### Injecting Hooks via `-c`
 
 Hooks can be configured inline using TOML inline-table syntax:

@@ -291,18 +291,20 @@ merges; do not add `spec:` frontmatter, run `ws:update-spec`, or edit
 `5596eec` fixed launcher tool-surface probing, and `6f022ed` added
 `delegate-orientation` to public `agents.register`. Plugin-managed smoke showed
 delegated Codex agents cannot see `agents.*`/`config.*`; `subquery` remains
-available at delegate level and intentionally keeps its scoped prompt.
+available at delegate level and intentionally keeps its scoped prompt. The
+current WSL2/Linux session added same-agent `agents.call` setup serialization
+and durable `agents.interrupt` delivery with inbox-backed resume.
 
-**In-flight:** none in the worktree. The active design gap is runtime
-stability: same-agent concurrent `agents.call` needs a race-safe current-call
-claim, and `agents.interrupt` is still planned rather than implemented.
+**In-flight:** none expected after this stability slice commits. `agents.call`
+now uses `current/setup.lock`; `agents.interrupt` queues
+`inbox/<id>.json`; active Codex workers keep the hook-shaped config but also use
+a worker-side inbox watcher because Codex CLI 0.128.0 on WSL2 accepted inline
+`PostToolUse` hooks without firing them in `codex exec --json`.
 
-**Next actions:** Start a fresh session by reading
-`ai-docs/tickets/todo/260503-feat-ws-mcp-worktree-orchestrator-lock.md`, then
-split or extend the stability work for `current/prompt.md` serialization and
-`agents.interrupt`. Before designing interrupt, read
-`claude-plugin/bin/ws-named-agent` and related shim/history because the existing
-Python interrupt/mailbox flow went through substantial prior iteration.
+**Next actions:** Commit the current stability slice, then refresh the local
+Codex plugin cache before plugin-managed verification of the new
+`agents.interrupt` surface. Remaining runtime gap: durable leaf-level role
+assignment beyond environment propagation.
 
 **Key artifacts:** `agents-plugin-tool/internal/wsagent/agent.go` — current-call
 and one-shot/subquery flow; `agents-plugin-tool/internal/mcp/server.go` — role
@@ -310,7 +312,6 @@ filtering; `agents-plugin-tool/internal/wsprompt/infra/delegate-orientation.md`
 — prompt-level delegate boundary; `ai-docs/ref/ws-agent-runtime.md` — runtime
 contract.
 
-**Open questions:** How to implement interrupt for Codex when UI cancellation
-does not arrive as MCP `notifications/cancelled`; whether leaf-level tool
-restriction needs durable role assignment beyond env propagation; how stale
-current-call claim locks should recover safely.
+**Open questions:** Whether leaf-level tool restriction needs durable role
+assignment beyond env propagation; whether Codex inline hooks should be
+re-tested on macOS or a later CLI after the WSL2 0.128.0 non-firing result.

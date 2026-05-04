@@ -256,7 +256,7 @@ MCP tools use server `ws` and the following tool names:
 - `agents.call` — start an async call for a registered agent and return follow-up state. Implemented.
 - `agents.wait` — wait for the current async call to finish, with timeout support. Implemented.
 - `agents.status` — report the current async call and agent registry state. Implemented.
-- `agents.interrupt` — enqueue a lead-to-agent message. Planned.
+- `agents.interrupt` — enqueue a lead-to-agent interrupt or redirect message. Implemented.
 - `agents.print` — return `output.md` for a named agent. Implemented.
 - `agents.tail` — summarize recent session/event state without invoking the backend. Implemented.
 - `agents.cancel` — best-effort terminate the active worker pid and mark the current call cancelled. Implemented.
@@ -285,6 +285,8 @@ ws-mcp agents call --root <repo> --name <name> --prompt-file -
 ws-mcp agents run-current --root <repo> --name <name>
 ws-mcp agents wait --root <repo> --name <name> [--timeout 30s]
 ws-mcp agents status --root <repo> --name <name>
+ws-mcp agents interrupt --root <repo> --name <name> <message>
+ws-mcp agents check-inbox --root <repo> --name <name>
 ws-mcp agents tail --root <repo> --name <name> [--lines 40]
 ws-mcp agents cancel --root <repo> --name <name>
 ws-mcp agents print --root <repo> --name <name>
@@ -298,17 +300,32 @@ ws-mcp runtime info
 The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 `events.jsonl` layout described above. Shared skill text should prefer the MCP
 tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
-`ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`, `ws/agents.print`,
-`ws/agents.erase`, `ws/config.show`, `ws/config.agents_tier`,
+`ws/agents.status`, `ws/agents.interrupt`, `ws/agents.tail`,
+`ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`, `ws/config.show`,
+`ws/config.agents_tier`,
 `ws/path.generate`, and `ws/runtime.info`.
 
-`agents.call` writes the prompt snapshot to `current/prompt.md`, starts an
-internal `agents run-current` worker process, records the worker pid in
-`current/state.json`, and returns before the backend finishes. The worker owns
-the actual backend call, captures backend stdout and stderr to `current/stdout`
-and `current/stderr`, persists streamed Codex `session_id` updates, writes the
-final `output.md`, and transitions the current call to `completed` or `failed`.
-Only one active call is allowed per named agent.
+`agents.call` acquires a short-lived `current/setup.lock`, writes the prompt
+snapshot to `current/prompt.md`, starts an internal `agents run-current` worker
+process, records the worker pid in `current/state.json`, and returns before the
+backend finishes. The setup lock serializes same-agent concurrent calls around
+`BeginCurrentCall` and prompt snapshot creation; stale setup locks whose owner
+pid is no longer alive may be recovered. The worker owns the actual backend
+call, captures backend stdout and stderr to `current/stdout` and
+`current/stderr`, persists streamed Codex `session_id` updates, writes the final
+`output.md`, and transitions the current call to `completed` or `failed`. Only
+one active call is allowed per named agent.
+
+`agents.interrupt` appends a durable pending message to `inbox/<id>.json`. An
+active Codex async worker configures the verified hook shape for compatibility,
+but also runs its own inbox watcher because Codex CLI 0.128.0 on WSL2 did not
+fire inline `PostToolUse` hooks during `codex exec` smoke testing. When the
+watcher sees pending inbox mail, it sends an interrupt signal to the active
+Codex subprocess. The worker treats the interrupted partial turn as resumable,
+drains pending inbox messages, marks them `delivered`, and resumes the same
+Codex thread with the lead messages before waiting for a final response. If no
+call is active, pending messages are delivered at the start of the next backend
+call.
 
 `agents.wait` polls `current/state.json` and returns `output.md` when the call is
 completed. If a timeout expires, it returns `timeout` plus the same structured

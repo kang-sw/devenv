@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -16,22 +17,25 @@ type Runner interface {
 }
 
 type RunnerRequest struct {
-	Root                string
-	Prompt              string
-	Model               string
-	SessionID           string
-	SystemPromptPath    string
-	Stdout              io.Writer
-	Stderr              io.Writer
-	OnSessionID         func(string) error
-	Timeout             time.Duration
-	InheritProcessGroup bool
-	ToolProfile         string
+	Root                 string
+	Prompt               string
+	Model                string
+	SessionID            string
+	SystemPromptPath     string
+	InterruptHookCommand string
+	Stdout               io.Writer
+	Stderr               io.Writer
+	OnSessionID          func(string) error
+	InterruptPending     func() (bool, error)
+	Timeout              time.Duration
+	InheritProcessGroup  bool
+	ToolProfile          string
 }
 
 type RunnerResult struct {
-	SessionID string
-	Text      string
+	SessionID   string
+	Text        string
+	Interrupted bool
 }
 
 type CodexRunner struct{}
@@ -47,6 +51,14 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	}
 	if req.SystemPromptPath != "" {
 		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", req.SystemPromptPath))
+	}
+	if req.InterruptHookCommand != "" {
+		hookCommand, err := json.Marshal(req.InterruptHookCommand)
+		if err != nil {
+			return RunnerResult{}, fmt.Errorf("quote interrupt hook command: %w", err)
+		}
+		hookTOML := fmt.Sprintf(`[{hooks=[{type="command",command=%s,timeout=5}]}]`, hookCommand)
+		args = append(args, "-c", "features.codex_hooks=true", "-c", "hooks.PostToolUse="+hookTOML)
 	}
 	if req.SessionID != "" {
 		args = append(args, req.SessionID)
@@ -80,6 +92,29 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if err := cmd.Start(); err != nil {
 		return RunnerResult{}, fmt.Errorf("start codex: %w", err)
 	}
+	done := make(chan struct{})
+	if req.InterruptPending != nil {
+		go func() {
+			ticker := time.NewTicker(250 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					pending, err := req.InterruptPending()
+					if err != nil || !pending {
+						continue
+					}
+					if err := cmd.Process.Signal(os.Interrupt); err != nil {
+						_ = cmd.Process.Kill()
+					}
+					return
+				}
+			}
+		}()
+	}
+	defer close(done)
 	if req.Stdout != nil {
 		stdout = struct {
 			io.Reader
@@ -89,15 +124,20 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 			Closer: stdout,
 		}
 	}
-	result, parseErr := parseCodexJSONLStream(stdout, req.OnSessionID)
-	if err := cmd.Wait(); err != nil {
+	result, parseErr := parseCodexJSONLStreamPartial(stdout, req.OnSessionID)
+	waitErr := cmd.Wait()
+	if waitErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return RunnerResult{}, fmt.Errorf("codex timed out after %s", req.Timeout)
 		}
-		if stderr.Len() > 0 {
-			return RunnerResult{}, fmt.Errorf("codex failed: %w: %s", err, stderr.String())
+		if result.SessionID != "" && result.Text == "" {
+			result.Interrupted = true
+			return result, nil
 		}
-		return RunnerResult{}, fmt.Errorf("codex failed: %w", err)
+		if stderr.Len() > 0 {
+			return RunnerResult{}, fmt.Errorf("codex failed: %w: %s", waitErr, stderr.String())
+		}
+		return RunnerResult{}, fmt.Errorf("codex failed: %w", waitErr)
 	}
 	if parseErr != nil {
 		return RunnerResult{}, parseErr
@@ -106,10 +146,22 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 }
 
 func parseCodexJSONL(raw []byte) (RunnerResult, error) {
-	return parseCodexJSONLStream(bytes.NewReader(raw), nil)
+	result, err := parseCodexJSONLStreamPartial(bytes.NewReader(raw), nil)
+	if err != nil {
+		return RunnerResult{}, err
+	}
+	return requireCompleteCodexResult(result)
 }
 
 func parseCodexJSONLStream(r io.Reader, onSessionID func(string) error) (RunnerResult, error) {
+	result, err := parseCodexJSONLStreamPartial(r, onSessionID)
+	if err != nil {
+		return RunnerResult{}, err
+	}
+	return requireCompleteCodexResult(result)
+}
+
+func parseCodexJSONLStreamPartial(r io.Reader, onSessionID func(string) error) (RunnerResult, error) {
 	var result RunnerResult
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
@@ -139,6 +191,10 @@ func parseCodexJSONLStream(r io.Reader, onSessionID func(string) error) (RunnerR
 	if err := scanner.Err(); err != nil {
 		return RunnerResult{}, fmt.Errorf("read codex jsonl: %w", err)
 	}
+	return result, nil
+}
+
+func requireCompleteCodexResult(result RunnerResult) (RunnerResult, error) {
 	if result.SessionID == "" {
 		return RunnerResult{}, fmt.Errorf("codex output missing thread.started thread_id")
 	}
