@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -128,4 +129,116 @@ func TestMergeBaseRequiresRevisions(t *testing.T) {
 	if _, err := (Client{}).MergeBase(context.Background(), "/repo", "main", ""); err == nil {
 		t.Fatal("MergeBase accepted missing head")
 	}
+}
+
+func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
+	runner := &sequenceRunner{outs: [][]byte{
+		{},
+		[]byte("1 A. N... 100644 100644 100644 aaa bbb src/file.go\n"),
+		[]byte("M\tai-docs/tickets/todo/260503-feat-demo.md\n"),
+		[]byte("diff --git a/ai-docs/tickets/todo/260503-feat-demo.md b/ai-docs/tickets/todo/260503-feat-demo.md\n+++ b/ai-docs/tickets/todo/260503-feat-demo.md\n+### Result (abc123) - 2026-05-04\n"),
+		{},
+		[]byte("abc123\n"),
+	}}
+	result, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
+		Paths:       []string{"src"},
+		Title:       "feat(ws-mcp): add commit tool",
+		Description: "Builds a structured workflow commit.",
+		AIContext:   []string{"User intent: make commit creation portable.", "Verification: unit test."},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Hash != "abc123" || result.Title != "feat(ws-mcp): add commit tool" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(result.TicketChanges) != 1 || !result.TicketChanges[0].ResultAdded {
+		t.Fatalf("ticket changes = %#v", result.TicketChanges)
+	}
+	wantFirst := []string{"add", "--", "src"}
+	if !reflect.DeepEqual(runner.calls[0].args, wantFirst) {
+		t.Fatalf("add args = %#v, want %#v", runner.calls[0].args, wantFirst)
+	}
+	commitArgs := runner.calls[4].args
+	if len(commitArgs) != 3 || commitArgs[0] != "commit" || commitArgs[1] != "-m" {
+		t.Fatalf("commit args = %#v", commitArgs)
+	}
+	message := commitArgs[2]
+	for _, want := range []string{"feat(ws-mcp): add commit tool", "Builds a structured workflow commit.", "## AI Context", "- User intent: make commit creation portable."} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message missing %q:\n%s", want, message)
+		}
+	}
+	if !strings.Contains(message, "## Updated Tickets") || !strings.Contains(message, "260503-feat-demo: added ### Result") {
+		t.Fatalf("message missing auto ticket summary:\n%s", message)
+	}
+}
+
+func TestCommitRefusesUnrelatedStagedPaths(t *testing.T) {
+	runner := &sequenceRunner{outs: [][]byte{
+		{},
+		[]byte("1 M. N... 100644 100644 100644 aaa bbb src/file.go\n1 M. N... 100644 100644 100644 aaa bbb docs/note.md\n"),
+	}}
+	_, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
+		Paths:     []string{"src/file.go"},
+		Title:     "feat: scoped",
+		AIContext: []string{"User intent: scoped commit."},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unrelated staged path") {
+		t.Fatalf("Commit error = %v, want unrelated staged path", err)
+	}
+}
+
+func TestCommitRequiresAIContextAndRelativePaths(t *testing.T) {
+	_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x"})
+	if err == nil || !strings.Contains(err.Error(), "ai_context") {
+		t.Fatalf("normalize error = %v, want ai_context", err)
+	}
+	_, err = normalizeCommitOptions(CommitOptions{Paths: []string{"../outside"}, Title: "feat: x", AIContext: []string{"context"}})
+	if err == nil || !strings.Contains(err.Error(), "inside the repository") {
+		t.Fatalf("normalize error = %v, want repository boundary", err)
+	}
+}
+
+func TestParseTicketNameStatusDetectsMoves(t *testing.T) {
+	changes := parseTicketNameStatus([]byte("R100\tai-docs/tickets/todo/260503-feat-demo.md\tai-docs/tickets/.done/260503-feat-demo.md\n"))
+	if len(changes) != 1 {
+		t.Fatalf("changes = %#v", changes)
+	}
+	change := changes[0]
+	if change.Stem != "260503-feat-demo" || change.FromStatus != "todo" || change.ToStatus != ".done" || change.OldPath == "" {
+		t.Fatalf("change = %#v", change)
+	}
+}
+
+func TestParseTicketResultAdditions(t *testing.T) {
+	changes := parseTicketResultAdditions([]byte("diff --git a/ai-docs/tickets/todo/260503-feat-demo.md b/ai-docs/tickets/todo/260503-feat-demo.md\n+++ b/ai-docs/tickets/todo/260503-feat-demo.md\n+### Result (abc123) - 2026-05-04\n+body\n"))
+	if len(changes) != 1 || changes[0].Stem != "260503-feat-demo" || changes[0].ResultHeading != "### Result (abc123) - 2026-05-04" {
+		t.Fatalf("changes = %#v", changes)
+	}
+}
+
+type sequenceRunner struct {
+	calls []gitCall
+	outs  [][]byte
+	errs  []error
+}
+
+type gitCall struct {
+	root string
+	args []string
+}
+
+func (r *sequenceRunner) RunGit(_ context.Context, root string, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, gitCall{root: root, args: append([]string(nil), args...)})
+	index := len(r.calls) - 1
+	var out []byte
+	if index < len(r.outs) {
+		out = r.outs[index]
+	}
+	var err error
+	if index < len(r.errs) {
+		err = r.errs[index]
+	}
+	return out, err
 }

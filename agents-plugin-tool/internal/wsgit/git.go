@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -331,4 +333,317 @@ func (c Client) MergeBase(ctx context.Context, root, base, head string) (MergeBa
 
 func MergeBaseArgs(base, head string) []string {
 	return []string{"merge-base", base, head}
+}
+
+type CommitOptions struct {
+	Paths               []string `json:"paths"`
+	Title               string   `json:"title"`
+	Description         string   `json:"description,omitempty"`
+	AIContext           []string `json:"ai_context"`
+	UpdatedTickets      []string `json:"updated_tickets,omitempty"`
+	UpdatedSpecs        []string `json:"updated_specs,omitempty"`
+	UpdatedMentalModels []string `json:"updated_mental_models,omitempty"`
+}
+
+type CommitResult struct {
+	Hash          string         `json:"hash"`
+	Paths         []string       `json:"paths"`
+	Title         string         `json:"title"`
+	TicketChanges []TicketChange `json:"ticket_changes,omitempty"`
+}
+
+type TicketChange struct {
+	Stem          string `json:"stem"`
+	Path          string `json:"path"`
+	OldPath       string `json:"old_path,omitempty"`
+	FromStatus    string `json:"from_status,omitempty"`
+	ToStatus      string `json:"to_status,omitempty"`
+	ResultAdded   bool   `json:"result_added,omitempty"`
+	ResultHeading string `json:"result_heading,omitempty"`
+}
+
+func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (CommitResult, error) {
+	opts, err := normalizeCommitOptions(opts)
+	if err != nil {
+		return CommitResult{}, err
+	}
+	runner := c.runner()
+	if _, err := runner.RunGit(ctx, root, append([]string{"add", "--"}, opts.Paths...)...); err != nil {
+		return CommitResult{}, err
+	}
+	statusOut, err := runner.RunGit(ctx, root, StatusArgs()...)
+	if err != nil {
+		return CommitResult{}, err
+	}
+	status := ParseStatus(statusOut)
+	if err := validateCommitStatus(status, opts.Paths); err != nil {
+		return CommitResult{}, err
+	}
+	ticketChanges := detectTicketChanges(ctx, runner, root)
+	if len(opts.UpdatedTickets) == 0 {
+		opts.UpdatedTickets = ticketChangeSummaries(ticketChanges)
+	}
+	message := CommitMessage(opts)
+	if _, err := runner.RunGit(ctx, root, "commit", "-m", message); err != nil {
+		return CommitResult{}, err
+	}
+	hashOut, err := runner.RunGit(ctx, root, "rev-parse", "HEAD")
+	if err != nil {
+		return CommitResult{}, err
+	}
+	return CommitResult{Hash: strings.TrimSpace(string(hashOut)), Paths: opts.Paths, Title: opts.Title, TicketChanges: ticketChanges}, nil
+}
+
+func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
+	opts.Title = strings.TrimSpace(opts.Title)
+	opts.Description = strings.TrimSpace(opts.Description)
+	opts.AIContext = trimStrings(opts.AIContext)
+	opts.UpdatedTickets = trimStrings(opts.UpdatedTickets)
+	opts.UpdatedSpecs = trimStrings(opts.UpdatedSpecs)
+	opts.UpdatedMentalModels = trimStrings(opts.UpdatedMentalModels)
+	if opts.Title == "" {
+		return CommitOptions{}, fmt.Errorf("title is required")
+	}
+	if strings.ContainsAny(opts.Title, "\r\n") {
+		return CommitOptions{}, fmt.Errorf("title must be a single line")
+	}
+	if len(opts.AIContext) == 0 {
+		return CommitOptions{}, fmt.Errorf("ai_context requires at least one entry")
+	}
+	paths := trimStrings(opts.Paths)
+	if len(paths) == 0 {
+		return CommitOptions{}, fmt.Errorf("paths requires at least one path")
+	}
+	for _, path := range paths {
+		if err := validateCommitPath(path); err != nil {
+			return CommitOptions{}, err
+		}
+	}
+	opts.Paths = paths
+	return opts, nil
+}
+
+func validateCommitPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("paths may not contain empty entries")
+	}
+	if strings.HasPrefix(path, "-") {
+		return fmt.Errorf("path %q must not start with '-'", path)
+	}
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") {
+		return fmt.Errorf("path %q must be relative", path)
+	}
+	cleaned := filepath.Clean(path)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || strings.HasPrefix(filepath.ToSlash(cleaned), "../") {
+		return fmt.Errorf("path %q must stay inside the repository", path)
+	}
+	return nil
+}
+
+func validateCommitStatus(status StatusResult, paths []string) error {
+	staged := 0
+	for _, file := range status.ChangedFiles {
+		if strings.HasPrefix(file.Status, "U") {
+			return fmt.Errorf("cannot commit while unmerged path %q is present", file.Path)
+		}
+		if file.IndexStatus == "" || file.IndexStatus == "." {
+			continue
+		}
+		if !pathInCommitSet(file.Path, paths) && (file.OldPath == "" || !pathInCommitSet(file.OldPath, paths)) {
+			return fmt.Errorf("refusing to commit unrelated staged path %q", file.Path)
+		}
+		staged++
+	}
+	if staged == 0 {
+		return fmt.Errorf("no staged changes in requested paths")
+	}
+	return nil
+}
+
+func pathInCommitSet(path string, roots []string) bool {
+	path = filepath.ToSlash(filepath.Clean(path))
+	for _, root := range roots {
+		root = filepath.ToSlash(filepath.Clean(root))
+		if path == root || strings.HasPrefix(path, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func CommitMessage(opts CommitOptions) string {
+	var b strings.Builder
+	b.WriteString(opts.Title)
+	if opts.Description != "" {
+		b.WriteString("\n\n")
+		b.WriteString(opts.Description)
+	}
+	b.WriteString("\n\n## AI Context\n")
+	for _, item := range opts.AIContext {
+		fmt.Fprintf(&b, "- %s\n", item)
+	}
+	writeCommitSection(&b, "## Updated Tickets", opts.UpdatedTickets)
+	writeCommitSection(&b, "## Updated Specs", opts.UpdatedSpecs)
+	writeCommitSection(&b, "## Updated Mental Models", opts.UpdatedMentalModels)
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func writeCommitSection(b *strings.Builder, heading string, values []string) {
+	if len(values) == 0 {
+		return
+	}
+	b.WriteString("\n\n")
+	b.WriteString(heading)
+	b.WriteByte('\n')
+	for _, value := range values {
+		fmt.Fprintf(b, "- %s\n", value)
+	}
+}
+
+func trimStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func detectTicketChanges(ctx context.Context, runner Runner, root string) []TicketChange {
+	changes := map[string]TicketChange{}
+	if out, err := runner.RunGit(ctx, root, "diff", "--cached", "--name-status", "--", "ai-docs/tickets"); err == nil {
+		for _, change := range parseTicketNameStatus(out) {
+			changes[ticketChangeKey(change)] = change
+		}
+	}
+	if out, err := runner.RunGit(ctx, root, "diff", "--cached", "--unified=0", "--", "ai-docs/tickets"); err == nil {
+		for _, change := range parseTicketResultAdditions(out) {
+			key := ticketChangeKey(change)
+			existing := changes[key]
+			if existing.Stem == "" {
+				existing = change
+			}
+			existing.ResultAdded = change.ResultAdded
+			existing.ResultHeading = change.ResultHeading
+			changes[key] = existing
+		}
+	}
+	out := make([]TicketChange, 0, len(changes))
+	for _, change := range changes {
+		out = append(out, change)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return ticketChangeKey(out[i]) < ticketChangeKey(out[j])
+	})
+	return out
+}
+
+func parseTicketNameStatus(out []byte) []TicketChange {
+	var changes []TicketChange
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		code := fields[0]
+		path := fields[1]
+		oldPath := ""
+		if strings.HasPrefix(code, "R") && len(fields) >= 3 {
+			oldPath = fields[1]
+			path = fields[2]
+		}
+		change, ok := ticketChangeForPath(path)
+		if !ok {
+			continue
+		}
+		if oldPath != "" {
+			if oldChange, ok := ticketChangeForPath(oldPath); ok {
+				change.OldPath = oldPath
+				change.FromStatus = oldChange.ToStatus
+			}
+		}
+		changes = append(changes, change)
+	}
+	return changes
+}
+
+func parseTicketResultAdditions(out []byte) []TicketChange {
+	var changes []TicketChange
+	var current TicketChange
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "+++ b/") {
+			current = TicketChange{}
+			if change, ok := ticketChangeForPath(strings.TrimPrefix(line, "+++ b/")); ok {
+				current = change
+			}
+			continue
+		}
+		if current.Stem == "" || !strings.HasPrefix(line, "+### Result") {
+			continue
+		}
+		change := current
+		change.ResultAdded = true
+		change.ResultHeading = strings.TrimPrefix(line, "+")
+		changes = append(changes, change)
+	}
+	return changes
+}
+
+func ticketChangeForPath(path string) (TicketChange, bool) {
+	status, stem, ok := ticketStatusStem(path)
+	if !ok {
+		return TicketChange{}, false
+	}
+	return TicketChange{Stem: stem, Path: path, ToStatus: status}, true
+}
+
+func ticketStatusStem(path string) (string, string, bool) {
+	normalized := filepath.ToSlash(filepath.Clean(path))
+	const prefix = "ai-docs/tickets/"
+	if !strings.HasPrefix(normalized, prefix) || !strings.HasSuffix(normalized, ".md") {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(normalized, prefix)
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	status := parts[0]
+	switch status {
+	case "idea", "todo", "wip", ".done", ".dropped":
+	default:
+		return "", "", false
+	}
+	stem := strings.TrimSuffix(parts[1], ".md")
+	if stem == "" {
+		return "", "", false
+	}
+	return status, stem, true
+}
+
+func ticketChangeKey(change TicketChange) string {
+	if change.Stem != "" {
+		return change.Stem
+	}
+	return change.Path
+}
+
+func ticketChangeSummaries(changes []TicketChange) []string {
+	summaries := make([]string, 0, len(changes))
+	for _, change := range changes {
+		switch {
+		case change.FromStatus != "" && change.FromStatus != change.ToStatus && change.ResultAdded:
+			summaries = append(summaries, fmt.Sprintf("%s: moved %s -> %s and added %s", change.Stem, change.FromStatus, change.ToStatus, change.ResultHeading))
+		case change.FromStatus != "" && change.FromStatus != change.ToStatus:
+			summaries = append(summaries, fmt.Sprintf("%s: moved %s -> %s", change.Stem, change.FromStatus, change.ToStatus))
+		case change.ResultAdded:
+			summaries = append(summaries, fmt.Sprintf("%s: added %s", change.Stem, change.ResultHeading))
+		}
+	}
+	return summaries
 }

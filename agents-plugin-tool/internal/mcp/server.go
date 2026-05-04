@@ -340,6 +340,23 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		head, _ := params.Arguments["head"].(string)
 		result, err := wsgit.NewClient().MergeBase(context.Background(), root, base, head)
 		return toolJSONResponse(req.ID, result, err)
+	case "git.commit":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		title, _ := params.Arguments["title"].(string)
+		description, _ := params.Arguments["description"].(string)
+		result, err := wsgit.NewClient().Commit(context.Background(), root, wsgit.CommitOptions{
+			Paths:               stringList(params.Arguments["paths"]),
+			Title:               title,
+			Description:         description,
+			AIContext:           stringList(params.Arguments["ai_context"]),
+			UpdatedTickets:      stringList(params.Arguments["updated_tickets"]),
+			UpdatedSpecs:        stringList(params.Arguments["updated_specs"]),
+			UpdatedMentalModels: stringList(params.Arguments["updated_mental_models"]),
+		})
+		return toolJSONResponse(req.ID, result, err)
 	case "project_tree":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -715,6 +732,24 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "git.commit",
+			"description": "Create a workflow-aware Git commit from explicit paths and structured message fields.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":                  stringProperty("Repository root. Defaults to the server root."),
+					"paths":                 stringArrayProperty("Explicit paths to stage and commit. Only these paths are staged."),
+					"title":                 stringProperty("Single-line commit title."),
+					"description":           stringProperty("Optional commit message body before AI Context."),
+					"ai_context":            stringArrayProperty("Required AI Context bullets for the commit message."),
+					"updated_tickets":       stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result headings are detected."),
+					"updated_specs":         stringArrayProperty("Optional spec update summaries."),
+					"updated_mental_models": stringArrayProperty("Optional mental-model update summaries."),
+				},
+				"required": []string{"paths", "title", "ai_context"},
+			},
+		},
+		{
 			"name":        "project_tree",
 			"description": "Render the ws project document map, spec inventory, and active ticket queue.",
 			"inputSchema": map[string]any{
@@ -1045,7 +1080,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 	case roleDelegate:
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "api.") && name != "subquery"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "api.") && name != "subquery" && name != "git.commit"
 	default:
 		return false
 	}

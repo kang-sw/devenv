@@ -285,6 +285,55 @@ Constraints:
 - Worker-facing guidance should use these tools and should not direct ordinary
   workers to read `ai-docs/.deps/` directly.
 
+### `ws/git.commit`
+
+Create a workflow-aware Git commit from explicit paths and structured message
+fields.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "paths": { "type": "array", "items": { "type": "string" } },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "ai_context": { "type": "array", "items": { "type": "string" } },
+    "updated_tickets": { "type": "array", "items": { "type": "string" } },
+    "updated_specs": { "type": "array", "items": { "type": "string" } },
+    "updated_mental_models": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["paths", "title", "ai_context"]
+}
+```
+
+Behavior:
+
+- Stages only `paths` through `git add -- <paths>`.
+- Refuses option-like, absolute, or repository-escaping paths.
+- Refuses commits when unrelated staged paths exist.
+- Builds a commit message with title, optional description, `## AI Context`,
+  and optional document-update sections.
+- If `updated_tickets` is omitted, staged ticket moves and added
+  `### Result` headings under `ai-docs/tickets/` are detected and summarized in
+  `## Updated Tickets`.
+- Returns JSON containing the new hash, paths, title, and detected
+  `ticket_changes`.
+
+Compatibility fallback:
+
+```bash
+ws-mcp git commit --path <path> --title <title> --ai-context <bullet>
+```
+
+Constraints:
+
+- This is a constrained commit builder, not a full Git wrapper.
+- It does not reset, checkout, clean, merge, push, or mutate ticket files.
+- Leaf-role MCP servers cannot call `ws/git.commit`.
+
 ### `ws/project_tree`
 
 Render the ws project document map, spec inventory, and active ticket queue.

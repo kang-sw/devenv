@@ -232,6 +232,8 @@ func gitCommand(args []string) {
 		gitLog(args[1:])
 	case "merge-base":
 		gitMergeBase(args[1:])
+	case "commit":
+		gitCommit(args[1:])
 	default:
 		gitUsage()
 		os.Exit(2)
@@ -239,7 +241,7 @@ func gitCommand(args []string) {
 }
 
 func gitUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp git <status|diff|log|merge-base>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp git <status|diff|log|merge-base|commit>")
 }
 
 func gitStatus(args []string) {
@@ -293,6 +295,45 @@ func gitMergeBase(args []string) {
 
 	result, err := wsgit.NewClient().MergeBase(context.Background(), defaultRoot(*root), *base, *head)
 	printJSONOrFatal("git merge-base", result, err)
+}
+
+func gitCommit(args []string) {
+	fs := flag.NewFlagSet("git commit", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	title := fs.String("title", "", "single-line commit title")
+	description := fs.String("description", "", "commit description body")
+	descriptionFile := fs.String("description-file", "", "commit description file; use - for stdin")
+	var paths multiFlag
+	var aiContext multiFlag
+	var updatedTickets multiFlag
+	var updatedSpecs multiFlag
+	var updatedMentalModels multiFlag
+	fs.Var(&paths, "path", "path to stage and commit; may be repeated")
+	fs.Var(&aiContext, "ai-context", "AI Context bullet; may be repeated")
+	fs.Var(&updatedTickets, "updated-ticket", "ticket update summary; may be repeated")
+	fs.Var(&updatedSpecs, "updated-spec", "spec update summary; may be repeated")
+	fs.Var(&updatedMentalModels, "updated-mental-model", "mental-model update summary; may be repeated")
+	_ = fs.Parse(args)
+	paths = append(paths, fs.Args()...)
+
+	body := *description
+	if *descriptionFile != "" {
+		text, err := readInputFile(*descriptionFile, "description")
+		if err != nil {
+			fatal("git commit", err)
+		}
+		body = text
+	}
+	result, err := wsgit.NewClient().Commit(context.Background(), defaultRoot(*root), wsgit.CommitOptions{
+		Paths:               paths,
+		Title:               *title,
+		Description:         body,
+		AIContext:           aiContext,
+		UpdatedTickets:      updatedTickets,
+		UpdatedSpecs:        updatedSpecs,
+		UpdatedMentalModels: updatedMentalModels,
+	})
+	printJSONOrFatal("git commit", result, err)
 }
 
 func printJSONOrFatal(prefix string, value any, err error) {
@@ -595,23 +636,27 @@ func agentsErase(args []string) {
 
 func promptFromArgs(args []string, promptFile string) (string, error) {
 	if promptFile != "" {
-		if promptFile == "-" {
-			raw, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return "", fmt.Errorf("read stdin prompt: %w", err)
-			}
-			return string(raw), nil
-		}
-		raw, err := os.ReadFile(promptFile)
-		if err != nil {
-			return "", fmt.Errorf("read prompt file: %w", err)
-		}
-		return string(raw), nil
+		return readInputFile(promptFile, "prompt")
 	}
 	if len(args) == 0 {
 		return "", fmt.Errorf("prompt is required")
 	}
 	return strings.Join(args, " "), nil
+}
+
+func readInputFile(path, label string) (string, error) {
+	if path == "-" {
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("read stdin %s: %w", label, err)
+		}
+		return string(raw), nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s file: %w", label, err)
+	}
+	return string(raw), nil
 }
 
 func readOptionalFile(path string) (string, error) {

@@ -90,7 +90,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
-	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base"} {
+	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
@@ -519,14 +519,18 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	runGit(t, root, "config", "user.email", "test@example.com")
 	runGit(t, root, "config", "user.name", "Test User")
 	mustWrite(t, root, "file.txt", "one\n")
-	runGit(t, root, "add", "file.txt")
+	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo\n---\n# Demo\n")
+	runGit(t, root, "add", "file.txt", "ai-docs/tickets/todo/260503-feat-demo.md")
 	runGit(t, root, "commit", "-m", "initial", "-m", "body text")
+	head := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
 	mustWrite(t, root, "file.txt", "one\ntwo\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo\n---\n# Demo\n\n### Result (abc123) - 2026-05-04\n\nImplemented.\n")
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.diff","arguments":{"mode":"name_only","paths":["file.txt"]}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.log","arguments":{"limit":1,"include_body":true}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.merge_base","arguments":{"base":"HEAD","head":"HEAD"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -535,8 +539,8 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -567,7 +571,6 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		t.Fatalf("log response = %#v", log)
 	}
 
-	head := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
 	var mergeBase struct {
 		Base      string `json:"base"`
 		Head      string `json:"head"`
@@ -578,6 +581,21 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 	if mergeBase.Base != "HEAD" || mergeBase.Head != "HEAD" || mergeBase.MergeBase != head {
 		t.Fatalf("merge-base response = %#v, want hash %s", mergeBase, head)
+	}
+
+	var commit struct {
+		Hash          string `json:"hash"`
+		Title         string `json:"title"`
+		TicketChanges []struct {
+			Stem        string `json:"stem"`
+			ResultAdded bool   `json:"result_added"`
+		} `json:"ticket_changes"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["4"])), &commit); err != nil {
+		t.Fatal(err)
+	}
+	if commit.Hash == "" || commit.Title != "test: mcp commit" || len(commit.TicketChanges) != 1 || commit.TicketChanges[0].Stem != "260503-feat-demo" || !commit.TicketChanges[0].ResultAdded {
+		t.Fatalf("commit response = %#v", commit)
 	}
 }
 
