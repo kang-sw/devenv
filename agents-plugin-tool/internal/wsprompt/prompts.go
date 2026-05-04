@@ -5,30 +5,20 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
+// Prompt discovery is limited to top-level Markdown files matching these embed
+// patterns. Add new bundled prompts as prompts/<stem>.md or infra/<stem>.md.
+//
 //go:embed prompts/*.md infra/*.md
 var promptFS embed.FS
 
-var embeddedPromptPaths = []string{
-	"prompts/code-reviewer.md",
-	"prompts/implementer.md",
-	"prompts/mental-model-updater.md",
-	"prompts/plan-populator-research.md",
-	"prompts/plan-populator-survey.md",
-	"prompts/project-survey.md",
-	"prompts/skeleton-writer.md",
-	"prompts/sprint-survey.md",
-	"infra/code-review-correctness.md",
-	"infra/code-review-fit.md",
-	"infra/code-review-test.md",
-	"infra/delegate-orientation.md",
-	"infra/impl-playbook.md",
-}
+var promptSearchPrefixes = []string{"prompts", "infra"}
 
 type Source struct {
 	Spec string `json:"spec"`
@@ -86,20 +76,9 @@ func Resolve(specs []string, systemPromptText, explicitTier, explicitModel strin
 }
 
 func Bundle(sourceCommit string) (BundleInfo, error) {
-	prompts := []string{
-		"code-reviewer",
-		"implementer",
-		"mental-model-updater",
-		"plan-populator-research",
-		"plan-populator-survey",
-		"project-survey",
-		"skeleton-writer",
-		"sprint-survey",
-		"code-review-correctness",
-		"code-review-fit",
-		"code-review-test",
-		"delegate-orientation",
-		"impl-playbook",
+	prompts, err := embeddedPromptStems()
+	if err != nil {
+		return BundleInfo{}, err
 	}
 	hash, err := ContentSHA256()
 	if err != nil {
@@ -113,8 +92,10 @@ func Bundle(sourceCommit string) (BundleInfo, error) {
 }
 
 func ContentSHA256() (string, error) {
-	paths := append([]string(nil), embeddedPromptPaths...)
-	sort.Strings(paths)
+	paths, err := embeddedPromptPaths()
+	if err != nil {
+		return "", err
+	}
 	sum := sha256.New()
 	for _, path := range paths {
 		data, err := promptFS.ReadFile(path)
@@ -142,7 +123,7 @@ func resolveOne(spec string) (string, map[string]string, Source, error) {
 		return "", nil, Source{}, fmt.Errorf("prompt spec %q must be a bare embedded stem or an absolute path", spec)
 	}
 	stem := strings.TrimSuffix(spec, ".md")
-	for _, prefix := range []string{"prompts", "infra"} {
+	for _, prefix := range promptSearchPrefixes {
 		path := filepath.ToSlash(filepath.Join(prefix, stem+".md"))
 		data, err := promptFS.ReadFile(path)
 		if err == nil {
@@ -151,6 +132,38 @@ func resolveOne(spec string) (string, map[string]string, Source, error) {
 		}
 	}
 	return "", nil, Source{}, fmt.Errorf("unknown embedded prompt stem %q", spec)
+}
+
+func embeddedPromptPaths() ([]string, error) {
+	var paths []string
+	for _, prefix := range promptSearchPrefixes {
+		matches, err := fs.Glob(promptFS, prefix+"/*.md")
+		if err != nil {
+			return nil, fmt.Errorf("glob embedded prompts %s: %w", prefix, err)
+		}
+		paths = append(paths, matches...)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func embeddedPromptStems() ([]string, error) {
+	paths, err := embeddedPromptPaths()
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]string{}
+	var stems []string
+	for _, path := range paths {
+		stem := strings.TrimSuffix(filepath.Base(path), ".md")
+		if existing, ok := seen[stem]; ok {
+			return nil, fmt.Errorf("duplicate embedded prompt stem %q in %s and %s", stem, existing, path)
+		}
+		seen[stem] = path
+		stems = append(stems, stem)
+	}
+	sort.Strings(stems)
+	return stems, nil
 }
 
 func isBareStem(spec string) bool {

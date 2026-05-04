@@ -143,7 +143,12 @@ func TestBundleMetadata(t *testing.T) {
 	if info.SourceCommit != "dev" || len(info.ContentSHA256) != 64 {
 		t.Fatalf("bundle info = %+v", info)
 	}
-	for _, prompt := range []string{
+	for i := 1; i < len(info.Prompts); i++ {
+		if info.Prompts[i-1] >= info.Prompts[i] {
+			t.Fatalf("prompts are not sorted and unique: %+v", info.Prompts)
+		}
+	}
+	required := []string{
 		"code-reviewer",
 		"implementer",
 		"mental-model-updater",
@@ -157,7 +162,8 @@ func TestBundleMetadata(t *testing.T) {
 		"code-review-test",
 		"delegate-orientation",
 		"impl-playbook",
-	} {
+	}
+	for _, prompt := range required {
 		found := false
 		for _, item := range info.Prompts {
 			if item == prompt {
@@ -166,6 +172,25 @@ func TestBundleMetadata(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("missing prompt %q in %+v", prompt, info.Prompts)
+		}
+	}
+}
+
+func TestEmbeddedPromptDiscoveryUsesTopLevelMarkdownOnly(t *testing.T) {
+	paths, err := embeddedPromptPaths()
+	if err != nil {
+		t.Fatalf("embeddedPromptPaths returned error: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no embedded prompt paths discovered")
+	}
+	for _, path := range paths {
+		if !strings.HasSuffix(path, ".md") {
+			t.Fatalf("non-markdown prompt path discovered: %s", path)
+		}
+		dir := filepath.ToSlash(filepath.Dir(path))
+		if dir != "prompts" && dir != "infra" {
+			t.Fatalf("prompt path outside top-level embed directories: %s", path)
 		}
 	}
 }
