@@ -312,6 +312,8 @@ Input schema:
 Behavior:
 
 - Stages only `paths` through `git add -- <paths>`.
+- When a requested path is a ticket file, expands staging to same-stem changed
+  ticket paths so status-directory moves commit old and new paths together.
 - Refuses option-like, absolute, or repository-escaping paths.
 - Refuses commits when unrelated staged paths exist.
 - Builds a commit message with title, optional description, `## AI Context`,

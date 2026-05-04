@@ -368,6 +368,11 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 		return CommitResult{}, err
 	}
 	runner := c.runner()
+	preStatusOut, err := runner.RunGit(ctx, root, StatusArgs()...)
+	if err != nil {
+		return CommitResult{}, err
+	}
+	opts.Paths = expandCommitPathsForTicketMoves(ParseStatus(preStatusOut), opts.Paths)
 	if _, err := runner.RunGit(ctx, root, append([]string{"add", "--"}, opts.Paths...)...); err != nil {
 		return CommitResult{}, err
 	}
@@ -458,6 +463,40 @@ func validateCommitStatus(status StatusResult, paths []string) error {
 		return fmt.Errorf("no staged changes in requested paths")
 	}
 	return nil
+}
+
+func expandCommitPathsForTicketMoves(status StatusResult, paths []string) []string {
+	stems := map[string]bool{}
+	for _, path := range paths {
+		if _, stem, ok := ticketStatusStem(path); ok {
+			stems[stem] = true
+		}
+	}
+	if len(stems) == 0 {
+		return paths
+	}
+	expanded := append([]string(nil), paths...)
+	seen := map[string]bool{}
+	for _, path := range paths {
+		seen[filepath.ToSlash(filepath.Clean(path))] = true
+	}
+	for _, file := range status.ChangedFiles {
+		for _, path := range []string{file.Path, file.OldPath} {
+			if path == "" {
+				continue
+			}
+			_, stem, ok := ticketStatusStem(path)
+			if !ok || !stems[stem] {
+				continue
+			}
+			cleaned := filepath.ToSlash(filepath.Clean(path))
+			if !seen[cleaned] {
+				expanded = append(expanded, path)
+				seen[cleaned] = true
+			}
+		}
+	}
+	return expanded
 }
 
 func pathInCommitSet(path string, roots []string) bool {

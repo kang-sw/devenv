@@ -134,6 +134,7 @@ func TestMergeBaseRequiresRevisions(t *testing.T) {
 func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 	runner := &sequenceRunner{outs: [][]byte{
 		{},
+		{},
 		[]byte("1 A. N... 100644 100644 100644 aaa bbb src/file.go\n"),
 		[]byte("M\tai-docs/tickets/todo/260503-feat-demo.md\n"),
 		[]byte("diff --git a/ai-docs/tickets/todo/260503-feat-demo.md b/ai-docs/tickets/todo/260503-feat-demo.md\n+++ b/ai-docs/tickets/todo/260503-feat-demo.md\n+### Result (abc123) - 2026-05-04\n"),
@@ -156,10 +157,10 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 		t.Fatalf("ticket changes = %#v", result.TicketChanges)
 	}
 	wantFirst := []string{"add", "--", "src"}
-	if !reflect.DeepEqual(runner.calls[0].args, wantFirst) {
-		t.Fatalf("add args = %#v, want %#v", runner.calls[0].args, wantFirst)
+	if !reflect.DeepEqual(runner.calls[1].args, wantFirst) {
+		t.Fatalf("add args = %#v, want %#v", runner.calls[1].args, wantFirst)
 	}
-	commitArgs := runner.calls[4].args
+	commitArgs := runner.calls[5].args
 	if len(commitArgs) != 3 || commitArgs[0] != "commit" || commitArgs[1] != "-m" {
 		t.Fatalf("commit args = %#v", commitArgs)
 	}
@@ -177,6 +178,7 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 func TestCommitRefusesUnrelatedStagedPaths(t *testing.T) {
 	runner := &sequenceRunner{outs: [][]byte{
 		{},
+		{},
 		[]byte("1 M. N... 100644 100644 100644 aaa bbb src/file.go\n1 M. N... 100644 100644 100644 aaa bbb docs/note.md\n"),
 	}}
 	_, err := (Client{Runner: runner}).Commit(context.Background(), "/repo", CommitOptions{
@@ -186,6 +188,15 @@ func TestCommitRefusesUnrelatedStagedPaths(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unrelated staged path") {
 		t.Fatalf("Commit error = %v, want unrelated staged path", err)
+	}
+}
+
+func TestCommitExpandsTicketMovePathsByStem(t *testing.T) {
+	preStatus := ParseStatus([]byte("1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/.done/260503-feat-demo.md\n"))
+	paths := expandCommitPathsForTicketMoves(preStatus, []string{"ai-docs/tickets/.done/260503-feat-demo.md"})
+	want := []string{"ai-docs/tickets/.done/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("paths = %#v, want %#v", paths, want)
 	}
 }
 

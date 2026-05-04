@@ -78,6 +78,18 @@ not large findings, between lead, implementer, and reviewers.
 
 Use for runtime compatibility checks and feature detection.
 
+### Git
+
+`ws/git.status`
+`ws/git.diff`
+`ws/git.log`
+`ws/git.merge_base`
+`ws/git.commit`
+
+Use `ws/git.commit` for workflow commits when available. It stages explicit
+paths, builds the `## AI Context` message, detects ticket moves and `### Result`
+headings, and avoids shell quoting drift.
+
 ### API documentation
 
 `ws/api.list`
@@ -117,6 +129,9 @@ API docs:
 call `ws/api.list()` when choosing among cached domains matters.
 call `ws/api.ask(prompt: "<prose API documentation question>")` for external API lookup.
 add `domain_hint: "<optional-domain>"` only when the intended domain is known.
+
+Commit:
+call `ws/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])`.
 ```
 
 ## Doctrine
