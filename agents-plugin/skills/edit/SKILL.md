@@ -10,8 +10,8 @@ Target: user request
 ## Invariants
 
 - The lead edits directly - no subagent delegation for the edit itself.
-- Follow impl-playbook: call MCP tool `ws/infra.read` for `impl-playbook` for test strategy, verify, failure diagnosis, and mechanical-edit criteria.
-- Load relevant mental-model docs before editing: run `ws/mental_models.list` for the target paths and read every listed file.
+- Follow impl-playbook: call `ws/infra.read(name: "impl-playbook")` for test strategy, verify, failure diagnosis, and mechanical-edit criteria.
+- Load relevant mental-model docs before editing: call `ws/mental_models.list(paths: <target-paths>)` and read every listed file.
 - Ancestor loading: when a read touches `mental-model/<domain>/<sub>.md`, load `mental-model/<domain>/index.md` first.
 - When skeleton exists for the target scope, its stubs and integration tests are the acceptance criteria.
 - Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
@@ -29,8 +29,8 @@ Target: user request
 2. Record current HEAD as `<start-commit>`: `git rev-parse HEAD`.
 3. If ticket-driven: read the ticket; collect skeleton references from frontmatter.
 4. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `ws:write-skeleton`.
-5. Load mental-model docs: `ws/mental_models.list` for the target paths; read every listed file, ancestors first.
-6. Call MCP tool `ws/infra.read` for `impl-playbook`.
+5. Call `ws/mental_models.list(paths: <target-paths>)`; read every listed file, ancestors first.
+6. Call `ws/infra.read(name: "impl-playbook")`.
 7. Identify integration test file paths and the run command.
 
 ### 2. Edit
@@ -47,11 +47,10 @@ Commit at logical checkpoints per CLAUDE.md rules. Include `## AI Context`.
 
 ### 4. Review
 
-Register `reviewer` with prompts `code-reviewer`, `code-review-correctness`,
-and `code-review-fit`. Generate one review path with `ws/path.generate`; store
-the returned path as `<review-path>`.
+Call `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`.
+Call `ws/path.generate(kind: "review", stems: ["direct"])`; store the returned path as `<review-path>`.
 
-Call `reviewer`:
+Call `ws/agents.call(name: "reviewer", prompt: <block below>)`:
 
 ```text
 Diff range: <start-commit>..HEAD
@@ -60,18 +59,17 @@ Scope: direct-edit - <brief scope description>
 Review for correctness and fit.
 Write full findings to: <review-path>
 Return only: [clean|non-clean]: <one-line summary>
-PROMPT
 ```
 
-After notification, read the reviewer summary from `ws/agents.print` if needed.
+After notification, read the reviewer summary from `ws/agents.print(name: "reviewer")` only if the async result did not include a usable summary.
 
 **If `[clean]`:** proceed to cleanup.
 
-**If `[non-clean]`:** read the review file directly. Apply fixes. Re-verify tests. Re-call reviewer:
+**If `[non-clean]`:** read the review file directly. Apply fixes. Re-verify
+tests. Re-call `ws/agents.call(name: "reviewer", prompt: <block below>)`:
 
 ```text
 Re-review. Updated diff: <start-commit>..HEAD
-PROMPT
 ```
 
 Repeat until `[clean]` or after 2 relay cycles - then proceed to cleanup regardless.

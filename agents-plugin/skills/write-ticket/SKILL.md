@@ -9,8 +9,8 @@ Target: user request
 
 ## Invariants
 
-- Ticket conventions: Call MCP tool `ws/convention.read` for `ticket-conventions` - path format, status flow, phase rules, stem rules, templates.
-- Never `read` a ticket file other than the current target - delegate any other ticket inspection to an Explore subagent.
+- Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
+- Never `read` a ticket file other than the current target - use `ws/subquery(question: "<focused ticket-inspection question>")` for any other ticket inspection.
 
 ## On: invoke
 

@@ -9,14 +9,14 @@ Target: user request
 
 ## Invariants
 
-- Call MCP tool `ws/convention.read` for `spec-conventions` before any spec write - conventions are canonical there.
-- All survey queries use `ws/subquery` with `deep_research: true` (sonnet); clerk uses `ws/subquery` with a self-contained clerk prompt.
+- Call `ws/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
+- All survey queries use `ws/subquery(deep_research: true, question: <focused prompt>)`; clerk uses `ws/subquery(deep_research: false, question: <self-contained clerk prompt>)`.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
-- Run `ws/spec_stem.generate` with the descriptive slug before every anchor insertion.
-- Run `ws/spec_index.verify` (no args) after every spec file write or update.
+- Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
+- Call `ws/spec_index.verify()` after every spec file write or update.
 - Domain task names use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
-- All survey subagents for a phase are dispatched in a single response turn (parallel).
+- All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls.
 
 ## On: invoke
 
@@ -42,8 +42,9 @@ Target: user request
 
 Issue all four queries in a single response turn as parallel `ws/subquery` calls:
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<'PROMPT'
 Survey the project's directory and module structure.
 
 Steps:
@@ -52,11 +53,11 @@ Steps:
 3. Return a structured summary: module names, paths, brief description of purpose derived from file names and directory layout.
 
 Format your response as a markdown bullet list grouped by module/area.
-PROMPT
 ```
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<'PROMPT'
 Survey all tickets under ai-docs/tickets/ (all statuses: idea/, todo/, wip/, .done/, .dropped/).
 
 Steps:
@@ -65,11 +66,11 @@ Steps:
 3. Group by apparent behavioral domain (infer from ticket title and content).
 
 Return a grouped list: domain -> behaviors/features mentioned in tickets.
-PROMPT
 ```
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<'PROMPT'
 Survey the archived spec files in ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory).
 
 Steps:
@@ -78,11 +79,11 @@ Steps:
 3. Note which features are marked [planned] (planned) vs unmarked (implemented).
 
 Return: a flat list of domain names found, with their heading topics. These are reference candidates only - do not treat them as authoritative.
-PROMPT
 ```
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<'PROMPT'
 Survey recent commit history for behavioral signals.
 
 Steps:
@@ -91,7 +92,6 @@ Steps:
 3. Group commit messages by apparent behavioral area.
 
 Return: a grouped list of behavioral areas -> representative commit messages. Omit chore/docs/refactor commits unless they reference spec-stems.
-PROMPT
 ```
 
 Wait for all four to return before synthesizing.
@@ -139,8 +139,9 @@ Call `TaskUpdate` to set the domain task status to `in_progress`.
 
 Issue all four queries in a single response turn as parallel `ws/subquery` calls:
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<PROMPT
 Survey source code for the <domain> domain.
 Module paths: <paths from task description>
 
@@ -150,11 +151,11 @@ Steps:
 3. For each behavior: note whether it appears fully implemented or partially implemented (stubs, TODOs, feature flags).
 
 Return: bullet list of caller-visible behaviors with implementation status (implemented / partial / none visible).
-PROMPT
 ```
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<PROMPT
 Find tickets relevant to the <domain> domain.
 Module paths: <paths from task description>
 
@@ -164,11 +165,11 @@ Steps:
 3. For each match: extract the feature or behavior described and its ticket status (todo/wip/.done/.dropped).
 
 Return: list of features -> ticket status. Wip/todo items are candidates for [planned] planned markers.
-PROMPT
 ```
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<PROMPT
 Survey the archived spec files for the <domain> domain.
 Archived location: ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory)
 Old spec files for this domain: <files from task description, or scan all>
@@ -179,11 +180,11 @@ Steps:
 3. Flag any behaviors in the old spec not visible in current source.
 
 Return: feature list from old spec with [planned] status and a note on current-source presence.
-PROMPT
 ```
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<PROMPT
 Survey commit history for the <domain> domain.
 Module paths: <paths from task description>
 
@@ -193,7 +194,6 @@ Steps:
 3. For each significant commit: note the behavior changed and whether it appears implemented or still in-flight.
 
 Return: chronological list of behavioral changes, newest first.
-PROMPT
 ```
 
 Wait for all four to return before synthesizing.
@@ -220,13 +220,13 @@ Collect the confirmed list before writing anything.
 ### 5. Write spec entries
 
 1. Determine the target spec file path. Apply `judge: directory-vs-flat`.
-2. Call MCP tool `ws/convention.read` for `spec-conventions` before writing - read the output before proceeding.
+2. Call `ws/convention.read(name: "spec-conventions")` before writing - read the output before proceeding.
 3. For each confirmed behavior:
-   a. Run `ws/spec_stem.generate` with the descriptive slug to obtain `{#YYMMDD-slug}`.
+   a. Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` to obtain `{#YYMMDD-slug}`.
    b. Write the spec entry using the `spec-format` template from `spec-conventions.md`.
    c. Place `[planned]` prefix on the `##` heading if planned; omit if implemented.
 4. After writing the file, verify it contains at least one `##` heading. If not, add a placeholder section and note it to the user.
-5. Run `ws/spec_index.verify` (no args).
+5. Call `ws/spec_index.verify()`.
 6. Apply `judge: directory-vs-flat` - if the written file warrants a directory split, note it as a split candidate for a follow-up `ws:write-spec` invocation. Do not perform the split inline.
 
 ### 6. Associate stems with tickets
@@ -234,12 +234,13 @@ Collect the confirmed list before writing anything.
 1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, commit the spec file changes now (`git add ai-docs/spec/ && git commit`) and skip to step 7.
 2. Dispatch clerk covering all collected tickets in a single call:
 
+Call `ws/subquery(deep_research: false, question: <block below>)`:
+
 ```text
-ws/subquery with a self-contained clerk prompt - <<PROMPT
 Associate spec stems with tickets and check convention compliance.
 
 Run first:
-  Call MCP tool `ws/convention.read` for `ticket-conventions`
+  Call `ws/convention.read(name: "ticket-conventions")`
 
 Spec stems generated for this domain:
 <list: {#YYMMDD-slug} - feature name, one per line>
@@ -252,7 +253,6 @@ For each ticket:
 2. Add or update the `spec:` frontmatter field with the stems relevant to this ticket. Merge with any existing `spec:` entries - never overwrite.
 3. Check the ticket body against loaded conventions. Fix any issues in place.
 4. Do not commit - the caller handles all git operations.
-PROMPT
 ```
 
 3. Review the `## Clerk report`. Resolve any open questions with the user before committing.
@@ -268,10 +268,10 @@ PROMPT
 
 ### 1. Final index pass
 
-Run `ws/spec_index.verify` (no args) as an idempotent safety pass over all spec files:
+Call `ws/spec_index.verify()` as an idempotent safety pass over all spec files:
 
 ```text
-ws/spec_index.verify
+ws/spec_index.verify()
 ```
 
 ### 2. Summary report
@@ -290,7 +290,7 @@ Total stems generated: <count>
 
 ### 3. Suggested next steps
 
-- Use `ws/subquery` with a self-contained spec-updater prompt to strip `[planned]` markers from any planned features whose implementation has since landed in commit history.
+- Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)` to strip `[planned]` markers from any planned features whose implementation has since landed in commit history.
 - Review `[planned]` entries with open tickets - confirm each has an active wip/todo ticket or drop the marker.
 - Run `ws:write-spec` for any domain surfaces discovered after wrap-up.
 
@@ -310,7 +310,7 @@ When uncertain, start flat. Re-evaluate after writing - if a split condition fir
 ### ws/spec_index.verify call
 
 ```text
-ws/spec_index.verify
+ws/spec_index.verify()
 ```
 
 No file arguments. Scans `ai-docs/spec/**/*.md` automatically. Run once after any spec write or update in this session.

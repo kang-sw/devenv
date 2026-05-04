@@ -22,6 +22,12 @@ This is the host-neutral reference for ws plugin skill text. Use the compact for
 `ws/<tool-name>` for MCP server `ws`, tool `<tool-name>`. Use `ws:` only for
 plugin skills such as `ws:write-ticket`; do not use it for MCP tools.
 
+Use pseudo-call notation when writing MCP calls in skills: `ws/tool.name(arg:
+value)`. Show required arguments inline. Show optional arguments only when the
+skill depends on a non-default value. Omit `root` when the current repository
+root is intended. Prefer `prompt: <block below>` or `question: <block below>` for
+large text payloads.
+
 When writing shared skill text, name only primitives that exist in the ws runtime.
 If a workflow needs a surface that is still planned, state the required MCP
 contract instead of naming a Claude helper command or another host-specific
@@ -85,16 +91,17 @@ generalize that into a richer interrupt contract without checking the runtime.
 
 ```text
 One-turn survey:
-call `ws/subquery` with the exact scoped question.
+call `ws/subquery(question: "<exact scoped question>")`.
+call `ws/subquery(deep_research: true, question: <block below>)` only for broad tracing.
 
 Persistent task:
-register `<agent-name>` with prompt stems or a self-contained system prompt.
-call `<agent-name>` with the next task prompt.
+call `ws/agents.register(name: "<agent-name>", prompts: ["<prompt-stem>"])`.
+call `ws/agents.call(name: "<agent-name>", prompt: <block below>)`.
 wait, inspect status, tail diagnostics, or print output as needed.
 erase the task-scoped agent when cleanup matters.
 
 Review artifacts:
-generate review paths with `ws/path.generate`.
+call `ws/path.generate(kind: "review", stems: ["<stem>"])`.
 tell reviewers to write full findings to those paths.
 relay file paths, not full findings, to the implementer.
 ```

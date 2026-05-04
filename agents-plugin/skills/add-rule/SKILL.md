@@ -9,7 +9,7 @@ Target: user request
 
 ## Project Map
 
-Load the current mental-model catalog with MCP tool `ws/mental_models.list`.
+Call `ws/mental_models.list()` to load the current mental-model catalog.
 
 ## Invariants
 
@@ -26,7 +26,7 @@ Load the current mental-model catalog with MCP tool `ws/mental_models.list`.
 
 1. Parse the rule from `user request`. If `user request` is empty, ask the user for the rule description and wait.
 2. Read `CLAUDE.md` to see current `## Architecture Rules` entries and avoid near-duplicates.
-3. Read the output of `ws-list-mental-model` (rendered above) for the current domain catalog and hierarchy.
+3. Use the `ws/mental_models.list()` result for the current domain catalog and hierarchy.
 4. Ancestor loading (one-level hierarchies - `<domain>/<sub>.md` only): for domain-scoped candidates, if any candidate target is a direct-child sub-domain doc (`mental-model/<domain>/<sub>.md`), read its parent `mental-model/<domain>/index.md` first - inherited `## Domain Rules` may already cover the rule.
 
 ### 2. Classify

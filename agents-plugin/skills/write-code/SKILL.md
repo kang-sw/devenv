@@ -29,11 +29,10 @@ Target: user request
 Parse `user request`: extract ticket path or inline description, and optional `--ticket <stem>`.
 If ticket-driven: read the ticket. Extract scope, stem, and phase context.
 
-Register `project-survey` with prompt `project-survey`, then call it:
+Call `ws/agents.register(name: "project-survey", prompts: ["project-survey"])`, then call `ws/agents.call(name: "project-survey", prompt: <block below>)`:
 
 ```text
 <ticket path or inline description>
-PROMPT
 ```
 
 Capture the returned `[Must|Maybe]` reference list - it informs the brief's `## References` section.
@@ -52,20 +51,18 @@ Apply `judge: plan-depth`. Default to survey when uncertain between as-is and su
 
 **as-is** - proceed to step 4.
 
-**survey** - register `plan-surveyor` with prompt `plan-populator-survey`, then call it:
+**survey** - call `ws/agents.register(name: "plan-surveyor", prompts: ["plan-populator-survey"])`, then call `ws/agents.call(name: "plan-surveyor", prompt: <block below>)`:
 
 ```text
 Brief path: <brief-path>
 Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
-PROMPT
 ```
 
-**research** - register `plan-researcher` with prompt `plan-populator-research`, then call it:
+**research** - call `ws/agents.register(name: "plan-researcher", prompts: ["plan-populator-research"])`, then call `ws/agents.call(name: "plan-researcher", prompt: <block below>)`:
 
 ```text
 Brief path: <brief-path>
 Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
-PROMPT
 ```
 
 After the population agent returns, commit the plan file before proceeding.
@@ -74,12 +71,15 @@ After the population agent returns, commit the plan file before proceeding.
 
 1. Verify skeleton: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests referencing target contracts. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `ws:write-skeleton`.
 2. Collect integration test context: identify test file paths and the run command. Flows into the implementer spawn prompt.
-3. Register agent slots: `implementer` with prompt `implementer`; reviewers with `code-reviewer` plus their partition prompt.
-4. Generate review paths with `ws/path.generate` for stems `correctness`, `fit`, and `test`; store them as `<correctness-path>`, `<fit-path>`, and `<test-path>`.
+3. Register agent slots with pseudo-calls.
+   Implementer: `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
+   Reviewers: `ws/agents.register(name: "<reviewer-name>", prompts: ["code-reviewer", "<partition-prompt>"])`.
+4. Call `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`; store the returned paths as `<correctness-path>`, `<fit-path>`, and `<test-path>`.
 
 ### 5. Spawn implementer
 
-Call `implementer`. Read output after notification.
+Call `ws/agents.call(name: "implementer", prompt: <block below>)`.
+Read output with `ws/agents.print(name: "implementer")` only if the async result did not include a usable summary.
 
 ```text
 Brief path: <brief-path>
@@ -99,10 +99,9 @@ Instructions:
 - Report completion in plain text. Include test results.
 - For fix cycles, a follow-up call will arrive with review findings - fix and report back.
 - Commit at logical checkpoints on the current branch.
-PROMPT
 ```
 
-After notification, read `implementer` output through `ws/agents.print` if needed.
+After notification, read `implementer` output with `ws/agents.print(name: "implementer")` only when needed.
 Note the commit range from the report.
 
 ### 6. Review
@@ -113,8 +112,8 @@ Apply `judge: partition-allocation` based on the implementer's report and the na
 
 #### 6b. Spawn reviewers
 
-Call one reviewer per selected partition in parallel. After all notifications,
-read each summary via `ws/agents.print` if needed.
+Call `ws/agents.call(name: "<reviewer-name>", prompt: <block below>)` once per selected reviewer name in parallel. After all
+notifications, read summaries with `ws/agents.print(name: "<reviewer-name>")` only when needed.
 
 ```text
 Diff range: <first-commit>..<last-commit>
@@ -122,7 +121,6 @@ Diff range: <first-commit>..<last-commit>
 Instructions:
 - Write your full findings to: <correctness-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
-PROMPT
 ```
 
 ```text
@@ -134,7 +132,6 @@ Instructions:
 - You may reference the ticket at <ticket-path> for architectural headroom checks (optional).
 - Write your full findings to: <fit-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
-PROMPT
 ```
 
 ```text
@@ -143,7 +140,6 @@ Diff range: <first-commit>..<last-commit>
 Instructions:
 - Write your full findings to: <test-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
-PROMPT
 ```
 
 #### 6c. Relay and loop
@@ -159,10 +155,9 @@ Review cycle <N>: <correctness-path>, <fit-path>, <test-path>. Read each file di
 For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
 Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
 Won't-fix not allowed: correctness, security, or contract violations - fix or escalate these.
-PROMPT
 ```
 
-After notification, read `implementer` output through `ws/agents.print` if needed. Extract the won't-fix list.
+After notification, read `implementer` output with `ws/agents.print(name: "implementer")` only when needed. Extract the won't-fix list.
 
 **Re-review** (parallel, same paths - reviewers overwrite):
 
@@ -170,21 +165,18 @@ After notification, read `implementer` output through `ws/agents.print` if neede
 Re-review. Updated diff: <diff>
 Implementer won't-fix items: <list with reasons>
 For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
-PROMPT
 ```
 
 ```text
 Re-review. Updated diff: <diff>
 Implementer won't-fix items: <list with reasons>
 For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
-PROMPT
 ```
 
 ```text
 Re-review. Updated diff: <diff>
 Implementer won't-fix items: <list with reasons>
 For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
-PROMPT
 ```
 
 After all notifications, read summaries.

@@ -12,7 +12,7 @@ Target: user request
 - Lead-driven - no subagent delegation.
 - Load spec-conventions before any write or read.
 - Only add entries for confirmed-implemented features - no [planned] entries unless explicitly directed.
-- Run `ws/spec_index.verify` after any file modification.
+- Call `ws/spec_index.verify()` after any file modification.
 - Commit all spec changes in a single `docs(spec): ...` commit.
 - All written content must be in English regardless of conversation language.
 
@@ -20,7 +20,7 @@ Target: user request
 
 ### 1. Load conventions
 
-Call MCP tool `ws/convention.read` for `spec-conventions`. Read `agents-plugin/skills/write-spec/SKILL.md`.
+Call `ws/convention.read(name: "spec-conventions")`. Read `agents-plugin/skills/write-spec/SKILL.md`.
 
 ### 2. Resolve commit range
 
@@ -37,7 +37,7 @@ Run `git log <range> --oneline`. Apply **judge: spec-impact** to each commit.
 For each commit with spec-impact:
 1. Identify the affected spec domain. Read the relevant file(s) from `ai-docs/spec/`.
 2. Check whether an entry already covers the new or changed behavior.
-3. If missing: call MCP tool `ws/spec_stem.generate` for `<slug>` and insert an entry following the `spec-format` template from `write-spec/SKILL.md`.
+3. If missing: call `ws/spec_stem.generate(slug: "<slug>")` and insert an entry following the `spec-format` template from `write-spec/SKILL.md`.
 
 ### 5. Strip [planned]
 
@@ -52,7 +52,7 @@ Run `git log <range> --format="%B" | grep "^removed:"`. For each `removed: <stem
 ### 7. Finalize
 
 If any spec file was modified:
-1. Run `ws/spec_index.verify`.
+1. Call `ws/spec_index.verify()`.
 2. Commit: `git add ai-docs/spec/ && git commit -m "docs(spec): ..."`.
 
 If no changes: output `Spec: no changes.`

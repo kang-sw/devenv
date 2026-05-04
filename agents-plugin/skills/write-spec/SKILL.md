@@ -9,10 +9,10 @@ Target: user request
 
 ## Invariants
 
-- Call MCP tool `ws/convention.read` for `spec-conventions` before any write or update - conventions are canonical there.
+- Call `ws/convention.read(name: "spec-conventions")` before any write or update - conventions are canonical there.
 - Location follows `judge: directory-vs-flat`.
-- Run `ws/spec_index.verify` (no args) after every write or update.
-- Accuracy check: for every heading without [planned], confirm the feature exists. Use an Explore agent if uncertain.
+- Call `ws/spec_index.verify()` after every write or update.
+- Accuracy check: for every heading without [planned], confirm the feature exists. Use `ws/subquery(question: "<focused verification question>")` if uncertain.
 
 ## On: invoke
 
@@ -25,16 +25,16 @@ Target: user request
 3. If creating a new spec:
    a. Apply `judge: directory-vs-flat` to choose the file structure.
    b. Write the spec body following the `spec-format` template. Apply `judge: idea-level` before inserting any `[planned]` entries.
-   c. Run `ws/spec_index.verify` (no args) for cleanup and verification.
+   c. Call `ws/spec_index.verify()` for cleanup and verification.
    d. Add the spec to the listing in `ai-docs/_index.md`.
 4. If updating an existing spec:
    a. Read the target file first.
-   b. For each new anchor: run `ws/spec_stem.generate` with the descriptive slug to get a collision-free `{#YYMMDD-slug}`.
+   b. For each new anchor: call `ws/spec_stem.generate(slug: "<descriptive-slug>")` to get a collision-free `{#YYMMDD-slug}`.
    c. Insert the anchor - on a heading line or anywhere in body text (not heading-only).
    d. Apply `judge: idea-level` before adding any `[planned]` Planned callouts. Remove [planned] from confirmed-implemented features as needed.
-   e. Run `ws/spec_index.verify` (no args) for cleanup and verification.
+   e. Call `ws/spec_index.verify()` for cleanup and verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
-6. Accuracy check - confirm every heading without [planned] exists in the codebase. Use an Explore agent if uncertain. Never remove [planned] without confirmation.
+6. Accuracy check - confirm every heading without [planned] exists in the codebase. Use `ws/subquery(question: "<focused verification question>")` if uncertain. Never remove [planned] without confirmation.
 7. **Commit** - in a single shell command, stage the spec file(s) updated in this run (and `ai-docs/_index.md` if the listing changed) then commit:
    `git add <file(s)> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
 
@@ -68,7 +68,7 @@ Any one condition is sufficient.
 After writing or updating a spec file:
 
 ```text
-ws/spec_index.verify
+ws/spec_index.verify()
 ```
 
 Scans all `*.md` files under `ai-docs/spec/` automatically. Removes any `features:` and `stems:` frontmatter blocks. No file arguments accepted. Output: `[fix]` for auto-applied cleanup (e.g. `features: removed - <path>`), `[warn]` for items needing human judgment (duplicate stems, staleness, anchor integrity). Parse failures and missing directory emit `[error]` to stderr. Always exits 0.
@@ -103,7 +103,7 @@ Planned behavior description - what the caller will observe once implemented.
 ```
 
 Anchoring rules:
-- Run `ws/spec_stem.generate` with the descriptive slug to obtain a `{#YYMMDD-slug}` before inserting any anchor.
+- Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` to obtain a `{#YYMMDD-slug}` before inserting any anchor.
 - Anchors may appear on any line (heading or body text), not heading-only.
 - Slugs are clean identifiers: lowercase, hyphens, no spaces.
 - No ticket references (`[stem/pN]`) in headings or `[planned]` markers - implementation traceability is via commits referencing spec-stems.

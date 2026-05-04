@@ -27,16 +27,15 @@ Target: user request
 
 ### 2. Delegate
 
-Register `skeleton-writer` with prompt `skeleton-writer`.
+Call `ws/agents.register(name: "skeleton-writer", prompts: ["skeleton-writer"])`.
 
-Call `skeleton-writer`:
+Call `ws/agents.call(name: "skeleton-writer", prompt: <block below>)`:
 
 ```text
 Ticket: <ticket-path>
 
 ## Contract directives
 - <binding decisions only - things not derivable from ticket + codebase>
-PROMPT
 ```
 
 ### 3. Review
@@ -46,10 +45,9 @@ PROMPT
 3. Run build to confirm compilation. Do not run tests - tests will fail by design because stubs are unimplemented. Passing tests is the implementor's responsibility, not the skeleton's.
 4. If issues found:
    - **Minor** - fix directly.
-   - **Structural** - relay amended directives via a follow-up call (session resumes with full context):
+   - **Structural** - relay amended directives with `ws/agents.call(name: "skeleton-writer", prompt: <block below>)`:
      ```text
      Amend: <issues and revised directives>
-     PROMPT
      ```
      Re-review after each round.
 

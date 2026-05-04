@@ -9,7 +9,7 @@ Topic: user request
 
 ## Project Map
 
-Load the current project map with MCP tool `ws/project_tree`.
+Call `ws/project_tree()` to load the current project map.
 
 ## Invariants
 
@@ -17,7 +17,7 @@ Load the current project map with MCP tool `ws/project_tree`.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phases with a `### Result` section are frozen - do not edit them.
 - read mental-model docs on-demand as topics emerge.
 - read spec docs in `ai-docs/spec/` on-demand as topics emerge - the Project Map above lists available specs.
-- Dispatch Explore agents for implementation details beyond mental-model docs - never read source directly.
+- Use `ws/subquery(question: "<focused implementation-detail question>")` for implementation details beyond mental-model docs.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 - Evaluate each claim independently - call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
@@ -33,10 +33,11 @@ Load the current project map with MCP tool `ws/project_tree`.
 
 ## On: discussion loop
 
-1. Apply **judge: needs-survey** - identify every named component, skill, agent, spec, or ticket the current question touches. For each unloaded doc, register `project-survey` with prompt `project-survey` and call it with `<topic brief>`.
+1. Apply **judge: needs-survey** - identify every named component, skill, agent, spec, or ticket the current question touches.
+   For each unloaded doc, call `ws/agents.register(name: "project-survey", prompts: ["project-survey"])`, then `ws/agents.call(name: "project-survey", prompt: "<topic brief>")`.
    Incorporate the returned reference list before responding.
 2. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-3. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
+3. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; use `ws/subquery(question: "<focused implementation-detail question>")` for implementation details.
    When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."
 4. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 5. Continue until the user signals done.

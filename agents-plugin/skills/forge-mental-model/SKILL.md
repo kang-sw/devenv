@@ -9,12 +9,12 @@ Target: user request
 
 ## Invariants
 
-- Call MCP tool `ws/convention.read` for `mental-model-conventions` before any document write - conventions are canonical there.
-- All survey and verifier queries use `ws/subquery` with `deep_research: true`.
+- Call `ws/convention.read(name: "mental-model-conventions")` before any document write - conventions are canonical there.
+- All survey and verifier queries use `ws/subquery(deep_research: true, question: <focused prompt>)`.
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
 - Domain task names use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Renaming tasks breaks cross-compact resume detection.
-- All survey subagents for a phase are dispatched in a single response turn (parallel).
+- All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls.
 - Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
@@ -44,8 +44,9 @@ Record whether spec is available (drives step 4 per domain).
 
 Issue all three queries in a single response turn as parallel `ws/subquery` calls:
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<'PROMPT'
 Survey the project's directory and module structure.
 
 Steps:
@@ -53,11 +54,11 @@ Steps:
 2. For each boundary: identify its apparent responsibility and whether it has outward-facing interfaces (APIs, CLI commands, config options).
 
 Return: a bullet list of module/area names with a one-line responsibility description each. Include file count per area as a rough size signal.
-PROMPT
 ```
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<'PROMPT'
 Survey the project for entry points and cross-module contracts.
 
 Steps:
@@ -66,11 +67,11 @@ Steps:
 3. Identify shared contracts: trait impls, protocols, interface files, plugin registries, or configuration schemas that cross module boundaries.
 
 Return: a bullet list of entry points and contracts with coupling direction (who depends on whom).
-PROMPT
 ```
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<'PROMPT'
 Survey the project for coupling hotspots and implicit contracts - areas that cause wrong outcomes for a developer who modifies them without knowing the contract.
 
 Look for: shared mutable state, ordering dependencies, sync points, extension registries, global config reads, event buses, or any code that must be called in a specific order.
@@ -78,7 +79,6 @@ Look for: shared mutable state, ordering dependencies, sync points, extension re
 For each hotspot: note the modules involved, the contract, and the failure mode if violated.
 
 Return: a bullet list of hotspots with modules, contract, and failure mode.
-PROMPT
 ```
 
 Wait for all three to return before synthesizing.
@@ -124,8 +124,9 @@ Call `TaskUpdate` to set the domain task status to `in_progress`.
 
 ### 2. Domain survey
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<PROMPT
 Analyze domain: <domain>
 Source paths: <paths from task description>
 
@@ -140,14 +141,13 @@ Focus on what would cause wrong outcomes if unknown:
 
 Be concrete: cite file paths, function names, specific types.
 Do NOT produce type/field listings or paraphrase what functions do.
-PROMPT
 ```
 
 Wait for the result before drafting.
 
 ### 3. Draft domain file
 
-1. Call MCP tool `ws/convention.read` for `mental-model-conventions`. Read the output; apply the inclusion test to every claim before writing it.
+1. Call `ws/convention.read(name: "mental-model-conventions")`. Read the output; apply the inclusion test to every claim before writing it.
 2. Draft the domain file content for `ai-docs/mental-model/<domain>.md` following the document format in `mental-model-conventions.md`.
 3. Set frontmatter: `domain` (filename stem), `description` (one-line scope summary), `sources` (directory patterns from task description), `related` (other domains with coupling to this one).
 
@@ -155,15 +155,16 @@ Wait for the result before drafting.
 
 If spec is available (recorded in cold-start step 1):
 
-1. Run `ws-list-spec-stems` (no args) to get all spec stems in the repo.
+1. Inspect `ai-docs/spec/**/*.md` directly to collect all `{#YYMMDD-slug}` anchors in the repo.
 2. For each section in the domain draft: identify spec stems whose behavior corresponds to the section's topic. Embed the stem inline in the relevant body text (e.g., `{#260421-feature-name}`).
 
 Skip if no spec exists.
 
 ### 5. Verify
 
+Call `ws/subquery(deep_research: true, question: <block below>)`:
+
 ```text
-ws/subquery with deep_research=true - <<PROMPT
 Verify the following mental-model domain document against the codebase.
 
 Domain file draft:
@@ -178,7 +179,6 @@ For each claim in the draft, assign a severity:
 - [BLOAT] Fails the inclusion test - type/field listing, paraphrase of what a function does, or content derivable without cost.
 
 Return a finding list. Each finding: severity tag, location in draft, correction or suggested removal.
-PROMPT
 ```
 
 Process verifier output:
