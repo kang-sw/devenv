@@ -251,34 +251,50 @@ install_local_devenv_runtime() {
   esac
   [ -f "$plugin_dir/.local-devenv-runtime" ] || return 1
   [ "$os" != "windows" ] || return 1
+  tmp=$runtime_dir/$binary_name.local
+
+  validate_tmp_runtime() {
+    old_binary=$binary
+    binary=$tmp
+    if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible && prompt_bundle_compatible; then
+      binary=$old_binary
+      return 0
+    fi
+    binary=$old_binary
+    return 1
+  }
 
   for candidate in \
     "$HOME/devenv/agents-plugin-tool/dist/$asset" \
     "$HOME/devenv/agents-plugin/.runtime/$platform/$binary_name"
   do
     if [ -x "$candidate" ]; then
-      cp "$candidate" "$binary"
-      chmod 755 "$binary"
-      if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible && prompt_bundle_compatible; then
+      cp "$candidate" "$tmp"
+      chmod 755 "$tmp"
+      if validate_tmp_runtime; then
+        mv "$tmp" "$binary"
+        chmod 755 "$binary"
         note "installed local devenv runtime from $candidate"
         return 0
       fi
       note "local devenv runtime candidate is incompatible: $candidate"
-      rm -f "$binary"
+      rm -f "$tmp"
     fi
   done
   if [ -d "$HOME/devenv/agents-plugin-tool" ] && command -v go >/dev/null 2>&1; then
     (
       cd "$HOME/devenv/agents-plugin-tool"
-      go build -o "$binary" ./cmd/ws-mcp
+      go build -o "$tmp" ./cmd/ws-mcp
     ) || return 1
-    chmod 755 "$binary"
-    if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible && prompt_bundle_compatible; then
+    chmod 755 "$tmp"
+    if validate_tmp_runtime; then
+      mv "$tmp" "$binary"
+      chmod 755 "$binary"
       note "built local devenv runtime from $HOME/devenv/agents-plugin-tool"
       return 0
     fi
     note "local devenv build produced incompatible runtime"
-    rm -f "$binary"
+    rm -f "$tmp"
   fi
   return 1
 }
@@ -319,7 +335,6 @@ detect_project_root
 version=$("$binary" version 2>/dev/null || true)
 if ! version_compatible "$version"; then
   note "replacing incompatible runtime version: ${version:-unknown}"
-  rm -f "$binary"
   install_runtime
   version=$("$binary" version 2>/dev/null || true)
   version_compatible "$version" || fail "incompatible ws-mcp version after repair: ${version:-unknown}"
@@ -327,7 +342,6 @@ fi
 
 if ! tools_compatible; then
   note "replacing runtime with incompatible MCP tool surface"
-  rm -f "$binary"
   install_runtime
   version=$("$binary" version 2>/dev/null || true)
   version_compatible "$version" || fail "incompatible ws-mcp version after tool-surface repair: ${version:-unknown}"
@@ -336,7 +350,6 @@ fi
 
 if ! commands_compatible; then
   note "replacing runtime with incompatible CLI command surface"
-  rm -f "$binary"
   install_runtime
   version=$("$binary" version 2>/dev/null || true)
   version_compatible "$version" || fail "incompatible ws-mcp version after command-surface repair: ${version:-unknown}"
@@ -346,7 +359,6 @@ fi
 
 if ! prompt_bundle_compatible; then
   note "replacing runtime with incompatible prompt bundle"
-  rm -f "$binary"
   install_runtime
   version=$("$binary" version 2>/dev/null || true)
   version_compatible "$version" || fail "incompatible ws-mcp version after prompt-bundle repair: ${version:-unknown}"

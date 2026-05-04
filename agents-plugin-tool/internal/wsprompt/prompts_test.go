@@ -1,6 +1,7 @@
 package wsprompt
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,5 +163,27 @@ func TestBundleMetadata(t *testing.T) {
 		if !found {
 			t.Fatalf("missing prompt %q in %+v", prompt, info.Prompts)
 		}
+	}
+}
+
+func TestRuntimeContractPromptBundleHash(t *testing.T) {
+	info, err := Bundle("dev")
+	if err != nil {
+		t.Fatalf("Bundle returned error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "runtime.json"))
+	if err != nil {
+		t.Fatalf("read runtime contract: %v", err)
+	}
+	var contract struct {
+		PromptBundle struct {
+			ContentSHA256 string `json:"content_sha256"`
+		} `json:"prompt_bundle"`
+	}
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatalf("parse runtime contract: %v", err)
+	}
+	if contract.PromptBundle.ContentSHA256 != info.ContentSHA256 {
+		t.Fatalf("runtime.json prompt bundle hash = %q, want %q", contract.PromptBundle.ContentSHA256, info.ContentSHA256)
 	}
 }

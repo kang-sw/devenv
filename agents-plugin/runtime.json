@@ -7,7 +7,7 @@
   "release_tag": "v0.1.0",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "03d4995b7dd7f960aeeea98525f57efa838e927a9968a0f9fb0859de29facfc6",
+    "content_sha256": "fb66a1855a5e6d2012f89b6fea7755ce3125385aa7eb18eee06043434e1229dc",
     "prompts": [
       "code-reviewer",
       "implementer",
