@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.16.3 - 2026-05-05
+
+### Changed
+- Add bounded named-agent backend failure diagnostics that preserve the raw
+  backend error and include PATH-detected backend/configuration hints.
+
+### Fixed
+- Keep completed Codex named-agent results when Windows process-control text
+  appears on stdout after valid JSONL output.
+
 ## v0.16.2 - 2026-05-05
 
 ### Changed
