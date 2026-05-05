@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.17.3 - 2026-05-05
+
+### Added
+- Add a Claude backend adapter for ws named agents while preserving the shared
+  named-agent lifecycle.
+
+### Fixed
+- Generate Claude session ids in the UUID format required by the Claude CLI.
+- Resume Claude sessions after hook-delivered mailbox messages so active hook
+  interrupts produce a final result instead of empty output.
+
 ## v0.17.2 - 2026-05-05
 
 ### Fixed
