@@ -6,6 +6,7 @@ spec:
   - 260505-claude-agent-runner
 related-mental-model:
   - named-agent-runtime
+completed: 2026-05-05
 ---
 
 # Claude named-agent runner
@@ -57,6 +58,12 @@ Success criteria:
   named-agent lifecycle, result, status, tail, interrupt, and diagnostics
   surfaces.
 
+### Result - 2026-05-05
+
+Added `260505-claude-agent-runner` to the named-agent runtime spec, populated
+the ticket `spec:` frontmatter, promoted the ticket to `todo/`, and added the
+ticket to the project queue.
+
 ### Phase 2: Claude runner adapter
 
 Implement a `ClaudeRunner` in the Go `wsagent` runtime and route
@@ -92,3 +99,18 @@ Success criteria:
   reconfiguration hints.
 - Tests cover command construction, first-call session id persistence, resume,
   JSON result parsing, and non-zero Claude exit behavior.
+
+### Result - 2026-05-05
+
+Implemented `ClaudeRunner` as a backend adapter behind the existing
+`Runner.Call` interface. Default runner selection now routes `backend: claude`
+to the Claude adapter while leaving Gemini unsupported through the existing
+diagnostic path. The runner generates first-call Claude session ids, resumes
+stored sessions, reads the registered system prompt into `--system-prompt`,
+encodes interrupt hooks through Claude `--settings`, parses Claude JSON output,
+and preserves non-zero process stderr for shared backend diagnostics.
+
+Tests cover direct Claude command construction, backend shorthand handling,
+first-call session persistence, resume behavior, JSON result parsing, non-zero
+Claude failures, and an async manager call/result flow for a Claude-backed named
+agent.

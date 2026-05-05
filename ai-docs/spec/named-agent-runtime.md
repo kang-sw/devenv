@@ -1,6 +1,6 @@
 ---
 title: Named Agent Runtime
-summary: Durable ws named-agent sessions, asynchronous lifecycle control, subquery fan-out, diagnostics, and Codex backend behavior.
+summary: Durable ws named-agent sessions, asynchronous lifecycle control, subquery fan-out, diagnostics, and backend adapter behavior.
 ---
 
 # Named Agent Runtime
@@ -120,17 +120,17 @@ stores the final plain-text agent message as the caller-facing result. The JSONL
 reader accepts large single-line events so verbose tool output does not break
 session parsing.
 
-## 🚧 Claude Agent Runner {#260505-claude-agent-runner}
+## Claude Agent Runner {#260505-claude-agent-runner}
 
-Named-agent registrations with `backend: claude` will execute through the same
+Named-agent registrations with `backend: claude` execute through the same
 agent lifecycle as Codex-backed agents. Callers will use the existing
 `agents.register`, `agents.call`, `agents.wait`, `agents.result`,
 `agents.status`, `agents.tail`, `agents.interrupt`, and diagnostics tools
 without switching to a Claude-specific registry or output surface.
 
-The Claude adapter will start first calls with a runtime-managed Claude session
-id, resume later calls with the stored session id, apply the resolved agent
-system prompt, and parse Claude JSON output into the final plain-text result.
+The Claude adapter starts first calls with a runtime-managed Claude session id,
+resumes later calls with the stored session id, applies the resolved agent
+system prompt, and parses Claude JSON output into the final plain-text result.
 Claude process failures will continue through the shared backend invocation
 diagnostics path, preserving raw backend errors and reconfiguration hints.
 

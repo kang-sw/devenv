@@ -1,6 +1,6 @@
 ---
 domain: named-agent-runtime
-description: "File-backed named agents, async calls, locks, subqueries, and Codex backend handling."
+description: "File-backed named agents, async calls, locks, subqueries, and backend adapter handling."
 sources:
   - agents-plugin-tool/internal/wsagent/
   - agents-plugin-tool/internal/wsstate/
@@ -16,6 +16,7 @@ related:
 - `wsagent.Manager` owns registration, async calls, wait/result/status/tail/cancel, inbox delivery, and erasure. {#260505-named-agent-registry-state-layout}
 - `wsstate.Manager.Ensure` derives cache, project, worktree, agent, review, lock, and temp paths.
 - `CodexRunner` invokes `codex exec --json`, captures thread ids, and extracts final agent messages. {#260505-codex-agent-session-jsonl-handling}
+- `ClaudeRunner` invokes `claude -p --output-format json`, manages first-call session ids, resumes stored sessions, and extracts final result text. {#260505-claude-agent-runner}
 
 ## Module Contracts
 
@@ -27,6 +28,7 @@ related:
 - Successful `Result` erases ephemeral agents; `Print` is legacy and does not consume them. {#260505-async-subquery-ephemeral-agent}
 - Backend invocation failures are formatted at the call site with raw error text, bounded PATH-detected backend hints, and reconfiguration guidance; do not run separate model/login probes during registration or config inspection. {#260505-agent-backend-failure-diagnostics}
 - Codex JSONL parsing treats non-JSON stdout as fatal until both session id and final agent message are available; trailing process-control noise after completion is ignored. {#260505-codex-jsonl-trailing-noise-tolerance}
+- Backend adapters must fit `RunnerRequest` and `RunnerResult`; keep backend-specific session and output parsing inside the runner instead of branching the manager lifecycle. {#260505-claude-agent-runner}
 
 ## Coupling
 
@@ -37,7 +39,7 @@ related:
 
 ## Extension Points & Change Recipes
 
-- **Add a backend**: implement `Runner`, then remove or branch the current backend checks that accept only `codex`.
+- **Add a backend**: implement `Runner`, add it to backend runner selection, and keep session persistence, stream capture, status transitions, inbox delivery, and diagnostics on the shared manager path.
 - **Add a diagnostic stream**: update stream path mapping, MCP debug tools, CLI debug tools, tail output, and tests. {#260505-agent-diagnostics-tail-debug}
 - **Add generated path kinds**: update `generatedPathTarget`, MCP schema, callers, and cleanup rules.
 

@@ -426,10 +426,6 @@ func (m Manager) syncCall(opts syncCallOptions) (Agent, string, error) {
 	if err != nil {
 		return Agent{}, "", err
 	}
-	if agent.Backend != "codex" {
-		err := fmt.Errorf("unsupported agent backend %q", agent.Backend)
-		return agent, "", backendInvocationError(agent, err)
-	}
 	if strings.TrimSpace(opts.Prompt) == "" {
 		return agent, "", errors.New("prompt is required")
 	}
@@ -491,8 +487,9 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	}
 	runner := m.opts.Runner
 	if runner == nil {
-		if agent.Backend != "codex" {
-			err := fmt.Errorf("unsupported agent backend %q", agent.Backend)
+		var err error
+		runner, err = runnerForBackend(agent.Backend)
+		if err != nil {
 			diagnostic := backendInvocationError(agent, err)
 			agent.Status = StatusFailed
 			agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
@@ -501,7 +498,6 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 			_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": diagnostic.Error()})
 			return "", agent, diagnostic
 		}
-		runner = CodexRunner{}
 	}
 	hookCommand := ""
 	if opts.CaptureStreams {

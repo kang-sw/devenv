@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -65,6 +66,38 @@ func writeBackendShim(t *testing.T, dir, name string) string {
 	}
 	if err := os.WriteFile(path, []byte(""), 0o755); err != nil {
 		t.Fatalf("write backend shim: %v", err)
+	}
+	return path
+}
+
+func writeFakeClaudeExecutable(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "claude")
+	if runtime.GOOS == "windows" {
+		path += ".cmd"
+		body := `@echo off
+echo %*>>"%CLAUDE_FAKE_LOG%"
+if "%CLAUDE_FAKE_FAIL%"=="1" (
+  echo login required 1>&2
+  exit /b 7
+)
+echo {^"result^":^"claude reply^",^"is_error^":false}
+`
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatalf("write fake claude cmd: %v", err)
+		}
+		return path
+	}
+	body := `#!/bin/sh
+printf '%s\n' "$@" >> "$CLAUDE_FAKE_LOG"
+if [ "$CLAUDE_FAKE_FAIL" = "1" ]; then
+  echo "login required" >&2
+  exit 7
+fi
+printf '{"result":"claude reply","is_error":false}\n'
+`
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
 	}
 	return path
 }
@@ -483,6 +516,117 @@ func TestCallStoresSessionIDAfterSynchronousCompletion(t *testing.T) {
 	}
 }
 
+func TestClaudeRunnerCreatesSessionAndParsesJSON(t *testing.T) {
+	repo := initRepo(t)
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "claude.log")
+	writeFakeClaudeExecutable(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_FAKE_LOG", logPath)
+
+	var capturedSession string
+	var stdout bytes.Buffer
+	result, err := ClaudeRunner{}.Call(RunnerRequest{
+		Root:    repo,
+		Prompt:  "hello claude",
+		Model:   "claude",
+		Stdout:  &stdout,
+		Timeout: time.Minute,
+		OnSessionID: func(sessionID string) error {
+			capturedSession = sessionID
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ClaudeRunner.Call returned error: %v", err)
+	}
+	if capturedSession == "" || result.SessionID != capturedSession {
+		t.Fatalf("session not captured: result=%q captured=%q", result.SessionID, capturedSession)
+	}
+	if result.Text != "claude reply" || !strings.Contains(stdout.String(), "claude reply") {
+		t.Fatalf("result/stdout = %q/%q", result.Text, stdout.String())
+	}
+	logRaw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logRaw)
+	if !strings.Contains(log, "--session-id") ||
+		!strings.Contains(log, capturedSession) ||
+		!strings.Contains(log, "hello claude") ||
+		strings.Contains(log, "--model") {
+		t.Fatalf("unexpected first-call args:\n%s", log)
+	}
+}
+
+func TestClaudeRunnerResumesWithSystemPromptModelAndHook(t *testing.T) {
+	repo := initRepo(t)
+	binDir := t.TempDir()
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "claude.log")
+	systemPromptPath := filepath.Join(tmp, "system.md")
+	if err := os.WriteFile(systemPromptPath, []byte("system text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeClaudeExecutable(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_FAKE_LOG", logPath)
+
+	result, err := ClaudeRunner{}.Call(RunnerRequest{
+		Root:                 repo,
+		Prompt:               "resume prompt",
+		Model:                "claude-sonnet-4",
+		SessionID:            "session-123",
+		SystemPromptPath:     systemPromptPath,
+		InterruptHookCommand: "ws hook",
+		Timeout:              time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("ClaudeRunner.Call returned error: %v", err)
+	}
+	if result.SessionID != "session-123" || result.Text != "claude reply" {
+		t.Fatalf("result = %+v", result)
+	}
+	logRaw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logRaw)
+	for _, want := range []string{
+		"--resume",
+		"session-123",
+		"--model",
+		"claude-sonnet-4",
+		"--system-prompt",
+		"system text",
+		"--settings",
+		"PostToolBatch",
+		"ws hook",
+		"resume prompt",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("claude args missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestClaudeRunnerNonZeroExitPreservesStderr(t *testing.T) {
+	repo := initRepo(t)
+	binDir := t.TempDir()
+	writeFakeClaudeExecutable(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_FAKE_LOG", filepath.Join(t.TempDir(), "claude.log"))
+	t.Setenv("CLAUDE_FAKE_FAIL", "1")
+
+	_, err := ClaudeRunner{}.Call(RunnerRequest{Root: repo, Prompt: "fail", Timeout: time.Minute})
+	if err == nil {
+		t.Fatal("ClaudeRunner.Call returned nil error")
+	}
+	if !strings.Contains(err.Error(), "claude failed") || !strings.Contains(err.Error(), "login required") {
+		t.Fatalf("error did not preserve stderr: %v", err)
+	}
+}
+
 func TestCallStartsWorkerAndRejectsBusyAgent(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
@@ -660,6 +804,88 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 		!strings.Contains(tail, "jsonl") ||
 		!strings.Contains(tail, "async reply") {
 		t.Fatalf("tail mismatch:\n%s", tail)
+	}
+}
+
+func TestRunCurrentUsesClaudeBackendRunner(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "claude.log")
+	writeFakeClaudeExecutable(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_FAKE_LOG", logPath)
+
+	starter := &fakeWorkerStarter{pid: 4567}
+	base := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+	if _, _, err := base.Register(RegisterOptions{
+		Root:             repo,
+		Name:             "impl",
+		Backend:          "claude",
+		Model:            "claude",
+		SystemPromptText: "sys",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	if err := manager.RunCurrent(repo, "impl"); err != nil {
+		t.Fatalf("RunCurrent returned error: %v", err)
+	}
+	layout, err := manager.layout(repo, "impl", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Backend != "claude" || agent.SessionID == "" || call.SessionID != agent.SessionID || call.Status != CallStatusCompleted {
+		t.Fatalf("claude call state mismatch: agent=%+v call=%+v", agent, call)
+	}
+	result, err := manager.Result(ResultOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatalf("Result returned error: %v", err)
+	}
+	if result != "claude reply" {
+		t.Fatalf("result = %q", result)
+	}
+	logRaw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logRaw)
+	if !strings.Contains(log, "--session-id") || !strings.Contains(log, agent.SessionID) || strings.Contains(log, "--model") {
+		t.Fatalf("unexpected claude args:\n%s", log)
+	}
+
+	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "resume prompt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RunCurrent(repo, "impl"); err != nil {
+		t.Fatalf("resume RunCurrent returned error: %v", err)
+	}
+	logRaw, err = os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log = string(logRaw)
+	if !strings.Contains(log, "--resume") || !strings.Contains(log, agent.SessionID) || !strings.Contains(log, "resume prompt") {
+		t.Fatalf("resume did not use stored session:\n%s", log)
 	}
 }
 
@@ -986,7 +1212,7 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 		Now:           func() time.Time { return testNow },
 		WorkerStarter: starter,
 	})
-	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl", Backend: "claude", Model: "claude-sonnet-4"}); err != nil {
+	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl", Backend: "gemini", Model: "gemini-3-1-pro"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
@@ -1002,9 +1228,9 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 		t.Fatal("RunCurrent returned nil error")
 	}
 	for _, want := range []string{
-		`unsupported agent backend "claude"`,
-		"backend: claude",
-		"model: claude-sonnet-4",
+		`unsupported agent backend "gemini"`,
+		"backend: gemini",
+		"model: gemini-3-1-pro",
 		"- gemini: " + geminiPath,
 		"re-run agents.register",
 		"config.agents_tier",
@@ -1017,7 +1243,7 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if !strings.Contains(status, "call_status: failed") || !strings.Contains(status, `unsupported agent backend "claude"`) {
+	if !strings.Contains(status, "call_status: failed") || !strings.Contains(status, `unsupported agent backend "gemini"`) {
 		t.Fatalf("status missing unsupported backend diagnostic:\n%s", status)
 	}
 }

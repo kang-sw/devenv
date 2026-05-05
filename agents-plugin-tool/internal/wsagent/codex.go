@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -34,6 +35,17 @@ type RunnerResult struct {
 	SessionID   string
 	Text        string
 	Interrupted bool
+}
+
+func runnerForBackend(backend string) (Runner, error) {
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "", "codex":
+		return CodexRunner{}, nil
+	case "claude":
+		return ClaudeRunner{}, nil
+	default:
+		return nil, fmt.Errorf("unsupported agent backend %q", backend)
+	}
 }
 
 type CodexRunner struct{}
