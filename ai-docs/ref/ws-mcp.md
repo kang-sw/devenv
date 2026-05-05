@@ -158,36 +158,22 @@ or repository files.
 
 ## Orchestrator Authority
 
-`ws-mcp` assigns lead orchestration authority through a worktree-local lock under
-the ws cache root:
+`ws-mcp` defaults to the full `lead` tool surface. It does not assign
+orchestration authority from worktree-local locks or startup-root ownership,
+because plugin-managed hosts can start MCP servers from cache directories and can
+fail to propagate environment variables to delegated sessions.
 
-```text
-~/.cache/ws@kang-sw-devenv/proj/<worktree-key>/locks/orchestrator.lock
-```
-
-The first live MCP server for a worktree owns the lock and receives the base
-`lead` role. Later MCP servers for the same worktree receive the base
-`delegate` role. Linked worktrees use different worktree keys, so each linked
-worktree may have an independent lead server.
-
-If the server cannot acquire or inspect the worktree-local lock because the
-default root is invalid, missing, or outside a Git worktree, the MCP server keeps
-the base `lead` role instead of hiding lead tools. The individual tool call may
-still fail until the caller passes a valid `root`, but startup-time root
-diagnostics must not demote the visible tool surface to delegate-only.
-
-`WS_MCP_TOOL_PROFILE` is an additional restriction only. The effective role is
-the minimum of the lock-derived base role and the requested profile, ordered
-`lead > delegate > leaf`. A non-owner cannot regain lead tools by setting
-`WS_MCP_TOOL_PROFILE=lead`; a lock owner can still voluntarily reduce itself to
-`delegate` or `leaf`.
-
-Delegate and leaf roles hide and reject lead-owned orchestration or mutation
-tools, currently `agents.*` and `config.*`. Delegate may use
+`WS_MCP_TOOL_PROFILE` is an optional profile filter, not an authority boundary.
+When the host propagates it, `delegate` and `leaf` hide and reject selected
+lead-owned orchestration or mutation tools. Delegate may use
 `agents.wait/result/status/tail/cancel/print` only for generated `subquery-*`
 agents. Leaf also hides `subquery`.
-`WS_MCP_ALLOWED_TOOLS` can narrow the resulting visible surface for tests or
-debugging, but it cannot bypass the effective role.
+
+If profile propagation fails, delegated agents may see the full lead MCP surface.
+Containment therefore depends on prompt-level role rules such as delegate
+orientation and lead-owned orchestration instructions. `WS_MCP_ALLOWED_TOOLS`
+can narrow the selected profile for tests or debugging, but it cannot expand
+access beyond that profile.
 
 For repo-local Codex plugin iteration, changed plugin-managed MCP configuration
 requires a human-in-the-loop cache refresh: the user must uninstall/install the
@@ -995,7 +981,7 @@ Behavior:
   `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` → `gpt-5.5`.
 - The JSON response contains `path` and `config` fields.
 - Delegate and leaf MCP tool profiles hide and reject this tool together with
-  the other `config.*` tools.
+  the other `config.*` tools when optional profile filtering is active.
 
 ### `ws/config.agents_tier`
 

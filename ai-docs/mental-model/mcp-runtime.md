@@ -15,7 +15,7 @@ related:
 ## Entry Points
 
 - `cmd/ws-mcp/main.go` is the binary entry point for `serve --stdio`, `runtime info`, CLI mirrors, and local diagnostics. {#260505-runtime-cli-entrypoints}
-- `internal/mcp/server.go` owns MCP JSON-RPC request handling, tool schemas, tool dispatch, role filtering, and cancellation. {#260505-mcp-server-protocol-surface}
+- `internal/mcp/server.go` owns MCP JSON-RPC request handling, tool schemas, tool dispatch, optional profile filtering, and cancellation. {#260505-mcp-server-protocol-surface}
 - `runtime.info` is launcher-facing compatibility data, including embedded prompt bundle metadata. {#260505-runtime-debug-metadata-tools}
 
 ## Module Contracts
@@ -25,7 +25,8 @@ related:
 - Tool results are returned as MCP text content, even when the text is JSON. Callers parse text, not structured content arrays.
 - `toolTextResponse` errors are successful JSON-RPC responses with `isError: true`; unknown tools/profile violations are JSON-RPC errors.
 - The server root is captured at `NewServer`; root-aware MCP tool calls use a resolver chain of explicit `root`, volatile session default root, `WS_MCP_PROJECT_ROOT`, unambiguous host workspace metadata, and then startup root. {#260505-mcp-session-default-root}
-- Orchestrator lock errors are startup diagnostics, not delegate evidence; an invalid default root must not hide lead tools that can accept an explicit `root`. {#260505-tool-profile-gating}
+- MCP starts with the lead tool surface; worktree locks are not an authority signal for tool visibility. {#260505-tool-profile-gating}
+- `WS_MCP_TOOL_PROFILE` is an optional containment filter. If host environment propagation fails, delegated agents may see lead tools and must follow prompt-level role rules.
 - `session.set_default_root` stores a canonical Git worktree root in the current server instance only; it does not change process cwd and does not write config.
 - Plugin-managed MCP calls may lack a caller repository root on native Windows; if `WS_MCP_PROJECT_ROOT` and host metadata are unavailable, tools need an explicit `root` or `session.set_default_root` rather than the user's shell cwd.
 
@@ -38,16 +39,16 @@ related:
 
 ## Extension Points & Change Recipes
 
-- **Add an MCP tool**: add schema in `tools()`, dispatch in `callTool`, profile permissions in `roleAllowsTool`, tests for lead/delegate/leaf visibility, and `runtime.json`.
+- **Add an MCP tool**: add schema in `tools()`, dispatch in `callTool`, optional profile permissions in `roleAllowsTool`, visibility tests when filtered, and `runtime.json`.
 - **Add a CLI mirror**: add the top-level or group subcommand in `cmd/ws-mcp`, map flags to the same internal package as MCP, and add command smoke tests.
-- **Restrict a tool**: update role tables and add tests proving allowlists cannot regain a tool hidden by role.
+- **Restrict a tool under a profile**: update profile tables and add tests proving allowlists cannot regain a hidden tool.
 
 ## Common Mistakes
 
 - Advertising a tool in `tools()` without a dispatch case creates a visible broken tool.
 - Adding dispatch without schema makes the tool callable only by guessing the name.
-- Assuming delegate agents can inspect arbitrary agents; delegate profile can use selected `agents.*` tools only for `subquery-*` names, while leaf profile cannot use `agents.*`.
-- Treating a lock acquisition error as delegate authority hides repair tools in plugin-managed sessions whose default root was misdetected.
+- Treating MCP profile filters as an authority boundary creates false safety; prompt-level delegate rules remain the durable containment mechanism.
+- Assuming delegate agents can inspect arbitrary agents when `WS_MCP_TOOL_PROFILE` is applied; delegate profile can use selected `agents.*` tools only for `subquery-*` names, while leaf profile cannot use `agents.*`.
 - Treating `domain_hint` in `api.ask` as a direct domain selector; only exact existing domain names bypass routing. {#260505-api-documentation-mcp-tools}
 - Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must ask for explicit `root` or `session.set_default_root` instead.

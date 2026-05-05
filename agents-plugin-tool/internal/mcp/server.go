@@ -77,7 +77,7 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 		commit = sourceCommit[0]
 	}
 	cleanRoot := filepath.Clean(root)
-	role := effectiveToolRole(cleanRoot, version)
+	role := requestedToolRole()
 	return &Server{root: cleanRoot, version: version, sourceCommit: commit, role: role}
 }
 
@@ -1406,21 +1406,6 @@ func (s *Server) toolAllowed(name string) bool {
 	return true
 }
 
-func effectiveToolRole(root, version string) toolRole {
-	base := roleDelegate
-	lock, err := wsstate.NewManager(wsstate.Options{}).AcquireOrchestratorLock(root, version)
-	if err != nil {
-		appendDebugEvent("orchestrator_lock.error", map[string]any{"root": root, "error": err.Error()})
-		base = roleLead
-	} else if lock.Owner || lock.Lock.PID == os.Getpid() {
-		base = roleLead
-		appendDebugEvent("orchestrator_lock.owner", map[string]any{"root": root, "path": lock.Path})
-	} else {
-		appendDebugEvent("orchestrator_lock.delegate", map[string]any{"root": root, "path": lock.Path, "owner_pid": lock.Lock.PID})
-	}
-	return minRole(base, requestedToolRole())
-}
-
 func requestedToolRole() toolRole {
 	switch strings.TrimSpace(os.Getenv("WS_MCP_TOOL_PROFILE")) {
 	case "", "lead":
@@ -1431,24 +1416,6 @@ func requestedToolRole() toolRole {
 		return roleLeaf
 	default:
 		return roleLead
-	}
-}
-
-func minRole(base, requested toolRole) toolRole {
-	if roleRank(requested) < roleRank(base) {
-		return requested
-	}
-	return base
-}
-
-func roleRank(role toolRole) int {
-	switch role {
-	case roleLeaf:
-		return 0
-	case roleDelegate:
-		return 1
-	default:
-		return 2
 	}
 }
 

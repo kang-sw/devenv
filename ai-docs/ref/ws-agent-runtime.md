@@ -216,24 +216,21 @@ Agent orchestration tools are lead-owned. The runtime does not rely only on
 `WS_MCP_TOOL_PROFILE`, because plugin-managed hosts may reuse or scope MCP server
 processes differently from the nested agent subprocess environment.
 
-At MCP startup, `ws-mcp` tries to create a worktree-local
-`locks/orchestrator.lock` file under the cache layout. The lock owner receives
-the base `lead` role. Other MCP servers for the same worktree receive the base
-`delegate` role. Linked worktrees use distinct worktree keys and may each have
-their own lead owner.
-
-The effective tool role is the lower of the lock-derived base role and the
-requested profile:
+`ws-mcp` defaults to the full `lead` tool surface. `WS_MCP_TOOL_PROFILE` is an
+optional profile filter for hosts that propagate it reliably:
 
 ```text
 lead > delegate > leaf
 ```
 
-`delegate` and `leaf` cannot see or call lead-owned orchestration or mutation
-tools. Delegate may use `agents.wait/result/status/tail/cancel/print` only for
-generated `subquery-*` agents; `leaf` also cannot see or call `subquery`.
-Explicit tool allowlists may narrow the visible surface for tests, but cannot
-raise a delegate or leaf back to lead.
+When profile propagation fails, delegated agents may see lead tools. Prompt-level
+delegate orientation remains the durable containment mechanism.
+
+When the profile filter is active, `delegate` and `leaf` cannot see or call
+selected lead-owned orchestration or mutation tools. Delegate may use
+`agents.wait/result/status/tail/cancel/print` only for generated `subquery-*`
+agents; `leaf` also cannot see or call `subquery`. Explicit tool allowlists may
+narrow the visible surface for tests, but cannot raise a filtered profile.
 
 ## Workload Tiers
 

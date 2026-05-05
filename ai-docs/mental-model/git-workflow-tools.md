@@ -28,15 +28,15 @@ related:
 
 ## Coupling
 
-- Git operation additions require `wsgit`, MCP dispatch/schema, CLI handler/usage, tests, role gating, and docs.
+- Git operation additions require `wsgit`, MCP dispatch/schema, CLI handler/usage, tests, optional profile filtering, and docs.
 - Diff modes are shared constants across core, MCP enum, CLI default/help, and docs.
 - Ticket move expansion depends on `ai-docs/tickets/{idea,todo,wip,.done,.dropped}` layout.
-- `git.commit` is available to lead/delegate profiles but not leaf profiles.
+- `git.commit` is hidden only when the optional leaf profile filter is active.
 
 ## Extension Points & Change Recipes
 
 - **Add a diff mode**: add constants, `DiffArgs`, MCP enum, CLI help/default handling, tests, and documentation.
-- **Add a write Git operation**: decide role access explicitly; defaulting to delegate access may expose mutation to the wrong profile.
+- **Add a write Git operation**: decide optional profile access explicitly; prompt-level role rules remain the primary containment mechanism.
 - **Change commit message format**: update structured message builder, ticket update detection, commit rules, and tests.
 
 ## Common Mistakes

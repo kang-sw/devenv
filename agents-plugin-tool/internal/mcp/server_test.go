@@ -18,7 +18,6 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
-	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 func TestServeStdioToolsListAndCall(t *testing.T) {
@@ -309,7 +308,7 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 	}
 }
 
-func TestServeStdioInvalidDefaultRootDoesNotHideLeadTools(t *testing.T) {
+func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -322,7 +321,7 @@ func TestServeStdioInvalidDefaultRootDoesNotHideLeadTools(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	if !strings.Contains(byID["1"], "agents.register") || !strings.Contains(byID["1"], "agents.call") || !strings.Contains(byID["1"], "config.show") {
-		t.Fatalf("invalid default root hid lead tools: %s", byID["1"])
+		t.Fatalf("default profile hid lead tools: %s", byID["1"])
 	}
 }
 
@@ -532,60 +531,6 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 	}
 }
 
-func TestServeStdioNonOwnerCannotEscalateWithLeadProfile(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	initGit(t, root)
-	cache := filepath.Join(t.TempDir(), "cache")
-	t.Setenv("WS_CACHE_HOME", cache)
-	layout, _, worktree, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner := startHelperProcess(t)
-	lock := wsstate.OrchestratorLock{
-		SchemaVersion: 1,
-		PID:           owner.Process.Pid,
-		StartedAt:     time.Now().UTC().Format(time.RFC3339),
-		Root:          worktree.WorktreePath,
-		WorktreeKey:   worktree.WorktreeKey,
-		Version:       "test",
-	}
-	mustWrite(t, layout.WorktreeLocksDir, "orchestrator.lock", string(mustMarshalForTest(t, lock)))
-
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"subquery-demo"}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"impl"}}}`,
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.wait","arguments":{"names":["subquery-demo","impl"]}}}`,
-	}, "\n")
-
-	var out bytes.Buffer
-	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
-	}
-	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "agents.call") || strings.Contains(byID["1"], "config.show") {
-		t.Fatalf("delegate profile tool surface mismatch: %s", byID["1"])
-	}
-	if !strings.Contains(byID["1"], "subquery") {
-		t.Fatalf("delegate profile unexpectedly hid subquery: %s", byID["1"])
-	}
-	if !strings.Contains(byID["2"], "only for subquery-* agents") {
-		t.Fatalf("non-owner tools/call did not reject non-subquery agents.status: %s", byID["2"])
-	}
-	if !strings.Contains(byID["3"], "read agent") {
-		t.Fatalf("delegate subquery agents.status did not reach runtime: %s", byID["3"])
-	}
-	if !strings.Contains(byID["4"], "only for subquery-* agents") {
-		t.Fatalf("non-owner tools/call did not reject non-subquery agents.result: %s", byID["4"])
-	}
-	if !strings.Contains(byID["5"], "only for subquery-* agents") {
-		t.Fatalf("non-owner tools/call did not reject mixed agents.wait names: %s", byID["5"])
-	}
-}
-
 func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
@@ -715,28 +660,6 @@ func useLeadProfile(t *testing.T) {
 	t.Helper()
 	t.Setenv("WS_MCP_TOOL_PROFILE", "lead")
 	t.Setenv("WS_MCP_ALLOWED_TOOLS", "")
-}
-
-func startHelperProcess(t *testing.T) *exec.Cmd {
-	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--")
-	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
-	return cmd
-}
-
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	time.Sleep(30 * time.Second)
-	os.Exit(0)
 }
 
 func mustWrite(t *testing.T, root, rel, text string) {

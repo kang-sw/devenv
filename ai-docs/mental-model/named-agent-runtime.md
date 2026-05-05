@@ -34,7 +34,7 @@ related:
 ## Coupling
 
 - MCP and CLI wrappers mirror `Register`, `Call`, `Wait`, `Result`, `Status`, `Interrupt`, `Tail`, debug streams, `Cancel`, `Print`, and `Erase`; behavior changes require both surfaces.
-- `ToolProfile` flows into Codex subprocess env as `WS_MCP_TOOL_PROFILE`; MCP role gating interprets the same strings.
+- `ToolProfile` flows into subprocess env as `WS_MCP_TOOL_PROFILE` when the host preserves it; MCP treats it as an optional profile filter, not an authority boundary.
 - Worktree scoping is shared by agents, generated review paths, and orchestrator locks; changing cache layout affects all three.
 - Prompt registration is static: `system.md` is written at registration time and existing agents do not automatically pick up edited embedded prompts. {#260505-agent-prompt-registration-tier-resolution}
 

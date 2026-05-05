@@ -171,21 +171,24 @@ returns a synchronous answer to the caller.
 
 ## Tool Profile Gating {#260505-tool-profile-gating}
 
-The MCP server filters visible and callable tools by effective role. The role is
-derived from the worktree-local orchestrator lock and can be further restricted
-by `WS_MCP_TOOL_PROFILE`.
+The MCP server defaults to the `lead` tool surface. It does not derive authority
+from worktree-local locks or startup-root ownership, because plugin-managed hosts
+can start the server from cache directories and can fail to propagate
+environment variables consistently.
 
-Lock acquisition errors during startup do not hide lead-owned tools. This allows
-plugin-managed sessions with an invalid default root to list and call lead tools
-that can receive an explicit `root`; the tool itself still reports root-specific
-errors when the supplied root is invalid.
+`WS_MCP_TOOL_PROFILE` is an optional profile filter, not an authority boundary.
+When the host successfully propagates it, `delegate` and `leaf` receive narrower
+tool sets for dogfood containment and tests. Delegate access to generated
+subquery agents is scoped to subquery result, status, tail, cancel, and
+print-style operations. Leaf also hides recursive orchestration and selected
+mutation tools.
 
-`lead` has the full surface. `delegate` and `leaf` receive narrower tool sets so
-delegated agents cannot regain lead-owned orchestration or mutation tools.
-Delegate access to generated subquery agents is scoped to subquery result,
-status, tail, cancel, and print-style operations. `WS_MCP_ALLOWED_TOOLS` can
-further narrow the visible surface for tests or debugging, but it cannot expand
-access beyond the effective role.
+When profile environment propagation fails, delegated agents may see the full
+lead MCP surface. Workflow containment therefore depends on prompt rules such as
+delegate orientation and lead-owned orchestration instructions, not on MCP
+tool-surface filtering. `WS_MCP_ALLOWED_TOOLS` can further narrow the visible
+surface for tests or debugging, but it cannot expand access beyond the selected
+profile.
 
 ## CLI Mirror Coverage {#260505-cli-mirror-coverage}
 
