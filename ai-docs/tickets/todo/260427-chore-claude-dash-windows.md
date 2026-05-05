@@ -1,5 +1,7 @@
 ---
 title: claude-dash — Windows native build verification
+spec:
+  - 260505-claude-dash-windows-verification
 ---
 
 # claude-dash — Windows native build verification
