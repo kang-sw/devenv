@@ -11,7 +11,7 @@ Target: user request
 
 - Lead-driven - no subagent delegation.
 - Call `ws/convention.read(name: "spec-conventions")` before any write or read.
-- Only add entries for confirmed-implemented features - no [planned] entries unless explicitly directed.
+- Only add entries for confirmed-implemented features - no `🚧` entries unless explicitly directed.
 - Call `ws/spec_index.verify()` after any file modification.
 - Commit all spec changes in a single `docs(spec): ...` commit.
 - Use `ws/git.*` for commit range discovery, diff inspection, log audit, and commit.
@@ -40,11 +40,11 @@ For each spec-impact commit:
 2. Check whether an entry already covers the new or changed behavior.
 3. If missing: call `ws/spec_stem.generate(slug: "<slug>")` and insert an entry following the `spec-format` template from `write-spec/SKILL.md`.
 
-### 5. Strip [planned]
+### 5. Strip `🚧`
 
-For each `[planned]` entry:
+For each `🚧` entry or `> [!note] Planned 🚧` callout:
 1. Extract the stem.
-2. Check the `ws/git.log` result for the stem. If matching commits exist and the feature is confirmed implemented: strip `[planned] ` from the heading and remove any `> [!note] Planned [planned]` callout block beneath it.
+2. Check the `ws/git.log` result for the stem. If matching commits exist and the feature is confirmed implemented: strip `🚧 ` from the heading and remove any `> [!note] Planned 🚧` callout block beneath it.
 
 ### 6. Handle removals
 
@@ -81,7 +81,7 @@ When borderline: err toward adding an entry. A false-positive entry is easier to
 ### Completion report
 
 ```
-Spec: <N entries added, M [planned] stripped, K removed> | no changes
+Spec: <N entries added, M 🚧 stripped, K removed> | no changes
 ```
 
 ## Doctrine

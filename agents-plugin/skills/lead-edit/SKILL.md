@@ -108,7 +108,7 @@ Edit complete.
 Commit range: <start-commit>..HEAD
 Test status: pass | fail | skipped
 Review: clean | non-clean (<one-line summary>)
-Spec: <N entries added, M [planned] stripped> | no changes
+Spec: <N entries added, M 🚧 stripped> | no changes
 <if issues remain after cap:> Open issues: <list>
 ```
 

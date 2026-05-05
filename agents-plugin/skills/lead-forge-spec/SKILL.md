@@ -68,7 +68,7 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 Survey the archived spec files in ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory).
 
 Glob ai-docs/ref/old-spec/**/*.md. Extract title, summary, `##` headings, and
-[planned] status. Return domain names and heading topics as reference candidates
+`🚧` status. Return domain names and heading topics as reference candidates
 only; do not treat archived specs as authoritative.
 ```
 
@@ -144,7 +144,7 @@ Find tickets relevant to the <domain> domain.
 Module paths: <paths from task description>
 
 Use `ws/tickets.find(query: "<domain>")`; filter by module paths when needed.
-Return features -> ticket status. todo/wip items are [planned] candidates.
+Return features -> ticket status. todo items are `🚧` candidates.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -155,7 +155,7 @@ Archived location: ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory)
 Old spec files for this domain: <files from task description, or scan all>
 
 Read relevant archived specs. For each `##` heading, note feature name,
-[planned] status, and whether current source shows it.
+`🚧` status, and whether current source shows it.
 Return features with archived status and current-source presence.
 ```
 
@@ -183,7 +183,7 @@ classification (implemented / planned), and uncertainty flags.
 Present the behavior brief to the user. For each item, establish:
 
 1. **Caller-visible or internal-only?** - Internal behaviors are excluded from spec per `spec-conventions.md`. Ask on every ambiguous item.
-2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Planned -> `[planned] {#slug}`.
+2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Planned -> `## 🚧 Feature {#slug}`.
 
 Ask on every ambiguous item. Do not classify without confirmation. Collect the
 confirmed list before writing anything.
@@ -195,7 +195,7 @@ confirmed list before writing anything.
 3. For each confirmed behavior:
    a. Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` to obtain `{#YYMMDD-slug}`.
    b. Write the spec entry using the `spec-format` template from `spec-conventions.md`.
-   c. Place `[planned]` prefix on the `##` heading if planned; omit if implemented.
+   c. Place `🚧` after the heading marker if planned; omit if implemented.
 4. After writing the file, verify it contains at least one `##` heading. If not, add a placeholder section and note it to the user.
 5. Call `ws/spec_index.verify()`.
 6. Apply `judge: directory-vs-flat` - if the written file warrants a directory split, note it as a split candidate for a follow-up `ws:lead-write-spec` invocation. Do not perform the split inline.
@@ -216,7 +216,7 @@ Run first:
 Spec stems generated for this domain:
 <list: {#YYMMDD-slug} - feature name, one per line>
 
-Tickets to update (wip/todo only):
+Tickets to update (todo only):
 <list: ai-docs/tickets/<status>/<stem>.md - one-line description>
 
 For each ticket:
@@ -252,13 +252,13 @@ Domains covered: <N>
 Spec files created: <list of paths>
 Total stems generated: <count>
   Implemented: <count>
-  [planned] Planned: <count>
+  🚧 Planned: <count>
 ```
 
 ### 3. Suggested next steps
 
-- Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, to strip `[planned]` markers from any planned features whose implementation has since landed in commit history.
-- Review `[planned]` entries with open tickets - confirm each has an active wip/todo ticket or drop the marker.
+- Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
+- Review `🚧` entries with open tickets - confirm each has an active todo ticket or drop the marker.
 - Run `ws:lead-write-spec` for any domain surfaces discovered after wrap-up.
 
 ## Judgments
@@ -268,7 +268,7 @@ Total stems generated: <count>
 | Decision | When |
 |----------|------|
 | Flat file `ai-docs/spec/<area>.md` | Single, self-contained surface - none of the split conditions below apply |
-| Directory `ai-docs/spec/<area>/index.md` | Any one split condition is met: (1) a section has its own [planned] markers with a distinct ticket lifecycle; (2) more than one `[!note] Constraints` block is present; (3) a section has a distinct audience from the parent doc |
+| Directory `ai-docs/spec/<area>/index.md` | Any one split condition is met: (1) a section has its own `🚧` markers with a distinct ticket lifecycle; (2) more than one `[!note] Constraints` block is present; (3) a section has a distinct audience from the parent doc |
 
 When uncertain, start flat. Re-evaluate after writing - if a split condition fires, note the file for a follow-up `ws:lead-write-spec` invocation.
 
@@ -280,7 +280,7 @@ When uncertain, start flat. Re-evaluate after writing - if a split condition fir
 ws/spec_index.verify()
 ```
 
-No file arguments. Scans `ai-docs/spec/**/*.md` automatically. Run once after any spec write or update in this session.
+No file arguments. Scans `ai-docs/spec/**/*.md` for duplicate anchors. Run once after any spec write or update in this session.
 
 ### Task registration
 
