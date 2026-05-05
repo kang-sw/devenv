@@ -83,7 +83,9 @@ The plugin-local `.mcp.json` uses an MCP server map:
     "ws": {
       "command": "./bin/ws-mcp-launcher",
       "cwd": ".",
-      "args": ["serve", "--stdio"]
+      "args": ["serve", "--stdio"],
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 600
     }
   }
 }
@@ -92,6 +94,11 @@ The plugin-local `.mcp.json` uses an MCP server map:
 The current POC adds `agents-plugin/bin/ws-mcp-launcher` and
 `agents-plugin/runtime.json`. The launcher is intentionally quiet on stdout:
 stdout belongs to the MCP JSON-RPC stream, while diagnostics go to stderr.
+The plugin MCP config sets a 30-second startup timeout and a 600-second per-tool
+timeout so long-running named-agent result reads can align with ws runtime
+defaults. Codex config names these fields as `mcp_servers.<id>.startup_timeout_sec`
+and `mcp_servers.<id>.tool_timeout_sec`; plugin-local `.mcp.json` carries the
+same server fields under the bundled `mcpServers` entry.
 
 The preferred Codex design is a plugin-local launcher, not a mandatory separate
 install skill. The launcher runs from the installed plugin cache, reads a

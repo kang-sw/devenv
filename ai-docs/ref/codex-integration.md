@@ -57,11 +57,19 @@ The plugin-local `.mcp.json` uses the usual MCP server map shape:
   "mcpServers": {
     "server-name": {
       "command": "some-command",
-      "args": ["arg1"]
+      "args": ["arg1"],
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 600
     }
   }
 }
 ```
+
+Codex configuration supports MCP server timeout fields:
+`startup_timeout_sec` overrides the default 10-second server startup timeout,
+and `tool_timeout_sec` overrides the default 60-second per-tool timeout. The ws
+plugin bundles these fields in `agents-plugin/.mcp.json` to align Codex's
+outer MCP timeout with ws's 10-minute named-agent wait/result defaults.
 
 Official examples:
 
