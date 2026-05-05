@@ -172,14 +172,14 @@ auto-chaining through the pipeline.
 
 | File | Title | Summary |
 |------|-------|---------|
-| `ai-docs/spec/api-deps.md` | API Dependency Docs | `ws-ask-api` / `ws/api.ask` external API doc cache |
-| `ai-docs/spec/agent-system.md` | Agent System | Spawnable agent roles and contracts |
-| `ai-docs/spec/personal-devenv.md` | Personal Dev Environment | install.sh, shell, dotfiles, Claude config |
-| `ai-docs/spec/plugin-infra.md` | Plugin Infrastructure | ws plugin delivery and named-agent primitives |
-| `ai-docs/spec/plugin-management.md` | Plugin Management | Local plugin maintenance |
-| `ai-docs/spec/spec-system.md` | Spec System | Spec authoring, planned markers, anchors |
-| `ai-docs/spec/tools.md` | Devenv Tools | claude-watch and claude-dash |
-| `ai-docs/spec/workflow-skills.md` | Workflow Skills | discuss/write/edit/implement/proceed/ship/exit flows |
+| `ai-docs/spec/plugin-runtime.md` | Plugin Runtime | Codex plugin packaging, runtime metadata, launcher repair, release assets, and runtime CLI |
+| `ai-docs/spec/mcp-tools.md` | MCP Tools | Host-neutral ws MCP tool contracts for context, workflow state, Git, docs, and agents |
+| `ai-docs/spec/named-agent-runtime.md` | Named Agent Runtime | Durable named-agent sessions, async lifecycle, subquery fan-out, diagnostics, and Codex backend behavior |
+| `ai-docs/spec/workflow-skills.md` | Workflow Skills | Codex-facing lead skills, routing, sprint work, reconstruction, utilities, and workflow primitives |
+| `ai-docs/spec/documentation-system.md` | Documentation System | Project memory, conventions, specs, tickets, mental models, reference tracing, and doc workflows |
+| `ai-docs/spec/api-documentation-cache.md` | API Documentation Cache | Host-neutral API documentation lookup through cached domain docs and manager sessions |
+| `ai-docs/spec/claude-compatibility.md` | Claude Compatibility | Claude shims, legacy plugin package, CLI fallbacks, installer behavior, and Windows shims |
+| `ai-docs/spec/developer-environment-tools.md` | Developer Environment Tools | Personal bootstrap, shell/terminal/editor config, tmux helpers, statusline, and Claude TUIs |
 
 ## Tickets
 
