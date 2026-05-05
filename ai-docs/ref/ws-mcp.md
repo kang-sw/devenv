@@ -181,8 +181,8 @@ the minimum of the lock-derived base role and the requested profile, ordered
 
 Delegate and leaf roles hide and reject lead-owned orchestration or mutation
 tools, currently `agents.*` and `config.*`. Delegate may use
-`agents.wait/status/tail/cancel/print` only for generated `subquery-*` agents.
-Leaf also hides `subquery`.
+`agents.wait/result/status/tail/cancel/print` only for generated `subquery-*`
+agents. Leaf also hides `subquery`.
 `WS_MCP_ALLOWED_TOOLS` can narrow the resulting visible surface for tests or
 debugging, but it cannot bypass the effective role.
 
@@ -892,18 +892,17 @@ Input schema:
 Behavior:
 
 - The tool is the MCP replacement for the old `ws-subquery` CLI.
-- It registers a generated `subquery-<id>` named agent and starts it through
+- It registers a generated `subquery-tmp<id>` named agent and starts it through
   the same async path as `ws/agents.call`.
 - Default workload tier is `light`; `deep_research: true` uses `deep`.
 - The system prompt is runtime-owned and self-contained.
 - The delegate is instructed to answer one scoped question with cited English
   output, assumptions when inferred, and searched gaps when evidence is missing.
 - Output contains `subquery_key`, agent status, worker pid, and follow-up
-  `ws/agents.wait` / `ws/agents.status` / `ws/agents.tail` /
+  `ws/agents.result` / `ws/agents.status` / `ws/agents.tail` /
   `ws/agents.cancel` calls.
-- Retrieve the final answer with `ws/agents.wait(name: "<subquery-key>",
-  timeout_seconds: 600)` or `ws/agents.print(name: "<subquery-key>")` after
-  completion.
+- Retrieve the final answer with `ws/agents.result(name: "<subquery-key>",
+  timeout_seconds: 600)`.
 
 ### `ws/path.generate`
 
@@ -1075,7 +1074,51 @@ Behavior:
 
 ### `ws/agents.wait`
 
-Wait for the current async call for a registered ws agent.
+Wait for one or more registered ws agents to become ready.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    },
+    "name": {
+      "type": "string",
+      "description": "Agent name. Compatibility alias for a single name."
+    },
+    "names": {
+      "type": "array",
+      "description": "Agent names to wait for.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "description": "Maximum seconds to wait. Defaults to 600."
+    }
+  }
+}
+```
+
+Output:
+
+- Ready calls return metadata with `ready: true`, `terminal: true`, and
+  `result_available: true` only for completed calls.
+- Running or queued calls return metadata with `ready: false` and `active: true`.
+- Timed-out calls return `wait_timeout: true` followed by readiness metadata for
+  every requested agent.
+- `wait` never returns final output.
+- Default timeout is 600 seconds; explicit bounded waits for normal agent work
+  should use at least 600 seconds.
+
+### `ws/agents.result`
+
+Return one completed agent result, optionally waiting first.
 
 Input schema:
 
@@ -1093,7 +1136,7 @@ Input schema:
     },
     "timeout_seconds": {
       "type": "number",
-      "description": "Maximum seconds to wait. Defaults to 600."
+      "description": "Maximum seconds to wait. Omit or set 0 for non-blocking."
     }
   },
   "required": ["name"]
@@ -1103,10 +1146,11 @@ Input schema:
 Output:
 
 - Completed calls return the final plain-text `output.md`.
-- Timed-out calls return `timeout` followed by `ws/agents.status` text.
-- Failed or cancelled calls return status text.
-- Default timeout is 600 seconds; explicit bounded waits for normal agent work
-  should use at least 600 seconds.
+- Omitted or zero timeout returns a non-ready status immediately when output is
+  not yet available.
+- Timed-out calls return `result_timeout: true` followed by status text.
+- Failed and cancelled calls return non-consuming status text.
+- Successful result reads erase agents marked ephemeral, such as subqueries.
 
 ### `ws/agents.status`
 

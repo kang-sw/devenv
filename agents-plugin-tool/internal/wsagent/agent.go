@@ -67,6 +67,7 @@ type RegisterOptions struct {
 	ConditionalPromptRefs []ConditionalPromptRef
 	SystemPromptText      string
 	SuppressOrientation   bool
+	Ephemeral             bool
 }
 
 type ConditionalPromptRef struct {
@@ -103,6 +104,15 @@ type InterruptResult struct {
 }
 
 type WaitOptions struct {
+	Root    string
+	Name    string
+	Names   []string
+	Timeout time.Duration
+	Poll    time.Duration
+	Context context.Context
+}
+
+type ResultOptions struct {
 	Root    string
 	Name    string
 	Timeout time.Duration
@@ -214,6 +224,7 @@ type Agent struct {
 	PromptRefs       []string        `json:"prompt_refs"`
 	SystemPromptPath string          `json:"system_prompt_path"`
 	Capabilities     map[string]bool `json:"capabilities"`
+	Ephemeral        bool            `json:"ephemeral,omitempty"`
 }
 
 type Message struct {
@@ -338,6 +349,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		LastOutputPath:   "output.md",
 		PromptRefs:       append([]string(nil), promptSpecs...),
 		SystemPromptPath: "",
+		Ephemeral:        opts.Ephemeral,
 		Capabilities: map[string]bool{
 			"resume":      true,
 			"interrupt":   false,
@@ -800,7 +812,7 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	if opts.DeepResearch {
 		tier = "deep"
 	}
-	name := fmt.Sprintf("subquery-%d-%06d", m.now().UTC().UnixNano(), subquerySeq.Add(1))
+	name := fmt.Sprintf("subquery-tmp%d-%06d", m.now().UTC().UnixNano(), subquerySeq.Add(1))
 	_, _, err := m.Register(RegisterOptions{
 		Root:                opts.Root,
 		Name:                name,
@@ -808,6 +820,7 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 		Tier:                tier,
 		SystemPromptText:    SubquerySystemPrompt,
 		SuppressOrientation: true,
+		Ephemeral:           true,
 	})
 	if err != nil {
 		return "", err
@@ -820,7 +833,7 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("subquery_key: %s\nagent_name: %s\nstatus: %s\npid: %d\nfollow_up: agents.wait(name: %q, timeout_seconds: 600) | agents.status(name: %q) | agents.tail(name: %q) | agents.cancel(name: %q)\n", result.AgentName, result.AgentName, result.Status, result.PID, result.AgentName, result.AgentName, result.AgentName, result.AgentName), nil
+	return fmt.Sprintf("subquery_key: %s\nagent_name: %s\nstatus: %s\npid: %d\nfollow_up: agents.result(name: %q, timeout_seconds: 600) | agents.status(name: %q) | agents.tail(name: %q) | agents.cancel(name: %q)\n", result.AgentName, result.AgentName, result.Status, result.PID, result.AgentName, result.AgentName, result.AgentName, result.AgentName), nil
 }
 
 func (m Manager) Print(root, name string) (string, error) {
@@ -838,6 +851,92 @@ func (m Manager) Print(root, name string) (string, error) {
 	return string(raw), nil
 }
 
+func (m Manager) Result(opts ResultOptions) (string, error) {
+	if strings.TrimSpace(opts.Root) == "" {
+		opts.Root = "."
+	}
+	if opts.Poll <= 0 {
+		opts.Poll = 200 * time.Millisecond
+	}
+	layout, err := m.layout(opts.Root, opts.Name, false)
+	if err != nil {
+		return "", err
+	}
+	deadline := time.Time{}
+	if opts.Timeout > 0 {
+		deadline = time.Now().Add(opts.Timeout)
+	}
+	for {
+		if opts.Context != nil {
+			select {
+			case <-opts.Context.Done():
+				return m.resultStatusText(layout, opts.Name, "result_cancelled: true\n")
+			default:
+			}
+		}
+		call, err := m.reconcileActiveCall(layout)
+		if errors.Is(err, os.ErrNotExist) {
+			return m.resultStatusText(layout, opts.Name, "result_ready: false\n")
+		}
+		if err != nil {
+			return "", err
+		}
+		switch call.Status {
+		case CallStatusCompleted:
+			agent, err := readAgent(layout.AgentFile)
+			if err != nil {
+				return "", err
+			}
+			raw, err := os.ReadFile(layout.OutputFile)
+			if err != nil {
+				return "", fmt.Errorf("read output: %w", err)
+			}
+			text := string(raw)
+			if agent.Ephemeral {
+				if err := m.Erase(opts.Root, opts.Name); err != nil {
+					return "", err
+				}
+			}
+			return text, nil
+		case CallStatusFailed, CallStatusCancelled:
+			return m.resultStatusText(layout, opts.Name, "")
+		}
+		if opts.Timeout <= 0 {
+			return m.resultStatusText(layout, opts.Name, "result_ready: false\n")
+		}
+		if !time.Now().Before(deadline) {
+			_ = appendRuntimeLog(layout, m.now(), "result.timeout", map[string]any{
+				"timeout_seconds": opts.Timeout.Seconds(),
+				"call_status":     call.Status,
+				"pid":             call.PID,
+			})
+			return m.resultStatusText(layout, opts.Name, "result_timeout: true\n")
+		}
+		if opts.Context != nil {
+			timer := time.NewTimer(opts.Poll)
+			select {
+			case <-opts.Context.Done():
+				timer.Stop()
+				return m.resultStatusText(layout, opts.Name, "result_cancelled: true\n")
+			case <-timer.C:
+			}
+		} else {
+			time.Sleep(opts.Poll)
+		}
+	}
+}
+
+func (m Manager) resultStatusText(layout Layout, name, prefix string) (string, error) {
+	status, err := m.Status(layout.Root, name)
+	if err != nil {
+		return "", err
+	}
+	return prefix +
+		"result_available: false\n" +
+		"follow_up: agents.result --timeout 10m | agents.status | agents.tail | agents.cancel\n" +
+		status, nil
+}
+
 func (m Manager) Wait(opts WaitOptions) (string, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		opts.Root = "."
@@ -848,66 +947,118 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 	if opts.Timeout <= 0 {
 		opts.Timeout = defaultAgentWaitTimeout
 	}
-	layout, err := m.layout(opts.Root, opts.Name, false)
-	if err != nil {
-		return "", err
+	names := append([]string(nil), opts.Names...)
+	if strings.TrimSpace(opts.Name) != "" {
+		names = append([]string{opts.Name}, names...)
+	}
+	if len(names) == 0 {
+		return "", errors.New("agent name is required")
+	}
+	layouts := make(map[string]Layout, len(names))
+	for _, name := range names {
+		layout, err := m.layout(opts.Root, name, false)
+		if err != nil {
+			return "", err
+		}
+		layouts[name] = layout
 	}
 	deadline := time.Now().Add(opts.Timeout)
 	for {
 		if opts.Context != nil {
 			select {
 			case <-opts.Context.Done():
-				_ = appendRuntimeLog(layout, m.now(), "wait.cancelled", map[string]any{
-					"error": opts.Context.Err().Error(),
-				})
-				return m.Status(opts.Root, opts.Name)
+				return m.readinessText(opts.Root, names, layouts, "wait_cancelled: true\n")
 			default:
 			}
 		}
-		call, err := m.reconcileActiveCall(layout)
-		if err != nil {
-			return "", err
-		}
-		switch call.Status {
-		case CallStatusCompleted:
-			text, err := m.Print(opts.Root, opts.Name)
+		anyReady := false
+		for _, name := range names {
+			call, err := m.reconcileActiveCall(layouts[name])
+			if errors.Is(err, os.ErrNotExist) {
+				anyReady = true
+				continue
+			}
 			if err != nil {
 				return "", err
 			}
-			return text, nil
-		case CallStatusFailed, CallStatusCancelled:
-			return m.Status(opts.Root, opts.Name)
+			if !isActiveCallStatus(call.Status) {
+				anyReady = true
+			}
+		}
+		if anyReady {
+			return m.readinessText(opts.Root, names, layouts, "")
 		}
 		if !time.Now().Before(deadline) {
-			_ = appendRuntimeLog(layout, m.now(), "wait.timeout", map[string]any{
-				"timeout_seconds": opts.Timeout.Seconds(),
-				"call_status":     call.Status,
-				"pid":             call.PID,
-			})
-			status, err := m.Status(opts.Root, opts.Name)
-			if err != nil {
-				return "", err
+			for _, name := range names {
+				call, err := readCurrentCall(layouts[name].CurrentStateFile)
+				if err == nil {
+					_ = appendRuntimeLog(layouts[name], m.now(), "wait.timeout", map[string]any{
+						"timeout_seconds": opts.Timeout.Seconds(),
+						"call_status":     call.Status,
+						"pid":             call.PID,
+					})
+				}
 			}
-			return "wait_timeout: true\n" +
-				"timeout_status: call may still be running\n" +
-				"follow_up: agents.wait --timeout 10m | agents.status | agents.cancel | agents.tail\n" +
-				status, nil
+			return m.readinessText(opts.Root, names, layouts, "wait_timeout: true\n")
 		}
 		if opts.Context != nil {
 			timer := time.NewTimer(opts.Poll)
 			select {
 			case <-opts.Context.Done():
 				timer.Stop()
-				_ = appendRuntimeLog(layout, m.now(), "wait.cancelled", map[string]any{
-					"error": opts.Context.Err().Error(),
-				})
-				return m.Status(opts.Root, opts.Name)
+				return m.readinessText(opts.Root, names, layouts, "wait_cancelled: true\n")
 			case <-timer.C:
 			}
 		} else {
 			time.Sleep(opts.Poll)
 		}
 	}
+}
+
+func (m Manager) readinessText(root string, names []string, layouts map[string]Layout, prefix string) (string, error) {
+	var b strings.Builder
+	b.WriteString(prefix)
+	for i, name := range names {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		text, err := m.readinessBlock(name, layouts[name])
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(text)
+	}
+	return b.String(), nil
+}
+
+func (m Manager) readinessBlock(name string, layout Layout) (string, error) {
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		return "", err
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Sprintf("agent: %s\ncall_status: none\nready: false\nterminal: false\nresult_available: false\nactive: false\nfollow_up: agents.status | agents.tail | agents.cancel\n", agent.Name), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	resultAvailable := call.Status == CallStatusCompleted
+	var b strings.Builder
+	fmt.Fprintf(&b, "agent: %s\n", agent.Name)
+	fmt.Fprintf(&b, "call_status: %s\n", call.Status)
+	fmt.Fprintf(&b, "ready: %t\n", !isActiveCallStatus(call.Status))
+	fmt.Fprintf(&b, "terminal: %t\n", !isActiveCallStatus(call.Status))
+	fmt.Fprintf(&b, "result_available: %t\n", resultAvailable)
+	fmt.Fprintf(&b, "active: %t\n", isActiveCallStatus(call.Status))
+	if call.PID != 0 {
+		fmt.Fprintf(&b, "pid: %d\n", call.PID)
+	}
+	if call.Error != "" {
+		fmt.Fprintf(&b, "error: %s\n", call.Error)
+	}
+	fmt.Fprintf(&b, "follow_up: %s\n", followUpForCall(call))
+	return b.String(), nil
 }
 
 func (m Manager) Status(root, name string) (string, error) {
@@ -1669,7 +1820,7 @@ func followUpForCall(call CurrentCall) string {
 	case CallStatusQueued, CallStatusRunning:
 		return "agents.wait --timeout 10m | agents.status | agents.cancel | agents.tail"
 	case CallStatusCompleted:
-		return "agents.print | agents.tail"
+		return "agents.result | agents.tail"
 	case CallStatusFailed:
 		return "agents.tail | agents.erase"
 	case CallStatusCancelled:

@@ -74,7 +74,7 @@ Look for: shared mutable state, ordering dependencies, sync points, extension re
 For each hotspot, return modules, contract, and failure mode.
 ```
 
-Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` for all three keys before synthesizing.
+Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` for all three keys before synthesizing.
 
 ### 3. Synthesize domain candidates
 
@@ -133,7 +133,7 @@ Focus on what would cause wrong outcomes if unknown:
 Be concrete: cite paths, functions, and types. Do not list fields or paraphrase functions.
 ```
 
-Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` before drafting.
+Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` before drafting.
 
 ### 3. Draft domain file
 

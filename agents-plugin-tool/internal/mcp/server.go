@@ -581,14 +581,29 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
+		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
 	case "agents.wait":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
 			root = value
 		}
 		name, _ := params.Arguments["name"].(string)
+		names := stringList(params.Arguments["names"])
 		text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
+			Root:    root,
+			Name:    name,
+			Names:   names,
+			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
+			Context: ctx,
+		})
+		return toolTextResponse(req.ID, text, err)
+	case "agents.result":
+		root := s.root
+		if value, ok := params.Arguments["root"].(string); ok && value != "" {
+			root = value
+		}
+		name, _ := params.Arguments["name"].(string)
+		text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
 			Root:    root,
 			Name:    name,
 			Timeout: durationFromSeconds(params.Arguments["timeout_seconds"]),
@@ -1120,13 +1135,26 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agents.wait",
-			"description": "Wait for the current async call for a registered ws agent.",
+			"description": "Wait for one or more registered ws agents to become ready; returns status metadata, not final output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":            stringProperty("Repository root. Defaults to the server root."),
+					"name":            stringProperty("Agent name. Compatibility alias for a single name."),
+					"names":           stringArrayProperty("Agent names to wait for."),
+					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to 600."),
+				},
+			},
+		},
+		{
+			"name":        "agents.result",
+			"description": "Return a completed agent result, optionally waiting; successful ephemeral results are consumed and erased.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"root":            stringProperty("Repository root. Defaults to the server root."),
 					"name":            stringProperty("Agent name."),
-					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to 600."),
+					"timeout_seconds": numberProperty("Maximum seconds to wait. Omit or set 0 for a non-blocking read."),
 				},
 				"required": []string{"name"},
 			},
@@ -1208,7 +1236,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agents.print",
-			"description": "Return the last plain-text output for a registered ws agent.",
+			"description": "Deprecated compatibility alias: return the last plain-text output without consuming ephemeral agents.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1321,12 +1349,20 @@ func (s *Server) subqueryAgentAccessAllowed(toolName string, arguments map[strin
 		return true
 	}
 	name, _ := arguments["name"].(string)
-	return strings.HasPrefix(name, "subquery-")
+	if name != "" && !strings.HasPrefix(name, "subquery-") {
+		return false
+	}
+	for _, item := range stringList(arguments["names"]) {
+		if !strings.HasPrefix(item, "subquery-") {
+			return false
+		}
+	}
+	return name != "" || len(stringList(arguments["names"])) > 0
 }
 
 func isSubqueryAgentTool(name string) bool {
 	switch name {
-	case "agents.wait", "agents.status", "agents.tail", "agents.cancel", "agents.print":
+	case "agents.wait", "agents.result", "agents.status", "agents.tail", "agents.cancel", "agents.print":
 		return true
 	default:
 		return false

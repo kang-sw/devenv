@@ -4,6 +4,7 @@ related:
   260503-epic-ws-agent-workflow-stability: stabilization parent for named-agent lifecycle behavior
   260505-feat-ws-mcp-async-subquery: introduced key-returning async subquery fan-out that needs clearer result retrieval and cleanup semantics
 parent: 260503-epic-ws-agent-workflow-stability
+completed: 2026-05-05
 ---
 
 # ws MCP agent result and readiness API
@@ -74,3 +75,22 @@ Result consumption is the only automatic cleanup point:
   identical, or whether omitted timeout should use the default bounded wait.
 - Whether a later TTL/GC cleanup ticket is needed for abandoned ephemeral agents
   that are never consumed.
+
+## Result
+
+Implemented the split API:
+
+- `agents.result` is the single result-consumption surface and optionally waits
+  before returning final output.
+- `agents.wait` accepts one or more names and returns readiness metadata without
+  final output.
+- `ws/subquery` now creates metadata-marked ephemeral agents with
+  `subquery-tmp...` hint names and points follow-up text at `agents.result`.
+- Successful `agents.result` calls erase ephemeral agents after reading output;
+  failed, cancelled, timed-out, and still-running agents remain available for
+  diagnostics.
+- `agents.print` remains a deprecated compatibility output reader.
+
+Tests cover wait readiness metadata, multi-name readiness return, result
+consumption, ephemeral cleanup, MCP dispatch, delegate gating, API-doc internal
+result reads, runtime prompt hash consistency, and the full Go package suite.

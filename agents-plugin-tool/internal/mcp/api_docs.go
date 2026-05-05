@@ -49,7 +49,7 @@ func (wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string
 	if _, err := mgr.Call(wsagent.CallOptions{Root: root, Name: name, Prompt: prompt}); err != nil {
 		return "", err
 	}
-	return mgr.Wait(wsagent.WaitOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
+	return mgr.Result(wsagent.ResultOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
 }
 
 func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
@@ -80,7 +80,7 @@ func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt st
 	if _, err := mgr.Call(wsagent.CallOptions{Root: root, Name: name, Prompt: prompt}); err != nil {
 		return "", err
 	}
-	return mgr.Wait(wsagent.WaitOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
+	return mgr.Result(wsagent.ResultOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
 }
 
 func apiManagerExpired(agent wsagent.Agent, now time.Time) bool {

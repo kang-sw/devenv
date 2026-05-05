@@ -592,6 +592,8 @@ func agents(args []string) {
 		agentsRunCurrent(args[1:])
 	case "wait":
 		agentsWait(args[1:])
+	case "result":
+		agentsResult(args[1:])
 	case "status":
 		agentsStatus(args[1:])
 	case "interrupt":
@@ -615,7 +617,7 @@ func agents(args []string) {
 }
 
 func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|run-current|wait|status|interrupt|check-inbox|tail|debug|cancel|print|erase>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|run-current|wait|result|status|interrupt|check-inbox|tail|debug|cancel|print|erase>")
 }
 
 type multiFlag []string
@@ -682,7 +684,7 @@ func agentsCall(args []string) {
 	if err != nil {
 		fatal("agents call", err)
 	}
-	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID)
+	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID)
 }
 
 func agentsRunCurrent(args []string) {
@@ -699,17 +701,37 @@ func agentsRunCurrent(args []string) {
 func agentsWait(args []string) {
 	fs := flag.NewFlagSet("agents wait", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
-	name := fs.String("name", "", "agent name")
+	var names multiFlag
+	fs.Var(&names, "name", "agent name; may be repeated")
 	timeout := fs.Duration("timeout", 0, "maximum wait duration; defaults to 10m")
 	_ = fs.Parse(args)
+	names = append(names, fs.Args()...)
 
 	text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
+		Root:    defaultRoot(*root),
+		Names:   names,
+		Timeout: *timeout,
+	})
+	if err != nil {
+		fatal("agents wait", err)
+	}
+	fmt.Print(text)
+}
+
+func agentsResult(args []string) {
+	fs := flag.NewFlagSet("agents result", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	timeout := fs.Duration("timeout", 0, "maximum wait duration; defaults to non-blocking")
+	_ = fs.Parse(args)
+
+	text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
 		Root:    defaultRoot(*root),
 		Name:    *name,
 		Timeout: *timeout,
 	})
 	if err != nil {
-		fatal("agents wait", err)
+		fatal("agents result", err)
 	}
 	fmt.Print(text)
 }

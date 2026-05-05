@@ -611,8 +611,18 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Wait returned error: %v", err)
 	}
-	if waited != "async reply\n" {
+	if !strings.Contains(waited, "agent: impl") ||
+		!strings.Contains(waited, "call_status: completed") ||
+		!strings.Contains(waited, "result_available: true") ||
+		strings.Contains(waited, "async reply") {
 		t.Fatalf("waited = %q", waited)
+	}
+	result, err := manager.Result(ResultOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatalf("Result returned error: %v", err)
+	}
+	if result != "async reply\n" {
+		t.Fatalf("result = %q", result)
 	}
 	status, err := manager.Status(repo, "impl")
 	if err != nil {
@@ -734,8 +744,9 @@ func TestWaitFinalizesDeadAsyncWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Wait returned error: %v", err)
 	}
-	if !strings.Contains(status, "agent_status: failed") ||
+	if !strings.Contains(status, "agent: impl") ||
 		!strings.Contains(status, "call_status: failed") ||
+		!strings.Contains(status, "result_available: false") ||
 		!strings.Contains(status, "async worker process 987654 is not running") {
 		t.Fatalf("dead worker status mismatch:\n%s", status)
 	}
@@ -745,6 +756,128 @@ func TestWaitFinalizesDeadAsyncWorker(t *testing.T) {
 	}
 	if !strings.Contains(tail, "== runtime ==") || !strings.Contains(tail, "worker.dead") {
 		t.Fatalf("tail missing runtime dead-worker log:\n%s", tail)
+	}
+}
+
+func TestWaitReturnsWhenAnyNamedAgentIsReady(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	for _, name := range []string{"ready", "pending"} {
+		if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readyLayout, err := manager.layout(repo, "ready", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingLayout, err := manager.layout(repo, "pending", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := manager.BeginCurrentCall(readyLayout, Agent{Name: "ready"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed.Status = CallStatusCompleted
+	completed.PID = 1234
+	if err := writeCurrentCall(readyLayout.CurrentStateFile, completed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(readyLayout.OutputFile, []byte("ready output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	running, err := manager.BeginCurrentCall(pendingLayout, Agent{Name: "pending"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running.Status = CallStatusRunning
+	running.PID = os.Getpid()
+	if err := writeCurrentCall(pendingLayout.CurrentStateFile, running); err != nil {
+		t.Fatal(err)
+	}
+
+	text, err := manager.Wait(WaitOptions{
+		Root:    repo,
+		Names:   []string{"ready", "pending"},
+		Timeout: time.Minute,
+		Poll:    time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Wait returned error: %v", err)
+	}
+	if !strings.Contains(text, "agent: ready") ||
+		!strings.Contains(text, "call_status: completed") ||
+		!strings.Contains(text, "result_available: true") ||
+		!strings.Contains(text, "agent: pending") ||
+		!strings.Contains(text, "call_status: running") ||
+		!strings.Contains(text, "active: true") ||
+		strings.Contains(text, "ready output") {
+		t.Fatalf("multi-agent readiness mismatch:\n%s", text)
+	}
+}
+
+func TestResultConsumesCompletedEphemeralAgentOnly(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	_, ephemeralLayout, err := manager.Register(RegisterOptions{Root: repo, Name: "tmp", Ephemeral: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := manager.BeginCurrentCall(ephemeralLayout, Agent{Name: "tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed.Status = CallStatusCompleted
+	if err := writeCurrentCall(ephemeralLayout.CurrentStateFile, completed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ephemeralLayout.OutputFile, []byte("temporary result\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	text, err := manager.Result(ResultOptions{Root: repo, Name: "tmp"})
+	if err != nil {
+		t.Fatalf("Result returned error: %v", err)
+	}
+	if text != "temporary result\n" {
+		t.Fatalf("result = %q", text)
+	}
+	if _, err := os.Stat(ephemeralLayout.AgentDir); !os.IsNotExist(err) {
+		t.Fatalf("ephemeral agent dir still exists after result: %v", err)
+	}
+
+	_, failedLayout, err := manager.Register(RegisterOptions{Root: repo, Name: "failed-tmp", Ephemeral: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := manager.BeginCurrentCall(failedLayout, Agent{Name: "failed-tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed.Status = CallStatusFailed
+	failed.Error = "boom"
+	if err := writeCurrentCall(failedLayout.CurrentStateFile, failed); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := manager.Result(ResultOptions{Root: repo, Name: "failed-tmp"})
+	if err != nil {
+		t.Fatalf("failed Result returned error: %v", err)
+	}
+	if !strings.Contains(status, "result_available: false") || !strings.Contains(status, "boom") {
+		t.Fatalf("failed result status mismatch:\n%s", status)
+	}
+	if _, err := os.Stat(failedLayout.AgentDir); err != nil {
+		t.Fatalf("failed ephemeral agent was erased: %v", err)
 	}
 }
 
@@ -1118,11 +1251,11 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 		t.Fatalf("Subquery returned error: %v", err)
 	}
 	key := extractFieldLine(t, text, "subquery_key")
-	if !strings.HasPrefix(key, "subquery-1777816800000000000-") ||
+	if !strings.HasPrefix(key, "subquery-tmp1777816800000000000-") ||
 		!strings.Contains(text, "agent_name: "+key) ||
 		!strings.Contains(text, "status: running") ||
 		!strings.Contains(text, "pid: 2468") ||
-		!strings.Contains(text, `agents.wait(name: "`+key+`", timeout_seconds: 600)`) {
+		!strings.Contains(text, `agents.result(name: "`+key+`", timeout_seconds: 600)`) {
 		t.Fatalf("subquery start text mismatch:\n%s", text)
 	}
 	if len(starter.requests) != 1 || starter.requests[0].Name != key {
@@ -1147,8 +1280,8 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agent.Tier != "light" {
-		t.Fatalf("subquery tier = %q", agent.Tier)
+	if agent.Tier != "light" || !agent.Ephemeral {
+		t.Fatalf("subquery metadata mismatch: tier=%q ephemeral=%t", agent.Tier, agent.Ephemeral)
 	}
 
 	deepStarter := &fakeWorkerStarter{pid: 3579}
@@ -1162,7 +1295,7 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 		t.Fatalf("deep Subquery returned error: %v", err)
 	}
 	deepKey := extractFieldLine(t, deepText, "subquery_key")
-	if !strings.HasPrefix(deepKey, "subquery-1777816801000000000-") || deepKey == key {
+	if !strings.HasPrefix(deepKey, "subquery-tmp1777816801000000000-") || deepKey == key {
 		t.Fatalf("deep subquery key = %q, first key = %q", deepKey, key)
 	}
 	deepLayout, err := deepManager.layout(repo, deepKey, false)

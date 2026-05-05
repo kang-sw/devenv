@@ -10,7 +10,7 @@ Target: user request
 ## Invariants
 
 - Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
-- Never `read` a ticket file other than the current target - use `ws/subquery(question: "<focused ticket-inspection question>")`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, for any other ticket inspection.
+- Never `read` a ticket file other than the current target - use `ws/subquery(question: "<focused ticket-inspection question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, for any other ticket inspection.
 
 ## On: invoke
 

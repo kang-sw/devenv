@@ -12,7 +12,7 @@ Target: user request
 - Call `ws/convention.read(name: "spec-conventions")` before any write or update - conventions are canonical there.
 - Location follows `judge: directory-vs-flat`.
 - Call `ws/spec_index.verify()` after every write or update.
-- Accuracy check: for every heading without [planned], confirm the feature exists. Use `ws/subquery(question: "<focused verification question>")`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, if uncertain.
+- Accuracy check: for every heading without [planned], confirm the feature exists. Use `ws/subquery(question: "<focused verification question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, if uncertain.
 
 ## On: invoke
 
@@ -34,7 +34,7 @@ Target: user request
    d. Apply `judge: idea-level` before adding any `[planned]` Planned callouts. Remove [planned] from confirmed-implemented features as needed.
    e. Call `ws/spec_index.verify()` for cleanup and verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
-6. Accuracy check - confirm every heading without [planned] exists in the codebase. Use `ws/subquery(question: "<focused verification question>")`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, if uncertain. Never remove [planned] without confirmation.
+6. Accuracy check - confirm every heading without [planned] exists in the codebase. Use `ws/subquery(question: "<focused verification question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, if uncertain. Never remove [planned] without confirmation.
 7. **Commit** - call `ws/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
 
 ## Judgments

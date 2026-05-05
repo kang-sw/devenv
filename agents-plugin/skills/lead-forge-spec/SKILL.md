@@ -83,7 +83,7 @@ Return behavioral areas -> representative commits. Omit chore/docs/refactor
 unless they reference spec-stems.
 ```
 
-Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` for all four keys before synthesizing.
+Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` for all four keys before synthesizing.
 
 ### 3. Synthesize domain candidates
 
@@ -170,7 +170,7 @@ caller-visible behavior (`feat:`, `fix:`, `spec:`, spec-stems).
 Return behavioral changes newest first, with implementation status when visible.
 ```
 
-Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` for all four keys before synthesizing.
+Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` for all four keys before synthesizing.
 
 ### 3. Synthesize behavior brief
 
@@ -226,7 +226,7 @@ For each ticket:
 4. Do not commit; caller owns git.
 ```
 
-3. Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, then review the `## Clerk report`. Resolve any open questions with the user before committing.
+3. Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, then review the `## Clerk report`. Resolve any open questions with the user before committing.
 4. Commit all domain changes in one commit: spec file + ticket association updates.
 
 ### 7. Complete domain
@@ -257,7 +257,7 @@ Total stems generated: <count>
 
 ### 3. Suggested next steps
 
-- Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, to strip `[planned]` markers from any planned features whose implementation has since landed in commit history.
+- Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, to strip `[planned]` markers from any planned features whose implementation has since landed in commit history.
 - Review `[planned]` entries with open tickets - confirm each has an active wip/todo ticket or drop the marker.
 - Run `ws:lead-write-spec` for any domain surfaces discovered after wrap-up.
 

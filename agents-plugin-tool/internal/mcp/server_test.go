@@ -95,7 +95,7 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
-	for _, tool := range []string{"agents.wait", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
+	for _, tool := range []string{"agents.wait", "agents.result", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
@@ -370,6 +370,8 @@ func TestServeStdioNonOwnerCannotEscalateWithLeadProfile(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"subquery-demo"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"impl"}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.wait","arguments":{"names":["subquery-demo","impl"]}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -388,6 +390,12 @@ func TestServeStdioNonOwnerCannotEscalateWithLeadProfile(t *testing.T) {
 	}
 	if !strings.Contains(byID["3"], "read agent") {
 		t.Fatalf("delegate subquery agents.status did not reach runtime: %s", byID["3"])
+	}
+	if !strings.Contains(byID["4"], "only for subquery-* agents") {
+		t.Fatalf("non-owner tools/call did not reject non-subquery agents.result: %s", byID["4"])
+	}
+	if !strings.Contains(byID["5"], "only for subquery-* agents") {
+		t.Fatalf("non-owner tools/call did not reject mixed agents.wait names: %s", byID["5"])
 	}
 }
 
@@ -477,6 +485,42 @@ func TestServeStdioDoesNotBlockToolsListBehindWait(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("ServeStdio did not exit after input close")
+	}
+}
+
+func TestServeStdioAgentsResultConsumesEphemeralAgent(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	manager := wsagent.NewManager(wsagent.Options{})
+	agent, layout, err := manager.Register(wsagent.RegisterOptions{Root: root, Name: "subquery-tmp-test", Ephemeral: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := manager.BeginCurrentCall(layout, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.Status = wsagent.CallStatusCompleted
+	if err := os.WriteFile(layout.CurrentStateFile, mustMarshalForTest(t, call), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.OutputFile, []byte("ephemeral answer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.result","arguments":{"name":"subquery-tmp-test"}}}` + "\n"
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(toolText(t, byID["1"]), "ephemeral answer") {
+		t.Fatalf("agents.result response mismatch: %s", byID["1"])
+	}
+	if _, err := os.Stat(layout.AgentDir); !os.IsNotExist(err) {
+		t.Fatalf("ephemeral agent dir still exists after MCP result: %v", err)
 	}
 }
 

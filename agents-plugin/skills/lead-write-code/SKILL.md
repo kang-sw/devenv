@@ -76,7 +76,7 @@ Commit the plan file before Prepare.
 ### 5. Spawn Implementer
 
 Call `ws/agents.call(name: "implementer", prompt: <block below>)`.
-Read `ws/agents.print(name: "implementer")` only if async result lacks usable summary.
+Read `ws/agents.result(name: "implementer", timeout_seconds: 600)` only if async result lacks usable summary.
 
 ```text
 Brief path: <brief-path>
@@ -109,7 +109,7 @@ Apply `judge: partition-allocation` from implementer report and changed files.
 #### 6b. Spawn Reviewers
 
 Call selected reviewers in parallel with `ws/agents.call`.
-Read `ws/agents.print(name: "<reviewer-name>")` only if needed.
+Read `ws/agents.result(name: "<reviewer-name>", timeout_seconds: 600)` only if needed.
 
 Correctness:
 

@@ -7,7 +7,7 @@
   "release_tag": "v0.16.0",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "b3af487adfcd08bf37051239eae07d874bb38d4dd0bbdc52c5c0ff40e977d5b4",
+    "content_sha256": "2247d2a4b4ce77bb2285228e3a7ed22532d661d10c1917080c505f0b6974fc1f",
     "prompts": [
       "api-doc-cargo-brief",
       "api-doc-manager",
@@ -52,6 +52,7 @@
     "agents.register": ">=0.16.0-dev <0.17.0",
     "agents.call": ">=0.16.0-dev <0.17.0",
     "agents.wait": ">=0.16.0-dev <0.17.0",
+    "agents.result": ">=0.16.0-dev <0.17.0",
     "agents.status": ">=0.16.0-dev <0.17.0",
     "agents.interrupt": ">=0.16.0-dev <0.17.0",
     "agents.tail": ">=0.16.0-dev <0.17.0",
@@ -81,6 +82,7 @@
     "agents.call": ">=0.16.0-dev <0.17.0",
     "agents.run-current": ">=0.16.0-dev <0.17.0",
     "agents.wait": ">=0.16.0-dev <0.17.0",
+    "agents.result": ">=0.16.0-dev <0.17.0",
     "agents.status": ">=0.16.0-dev <0.17.0",
     "agents.interrupt": ">=0.16.0-dev <0.17.0",
     "agents.check-inbox": ">=0.16.0-dev <0.17.0",

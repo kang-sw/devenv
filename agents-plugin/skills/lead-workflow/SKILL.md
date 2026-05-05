@@ -48,7 +48,7 @@ include only local arguments that affect the current step.
 `ws/subquery`
 
 Use for scoped fact-finding, surveys, and one-turn answers. It starts async and
-returns a `subquery_key`; retrieve output with `ws/agents.wait(name: <key>,
+returns a `subquery_key`; retrieve output with `ws/agents.result(name: <key>,
 timeout_seconds: 600)`. Set `deep_research: true` only for broad tracing.
 
 ### Persistent agents
@@ -56,6 +56,7 @@ timeout_seconds: 600)`. Set `deep_research: true` only for broad tracing.
 `ws/agents.register`
 `ws/agents.call`
 `ws/agents.wait`
+`ws/agents.result`
 `ws/agents.status`
 `ws/agents.tail`
 `ws/agents.print`
@@ -64,10 +65,7 @@ timeout_seconds: 600)`. Set `deep_research: true` only for broad tracing.
 
 Register a stable task name with prompt stems or a self-contained system prompt.
 Call it for each continuity turn. `ws/agents.call` starts async and returns
-promptly. Use `wait(timeout_seconds: 600)` or a longer bound for final output,
-`status` before waiting, `tail(lines: 3)` for small diagnostics, `print` for
-last output, `cancel` to stop active work, and `erase` when task-scoped state
-should be removed.
+promptly. Use `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds: 600)` or a longer bound for final output, `status` before waiting, `tail(lines: 3)` for small diagnostics, `print` only as a compatibility output alias, `cancel` to stop active work, and `erase` when task-scoped state should be removed.
 
 ### Artifact paths
 
@@ -158,12 +156,12 @@ interrupt behavior.
 One-turn survey:
 call `ws/subquery(question: "<exact scoped question>")`; store `<subquery-key>`.
 call `ws/subquery(deep_research: true, question: <block below>)` only for broad tracing.
-call `ws/agents.wait(name: "<subquery-key>", timeout_seconds: 600)` to read output.
+call `ws/agents.result(name: "<subquery-key>", timeout_seconds: 600)` to read output.
 
 Persistent task:
 call `ws/agents.register(name: "<agent-name>", prompts: ["<prompt-stem>"])`.
 call `ws/agents.call(name: "<agent-name>", prompt: <block below>)`.
-wait with `timeout_seconds: 600` or longer, inspect status, tail with `lines: 3`, or print output as needed.
+wait for readiness, read final output with `result(timeout_seconds: 600)`, inspect status, or tail with `lines: 3`.
 erase the task-scoped agent when cleanup matters.
 
 Review artifacts:

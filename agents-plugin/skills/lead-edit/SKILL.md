@@ -64,7 +64,7 @@ Write full findings to: <review-path>
 Return only: [clean|non-clean]: <one-line summary>
 ```
 
-4. Read `ws/agents.print(name: "reviewer")` only if async result lacks usable summary.
+4. Read `ws/agents.result(name: "reviewer", timeout_seconds: 600)` only if async result lacks usable summary.
 5. If `[clean]`, proceed to cleanup.
 6. If `[non-clean]`, read `<review-path>` and classify findings:
    - Fix: correctness, security, contract, regression.

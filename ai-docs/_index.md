@@ -78,8 +78,8 @@ Implemented MCP tools:
 - Git: `ws/git.status`, `ws/git.diff`, `ws/git.log`, `ws/git.merge_base`,
   `ws/git.commit`
 - Agents: `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
-  `ws/agents.status`, `ws/agents.tail`, `ws/agents.cancel`,
-  `ws/agents.print`, `ws/agents.erase`
+  `ws/agents.result`, `ws/agents.status`, `ws/agents.tail`,
+  `ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`
 - API docs: `ws/api.list`, `ws/api.ask`
 
 Shared `agents-plugin` skill text uses MCP names, not repo-local
@@ -190,7 +190,6 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
-| `260505-feat-ws-mcp-result-readiness-api` | todo | Split agent result consumption from readiness waits and add ephemeral result cleanup |
 | `260503-feat-agents-plugin-runtime-boundary` | todo | Go stdio MCP/runtime boundary; Windows runtime smoke verified, launcher startup deferred |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
@@ -201,7 +200,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260503-epic-ws-agent-workflow-stability` - keep open for future observed runtime failures; no active blocker after worktree lock, interrupt, and leaf deferral.
-`260505-feat-ws-mcp-result-readiness-api` - implement agents.result, multi-name readiness wait, and metadata-driven ephemeral cleanup; spec linkage deferred until forge-spec rebuild.
 `260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; CI now runs release asset checks and Windows executable smoke; native Windows plugin-managed launcher verification deferred.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.

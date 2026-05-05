@@ -230,7 +230,7 @@ lead > delegate > leaf
 ```
 
 `delegate` and `leaf` cannot see or call lead-owned orchestration or mutation
-tools. Delegate may use `agents.wait/status/tail/cancel/print` only for
+tools. Delegate may use `agents.wait/result/status/tail/cancel/print` only for
 generated `subquery-*` agents; `leaf` also cannot see or call `subquery`.
 Explicit tool allowlists may narrow the visible surface for tests, but cannot
 raise a delegate or leaf back to lead.
@@ -259,10 +259,11 @@ MCP tools use server `ws` and the following tool names:
 
 - `agents.register` — create or replace one named agent registry entry. Implemented.
 - `agents.call` — start an async call for a registered agent and return follow-up state. Implemented.
-- `agents.wait` — wait for the current async call to finish, with timeout support. Implemented.
+- `agents.wait` — wait for one or more async calls to become ready and return metadata. Implemented.
+- `agents.result` — return one completed result, optionally waiting first; successful ephemeral results are consumed and erased. Implemented.
 - `agents.status` — report the current async call and agent registry state. Implemented.
 - `agents.interrupt` — enqueue a lead-to-agent interrupt or redirect message. Implemented.
-- `agents.print` — return `output.md` for a named agent. Implemented.
+- `agents.print` — compatibility output reader that does not consume ephemeral agents. Implemented.
 - `agents.tail` — summarize recent session/event state without invoking the backend. Implemented.
 - `agents.cancel` — best-effort terminate the active worker pid and mark the current call cancelled. Implemented.
 - `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
@@ -290,7 +291,9 @@ ws-mcp agents register --root <repo> --name <name> [--backend codex] [--tier lig
 ws-mcp agents call --root <repo> --name <name> <prompt>
 ws-mcp agents call --root <repo> --name <name> --prompt-file -
 ws-mcp agents run-current --root <repo> --name <name>
-ws-mcp agents wait --root <repo> --name <name> [--timeout 10m]
+ws-mcp agents wait --root <repo> --name <name> [--name <name> ...] [--timeout 10m]
+ws-mcp agents wait --root <repo> [--timeout 10m] <name> [<name> ...]
+ws-mcp agents result --root <repo> --name <name> [--timeout 10m]
 ws-mcp agents status --root <repo> --name <name>
 ws-mcp agents interrupt --root <repo> --name <name> <message>
 ws-mcp agents check-inbox --root <repo> --name <name>
@@ -307,9 +310,9 @@ ws-mcp runtime info
 The CLI uses the same `agents/<agent-name>/agent.json`, `output.md`, and
 `events.jsonl` layout described above. Shared skill text should prefer the MCP
 tools with `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
-`ws/agents.status`, `ws/agents.interrupt`, `ws/agents.tail`,
-`ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`, `ws/config.show`,
-`ws/config.agents_tier`,
+`ws/agents.result`, `ws/agents.status`, `ws/agents.interrupt`,
+`ws/agents.tail`, `ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`,
+`ws/config.show`, `ws/config.agents_tier`,
 `ws/path.generate`, `ws/api.list`, `ws/api.ask`, and `ws/runtime.info`.
 
 `agents.call` acquires a short-lived `current/setup.lock`, writes the prompt
@@ -323,7 +326,7 @@ call, captures backend stdout and stderr to `current/stdout` and
 `output.md`, and transitions the current call to `completed` or `failed`. Only
 one active call is allowed per named agent. `api.ask` composes over the same
 agent runtime by registering or reusing `api-doc-<domain>` sessions and by
-serializing same-domain calls before invoking `agents.call`/`agents.wait`.
+serializing same-domain calls before invoking `agents.call`/`agents.result`.
 
 `agents.interrupt` appends a durable pending message to `inbox/<id>.json`.
 Messages use a two-state contract: `pending` means the runtime has not injected
@@ -344,21 +347,28 @@ Use `agents.cancel` for urgent process termination. Cancellation may interrupt
 or kill owned subprocesses and can require partial-output recovery; it is not
 the normal `agents.interrupt` delivery path.
 
-`agents.wait` polls `current/state.json` and returns `output.md` when the call is
-completed. If a timeout expires, it returns `timeout` plus the same structured
-status text produced by `agents.status`. Failed and cancelled calls also return
-status text so workflow skills can branch without opening state files directly.
-Default timeout is 10 minutes. Explicit bounded waits for normal agent work
-should use at least 10 minutes.
+`agents.wait` polls `current/state.json` for one or more names and returns
+readiness metadata when any named call is completed, failed, cancelled, or
+otherwise no longer active. It never returns final output. If a timeout expires,
+it returns `wait_timeout: true` plus ready/pending metadata for every requested
+agent. Default timeout is 10 minutes. Explicit bounded waits for normal agent
+work should use at least 10 minutes.
+
+`agents.result` is the result-consumption surface. Without a timeout it reads an
+already-completed result or returns a non-ready status immediately. With a
+timeout it waits up to the bound. Successful result reads erase agents marked
+ephemeral, such as generated subquery agents. Failed, cancelled, timed-out, and
+still-running agents remain available for diagnostics.
 
 `agents.tail` reads recent lines from `events.jsonl`, `current/stdout`,
 `current/stderr`, and `output.md` without invoking a backend. Routine progress
 checks should request `--lines 3`; larger tails are for concrete failure
 diagnosis. `agents.cancel` uses the stored worker pid for a best-effort local
 process kill and marks the current call `cancelled`. After process restart,
-`wait`, `status`, `tail`, and `print` still work from disk state; `cancel` can
-only terminate a process when the stored pid still refers to a live local worker,
-and it does not yet provide backend-specific process-group cleanup.
+`wait`, `result`, `status`, `tail`, and `print` still work from disk state;
+`cancel` can only terminate a process when the stored pid still refers to a live
+local worker, and it does not yet provide backend-specific process-group
+cleanup.
 
 ## Prompt Resolution
 
