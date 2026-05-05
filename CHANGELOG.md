@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.18.1 - 2026-05-06
+
+### Fixed
+- Remove unreliable worktree-lock MCP tool authority detection so
+  plugin-managed sessions default to the lead tool surface; document
+  `WS_MCP_TOOL_PROFILE` as an optional containment filter rather than an
+  authority boundary.
+
 ## v0.18.0 - 2026-05-05
 
 ### Changed
