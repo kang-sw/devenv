@@ -45,6 +45,7 @@ const (
 const (
 	tailMaxFieldRunes = 2000
 	tailMaxLineRunes  = 6000
+	backendErrorRunes = 4000
 )
 
 var tailLargeFieldKeys = map[string]struct{}{
@@ -426,7 +427,8 @@ func (m Manager) syncCall(opts syncCallOptions) (Agent, string, error) {
 		return Agent{}, "", err
 	}
 	if agent.Backend != "codex" {
-		return agent, "", fmt.Errorf("unsupported agent backend %q", agent.Backend)
+		err := fmt.Errorf("unsupported agent backend %q", agent.Backend)
+		return agent, "", backendInvocationError(agent, err)
 	}
 	if strings.TrimSpace(opts.Prompt) == "" {
 		return agent, "", errors.New("prompt is required")
@@ -489,6 +491,16 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	}
 	runner := m.opts.Runner
 	if runner == nil {
+		if agent.Backend != "codex" {
+			err := fmt.Errorf("unsupported agent backend %q", agent.Backend)
+			diagnostic := backendInvocationError(agent, err)
+			agent.Status = StatusFailed
+			agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
+			_ = writeAgent(layout.AgentFile, agent)
+			_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": diagnostic.Error()})
+			_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": diagnostic.Error()})
+			return "", agent, diagnostic
+		}
 		runner = CodexRunner{}
 	}
 	hookCommand := ""
@@ -542,12 +554,13 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 		ToolProfile:          opts.ToolProfile,
 	})
 	if err != nil {
+		diagnostic := backendInvocationError(agent, err)
 		agent.Status = StatusFailed
 		agent.LastSeenAt = m.now().UTC().Format(time.RFC3339)
 		_ = writeAgent(layout.AgentFile, agent)
-		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": err.Error()})
-		_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": err.Error()})
-		return "", agent, err
+		_ = appendEvent(layout.EventsFile, m.now(), "call.failed", map[string]any{"error": diagnostic.Error()})
+		_ = appendRuntimeLog(layout, m.now(), "backend.call.error", map[string]any{"error": diagnostic.Error()})
+		return "", agent, diagnostic
 	}
 	if result.SessionID != "" {
 		agent.SessionID = result.SessionID
@@ -590,9 +603,6 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 	agent, err := readAgent(layout.AgentFile)
 	if err != nil {
 		return CallResult{}, err
-	}
-	if agent.Backend != "codex" {
-		return CallResult{}, fmt.Errorf("unsupported agent backend %q", agent.Backend)
 	}
 	if strings.TrimSpace(opts.Prompt) == "" {
 		return CallResult{}, errors.New("prompt is required")
@@ -1283,6 +1293,48 @@ func truncateTailString(value string, limit int, label string) string {
 	}
 	omitted := len(runes) - limit
 	return string(runes[:limit]) + fmt.Sprintf("\n[ws-tail truncated %s: omitted %d chars]", label, omitted)
+}
+
+func backendInvocationError(agent Agent, err error) error {
+	if err == nil {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("backend invocation failed\n")
+	fmt.Fprintf(&b, "agent: %s\n", agent.Name)
+	if agent.Tier != "" {
+		fmt.Fprintf(&b, "tier: %s\n", agent.Tier)
+	}
+	if agent.Backend != "" {
+		fmt.Fprintf(&b, "backend: %s\n", agent.Backend)
+	}
+	if agent.Model != "" {
+		fmt.Fprintf(&b, "model: %s\n", agent.Model)
+	}
+	b.WriteString("\nraw_error:\n")
+	b.WriteString(truncateBackendError(err.Error()))
+	b.WriteString("\n\nhint:\n")
+	b.WriteString("If the configured backend is unavailable on this machine, fix that backend and retry, or switch explicitly.\n")
+	b.WriteString("PATH-detected backend binaries:\n")
+	for _, backend := range []string{"codex", "claude", "gemini"} {
+		if path, lookErr := exec.LookPath(backend); lookErr == nil {
+			fmt.Fprintf(&b, "- %s: %s\n", backend, path)
+		} else {
+			fmt.Fprintf(&b, "- %s: not found\n", backend)
+		}
+	}
+	b.WriteString("Existing agents keep stored backend/model; re-run agents.register with backend/model to switch an existing agent.\n")
+	b.WriteString("Future registrations can change tier defaults with config.agents_tier.\n")
+	return errors.New(b.String())
+}
+
+func truncateBackendError(value string) string {
+	runes := []rune(value)
+	if len(runes) <= backendErrorRunes {
+		return value
+	}
+	omitted := len(runes) - backendErrorRunes
+	return string(runes[:backendErrorRunes]) + fmt.Sprintf("\n[ws-backend-error truncated: omitted %d chars]", omitted)
 }
 
 func (m Manager) DiagnosticStream(opts DiagnosticStreamOptions) (string, error) {

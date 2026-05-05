@@ -119,3 +119,10 @@ incrementally, persists `thread.started.thread_id` as soon as it appears, and
 stores the final plain-text agent message as the caller-facing result. The JSONL
 reader accepts large single-line events so verbose tool output does not break
 session parsing.
+
+## Backend Invocation Failure Diagnostics {#260505-agent-backend-failure-diagnostics}
+
+Backend invocation failures preserve the raw backend error and append a bounded
+hint. The hint includes the configured agent name, tier, backend, and model;
+PATH-detected backend binaries for known local backends; and explicit recovery
+guidance for re-registering an existing agent or changing future tier defaults.

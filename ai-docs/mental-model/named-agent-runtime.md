@@ -25,6 +25,7 @@ related:
 - `Result` requires terminal completed state and `output.md`; output must be written before current call completion is recorded. {#260505-agent-readiness-result-split}
 - Interrupts are inbox files delivered at hook/check-inbox boundaries, not OS signals. {#260505-agent-inbox-interrupt-delivery}
 - Successful `Result` erases ephemeral agents; `Print` is legacy and does not consume them. {#260505-async-subquery-ephemeral-agent}
+- Backend invocation failures are formatted at the call site with raw error text, bounded PATH-detected backend hints, and reconfiguration guidance; do not run separate model/login probes during registration or config inspection. {#260505-agent-backend-failure-diagnostics}
 
 ## Coupling
 
@@ -44,6 +45,7 @@ related:
 - Setting `Agent.Status` alone does not make an agent reusable; `current/state.json` controls active calls.
 - Forgetting `reconcileActiveCall` before status/result/wait leaves dead workers appearing `running`.
 - Assuming agent names are arbitrary safe paths; `AgentKey` normalization can make distinct names collide.
+- Inferring login state from backend output is brittle; preserve raw backend errors and present configuration options as hints.
 - Cancelling by killing only the parent process can leave children alive on Unix; process-group behavior is intentional. {#260505-agent-cancel-recovery}
 
 ## Technical Debt

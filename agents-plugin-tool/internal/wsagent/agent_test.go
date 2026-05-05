@@ -57,6 +57,18 @@ func (panicRunner) Call(RunnerRequest) (RunnerResult, error) {
 	panic("runner panic")
 }
 
+func writeBackendShim(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if runtime.GOOS == "windows" {
+		path += ".exe"
+	}
+	if err := os.WriteFile(path, []byte(""), 0o755); err != nil {
+		t.Fatalf("write backend shim: %v", err)
+	}
+	return path
+}
+
 type sessionPersistRunner struct {
 	t         *testing.T
 	agentFile string
@@ -891,6 +903,9 @@ func TestResultConsumesCompletedEphemeralAgentOnly(t *testing.T) {
 func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
+	binDir := t.TempDir()
+	claudePath := writeBackendShim(t, binDir, "claude")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	starter := &fakeWorkerStarter{pid: 4567}
 	base := NewManager(Options{
 		CacheHome:     cache,
@@ -909,14 +924,23 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 		Now:       func() time.Time { return testNow },
 		Runner:    errorRunner{err: errors.New("backend exploded")},
 	})
-	if err := manager.RunCurrent(repo, "impl"); err == nil || !strings.Contains(err.Error(), "backend exploded") {
+	if err := manager.RunCurrent(repo, "impl"); err == nil ||
+		!strings.Contains(err.Error(), "backend exploded") ||
+		!strings.Contains(err.Error(), "backend invocation failed") ||
+		!strings.Contains(err.Error(), "- claude: "+claudePath) ||
+		!strings.Contains(err.Error(), "re-run agents.register") ||
+		!strings.Contains(err.Error(), "config.agents_tier") {
 		t.Fatalf("RunCurrent error = %v", err)
 	}
 	status, err := manager.Status(repo, "impl")
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if !strings.Contains(status, "agent_status: failed") || !strings.Contains(status, "error: backend exploded") {
+	if !strings.Contains(status, "agent_status: failed") ||
+		!strings.Contains(status, "error: backend invocation failed") ||
+		!strings.Contains(status, "raw_error:") ||
+		!strings.Contains(status, "backend exploded") ||
+		!strings.Contains(status, "- claude: "+claudePath) {
 		t.Fatalf("failure status mismatch:\n%s", status)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
@@ -947,6 +971,54 @@ func TestRunCurrentFailureAndPanicDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(panicTail, "worker.panic") {
 		t.Fatalf("tail missing panic runtime diagnostics:\n%s", panicTail)
+	}
+}
+
+func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	binDir := t.TempDir()
+	geminiPath := writeBackendShim(t, binDir, "gemini")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	starter := &fakeWorkerStarter{pid: 4567}
+	base := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl", Backend: "claude", Model: "claude-sonnet-4"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+		t.Fatalf("Call should queue unsupported backend for worker diagnostics: %v", err)
+	}
+
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	err := manager.RunCurrent(repo, "impl")
+	if err == nil {
+		t.Fatal("RunCurrent returned nil error")
+	}
+	for _, want := range []string{
+		`unsupported agent backend "claude"`,
+		"backend: claude",
+		"model: claude-sonnet-4",
+		"- gemini: " + geminiPath,
+		"re-run agents.register",
+		"config.agents_tier",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("RunCurrent error missing %q:\n%v", want, err)
+		}
+	}
+	status, err := manager.Status(repo, "impl")
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if !strings.Contains(status, "call_status: failed") || !strings.Contains(status, `unsupported agent backend "claude"`) {
+		t.Fatalf("status missing unsupported backend diagnostic:\n%s", status)
 	}
 }
 
