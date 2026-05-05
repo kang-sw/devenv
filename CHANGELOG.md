@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.16.0 - 2026-05-05
+
+### Added
+- Codex-first `agents-plugin/` package with `lead-*` workflow skills and plugin-managed MCP configuration.
+- Native Go `ws-mcp` runtime for Codex plugin installs, including project docs, tickets, specs, mental models, Git, API docs, generated paths, runtime metadata, and named-agent MCP tools.
+- Plugin-local runtime launcher with release download, checksum verification, compatibility checks, project-root detection, and local development repair.
+- Embedded prompt bundle for reviewers, implementers, surveys, skeleton writing, API docs, and delegate orientation.
+- Async named-agent runtime with register/call/wait/result/status/tail/debug/cancel/erase surfaces and async `subquery` fan-out.
+- GitHub Actions release workflow that builds cross-platform `ws-mcp-*` assets, verifies checksums, uploads artifacts, and publishes release assets for `v*` tags.
+
+### Changed
+- Shifted the active workflow authority to `AGENTS.md` while keeping `CLAUDE.md` as a compatibility shim.
+- Rebuilt the active spec corpus and mental-model domains around the Codex-first plugin/runtime surface.
+- Updated workflow skills to prefer host-neutral MCP primitives and ws named-agent delegation.
+- Split agent readiness from result consumption: `agents.wait` reports readiness and `agents.result` is the result retrieval point.
+- Changed `git.diff` to default to stat output, with full diff content available by parameter.
+- Relaxed todo ticket spec gating for `epic` and `research` tickets.
+- Reworked `ws` shipping docs around Codex/GitHub plugin install while preserving the stable Claude compatibility package.
+
+### Fixed
+- Increased default agent wait/result timeout guidance to 10 minutes for long-running workflow agents.
+- Hardened named-agent lifecycle, diagnostics, nonblocking orchestration, worktree authority locking, cancellation, interrupt delivery, and large Codex JSONL reads.
+- Fixed MCP Git commit staging for deleted paths and ticket moves.
+- Fixed Windows runtime smoke failures in Go tests and executable validation.
+- Reduced context-heavy agent tail output while keeping raw debug diagnostics available.
+- Kept runtime contract metadata synchronized with embedded prompts and shortened generated subquery keys.
+
 ## v0.15.0 — 2026-04-29
 
 ### Added
