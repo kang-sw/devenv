@@ -17,7 +17,7 @@ Target: $ARGUMENTS
 
 ## On: invoke
 
-0. Apply **judge: spec-gate** (CREATE path only).
+0. For create, classify category/status and apply **judge: spec-gate** unless category is `epic` or `research`.
 1. If `$ARGUMENTS` references an existing ticket, read it.
 2. **Create** (new ticket):
    a. Determine category from the topic.
@@ -36,7 +36,7 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** — confirm ticket↔spec linkage:
+6. **Spec-stem check** — skip `epic` and `research`; otherwise confirm ticket↔spec linkage:
    a. Run `ws-list-spec-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
    b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
@@ -50,7 +50,7 @@ Target: $ARGUMENTS
 
 ### judge: spec-gate
 
-Fires on any action that results in `todo/`-or-higher status: direct `todo/` creation and `idea/` → `todo/` promotion moves. `idea/` creation is ungated.
+Fires on any non-`epic`, non-`research` action that results in `todo/`-or-higher status: direct `todo/` creation and `idea/` → `todo/` promotion moves. `idea/` creation is ungated.
 
 Identify the relevant spec file for the topic.
 Run `ws-list-spec-stems <spec-file>` (Bash) if a spec file is identifiable.

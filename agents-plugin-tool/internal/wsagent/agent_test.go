@@ -1251,7 +1251,7 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 		t.Fatalf("Subquery returned error: %v", err)
 	}
 	key := extractFieldLine(t, text, "subquery_key")
-	if !strings.HasPrefix(key, "subquery-tmp1777816800000000000-") ||
+	if !strings.HasPrefix(key, "subquery-tmpdi93gj02ha80-") ||
 		!strings.Contains(text, "agent_name: "+key) ||
 		!strings.Contains(text, "status: running") ||
 		!strings.Contains(text, "pid: 2468") ||
@@ -1295,7 +1295,7 @@ func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 		t.Fatalf("deep Subquery returned error: %v", err)
 	}
 	deepKey := extractFieldLine(t, deepText, "subquery_key")
-	if !strings.HasPrefix(deepKey, "subquery-tmp1777816801000000000-") || deepKey == key {
+	if !strings.HasPrefix(deepKey, "subquery-tmpdi93gjglur5s-") || deepKey == key {
 		t.Fatalf("deep subquery key = %q, first key = %q", deepKey, key)
 	}
 	deepLayout, err := deepManager.layout(repo, deepKey, false)

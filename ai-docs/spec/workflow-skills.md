@@ -71,8 +71,9 @@ or implemented entries according to the current behavior, verifies the spec
 index, and commits the spec update.
 
 `lead-write-ticket` creates or updates workflow tickets. It applies the spec
-gate for todo-or-higher tickets, uses ticket conventions, maintains queue
-entries where needed, preserves stable ticket stems, and commits ticket changes.
+gate for todo-or-higher implementation-bearing tickets, skips that gate for
+`epic` and `research`, uses ticket conventions, maintains queue entries where
+needed, preserves stable ticket stems, and commits ticket changes.
 
 `lead-write-skeleton` locks public contracts before implementation when the
 scope needs stubs, integration tests, or interface scaffolding. It delegates

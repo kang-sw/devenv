@@ -899,7 +899,7 @@ Input schema:
 Behavior:
 
 - The tool is the MCP replacement for the old `ws-subquery` CLI.
-- It registers a generated `subquery-tmp<id>` named agent and starts it through
+- It registers a generated `subquery-tmp<base36-id>` named agent and starts it through
   the same async path as `ws/agents.call`.
 - Default workload tier is `light`; `deep_research: true` uses `deep`.
 - The system prompt is runtime-owned and self-contained.

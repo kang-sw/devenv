@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -827,7 +828,10 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	if opts.DeepResearch {
 		tier = "deep"
 	}
-	name := fmt.Sprintf("subquery-tmp%d-%06d", m.now().UTC().UnixNano(), subquerySeq.Add(1))
+	name := fmt.Sprintf("subquery-tmp%s-%s",
+		strconv.FormatInt(m.now().UTC().UnixNano(), 36),
+		strconv.FormatUint(subquerySeq.Add(1), 36),
+	)
 	_, _, err := m.Register(RegisterOptions{
 		Root:                opts.Root,
 		Name:                name,

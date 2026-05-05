@@ -14,7 +14,7 @@ Target: user request
 
 ## On: invoke
 
-0. Apply **judge: spec-gate** (CREATE path only).
+0. For create, classify category/status and apply **judge: spec-gate** unless category is `epic` or `research`.
 1. If `user request` references an existing ticket, read it.
 2. **Create** (new ticket):
    a. Determine category from the topic.
@@ -33,7 +33,7 @@ Target: user request
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** - confirm ticket↔spec linkage:
+6. **Spec-stem check** - skip `epic` and `research`; otherwise confirm ticket↔spec linkage:
    a. Use `ws/specs.find` or `ws/specs.status` to confirm canonical stems.
    b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
@@ -46,7 +46,7 @@ Target: user request
 
 ### judge: spec-gate
 
-Fires on any action that results in `todo/`-or-higher status: direct `todo/` creation and `idea/` -> `todo/` promotion moves. `idea/` creation is ungated.
+Fires on any non-`epic`, non-`research` action that results in `todo/`-or-higher status: direct `todo/` creation and `idea/` -> `todo/` promotion moves. `idea/` creation is ungated.
 
 Identify the relevant spec file for the topic.
 Use `ws/specs.find` or `ws/specs.status` if a relevant spec file or stem is identifiable.

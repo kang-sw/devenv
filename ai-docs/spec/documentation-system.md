@@ -105,8 +105,9 @@ landed, handles removed spec stems, verifies duplicate anchors, and commits all
 spec changes together.
 
 `lead-write-ticket` creates or updates tickets. It applies the spec gate for
-todo-or-higher work, reads ticket conventions, updates queue entries when
-needed, preserves stable ticket stems, and commits ticket changes.
+todo-or-higher work except `epic` and `research` tickets, reads ticket
+conventions, updates queue entries when needed, preserves stable ticket stems,
+and commits ticket changes.
 
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}
 

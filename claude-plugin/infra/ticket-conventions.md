@@ -14,7 +14,8 @@ Canonical reference for ticket structure, naming, and lifecycle.
 - Move tickets with `git mv`; no cross-link updates needed.
 - Add `completed:` date on move to `.done/`.
 - `idea/` tickets may not have `spec:` entries — spec linkage begins at `todo/` or higher.
-- Promoting `idea/` → `todo/` for a ticket with spec-relevant behaviors: route through `/discuss` → `/write-spec` adds the `🚧` entry before or after the move.
+- `epic` and `research` tickets do not require `spec:` entries in `todo/`; epics decompose scope and research captures findings.
+- Promoting `idea/` → `todo/` for a non-`epic`, non-`research` ticket with spec-relevant behaviors: route through `/discuss` → `/write-spec` adds the `🚧` entry before or after the move.
 - Dropping a ticket with linked spec entries: route through `/discuss` → `/write-spec` removes orphaned `🚧` entries before the move.
 
 ## Phases
