@@ -137,6 +137,9 @@ not stage it unless explicitly requested.
 5. **Windows compatibility for Claude bin additions.** Every new script added to
    `claude-plugin/bin/` must include a Windows-compatible variant (`.cmd` shim or
    equivalent) verified under both PowerShell and Cmd.
+6. **Named-agent delegation first.** Prefer ws named agents over host-native
+   subagents for repo workflow delegation so dogfooding preserves platform
+   independence.
 
 ## Documentation System
 
