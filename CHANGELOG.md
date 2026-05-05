@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.1 - 2026-05-05
+
+### Fixed
+- Fix the Windows CI session default-root test to compare decoded JSON paths
+  instead of escaped response text.
+
 ## v0.17.0 - 2026-05-05
 
 ### Added
