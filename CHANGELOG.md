@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.5 - 2026-05-05
+
+### Fixed
+- Invoke Windows Claude `.cmd` and `.bat` backend shims through `cmd /c call`
+  so quoted batch paths execute correctly.
+
 ## v0.17.4 - 2026-05-05
 
 ### Fixed
