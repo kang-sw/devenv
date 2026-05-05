@@ -205,11 +205,11 @@ func claudeCommandContext(ctx context.Context, args []string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		lower := strings.ToLower(exe)
 		if strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat") {
-			line := windowsCmdQuote(exe)
+			line := "call " + windowsCmdQuote(exe)
 			for _, arg := range args {
 				line += " " + windowsCmdQuote(arg)
 			}
-			return exec.CommandContext(ctx, "cmd", "/d", "/s", "/c", line)
+			return exec.CommandContext(ctx, "cmd", "/d", "/c", line)
 		}
 	}
 	return exec.CommandContext(ctx, exe, args...)
