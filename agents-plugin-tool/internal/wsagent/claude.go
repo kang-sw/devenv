@@ -205,8 +205,43 @@ func claudeCommandContext(ctx context.Context, args []string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		lower := strings.ToLower(exe)
 		if strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat") {
-			return exec.CommandContext(ctx, "cmd", append([]string{"/c", exe}, args...)...)
+			line := windowsCmdQuote(exe)
+			for _, arg := range args {
+				line += " " + windowsCmdQuote(arg)
+			}
+			return exec.CommandContext(ctx, "cmd", "/d", "/s", "/c", line)
 		}
 	}
 	return exec.CommandContext(ctx, exe, args...)
+}
+
+func windowsCmdQuote(value string) string {
+	if value == "" {
+		return `""`
+	}
+	value = strings.ReplaceAll(value, "%", "%%")
+	var b strings.Builder
+	b.WriteByte('"')
+	backslashes := 0
+	for _, r := range value {
+		switch r {
+		case '\\':
+			backslashes++
+		case '"':
+			b.WriteString(strings.Repeat(`\`, backslashes*2+1))
+			b.WriteRune(r)
+			backslashes = 0
+		default:
+			if backslashes > 0 {
+				b.WriteString(strings.Repeat(`\`, backslashes))
+				backslashes = 0
+			}
+			b.WriteRune(r)
+		}
+	}
+	if backslashes > 0 {
+		b.WriteString(strings.Repeat(`\`, backslashes*2))
+	}
+	b.WriteByte('"')
+	return b.String()
 }
