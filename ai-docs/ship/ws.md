@@ -1,35 +1,63 @@
 # Ship: ws
 
-The `ws` Claude Code plugin — structured AI-assisted development workflow skills and agents.
+The `ws` Codex-first workflow plugin and native `ws-mcp` runtime, published from
+`agents-plugin/` and `agents-plugin-tool/` while preserving the existing Claude
+compatibility package under `claude-plugin/`.
 
 ## Version Strategy
 
-Semantic versioning. Source of truth: `claude-plugin/.claude-plugin/plugin.json` → `version` field.
+Semantic versioning for the Codex-first plugin.
+
+Source of truth:
+- `agents-plugin/.codex-plugin/plugin.json` -> `version`
+- `agents-plugin/runtime.json` -> `plugin_version` and `release_tag`
+
+Version coupling:
+- `agents-plugin/.claude-plugin/plugin.json` mirrors the Codex-first candidate
+  version for compatibility metadata inside `agents-plugin/`.
+- `claude-plugin/.claude-plugin/plugin.json` remains the stable Claude package
+  version and is not bumped by this ship flow unless explicitly requested.
+- `agents-plugin/runtime.json.release_tag` must be `v<version>`.
+- `agents-plugin/runtime.json.required_mcp`, all runtime tool ranges, and all
+  command ranges must cover `<version>-dev` and stay below the next minor.
+- `agents-plugin-tool/cmd/ws-mcp/main.go` uses `<version>-dev` before tagging;
+  release assets embed `<version>` when built from the tag.
 
 Bump rules:
-- **Minor** (0.X.0): new user-invocable skill or agent added.
-- **Patch** (0.0.X): behavior change to existing skill, agent, or infra doc with no new public entry point.
-- **Major** (X.0.0): breaking change to a canonical flow or public interface that requires downstream migration.
+- **Minor** (`0.X.0`): new Codex-visible skill, MCP tool family, runtime
+  command family, or plugin-managed install capability.
+- **Patch** (`0.0.X`): behavior change or bug fix to existing skills, MCP
+  tools, runtime, launcher, docs, or packaging with no new public entry point.
+- **Major** (`X.0.0`): breaking change to canonical workflow, plugin layout,
+  MCP protocol expectations, or install/repair contract.
 
 At ship time:
-1. Run `git log <last-tag>..HEAD --oneline` to enumerate changes.
-2. Classify each commit as minor, patch, or major using the rules above.
-3. Apply the highest bump to the current version in `claude-plugin/.claude-plugin/plugin.json`.
-4. Update the `Plugin: ws@<version>` line in `ai-docs/_index.md`.
+1. Run `git tag --list 'v*' --sort=-v:refname | head -n1`.
+2. Run `git log <last-tag>..HEAD --oneline`.
+3. Classify commits by the bump rules.
+4. If the version must change, run
+   `agents-plugin-tool/scripts/bump-ws-version.sh <version>`.
+5. Verify the changed files named by the bump helper before committing.
 
 ## Pre-flight
 
-- `git status --porcelain` — must be empty (clean working tree).
+- `git status --porcelain` - must be empty before release preparation starts.
+- `cd agents-plugin-tool && go test ./...`
+- `cd agents-plugin-tool && scripts/smoke-ws-mcp.sh ..`
+- Windows host smoke when available:
+  - `go test ./...` in `agents-plugin-tool`
+  - build `dist/ws-mcp-windows-amd64.exe`
+  - run `version`, `doctor --root <repo>`, and stdio `tools/list` smoke
 
 ## Changelog
 
-Update `CHANGELOG.md` in the repo root before tagging:
+Update `CHANGELOG.md` before tagging:
 
 ```markdown
-## v<version> — YYYY-MM-DD
+## v<version> - YYYY-MM-DD
 
 ### Added
-- <new skill or agent>
+- <new Codex skill, MCP tool, runtime command, or install capability>
 
 ### Changed
 - <behavior change>
@@ -38,22 +66,81 @@ Update `CHANGELOG.md` in the repo root before tagging:
 - <bug fix>
 ```
 
-One entry per shipped version. Derive content from `git log <last-tag>..HEAD`.
+One entry per shipped version. Derive content from
+`git log <last-tag>..HEAD --oneline`.
 
 ## Build
 
-- `claude plugin update ws@kang-sw-devenv` — propagate changes to local plugin cache.
+Local release-asset verification:
+
+```bash
+cd agents-plugin-tool
+scripts/build-release-assets.sh <version>
+host_os=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$(uname -m)" in arm64|aarch64) host_arch=arm64 ;; x86_64|amd64) host_arch=amd64 ;; esac
+"dist/ws-mcp-${host_os}-${host_arch}" version
+cd dist
+shasum -a 256 -c SHA256SUMS
+```
+
+Notes:
+- Do not commit `agents-plugin-tool/dist/` unless a separate ticket changes the
+  artifact policy.
+- The build script refreshes `agents-plugin/runtime.json` prompt bundle metadata
+  when the host binary can report it; commit any resulting metadata drift before
+  tagging.
 
 ## Tag
 
-Format: `v<version>` (e.g. `v0.6.0`)
-Command: `git tag -a v<version> -m "v<version>"` (annotated — required for `--follow-tags`)
-Push: yes
+Format: `v<version>` (for example, `v0.16.0`)
+
+Command:
+
+```bash
+git tag -a v<version> -m "v<version>"
+```
+
+Do not push the tag until the final confirmation gate.
 
 ## Publish
 
-- `git push origin main --follow-tags`
+Publish targets:
+- `origin/main`
+- annotated tag `v<version>`
+- GitHub Actions release assets uploaded by `.github/workflows/ws-mcp-release.yml`
+  when the `v*` tag is pushed
+- Codex GitHub plugin marketplace install from repository
+  `.agents/plugins/marketplace.json` pointing at `./agents-plugin`
+
+Publish command after explicit final approval:
+
+```bash
+git push origin main --follow-tags
+```
+
+Expected GitHub Actions behavior:
+- Branch push runs tests and builds workflow artifacts when plugin/runtime paths
+  changed.
+- Tag push runs tests, builds release assets, verifies checksums, creates or
+  updates the GitHub release, and uploads `agents-plugin-tool/dist/*`.
 
 ## Post-ship
 
-- Confirm plugin version with `claude plugin list | grep ws`.
+1. Confirm the GitHub Actions workflow succeeds for `main` and `v<version>`.
+2. Confirm the GitHub release contains:
+   - `SHA256SUMS`
+   - `ws-mcp-darwin-arm64`
+   - `ws-mcp-darwin-amd64`
+   - `ws-mcp-linux-amd64`
+   - `ws-mcp-linux-arm64`
+   - `ws-mcp-windows-amd64.exe`
+   - `ws-mcp-windows-arm64.exe`
+3. Dogfood Codex GitHub plugin install from `kang-sw/devenv`.
+4. In a fresh Codex session, confirm:
+   - `ws` plugin is installed from the GitHub marketplace entry
+   - `$ws:lead-workflow` is visible
+   - MCP server `ws` starts from plugin-managed `.mcp.json`
+   - `runtime.info` reports the shipped version and matching prompt bundle hash
+   - `project_tree` returns `ai-docs/` as its first non-empty line
+5. Keep the Claude package untouched unless a separate Claude compatibility ship
+   is requested.
