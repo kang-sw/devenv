@@ -126,3 +126,10 @@ Backend invocation failures preserve the raw backend error and append a bounded
 hint. The hint includes the configured agent name, tier, backend, and model;
 PATH-detected backend binaries for known local backends; and explicit recovery
 guidance for re-registering an existing agent or changing future tier defaults.
+
+## Codex JSONL Trailing Noise Tolerance {#260505-codex-jsonl-trailing-noise-tolerance}
+
+After the Codex backend has emitted both a session id and a final
+`agent_message`, trailing non-JSONL process-control output on stdout does not
+invalidate the completed agent result. Non-JSONL output before the result is
+complete remains a parse failure.

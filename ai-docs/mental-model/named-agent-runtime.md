@@ -26,6 +26,7 @@ related:
 - Interrupts are inbox files delivered at hook/check-inbox boundaries, not OS signals. {#260505-agent-inbox-interrupt-delivery}
 - Successful `Result` erases ephemeral agents; `Print` is legacy and does not consume them. {#260505-async-subquery-ephemeral-agent}
 - Backend invocation failures are formatted at the call site with raw error text, bounded PATH-detected backend hints, and reconfiguration guidance; do not run separate model/login probes during registration or config inspection. {#260505-agent-backend-failure-diagnostics}
+- Codex JSONL parsing treats non-JSON stdout as fatal until both session id and final agent message are available; trailing process-control noise after completion is ignored. {#260505-codex-jsonl-trailing-noise-tolerance}
 
 ## Coupling
 
@@ -46,6 +47,7 @@ related:
 - Forgetting `reconcileActiveCall` before status/result/wait leaves dead workers appearing `running`.
 - Assuming agent names are arbitrary safe paths; `AgentKey` normalization can make distinct names collide.
 - Inferring login state from backend output is brittle; preserve raw backend errors and present configuration options as hints.
+- Treating every stdout line after a completed Codex result as model output can discard a valid Windows result when process-control messages are appended.
 - Cancelling by killing only the parent process can leave children alive on Unix; process-group behavior is intentional. {#260505-agent-cancel-recovery}
 
 ## Technical Debt

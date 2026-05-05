@@ -26,6 +26,7 @@ related:
 - `toolTextResponse` errors are successful JSON-RPC responses with `isError: true`; unknown tools/profile violations are JSON-RPC errors.
 - The server root is captured at `NewServer`; CLI default root can come from `WS_MCP_PROJECT_ROOT` when invoked from plugin runtime.
 - Orchestrator lock errors are startup diagnostics, not delegate evidence; an invalid default root must not hide lead tools that can accept an explicit `root`. {#260505-tool-profile-gating}
+- Plugin-managed MCP calls may lack a caller repository root on native Windows; without `WS_MCP_PROJECT_ROOT` or an explicit `root`, tools operate from the server root rather than the user's shell cwd.
 
 ## Coupling
 
@@ -47,6 +48,7 @@ related:
 - Assuming delegate agents can inspect arbitrary agents; delegate profile can use selected `agents.*` tools only for `subquery-*` names, while leaf profile cannot use `agents.*`.
 - Treating a lock acquisition error as delegate authority hides repair tools in plugin-managed sessions whose default root was misdetected.
 - Treating `domain_hint` in `api.ask` as a direct domain selector; only exact existing domain names bypass routing. {#260505-api-documentation-mcp-tools}
+- Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
 
 ## Technical Debt
 

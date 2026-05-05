@@ -159,6 +159,12 @@ func parseCodexJSONLStreamPartial(r io.Reader, onSessionID func(string) error) (
 			} `json:"item"`
 		}
 		if err := json.Unmarshal(line, &event); err != nil {
+			if result.SessionID != "" && result.Text != "" {
+				if err == io.EOF {
+					break
+				}
+				continue
+			}
 			return RunnerResult{}, fmt.Errorf("parse codex jsonl: %w", err)
 		}
 		if event.Type == "thread.started" && event.ThreadID != "" {

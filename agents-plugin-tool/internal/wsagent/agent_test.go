@@ -1432,6 +1432,32 @@ func TestParseCodexJSONLAllowsLargeToolEventLine(t *testing.T) {
 	}
 }
 
+func TestParseCodexJSONLToleratesTrailingNonJSONAfterFinalMessage(t *testing.T) {
+	raw := []byte(strings.Join([]string{
+		`{"type":"thread.started","thread_id":"019test"}`,
+		`{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}`,
+		`����: PID 22896�� ���μ���(PID 25328�� �ڽ� ���μ���)�� �����Ǿ����ϴ�.`,
+	}, "\n"))
+	result, err := parseCodexJSONL(raw)
+	if err != nil {
+		t.Fatalf("parseCodexJSONL returned error: %v", err)
+	}
+	if result.SessionID != "019test" || result.Text != "hello" {
+		t.Fatalf("result mismatch: %+v", result)
+	}
+}
+
+func TestParseCodexJSONLRejectsNonJSONBeforeFinalMessage(t *testing.T) {
+	raw := []byte(strings.Join([]string{
+		`{"type":"thread.started","thread_id":"019test"}`,
+		`not-json`,
+		`{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}`,
+	}, "\n"))
+	if _, err := parseCodexJSONL(raw); err == nil {
+		t.Fatalf("parseCodexJSONL returned nil error")
+	}
+}
+
 func TestParseCodexJSONLStreamNotifiesSessionBeforeFinalMessage(t *testing.T) {
 	sessionSeen := false
 	reader := &chunkReader{
