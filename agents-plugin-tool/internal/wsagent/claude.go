@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -205,43 +206,14 @@ func claudeCommandContext(ctx context.Context, args []string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		lower := strings.ToLower(exe)
 		if strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat") {
-			line := "call " + windowsCmdQuote(exe)
-			for _, arg := range args {
-				line += " " + windowsCmdQuote(arg)
+			ps1 := strings.TrimSuffix(exe, filepath.Ext(exe)) + ".ps1"
+			if _, err := os.Stat(ps1); err == nil {
+				psArgs := append([]string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", ps1}, args...)
+				return exec.CommandContext(ctx, "powershell", psArgs...)
 			}
-			return exec.CommandContext(ctx, "cmd", "/d", "/c", line)
+			cmdArgs := append([]string{"/d", "/c", "call", exe}, args...)
+			return exec.CommandContext(ctx, "cmd", cmdArgs...)
 		}
 	}
 	return exec.CommandContext(ctx, exe, args...)
-}
-
-func windowsCmdQuote(value string) string {
-	if value == "" {
-		return `""`
-	}
-	value = strings.ReplaceAll(value, "%", "%%")
-	var b strings.Builder
-	b.WriteByte('"')
-	backslashes := 0
-	for _, r := range value {
-		switch r {
-		case '\\':
-			backslashes++
-		case '"':
-			b.WriteString(strings.Repeat(`\`, backslashes*2+1))
-			b.WriteRune(r)
-			backslashes = 0
-		default:
-			if backslashes > 0 {
-				b.WriteString(strings.Repeat(`\`, backslashes))
-				backslashes = 0
-			}
-			b.WriteRune(r)
-		}
-	}
-	if backslashes > 0 {
-		b.WriteString(strings.Repeat(`\`, backslashes*2))
-	}
-	b.WriteByte('"')
-	return b.String()
 }

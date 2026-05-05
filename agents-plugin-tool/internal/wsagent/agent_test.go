@@ -91,6 +91,22 @@ echo {^"result^":^"claude reply^",^"is_error^":false}
 		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 			t.Fatalf("write fake claude cmd: %v", err)
 		}
+		ps1Path := strings.TrimSuffix(path, filepath.Ext(path)) + ".ps1"
+		ps1Body := `$args | ForEach-Object { Add-Content -Path $env:CLAUDE_FAKE_LOG -Value $_ }
+if ($env:CLAUDE_FAKE_FAIL -eq "1") {
+  [Console]::Error.WriteLine("login required")
+  exit 7
+}
+if ($env:CLAUDE_FAKE_HOOK_STOP -eq "1" -and !(Test-Path $env:CLAUDE_FAKE_HOOK_MARKER)) {
+  Set-Content -Path $env:CLAUDE_FAKE_HOOK_MARKER -Value "stopped"
+  Write-Output '{"result":"","is_error":false,"terminal_reason":"hook_stopped","stop_reason":"tool_use"}'
+  exit 0
+}
+Write-Output '{"result":"claude reply","is_error":false}'
+`
+		if err := os.WriteFile(ps1Path, []byte(ps1Body), 0o755); err != nil {
+			t.Fatalf("write fake claude ps1: %v", err)
+		}
 		return path
 	}
 	body := `#!/bin/sh
