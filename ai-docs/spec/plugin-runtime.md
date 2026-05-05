@@ -23,10 +23,10 @@ prompts that point users at skill authoring workflows.
 ## Plugin-Local MCP Server Configuration {#260505-plugin-local-mcp-server-config}
 
 The plugin ships an MCP configuration that starts the `ws` MCP server through
-the plugin-local launcher:
+the plugin-local Python launcher:
 
 ```text
-./bin/ws-mcp-launcher serve --stdio
+python3 ./bin/ws-mcp-launcher.py serve --stdio
 ```
 
 The MCP server runs with the plugin directory as its configured working
@@ -108,10 +108,16 @@ version and prompt bundle metadata. `doctor` reports repository health. The
 grouped commands mirror MCP behavior where a CLI fallback is part of the public
 runtime surface.
 
-## 🚧 Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
+## Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
 
 The runtime publishes Windows assets and verifies Windows executable startup in
 release smoke coverage.
 
-Native Windows plugin-managed startup remains planned until the plugin-managed
-launcher path is verified end-to-end under Windows Codex plugin installation.
+Native Windows plugin-managed startup uses the same Python launcher as macOS and
+Linux. Codex materializes plugin-managed MCP entries during plugin install or
+refresh, so changed `.mcp.json` launcher commands require plugin reinstall or
+refresh before Windows startup verification.
+
+Windows users need a working `python3` command on `PATH`. On Windows 11 the
+Python Store alias may appear before Python is installed; if MCP startup reports
+that Python cannot run the launcher, install Python 3 and refresh the plugin.

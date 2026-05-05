@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "ws": {
-      "command": "./bin/ws-mcp-launcher",
+      "command": "python3",
       "cwd": ".",
-      "args": ["serve", "--stdio"],
+      "args": ["./bin/ws-mcp-launcher.py", "serve", "--stdio"],
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 600
     }

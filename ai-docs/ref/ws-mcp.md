@@ -81,9 +81,9 @@ The plugin-local `.mcp.json` uses an MCP server map:
 {
   "mcpServers": {
     "ws": {
-      "command": "./bin/ws-mcp-launcher",
+      "command": "python3",
       "cwd": ".",
-      "args": ["serve", "--stdio"],
+      "args": ["./bin/ws-mcp-launcher.py", "serve", "--stdio"],
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 600
     }
@@ -91,7 +91,7 @@ The plugin-local `.mcp.json` uses an MCP server map:
 }
 ```
 
-The current POC adds `agents-plugin/bin/ws-mcp-launcher` and
+The current POC adds `agents-plugin/bin/ws-mcp-launcher.py` and
 `agents-plugin/runtime.json`. The launcher is intentionally quiet on stdout:
 stdout belongs to the MCP JSON-RPC stream, while diagnostics go to stderr.
 The plugin MCP config sets a 30-second startup timeout and a 600-second per-tool
@@ -109,31 +109,13 @@ plugin-local runtime contract, downloads or copies and verifies the prebuilt
 Codex does not resolve plugin-managed MCP `command` relative paths against the
 plugin cache by default. The POC must set `"cwd": "."`; Codex normalizes that
 value to the installed plugin cache directory, after which
-`command: "./bin/ws-mcp-launcher"` starts successfully.
+`command: "python3"` starts the plugin-local launcher successfully.
 
-For macOS and Linux, `./bin/ws-mcp-launcher` is the canonical entrypoint and may
-remain a POSIX `sh` script. A single script can branch internally on `uname -s`
-and `uname -m`, then select an OS/architecture-specific native `ws-mcp` binary.
-The command name can stay stable even though the selected binary differs.
-
-Windows remains a separate production risk. The `.mcp.json` format does not
-provide an OS selector, so the production path depends on whether Codex on
-Windows resolves `command: "./bin/ws-mcp-launcher"` to
-`./bin/ws-mcp-launcher.exe`. Windows verification is deferred until a host is
-available; it should not block Unix/macOS skill migration.
-
-If Windows does not resolve the extensionless launcher command to `.exe`, use
-this fallback order:
-
-1. Prefer a native Go launcher at `bin/ws-mcp-launcher.exe` plus the existing
-   release-download/runtime-check logic. Keep the POSIX launcher for macOS/Linux.
-2. If Codex still cannot select the Windows launcher from the shared
-   plugin-local `.mcp.json`, split the installed adapter artifact: keep shared
-   skills/runtime metadata, but publish host-specific `.mcp.json` manifests for
-   Windows and Unix-like hosts.
-3. If plugin-managed Windows MCP remains blocked by Codex host behavior, provide
-   a repair/setup skill or documented one-time `codex mcp add` path that points
-   directly at the downloaded `ws-mcp-windows-<arch>.exe`.
+The shared `.mcp.json` uses `python3` because the MCP config format does not
+provide an OS selector. The Python launcher keeps one plugin-managed MCP command
+for macOS, Linux, and native Windows while the runtime itself remains a prebuilt
+Go binary. Native Windows users may need to install Python 3 once when the
+Windows Store alias exists but no interpreter is installed.
 
 All fallback paths must preserve the same `runtime.json` compatibility contract,
 cache-local runtime location, release asset naming, and checksum verification
@@ -153,14 +135,13 @@ Current launcher inputs:
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_PROJECT_ROOT` | Project root used as the default when a tool or CLI command omits `root`; normally derived by the launcher from the parent Codex process. |
 
-The macOS plugin-managed MCP POC is proven for `codex exec` when `.mcp.json`
-sets `cwd: "."`. Without that field, Codex registers the server but startup fails
-with `No such file or directory` because the relative command is interpreted from
-the workspace process context, not the plugin cache. Windows extensionless `.exe`
-resolution remains a later host verification item.
+The plugin-managed MCP path is proven for `codex exec` when `.mcp.json` sets
+`cwd: "."`. Without that field, Codex registers the server but startup fails
+with `No such file or directory` because the relative launcher argument is
+interpreted from the workspace process context, not the plugin cache.
 
 Because `cwd: "."` points the MCP process at the installed plugin cache, tools
-must not treat process cwd as the downstream project root. The POSIX launcher
+must not treat process cwd as the downstream project root. The Python launcher
 derives `WS_MCP_PROJECT_ROOT` from the parent Codex process `PWD` when possible,
 and `ws-mcp` uses that environment variable whenever a tool or command omits
 `root` or passes `"."`. Skills may still pass `root` explicitly, but omitted
@@ -1214,15 +1195,15 @@ validated.
 
 ## Version And Drift Boundary
 
-The current binary reports `0.16.1-dev`. Phase 3 must add a runtime contract that
-lets `ws-mcp doctor` and server startup detect drift between the installed plugin
-bundle and the local `ws-mcp` binary.
+The current binary reports `0.16.1-dev`. The runtime contract lets launcher
+startup detect drift between the installed plugin bundle and the local `ws-mcp`
+binary.
 
 Use `agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>` to keep the
 plugin/runtime version contract synchronized. The script updates the Codex and
-Claude adapter manifests, `agents-plugin/runtime.json`, the POSIX launcher
-compatibility gate, `ws-mcp` dev defaults, release workflow defaults, and current
-runtime documentation. It intentionally preserves historical ticket result text.
+Claude adapter manifests, `agents-plugin/runtime.json`, `ws-mcp` dev defaults,
+release workflow defaults, and current runtime documentation. It intentionally
+preserves historical ticket result text.
 
 Expected direction:
 
@@ -1241,8 +1222,9 @@ installed `ws-mcp` binary are automatically in sync.
 ## Release Distribution
 
 `ws-mcp` is distributed as prebuilt native binaries produced from
-`agents-plugin-tool/`. End users should not need Go, Python, Node, Cargo, or
-Visual Studio Build Tools to run the MCP server.
+`agents-plugin-tool/`. End users should not need Go, Node, Cargo, or Visual
+Studio Build Tools to run the MCP server. Plugin-managed startup does require a
+working `python3` command for the small cross-platform launcher.
 
 Release asset names follow this pattern:
 
@@ -1267,7 +1249,7 @@ The launcher should download the selected binary and `SHA256SUMS`, verify the
 matching checksum line before chmod/exec, and print failures to stderr only.
 
 `agents-plugin/runtime.json` currently carries `release_repository` and
-`release_tag`. The POSIX launcher derives the release base URL as:
+`release_tag`. The Python launcher derives the release base URL as:
 
 ```text
 https://github.com/<release_repository>/releases/download/<release_tag>
@@ -1305,7 +1287,7 @@ Local devenv development exception:
 
 - When the installed plugin path is under
   `~/.codex/plugins/cache/kang-sw-devenv/ws/` and the installed plugin cache
-  contains `.local-devenv-runtime`, the POSIX launcher may copy a local runtime
+  contains `.local-devenv-runtime`, the Python launcher may copy a local runtime
   binary from `~/devenv/agents-plugin-tool/dist/` or
   `~/devenv/agents-plugin/.runtime/` before attempting GitHub release download.
   If those local binaries are absent or fail the tool-surface check, it may build
@@ -1331,13 +1313,11 @@ accepts that trigger when the workflow file exists on the default branch. The
 workflow currently uses official GitHub actions `actions/checkout@v5`,
 `actions/setup-go@v6`, and `actions/upload-artifact@v7`.
 
-Windows host verification remains separate from Go cross-compilation and is a
-deferred host-smoke item. Parallels can verify that `ws-mcp-windows-amd64.exe`
-runs `version`, `doctor`, and stdio MCP smoke tests. Plugin-managed Windows
-startup additionally needs either extensionless `.exe` resolution, a native
-launcher artifact at `bin/ws-mcp-launcher.exe`, an adapter-specific manifest, or
-a documented one-time global MCP setup fallback; the POSIX `sh` launcher only
-proves the macOS/Linux path.
+Windows host verification remains separate from Go cross-compilation. Parallels
+can verify that `python3 ./bin/ws-mcp-launcher.py version`, `runtime info`, and
+stdio MCP smoke tests work from the installed plugin cache. If `python3` resolves
+to the Windows Store alias instead of an installed interpreter, install Python 3
+and refresh the plugin so Codex rematerializes the plugin-managed MCP entry.
 
 ## Development Verification
 

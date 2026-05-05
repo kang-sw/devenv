@@ -97,7 +97,7 @@ CLI fallbacks still exist under `claude-plugin/bin/` for Claude compatibility:
 Runtime binaries are plugin cache-local under
 `agents-plugin/.runtime/<os>-<arch>/ws-mcp[.exe]`.
 
-The POSIX launcher `agents-plugin/bin/ws-mcp-launcher`:
+The Python launcher `agents-plugin/bin/ws-mcp-launcher.py`:
 
 - runs from the installed Codex plugin cache with `.mcp.json` `cwd: "."`;
 - derives `WS_MCP_PROJECT_ROOT` from the parent Codex process `PWD`;
@@ -107,8 +107,10 @@ The POSIX launcher `agents-plugin/bin/ws-mcp-launcher`:
 - for this machine's local install only, can use dev binaries or build from
   `~/devenv/agents-plugin-tool` when `.local-devenv-runtime` exists.
 
-Windows plugin-managed startup still needs a native launcher or adapter-specific
-manifest verification.
+Windows plugin-managed startup uses the same Python launcher. Native Windows
+needs a working `python3` command; if the Windows Store alias is present without
+Python installed, install Python 3 and refresh/reinstall the plugin before
+rechecking `codex mcp list`.
 
 ## Prompt And Agent Inventory
 
@@ -190,7 +192,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
-| `260503-feat-agents-plugin-runtime-boundary` | todo | Go stdio MCP/runtime boundary; Windows runtime smoke verified, launcher startup deferred |
+| `260503-feat-agents-plugin-runtime-boundary` | todo | Go stdio MCP/runtime boundary; Python launcher smoke in progress |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -200,7 +202,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260503-epic-ws-agent-workflow-stability` - keep open for future observed runtime failures; no active blocker after worktree lock, interrupt, and leaf deferral.
-`260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; CI now runs release asset checks and Windows executable smoke; native Windows plugin-managed launcher verification deferred.
+`260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; Python launcher is the current shared startup path and needs installed-cache verification on Windows after Python 3 is available.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
 
@@ -212,9 +214,9 @@ bootstrap template, active `lead-*` skills, delegate prompts, and
 `ai-docs/ref/skill-authoring.md`.
 
 In-flight: none.
-Next: push `main` and create `v0.16.1` when ready to publish release assets, then
-verify native Windows plugin-managed launcher startup under
-`260503-feat-agents-plugin-runtime-boundary`.
+Next: verify native Windows plugin-managed Python launcher startup under
+`260503-feat-agents-plugin-runtime-boundary`, then prepare a patch release if
+the installed-cache smoke passes.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
 `agents-plugin-tool/internal/mcp/server.go`,

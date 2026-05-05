@@ -16,14 +16,15 @@ related:
 avoid operational helper behavior. The core runtime problem is that the current
 Claude package relies on `ws-*` scripts becoming available through plugin install
 and shell `PATH` behavior. Codex local plugin installs do not provide an equivalent
-PATH injection contract, and company Windows deployments should not assume Python,
-Node, Cargo, or Visual Studio Build Tools are present.
+PATH injection contract, and company Windows deployments should not assume Node,
+Cargo, Visual Studio Build Tools, or Go are present.
 
 The next slice should create a small, portable MCP baseline that lets hosts call
 `ws` project helpers through an explicit server command instead of through implicit
 PATH mutation. The implementation language decision is Go: ship prebuilt native
-binaries per OS/architecture, use curl or PowerShell only as bootstrap download
-mechanisms, and keep the runtime free of user-installed language dependencies.
+binaries per OS/architecture, use a small Python 3 launcher only as the
+cross-platform bootstrap, and keep the runtime server free of build-time user
+dependencies.
 
 ## Decisions
 
@@ -56,13 +57,10 @@ mechanisms, and keep the runtime free of user-installed language dependencies.
   the stable `claude-plugin/` package, plugin update timing, and `bin/`/PATH
   helper behavior. Shared runtime contracts may converge later, but installation
   and update mechanics should not be forced into one path during this ticket.
-- Windows plugin-managed launcher behavior is a deferred host-smoke item, not a
-  blocker for continuing Unix/macOS skill migration. If Codex on Windows does not
-  resolve `./bin/ws-mcp-launcher` to `./bin/ws-mcp-launcher.exe`, fallback in this
-  order: native Go launcher with shared runtime behavior, host-specific
-  `.mcp.json` adapter artifacts, then a documented one-time `codex mcp add` or
-  repair/setup skill path that points directly at the downloaded Windows
-  `ws-mcp` binary.
+- Windows plugin-managed MCP materialization works, but native Windows cannot run
+  the POSIX launcher. Use `python3 ./bin/ws-mcp-launcher.py` as the shared
+  plugin-managed launcher command; Windows users may need a one-time Python 3
+  install when only the Windows Store alias is present.
 
 ## Phases
 
@@ -435,7 +433,7 @@ Verification:
 - `cmd.exe /C "C:\Users\user\AppData\Local\Temp\ws-mcp-windows-amd64.exe doctor --root \\wsl.localhost\Ubuntu\home\swkang\devenv"`
 - `cmd.exe /C "type C:\Users\user\AppData\Local\Temp\ws-mcp-smoke.jsonl | C:\Users\user\AppData\Local\Temp\ws-mcp-windows-amd64.exe serve --stdio --root \\wsl.localhost\Ubuntu\home\swkang\devenv"`
 
-### Phase 7: Windows plugin-managed startup [deferred]
+### Phase 7: Windows plugin-managed startup
 
 Verify the Windows plugin-managed startup assumptions when a native Windows Codex
 host is available.
@@ -450,7 +448,42 @@ Scope:
   native Go launcher, host-specific `.mcp.json` adapter artifact, or one-time
   global MCP setup/repair skill.
 
-This phase remains deferred. The runtime contract is considered adequate to
-resume skill migration because the Go MCP baseline, plugin cache launcher path,
-release asset build, checksum verification, production download branch, and
-Windows Go runtime smoke have all been verified.
+### Result (in progress) - 2026-05-05
+
+Native Windows Codex plugin-managed MCP materialization was verified, but the
+released `v0.16.1` plugin fails startup because `.mcp.json` points at the POSIX
+launcher:
+
+- `codex mcp list` materializes the plugin-managed `ws` server after plugin
+  uninstall/install.
+- The materialized server command is `./bin/ws-mcp-launcher serve --stdio` with
+  cwd set to the installed plugin cache.
+- Windows startup then fails with `os error 3` because the extensionless POSIX
+  launcher is not executable by native Windows Codex.
+- A temporary PowerShell cache-local launcher proved that the Windows release
+  asset downloads, verifies, and serves MCP correctly.
+
+Decision:
+
+- Replace the plugin-managed launcher command with `python3
+  ./bin/ws-mcp-launcher.py serve --stdio`.
+- Keep the runtime server as the prebuilt Go `ws-mcp` binary.
+- Accept Python 3 as the one-time Windows prerequisite when the Windows Store
+  alias exists but no interpreter is installed.
+
+Verification so far:
+
+- macOS source-tree `./agents-plugin/bin/ws-mcp-launcher.py version`
+- macOS source-tree `./agents-plugin/bin/ws-mcp-launcher.py runtime info`
+- macOS source-tree stdio MCP `initialize` and `runtime.info` smoke
+- Windows installed-cache `python3 bin/ws-mcp-launcher.py version`
+- Windows installed-cache `python3 bin/ws-mcp-launcher.py runtime info`
+- Windows installed-cache stdio MCP `initialize` and `runtime.info` smoke
+- Windows `codex mcp list` materialized `ws` as `python3
+  ./bin/ws-mcp-launcher.py serve --stdio` after cache-local `.mcp.json` update
+
+Open:
+
+- SSH-driven noninteractive `codex exec` reaches `mcp__ws__runtime_info` but
+  returns `user cancelled MCP tool call`; this also reproduced with the temporary
+  PowerShell launcher and is tracked separately from launcher startup.
