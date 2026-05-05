@@ -1135,6 +1135,12 @@ The current binary reports `0.16.0-dev`. Phase 3 must add a runtime contract tha
 lets `ws-mcp doctor` and server startup detect drift between the installed plugin
 bundle and the local `ws-mcp` binary.
 
+Use `agents-plugin-tool/scripts/bump-ws-version.sh <X.Y.Z>` to keep the
+plugin/runtime version contract synchronized. The script updates the Codex and
+Claude adapter manifests, `agents-plugin/runtime.json`, the POSIX launcher
+compatibility gate, `ws-mcp` dev defaults, release workflow defaults, and current
+runtime documentation. It intentionally preserves historical ticket result text.
+
 Expected direction:
 
 - plugin documents carry a small runtime contract file
