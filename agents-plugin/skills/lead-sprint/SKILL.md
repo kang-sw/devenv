@@ -20,7 +20,7 @@ Call `ws/project_tree()`.
 
 ## On: invoke
 
-1. Invoke `ws:lead-workflow`.
+1. Invoke `ws:lead-workflow-manual`.
 2. Call `ws/git.status()`.
 3. On `sprint/` branch: detect sprint name; present continue, wrap-up, abandon.
 4. Outside `sprint/`: infer name without asking, then `git checkout -b sprint/<name>`.

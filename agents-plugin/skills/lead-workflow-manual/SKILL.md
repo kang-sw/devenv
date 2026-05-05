@@ -1,12 +1,12 @@
 ---
-name: lead-workflow
-description: Load before writing or executing ws workflow skills; keeps host-neutral MCP notation and orchestration primitive boundaries in context.
+name: lead-workflow-manual
+description: Load the ws workflow primitive manual before writing or executing workflow skills; use when MCP tool notation, named-agent primitives, or orchestration boundaries matter.
 ---
 
-# Workflow
+# Workflow Manual
 
 > **Session invariant:** Keep this reference active while writing or executing ws
-> workflow skills. After compaction, re-invoke `ws:lead-workflow` when primitive
+> workflow skills. After compaction, re-invoke `ws:lead-workflow-manual` when primitive
 > names or orchestration boundaries matter.
 
 ## On: invoke

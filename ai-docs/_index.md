@@ -149,7 +149,7 @@ lead-ship
 lead-skill-authoring
 lead-sprint
 lead-update-spec
-lead-workflow
+lead-workflow-manual
 lead-write-code
 lead-write-skeleton
 lead-write-spec

@@ -16,7 +16,7 @@ related:
 
 - `agents-plugin/skills/lead-*` is the Codex-facing workflow surface and uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
 - `claude-plugin/skills/*` is the compatibility tree and may use slash commands and shell fallbacks.
-- `lead-workflow` is the notation and primitive boundary reference for shared skill text. {#260505-workflow-primitive-reference}
+- `lead-workflow-manual` is the notation and primitive boundary reference for shared skill text. {#260505-workflow-primitive-reference}
 
 ## Module Contracts
 
@@ -43,7 +43,7 @@ related:
 ## Common Mistakes
 
 - Treating `lead-proceed` as an implementation skill; it routes, it does not read source.
-- Skipping `lead-workflow` before editing workflow skills, which causes notation drift back to Claude shell helpers.
+- Skipping `lead-workflow-manual` before editing workflow skills, which causes notation drift back to Claude shell helpers.
 - Removing the final `Ticket:` artifact from write-ticket output.
 - Relaying reviewer file contents instead of file paths, which breaks the write-code review protocol and inflates lead context.
 

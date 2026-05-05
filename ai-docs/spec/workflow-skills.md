@@ -34,7 +34,7 @@ lead-ship
 lead-skill-authoring
 lead-sprint
 lead-update-spec
-lead-workflow
+lead-workflow-manual
 lead-write-code
 lead-write-skeleton
 lead-write-spec
@@ -45,7 +45,7 @@ Skill descriptions provide the natural-language trigger surface for Codex.
 
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 
-`lead-workflow` is the shared primitive reference for writing or executing ws
+`lead-workflow-manual` is the shared primitive reference for writing or executing ws
 workflow skills. It defines host-neutral notation: `ws/<tool-name>` means an MCP
 tool on the `ws` server, while `ws:` names plugin skills.
 

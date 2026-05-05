@@ -135,7 +135,7 @@ Expected GitHub Actions behavior:
 3. Dogfood Codex GitHub plugin install from `kang-sw/devenv`.
 4. In a fresh Codex session, confirm:
    - `ws` plugin is installed from the GitHub marketplace entry
-   - `$ws:lead-workflow` is visible
+   - `$ws:lead-workflow-manual` is visible
    - MCP server `ws` starts from plugin-managed `.mcp.json`
    - `runtime.info` reports the shipped version and matching prompt bundle hash
    - `project_tree` returns `ai-docs/` as its first non-empty line
