@@ -153,6 +153,11 @@ The MCP server filters visible and callable tools by effective role. The role is
 derived from the worktree-local orchestrator lock and can be further restricted
 by `WS_MCP_TOOL_PROFILE`.
 
+Lock acquisition errors during startup do not hide lead-owned tools. This allows
+plugin-managed sessions with an invalid default root to list and call lead tools
+that can receive an explicit `root`; the tool itself still reports root-specific
+errors when the supplied root is invalid.
+
 `lead` has the full surface. `delegate` and `leaf` receive narrower tool sets so
 delegated agents cannot regain lead-owned orchestration or mutation tools.
 Delegate access to generated subquery agents is scoped to subquery result,

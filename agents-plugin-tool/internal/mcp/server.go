@@ -1289,6 +1289,7 @@ func effectiveToolRole(root, version string) toolRole {
 	lock, err := wsstate.NewManager(wsstate.Options{}).AcquireOrchestratorLock(root, version)
 	if err != nil {
 		appendDebugEvent("orchestrator_lock.error", map[string]any{"root": root, "error": err.Error()})
+		base = roleLead
 	} else if lock.Owner || lock.Lock.PID == os.Getpid() {
 		base = roleLead
 		appendDebugEvent("orchestrator_lock.owner", map[string]any{"root": root, "path": lock.Path})

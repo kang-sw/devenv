@@ -487,3 +487,31 @@ Open:
 - SSH-driven noninteractive `codex exec` reaches `mcp__ws__runtime_info` but
   returns `user cancelled MCP tool call`; this also reproduced with the temporary
   PowerShell launcher and is tracked separately from launcher startup.
+- Windows plugin-managed sessions can still start with `cwd` at the user home or
+  plugin cache and no detected project root. In that state the orchestrator lock
+  acquisition reports a non-Git root. This must not be interpreted as delegate
+  ownership, because it hides `agents.register`, `agents.call`, and `config.*`
+  before a caller can pass an explicit `root`.
+
+### Result (role-gating hotfix) - 2026-05-05
+
+Fixed the startup role gate so orchestrator lock acquisition errors preserve the
+requested lead tool surface. A valid live lock owned by another process still
+demotes the server to delegate, and `WS_MCP_TOOL_PROFILE` remains an additional
+restriction only.
+
+The dogfood failure was visible on native Windows Codex after the Python launcher
+made the MCP server start: only `agents.status`, `agents.tail`, `agents.wait`,
+`agents.result`, `agents.cancel`, and the deprecated `agents.print` alias were
+visible. Debug output showed the launcher had no project root and the server
+logged `orchestrator_lock.error` for root `"."`; the previous role code treated
+that failure as delegate-level authority.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./internal/mcp ./internal/wsstate ./...`
+- `cd agents-plugin-tool && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build
+  -trimpath -o /tmp/ws-mcp-windows-amd64-rolefix.exe ./cmd/ws-mcp`
+- Windows temporary runtime smoke with the patched `ws-mcp.exe` showed
+  `config.show`, `agents.register`, and `agents.call` in `tools/list` despite the
+  non-Git default root diagnostic.

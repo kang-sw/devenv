@@ -161,6 +161,12 @@ The first live MCP server for a worktree owns the lock and receives the base
 `delegate` role. Linked worktrees use different worktree keys, so each linked
 worktree may have an independent lead server.
 
+If the server cannot acquire or inspect the worktree-local lock because the
+default root is invalid, missing, or outside a Git worktree, the MCP server keeps
+the base `lead` role instead of hiding lead tools. The individual tool call may
+still fail until the caller passes a valid `root`, but startup-time root
+diagnostics must not demote the visible tool surface to delegate-only.
+
 `WS_MCP_TOOL_PROFILE` is an additional restriction only. The effective role is
 the minimum of the lock-derived base role and the requested profile, ordered
 `lead > delegate > leaf`. A non-owner cannot regain lead tools by setting

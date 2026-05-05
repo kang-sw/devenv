@@ -309,6 +309,23 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 	}
 }
 
+func TestServeStdioInvalidDefaultRootDoesNotHideLeadTools(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`+"\n",
+	), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(byID["1"], "agents.register") || !strings.Contains(byID["1"], "agents.call") || !strings.Contains(byID["1"], "config.show") {
+		t.Fatalf("invalid default root hid lead tools: %s", byID["1"])
+	}
+}
+
 func TestServeStdioLogsCancellationNotificationsWhenEnabled(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
