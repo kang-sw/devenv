@@ -183,14 +183,14 @@ auto-chaining through the pipeline.
 
 ## Tickets
 
-Status directories: `idea/`, `todo/`, `wip/`, `.done/`, `.dropped/`.
+Status directories: `idea/`, `todo/`, `.done/`, `.dropped/`.
 Reference tickets by stem. This index lists active tickets only; completed or
 dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
-| `260503-feat-agents-plugin-runtime-boundary` | wip | Go stdio MCP/runtime boundary; Windows runtime smoke verified, launcher startup deferred |
+| `260503-feat-agents-plugin-runtime-boundary` | todo | Go stdio MCP/runtime boundary; Windows runtime smoke verified, launcher startup deferred |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -200,7 +200,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260503-epic-ws-agent-workflow-stability` - keep open for future observed runtime failures; no active blocker after worktree lock, interrupt, and leaf deferral.
-`260503-feat-agents-plugin-runtime-boundary` - wip; macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; CI now runs release asset checks and Windows executable smoke; native Windows plugin-managed launcher verification deferred.
+`260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; CI now runs release asset checks and Windows executable smoke; native Windows plugin-managed launcher verification deferred.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
 
