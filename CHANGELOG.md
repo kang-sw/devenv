@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.4 - 2026-05-05
+
+### Fixed
+- Quote Claude `.cmd` and `.bat` backend arguments on Windows so JSON settings
+  and prompts survive command-shell execution.
+
 ## v0.17.3 - 2026-05-05
 
 ### Added
