@@ -39,6 +39,9 @@ Read at every session start, before other action:
   success.
 - **No performative agreement.** Restate the requirement, verify, then act or
   push back.
+- **Dogfood surprises become fix proposals.** When a ws tool behaves contrary to
+  reasonable caller expectations during dogfooding, name the surprise and propose
+  a fix instead of silently routing around it.
 - **Actions over words.** Prefer "Fixed. [what changed]" or the diff. Skip
   filler.
 
