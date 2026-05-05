@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.18.0 - 2026-05-05
+
+### Changed
+- Re-link Claude plugin install from `claude-plugin/` to `agents-plugin/` so
+  the Codex-first candidate is now the single source for both Claude and Codex
+  consumers.
+- Wire inline `mcpServers` in `agents-plugin/.claude-plugin/plugin.json` using
+  `${CLAUDE_PLUGIN_ROOT}` so the MCP server is accessible from Claude sessions
+  without touching the Codex-facing `.mcp.json`.
+- Update `.claude-plugin/marketplace.json` external source to `./agents-plugin`,
+  completing the remote-install path migration.
+
 ## v0.17.6 - 2026-05-05
 
 ### Fixed

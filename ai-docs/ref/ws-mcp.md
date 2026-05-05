@@ -130,7 +130,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`, for example `kang-sw/devenv`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.17.6`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.18.0`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_PROJECT_ROOT` | Project root used as the default when a tool or CLI command omits `root`; normally derived by the launcher from the parent Codex process. |
@@ -1244,7 +1244,7 @@ validated.
 
 ## Version And Drift Boundary
 
-The current binary reports `0.17.6-dev`. The runtime contract lets launcher
+The current binary reports `0.18.0-dev`. The runtime contract lets launcher
 startup detect drift between the installed plugin bundle and the local `ws-mcp`
 binary.
 
@@ -1305,7 +1305,7 @@ https://github.com/<release_repository>/releases/download/<release_tag>
 ```
 
 It then downloads `ws-mcp-<os>-<arch>[.exe]` and `SHA256SUMS`. The launcher
-checks an existing cache-local binary first; compatible `0.17.x` binaries run
+checks an existing cache-local binary first; compatible `0.18.x` binaries run
 without network access, while missing or incompatible binaries trigger repair.
 
 Runtime binaries live in the installed plugin cache by default:
@@ -1385,7 +1385,7 @@ Level 2 validates the local release assets without waiting for GitHub Actions:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.17.6-dev
+scripts/build-release-assets.sh 0.18.0-dev
 dist/ws-mcp-darwin-arm64 version
 cd dist
 shasum -a 256 -c SHA256SUMS

@@ -1,6 +1,6 @@
 {
   "name": "ws",
-  "version": "0.17.6",
+  "version": "0.18.0",
   "description": "Codex-first ws workflow plugin candidate for host-neutral skills and project context.",
   "author": {
     "name": "kang-sw"
@@ -10,7 +10,10 @@
   "mcpServers": {
     "ws": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/ws-mcp-launcher",
-      "args": ["serve", "--stdio"],
+      "args": [
+        "serve",
+        "--stdio"
+      ],
       "startup_timeout_sec": 30,
       "tool_timeout_sec": 600
     }
