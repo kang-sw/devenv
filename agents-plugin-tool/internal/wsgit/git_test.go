@@ -202,10 +202,25 @@ func TestCommitExpandsTicketMovePathsByStem(t *testing.T) {
 
 func TestCommitStagesDeletedTicketMoveByParentDirectory(t *testing.T) {
 	preStatus := ParseStatus([]byte("1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/todo/260503-feat-demo.md\n? ai-docs/tickets/.done/260503-feat-demo.md\n"))
-	got := stagingPathsForCommit("/repo", []string{"ai-docs/tickets/.done/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"}, preStatus)
-	want := []string{"ai-docs/tickets/.done/260503-feat-demo.md", "ai-docs/tickets/todo"}
+	got := stagingCommandsForCommit([]string{"ai-docs/tickets/.done/260503-feat-demo.md", "ai-docs/tickets/todo/260503-feat-demo.md"}, preStatus)
+	want := [][]string{
+		{"add", "-A", "--", "ai-docs/tickets/.done/260503-feat-demo.md"},
+		{"rm", "--cached", "--ignore-unmatch", "--", "ai-docs/tickets/todo/260503-feat-demo.md"},
+	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("staging paths = %#v, want %#v", got, want)
+		t.Fatalf("staging commands = %#v, want %#v", got, want)
+	}
+}
+
+func TestCommitStagesDeletedTicketMoveWhenOldStatusDirectoryIsGone(t *testing.T) {
+	preStatus := ParseStatus([]byte("1 .D N... 100644 100644 100644 aaa bbb ai-docs/tickets/wip/260503-feat-demo.md\n? ai-docs/tickets/todo/260503-feat-demo.md\n"))
+	got := stagingCommandsForCommit([]string{"ai-docs/tickets/todo/260503-feat-demo.md", "ai-docs/tickets/wip/260503-feat-demo.md"}, preStatus)
+	want := [][]string{
+		{"add", "-A", "--", "ai-docs/tickets/todo/260503-feat-demo.md"},
+		{"rm", "--cached", "--ignore-unmatch", "--", "ai-docs/tickets/wip/260503-feat-demo.md"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("staging commands = %#v, want %#v", got, want)
 	}
 }
 
