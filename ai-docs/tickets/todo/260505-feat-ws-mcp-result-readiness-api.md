@@ -3,6 +3,7 @@ title: ws MCP agent result and readiness API
 related:
   260503-epic-ws-agent-workflow-stability: stabilization parent for named-agent lifecycle behavior
   260505-feat-ws-mcp-async-subquery: introduced key-returning async subquery fan-out that needs clearer result retrieval and cleanup semantics
+parent: 260503-epic-ws-agent-workflow-stability
 ---
 
 # ws MCP agent result and readiness API
