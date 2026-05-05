@@ -30,6 +30,28 @@ checks use this output to detect stale or incompatible runtime binaries.
 tool is bounded by an optional limit parameter and is intended for diagnosing MCP
 server behavior without reading process-local files directly.
 
+## MCP Session Root Defaults {#260505-mcp-session-default-root}
+
+Root-aware MCP tools resolve omitted `root` arguments through the current MCP
+server session before falling back to startup state. The priority is:
+
+1. Explicit tool argument `root`.
+2. Volatile session default root.
+3. `WS_MCP_PROJECT_ROOT`.
+4. Host workspace metadata when the host provides exactly one workspace.
+5. Server startup root.
+
+`session.set_default_root` validates that its `root` is inside a Git worktree,
+stores the canonical worktree root in the current server process, and returns
+that effective root. The value is volatile and does not write user config, ws
+cache config, or repository files. `session.get_default_root` reports whether a
+session default is set plus fallback state such as the server root and
+`WS_MCP_PROJECT_ROOT`.
+
+When host metadata names multiple workspaces and no higher-priority root exists,
+root-aware tools refuse to guess and return an actionable error asking the caller
+to pass `root` explicitly or call `session.set_default_root`.
+
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current

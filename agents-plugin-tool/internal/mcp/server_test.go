@@ -326,6 +326,102 @@ func TestServeStdioInvalidDefaultRootDoesNotHideLeadTools(t *testing.T) {
 	}
 }
 
+func TestServeStdioSessionDefaultRootAndExplicitOverride(t *testing.T) {
+	useLeadProfile(t)
+	rootA := initTicketRepo(t, "260505-feat-alpha")
+	rootB := initTicketRepo(t, "260505-feat-beta")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(t.TempDir(), "test")
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session.set_default_root","arguments":{"root":%q}}}`+"\n", rootA),
+	), &out); err != nil {
+		t.Fatalf("set default ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(toolText(t, byID["1"]), canonicalTestPath(t, rootA)) {
+		t.Fatalf("session.set_default_root response mismatch: %s", byID["1"])
+	}
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tickets.list","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"session.get_default_root","arguments":{}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tickets.list","arguments":{"root":%q}}}`, rootB),
+	}, "\n")
+
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(toolText(t, byID["2"]), "260505-feat-alpha") || strings.Contains(toolText(t, byID["2"]), "260505-feat-beta") {
+		t.Fatalf("session default root was not used for root-omitted call: %s", byID["2"])
+	}
+	if !strings.Contains(toolText(t, byID["3"]), `"has_session_default":true`) || !strings.Contains(toolText(t, byID["3"]), canonicalTestPath(t, rootA)) {
+		t.Fatalf("session.get_default_root response mismatch: %s", byID["3"])
+	}
+	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
+		t.Fatalf("explicit root did not override session default: %s", byID["4"])
+	}
+}
+
+func TestServeStdioSessionDefaultRootDoesNotPersistAcrossServers(t *testing.T) {
+	useLeadProfile(t)
+	rootA := initTicketRepo(t, "260505-feat-alpha")
+	rootB := initTicketRepo(t, "260505-feat-beta")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	firstInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session.set_default_root","arguments":{"root":%q}}}`+"\n", rootA)
+	var firstOut bytes.Buffer
+	if err := NewServer(rootB, "test").ServeStdio(context.Background(), strings.NewReader(firstInput), &firstOut); err != nil {
+		t.Fatalf("first ServeStdio returned error: %v", err)
+	}
+
+	secondInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tickets.list","arguments":{}}}` + "\n"
+	var secondOut bytes.Buffer
+	if err := NewServer(rootB, "test").ServeStdio(context.Background(), strings.NewReader(secondInput), &secondOut); err != nil {
+		t.Fatalf("second ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(secondOut.String()), "\n"))
+	if !strings.Contains(toolText(t, byID["2"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["2"]), "260505-feat-alpha") {
+		t.Fatalf("session default root leaked across server instances: %s", byID["2"])
+	}
+}
+
+func TestServeStdioCodexWorkspaceMetadataRootFallback(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260505-feat-metadata")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.list","arguments":{},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`+"\n", root)
+	var out bytes.Buffer
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(toolText(t, byID["1"]), "260505-feat-metadata") {
+		t.Fatalf("metadata workspace root was not used: %s", byID["1"])
+	}
+}
+
+func TestServeStdioCodexMultiWorkspaceMetadataRefusesToGuess(t *testing.T) {
+	useLeadProfile(t)
+	rootA := initTicketRepo(t, "260505-feat-alpha")
+	rootB := initTicketRepo(t, "260505-feat-beta")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.list","arguments":{},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{},%q:{}}}}}}`+"\n", rootA, rootB)
+	var out bytes.Buffer
+	if err := NewServer(t.TempDir(), "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["1"]) || !strings.Contains(toolText(t, byID["1"]), "multiple host workspaces") || !strings.Contains(toolText(t, byID["1"]), "session.set_default_root") {
+		t.Fatalf("multi-workspace metadata did not produce actionable error: %s", byID["1"])
+	}
+}
+
 func TestServeStdioLogsCancellationNotificationsWhenEnabled(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -657,6 +753,14 @@ func initGit(t *testing.T, root string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init failed: %v\n%s", err, string(out))
 	}
+}
+
+func initTicketRepo(t *testing.T, stem string) string {
+	t.Helper()
+	root := t.TempDir()
+	mustWrite(t, root, filepath.Join("ai-docs/tickets/todo", stem+".md"), "---\ntitle: Demo\n---\n# Demo\n")
+	initGit(t, root)
+	return root
 }
 
 func TestServeStdioGitToolCalls(t *testing.T) {

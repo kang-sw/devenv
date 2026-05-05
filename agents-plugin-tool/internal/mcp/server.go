@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ type Server struct {
 	sourceCommit string
 	role         toolRole
 	api          apiRuntime
+	rootMu       sync.RWMutex
+	sessionRoot  string
 }
 
 type toolRole string
@@ -255,9 +258,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	var params struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
+		Meta      map[string]any `json:"_meta"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return errorResponse(req.ID, -32602, "invalid params")
+	}
+	if params.Arguments == nil {
+		params.Arguments = map[string]any{}
 	}
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current ws MCP profile: %s", params.Name))
@@ -280,17 +287,40 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	case "runtime.debug_events":
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
+	case "session.set_default_root":
+		root, _ := params.Arguments["root"].(string)
+		canonical, err := canonicalGitRoot(root)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		s.rootMu.Lock()
+		s.sessionRoot = canonical
+		s.rootMu.Unlock()
+		return toolJSONResponse(req.ID, map[string]any{
+			"session_default_root": canonical,
+			"source":               "session",
+		}, nil)
+	case "session.get_default_root":
+		s.rootMu.RLock()
+		sessionRoot := s.sessionRoot
+		s.rootMu.RUnlock()
+		return toolJSONResponse(req.ID, map[string]any{
+			"session_default_root": sessionRoot,
+			"has_session_default":  sessionRoot != "",
+			"env_project_root":     strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")),
+			"server_root":          s.root,
+		}, nil)
 	case "api.list":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		domains, err := apiListDomains(root)
 		return toolJSONResponse(req.ID, domains, err)
 	case "api.ask":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		prompt, _ := params.Arguments["prompt"].(string)
 		hint, _ := params.Arguments["domain_hint"].(string)
@@ -310,43 +340,43 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolJSONResponse(req.ID, cfg, err)
 
 	case "git.status":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsgit.NewClient().Status(context.Background(), root)
 		return toolJSONResponse(req.ID, result, err)
 	case "git.diff":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		rangeValue, _ := params.Arguments["range"].(string)
 		mode, _ := params.Arguments["mode"].(string)
 		result, err := wsgit.NewClient().Diff(context.Background(), root, wsgit.DiffOptions{Range: rangeValue, Mode: mode, Paths: stringList(params.Arguments["paths"])})
 		return toolJSONResponse(req.ID, result, err)
 	case "git.log":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		rangeValue, _ := params.Arguments["range"].(string)
 		includeBody, _ := params.Arguments["include_body"].(bool)
 		result, err := wsgit.NewClient().Log(context.Background(), root, wsgit.LogOptions{Range: rangeValue, Limit: intFromArgument(params.Arguments["limit"], 20), IncludeBody: includeBody})
 		return toolJSONResponse(req.ID, result, err)
 	case "git.merge_base":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		base, _ := params.Arguments["base"].(string)
 		head, _ := params.Arguments["head"].(string)
 		result, err := wsgit.NewClient().MergeBase(context.Background(), root, base, head)
 		return toolJSONResponse(req.ID, result, err)
 	case "git.commit":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		title, _ := params.Arguments["title"].(string)
 		description, _ := params.Arguments["description"].(string)
@@ -361,15 +391,19 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolJSONResponse(req.ID, result, err)
 	case "project_tree":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		text, err := wsdoc.ProjectTree(root)
 		return toolTextResponse(req.ID, text, err)
 	case "infra.read":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsdoc.ReadInfra(s.root, name)
+		text, err := wsdoc.ReadInfra(root, name)
 		return toolTextResponse(req.ID, text, err)
 	case "convention.read":
 		name, _ := params.Arguments["name"].(string)
@@ -377,16 +411,16 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolTextResponse(req.ID, text, err)
 	case "spec_stem.generate":
 		slug, _ := params.Arguments["slug"].(string)
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		stem, err := wsdoc.GenerateSpecStem(root, slug, time.Now())
 		return toolTextResponse(req.ID, stem+"\n", err)
 	case "spec_index.verify":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		text, err := wsdoc.VerifySpecIndex(root)
 		return toolTextResponse(req.ID, text, err)
@@ -394,9 +428,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if hasTicketStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("specs.list does not accept ticket_stem parameters"))
 		}
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsdoc.SpecsList(root)
 		return toolJSONResponse(req.ID, result, err)
@@ -404,9 +438,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if _, ok := params.Arguments["mentions_ticket_stem"]; ok {
 			return toolTextResponse(req.ID, "", fmt.Errorf("specs.find uses ticket_stem, not mentions_ticket_stem"))
 		}
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		query, _ := params.Arguments["query"].(string)
 		specStem, _ := params.Arguments["spec_stem"].(string)
@@ -417,17 +451,17 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if hasTicketStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("specs.status uses spec_stem"))
 		}
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		specStem, _ := params.Arguments["spec_stem"].(string)
 		result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
 		return toolJSONResponse(req.ID, result, err)
 	case "mental_models.list":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		text, err := wsdoc.MentalModelsList(root)
 		return toolTextResponse(req.ID, text, err)
@@ -435,9 +469,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if hasTicketStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.find uses spec_stem, not ticket_stem"))
 		}
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		query, _ := params.Arguments["query"].(string)
 		specStem, _ := params.Arguments["spec_stem"].(string)
@@ -448,18 +482,18 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.status uses domain or path"))
 		}
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		domain, _ := params.Arguments["domain"].(string)
 		path, _ := params.Arguments["path"].(string)
 		result, err := wsdoc.MentalModelsStatus(root, wsdoc.MentalModelStatusOptions{Domain: domain, Path: path})
 		return toolJSONResponse(req.ID, result, err)
 	case "references.trace":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
 		specStem, _ := params.Arguments["spec_stem"].(string)
@@ -469,9 +503,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsdoc.TicketsList(root, wsdoc.TicketListOptions{
 			Statuses:       stringList(params.Arguments["statuses"]),
@@ -483,9 +517,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		query, _ := params.Arguments["query"].(string)
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
@@ -503,9 +537,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
 		}
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
 		result, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{
@@ -515,9 +549,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolJSONResponse(req.ID, result, err)
 	case "subquery":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		question, _ := params.Arguments["question"].(string)
 		if question == "" {
@@ -531,9 +565,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		kind, _ := params.Arguments["kind"].(string)
 		generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(root, kind, stringList(params.Arguments["stems"]))
@@ -546,9 +580,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolTextResponse(req.ID, text, nil)
 	case "agents.register":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		backend, _ := params.Arguments["backend"].(string)
@@ -567,9 +601,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolTextResponse(req.ID, agent.Name+"\n", err)
 	case "agents.call":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		prompt, _ := params.Arguments["prompt"].(string)
@@ -583,9 +617,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
 	case "agents.wait":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		names := stringList(params.Arguments["names"])
@@ -598,9 +632,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.result":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Result(wsagent.ResultOptions{
@@ -611,17 +645,17 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.status":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Status(root, name)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.interrupt":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		message, _ := params.Arguments["message"].(string)
@@ -635,9 +669,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		return toolTextResponse(req.ID, fmt.Sprintf("%s\tqueued\tmessage=%s\n", result.AgentName, result.MessageID), nil)
 	case "agents.tail":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
@@ -648,9 +682,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.debug.tail":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
@@ -662,9 +696,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		lines := intFromArgument(params.Arguments["lines"], 40)
@@ -677,28 +711,28 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.cancel":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.print":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Print(root, name)
 		return toolTextResponse(req.ID, text, err)
 	case "agents.erase":
-		root := s.root
-		if value, ok := params.Arguments["root"].(string); ok && value != "" {
-			root = value
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		name, _ := params.Arguments["name"].(string)
-		err := wsagent.NewManager(wsagent.Options{}).Erase(root, name)
+		err = wsagent.NewManager(wsagent.Options{}).Erase(root, name)
 		return toolTextResponse(req.ID, "erased\n", err)
 	default:
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -715,6 +749,75 @@ func runtimeInfo(version, sourceCommit string) (map[string]any, error) {
 		"source_commit": sourceCommit,
 		"prompt_bundle": bundle,
 	}, nil
+}
+
+func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) (string, error) {
+	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
+		return canonicalGitRoot(value)
+	}
+
+	s.rootMu.RLock()
+	sessionRoot := s.sessionRoot
+	s.rootMu.RUnlock()
+	if sessionRoot != "" {
+		return sessionRoot, nil
+	}
+
+	if envRoot := strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")); envRoot != "" {
+		return canonicalGitRoot(envRoot)
+	}
+
+	workspaces := codexWorkspaceRoots(meta)
+	if len(workspaces) == 1 {
+		return canonicalGitRoot(workspaces[0])
+	}
+	if len(workspaces) > 1 {
+		return "", fmt.Errorf("multiple host workspaces are available; pass root explicitly or call session.set_default_root before using root-omitted ws tools")
+	}
+
+	root, err := canonicalGitRoot(s.root)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve a repository root from the MCP session; pass root explicitly or call session.set_default_root: %w", err)
+	}
+	return root, nil
+}
+
+func canonicalGitRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("root is required")
+	}
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("root %q is not inside a Git worktree: %s", root, strings.TrimSpace(string(output)))
+	}
+	canonical := strings.TrimSpace(string(output))
+	if canonical == "" {
+		return "", fmt.Errorf("root %q did not resolve to a Git worktree", root)
+	}
+	if evaluated, err := filepath.EvalSymlinks(canonical); err == nil {
+		canonical = evaluated
+	}
+	return filepath.Clean(canonical), nil
+}
+
+func codexWorkspaceRoots(meta map[string]any) []string {
+	turn, ok := meta["x-codex-turn-metadata"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	rawWorkspaces, ok := turn["workspaces"].(map[string]any)
+	if !ok || len(rawWorkspaces) == 0 {
+		return nil
+	}
+	roots := make([]string, 0, len(rawWorkspaces))
+	for root := range rawWorkspaces {
+		if strings.TrimSpace(root) != "" {
+			roots = append(roots, root)
+		}
+	}
+	return roots
 }
 
 func toolJSONResponse(id json.RawMessage, value any, err error) response {
@@ -772,6 +875,25 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"limit": integerProperty("Maximum number of events to return. Defaults to 80 and is capped."),
 				},
+			},
+		},
+		{
+			"name":        "session.set_default_root",
+			"description": "Set the volatile repository root default for this MCP server process.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root": stringProperty("Git worktree root to use when later ws MCP tool calls omit root."),
+				},
+				"required": []string{"root"},
+			},
+		},
+		{
+			"name":        "session.get_default_root",
+			"description": "Report the volatile repository root default and root fallback state for this MCP server process.",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
 			},
 		},
 		{
@@ -1335,12 +1457,15 @@ func roleAllowsTool(role toolRole, name string) bool {
 	case roleLead:
 		return true
 	case roleDelegate:
+		if strings.HasPrefix(name, "session.") {
+			return false
+		}
 		if isSubqueryAgentTool(name) {
 			return true
 		}
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "api.") && name != "subquery" && name != "git.commit"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "subquery" && name != "git.commit"
 	default:
 		return false
 	}

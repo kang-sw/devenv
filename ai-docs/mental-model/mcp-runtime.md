@@ -24,9 +24,10 @@ related:
 - Cancellation depends on exact JSON-RPC id stringification; changing id formatting breaks `notifications/cancelled`.
 - Tool results are returned as MCP text content, even when the text is JSON. Callers parse text, not structured content arrays.
 - `toolTextResponse` errors are successful JSON-RPC responses with `isError: true`; unknown tools/profile violations are JSON-RPC errors.
-- The server root is captured at `NewServer`; CLI default root can come from `WS_MCP_PROJECT_ROOT` when invoked from plugin runtime.
+- The server root is captured at `NewServer`; root-aware MCP tool calls use a resolver chain of explicit `root`, volatile session default root, `WS_MCP_PROJECT_ROOT`, unambiguous host workspace metadata, and then startup root. {#260505-mcp-session-default-root}
 - Orchestrator lock errors are startup diagnostics, not delegate evidence; an invalid default root must not hide lead tools that can accept an explicit `root`. {#260505-tool-profile-gating}
-- Plugin-managed MCP calls may lack a caller repository root on native Windows; without `WS_MCP_PROJECT_ROOT` or an explicit `root`, tools operate from the server root rather than the user's shell cwd.
+- `session.set_default_root` stores a canonical Git worktree root in the current server instance only; it does not change process cwd and does not write config.
+- Plugin-managed MCP calls may lack a caller repository root on native Windows; if `WS_MCP_PROJECT_ROOT` and host metadata are unavailable, tools need an explicit `root` or `session.set_default_root` rather than the user's shell cwd.
 
 ## Coupling
 
@@ -49,6 +50,7 @@ related:
 - Treating a lock acquisition error as delegate authority hides repair tools in plugin-managed sessions whose default root was misdetected.
 - Treating `domain_hint` in `api.ask` as a direct domain selector; only exact existing domain names bypass routing. {#260505-api-documentation-mcp-tools}
 - Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
+- Guessing among multiple host workspaces creates cross-project writes; root resolution must ask for explicit `root` or `session.set_default_root` instead.
 
 ## Technical Debt
 

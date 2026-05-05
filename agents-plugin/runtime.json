@@ -30,6 +30,8 @@
   "tools": {
     "runtime.info": ">=0.16.3-dev <0.17.0",
     "runtime.debug_events": ">=0.16.3-dev <0.17.0",
+    "session.set_default_root": ">=0.16.3-dev <0.17.0",
+    "session.get_default_root": ">=0.16.3-dev <0.17.0",
     "config.show": ">=0.16.3-dev <0.17.0",
     "config.agents_tier": ">=0.16.3-dev <0.17.0",
     "project_tree": ">=0.16.3-dev <0.17.0",

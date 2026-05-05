@@ -2,6 +2,8 @@
 title: MCP session default root
 related:
   260505-bug-plugin-managed-default-root-discovery: recovery path for plugin-managed MCP calls without caller root
+spec:
+  - 260505-mcp-session-default-root
 related-mental-model:
   - mcp-runtime
 ---

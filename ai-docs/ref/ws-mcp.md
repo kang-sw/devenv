@@ -147,6 +147,15 @@ and `ws-mcp` uses that environment variable whenever a tool or command omits
 `root` or passes `"."`. Skills may still pass `root` explicitly, but omitted
 root should resolve to the active project in plugin-managed Codex sessions.
 
+At tool-call time, root-aware MCP tools resolve omitted `root` arguments in this
+order: explicit `root`, volatile `session.set_default_root`, `WS_MCP_PROJECT_ROOT`,
+Codex `_meta.x-codex-turn-metadata.workspaces` when it contains exactly one
+workspace, then the server startup root. If Codex metadata contains multiple
+workspaces and no higher-priority root is available, the tool returns an
+actionable error instead of guessing. The session default exists only in the
+current stdio server process and is not written to user config, ws cache config,
+or repository files.
+
 ## Orchestrator Authority
 
 `ws-mcp` assigns lead orchestration authority through a worktree-local lock under
@@ -204,6 +213,40 @@ Behavior:
   `agents-plugin/runtime.json`.
 - A mismatch causes the launcher to repair the cache-local runtime binary just
   as tool or command drift does.
+
+### `ws/session.set_default_root`
+
+Set the volatile repository root default for the current MCP server process.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Git worktree root to use when later ws MCP tool calls omit root."
+    }
+  },
+  "required": ["root"]
+}
+```
+
+Behavior:
+
+- Validates `root` with Git and stores the canonical worktree root in memory.
+- Affects later root-omitted root-aware tool calls handled by the same server.
+- Does not persist beyond the MCP server process and does not write config files.
+
+### `ws/session.get_default_root`
+
+Report the volatile default root state for the current MCP server process.
+
+Output:
+
+- MCP text content containing JSON with `session_default_root`,
+  `has_session_default`, `env_project_root`, and `server_root`.
 
 ### `ws/api.list`
 
