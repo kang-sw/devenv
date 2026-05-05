@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.17.6 - 2026-05-05
+
+### Fixed
+- Prefer the sibling Claude PowerShell shim on Windows so multiline system
+  prompts are passed as argv instead of being reinterpreted by `cmd`.
+
 ## v0.17.5 - 2026-05-05
 
 ### Fixed
