@@ -43,13 +43,13 @@ include only local arguments that affect the current step.
 
 ## Available
 
-### One-turn query
+### Async one-turn query
 
 `ws/subquery`
 
-Use for scoped fact-finding, surveys, and one-turn answers. Set
-`deep_research: true` only for broad tracing. Runtime default timeout is 10
-minutes.
+Use for scoped fact-finding, surveys, and one-turn answers. It starts async and
+returns a `subquery_key`; retrieve output with `ws/agents.wait(name: <key>,
+timeout_seconds: 600)`. Set `deep_research: true` only for broad tracing.
 
 ### Persistent agents
 
@@ -156,8 +156,9 @@ interrupt behavior.
 
 ```text
 One-turn survey:
-call `ws/subquery(question: "<exact scoped question>")`.
+call `ws/subquery(question: "<exact scoped question>")`; store `<subquery-key>`.
 call `ws/subquery(deep_research: true, question: <block below>)` only for broad tracing.
+call `ws/agents.wait(name: "<subquery-key>", timeout_seconds: 600)` to read output.
 
 Persistent task:
 call `ws/agents.register(name: "<agent-name>", prompts: ["<prompt-stem>"])`.

@@ -890,9 +890,6 @@ func TestAgentTimeoutDefaultsAreTenMinutes(t *testing.T) {
 	if defaultAgentWaitTimeout != 10*time.Minute {
 		t.Fatalf("defaultAgentWaitTimeout = %s", defaultAgentWaitTimeout)
 	}
-	if defaultSubqueryTimeout != 10*time.Minute {
-		t.Fatalf("defaultSubqueryTimeout = %s", defaultSubqueryTimeout)
-	}
 }
 
 func TestCancelReportsCleanupNeededWhenOwnedProcessSurvives(t *testing.T) {
@@ -1109,68 +1106,88 @@ func TestInternalOneShotErasesAgentDirectory(t *testing.T) {
 func TestSubqueryUsesOneShotLightOrDeepTier(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	runner := &fakeRunner{}
+	starter := &fakeWorkerStarter{pid: 2468}
 	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-		Runner:    runner,
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
 	})
 
 	text, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Where is workflow?"})
 	if err != nil {
 		t.Fatalf("Subquery returned error: %v", err)
 	}
-	if text != "reply: Where is workflow?\n" {
-		t.Fatalf("subquery text = %q", text)
+	key := extractFieldLine(t, text, "subquery_key")
+	if !strings.HasPrefix(key, "subquery-1777816800000000000-") ||
+		!strings.Contains(text, "agent_name: "+key) ||
+		!strings.Contains(text, "status: running") ||
+		!strings.Contains(text, "pid: 2468") ||
+		!strings.Contains(text, `agents.wait(name: "`+key+`", timeout_seconds: 600)`) {
+		t.Fatalf("subquery start text mismatch:\n%s", text)
 	}
-	if len(runner.calls) != 1 || !strings.Contains(runner.calls[0].SystemPromptPath, "system.md") {
-		t.Fatalf("subquery runner call mismatch: %+v", runner.calls)
+	if len(starter.requests) != 1 || starter.requests[0].Name != key {
+		t.Fatalf("worker starter requests = %+v", starter.requests)
 	}
-	if len(runner.systemPrompts) != 1 {
-		t.Fatalf("runner system prompts = %d", len(runner.systemPrompts))
+	layout, err := manager.layout(repo, key, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(runner.systemPrompts[0], "You are a delegated worker") {
-		t.Fatalf("subquery prompt included delegate orientation:\n%s", runner.systemPrompts[0])
+	raw, err := os.ReadFile(layout.SystemFile)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(runner.systemPrompts[0], "You are a scoped sub-query worker") {
-		t.Fatalf("subquery prompt missing scoped worker prompt:\n%s", runner.systemPrompts[0])
+	system := string(raw)
+	if strings.Contains(system, "You are a delegated worker") {
+		t.Fatalf("subquery prompt included delegate orientation:\n%s", system)
+	}
+	if !strings.Contains(system, "You are a scoped sub-query worker") {
+		t.Fatalf("subquery prompt missing scoped worker prompt:\n%s", system)
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Tier != "light" {
+		t.Fatalf("subquery tier = %q", agent.Tier)
 	}
 
-	if _, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Trace history", DeepResearch: true}); err != nil {
+	deepStarter := &fakeWorkerStarter{pid: 3579}
+	deepManager := NewManager(Options{
+		CacheHome:     filepath.Join(t.TempDir(), "cache"),
+		Now:           func() time.Time { return testNow.Add(time.Second) },
+		WorkerStarter: deepStarter,
+	})
+	deepText, err := deepManager.Subquery(SubqueryOptions{Root: repo, Question: "Trace history", DeepResearch: true})
+	if err != nil {
 		t.Fatalf("deep Subquery returned error: %v", err)
 	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("runner calls = %d", len(runner.calls))
+	deepKey := extractFieldLine(t, deepText, "subquery_key")
+	if !strings.HasPrefix(deepKey, "subquery-1777816801000000000-") || deepKey == key {
+		t.Fatalf("deep subquery key = %q, first key = %q", deepKey, key)
+	}
+	deepLayout, err := deepManager.layout(repo, deepKey, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deepAgent, err := readAgent(deepLayout.AgentFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deepAgent.Tier != "deep" {
+		t.Fatalf("deep subquery tier = %q", deepAgent.Tier)
 	}
 }
 
-func TestSubqueryPassesDefaultAndCustomTimeout(t *testing.T) {
-	repo := initRepo(t)
-	cache := filepath.Join(t.TempDir(), "cache")
-	runner := &fakeRunner{}
-	manager := NewManager(Options{
-		CacheHome: cache,
-		Now:       func() time.Time { return testNow },
-		Runner:    runner,
-	})
-
-	if _, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Default timeout?"}); err != nil {
-		t.Fatalf("Subquery returned error: %v", err)
+func extractFieldLine(t *testing.T, text, field string) string {
+	t.Helper()
+	prefix := field + ": "
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
 	}
-	if len(runner.calls) != 1 || runner.calls[0].Timeout != 10*time.Minute {
-		t.Fatalf("default timeout call mismatch: %+v", runner.calls)
-	}
-
-	if _, err := manager.Subquery(SubqueryOptions{
-		Root:     repo,
-		Question: "Custom timeout?",
-		Timeout:  3 * time.Second,
-	}); err != nil {
-		t.Fatalf("custom timeout Subquery returned error: %v", err)
-	}
-	if len(runner.calls) != 2 || runner.calls[1].Timeout != 3*time.Second {
-		t.Fatalf("custom timeout call mismatch: %+v", runner.calls)
-	}
+	t.Fatalf("missing %s in:\n%s", field, text)
+	return ""
 }
 
 func TestParseCodexJSONL(t *testing.T) {

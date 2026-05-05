@@ -97,12 +97,16 @@ Out of scope:
   orientation, current-call serialization, and the initial interrupt surface.
   Stricter leaf-level role assignment is deferred to
   `260504-research-durable-leaf-role-assignment`.
+- `260505-feat-ws-mcp-async-subquery` — Async subquery fan-out fix:
+  `ws/subquery` now returns a generated key immediately, runs through the
+  named-agent async path, and lets delegate callers retrieve only generated
+  `subquery-*` agent results.
 
 ## Active Children
 
-- `260505-feat-ws-mcp-async-subquery` — Convert `ws/subquery` from a sync
-  one-shot answer tool to an async key-returning named-agent start operation
-  while keeping `ws/api.ask` synchronous.
+None. Runtime stabilization is sufficient to return to the core orchestration
+skill migration; future runtime gaps should be promoted from observed failures
+or from the deferred idea queue.
 
 ## Remaining Failure Evidence
 

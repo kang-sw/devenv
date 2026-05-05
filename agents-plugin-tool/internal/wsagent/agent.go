@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -38,10 +39,11 @@ const (
 	CallStatusCancelled = "cancelled"
 
 	defaultAgentWaitTimeout = 10 * time.Minute
-	defaultSubqueryTimeout  = 10 * time.Minute
 )
 
 var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+var subquerySeq atomic.Uint64
 
 type Clock func() time.Time
 
@@ -161,7 +163,6 @@ type SubqueryOptions struct {
 	Root         string
 	Question     string
 	DeepResearch bool
-	Timeout      time.Duration
 }
 
 type SelfWorkerStarter struct{}
@@ -799,19 +800,27 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	if opts.DeepResearch {
 		tier = "deep"
 	}
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = defaultSubqueryTimeout
-	}
-	return m.oneShot(oneShotOptions{
+	name := fmt.Sprintf("subquery-%d-%06d", m.now().UTC().UnixNano(), subquerySeq.Add(1))
+	_, _, err := m.Register(RegisterOptions{
 		Root:                opts.Root,
+		Name:                name,
 		Backend:             "codex",
 		Tier:                tier,
 		SystemPromptText:    SubquerySystemPrompt,
-		Prompt:              opts.Question,
-		Timeout:             timeout,
 		SuppressOrientation: true,
 	})
+	if err != nil {
+		return "", err
+	}
+	result, err := m.Call(CallOptions{
+		Root:   opts.Root,
+		Name:   name,
+		Prompt: opts.Question,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("subquery_key: %s\nagent_name: %s\nstatus: %s\npid: %d\nfollow_up: agents.wait(name: %q, timeout_seconds: 600) | agents.status(name: %q) | agents.tail(name: %q) | agents.cancel(name: %q)\n", result.AgentName, result.AgentName, result.Status, result.PID, result.AgentName, result.AgentName, result.AgentName, result.AgentName), nil
 }
 
 func (m Manager) Print(root, name string) (string, error) {

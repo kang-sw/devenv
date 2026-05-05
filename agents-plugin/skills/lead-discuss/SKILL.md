@@ -17,7 +17,7 @@ Call `ws/project_tree()` to load the current project map.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phases with a `### Result` section are frozen - do not edit them.
 - Read mental-model docs on-demand as topics emerge.
 - Read spec docs in `ai-docs/spec/` on-demand as topics emerge; Project Map lists available specs.
-- Use `ws/subquery(question: "<focused implementation-detail question>")` for implementation details beyond mental-model docs.
+- Use `ws/subquery(question: "<focused implementation-detail question>")`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, for implementation details beyond mental-model docs.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 - Evaluate each claim independently - call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
@@ -37,7 +37,7 @@ Call `ws/project_tree()` to load the current project map.
    For each unloaded doc, call `ws/agents.register(name: "project-survey", prompts: ["project-survey"])`, then `ws/agents.call(name: "project-survey", prompt: "<topic brief>")`.
    Incorporate the returned reference list before responding.
 2. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-3. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery(question: "<focused implementation-detail question>")` for implementation details.
+3. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery(question: "<focused implementation-detail question>")`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, for implementation details.
    For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
 4. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 5. Continue until the user signals done.

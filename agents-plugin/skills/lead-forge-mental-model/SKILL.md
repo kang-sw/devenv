@@ -10,11 +10,11 @@ Target: user request
 ## Invariants
 
 - Call `ws/convention.read(name: "mental-model-conventions")` before any document write - conventions are canonical there.
-- All survey and verifier queries use `ws/subquery(deep_research: true, question: <focused prompt>)`.
+- All survey and verifier queries start with `ws/subquery(deep_research: true, question: <focused prompt>)`.
 - No domain file is written without completing the survey for that domain first.
 - Domain list must be explicitly confirmed by the user before any file is written.
 - Domain task names use the prefix `forge-mental-model-<domain>` (e.g., `forge-mental-model-auth`). Renaming tasks breaks cross-compact resume detection.
-- All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls.
+- All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls; store returned keys and wait on all keys before synthesizing.
 - Every commit touching `ai-docs/mental-model/` or `ai-docs/mental-model.md` must include `(mental-model-updated)` in the message body.
 
 ## On: invoke
@@ -42,7 +42,7 @@ Record whether spec is available (drives step 4 per domain).
 
 ### 2. Parallel codebase survey
 
-Issue all three queries in a single response turn as parallel `ws/subquery` calls:
+Issue all three queries in a single response turn as parallel `ws/subquery` calls. Store each returned `subquery_key`:
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
 
@@ -74,7 +74,7 @@ Look for: shared mutable state, ordering dependencies, sync points, extension re
 For each hotspot, return modules, contract, and failure mode.
 ```
 
-Wait for all three to return before synthesizing.
+Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` for all three keys before synthesizing.
 
 ### 3. Synthesize domain candidates
 
@@ -115,7 +115,7 @@ Call `TaskUpdate` to set the domain task status to `in_progress`.
 
 ### 2. Domain survey
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Call `ws/subquery(deep_research: true, question: <block below>)`, store the returned `subquery_key`, then wait for it:
 
 ```text
 Analyze domain: <domain>
@@ -133,7 +133,7 @@ Focus on what would cause wrong outcomes if unknown:
 Be concrete: cite paths, functions, and types. Do not list fields or paraphrase functions.
 ```
 
-Wait for the result before drafting.
+Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` before drafting.
 
 ### 3. Draft domain file
 
@@ -152,7 +152,7 @@ Skip if no spec exists.
 
 ### 5. Verify
 
-Call `ws/subquery(deep_research: true, question: <block below>)`:
+Call `ws/subquery(deep_research: true, question: <block below>)`, store the returned `subquery_key`, then wait for it:
 
 ```text
 Verify the following mental-model domain document against the codebase.

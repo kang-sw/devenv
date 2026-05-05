@@ -43,7 +43,7 @@ ws-mcp version
 ws-mcp doctor --root <repo-root>
 ws-mcp runtime info
 ws-mcp serve --stdio --root <repo-root>
-ws-mcp subquery --root <repo-root> [--deep-research] <question>
+ws-mcp subquery --root <repo-root> [--deep-research] <question>  # starts async; returns subquery_key
 ```
 
 `doctor` is a host-independent smoke check. In this repository it verifies the
@@ -180,7 +180,9 @@ the minimum of the lock-derived base role and the requested profile, ordered
 `delegate` or `leaf`.
 
 Delegate and leaf roles hide and reject lead-owned orchestration or mutation
-tools, currently `agents.*` and `config.*`. Leaf also hides `subquery`.
+tools, currently `agents.*` and `config.*`. Delegate may use
+`agents.wait/status/tail/cancel/print` only for generated `subquery-*` agents.
+Leaf also hides `subquery`.
 `WS_MCP_ALLOWED_TOOLS` can narrow the resulting visible surface for tests or
 debugging, but it cannot bypass the effective role.
 
@@ -274,6 +276,8 @@ Behavior:
   official-documentation fetching inside its domain cache.
 - Same-process calls for the same domain serialize through a process-local
   per-domain lock. Distinct domains may run concurrently.
+- The public tool call is synchronous: it waits for routed domain managers and
+  aggregates their results before returning.
 - Output preserves per-domain boundaries. If at least one domain succeeds, failed
   domains are included as explicit error blocks; if all domains fail, the tool
   returns a tool error.
@@ -845,8 +849,8 @@ ws-mcp references trace --spec-stem <spec-stem>
 
 ### `ws/subquery`
 
-Run a scoped one-turn codebase or documentation query through a temporary ws
-delegate.
+Start a scoped one-turn codebase or documentation query and return immediately
+with a subquery key.
 
 Input schema:
 
@@ -874,12 +878,18 @@ Input schema:
 Behavior:
 
 - The tool is the MCP replacement for the old `ws-subquery` CLI.
-- It composes over `agents.oneshot`; no named agent session persists.
+- It registers a generated `subquery-<id>` named agent and starts it through
+  the same async path as `ws/agents.call`.
 - Default workload tier is `light`; `deep_research: true` uses `deep`.
-- Default timeout is 10 minutes.
 - The system prompt is runtime-owned and self-contained.
 - The delegate is instructed to answer one scoped question with cited English
   output, assumptions when inferred, and searched gaps when evidence is missing.
+- Output contains `subquery_key`, agent status, worker pid, and follow-up
+  `ws/agents.wait` / `ws/agents.status` / `ws/agents.tail` /
+  `ws/agents.cancel` calls.
+- Retrieve the final answer with `ws/agents.wait(name: "<subquery-key>",
+  timeout_seconds: 600)` or `ws/agents.print(name: "<subquery-key>")` after
+  completion.
 
 ### `ws/path.generate`
 

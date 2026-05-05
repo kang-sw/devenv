@@ -62,8 +62,8 @@ Pick first match, execute, return to loop.
 
 | Request type | Routing |
 |---|---|
-| Behavior, concept, or status question | Answer inline; use `ws/subquery(question: <block below>)` if codebase search is needed |
-| Codebase exploration | Call `ws/subquery(question: <block below>)` |
+| Behavior, concept, or status question | Answer inline; use `ws/subquery(question: <block below>)`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, if codebase search is needed |
+| Codebase exploration | Call `ws/subquery(question: <block below>)`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` |
 | Design discussion | Discuss inline; do not auto-chain to `ws:lead-write-spec` |
 | Single-file edit or clear isolated change | Invoke `ws:lead-edit` |
 | Multi-file or new-pattern implementation | Invoke `ws:lead-write-code` |

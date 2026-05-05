@@ -369,6 +369,7 @@ func TestServeStdioNonOwnerCannotEscalateWithLeadProfile(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"subquery-demo"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -376,14 +377,17 @@ func TestServeStdioNonOwnerCannotEscalateWithLeadProfile(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "config.show") {
-		t.Fatalf("non-owner lead profile exposed lead tools: %s", byID["1"])
+	if !strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "agents.call") || strings.Contains(byID["1"], "config.show") {
+		t.Fatalf("delegate profile tool surface mismatch: %s", byID["1"])
 	}
 	if !strings.Contains(byID["1"], "subquery") {
 		t.Fatalf("delegate profile unexpectedly hid subquery: %s", byID["1"])
 	}
-	if !strings.Contains(byID["2"], "tool not available") {
-		t.Fatalf("non-owner tools/call did not reject agents.status: %s", byID["2"])
+	if !strings.Contains(byID["2"], "only for subquery-* agents") {
+		t.Fatalf("non-owner tools/call did not reject non-subquery agents.status: %s", byID["2"])
+	}
+	if !strings.Contains(byID["3"], "read agent") {
+		t.Fatalf("delegate subquery agents.status did not reach runtime: %s", byID["3"])
 	}
 }
 

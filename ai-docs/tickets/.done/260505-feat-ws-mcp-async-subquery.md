@@ -6,6 +6,7 @@ related:
   260504-research-durable-leaf-role-assignment: deferred recursive-helper containment research
 related-mental-model:
   - executor-wrapup
+completed: 2026-05-05
 ---
 
 # ws-mcp async subquery
@@ -72,3 +73,20 @@ Success criteria:
   answer text directly.
 - `api.ask` docs explicitly remain synchronous and explain that domain fan-out is
   internal to the tool.
+
+### Result (pending) - 2026-05-05
+
+Implemented in the next source commit. `ws/subquery` now registers a generated
+`subquery-<timestamp>-<seq>` named agent, starts it through the async
+`agents.call` path, and immediately returns `subquery_key`, status, pid, and
+follow-up `agents.wait/status/tail/cancel` calls. Results are retrieved through
+`agents.wait` or `agents.print`; subquery no longer returns answer text
+directly.
+
+The generated key includes an atomic sequence suffix so parallel subquery starts
+from the same process do not collide when the clock value matches. Delegate MCP
+profiles may use `agents.wait/status/tail/cancel/print` only for generated
+`subquery-*` agent names, preserving the broader lead-owned orchestration
+boundary. Internal skill/prompt/reference text now treats subquery as an async
+start operation, and `api.ask` documentation explicitly remains synchronous
+while its per-domain managers fan out internally.

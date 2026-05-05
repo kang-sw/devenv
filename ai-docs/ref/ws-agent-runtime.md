@@ -229,9 +229,11 @@ requested profile:
 lead > delegate > leaf
 ```
 
-`delegate` and `leaf` cannot see or call `agents.*` or `config.*` tools, and
-`leaf` also cannot see or call `subquery`. Explicit tool allowlists may narrow
-the visible surface for tests, but cannot raise a delegate or leaf back to lead.
+`delegate` and `leaf` cannot see or call lead-owned orchestration or mutation
+tools. Delegate may use `agents.wait/status/tail/cancel/print` only for
+generated `subquery-*` agents; `leaf` also cannot see or call `subquery`.
+Explicit tool allowlists may narrow the visible surface for tests, but cannot
+raise a delegate or leaf back to lead.
 
 ## Workload Tiers
 
@@ -364,18 +366,19 @@ Prompt references are logical names or absolute prompt paths, not
 repository-local plugin source paths. Shared skill text must not point at
 `claude-plugin/infra/prompts/`.
 
-`agents.register` and `agents.oneshot` accept `prompts` as the canonical prompt
-chain field. `prompt_refs` remains a migration alias for older callers. Bare
-stems resolve from the embedded runtime prompt bundle; absolute paths read the
-specified file directly. Ambiguous relative paths are rejected until a later
-root-relative contract exists.
+`agents.register` accepts `prompts` as the canonical prompt chain field.
+`prompt_refs` remains a migration alias for older callers. Bare stems resolve
+from the embedded runtime prompt bundle; absolute paths read the specified file
+directly. Ambiguous relative paths are rejected until a later root-relative
+contract exists.
 
 Public `agents.register` calls prepend the embedded `delegate-orientation`
 prompt before caller material. The orientation is a host-neutral role boundary
 for lead-spawned delegates; it tells implementers and reviewers not to perform
 lead-owned orchestration, reviewer fanout, or documentation lifecycle work
 unless explicitly assigned. Internal helpers such as `subquery` suppress this
-orientation and keep their scoped system prompt self-contained.
+orientation and keep their scoped system prompt self-contained while still using
+the named-agent async call path.
 
 The runtime strips YAML frontmatter from each resolved prompt and concatenates
 prompt bodies in caller order with `---` separators. `system_prompt_text`, when

@@ -10,13 +10,13 @@ Target: user request
 ## Invariants
 
 - Call `ws/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
-- All survey queries use `ws/subquery(deep_research: true, question: <focused prompt>)`; clerk uses `ws/subquery(deep_research: false, question: <self-contained clerk prompt>)`.
+- All survey queries start with `ws/subquery(deep_research: true, question: <focused prompt>)`; clerk starts with `ws/subquery(deep_research: false, question: <self-contained clerk prompt>)`.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `ws/spec_index.verify()` after every spec file write or update.
 - Domain task names use the prefix `forge-spec-<domain>` (e.g., `forge-spec-auth`).
-- All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls.
+- All survey `ws/subquery(...)` calls for a phase are dispatched in a single response turn when the host can issue parallel calls; store returned keys and wait on all keys before synthesizing.
 
 ## On: invoke
 
@@ -40,7 +40,7 @@ Target: user request
 
 ### 2. Parallel codebase survey
 
-Issue all four queries in a single response turn as parallel `ws/subquery` calls:
+Issue all four queries in a single response turn as parallel `ws/subquery` calls. Store each returned `subquery_key`:
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
 
@@ -83,7 +83,7 @@ Return behavioral areas -> representative commits. Omit chore/docs/refactor
 unless they reference spec-stems.
 ```
 
-Wait for all four to return before synthesizing.
+Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` for all four keys before synthesizing.
 
 ### 3. Synthesize domain candidates
 
@@ -124,7 +124,7 @@ Call `TaskUpdate` to set the domain task status to `in_progress`.
 
 ### 2. Parallel domain survey
 
-Issue all four queries in a single response turn as parallel `ws/subquery` calls:
+Issue all four queries in a single response turn as parallel `ws/subquery` calls. Store each returned `subquery_key`:
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
 
@@ -170,7 +170,7 @@ caller-visible behavior (`feat:`, `fix:`, `spec:`, spec-stems).
 Return behavioral changes newest first, with implementation status when visible.
 ```
 
-Wait for all four to return before synthesizing.
+Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)` for all four keys before synthesizing.
 
 ### 3. Synthesize behavior brief
 
@@ -203,7 +203,7 @@ confirmed list before writing anything.
 ### 6. Associate stems with tickets
 
 1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
-2. Dispatch clerk covering all collected tickets in a single call:
+2. Dispatch clerk covering all collected tickets in a single call, store the returned `subquery_key`, then wait for it:
 
 Call `ws/subquery(deep_research: false, question: <block below>)`:
 
@@ -226,7 +226,7 @@ For each ticket:
 4. Do not commit; caller owns git.
 ```
 
-3. Review the `## Clerk report`. Resolve any open questions with the user before committing.
+3. Call `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, then review the `## Clerk report`. Resolve any open questions with the user before committing.
 4. Commit all domain changes in one commit: spec file + ticket association updates.
 
 ### 7. Complete domain
@@ -257,7 +257,7 @@ Total stems generated: <count>
 
 ### 3. Suggested next steps
 
-- Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)` to strip `[planned]` markers from any planned features whose implementation has since landed in commit history.
+- Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)`, then `ws/agents.wait(name: <subquery-key>, timeout_seconds: 600)`, to strip `[planned]` markers from any planned features whose implementation has since landed in commit history.
 - Review `[planned]` entries with open tickets - confirm each has an active wip/todo ticket or drop the marker.
 - Run `ws:lead-write-spec` for any domain surfaces discovered after wrap-up.
 

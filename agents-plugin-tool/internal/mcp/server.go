@@ -262,6 +262,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current ws MCP profile: %s", params.Name))
 	}
+	if !s.subqueryAgentAccessAllowed(params.Name, params.Arguments) {
+		return errorResponse(req.ID, -32601, fmt.Sprintf("tool available only for subquery-* agents in current ws MCP profile: %s", params.Name))
+	}
 
 	switch params.Name {
 	case "runtime.info":
@@ -1060,7 +1063,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "subquery",
-			"description": "Run a scoped one-turn codebase or documentation query through a temporary ws delegate.",
+			"description": "Start an async scoped codebase or documentation query and return a subquery key.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1302,9 +1305,29 @@ func roleAllowsTool(role toolRole, name string) bool {
 	case roleLead:
 		return true
 	case roleDelegate:
+		if isSubqueryAgentTool(name) {
+			return true
+		}
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "api.") && name != "subquery" && name != "git.commit"
+	default:
+		return false
+	}
+}
+
+func (s *Server) subqueryAgentAccessAllowed(toolName string, arguments map[string]any) bool {
+	if s.role == roleLead || !isSubqueryAgentTool(toolName) {
+		return true
+	}
+	name, _ := arguments["name"].(string)
+	return strings.HasPrefix(name, "subquery-")
+}
+
+func isSubqueryAgentTool(name string) bool {
+	switch name {
+	case "agents.wait", "agents.status", "agents.tail", "agents.cancel", "agents.print":
+		return true
 	default:
 		return false
 	}
