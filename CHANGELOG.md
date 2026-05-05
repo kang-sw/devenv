@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.16.2 - 2026-05-05
+
+### Changed
+- Run the Codex plugin-managed MCP server through the Python launcher so native
+  Windows plugin installs do not try to execute the POSIX launcher.
+- Limit the release workflow trigger to `v*` tag pushes instead of every main
+  branch push.
+
+### Fixed
+- Keep lead MCP tools visible when startup project-root detection leaves the
+  orchestrator lock unavailable; callers can still pass an explicit `root`.
+
 ## v0.16.1 - 2026-05-05
 
 ### Fixed
