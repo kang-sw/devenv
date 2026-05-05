@@ -134,8 +134,22 @@ func parseCodexJSONLStream(r io.Reader, onSessionID func(string) error) (RunnerR
 
 func parseCodexJSONLStreamPartial(r io.Reader, onSessionID func(string) error) (RunnerResult, error) {
 	var result RunnerResult
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) == 0 && err == io.EOF {
+			break
+		}
+		if err != nil && err != io.EOF {
+			return RunnerResult{}, fmt.Errorf("read codex jsonl: %w", err)
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
 		var event struct {
 			Type     string `json:"type"`
 			ThreadID string `json:"thread_id"`
@@ -144,7 +158,7 @@ func parseCodexJSONLStreamPartial(r io.Reader, onSessionID func(string) error) (
 				Text string `json:"text"`
 			} `json:"item"`
 		}
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+		if err := json.Unmarshal(line, &event); err != nil {
 			return RunnerResult{}, fmt.Errorf("parse codex jsonl: %w", err)
 		}
 		if event.Type == "thread.started" && event.ThreadID != "" {
@@ -158,9 +172,9 @@ func parseCodexJSONLStreamPartial(r io.Reader, onSessionID func(string) error) (
 		if event.Type == "item.completed" && event.Item.Type == "agent_message" {
 			result.Text = event.Item.Text
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return RunnerResult{}, fmt.Errorf("read codex jsonl: %w", err)
+		if err == io.EOF {
+			break
+		}
 	}
 	return result, nil
 }

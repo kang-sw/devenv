@@ -2,6 +2,7 @@
 title: wsagent Codex JSONL token too long
 related:
   260505-bug-ws-agent-dogfood-timeout-tail-context: adjacent dogfood context-boundary issue exposed during forge-spec survey
+completed: 2026-05-05
 ---
 
 # wsagent Codex JSONL token too long
@@ -32,3 +33,12 @@ pulling unbounded payloads into normal tool responses, and include a regression
 test with a large single JSONL line. Debug/raw inspection can remain explicit,
 but long backend events should not crash result collection.
 
+### Result - 2026-05-05
+
+Replaced the Codex JSONL parser's `bufio.Scanner` loop with a line reader that
+can read large single JSONL events. The parser still extracts only the session
+ID and final agent message from the event stream, so large command-output events
+can pass through parsing without becoming result text.
+
+Added a regression test with a 256 KiB `aggregated_output` event between
+`thread.started` and the final `agent_message`.

@@ -1338,6 +1338,21 @@ func TestParseCodexJSONL(t *testing.T) {
 	}
 }
 
+func TestParseCodexJSONLAllowsLargeToolEventLine(t *testing.T) {
+	raw := []byte(strings.Join([]string{
+		`{"type":"thread.started","thread_id":"019test"}`,
+		`{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"` + strings.Repeat("x", 256*1024) + `"}}`,
+		`{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}`,
+	}, "\n"))
+	result, err := parseCodexJSONL(raw)
+	if err != nil {
+		t.Fatalf("parseCodexJSONL returned error: %v", err)
+	}
+	if result.SessionID != "019test" || result.Text != "hello" {
+		t.Fatalf("result mismatch: %+v", result)
+	}
+}
+
 func TestParseCodexJSONLStreamNotifiesSessionBeforeFinalMessage(t *testing.T) {
 	sessionSeen := false
 	reader := &chunkReader{
