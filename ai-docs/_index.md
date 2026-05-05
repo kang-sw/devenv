@@ -13,7 +13,7 @@ tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
 Stable Claude package: `claude-plugin/` (`ws@0.15.0`).
-Codex-first candidate: `agents-plugin/` (`ws@0.16.0`).
+Codex-first candidate: `agents-plugin/` (`ws@0.16.1`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 
 ## Current Branch Rules
@@ -212,7 +212,7 @@ bootstrap template, active `lead-*` skills, delegate prompts, and
 `ai-docs/ref/skill-authoring.md`.
 
 In-flight: none.
-Next: push `main` and create `v0.16.0` when ready to publish release assets, then
+Next: push `main` and create `v0.16.1` when ready to publish release assets, then
 verify native Windows plugin-managed launcher startup under
 `260503-feat-agents-plugin-runtime-boundary`.
 

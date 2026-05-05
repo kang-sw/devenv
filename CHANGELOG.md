@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.16.1 - 2026-05-05
+
+### Fixed
+- Normalize embedded prompt bundle hash inputs across LF and CRLF checkouts so
+  Windows GitHub Actions runners validate the same `runtime.json` contract as
+  macOS/Linux builds.
+
 ## v0.16.0 - 2026-05-05
 
 ### Added
