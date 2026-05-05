@@ -1,0 +1,117 @@
+---
+title: Plugin Runtime
+summary: Codex plugin packaging, runtime metadata, launcher repair, release assets, and runtime CLI surfaces for ws.
+---
+
+# Plugin Runtime
+
+The ws plugin runtime gives Codex users a packaged `ws` plugin with bundled
+workflow skills and a local MCP server entrypoint. It also defines how plugin
+installations discover, verify, repair, and run the native `ws-mcp` runtime.
+
+## Codex Plugin Manifest And Skill Bundle {#260505-codex-plugin-manifest-skill-bundle}
+
+The Codex plugin manifest exposes the plugin as `ws`, declares the plugin
+version, points Codex at the bundled `skills/` directory, and references the
+plugin-local MCP server configuration.
+
+Callers installing the plugin observe a Codex-facing skill namespace whose
+workflow skills use the `lead-*` naming convention. The manifest describes the
+plugin as an interactive/write-capable productivity plugin and includes default
+prompts that point users at skill authoring workflows.
+
+## Plugin-Local MCP Server Configuration {#260505-plugin-local-mcp-server-config}
+
+The plugin ships an MCP configuration that starts the `ws` MCP server through
+the plugin-local launcher:
+
+```text
+./bin/ws-mcp-launcher serve --stdio
+```
+
+The MCP server runs with the plugin directory as its configured working
+directory. The bundled configuration gives the server a 30-second startup
+timeout and a 600-second per-tool timeout so long-running ws orchestration calls
+can complete without relying on user-local Codex configuration.
+
+## Runtime Contract Metadata {#260505-runtime-contract-metadata}
+
+The plugin runtime contract declares the plugin version, compatible `ws-mcp`
+version range, release repository and tag, embedded prompt bundle metadata, and
+the required MCP tool and CLI command surfaces.
+
+The launcher and release checks use this metadata as the caller-visible
+compatibility contract. A runtime is considered stale when it cannot satisfy the
+declared version range, tool list, command list, or prompt bundle hash.
+
+## Runtime Launcher Repair And Project-Root Detection {#260505-runtime-launcher-repair-project-root}
+
+The plugin launcher resolves the current operating system and architecture,
+selects the matching cache-local `ws-mcp` binary path, and ensures an executable
+compatible runtime is present before delegating to it.
+
+When the binary is missing or incompatible, the launcher can install a runtime
+from an explicit bootstrap binary, a bootstrap URL, a local devenv runtime, or
+the release asset URL declared in the runtime contract. Downloaded release
+assets are verified against `SHA256SUMS` before becoming executable.
+
+For plugin-managed Codex sessions, the launcher detects the caller project root
+from the parent process environment when possible and exports it as
+`WS_MCP_PROJECT_ROOT`, while avoiding the plugin cache directory itself as the
+project root.
+
+## Release Asset Build And Checksum Pipeline {#260505-release-asset-build-checksum-pipeline}
+
+The runtime build script produces cross-platform `ws-mcp-*` release assets for
+macOS, Linux, and Windows on supported arm64/amd64 targets, embedding the
+runtime version and source commit into each binary.
+
+The release artifact set includes `SHA256SUMS`. The release workflow verifies
+release asset construction and includes Windows executable smoke coverage so
+published runtime assets can be consumed by plugin installations.
+
+## Runtime Version Bump Helper {#260505-runtime-version-bump-helper}
+
+The version bump helper accepts a semantic `X.Y.Z` release version and updates
+the plugin manifests, runtime contract version range, release tag, launcher
+compatibility glob, Go runtime development version, release workflow references,
+and selected project documentation references in one command.
+
+The helper is the expected way to keep the plugin version, runtime version,
+release tag, and compatibility range synchronized for a ws release.
+
+## Runtime CLI Entrypoints {#260505-runtime-cli-entrypoints}
+
+The `ws-mcp` binary exposes direct CLI entrypoints for local smoke tests,
+fallback usage, and launcher compatibility checks.
+
+Top-level commands include:
+
+```text
+version
+doctor
+runtime
+serve
+subquery
+config
+path
+agents
+git
+tickets
+specs
+mental-models
+references
+```
+
+`serve --stdio` is the MCP server entrypoint. `runtime info` reports runtime
+version and prompt bundle metadata. `doctor` reports repository health. The
+grouped commands mirror MCP behavior where a CLI fallback is part of the public
+runtime surface.
+
+## 🚧 Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
+
+The runtime publishes Windows assets and verifies Windows executable startup in
+release smoke coverage.
+
+Native Windows plugin-managed startup remains planned until the plugin-managed
+launcher path is verified end-to-end under Windows Codex plugin installation.

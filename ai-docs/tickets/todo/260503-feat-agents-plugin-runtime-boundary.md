@@ -1,6 +1,8 @@
 ---
 title: agents-plugin runtime and MCP boundary
 parent: 260503-epic-agents-plugin-skill-porting
+spec:
+  - 260505-windows-plugin-managed-startup
 related:
   260429-research-host-neutral-ws-plugin: research anchor for host-neutral ws plugin architecture
   260502-feat-agents-plugin-workflow-skill-drafts: draft skills waiting on helper/runtime reconstruction
