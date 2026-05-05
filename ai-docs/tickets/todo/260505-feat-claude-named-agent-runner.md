@@ -2,6 +2,8 @@
 title: Claude named-agent runner
 related:
   260505-feat-agent-backend-failure-diagnostics: diagnostics already expose Claude availability but execution remains unsupported
+spec:
+  - 260505-claude-agent-runner
 related-mental-model:
   - named-agent-runtime
 ---

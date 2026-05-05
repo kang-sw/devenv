@@ -120,6 +120,20 @@ stores the final plain-text agent message as the caller-facing result. The JSONL
 reader accepts large single-line events so verbose tool output does not break
 session parsing.
 
+## 🚧 Claude Agent Runner {#260505-claude-agent-runner}
+
+Named-agent registrations with `backend: claude` will execute through the same
+agent lifecycle as Codex-backed agents. Callers will use the existing
+`agents.register`, `agents.call`, `agents.wait`, `agents.result`,
+`agents.status`, `agents.tail`, `agents.interrupt`, and diagnostics tools
+without switching to a Claude-specific registry or output surface.
+
+The Claude adapter will start first calls with a runtime-managed Claude session
+id, resume later calls with the stored session id, apply the resolved agent
+system prompt, and parse Claude JSON output into the final plain-text result.
+Claude process failures will continue through the shared backend invocation
+diagnostics path, preserving raw backend errors and reconfiguration hints.
+
 ## Backend Invocation Failure Diagnostics {#260505-agent-backend-failure-diagnostics}
 
 Backend invocation failures preserve the raw backend error and append a bounded

@@ -195,6 +195,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
 | `260503-feat-agents-plugin-runtime-boundary` | todo | Go stdio MCP/runtime boundary; Python launcher smoke in progress |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
+| `260505-feat-claude-named-agent-runner` | todo | Add a Claude backend adapter for ws named agents |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
@@ -206,6 +207,7 @@ dropped tickets live in hidden archive dirs and git history.
 `260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; Python launcher is the current shared startup path and needs installed-cache verification on Windows after Python 3 is available.
 `260505-feat-agent-backend-failure-diagnostics` - improve named-agent backend invocation failures with raw errors, PATH-detected backend hints, and explicit reconfiguration guidance.
 `260505-bug-codex-jsonl-trailing-noise` - hotfix Windows Codex persistent-agent results when process-control stdout appears after a valid JSONL agent message.
+`260505-feat-claude-named-agent-runner` - add a Claude backend adapter for ws named agents while preserving the shared runner interface.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
 
