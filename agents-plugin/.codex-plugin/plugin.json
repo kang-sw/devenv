@@ -1,6 +1,6 @@
 {
   "name": "ws",
-  "version": "0.16.3",
+  "version": "0.17.0",
   "description": "Codex-first ws workflow plugin candidate for host-neutral skills and project context.",
   "author": {
     "name": "kang-sw"

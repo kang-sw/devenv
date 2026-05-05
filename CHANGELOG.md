@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.17.0 - 2026-05-05
+
+### Added
+- Add `session.set_default_root` and `session.get_default_root` MCP tools for
+  volatile per-server repository root recovery.
+
+### Changed
+- Resolve root-omitted MCP tool calls through explicit `root`, session default,
+  `WS_MCP_PROJECT_ROOT`, unambiguous Codex workspace metadata, and startup root.
+- Rename the Codex workflow primitive reference skill from `lead-workflow` to
+  `lead-workflow-manual`.
+
 ## v0.16.3 - 2026-05-05
 
 ### Changed

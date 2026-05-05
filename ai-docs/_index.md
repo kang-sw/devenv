@@ -13,7 +13,7 @@ tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
 Stable Claude package: `claude-plugin/` (`ws@0.15.0`).
-Codex-first candidate: `agents-plugin/` (`ws@0.16.3`).
+Codex-first candidate: `agents-plugin/` (`ws@0.17.0`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 
 ## Current Branch Rules

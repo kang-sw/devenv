@@ -89,7 +89,7 @@ mkdir -p "$runtime_dir"
 
 version_compatible() {
   case "$1" in
-    0.16.*) return 0 ;;
+    0.17.*) return 0 ;;
     *) return 1 ;;
   esac
 }
