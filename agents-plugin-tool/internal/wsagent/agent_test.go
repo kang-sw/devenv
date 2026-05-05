@@ -543,6 +543,13 @@ func TestClaudeRunnerCreatesSessionAndParsesJSON(t *testing.T) {
 	if capturedSession == "" || result.SessionID != capturedSession {
 		t.Fatalf("session not captured: result=%q captured=%q", result.SessionID, capturedSession)
 	}
+	if len(capturedSession) != 36 ||
+		capturedSession[8] != '-' ||
+		capturedSession[13] != '-' ||
+		capturedSession[18] != '-' ||
+		capturedSession[23] != '-' {
+		t.Fatalf("session is not UUID-shaped: %q", capturedSession)
+	}
 	if result.Text != "claude reply" || !strings.Contains(stdout.String(), "claude reply") {
 		t.Fatalf("result/stdout = %q/%q", result.Text, stdout.String())
 	}
