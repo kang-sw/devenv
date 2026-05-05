@@ -1169,10 +1169,15 @@ Output includes stable line keys such as `agent`, `agent_status`, `backend`,
 
 ### `ws/agents.tail`
 
-Return recent diagnostic lines without invoking a backend.
+Return context-bounded recent diagnostic lines without invoking a backend.
 
 Input adds optional `lines` per section, defaulting to `40`. Output contains
 sections for `events`, `stdout`, `stderr`, and `output`.
+
+Normal tail output truncates large stream fields such as `aggregated_output`
+and long lines with an explicit `ws-tail truncated` marker. Use
+`ws/agents.debug.tail` or stream-specific `ws/agents.debug.*` tools only when
+raw diagnostic content is required.
 
 Workflow skills should pass `lines: 3` for routine progress checks. Larger
 tails are reserved for diagnosing concrete failures where recent timestamps and

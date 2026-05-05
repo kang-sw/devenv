@@ -1448,6 +1448,44 @@ func TestDiagnosticStreamSelectsRawFilesAndBoundsLines(t *testing.T) {
 	}
 }
 
+func TestTailSanitizesLargeJSONFieldsAndRawTailPreservesThem(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	_, layout, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	largeOutput := strings.Repeat("x", tailMaxFieldRunes+200)
+	line := `{"type":"event","aggregated_output":"` + largeOutput + `","small":"keep"}`
+	mustWriteAgentTest(t, layout.CurrentStdout, line+"\n")
+
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 1})
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	if !strings.Contains(tail, "ws-tail truncated field aggregated_output") {
+		t.Fatalf("tail missing truncation marker:\n%s", tail)
+	}
+	if strings.Contains(tail, largeOutput) {
+		t.Fatalf("tail included the full large field")
+	}
+	if !strings.Contains(tail, `"small":"keep"`) {
+		t.Fatalf("tail lost unrelated JSON fields:\n%s", tail)
+	}
+
+	rawTail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 1, Raw: true})
+	if err != nil {
+		t.Fatalf("raw Tail returned error: %v", err)
+	}
+	if !strings.Contains(rawTail, largeOutput) || strings.Contains(rawTail, "ws-tail truncated") {
+		t.Fatalf("raw tail did not preserve large field:\n%s", rawTail)
+	}
+}
+
 func mustWriteAgentTest(t *testing.T, path, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

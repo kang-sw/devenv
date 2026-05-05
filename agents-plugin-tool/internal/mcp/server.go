@@ -658,6 +658,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Root:  root,
 			Name:  name,
 			Lines: lines,
+			Raw:   true,
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events":
@@ -1186,7 +1187,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agents.tail",
-			"description": "Return recent event, stream, and output lines for a registered ws agent.",
+			"description": "Return context-bounded recent event, stream, and output lines for a registered ws agent.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

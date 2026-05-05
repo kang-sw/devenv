@@ -361,14 +361,16 @@ ephemeral, such as generated subquery agents. Failed, cancelled, timed-out, and
 still-running agents remain available for diagnostics.
 
 `agents.tail` reads recent lines from `events.jsonl`, `current/stdout`,
-`current/stderr`, and `output.md` without invoking a backend. Routine progress
-checks should request `--lines 3`; larger tails are for concrete failure
-diagnosis. `agents.cancel` uses the stored worker pid for a best-effort local
-process kill and marks the current call `cancelled`. After process restart,
-`wait`, `result`, `status`, `tail`, and `print` still work from disk state;
-`cancel` can only terminate a process when the stored pid still refers to a live
-local worker, and it does not yet provide backend-specific process-group
-cleanup.
+`current/stderr`, and `output.md` without invoking a backend. Normal tail output
+is context-bounded: large stream fields such as `aggregated_output` and long
+lines are shortened with a visible `ws-tail truncated` marker. Raw stream
+inspection belongs under `agents.debug.*`. Routine progress checks should
+request `--lines 3`; larger tails are for concrete failure diagnosis.
+`agents.cancel` uses the stored worker pid for a best-effort local process kill
+and marks the current call `cancelled`. After process restart, `wait`, `result`,
+`status`, `tail`, and `print` still work from disk state; `cancel` can only
+terminate a process when the stored pid still refers to a live local worker, and
+it does not yet provide backend-specific process-group cleanup.
 
 ## Prompt Resolution
 

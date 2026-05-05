@@ -788,6 +788,10 @@ func agentsCheckInbox(args []string) {
 }
 
 func agentsTail(args []string) {
+	agentsTailRaw(args, false)
+}
+
+func agentsTailRaw(args []string, raw bool) {
 	fs := flag.NewFlagSet("agents tail", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
@@ -798,6 +802,7 @@ func agentsTail(args []string) {
 		Root:  defaultRoot(*root),
 		Name:  *name,
 		Lines: *lines,
+		Raw:   raw,
 	})
 	if err != nil {
 		fatal("agents tail", err)
@@ -812,7 +817,7 @@ func agentsDebug(args []string) {
 	}
 	switch args[0] {
 	case "tail":
-		agentsTail(args[1:])
+		agentsTailRaw(args[1:], true)
 	case "stdout":
 		agentsDebugStream("stdout", args[1:])
 	case "stderr":

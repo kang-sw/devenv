@@ -180,6 +180,45 @@ func TestServeStdioAgentDebugToolCalls(t *testing.T) {
 	}
 }
 
+func TestServeStdioAgentTailIsBoundedButDebugTailIsRaw(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cache)
+	_, layout, err := wsagent.NewManager(wsagent.Options{}).Register(wsagent.RegisterOptions{Root: root, Name: "impl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	largeOutput := strings.Repeat("x", 5000)
+	line := `{"type":"event","aggregated_output":"` + largeOutput + `"}`
+	mustWrite(t, filepath.Dir(layout.CurrentStdout), filepath.Base(layout.CurrentStdout), line+"\n")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.tail","arguments":{"name":"impl","lines":1}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.debug.tail","arguments":{"name":"impl","lines":1}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 responses, got %d\n%s", len(lines), out.String())
+	}
+	byID := responseLinesByID(t, lines)
+	normal := toolText(t, byID["1"])
+	if !strings.Contains(normal, "ws-tail truncated field aggregated_output") || strings.Contains(normal, largeOutput) {
+		t.Fatalf("normal tail was not bounded: %q", normal)
+	}
+	debug := toolText(t, byID["2"])
+	if !strings.Contains(debug, largeOutput) || strings.Contains(debug, "ws-tail truncated") {
+		t.Fatalf("debug tail was not raw: %q", debug)
+	}
+}
+
 func TestServeStdioConfigShow(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

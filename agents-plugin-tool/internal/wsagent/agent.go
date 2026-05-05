@@ -41,6 +41,20 @@ const (
 	defaultAgentWaitTimeout = 10 * time.Minute
 )
 
+const (
+	tailMaxFieldRunes = 2000
+	tailMaxLineRunes  = 6000
+)
+
+var tailLargeFieldKeys = map[string]struct{}{
+	"aggregated_output": {},
+	"content":           {},
+	"output":            {},
+	"stderr":            {},
+	"stdout":            {},
+	"text":              {},
+}
+
 var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 var subquerySeq atomic.Uint64
@@ -124,6 +138,7 @@ type TailOptions struct {
 	Root  string
 	Name  string
 	Lines int
+	Raw   bool
 }
 
 type DiagnosticStreamOptions struct {
@@ -1207,10 +1222,63 @@ func (m Manager) Tail(opts TailOptions) (string, error) {
 			b.WriteString("(empty)\n")
 			continue
 		}
+		if !opts.Raw {
+			lines = sanitizeTailLines(lines)
+		}
 		b.WriteString(strings.Join(lines, "\n"))
 		b.WriteByte('\n')
 	}
 	return b.String(), nil
+}
+
+func sanitizeTailLines(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = sanitizeTailLine(line)
+	}
+	return out
+}
+
+func sanitizeTailLine(line string) string {
+	var payload any
+	if err := json.Unmarshal([]byte(line), &payload); err == nil {
+		payload = sanitizeTailJSONValue(payload, "")
+		if raw, err := json.Marshal(payload); err == nil {
+			line = string(raw)
+		}
+	}
+	return truncateTailString(line, tailMaxLineRunes, "line")
+}
+
+func sanitizeTailJSONValue(value any, key string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for k, v := range typed {
+			typed[k] = sanitizeTailJSONValue(v, k)
+		}
+		return typed
+	case []any:
+		for i, v := range typed {
+			typed[i] = sanitizeTailJSONValue(v, key)
+		}
+		return typed
+	case string:
+		if _, ok := tailLargeFieldKeys[key]; ok {
+			return truncateTailString(typed, tailMaxFieldRunes, "field "+key)
+		}
+		return typed
+	default:
+		return typed
+	}
+}
+
+func truncateTailString(value string, limit int, label string) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	omitted := len(runes) - limit
+	return string(runes[:limit]) + fmt.Sprintf("\n[ws-tail truncated %s: omitted %d chars]", label, omitted)
 }
 
 func (m Manager) DiagnosticStream(opts DiagnosticStreamOptions) (string, error) {
