@@ -44,10 +44,6 @@ At ship time:
 - `git status --porcelain` - must be empty before release preparation starts.
 - `cd agents-plugin-tool && go test ./...`
 - `cd agents-plugin-tool && scripts/smoke-ws-mcp.sh ..`
-- Windows host smoke when available:
-  - `go test ./...` in `agents-plugin-tool`
-  - build `dist/ws-mcp-windows-amd64.exe`
-  - run `version`, `doctor --root <repo>`, and stdio `tools/list` smoke
 
 ## Changelog
 
@@ -142,5 +138,8 @@ Expected GitHub Actions behavior:
    - MCP server `ws` starts from plugin-managed `.mcp.json`
    - `runtime.info` reports the shipped version and matching prompt bundle hash
    - `project_tree` returns `ai-docs/` as its first non-empty line
-5. Keep the Claude package untouched unless a separate Claude compatibility ship
+5. Optional local dogfood: if a Windows host is available, run the same commands
+   as `.github/workflows/ws-mcp-release.yml`'s Windows smoke job before relying on
+   the GitHub Actions result.
+6. Keep the Claude package untouched unless a separate Claude compatibility ship
    is requested.
