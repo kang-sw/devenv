@@ -6,6 +6,7 @@ spec:
   - 260505-mcp-session-default-root
 related-mental-model:
   - mcp-runtime
+completed: 2026-05-05
 ---
 
 # MCP session default root
@@ -89,3 +90,20 @@ tests that cover:
 - the value not persisting across new server instances;
 - Codex single-workspace metadata fallback;
 - Codex multi-workspace metadata refusing to guess.
+
+### Result (79602bf) - 2026-05-05
+
+Implemented the full ticket scope in one slice. `ws-mcp` now exposes
+`session.set_default_root` and `session.get_default_root`, stores the default
+root only in the current `Server` instance, and routes root-aware MCP tools
+through a shared resolver with explicit argument, session default,
+`WS_MCP_PROJECT_ROOT`, unambiguous Codex workspace metadata, and startup-root
+fallbacks.
+
+The resolver validates selected roots as Git worktrees, refuses to guess when
+Codex metadata reports multiple workspaces, and returns actionable tool errors
+asking callers to pass `root` or call `session.set_default_root`.
+
+Coverage was added for explicit-root override, same-session default use,
+cross-server non-persistence, Codex single-workspace fallback, and
+multi-workspace ambiguity.
