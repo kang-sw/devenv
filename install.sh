@@ -584,7 +584,7 @@ info "Syncing ws plugin snapshot to $PLUGIN_CACHE/ws/..."
 mkdir -p "$PLUGIN_CACHE/ws"
 # Remove stale subdirs from earlier layouts (claude/, claude-plugin/)
 rm -rf "$PLUGIN_CACHE/claude" "$PLUGIN_CACHE/claude-plugin"
-rsync -a --delete "$REPO_DIR/claude-plugin/" "$PLUGIN_CACHE/ws/"
+rsync -a --delete "$REPO_DIR/agents-plugin/" "$PLUGIN_CACHE/ws/"
 # Generate marketplace.json that registers ws as a plugin at ./ws
 mkdir -p "$PLUGIN_CACHE/.claude-plugin"
 python3 - "$PLUGIN_CACHE/.claude-plugin/marketplace.json" "$PLUGIN_CACHE/ws/.claude-plugin/plugin.json" <<'MKTEOF'

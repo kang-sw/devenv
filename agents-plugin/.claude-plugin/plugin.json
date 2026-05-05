@@ -6,5 +6,13 @@
     "name": "kang-sw"
   },
   "repository": "https://github.com/kang-sw/devenv",
-  "license": "MIT"
+  "license": "MIT",
+  "mcpServers": {
+    "ws": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/ws-mcp-launcher",
+      "args": ["serve", "--stdio"],
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 600
+    }
+  }
 }
