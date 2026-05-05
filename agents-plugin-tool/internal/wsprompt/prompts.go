@@ -104,10 +104,14 @@ func ContentSHA256() (string, error) {
 		}
 		sum.Write([]byte(filepath.ToSlash(path)))
 		sum.Write([]byte{0})
-		sum.Write(data)
+		sum.Write(normalizePromptHashContent(data))
 		sum.Write([]byte{0})
 	}
 	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+func normalizePromptHashContent(data []byte) []byte {
+	return []byte(strings.ReplaceAll(string(data), "\r\n", "\n"))
 }
 
 func resolveOne(spec string) (string, map[string]string, Source, error) {

@@ -255,3 +255,11 @@ func TestRuntimeContractPromptBundleHash(t *testing.T) {
 		t.Fatalf("runtime.json prompt bundle hash = %q, want %q", contract.PromptBundle.ContentSHA256, info.ContentSHA256)
 	}
 }
+
+func TestNormalizePromptHashContent(t *testing.T) {
+	got := string(normalizePromptHashContent([]byte("one\r\ntwo\nthree\r\n")))
+	want := "one\ntwo\nthree\n"
+	if got != want {
+		t.Fatalf("normalized prompt hash content = %q, want %q", got, want)
+	}
+}
