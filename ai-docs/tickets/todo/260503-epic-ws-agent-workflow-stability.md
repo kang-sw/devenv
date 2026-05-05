@@ -100,9 +100,9 @@ Out of scope:
 
 ## Active Children
 
-None. Runtime stabilization is sufficient to return to the core orchestration
-skill migration; future runtime gaps should be promoted from observed failures
-or from the deferred idea queue.
+- `260505-feat-ws-mcp-async-subquery` — Convert `ws/subquery` from a sync
+  one-shot answer tool to an async key-returning named-agent start operation
+  while keeping `ws/api.ask` synchronous.
 
 ## Remaining Failure Evidence
 
