@@ -288,7 +288,7 @@ ws-mcp agents register --root <repo> --name <name> [--backend codex] [--tier lig
 ws-mcp agents call --root <repo> --name <name> <prompt>
 ws-mcp agents call --root <repo> --name <name> --prompt-file -
 ws-mcp agents run-current --root <repo> --name <name>
-ws-mcp agents wait --root <repo> --name <name> [--timeout 30s]
+ws-mcp agents wait --root <repo> --name <name> [--timeout 10m]
 ws-mcp agents status --root <repo> --name <name>
 ws-mcp agents interrupt --root <repo> --name <name> <message>
 ws-mcp agents check-inbox --root <repo> --name <name>
@@ -346,6 +346,8 @@ the normal `agents.interrupt` delivery path.
 completed. If a timeout expires, it returns `timeout` plus the same structured
 status text produced by `agents.status`. Failed and cancelled calls also return
 status text so workflow skills can branch without opening state files directly.
+Default timeout is 10 minutes. Explicit bounded waits for normal agent work
+should use at least 10 minutes.
 
 `agents.tail` reads recent lines from `events.jsonl`, `current/stdout`,
 `current/stderr`, and `output.md` without invoking a backend. Routine progress

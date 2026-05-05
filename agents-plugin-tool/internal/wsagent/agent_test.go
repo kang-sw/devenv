@@ -847,7 +847,7 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	if !strings.Contains(timeoutText, "wait_timeout: true") ||
 		!strings.Contains(timeoutText, "call_status: running") ||
 		!strings.Contains(timeoutText, "active: true") ||
-		!strings.Contains(timeoutText, "follow_up: agents.wait | agents.status | agents.cancel | agents.tail") {
+		!strings.Contains(timeoutText, "follow_up: agents.wait --timeout 10m | agents.status | agents.cancel | agents.tail") {
 		t.Fatalf("timeout text mismatch:\n%s", timeoutText)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
@@ -883,6 +883,15 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	}
 	if !strings.Contains(tail, "cancel.begin") || !strings.Contains(tail, "cancel.end") {
 		t.Fatalf("tail missing cancel diagnostics:\n%s", tail)
+	}
+}
+
+func TestAgentTimeoutDefaultsAreTenMinutes(t *testing.T) {
+	if defaultAgentWaitTimeout != 10*time.Minute {
+		t.Fatalf("defaultAgentWaitTimeout = %s", defaultAgentWaitTimeout)
+	}
+	if defaultSubqueryTimeout != 10*time.Minute {
+		t.Fatalf("defaultSubqueryTimeout = %s", defaultSubqueryTimeout)
 	}
 }
 
@@ -1148,7 +1157,7 @@ func TestSubqueryPassesDefaultAndCustomTimeout(t *testing.T) {
 	if _, err := manager.Subquery(SubqueryOptions{Root: repo, Question: "Default timeout?"}); err != nil {
 		t.Fatalf("Subquery returned error: %v", err)
 	}
-	if len(runner.calls) != 1 || runner.calls[0].Timeout != defaultSubqueryTimeout {
+	if len(runner.calls) != 1 || runner.calls[0].Timeout != 10*time.Minute {
 		t.Fatalf("default timeout call mismatch: %+v", runner.calls)
 	}
 

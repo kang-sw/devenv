@@ -876,6 +876,7 @@ Behavior:
 - The tool is the MCP replacement for the old `ws-subquery` CLI.
 - It composes over `agents.oneshot`; no named agent session persists.
 - Default workload tier is `light`; `deep_research: true` uses `deep`.
+- Default timeout is 10 minutes.
 - The system prompt is runtime-owned and self-contained.
 - The delegate is instructed to answer one scoped question with cited English
   output, assumptions when inferred, and searched gaps when evidence is missing.
@@ -1068,7 +1069,7 @@ Input schema:
     },
     "timeout_seconds": {
       "type": "number",
-      "description": "Maximum seconds to wait. Defaults to no timeout."
+      "description": "Maximum seconds to wait. Defaults to 600."
     }
   },
   "required": ["name"]
@@ -1080,6 +1081,8 @@ Output:
 - Completed calls return the final plain-text `output.md`.
 - Timed-out calls return `timeout` followed by `ws/agents.status` text.
 - Failed or cancelled calls return status text.
+- Default timeout is 600 seconds; explicit bounded waits for normal agent work
+  should use at least 600 seconds.
 
 ### `ws/agents.status`
 

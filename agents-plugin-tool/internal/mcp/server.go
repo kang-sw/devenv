@@ -578,7 +578,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.wait | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
+		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
 	case "agents.wait":
 		root := s.root
 		if value, ok := params.Arguments["root"].(string); ok && value != "" {
@@ -1123,7 +1123,7 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"root":            stringProperty("Repository root. Defaults to the server root."),
 					"name":            stringProperty("Agent name."),
-					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to no timeout."),
+					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to 600."),
 				},
 				"required": []string{"name"},
 			},

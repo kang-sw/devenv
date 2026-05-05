@@ -37,7 +37,8 @@ const (
 	CallStatusFailed    = "failed"
 	CallStatusCancelled = "cancelled"
 
-	defaultSubqueryTimeout = 90 * time.Second
+	defaultAgentWaitTimeout = 10 * time.Minute
+	defaultSubqueryTimeout  = 10 * time.Minute
 )
 
 var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
@@ -835,14 +836,14 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 	if opts.Poll <= 0 {
 		opts.Poll = 200 * time.Millisecond
 	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = defaultAgentWaitTimeout
+	}
 	layout, err := m.layout(opts.Root, opts.Name, false)
 	if err != nil {
 		return "", err
 	}
-	deadline := time.Time{}
-	if opts.Timeout > 0 {
-		deadline = time.Now().Add(opts.Timeout)
-	}
+	deadline := time.Now().Add(opts.Timeout)
 	for {
 		if opts.Context != nil {
 			select {
@@ -868,17 +869,7 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 		case CallStatusFailed, CallStatusCancelled:
 			return m.Status(opts.Root, opts.Name)
 		}
-		if opts.Timeout <= 0 {
-			status, err := m.Status(opts.Root, opts.Name)
-			if err != nil {
-				return "", err
-			}
-			return "wait_pending: true\n" +
-				"timeout_status: call may still be running\n" +
-				"follow_up: agents.wait --timeout <duration> | agents.status | agents.cancel | agents.tail\n" +
-				status, nil
-		}
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
+		if !time.Now().Before(deadline) {
 			_ = appendRuntimeLog(layout, m.now(), "wait.timeout", map[string]any{
 				"timeout_seconds": opts.Timeout.Seconds(),
 				"call_status":     call.Status,
@@ -890,7 +881,7 @@ func (m Manager) Wait(opts WaitOptions) (string, error) {
 			}
 			return "wait_timeout: true\n" +
 				"timeout_status: call may still be running\n" +
-				"follow_up: agents.wait | agents.status | agents.cancel | agents.tail\n" +
+				"follow_up: agents.wait --timeout 10m | agents.status | agents.cancel | agents.tail\n" +
 				status, nil
 		}
 		if opts.Context != nil {
@@ -1667,7 +1658,7 @@ func (m Manager) processAliveAfterCancel(pid int) (bool, error) {
 func followUpForCall(call CurrentCall) string {
 	switch call.Status {
 	case CallStatusQueued, CallStatusRunning:
-		return "agents.wait | agents.status | agents.cancel | agents.tail"
+		return "agents.wait --timeout 10m | agents.status | agents.cancel | agents.tail"
 	case CallStatusCompleted:
 		return "agents.print | agents.tail"
 	case CallStatusFailed:

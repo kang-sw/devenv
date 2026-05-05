@@ -48,7 +48,8 @@ include only local arguments that affect the current step.
 `ws/subquery`
 
 Use for scoped fact-finding, surveys, and one-turn answers. Set
-`deep_research: true` only for broad tracing.
+`deep_research: true` only for broad tracing. Runtime default timeout is 10
+minutes.
 
 ### Persistent agents
 
@@ -63,9 +64,10 @@ Use for scoped fact-finding, surveys, and one-turn answers. Set
 
 Register a stable task name with prompt stems or a self-contained system prompt.
 Call it for each continuity turn. `ws/agents.call` starts async and returns
-promptly. Use `wait` for final output, `status` before waiting, `tail(lines: 3)`
-for small diagnostics, `print` for last output, `cancel` to stop active work,
-and `erase` when task-scoped state should be removed.
+promptly. Use `wait(timeout_seconds: 600)` or a longer bound for final output,
+`status` before waiting, `tail(lines: 3)` for small diagnostics, `print` for
+last output, `cancel` to stop active work, and `erase` when task-scoped state
+should be removed.
 
 ### Artifact paths
 
@@ -160,7 +162,7 @@ call `ws/subquery(deep_research: true, question: <block below>)` only for broad 
 Persistent task:
 call `ws/agents.register(name: "<agent-name>", prompts: ["<prompt-stem>"])`.
 call `ws/agents.call(name: "<agent-name>", prompt: <block below>)`.
-wait, inspect status, tail with `lines: 3`, or print output as needed.
+wait with `timeout_seconds: 600` or longer, inspect status, tail with `lines: 3`, or print output as needed.
 erase the task-scoped agent when cleanup matters.
 
 Review artifacts:

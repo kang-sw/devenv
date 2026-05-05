@@ -682,7 +682,7 @@ func agentsCall(args []string) {
 	if err != nil {
 		fatal("agents call", err)
 	}
-	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: agents.wait | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID)
+	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID)
 }
 
 func agentsRunCurrent(args []string) {
@@ -700,7 +700,7 @@ func agentsWait(args []string) {
 	fs := flag.NewFlagSet("agents wait", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
-	timeout := fs.Duration("timeout", 0, "maximum wait duration, for example 30s or 2m")
+	timeout := fs.Duration("timeout", 0, "maximum wait duration; defaults to 10m")
 	_ = fs.Parse(args)
 
 	text, err := wsagent.NewManager(wsagent.Options{}).Wait(wsagent.WaitOptions{
