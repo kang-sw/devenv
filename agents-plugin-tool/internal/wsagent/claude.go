@@ -26,6 +26,34 @@ func (ClaudeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		}
 	}
 
+	args, err := claudeArgs(req, sessionID, firstCall, req.Prompt)
+	if err != nil {
+		return RunnerResult{}, err
+	}
+
+	if firstCall && req.OnSessionID != nil {
+		if err := req.OnSessionID(sessionID); err != nil {
+			return RunnerResult{}, fmt.Errorf("handle claude session id: %w", err)
+		}
+	}
+	result, err := runClaude(req, args, sessionID)
+	if err != nil {
+		return RunnerResult{}, err
+	}
+	if result.Interrupted {
+		resumeArgs, err := claudeArgs(req, sessionID, false, "Continue after applying the lead message delivered by the hook.")
+		if err != nil {
+			return RunnerResult{}, err
+		}
+		result, err = runClaude(req, resumeArgs, sessionID)
+		if err != nil {
+			return RunnerResult{}, err
+		}
+	}
+	return result, nil
+}
+
+func claudeArgs(req RunnerRequest, sessionID string, firstCall bool, prompt string) ([]string, error) {
 	args := []string{"-p", "--dangerously-skip-permissions", "--output-format", "json"}
 	if model := strings.TrimSpace(req.Model); model != "" && !isBackendShorthand(model) {
 		args = append(args, "--model", model)
@@ -33,7 +61,7 @@ func (ClaudeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if req.SystemPromptPath != "" {
 		systemPrompt, err := os.ReadFile(req.SystemPromptPath)
 		if err != nil {
-			return RunnerResult{}, fmt.Errorf("read claude system prompt: %w", err)
+			return nil, fmt.Errorf("read claude system prompt: %w", err)
 		}
 		if strings.TrimSpace(string(systemPrompt)) != "" {
 			args = append(args, "--system-prompt", string(systemPrompt))
@@ -42,7 +70,7 @@ func (ClaudeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if req.InterruptHookCommand != "" {
 		settings, err := claudeSettingsJSON(req.InterruptHookCommand)
 		if err != nil {
-			return RunnerResult{}, err
+			return nil, err
 		}
 		args = append(args, "--settings", settings)
 	}
@@ -51,8 +79,11 @@ func (ClaudeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	} else {
 		args = append(args, "--resume", sessionID)
 	}
-	args = append(args, req.Prompt)
+	args = append(args, prompt)
+	return args, nil
+}
 
+func runClaude(req RunnerRequest, args []string, sessionID string) (RunnerResult, error) {
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if req.Timeout > 0 {
@@ -81,13 +112,6 @@ func (ClaudeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	}
 	if err := cmd.Start(); err != nil {
 		return RunnerResult{}, fmt.Errorf("start claude: %w", err)
-	}
-	if firstCall && req.OnSessionID != nil {
-		if err := req.OnSessionID(sessionID); err != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			return RunnerResult{}, fmt.Errorf("handle claude session id: %w", err)
-		}
 	}
 	waitErr := cmd.Wait()
 	if waitErr != nil {
@@ -131,9 +155,10 @@ func claudeSettingsJSON(hookCommand string) (string, error) {
 
 func parseClaudeJSON(raw []byte, sessionID string) (RunnerResult, error) {
 	var event struct {
-		Result  string `json:"result"`
-		IsError bool   `json:"is_error"`
-		Error   string `json:"error"`
+		Result         string `json:"result"`
+		IsError        bool   `json:"is_error"`
+		Error          string `json:"error"`
+		TerminalReason string `json:"terminal_reason"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(raw), &event); err != nil {
 		return RunnerResult{}, fmt.Errorf("parse claude json: %w", err)
@@ -146,6 +171,9 @@ func parseClaudeJSON(raw []byte, sessionID string) (RunnerResult, error) {
 			return RunnerResult{}, fmt.Errorf("claude returned error: %s", event.Error)
 		}
 		return RunnerResult{}, fmt.Errorf("claude returned error")
+	}
+	if event.TerminalReason == "hook_stopped" {
+		return RunnerResult{SessionID: sessionID, Interrupted: true}, nil
 	}
 	return RunnerResult{SessionID: sessionID, Text: event.Result}, nil
 }

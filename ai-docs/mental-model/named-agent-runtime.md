@@ -29,6 +29,7 @@ related:
 - Backend invocation failures are formatted at the call site with raw error text, bounded PATH-detected backend hints, and reconfiguration guidance; do not run separate model/login probes during registration or config inspection. {#260505-agent-backend-failure-diagnostics}
 - Codex JSONL parsing treats non-JSON stdout as fatal until both session id and final agent message are available; trailing process-control noise after completion is ignored. {#260505-codex-jsonl-trailing-noise-tolerance}
 - Backend adapters must fit `RunnerRequest` and `RunnerResult`; keep backend-specific session and output parsing inside the runner instead of branching the manager lifecycle. {#260505-claude-agent-runner}
+- Claude `terminal_reason: hook_stopped` is an intermediate adapter state: resume the same session so hook-delivered lead messages produce a final output instead of an empty completed result. {#260505-claude-agent-runner}
 
 ## Coupling
 

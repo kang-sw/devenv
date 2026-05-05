@@ -131,6 +131,9 @@ without switching to a Claude-specific registry or output surface.
 The Claude adapter starts first calls with a runtime-managed Claude session id,
 resumes later calls with the stored session id, applies the resolved agent
 system prompt, and parses Claude JSON output into the final plain-text result.
+When a Claude hook delivery stops a turn with `terminal_reason: hook_stopped`,
+the adapter resumes the same session so the delivered lead message can be
+incorporated into a final result instead of completing with empty output.
 Claude process failures will continue through the shared backend invocation
 diagnostics path, preserving raw backend errors and reconfiguration hints.
 

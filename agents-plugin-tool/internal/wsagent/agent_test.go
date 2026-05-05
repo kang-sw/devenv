@@ -81,6 +81,11 @@ if "%CLAUDE_FAKE_FAIL%"=="1" (
   echo login required 1>&2
   exit /b 7
 )
+if "%CLAUDE_FAKE_HOOK_STOP%"=="1" if not exist "%CLAUDE_FAKE_HOOK_MARKER%" (
+  echo stopped>"%CLAUDE_FAKE_HOOK_MARKER%"
+  echo {^"result^":^"^",^"is_error^":false,^"terminal_reason^":^"hook_stopped^",^"stop_reason^":^"tool_use^"}
+  exit /b 0
+)
 echo {^"result^":^"claude reply^",^"is_error^":false}
 `
 		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
@@ -93,6 +98,11 @@ printf '%s\n' "$@" >> "$CLAUDE_FAKE_LOG"
 if [ "$CLAUDE_FAKE_FAIL" = "1" ]; then
   echo "login required" >&2
   exit 7
+fi
+if [ "$CLAUDE_FAKE_HOOK_STOP" = "1" ] && [ ! -f "$CLAUDE_FAKE_HOOK_MARKER" ]; then
+  printf 'stopped\n' > "$CLAUDE_FAKE_HOOK_MARKER"
+  printf '{"result":"","is_error":false,"terminal_reason":"hook_stopped","stop_reason":"tool_use"}\n'
+  exit 0
 fi
 printf '{"result":"claude reply","is_error":false}\n'
 `
@@ -631,6 +641,42 @@ func TestClaudeRunnerNonZeroExitPreservesStderr(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "claude failed") || !strings.Contains(err.Error(), "login required") {
 		t.Fatalf("error did not preserve stderr: %v", err)
+	}
+}
+
+func TestClaudeRunnerResumesAfterHookStopped(t *testing.T) {
+	repo := initRepo(t)
+	binDir := t.TempDir()
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "claude.log")
+	markerPath := filepath.Join(tmp, "hook.marker")
+	writeFakeClaudeExecutable(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_FAKE_LOG", logPath)
+	t.Setenv("CLAUDE_FAKE_HOOK_STOP", "1")
+	t.Setenv("CLAUDE_FAKE_HOOK_MARKER", markerPath)
+
+	result, err := ClaudeRunner{}.Call(RunnerRequest{
+		Root:      repo,
+		Prompt:    "run tool",
+		SessionID: "session-123",
+		Timeout:   time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("ClaudeRunner.Call returned error: %v", err)
+	}
+	if result.Interrupted || result.Text != "claude reply" || result.SessionID != "session-123" {
+		t.Fatalf("result = %+v", result)
+	}
+	logRaw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logRaw)
+	if strings.Count(log, "--resume") != 2 ||
+		!strings.Contains(log, "run tool") ||
+		!strings.Contains(log, "Continue after applying the lead message delivered by the hook.") {
+		t.Fatalf("hook-stopped call was not resumed correctly:\n%s", log)
 	}
 }
 
