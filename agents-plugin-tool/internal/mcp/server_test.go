@@ -340,7 +340,13 @@ func TestServeStdioSessionDefaultRootAndExplicitOverride(t *testing.T) {
 		t.Fatalf("set default ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !strings.Contains(toolText(t, byID["1"]), canonicalTestPath(t, rootA)) {
+	var setResponse struct {
+		SessionDefaultRoot string `json:"session_default_root"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &setResponse); err != nil {
+		t.Fatalf("session.set_default_root response is not JSON: %v\n%s", err, byID["1"])
+	}
+	if setResponse.SessionDefaultRoot != canonicalTestPath(t, rootA) {
 		t.Fatalf("session.set_default_root response mismatch: %s", byID["1"])
 	}
 
