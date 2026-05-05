@@ -364,7 +364,14 @@ func TestServeStdioSessionDefaultRootAndExplicitOverride(t *testing.T) {
 	if !strings.Contains(toolText(t, byID["2"]), "260505-feat-alpha") || strings.Contains(toolText(t, byID["2"]), "260505-feat-beta") {
 		t.Fatalf("session default root was not used for root-omitted call: %s", byID["2"])
 	}
-	if !strings.Contains(toolText(t, byID["3"]), `"has_session_default":true`) || !strings.Contains(toolText(t, byID["3"]), canonicalTestPath(t, rootA)) {
+	var getResponse struct {
+		SessionDefaultRoot string `json:"session_default_root"`
+		HasSessionDefault  bool   `json:"has_session_default"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &getResponse); err != nil {
+		t.Fatalf("session.get_default_root response is not JSON: %v\n%s", err, byID["3"])
+	}
+	if !getResponse.HasSessionDefault || getResponse.SessionDefaultRoot != canonicalTestPath(t, rootA) {
 		t.Fatalf("session.get_default_root response mismatch: %s", byID["3"])
 	}
 	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
