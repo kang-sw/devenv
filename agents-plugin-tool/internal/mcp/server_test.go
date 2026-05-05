@@ -234,7 +234,17 @@ func TestServeStdioConfigShow(t *testing.T) {
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	showBefore := toolText(t, byID["1"])
-	if !strings.Contains(showBefore, filepath.Join(cache, "config.json")) || !strings.Contains(showBefore, `"schema_version":1`) {
+	var before struct {
+		Path   string `json:"path"`
+		Config struct {
+			SchemaVersion int `json:"schema_version"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal([]byte(showBefore), &before); err != nil {
+		t.Fatalf("config.show default response is not JSON: %v\n%s", err, showBefore)
+	}
+	wantConfigPath := filepath.Join(canonicalTestPath(t, cache), "config.json")
+	if before.Path != wantConfigPath || before.Config.SchemaVersion != 1 {
 		t.Fatalf("config.show default response mismatch: %s", byID["1"])
 	}
 
@@ -252,6 +262,18 @@ func TestServeStdioConfigShow(t *testing.T) {
 	if !strings.Contains(showAfter, `"backend":"gemini"`) || !strings.Contains(showAfter, `"model":"gemini-3-1-pro"`) {
 		t.Fatalf("config.show response missing tier mapping: %s", byID["2"])
 	}
+}
+
+func canonicalTestPath(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evaluated, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = evaluated
+	}
+	return abs
 }
 
 func TestServeStdioConfigAgentsTier(t *testing.T) {

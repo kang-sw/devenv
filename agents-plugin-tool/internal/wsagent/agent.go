@@ -1951,7 +1951,7 @@ func writeAgent(path string, agent Agent) error {
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write agent: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := replaceFile(tmp, path); err != nil {
 		return fmt.Errorf("replace agent: %w", err)
 	}
 	return nil
@@ -1978,7 +1978,7 @@ func writeMessage(path string, msg Message) error {
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write inbox message: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := replaceFile(tmp, path); err != nil {
 		return fmt.Errorf("replace inbox message: %w", err)
 	}
 	return nil
@@ -2011,10 +2011,22 @@ func writeCurrentCall(path string, call CurrentCall) error {
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write current call: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := replaceFile(tmp, path); err != nil {
 		return fmt.Errorf("replace current call: %w", err)
 	}
 	return nil
+}
+
+func replaceFile(tmp, path string) error {
+	if err := os.Rename(tmp, path); err == nil {
+		return nil
+	} else if _, statErr := os.Stat(path); statErr != nil {
+		return err
+	}
+	if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return removeErr
+	}
+	return os.Rename(tmp, path)
 }
 
 func isActiveCallStatus(status string) bool {

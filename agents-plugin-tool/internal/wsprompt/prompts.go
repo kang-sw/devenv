@@ -102,7 +102,7 @@ func ContentSHA256() (string, error) {
 		if err != nil {
 			return "", err
 		}
-		sum.Write([]byte(path))
+		sum.Write([]byte(filepath.ToSlash(path)))
 		sum.Write([]byte{0})
 		sum.Write(data)
 		sum.Write([]byte{0})

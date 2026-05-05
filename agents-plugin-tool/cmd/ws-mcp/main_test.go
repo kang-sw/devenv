@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestDefaultRootPreservesDotWithoutProjectEnv(t *testing.T) {
 }
 
 func TestGitCLICommandsReturnJSON(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "ws-mcp")
+	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build failed: %v\n%s", err, string(out))
@@ -41,6 +42,7 @@ func TestGitCLICommandsReturnJSON(t *testing.T) {
 
 	root := t.TempDir()
 	runGit(t, root, "init")
+	runGit(t, root, "config", "core.autocrlf", "false")
 	runGit(t, root, "config", "user.email", "test@example.com")
 	runGit(t, root, "config", "user.name", "Test User")
 	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("one\n"), 0o644); err != nil {
@@ -115,7 +117,7 @@ func TestGitCLICommandsReturnJSON(t *testing.T) {
 }
 
 func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "ws-mcp")
+	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build failed: %v\n%s", err, string(out))
@@ -167,7 +169,7 @@ func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
 }
 
 func TestConfigCLICommandsReturnConfigView(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "ws-mcp")
+	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build failed: %v\n%s", err, string(out))
@@ -243,6 +245,15 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	if after.Path != wantConfigPath() || light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
 		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
 	}
+}
+
+func wsMCPTestBin(t *testing.T) string {
+	t.Helper()
+	name := "ws-mcp"
+	if goruntime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(t.TempDir(), name)
 }
 
 func mustWriteCLITest(t *testing.T, path, text string) {

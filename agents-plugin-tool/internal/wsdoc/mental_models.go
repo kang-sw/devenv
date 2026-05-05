@@ -27,6 +27,7 @@ func MentalModelsList(root string) (string, error) {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
 		fm := frontmatter(path)
 		domain, _ := fm["domain"].(string)
 		if domain == "" {

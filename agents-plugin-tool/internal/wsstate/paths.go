@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -72,6 +73,8 @@ type WorktreeMetadata struct {
 type Manager struct {
 	opts Options
 }
+
+var metadataWriteMu sync.Mutex
 
 func NewManager(opts Options) Manager {
 	return Manager{opts: opts}
@@ -265,6 +268,9 @@ func upsertJSON(path string, next any) error {
 		return fmt.Errorf("create metadata dir %s: %w", filepath.Dir(path), err)
 	}
 
+	metadataWriteMu.Lock()
+	defer metadataWriteMu.Unlock()
+
 	now := ""
 	switch v := next.(type) {
 	case *ProjectMetadata:
@@ -300,11 +306,23 @@ func upsertJSON(path string, next any) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("close metadata %s: %w", tmp, err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := replaceFile(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("replace metadata %s: %w", path, err)
 	}
 	return nil
+}
+
+func replaceFile(tmp, path string) error {
+	if err := os.Rename(tmp, path); err == nil {
+		return nil
+	} else if _, statErr := os.Stat(path); statErr != nil {
+		return err
+	}
+	if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return removeErr
+	}
+	return os.Rename(tmp, path)
 }
 
 func readProjectMetadata(path string) (ProjectMetadata, bool) {

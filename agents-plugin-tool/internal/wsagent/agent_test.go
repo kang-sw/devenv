@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -277,8 +278,14 @@ func TestRegisterConditionalPromptRefPresent(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	binDir := t.TempDir()
-	bin := filepath.Join(binDir, "ws-test-tool")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	toolName := "ws-test-tool"
+	bin := filepath.Join(binDir, toolName)
+	script := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		bin += ".cmd"
+		script = "@echo off\r\nexit /b 0\r\n"
+	}
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -292,7 +299,7 @@ func TestRegisterConditionalPromptRefPresent(t *testing.T) {
 		Name:    "conditional",
 		Prompts: []string{"code-reviewer"},
 		ConditionalPromptRefs: []ConditionalPromptRef{
-			{Binary: "ws-test-tool", PromptRef: "code-review-fit"},
+			{Binary: toolName, PromptRef: "code-review-fit"},
 		},
 		SuppressOrientation: true,
 	})
