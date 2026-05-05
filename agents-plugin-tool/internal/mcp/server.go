@@ -814,14 +814,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.diff",
-			"description": "Return read-only Git diff output in full, stat, or name-only mode.",
+			"description": "Return read-only Git diff output. Defaults to stat mode; use mode=full for patch content.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"root":  stringProperty("Repository root. Defaults to the server root."),
 					"range": stringProperty("Optional revision range."),
 					"paths": stringArrayProperty("Optional path filters appended after --."),
-					"mode":  enumStringProperty("Diff mode.", []string{"full", "stat", "name_only"}),
+					"mode":  enumStringProperty("Diff mode. Defaults to stat.", []string{"full", "stat", "name_only"}),
 				},
 			},
 		},

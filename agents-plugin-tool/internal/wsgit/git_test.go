@@ -22,6 +22,20 @@ func TestDiffArgsAppendsPathFiltersAfterDoubleDash(t *testing.T) {
 	}
 }
 
+func TestDiffArgsDefaultsToStatMode(t *testing.T) {
+	args, mode, err := DiffArgs(DiffOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"diff", "--stat"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("DiffArgs = %#v, want %#v", args, want)
+	}
+	if mode != DiffModeStat {
+		t.Fatalf("mode = %q, want %q", mode, DiffModeStat)
+	}
+}
+
 func TestLogArgsBoundsLimitAndKeepsRange(t *testing.T) {
 	args, limit, err := LogArgs(LogOptions{Range: "main..HEAD", Limit: 500})
 	if err != nil {
@@ -50,6 +64,80 @@ func TestRevisionFieldsRejectGitOptions(t *testing.T) {
 func TestDiffArgsRejectsUnsupportedMode(t *testing.T) {
 	if _, _, err := DiffArgs(DiffOptions{Mode: "patch-with-stat"}); err == nil {
 		t.Fatal("DiffArgs accepted unsupported mode")
+	}
+}
+
+func TestClientDiffStatIncludesUntrackedFiles(t *testing.T) {
+	runner := &sequenceRunner{outs: [][]byte{
+		[]byte(" tracked.go | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)\n"),
+		[]byte("notes/new.md\x00"),
+	}}
+	result, err := (Client{Runner: runner}).Diff(context.Background(), "/repo", DiffOptions{Mode: DiffModeStat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "tracked.go | 2 +-") || !strings.Contains(result.Output, "Untracked files:\n  notes/new.md\n") {
+		t.Fatalf("diff output missing tracked or untracked content:\n%s", result.Output)
+	}
+	wantCalls := [][]string{
+		{"diff", "--stat"},
+		{"ls-files", "--others", "--exclude-standard", "-z"},
+	}
+	for i, want := range wantCalls {
+		if !reflect.DeepEqual(runner.calls[i].args, want) {
+			t.Fatalf("call %d args = %#v, want %#v", i, runner.calls[i].args, want)
+		}
+	}
+}
+
+func TestClientDiffNameOnlyIncludesPathFilteredUntrackedFiles(t *testing.T) {
+	runner := &sequenceRunner{outs: [][]byte{
+		[]byte("src/tracked.go\n"),
+		[]byte("src/new.go\x00"),
+	}}
+	result, err := (Client{Runner: runner}).Diff(context.Background(), "/repo", DiffOptions{Mode: DiffModeNameOnly, Paths: []string{"src"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != "src/tracked.go\nsrc/new.go\n" {
+		t.Fatalf("diff output = %q", result.Output)
+	}
+	want := []string{"ls-files", "--others", "--exclude-standard", "-z", "--", "src"}
+	if !reflect.DeepEqual(runner.calls[1].args, want) {
+		t.Fatalf("ls-files args = %#v, want %#v", runner.calls[1].args, want)
+	}
+}
+
+func TestClientDiffNameOnlyIncludesSpecificFileInsideUntrackedDirectory(t *testing.T) {
+	runner := &sequenceRunner{outs: [][]byte{
+		{},
+		[]byte("ai-docs/ref/old-spec/260505/agent-system.md\x00"),
+	}}
+	path := "ai-docs/ref/old-spec/260505/agent-system.md"
+	result, err := (Client{Runner: runner}).Diff(context.Background(), "/repo", DiffOptions{Mode: DiffModeNameOnly, Paths: []string{path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != path+"\n" {
+		t.Fatalf("diff output = %q", result.Output)
+	}
+	want := []string{"ls-files", "--others", "--exclude-standard", "-z", "--", path}
+	if !reflect.DeepEqual(runner.calls[1].args, want) {
+		t.Fatalf("ls-files args = %#v, want %#v", runner.calls[1].args, want)
+	}
+}
+
+func TestClientDiffRangeDoesNotIncludeWorktreeUntrackedFiles(t *testing.T) {
+	runner := &sequenceRunner{outs: [][]byte{[]byte("src/tracked.go\n")}}
+	result, err := (Client{Runner: runner}).Diff(context.Background(), "/repo", DiffOptions{Range: "HEAD~1..HEAD", Mode: DiffModeNameOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != "src/tracked.go\n" {
+		t.Fatalf("diff output = %q", result.Output)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("calls = %#v, want only git diff for revision range", runner.calls)
 	}
 }
 

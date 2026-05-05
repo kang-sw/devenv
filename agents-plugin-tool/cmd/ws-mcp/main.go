@@ -265,7 +265,7 @@ func gitDiff(args []string) {
 	fs := flag.NewFlagSet("git diff", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	rangeValue := fs.String("range", "", "revision range")
-	mode := fs.String("mode", wsgit.DiffModeFull, "diff mode: full, stat, or name_only")
+	mode := fs.String("mode", wsgit.DiffModeStat, "diff mode: full, stat, or name_only; defaults to stat")
 	var paths multiFlag
 	fs.Var(&paths, "path", "path filter; may be repeated")
 	_ = fs.Parse(args)

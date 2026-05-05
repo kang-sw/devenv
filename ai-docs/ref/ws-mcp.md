@@ -289,6 +289,20 @@ Constraints:
 - Worker-facing guidance should use these tools and should not direct ordinary
   workers to read `ai-docs/.deps/` directly.
 
+### `ws/git.diff`
+
+Return read-only Git diff output.
+
+Behavior:
+
+- Defaults to `mode: "stat"` to avoid returning patch content unless requested.
+- `mode: "full"` returns patch content.
+- `mode: "name_only"` returns changed paths.
+- With no `range`, worktree output includes untracked files so `ws/git.diff`
+  does not hide files visible in `ws/git.status`.
+- With a `range`, output is revision-scoped and does not include unrelated
+  worktree untracked files.
+
 ### `ws/git.commit`
 
 Create a workflow-aware Git commit from explicit paths and structured message
