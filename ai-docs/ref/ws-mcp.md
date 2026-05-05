@@ -1323,13 +1323,13 @@ agents-plugin-tool/scripts/build-release-assets.sh [version]
 ```
 
 GitHub Actions workflow `.github/workflows/ws-mcp-release.yml` runs tests,
-cross-compiles assets, and uploads workflow artifacts on branch pushes and pull
-requests that touch the workflow or `agents-plugin-tool/`. It publishes assets to
-the GitHub release only for pushed `v*` tags. `workflow_dispatch` is present for
-post-merge manual runs, but GitHub only accepts that trigger when the workflow
-file exists on the default branch. The workflow currently uses official GitHub
-actions `actions/checkout@v5`, `actions/setup-go@v6`, and
-`actions/upload-artifact@v7`.
+cross-compiles assets, uploads workflow artifacts, and publishes GitHub release
+assets for pushed `v*` tags. Pull requests that touch the workflow or
+plugin/runtime paths run the same checks without publishing release assets.
+`workflow_dispatch` is present for manual verification runs, but GitHub only
+accepts that trigger when the workflow file exists on the default branch. The
+workflow currently uses official GitHub actions `actions/checkout@v5`,
+`actions/setup-go@v6`, and `actions/upload-artifact@v7`.
 
 Windows host verification remains separate from Go cross-compilation and is a
 deferred host-smoke item. Parallels can verify that `ws-mcp-windows-amd64.exe`

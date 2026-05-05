@@ -115,14 +115,15 @@ git push origin main --follow-tags
 ```
 
 Expected GitHub Actions behavior:
-- Branch push runs tests and builds workflow artifacts when plugin/runtime paths
-  changed.
+- Pull requests that touch the workflow, marketplace, plugin, or runtime paths
+  run tests, build release assets, verify checksums, and upload workflow
+  artifacts without publishing a GitHub release.
 - Tag push runs tests, builds release assets, verifies checksums, creates or
   updates the GitHub release, and uploads `agents-plugin-tool/dist/*`.
 
 ## Post-ship
 
-1. Confirm the GitHub Actions workflow succeeds for `main` and `v<version>`.
+1. Confirm the GitHub Actions workflow succeeds for `v<version>`.
 2. Confirm the GitHub release contains:
    - `SHA256SUMS`
    - `ws-mcp-darwin-arm64`
