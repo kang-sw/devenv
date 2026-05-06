@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.20.0 - 2026-05-06
+
+### Changed
+- Split ticket lifecycle semantics so `todo/` is accepted backlog and `ready/`
+  is the spec-gated implementation queue across ticket discovery,
+  `project_tree`, workflow skills, conventions, bootstrap migration, and Claude
+  compatibility guidance.
+- Tighten `lead-proceed` and Claude `/proceed` so `todo/` tickets route through
+  ready promotion before skeleton or implementation work begins.
+- Make `lead-write-code` and `lead-edit` review directives more risk-scoped by
+  focusing reviewer prompts and limiting re-review to material findings.
+
+### Fixed
+- Teach `git.commit` ticket move expansion to recognize `ready/` paths,
+  including `todo/` -> `ready/` promotion moves.
+
 ## v0.19.0 - 2026-05-06
 
 ### Added
