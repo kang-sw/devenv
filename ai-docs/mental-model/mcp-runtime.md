@@ -5,7 +5,7 @@ sources:
   - agents-plugin-tool/internal/mcp/
   - agents-plugin-tool/cmd/ws-mcp/
 related:
-  plugin-runtime: "runtime.info and tools/list are consumed by launcher compatibility checks."
+  plugin-runtime: "runtime.capabilities is the launcher fast path; runtime.info, tools/list, and CLI probes remain fallback compatibility checks."
   named-agent-runtime: "agents.*, subquery, and api.ask route through wsagent lifecycle APIs."
   git-workflow-tools: "git.* MCP tools and CLI mirrors delegate to internal/wsgit."
 ---
@@ -16,7 +16,7 @@ related:
 
 - `cmd/ws-mcp/main.go` is the binary entry point for `serve --stdio`, `runtime info`, CLI mirrors, and local diagnostics. {#260505-runtime-cli-entrypoints}
 - `internal/mcp/server.go` owns MCP JSON-RPC request handling, tool schemas, tool dispatch, optional profile filtering, and cancellation. {#260505-mcp-server-protocol-surface}
-- `runtime.info` is launcher-facing compatibility data, including embedded prompt bundle metadata. {#260505-runtime-debug-metadata-tools}
+- `runtime.info` and `runtime.capabilities` are launcher-facing compatibility data; capabilities adds MCP protocol, lead tool names, and CLI commands. {#260505-runtime-debug-metadata-tools} {#260506-runtime-capabilities-single-probe}
 
 ## Module Contracts
 
@@ -24,7 +24,8 @@ related:
 - Cancellation depends on exact JSON-RPC id stringification; changing id formatting breaks `notifications/cancelled`.
 - Tool results are returned as MCP text content, even when the text is JSON. Callers parse text, not structured content arrays.
 - `toolTextResponse` errors are successful JSON-RPC responses with `isError: true`; unknown tools/profile violations are JSON-RPC errors.
-- The server root is captured at `NewServer`; root-aware MCP tool calls use a resolver chain of explicit `root`, volatile session default root, `WS_MCP_PROJECT_ROOT`, unambiguous host workspace metadata, and then startup root. {#260505-mcp-session-default-root}
+- The server root is captured at `NewServer`; root-aware MCP tool calls use a resolver chain of explicit `root`, volatile session default root, unambiguous host workspace metadata, explicit non-dot startup root, `WS_MCP_PROJECT_ROOT`, and then startup root. Invalid explicit startup roots fail closed instead of falling through to the environment fallback. {#260505-mcp-session-default-root}
+- `runtime.capabilities` must report the full lead launcher contract surface even when `WS_MCP_TOOL_PROFILE` or `WS_MCP_ALLOWED_TOOLS` is inherited; use `LeadToolNames`, not filtered server tools. {#260506-runtime-capabilities-single-probe}
 - MCP starts with the lead tool surface; worktree locks are not an authority signal for tool visibility. {#260505-tool-profile-gating}
 - `WS_MCP_TOOL_PROFILE` is an optional containment filter. If host environment propagation fails, delegated agents may see lead tools and must follow prompt-level role rules.
 - `session.set_default_root` stores a canonical Git worktree root in the current server instance only; it does not change process cwd and does not write config.
@@ -32,8 +33,8 @@ related:
 
 ## Coupling
 
-- Tool additions require both `callTool` and `tools()` updates; role/profile filtering and runtime metadata must also be reviewed. {#260505-tool-profile-gating}
-- CLI mirrors are separate adapters. MCP behavior changes do not update `cmd/ws-mcp` handlers automatically. {#260505-cli-mirror-coverage}
+- Tool additions require both `callTool` and `tools()` updates; role/profile filtering and runtime metadata must also be reviewed. `runtime.capabilities` derives MCP tool names from `tools()`, but `runtime.json` still must be updated. {#260505-tool-profile-gating}
+- CLI mirrors are separate adapters. MCP behavior changes do not update `cmd/ws-mcp` handlers automatically, and public launcher-required CLI commands must also be kept in `runtimeCapabilityCommandNames` plus `runtime.json.commands`. {#260505-cli-mirror-coverage}
 - `api.ask` and `subquery` use named-agent runtime semantics; changes to agent result/wait behavior must keep MCP tool descriptions and follow-up text coherent. {#260505-workflow-state-delegation-tools}
 - Config tools read/write user-local config through `wsconfig`; tier names and defaults must match agent registration behavior. {#260505-config-tools}
 
@@ -52,6 +53,7 @@ related:
 - Treating `domain_hint` in `api.ask` as a direct domain selector; only exact existing domain names bypass routing. {#260505-api-documentation-mcp-tools}
 - Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must ask for explicit `root` or `session.set_default_root` instead.
+- Letting `WS_MCP_PROJECT_ROOT` shadow an explicit non-dot server startup root makes tests pass in this dogfooding repo while plugin-managed calls target the wrong project.
 
 ## Technical Debt
 

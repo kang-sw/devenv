@@ -4,7 +4,7 @@ description: "Embedded prompt discovery, prompt resolution, delegate orientation
 sources:
   - agents-plugin-tool/internal/wsprompt/
   - agents-plugin-tool/internal/wsagent/
-  - agents-plugin/runtime.json
+  - agents-plugin/
 related:
   plugin-runtime: "runtime.json and launcher checks consume prompt bundle hash/list metadata."
   workflow-skills: "skills register delegate agents by embedded prompt stem."
@@ -16,7 +16,7 @@ related:
 ## Entry Points
 
 - `wsprompt.Resolve` resolves embedded stems or absolute prompt paths into system text and optional model/tier metadata.
-- `wsprompt.Bundle` and `ContentSHA256` expose prompt bundle metadata to `runtime.info`.
+- `wsprompt.Bundle` and `ContentSHA256` expose prompt bundle metadata to `runtime.info` and `runtime.capabilities`.
 - `wsagent.Manager.Register` materializes prompt chains into each agent's `system.md`. {#260505-agent-prompt-registration-tier-resolution}
 
 ## Module Contracts
@@ -32,6 +32,7 @@ related:
 ## Coupling
 
 - Prompt text, filenames, additions, deletions, and moves change the bundle hash; `agents-plugin/runtime.json` must be refreshed.
+- Launcher fast-path and fallback checks must report the same prompt bundle hash: `runtime.capabilities`, `runtime.info`, and `runtime.json` drift makes otherwise compatible binaries fail validation.
 - Release asset builds rewrite runtime prompt metadata from the built binary.
 - Skills and API docs code name prompt stems directly; renaming stems requires updating those callers.
 - `prompts` is canonical while `prompt_refs` is a migration alias; when both are present, `prompts` wins.

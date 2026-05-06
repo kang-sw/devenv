@@ -51,9 +51,9 @@ body text, not frontmatter.
 **Ticket status:** ticket state is directory-derived under `ai-docs/tickets/`.
 Discovery excludes `.done/` and `.dropped/` unless explicitly requested.
 
-**Runtime metadata:** plugin runtime compatibility depends on `runtime.info`,
-`agents-plugin/runtime.json`, embedded prompt bundle hashes, and MCP tool/CLI
-surface lists staying synchronized.
+**Runtime metadata:** plugin runtime compatibility depends on
+`runtime.capabilities`, `runtime.info`, `agents-plugin/runtime.json`, embedded
+prompt bundle hashes, and MCP tool/CLI surface lists staying synchronized.
 
 **Host split:** Codex-first behavior lives under `agents-plugin/` and
 `agents-plugin-tool/`; `claude-plugin/` remains the Claude compatibility

@@ -37,9 +37,10 @@ server session before falling back to startup state. The priority is:
 
 1. Explicit tool argument `root`.
 2. Volatile session default root.
-3. `WS_MCP_PROJECT_ROOT`.
-4. Host workspace metadata when the host provides exactly one workspace.
-5. Server startup root.
+3. Host workspace metadata when the host provides exactly one workspace.
+4. Explicit non-dot server startup root.
+5. `WS_MCP_PROJECT_ROOT`.
+6. Server startup root.
 
 `session.set_default_root` validates that its `root` is inside a Git worktree,
 stores the canonical worktree root in the current server process, and returns
@@ -51,6 +52,11 @@ session default is set plus fallback state such as the server root and
 When host metadata names multiple workspaces and no higher-priority root exists,
 root-aware tools refuse to guess and return an actionable error asking the caller
 to pass `root` explicitly or call `session.set_default_root`.
+
+An explicit non-dot server startup root is treated as authoritative before the
+launcher-provided project-root environment fallback. If that explicit startup
+root is invalid, root-aware tools fail closed instead of silently falling back to
+`WS_MCP_PROJECT_ROOT`.
 
 ## Config Tools {#260505-config-tools}
 

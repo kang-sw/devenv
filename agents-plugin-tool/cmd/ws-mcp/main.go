@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/mcp"
@@ -163,9 +164,47 @@ func runtimeCapabilities(args []string) {
 }
 
 func runtimeCapabilityCommandNames() []string {
-	// TODO(260506-runtime-capabilities-single-probe): enumerate the public CLI
-	// command surface required by agents-plugin/runtime.json.
-	return []string{}
+	commands := []string{
+		"agents.call",
+		"agents.cancel",
+		"agents.check-inbox",
+		"agents.debug.events",
+		"agents.debug.runtime-log",
+		"agents.debug.stderr",
+		"agents.debug.stdout",
+		"agents.debug.tail",
+		"agents.erase",
+		"agents.interrupt",
+		"agents.print",
+		"agents.register",
+		"agents.result",
+		"agents.run-current",
+		"agents.status",
+		"agents.tail",
+		"agents.wait",
+		"config.agents-tier",
+		"config.show",
+		"git.commit",
+		"git.diff",
+		"git.log",
+		"git.merge-base",
+		"git.status",
+		"mental-models.find",
+		"mental-models.status",
+		"path.generate",
+		"references.trace",
+		"runtime.capabilities",
+		"runtime.info",
+		"specs.find",
+		"specs.list",
+		"specs.status",
+		"subquery",
+		"tickets.find",
+		"tickets.list",
+		"tickets.status",
+	}
+	sort.Strings(commands)
+	return commands
 }
 
 func subquery(args []string) {

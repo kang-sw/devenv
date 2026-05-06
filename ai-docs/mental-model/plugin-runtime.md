@@ -5,7 +5,7 @@ sources:
   - agents-plugin/
   - agents-plugin/bin/
 related:
-  mcp-runtime: "Launcher compatibility probes depend on ws-mcp runtime.info, tools/list, and CLI command behavior."
+  mcp-runtime: "Launcher compatibility uses runtime.capabilities first, with runtime.info, tools/list, and CLI probes as fallback checks."
   prompt-bundle: "runtime.json prompt bundle metadata must match embedded prompt content."
 ---
 
@@ -23,6 +23,7 @@ related:
 - The launcher writes diagnostics to stderr only; any stdout before `exec "$binary" "$@"` corrupts stdio MCP JSON-RPC.
 - `.mcp.json` cwd is the plugin cache, so repo root defaults must flow through `WS_MCP_PROJECT_ROOT`, not process cwd.
 - `runtime.json` tool names, command names, and prompt bundle metadata are compared against the binary by the launcher; stale names or prompt metadata can make a working binary get replaced or rejected.
+- The launcher tries `ws-mcp runtime capabilities` as the single-process fast path and accepts only a complete JSON payload matching version, MCP protocol, prompt bundle hash, required lead tools, and required CLI commands. Missing, invalid, or partial capability output falls through to bounded legacy validation rather than being trusted. {#260506-runtime-capabilities-single-probe}
 - The launcher's `.compatibility.json` stamp is a hot-path optimization, not a new trust boundary: only an exact stamp keyed to `runtime.json` content plus resolved binary path, size, and mtime can skip full validation; unreadable, missing, or mismatched stamps fail closed into `runtime_fully_compatible`. {#260506-launcher-hot-path-compatibility-cache}
 - Release repair requires matching binary asset names and `SHA256SUMS`; local dev repair is gated to the local installed plugin cache, `.local-devenv-runtime`, and non-Windows platforms. {#260505-release-asset-build-checksum-pipeline}
 - Install and repair paths still clear stale compatibility stamps and run full validation before handoff, then write a fresh stamp only after success. {#260506-launcher-hot-path-compatibility-cache}
@@ -31,8 +32,8 @@ related:
 
 ## Coupling
 
-- Add or rename an MCP tool: update `internal/mcp/server.go` dispatch, `tools()` schema, tests, `agents-plugin/runtime.json`, and any skill guidance that names the tool.
-- Add or rename a CLI command: update `cmd/ws-mcp/main.go`, command tests, `runtime.json.commands`, launcher command probing assumptions, and docs. {#260505-runtime-cli-entrypoints}
+- Add or rename an MCP tool: update `internal/mcp/server.go` dispatch, `tools()` schema, tests, `agents-plugin/runtime.json`, and any skill guidance that names the tool; the capabilities fast path will compare `runtime.json` against the lead tool registry.
+- Add or rename a CLI command: update `cmd/ws-mcp/main.go`, `runtimeCapabilityCommandNames`, command tests, `runtime.json.commands`, launcher command probing assumptions, and docs. {#260505-runtime-cli-entrypoints}
 - Edit embedded prompts: update `agents-plugin/runtime.json` prompt bundle hash/list or build release assets so the script rewrites it.
 - Change `.mcp.json` timeouts or command path: verify installed plugin cache startup, not only source-tree execution.
 
@@ -47,6 +48,7 @@ related:
 - Removing `.mcp.json` `cwd: "."` makes Codex resolve `./bin/ws-mcp-launcher.py` from the workspace instead of the plugin cache.
 - Treating `runtime.json` as release notes leaves launcher repair with stale tool, command, or prompt-bundle expectations.
 - Treating the compatibility stamp as sufficient after changing validation logic, `runtime.json`, or the binary identity; the stamp should force a miss unless the validated contract/binary pair is unchanged.
+- Adding a launcher-required CLI command only to `runtime.json.commands`; the capabilities fast path has a separate manually maintained command list.
 - Printing debug output to stdout from the launcher breaks MCP startup.
 - Assuming Windows plugin-managed startup works without `python3`; the shared launcher needs an installed Python 3 interpreter on native Windows. {#260505-windows-plugin-managed-startup}
 
