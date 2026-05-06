@@ -24,7 +24,7 @@ related:
 - Claude and Codex skills are parallel, not identical. Porting must preserve host-specific notation while keeping workflow semantics aligned.
 - `lead-proceed` routes through prefix stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
 - `lead-write-ticket` runs the spec gate only when non-`epic`, non-`research` work enters `ready/`; `todo/` is accepted backlog with optional spec recovery hints. {#260505-planning-workflow-skills}
-- `lead-bootstrap` has two template contracts: root context and `WORKFLOW.template.md`. Fresh and upgrade paths must install or preserve `ai-docs/workflow/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
+- `lead-bootstrap` has two template contracts: root context and `WORKFLOW.md`. Fresh and upgrade paths must install or preserve `ai-docs/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
 - `lead-write-code` uses brief-bounded implementation and file-based reviewer output; reviewer allocation is risk-scoped, reviewers return summaries, and implementers read finding files directly. {#260505-implementation-workflow-skills}
 - Sprint defers doc pipeline until wrap-up; per-task doc updates inside sprint create partial checkpoints that confuse wrap-up. {#260505-sprint-session-container}
 
@@ -46,7 +46,7 @@ related:
 
 - Treating `lead-proceed` as an implementation skill; it routes, sends `todo/` tickets through ready promotion, and does not read source.
 - Skipping `lead-workflow-manual` before editing workflow skills, which causes notation drift back to Claude shell helpers.
-- Editing downstream `ai-docs/workflow/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
+- Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
 - Relaying reviewer file contents instead of file paths, which breaks the write-code review protocol and inflates lead context.
 

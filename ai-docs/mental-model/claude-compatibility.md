@@ -23,7 +23,7 @@ related:
 
 - Shared workflow semantics belong in `AGENTS.md`; Claude-only files are compatibility adapters.
 - The installed Claude plugin is a snapshot under the user's Claude plugin cache; live edits under `claude-plugin/` require update/install before Claude sees them.
-- Claude bootstrap has its own `WORKFLOW.template.md` mirror and installs `ai-docs/workflow/WORKFLOW.md`, but the copied guide is only a plugin-less maintenance fallback; it must not become a Claude-specific authority over ws runtime or parser behavior. {#260506-bootstrap-workflow-guide}
+- Claude bootstrap has its own `WORKFLOW.md` mirror and installs `ai-docs/WORKFLOW.md`, but the copied guide is only a plugin-less maintenance fallback; it must not become a Claude-specific authority over ws runtime or parser behavior. {#260506-bootstrap-workflow-guide}
 - Every new `claude-plugin/bin/` script needs a Windows-compatible `.cmd` shim. {#260505-claude-bin-windows-shims}
 - Legacy named-agent CLI state is Git-repo scoped and backend-specific. {#260505-claude-named-agent-cli-runtime}
 

@@ -14,7 +14,7 @@ Mode: $ARGUMENTS
 
 ## Invariants
 
-- Template sources are `${CLAUDE_SKILL_DIR}/CLAUDE.template.md` and `${CLAUDE_SKILL_DIR}/WORKFLOW.template.md` — read both before any action.
+- Template sources are `${CLAUDE_SKILL_DIR}/CLAUDE.template.md` and `${CLAUDE_SKILL_DIR}/WORKFLOW.md` — read both before any action.
 - Never overwrite project-specific sections: Architecture Rules, custom Code Standards entries, custom Project Knowledge entries.
 - Merge surgically. When template and project conflict, flag the conflict inline with `<!-- CONFLICT: ... -->` and move on — do not resolve silently.
 - Every migration item is idempotent — re-running on an already-migrated project produces no changes.
@@ -23,7 +23,7 @@ Mode: $ARGUMENTS
 
 ## On: invocation
 
-1. Read `${CLAUDE_SKILL_DIR}/CLAUDE.template.md` and `${CLAUDE_SKILL_DIR}/WORKFLOW.template.md`.
+1. Read `${CLAUDE_SKILL_DIR}/CLAUDE.template.md` and `${CLAUDE_SKILL_DIR}/WORKFLOW.md`.
 2. Read the current project's `AGENTS.md` and `CLAUDE.md` if they exist.
 3. Detect mode:
    - **fresh** — no `CLAUDE.md` exists. Scaffold from template.
@@ -39,8 +39,8 @@ Mode: $ARGUMENTS
    - `ai-docs/_index.md` (with memory-policy comment, skeleton headings)
    - `ai-docs/_index.local.md` (stub, add to `.gitignore`)
    - `ai-docs/tickets/` with status subdirectories: `idea/`, `todo/`, `ready/`, `.done/`, `.dropped/`
-   - `ai-docs/mental-model/`, `ai-docs/ref/`, `ai-docs/workflow/`
-4. Copy `${CLAUDE_SKILL_DIR}/WORKFLOW.template.md` to `ai-docs/workflow/WORKFLOW.md`.
+   - `ai-docs/mental-model/`, `ai-docs/ref/`
+4. Copy `${CLAUDE_SKILL_DIR}/WORKFLOW.md` to `ai-docs/WORKFLOW.md`.
 5. Add `ai-docs/_index.local.md` to `.gitignore` if not present.
 6. Set `<!-- Template Version: vNNNN -->` to latest version from template.
 7. Commit.

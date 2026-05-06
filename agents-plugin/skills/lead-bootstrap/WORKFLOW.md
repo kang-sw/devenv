@@ -1,6 +1,6 @@
 # ws Workflow Guide
 
-This guide is copied to `ai-docs/workflow/WORKFLOW.md` by bootstrap so a
+This guide is copied to `ai-docs/WORKFLOW.md` by bootstrap so a
 maintainer can preserve the project shape when ws skills or MCP tools are not
 available. It is an explanation and manual fallback only: editing this file does
 not change MCP parser behavior, plugin/runtime semantics, ticket status logic,
@@ -15,7 +15,7 @@ template rather than relying on a project-local guide override.
 - `AGENTS.md` is the canonical root workflow context for agents.
 - `CLAUDE.md` exists only for Claude compatibility and should contain
   `@AGENTS.md` when the project has migrated to the host-neutral context.
-- `ai-docs/workflow/WORKFLOW.md` is this pinned guide for plugin-less
+- `ai-docs/WORKFLOW.md` is this pinned guide for plugin-less
   maintenance. Keep root context short; put durable project context in
   `ai-docs/_index.md` and workflow-system changes in upstream tooling.
 
@@ -30,7 +30,7 @@ template rather than relying on a project-local guide override.
 - `mental-model.md` and `mental-model/` store modification-relevant operational
   knowledge and domain rules.
 - `ref/` stores static references that are not active workflow state.
-- `workflow/` stores this human-readable fallback guide.
+- `WORKFLOW.md` is this human-readable fallback guide.
 
 ## Tickets
 

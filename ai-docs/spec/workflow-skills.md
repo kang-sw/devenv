@@ -157,7 +157,7 @@ and writes it to the appropriate authority document.
 the canonical workflow context while preserving Claude compatibility through a
 shim when needed.
 
-Bootstrap installs a project-local workflow guide under `ai-docs/workflow/` and
+Bootstrap installs a project-local workflow guide as `ai-docs/WORKFLOW.md` and
 points `AGENTS.md` at it. The guide is a pinned explanation of the ws workflow
 contract for plugin-less maintainers: it explains the document layers, ticket
 lifecycle, spec stems, mental models, commit traceability, and manual fallback
