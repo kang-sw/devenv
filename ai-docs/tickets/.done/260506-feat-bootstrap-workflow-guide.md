@@ -9,6 +9,7 @@ related-mental-model:
   - workflow-skills
   - documentation-system
   - claude-compatibility
+completed: 2026-05-06
 ---
 
 # Bootstrap project-local workflow guide
@@ -58,3 +59,16 @@ Success criteria:
 - The guide states that runtime/plugin semantics remain canonical and local
   deviations need explicit supported extension points.
 - Existing bootstrap idempotency and migration behavior remain intact.
+
+### Result (5472921) - 2026-05-06
+
+Implemented through merge `5472921`. Codex and Claude bootstrap packages now
+carry fixed `WORKFLOW.md` source documents and install them as
+`ai-docs/WORKFLOW.md`. Root templates point readers at that guide while keeping
+`AGENTS.md` concise and preserving `CLAUDE.md` as an `@AGENTS.md` compatibility
+shim. Template version advanced to `v0036`.
+
+The guide is 92 lines in both packages and explicitly remains explanatory:
+plugin/runtime semantics and MCP parser behavior stay canonical. Correctness and
+fit reviews were clean after one fix cycle and a focused re-review of the final
+`ai-docs/WORKFLOW.md` path/source-name tweak.

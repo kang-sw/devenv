@@ -192,7 +192,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260506-feat-bootstrap-workflow-guide` | ready | Install a project-local workflow guide for plugin-less downstream maintainers |
 | `260503-feat-agents-plugin-runtime-boundary` | ready | Go stdio MCP/runtime boundary; Python launcher smoke in progress |
 | `260506-bug-ws-mcp-launcher-startup-delay` | ready | Launcher hot-path cache and runtime capabilities probe done; timeout mitigation remains optional follow-up |
 | `260505-feat-agent-backend-failure-diagnostics` | ready | Improve named-agent backend failure diagnostics |
@@ -207,7 +206,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-`260506-feat-bootstrap-workflow-guide` - add bootstrap-managed `ai-docs/workflow/WORKFLOW.md` and root-context pointers so plugin-less downstream maintainers can preserve the ws workflow shape.
 `260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; Python launcher is the current shared startup path and needs installed-cache verification on Windows after Python 3 is available.
 `260506-bug-ws-mcp-launcher-startup-delay` - Phases 1, 2, and 3 are done; Phase 4 startup timeout mitigation remains optional upgrade-buffer scope after release validation.
 `260505-feat-agent-backend-failure-diagnostics` - improve named-agent backend invocation failures with raw errors, PATH-detected backend hints, and explicit reconfiguration guidance.
