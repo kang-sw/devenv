@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.20.1 - 2026-05-06
+
+### Changed
+- Add bootstrap-managed `ai-docs/WORKFLOW.md` guidance so downstream projects
+  retain plugin-less workflow maintenance instructions while plugin/runtime
+  semantics remain canonical.
+- Clarify workflow primitive guidance around native ticket status moves and
+  `ws/git.commit`.
+
 ## v0.20.0 - 2026-05-06
 
 ### Changed
