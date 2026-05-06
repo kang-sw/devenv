@@ -97,7 +97,7 @@ When a spec heading's `{#slug}` changes, include `renamed-spec: <old-stem> → <
 - Before creating or editing tickets, load `/write-ticket` for conventions.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
   full path — stems stay stable across status moves.
-- Check `## Ticket Queue` in `ai-docs/_index.md` for the intended implementation order before starting a ticket.
+- Check `## Ticket Queue` in `ai-docs/_index.md` for the intended implementation order before starting implementation; it lists `ready/` work only.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>`
   and look for `## Ticket Updates` sections in matching commits.
 - **Language:** All AI-authored artifacts — documents, plans, commit messages, ticket entries,

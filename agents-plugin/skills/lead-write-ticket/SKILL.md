@@ -33,10 +33,11 @@ Target: user request
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** - skip `epic` and `research`; enforce ticket↔spec linkage for `ready/`, and treat `todo/` links as optional recovery hints:
-   a. Use `ws/specs.find` or `ws/specs.status` to confirm canonical stems.
-   b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
-   c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
+6. **Spec-stem check** - skip `epic` and `research`:
+   a. If status is `todo/`: preserve any existing `spec:` links as optional recovery hints; do not require stem discovery, do not fire `judge: missing-spec-entry`, and do not suppress the proceed prompt.
+   b. If status is `ready/`: use `ws/specs.find` or `ws/specs.status` to confirm canonical stems.
+   c. If status is `ready/`: ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
+   d. If status is `ready/`: remind that commits implementing this ticket should include a `## Spec` section with those stems.
 7. **Commit** - call `ws/git.commit(paths: ["<ticket-path>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed.
 8. **Proceed prompt** - suggest `ws:lead-proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 

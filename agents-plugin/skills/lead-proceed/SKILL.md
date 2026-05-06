@@ -15,7 +15,7 @@ Target: user request
 - Execution mode is single; split multi-scope work into separate tickets.
 - Always route implementation through `ws:lead-implement`.
 - Existing `ready/` ticket path skips `ws:lead-write-ticket`; existing `todo/` ticket path routes through ready promotion before implementation.
-- Actionable inline target invokes `ws:lead-write-ticket`, captures `Ticket:`, then continues.
+- Actionable inline target invokes `ws:lead-write-ticket`, captures `Ticket:`, then re-checks status; `todo/` output must promote to `ready/` before implementation.
 - Exploratory target stops and suggests `ws:lead-discuss`.
 - Announce routing before execution; chain stages without pausing for confirmation.
 - Prefix stages receive gate-suppression context in arguments.
@@ -39,7 +39,7 @@ Target: user request
 2. Apply `judge: needs-ticket`.
 3. If invoking `ws:lead-write-ticket`, append:
    `Chained from ws:lead-proceed - treat spec coverage as satisfied whether ws:lead-write-spec wrote anything or exited early.`
-4. If the target ticket status is `todo/`, stop implementation routing and invoke `ws:lead-discuss` for `todo/` -> `ready/` promotion.
+4. If the current or captured ticket status is `todo/`, stop implementation routing and invoke `ws:lead-discuss` for `todo/` -> `ready/` promotion. Continue only after the target path is `ready/`.
 5. Apply `judge: needs-skeleton`.
 6. Build pipeline:
    - No skeleton: `ws:lead-implement`.
@@ -67,7 +67,9 @@ Do not ask for confirmation; the user can interrupt.
 1. Invoke stages sequentially with the current target.
 2. After each stage, verify completion from committed artifacts or stage output.
 3. Stop on failure or user interruption.
-4. If `ws:lead-write-ticket` ran, use its `Ticket:` path downstream.
+4. If `ws:lead-write-ticket` ran, capture its `Ticket:` path before any downstream stage.
+5. If the captured path is under `ai-docs/tickets/todo/`, invoke `ws:lead-discuss` for `todo/` -> `ready/` promotion and stop; do not invoke skeleton or implementation.
+6. Use only `ready/` ticket paths downstream.
 
 ## Judgments
 

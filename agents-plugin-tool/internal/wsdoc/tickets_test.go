@@ -59,6 +59,29 @@ func TestTicketsListIncludeDoneAndDroppedAreSeparate(t *testing.T) {
 	}
 }
 
+func TestTicketsListAndFindAcceptReadyStatusFilter(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/ready/260504-ready-demo.md", "---\ntitle: Ready\n---\n# Shared query\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260504-todo-demo.md", "---\ntitle: Todo\n---\n# Shared query\n")
+	mustWrite(t, root, "ai-docs/tickets/idea/260504-idea-demo.md", "---\ntitle: Idea\n---\n# Shared query\n")
+
+	listed, err := TicketsList(root, TicketListOptions{Statuses: []string{"ready"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stems(listed) != "260504-ready-demo" || listed[0].Status != "ready" {
+		t.Fatalf("ready list filter = %#v", listed)
+	}
+
+	found, err := TicketsFind(root, TicketFindOptions{Statuses: []string{"ready"}, Query: "Shared query"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stems(found) != "260504-ready-demo" || found[0].Status != "ready" {
+		t.Fatalf("ready find filter = %#v", found)
+	}
+}
+
 func TestTicketsFindByMentionAndQuery(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/tickets/todo/260504-parent-demo.md", "---\ntitle: Parent\n---\n# Parent\n")

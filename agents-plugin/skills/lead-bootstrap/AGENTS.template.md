@@ -76,7 +76,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 - Project state and cross-session context live in `ai-docs/`.
 - Before creating or editing tickets, load the write-ticket workflow skill for conventions.
 - Reference tickets by stem only, never full path; stems survive status moves.
-- Check `## Ticket Queue` in `ai-docs/_index.md` before starting a ticket.
+- Check `## Ticket Queue` in `ai-docs/_index.md` before starting implementation; it lists `ready/` work only.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
 - Claude Code compatibility is `CLAUDE.md` containing `@AGENTS.md`.
 - **Language:** AI-authored docs, plans, commits, tickets, and code comments are English. Human-facing UI strings are exempt.

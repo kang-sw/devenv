@@ -36,10 +36,11 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** — skip `epic` and `research`; enforce ticket↔spec linkage for `ready/`, and treat `todo/` links as optional recovery hints:
-   a. Run `ws-list-spec-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
-   b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
-   c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
+6. **Spec-stem check** — skip `epic` and `research`:
+   a. If status is `todo/`: preserve any existing `spec:` links as optional recovery hints; do not require stem discovery, do not fire `judge: missing-spec-entry`, and do not suppress the proceed prompt.
+   b. If status is `ready/`: run `ws-list-spec-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
+   c. If status is `ready/`: ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
+   d. If status is `ready/`: remind that commits implementing this ticket should include a `## Spec` section with those stems.
 7. **Commit** — in a single Bash command, stage the ticket file (if `git mv` was used, `git add <new-path>` is sufficient) then commit:
    `git add <file> && git commit -m "$(cat <<'EOF'\n...\nEOF\n)"`. Do not use `git add -A`. Chaining in one invocation minimizes interleave risk from concurrent sessions.
 8. **Proceed prompt** — suggest `/proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
