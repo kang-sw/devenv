@@ -74,6 +74,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 ## Project Knowledge
 
 - Project state and cross-session context live in `ai-docs/`.
+- Workflow shape and plugin-less maintenance guidance live in `ai-docs/workflow/WORKFLOW.md`; it is explanatory and does not override ws runtime or MCP parser behavior.
 - Before creating or editing tickets, load the write-ticket workflow skill for conventions.
 - Reference tickets by stem only, never full path; stems survive status moves.
 - Check `## Ticket Queue` in `ai-docs/_index.md` before starting implementation; it lists `ready/` work only.
@@ -90,6 +91,7 @@ ai-docs/
   mental-model/      - contracts, coupling, architecture narrative
   spec/              - external-perspective specs
   ref/               - static reference material
+  workflow/          - plugin-less maintenance guide
   tickets/<status>/  - idea/ todo/ ready/ .done/ .dropped/
 
 CLAUDE.md compatibility shim:
@@ -157,6 +159,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
 - v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `ws:lead-discuss`.
+- v0036: If `ai-docs/workflow/WORKFLOW.md` is absent, create it from the bootstrap workflow guide template. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws runtime or MCP parser behavior.
 -->
 
-<!-- Template Version: v0035 -->
+<!-- Template Version: v0036 -->
