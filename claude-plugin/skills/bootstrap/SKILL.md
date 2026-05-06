@@ -14,7 +14,7 @@ Mode: $ARGUMENTS
 
 ## Invariants
 
-- Template source is `${CLAUDE_SKILL_DIR}/CLAUDE.template.md` — read it before any action.
+- Template sources are `${CLAUDE_SKILL_DIR}/CLAUDE.template.md` and `${CLAUDE_SKILL_DIR}/WORKFLOW.md` — read both before any action.
 - Never overwrite project-specific sections: Architecture Rules, custom Code Standards entries, custom Project Knowledge entries.
 - Merge surgically. When template and project conflict, flag the conflict inline with `<!-- CONFLICT: ... -->` and move on — do not resolve silently.
 - Every migration item is idempotent — re-running on an already-migrated project produces no changes.
@@ -23,8 +23,8 @@ Mode: $ARGUMENTS
 
 ## On: invocation
 
-1. Read `${CLAUDE_SKILL_DIR}/CLAUDE.template.md`.
-2. Read the current project's `CLAUDE.md` (if it exists).
+1. Read `${CLAUDE_SKILL_DIR}/CLAUDE.template.md` and `${CLAUDE_SKILL_DIR}/WORKFLOW.md`.
+2. Read the current project's `AGENTS.md` and `CLAUDE.md` if they exist.
 3. Detect mode:
    - **fresh** — no `CLAUDE.md` exists. Scaffold from template.
    - **upgrade** — `CLAUDE.md` exists with `<!-- Template Version: vNNNN -->`. Apply items where version > current.
@@ -40,10 +40,11 @@ Mode: $ARGUMENTS
    - `ai-docs/_index.local.md` (stub, add to `.gitignore`)
    - `ai-docs/tickets/` with status subdirectories: `idea/`, `todo/`, `ready/`, `.done/`, `.dropped/`
    - `ai-docs/mental-model/`, `ai-docs/ref/`
-4. Add `ai-docs/_index.local.md` to `.gitignore` if not present.
-5. Set `<!-- Template Version: vNNNN -->` to latest version from template.
-6. Commit.
-7. **Legacy detection**: check for absent documentation baselines and suggest forge skills as needed (output-only — do not invoke).
+4. Copy `${CLAUDE_SKILL_DIR}/WORKFLOW.md` to `ai-docs/WORKFLOW.md`.
+5. Add `ai-docs/_index.local.md` to `.gitignore` if not present.
+6. Set `<!-- Template Version: vNNNN -->` to latest version from template.
+7. Commit.
+8. **Legacy detection**: check for absent documentation baselines and suggest forge skills as needed (output-only — do not invoke).
    - `ai-docs/spec/` absent → suggest `/forge-spec` to build the spec baseline.
    - `ai-docs/mental-model/` absent → suggest `/forge-mental-model` to build the mental-model baseline.
    - Both absent → suggest `/forge-spec` first, then `/forge-mental-model`.
@@ -56,18 +57,18 @@ Mode: $ARGUMENTS
    - If marked `[obsoleted by vNNNN]`, skip.
    - Check the condition (e.g., "If X lacks Y").
    - If condition met, apply the change. If not, skip.
-4. After all items applied, update `<!-- Template Version: vNNNN -->` to latest.
-5. Sync non-project-specific template sections (Response Discipline, Workflow, Commit Rules) with latest template wording — use diff judgment.
+4. After all items applied, update `<!-- Template Version: vNNNN -->` in the canonical managed context (`AGENTS.md` after v0034, otherwise `CLAUDE.md`).
+5. Sync non-project-specific template sections (Response Discipline, Workflow, Commit Rules) and the workflow-guide Project Knowledge pointer in the canonical managed context — use diff judgment. After v0034, keep `CLAUDE.md` as the `@AGENTS.md` shim.
 6. Commit.
 
 ## On: adopt
 
-1. Follow v0031: review v0001 through latest against current project state.
+1. Review v0001 through latest against current project state.
 2. For each item, check whether already satisfied; apply only what's missing.
-3. Add `<!-- Template Version: vNNNN -->` at bottom of CLAUDE.md set to latest.
+3. Add `<!-- Template Version: vNNNN -->` at the bottom of the canonical managed context (`AGENTS.md` if present, otherwise `CLAUDE.md`) set to latest.
 4. Proceed to **upgrade** handler for any remaining sync.
 5. Commit.
-6. **Legacy detection**: same as On: fresh step 7 — check for absent `ai-docs/spec/` and `ai-docs/mental-model/`; suggest forge skills as needed (output-only).
+6. **Legacy detection**: same as On: fresh step 8 — check for absent `ai-docs/spec/` and `ai-docs/mental-model/`; suggest forge skills as needed (output-only).
 
 ## Judgments
 

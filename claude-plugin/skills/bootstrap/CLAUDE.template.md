@@ -94,6 +94,7 @@ When a spec heading's `{#slug}` changes, include `renamed-spec: <old-stem> → <
 ## Project Knowledge
 
 - Project state and cross-session context live in `ai-docs/`.
+- Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; it is explanatory and does not override ws runtime or parser behavior.
 - Before creating or editing tickets, load `/write-ticket` for conventions.
 - Reference tickets by **stem only** (e.g., `260115-feat-foo-bar`), never by
   full path — stems stay stable across status moves.
@@ -113,6 +114,7 @@ ai-docs/
   mental-model/      — project map: contracts, coupling, architectural narrative
   spec/              — external-perspective specs (area/ directories for multi-section areas)
   ref/               — static reference material (external specs, protocol docs, design notes)
+  WORKFLOW.md        — plugin-less maintenance guide
   tickets/<status>/  — idea/ todo/ ready/ .done/ .dropped/
 
 _index.md should cover:
@@ -274,6 +276,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
 - v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
 - v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `/discuss`.
+- v0036: If `ai-docs/WORKFLOW.md` is absent, create it from the bootstrap workflow guide source. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws runtime or parser behavior.
 -->
 
-<!-- Template Version: v0035 -->
+<!-- Template Version: v0036 -->

@@ -31,9 +31,9 @@ MCP/runtime behavior.
 
 ### Phase 1: Install workflow guide through bootstrap
 
-Add a concise `WORKFLOW.md` template for downstream projects and update
-bootstrap-managed context so fresh and upgraded projects install it under
-`ai-docs/workflow/`.
+Add a concise `WORKFLOW.md` source document for downstream projects and update
+bootstrap-managed context so fresh and upgraded projects install it as
+`ai-docs/WORKFLOW.md`.
 
 The guide should stay under 200 lines and explain enough for a maintainer to
 keep the project usable when the ws plugin is absent:
@@ -53,7 +53,7 @@ semantics out of the plugin/runtime contract. Keep Claude compatibility as the
 
 Success criteria:
 
-- Fresh bootstrap output includes `ai-docs/workflow/WORKFLOW.md`.
+- Fresh bootstrap output includes `ai-docs/WORKFLOW.md`.
 - `AGENTS.md` tells readers where the project-local workflow guide lives.
 - The guide states that runtime/plugin semantics remain canonical and local
   deviations need explicit supported extension points.

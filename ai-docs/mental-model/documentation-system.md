@@ -22,6 +22,7 @@ related:
 - Ticket status is directory state: `ready/`, `todo/`, and `idea/` are active; `.done` and `.dropped` are invisible unless discovery calls opt in. {#260505-ticket-document-system}
 - Mental-model hierarchy is path-derived; subdomain callers must load parent `index.md` before child docs. {#260505-mental-model-document-system}
 - Convention docs are embedded in the Go runtime; editing only `claude-plugin/infra/*` leaves `ws/convention.read` stale.
+- `ai-docs/WORKFLOW.md` is bootstrap-installed explanatory documentation for plugin-less maintenance; wsdoc parsers and MCP tools do not treat it as convention, spec, ticket, or runtime input. {#260506-bootstrap-workflow-guide}
 
 ## Coupling
 
@@ -41,6 +42,7 @@ related:
 - Adding spec anchors manually without checking for duplicates.
 - Promoting non-epic, non-research work into `ready/` without matching spec entry/stem linkage.
 - Using full YAML features in frontmatter; the parser is deliberately minimal.
+- Changing workflow semantics in the downstream workflow guide instead of the canonical plugin/runtime, bundled conventions, or bootstrap templates.
 - Loading mental-model child docs without ancestors and missing inherited Domain Rules.
 
 ## Technical Debt
