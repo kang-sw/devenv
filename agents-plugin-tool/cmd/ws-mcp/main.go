@@ -104,6 +104,8 @@ func runtime(args []string) {
 	switch args[0] {
 	case "info":
 		runtimeInfo(args[1:])
+	case "capabilities":
+		runtimeCapabilities(args[1:])
 	default:
 		runtimeUsage()
 		os.Exit(2)
@@ -111,7 +113,7 @@ func runtime(args []string) {
 }
 
 func runtimeUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp runtime <info>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp runtime <info|capabilities>")
 }
 
 func runtimeInfo(args []string) {
@@ -130,6 +132,40 @@ func runtimeInfo(args []string) {
 		fmt.Printf("%q", prompt)
 	}
 	fmt.Println("]}}")
+}
+
+type runtimeCapabilitiesPayload struct {
+	Version      string              `json:"version"`
+	SourceCommit string              `json:"source_commit"`
+	MCPProtocol  string              `json:"mcp_protocol"`
+	PromptBundle wsprompt.BundleInfo `json:"prompt_bundle"`
+	Tools        []string            `json:"tools"`
+	Commands     []string            `json:"commands"`
+}
+
+func runtimeCapabilities(args []string) {
+	fs := flag.NewFlagSet("runtime capabilities", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	bundle, err := wsprompt.Bundle(sourceCommit)
+	if err != nil {
+		fatal("runtime capabilities", err)
+	}
+	payload := runtimeCapabilitiesPayload{
+		Version:      version,
+		SourceCommit: sourceCommit,
+		MCPProtocol:  mcp.ProtocolVersion,
+		PromptBundle: bundle,
+		Tools:        mcp.LeadToolNames(),
+		Commands:     runtimeCapabilityCommandNames(),
+	}
+	printJSONOrFatal("runtime capabilities", payload, nil)
+}
+
+func runtimeCapabilityCommandNames() []string {
+	// TODO(260506-runtime-capabilities-single-probe): enumerate the public CLI
+	// command surface required by agents-plugin/runtime.json.
+	return []string{}
 }
 
 func subquery(args []string) {

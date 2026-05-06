@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,6 +32,60 @@ func TestDefaultRootPreservesDotWithoutProjectEnv(t *testing.T) {
 	t.Setenv("WS_MCP_PROJECT_ROOT", "")
 	if got := defaultRoot("."); got != "." {
 		t.Fatalf("defaultRoot without env = %q", got)
+	}
+}
+
+func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	contract := readRuntimeContractTest(t)
+	cmd := exec.Command(bin, "runtime", "capabilities")
+	cmd.Env = append(os.Environ(), "WS_MCP_TOOL_PROFILE=leaf", "WS_MCP_ALLOWED_TOOLS=project_tree")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("ws-mcp runtime capabilities failed: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runtime capabilities wrote diagnostics on success: %q", stderr.String())
+	}
+
+	var got struct {
+		Version      string `json:"version"`
+		SourceCommit string `json:"source_commit"`
+		MCPProtocol  string `json:"mcp_protocol"`
+		PromptBundle struct {
+			SourceCommit  string   `json:"source_commit"`
+			ContentSHA256 string   `json:"content_sha256"`
+			Prompts       []string `json:"prompts"`
+		} `json:"prompt_bundle"`
+		Tools    []string `json:"tools"`
+		Commands []string `json:"commands"`
+	}
+	mustUnmarshalCLIJSON(t, out, &got)
+	if got.Version == "" || got.SourceCommit == "" {
+		t.Fatalf("runtime capabilities missing version/source_commit: %#v", got)
+	}
+	if got.MCPProtocol != contract.MCPProtocol {
+		t.Fatalf("mcp_protocol = %q, want %q", got.MCPProtocol, contract.MCPProtocol)
+	}
+	if got.PromptBundle.ContentSHA256 != contract.PromptBundle.ContentSHA256 || len(got.PromptBundle.Prompts) == 0 {
+		t.Fatalf("prompt bundle = %#v, want hash %q with prompt list", got.PromptBundle, contract.PromptBundle.ContentSHA256)
+	}
+	wantTools := sortedMapKeys(contract.Tools)
+	slices.Sort(got.Tools)
+	if !slices.Equal(got.Tools, wantTools) {
+		t.Fatalf("tools = %v, want full lead runtime contract tools %v", got.Tools, wantTools)
+	}
+	wantCommands := sortedMapKeys(contract.Commands)
+	slices.Sort(got.Commands)
+	if !slices.Equal(got.Commands, wantCommands) {
+		t.Fatalf("commands = %v, want runtime contract commands %v", got.Commands, wantCommands)
 	}
 }
 
@@ -245,6 +301,38 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	if after.Path != wantConfigPath() || light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
 		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
 	}
+}
+
+type runtimeContractTest struct {
+	MCPProtocol  string `json:"mcp_protocol"`
+	PromptBundle struct {
+		ContentSHA256 string `json:"content_sha256"`
+	} `json:"prompt_bundle"`
+	Tools    map[string]string `json:"tools"`
+	Commands map[string]string `json:"commands"`
+}
+
+func readRuntimeContractTest(t *testing.T) runtimeContractTest {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "agents-plugin", "runtime.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract runtimeContractTest
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatal(err)
+	}
+	return contract
+}
+
+func sortedMapKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 func wsMCPTestBin(t *testing.T) string {

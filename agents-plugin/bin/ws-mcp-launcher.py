@@ -350,9 +350,17 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
         install_downloaded_runtime(binary, runtime_dir, asset, contract)
 
 
+def runtime_capabilities_compatible(binary: Path, contract: dict) -> bool:
+    # TODO(260506-runtime-capabilities-single-probe): run
+    # `ws-mcp runtime capabilities` once and validate version, MCP protocol,
+    # prompt bundle, full lead MCP tools, and CLI commands from its JSON payload.
+    return False
+
 def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path) -> bool:
     if not binary.is_file():
         return False
+    if runtime_capabilities_compatible(binary, contract):
+        return True
     try:
         proc = run_binary(binary, ["version"])
     except Exception:

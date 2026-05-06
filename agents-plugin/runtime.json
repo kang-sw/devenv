@@ -76,6 +76,7 @@
   },
   "commands": {
     "runtime.info": ">=0.18.1-dev <0.19.0",
+    "runtime.capabilities": ">=0.18.1-dev <0.19.0",
     "config.show": ">=0.18.1-dev <0.19.0",
     "config.agents-tier": ">=0.18.1-dev <0.19.0",
     "subquery": ">=0.18.1-dev <0.19.0",

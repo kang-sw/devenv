@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +64,8 @@ type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
+
+const ProtocolVersion = "2025-03-26"
 
 const maxDebugEvents = 256
 
@@ -166,7 +169,7 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
-			"protocolVersion": "2025-03-26",
+			"protocolVersion": ProtocolVersion,
 			"serverInfo": map[string]string{
 				"name":    "ws-mcp",
 				"version": s.version,
@@ -1382,6 +1385,18 @@ func tools() []map[string]any {
 			},
 		},
 	}
+}
+
+func LeadToolNames() []string {
+	names := make([]string, 0, len(tools()))
+	for _, tool := range tools() {
+		name, _ := tool["name"].(string)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (s *Server) filteredTools() []map[string]any {
