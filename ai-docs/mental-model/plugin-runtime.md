@@ -23,7 +23,9 @@ related:
 - The launcher writes diagnostics to stderr only; any stdout before `exec "$binary" "$@"` corrupts stdio MCP JSON-RPC.
 - `.mcp.json` cwd is the plugin cache, so repo root defaults must flow through `WS_MCP_PROJECT_ROOT`, not process cwd.
 - `runtime.json` tool names, command names, and prompt bundle metadata are compared against the binary by the launcher; stale names or prompt metadata can make a working binary get replaced or rejected.
+- The launcher's `.compatibility.json` stamp is a hot-path optimization, not a new trust boundary: only an exact stamp keyed to `runtime.json` content plus resolved binary path, size, and mtime can skip full validation; unreadable, missing, or mismatched stamps fail closed into `runtime_fully_compatible`. {#260506-launcher-hot-path-compatibility-cache}
 - Release repair requires matching binary asset names and `SHA256SUMS`; local dev repair is gated to the local installed plugin cache, `.local-devenv-runtime`, and non-Windows platforms. {#260505-release-asset-build-checksum-pipeline}
+- Install and repair paths still clear stale compatibility stamps and run full validation before handoff, then write a fresh stamp only after success. {#260506-launcher-hot-path-compatibility-cache}
 - Version changes are multi-file and should use the bump helper rather than editing manifests manually. {#260505-runtime-version-bump-helper}
 - Runtime install/repair has explicit override env vars: `WS_MCP_RUNTIME_DIR`, release repository/tag/base URL overrides, and bootstrap binary/URL/checksum overrides.
 
@@ -44,6 +46,7 @@ related:
 
 - Removing `.mcp.json` `cwd: "."` makes Codex resolve `./bin/ws-mcp-launcher.py` from the workspace instead of the plugin cache.
 - Treating `runtime.json` as release notes leaves launcher repair with stale tool, command, or prompt-bundle expectations.
+- Treating the compatibility stamp as sufficient after changing validation logic, `runtime.json`, or the binary identity; the stamp should force a miss unless the validated contract/binary pair is unchanged.
 - Printing debug output to stdout from the launcher breaks MCP startup.
 - Assuming Windows plugin-managed startup works without `python3`; the shared launcher needs an installed Python 3 interpreter on native Windows. {#260505-windows-plugin-managed-startup}
 
