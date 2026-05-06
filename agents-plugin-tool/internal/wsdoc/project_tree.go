@@ -148,7 +148,7 @@ func specStats(fm map[string]any) (int, int, []string) {
 func renderTickets(b *strings.Builder, ticketsRoot string) {
 	b.WriteString("tickets:\n")
 	anyTicket := false
-	for _, status := range []string{"todo", "idea"} {
+	for _, status := range []string{"ready", "todo", "idea"} {
 		statusDir := filepath.Join(ticketsRoot, status)
 		if !isDir(statusDir) {
 			continue
@@ -203,7 +203,7 @@ func titleSuffix(stem, ticketsRoot string) string {
 }
 
 func ticketTitle(stem, ticketsRoot string) string {
-	for _, status := range []string{"todo", "idea", "wip", ".done", ".dropped"} {
+	for _, status := range []string{"ready", "todo", "idea", "wip", ".done", ".dropped"} {
 		path := filepath.Join(ticketsRoot, status, stem+".md")
 		if _, err := os.Stat(path); err == nil {
 			title, _ := frontmatter(path)["title"].(string)

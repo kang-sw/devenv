@@ -13,7 +13,7 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	mustWrite(t, root, "ai-docs/ref/guide.md", "# Guide\n")
 	mustWrite(t, root, "ai-docs/spec/demo.md", "---\ntitle: Demo\nfeatures:\n  - done {#260503-done}\n  - 🚧 pending [260503-feat-demo/p1]\n---\n# Demo\n")
-	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo ticket\nparent: 260503-epic-demo\nrelated:\n  260503-research-demo: source\n---\n# Demo ticket\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260503-feat-demo.md", "---\ntitle: Demo ticket\nparent: 260503-epic-demo\nrelated:\n  260503-research-demo: source\n---\n# Demo ticket\n")
 	mustWrite(t, root, "ai-docs/tickets/idea/260503-research-demo.md", "---\ntitle: Research demo\n---\n# Research demo\n")
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-epic-demo.md", "---\ntitle: Epic demo\n---\n# Epic demo\n")
 
@@ -28,7 +28,7 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 		"spec:",
 		"  demo.md  - Demo  [2f, WIP 1 -> 260503-feat-demo/p1]",
 		"tickets:",
-		"  [todo] 260503-feat-demo",
+		"  [ready] 260503-feat-demo",
 		"      parent: 260503-epic-demo  # Epic demo",
 		"      related: 260503-research-demo  # source · Research demo",
 	} {

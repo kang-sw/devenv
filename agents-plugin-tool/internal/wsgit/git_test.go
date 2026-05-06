@@ -334,6 +334,17 @@ func TestParseTicketNameStatusDetectsMoves(t *testing.T) {
 	}
 }
 
+func TestParseTicketNameStatusDetectsReadyMoves(t *testing.T) {
+	changes := parseTicketNameStatus([]byte("R100\tai-docs/tickets/todo/260503-feat-demo.md\tai-docs/tickets/ready/260503-feat-demo.md\n"))
+	if len(changes) != 1 {
+		t.Fatalf("changes = %#v", changes)
+	}
+	change := changes[0]
+	if change.Stem != "260503-feat-demo" || change.FromStatus != "todo" || change.ToStatus != "ready" || change.OldPath == "" {
+		t.Fatalf("change = %#v", change)
+	}
+}
+
 func TestParseTicketResultAdditions(t *testing.T) {
 	changes := parseTicketResultAdditions([]byte("diff --git a/ai-docs/tickets/todo/260503-feat-demo.md b/ai-docs/tickets/todo/260503-feat-demo.md\n+++ b/ai-docs/tickets/todo/260503-feat-demo.md\n+### Result (abc123) - 2026-05-04\n+body\n"))
 	if len(changes) != 1 || changes[0].Stem != "260503-feat-demo" || changes[0].ResultHeading != "### Result (abc123) - 2026-05-04" {

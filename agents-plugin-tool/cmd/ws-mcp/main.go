@@ -447,7 +447,7 @@ func ticketsList(args []string) {
 	includeDone := fs.Bool("include-done", false, "include ai-docs/tickets/.done")
 	includeDropped := fs.Bool("include-dropped", false, "include ai-docs/tickets/.dropped")
 	var statuses multiFlag
-	fs.Var(&statuses, "status", "ticket status to scan; may be repeated")
+	fs.Var(&statuses, "status", "ticket status to scan (ready, todo, idea; archives require include flags); may be repeated")
 	_ = fs.Parse(args)
 
 	result, err := wsdoc.TicketsList(defaultRoot(*root), wsdoc.TicketListOptions{
@@ -467,7 +467,7 @@ func ticketsFind(args []string) {
 	includeDone := fs.Bool("include-done", false, "include ai-docs/tickets/.done")
 	includeDropped := fs.Bool("include-dropped", false, "include ai-docs/tickets/.dropped")
 	var statuses multiFlag
-	fs.Var(&statuses, "status", "ticket status to scan; may be repeated")
+	fs.Var(&statuses, "status", "ticket status to scan (ready, todo, idea; archives require include flags); may be repeated")
 	_ = fs.Parse(args)
 
 	result, err := wsdoc.TicketsFind(defaultRoot(*root), wsdoc.TicketFindOptions{

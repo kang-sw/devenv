@@ -5,8 +5,8 @@ import "testing"
 func TestTicketsListDefaultsToActiveStatuses(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/tickets/idea/260504-idea-demo.md", "---\ntitle: Idea demo\n---\n# Idea\n")
-	mustWrite(t, root, "ai-docs/tickets/todo/260504-todo-demo.md", "---\ntitle: Todo demo\nparent: 260504-epic-demo\nrelated:\n  260504-idea-demo: source\nspec:\n  - 260504-spec-demo\nspec-remove: 260504-old-spec\nplans:\n  - ai-docs/.plans/demo.md\nskeletons:\n  - agents-plugin-tool/internal/demo.go\n---\n# Todo\n\n## Phases\n\n### Phase 1: First\n\n### Result (abc123) - 2026-05-04\n\nDone.\n\n### Phase 2: Second\n")
-	mustWrite(t, root, "ai-docs/tickets/wip/260504-wip-demo.md", "---\ntitle: WIP demo\n---\n# WIP\n")
+	mustWrite(t, root, "ai-docs/tickets/ready/260504-ready-demo.md", "---\ntitle: Todo demo\nparent: 260504-epic-demo\nrelated:\n  260504-idea-demo: source\nspec:\n  - 260504-spec-demo\nspec-remove: 260504-old-spec\nplans:\n  - ai-docs/.plans/demo.md\nskeletons:\n  - agents-plugin-tool/internal/demo.go\n---\n# Todo\n\n## Phases\n\n### Phase 1: First\n\n### Result (abc123) - 2026-05-04\n\nDone.\n\n### Phase 2: Second\n")
+	mustWrite(t, root, "ai-docs/tickets/todo/260504-todo-demo.md", "---\ntitle: Todo backlog\n---\n# Todo backlog\n")
 	mustWrite(t, root, "ai-docs/tickets/.done/260504-done-demo.md", "---\ntitle: Done demo\ncompleted: 2026-05-04\n---\n# Done\n")
 	mustWrite(t, root, "ai-docs/tickets/.dropped/260504-dropped-demo.md", "---\ntitle: Dropped demo\n---\n# Dropped\n")
 
@@ -14,25 +14,25 @@ func TestTicketsListDefaultsToActiveStatuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TicketsList returned error: %v", err)
 	}
-	if stems(got) != "260504-idea-demo,260504-todo-demo,260504-wip-demo" {
+	if stems(got) != "260504-ready-demo,260504-todo-demo,260504-idea-demo" {
 		t.Fatalf("default stems = %s", stems(got))
 	}
 
-	todo := findTicket(t, got, "260504-todo-demo")
-	if todo.Path != "ai-docs/tickets/todo/260504-todo-demo.md" || todo.Status != "todo" || todo.Title != "Todo demo" {
-		t.Fatalf("todo metadata = %#v", todo)
+	ready := findTicket(t, got, "260504-ready-demo")
+	if ready.Path != "ai-docs/tickets/ready/260504-ready-demo.md" || ready.Status != "ready" || ready.Title != "Todo demo" {
+		t.Fatalf("ready metadata = %#v", ready)
 	}
-	if todo.Parent != "260504-epic-demo" || todo.Related["260504-idea-demo"] != "source" {
-		t.Fatalf("todo relationships = %#v", todo)
+	if ready.Parent != "260504-epic-demo" || ready.Related["260504-idea-demo"] != "source" {
+		t.Fatalf("ready relationships = %#v", ready)
 	}
-	if joined(todo.Specs) != "260504-spec-demo" || joined(todo.SpecRemoves) != "260504-old-spec" {
-		t.Fatalf("todo specs = %#v %#v", todo.Specs, todo.SpecRemoves)
+	if joined(ready.Specs) != "260504-spec-demo" || joined(ready.SpecRemoves) != "260504-old-spec" {
+		t.Fatalf("todo specs = %#v %#v", ready.Specs, ready.SpecRemoves)
 	}
-	if joined(todo.Plans) != "ai-docs/.plans/demo.md" || joined(todo.Skeletons) != "agents-plugin-tool/internal/demo.go" {
-		t.Fatalf("todo artifacts = %#v %#v", todo.Plans, todo.Skeletons)
+	if joined(ready.Plans) != "ai-docs/.plans/demo.md" || joined(ready.Skeletons) != "agents-plugin-tool/internal/demo.go" {
+		t.Fatalf("todo artifacts = %#v %#v", ready.Plans, ready.Skeletons)
 	}
-	if !todo.ResultPresent || joined(todo.UnresolvedPhases) != "Phase 2: Second" {
-		t.Fatalf("todo phases = %#v", todo)
+	if !ready.ResultPresent || joined(ready.UnresolvedPhases) != "Phase 2: Second" {
+		t.Fatalf("ready phases = %#v", ready)
 	}
 }
 
