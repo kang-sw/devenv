@@ -197,6 +197,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260506-bug-ws-mcp-launcher-startup-delay` | todo | Launcher hot-path cache and runtime capabilities probe done; timeout mitigation remains optional follow-up |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
+| `260506-feat-ready-ticket-status` | idea | Split accepted backlog from spec-gated implementation queue with a new `ready/` status |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
