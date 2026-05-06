@@ -98,6 +98,16 @@ Success criteria:
   handoff.
 - Launcher stdout remains reserved for MCP JSON-RPC.
 
+### Result (d3ae5c9) - 2026-05-06
+
+The Python launcher now stores the initial compatibility result in `main()` and
+only reruns full validation after install or repair changes the runtime binary.
+Compatible installed runtimes no longer perform the duplicated full preflight.
+
+Verification used a fake-runtime smoke that counted launcher subprocesses and a
+real source-tree launcher smoke. The fake runtime showed first startup using the
+full validation path and second startup skipping back to final handoff.
+
 ### Phase 2: Add a compatibility stamp for hot-path reuse
 
 Add a launcher-managed compatibility stamp keyed by the runtime contract and the
@@ -121,6 +131,20 @@ Success criteria:
 - Later startups with unchanged runtime and contract skip expensive validation.
 - Corrupt, missing, or stale stamps fail closed into full validation.
 - Stamp writes do not print to stdout and do not corrupt stdio MCP startup.
+
+### Result (d3ae5c9) - 2026-05-06
+
+Added a launcher-managed `.compatibility.json` stamp under the selected runtime
+directory. The stamp records schema version, runtime contract hash, plugin
+version, required MCP range, runtime binary path, size, and mtime. Matching
+stamps skip full validation; missing, unreadable, stale, or mismatched stamps
+fall back to full validation. Install and repair paths clear the stamp and write
+a new one only after the replacement runtime validates successfully.
+
+Verification confirmed that touching the runtime binary invalidates the stamp
+and forces the full validation path again. Real source-tree `version` and stdio
+`tools/list` smokes passed with cached compatibility and no launcher stdout
+pollution.
 
 ### Phase 3: Add a single runtime capability command
 
