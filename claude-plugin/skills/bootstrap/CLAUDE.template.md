@@ -276,7 +276,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
 - v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
 - v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `/discuss`.
-- v0036: If `ai-docs/workflow/WORKFLOW.md` is absent, create it from the bootstrap workflow guide template. If `CLAUDE.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws runtime or parser behavior.
+- v0036: If `ai-docs/workflow/WORKFLOW.md` is absent, create it from the bootstrap workflow guide template. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws runtime or parser behavior.
 -->
 
 <!-- Template Version: v0036 -->

@@ -24,7 +24,7 @@ Mode: $ARGUMENTS
 ## On: invocation
 
 1. Read `${CLAUDE_SKILL_DIR}/CLAUDE.template.md` and `${CLAUDE_SKILL_DIR}/WORKFLOW.template.md`.
-2. Read the current project's `CLAUDE.md` (if it exists).
+2. Read the current project's `AGENTS.md` and `CLAUDE.md` if they exist.
 3. Detect mode:
    - **fresh** — no `CLAUDE.md` exists. Scaffold from template.
    - **upgrade** — `CLAUDE.md` exists with `<!-- Template Version: vNNNN -->`. Apply items where version > current.
@@ -57,15 +57,15 @@ Mode: $ARGUMENTS
    - If marked `[obsoleted by vNNNN]`, skip.
    - Check the condition (e.g., "If X lacks Y").
    - If condition met, apply the change. If not, skip.
-4. After all items applied, update `<!-- Template Version: vNNNN -->` to latest.
-5. Sync non-project-specific template sections (Response Discipline, Workflow, Commit Rules) with latest template wording — use diff judgment.
+4. After all items applied, update `<!-- Template Version: vNNNN -->` in the canonical managed context (`AGENTS.md` after v0034, otherwise `CLAUDE.md`).
+5. Sync non-project-specific template sections (Response Discipline, Workflow, Commit Rules) and the workflow-guide Project Knowledge pointer in the canonical managed context — use diff judgment. After v0034, keep `CLAUDE.md` as the `@AGENTS.md` shim.
 6. Commit.
 
 ## On: adopt
 
 1. Review v0001 through latest against current project state.
 2. For each item, check whether already satisfied; apply only what's missing.
-3. Add `<!-- Template Version: vNNNN -->` at bottom of CLAUDE.md set to latest.
+3. Add `<!-- Template Version: vNNNN -->` at the bottom of the canonical managed context (`AGENTS.md` if present, otherwise `CLAUDE.md`) set to latest.
 4. Proceed to **upgrade** handler for any remaining sync.
 5. Commit.
 6. **Legacy detection**: same as On: fresh step 8 — check for absent `ai-docs/spec/` and `ai-docs/mental-model/`; suggest forge skills as needed (output-only).
