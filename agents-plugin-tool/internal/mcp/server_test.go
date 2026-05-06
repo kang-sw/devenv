@@ -401,6 +401,24 @@ func TestServeStdioSessionDefaultRootDoesNotPersistAcrossServers(t *testing.T) {
 	}
 }
 
+func TestServeStdioServerRootTakesPrecedenceOverProjectEnv(t *testing.T) {
+	useLeadProfile(t)
+	envRoot := initTicketRepo(t, "260505-feat-env")
+	serverRoot := initTicketRepo(t, "260505-feat-server")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_PROJECT_ROOT", envRoot)
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.list","arguments":{}}}` + "\n"
+	var out bytes.Buffer
+	if err := NewServer(serverRoot, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !strings.Contains(toolText(t, byID["1"]), "260505-feat-server") || strings.Contains(toolText(t, byID["1"]), "260505-feat-env") {
+		t.Fatalf("server root did not take precedence over project env: %s", byID["1"])
+	}
+}
+
 func TestServeStdioCodexWorkspaceMetadataRootFallback(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260505-feat-metadata")

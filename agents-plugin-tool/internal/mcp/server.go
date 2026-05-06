@@ -766,16 +766,22 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 		return sessionRoot, nil
 	}
 
-	if envRoot := strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")); envRoot != "" {
-		return canonicalGitRoot(envRoot)
-	}
-
 	workspaces := codexWorkspaceRoots(meta)
 	if len(workspaces) == 1 {
 		return canonicalGitRoot(workspaces[0])
 	}
 	if len(workspaces) > 1 {
 		return "", fmt.Errorf("multiple host workspaces are available; pass root explicitly or call session.set_default_root before using root-omitted ws tools")
+	}
+
+	if strings.TrimSpace(s.root) != "" && strings.TrimSpace(s.root) != "." {
+		if root, err := canonicalGitRoot(s.root); err == nil {
+			return root, nil
+		}
+	}
+
+	if envRoot := strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")); envRoot != "" {
+		return canonicalGitRoot(envRoot)
 	}
 
 	root, err := canonicalGitRoot(s.root)
