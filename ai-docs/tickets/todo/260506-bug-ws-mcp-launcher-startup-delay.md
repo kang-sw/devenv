@@ -5,6 +5,8 @@ related:
 spec:
   - 260506-launcher-hot-path-compatibility-cache
   - 260506-runtime-capabilities-single-probe
+skeletons:
+  phase-3: 7d13546
 related-mental-model:
   - plugin-runtime
 ---
