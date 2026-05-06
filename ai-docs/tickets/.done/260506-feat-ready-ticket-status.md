@@ -10,6 +10,7 @@ spec:
   - 260505-ticket-discovery-tools
   - 260505-planning-workflow-skills
   - 260505-proceed-routing-pipeline
+completed: 2026-05-06
 ---
 
 # Ready Ticket Status And Backlog Split
@@ -71,6 +72,13 @@ Required outcomes:
 - Existing ambiguous phrases such as `todo-or-higher` are replaced with explicit
   status-specific wording.
 
+### Result (6e20de3) - 2026-05-06
+
+Implemented the lifecycle contract across bundled and compatibility convention
+docs. Specs now describe `todo/` as accepted backlog and `ready/` as the
+spec-gated implementation queue, and mental models capture status parsing,
+queue rendering, and workflow gate hazards.
+
 ### Phase 2: Bootstrap Migration Rule
 
 Update the managed `AGENTS.template.md` migration guide so downstream projects
@@ -91,6 +99,13 @@ Required outcomes:
   - instructs users to promote scoped `idea/` tickets to `todo/` through
     `ws:lead-discuss`.
 
+### Result (6e20de3) - 2026-05-06
+
+Added bootstrap migration v0035 to the Codex AGENTS template and Claude
+compatibility template. The migration creates `ready/`, moves spec-linked
+implementation-ready tickets from `todo/`, keeps uncertain backlog in `todo/`,
+and treats `ready/` as the `## Ticket Queue` source.
+
 ### Phase 3: Discovery And Git Plumbing
 
 Teach the runtime documentation and Git helpers about the new active status.
@@ -106,6 +121,13 @@ Required outcomes:
 - `git.commit` ticket move expansion recognizes `ready/` paths.
 - Tests cover discovery, status filters, project-tree rendering, and ticket move
   expansion.
+
+### Result (6e20de3) - 2026-05-06
+
+Added `ready` to ticket discovery normalization, default active scans, MCP/CLI
+schema text, project-tree rendering, and Git ticket move expansion. Tests now
+cover explicit `ready` filters, project-tree ordering, and `todo/` -> `ready/`
+move staging.
 
 ### Phase 4: Workflow Skill Routing
 
@@ -126,6 +148,13 @@ Required outcomes:
 - `lead-write-spec`, reconstruction flows, survey prompts, and compatibility
   guidance stop treating `todo/` as the implementation-bearing status.
 
+### Result (6e20de3) - 2026-05-06
+
+Updated Codex and Claude workflow skills/prompts so `todo/` is backlog and
+`ready/` is the implementation target. A review fix tightened `lead-proceed`
+and Claude `/proceed` so inline-created or existing `todo/` tickets route
+through ready promotion before skeleton or implementation stages.
+
 ### Phase 5: Repository Self-Migration
 
 Migrate this repository after the new rules and tooling exist.
@@ -139,3 +168,10 @@ Required outcomes:
   ticket discovery still mentions `idea/`, `todo/`, and `ready/`.
 - Leave completion and drop flows flexible; do not add a hard prohibition on
   direct `todo/` -> `.done/` when a future exceptional workflow justifies it.
+
+### Result (6e20de3) - 2026-05-06
+
+Created the live `ready/` directory and moved current spec-linked non-epic,
+non-research implementation work there. Kept the workflow stability epic in
+`todo/`, preserved rough research/default-root items in `idea/`, and refreshed
+`_index.md` so the active table and queue follow the new lifecycle.

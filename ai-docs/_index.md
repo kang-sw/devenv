@@ -192,7 +192,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260506-feat-ready-ticket-status` | ready | Split accepted backlog from spec-gated implementation queue with a new `ready/` status |
 | `260503-feat-agents-plugin-runtime-boundary` | ready | Go stdio MCP/runtime boundary; Python launcher smoke in progress |
 | `260506-bug-ws-mcp-launcher-startup-delay` | ready | Launcher hot-path cache and runtime capabilities probe done; timeout mitigation remains optional follow-up |
 | `260505-feat-agent-backend-failure-diagnostics` | ready | Improve named-agent backend failure diagnostics |
@@ -207,7 +206,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-`260506-feat-ready-ticket-status` - split ticket lifecycle so `todo/` is accepted backlog and `ready/` is the spec-gated implementation queue.
 `260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; Python launcher is the current shared startup path and needs installed-cache verification on Windows after Python 3 is available.
 `260506-bug-ws-mcp-launcher-startup-delay` - Phases 1, 2, and 3 are done; Phase 4 startup timeout mitigation remains optional upgrade-buffer scope after release validation.
 `260505-feat-agent-backend-failure-diagnostics` - improve named-agent backend invocation failures with raw errors, PATH-detected backend hints, and explicit reconfiguration guidance.
