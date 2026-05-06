@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import unittest
 from pathlib import Path
@@ -16,6 +17,59 @@ def load_launcher():
 
 
 class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
+    def test_capabilities_probe_validates_full_contract_from_one_response(self):
+        launcher = load_launcher()
+        binary = Path("/tmp/ws-mcp")
+        calls = []
+        contract = {
+            "plugin_version": "0.18.1",
+            "mcp_protocol": "2025-03-26",
+            "prompt_bundle": {"content_sha256": "abc123"},
+            "tools": {"runtime.info": ">=0.18.1-dev <0.19.0"},
+            "commands": {"runtime.info": ">=0.18.1-dev <0.19.0"},
+        }
+
+        def fake_run_binary(got_binary, args, **kwargs):
+            calls.append((got_binary, tuple(args)))
+            payload = {
+                "version": "0.18.1",
+                "source_commit": "dev",
+                "mcp_protocol": "2025-03-26",
+                "prompt_bundle": {"content_sha256": "abc123", "prompts": ["delegate-orientation"]},
+                "tools": ["runtime.info"],
+                "commands": ["runtime.info"],
+            }
+            return subprocess.CompletedProcess([str(got_binary), *args], 0, stdout=json.dumps(payload), stderr="")
+
+        launcher.run_binary = fake_run_binary
+
+        self.assertTrue(launcher.runtime_capabilities_compatible(binary, contract))
+        self.assertEqual(calls, [(binary, ("runtime", "capabilities"))])
+
+    def test_invalid_or_incomplete_capabilities_probe_is_not_compatible(self):
+        launcher = load_launcher()
+        binary = Path("/tmp/ws-mcp")
+        contract = {
+            "plugin_version": "0.18.1",
+            "mcp_protocol": "2025-03-26",
+            "prompt_bundle": {"content_sha256": "abc123"},
+            "tools": {"runtime.info": ">=0.18.1-dev <0.19.0"},
+            "commands": {"runtime.info": ">=0.18.1-dev <0.19.0"},
+        }
+        payload = {
+            "version": "0.18.1",
+            "mcp_protocol": "2025-03-26",
+            "prompt_bundle": {"content_sha256": "abc123"},
+            "tools": [],
+            "commands": ["runtime.info"],
+        }
+
+        launcher.run_binary = lambda got_binary, args, **kwargs: subprocess.CompletedProcess(
+            [str(got_binary), *args], 0, stdout=json.dumps(payload), stderr=""
+        )
+
+        self.assertFalse(launcher.runtime_capabilities_compatible(binary, contract))
+
     def test_successful_capabilities_probe_skips_fanout(self):
         launcher = load_launcher()
         import tempfile
@@ -60,7 +114,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
             self.assertTrue(launcher.runtime_fully_compatible(binary, {"plugin_version": "0.18.1"}, temp))
             self.assertEqual(calls, [("version",)])
-
 
 if __name__ == "__main__":
     unittest.main()

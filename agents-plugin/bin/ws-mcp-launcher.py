@@ -192,6 +192,30 @@ def prompt_bundle_compatible(binary: Path, contract: dict) -> bool:
     return True
 
 
+def _capabilities_string_list(payload: dict, key: str) -> list[str] | None:
+    values = payload.get(key)
+    if not isinstance(values, list):
+        return None
+    result = []
+    for value in values:
+        if not isinstance(value, str):
+            return None
+        result.append(value)
+    return result
+
+
+def _capabilities_contains_required(payload: dict, key: str, required: list[str]) -> bool:
+    actual = _capabilities_string_list(payload, key)
+    if actual is None:
+        return False
+    actual_set = set(actual)
+    for name in required:
+        if name not in actual_set:
+            note(f"runtime capabilities missing required {key[:-1]}: {name}")
+            return False
+    return True
+
+
 def compatibility_stamp_path(runtime_dir: Path) -> Path:
     return runtime_dir / ".compatibility.json"
 
@@ -351,10 +375,43 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
 
 
 def runtime_capabilities_compatible(binary: Path, contract: dict) -> bool:
-    # TODO(260506-runtime-capabilities-single-probe): run
-    # `ws-mcp runtime capabilities` once and validate version, MCP protocol,
-    # prompt bundle, full lead MCP tools, and CLI commands from its JSON payload.
-    return False
+    try:
+        proc = run_binary(binary, ["runtime", "capabilities"])
+    except Exception as exc:
+        note(f"runtime capabilities probe failed: {exc}")
+        return False
+    if proc.returncode != 0 or not proc.stdout:
+        note("runtime capabilities probe unavailable")
+        return False
+    try:
+        payload = json.loads(proc.stdout)
+    except Exception:
+        note("runtime capabilities probe returned invalid JSON")
+        return False
+    if not isinstance(payload, dict):
+        return False
+
+    if not version_compatible(str(payload.get("version", "")), contract):
+        note("runtime capabilities version mismatch")
+        return False
+
+    expected_protocol = str(contract.get("mcp_protocol", ""))
+    if not expected_protocol or payload.get("mcp_protocol") != expected_protocol:
+        note("runtime capabilities MCP protocol mismatch")
+        return False
+
+    expected_prompt_hash = contract.get("prompt_bundle", {}).get("content_sha256")
+    if expected_prompt_hash:
+        prompt_bundle = payload.get("prompt_bundle")
+        if not isinstance(prompt_bundle, dict) or prompt_bundle.get("content_sha256") != expected_prompt_hash:
+            note("runtime capabilities prompt bundle hash mismatch")
+            return False
+
+    if not _capabilities_contains_required(payload, "tools", runtime_tools(contract)):
+        return False
+    if not _capabilities_contains_required(payload, "commands", runtime_commands(contract)):
+        return False
+    return True
 
 def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path) -> bool:
     if not binary.is_file():
