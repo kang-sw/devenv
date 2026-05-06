@@ -115,6 +115,23 @@ version and prompt bundle metadata. `doctor` reports repository health. The
 grouped commands mirror MCP behavior where a CLI fallback is part of the public
 runtime surface.
 
+### 🚧 Single-Probe Runtime Capabilities {#260506-runtime-capabilities-single-probe}
+
+`ws-mcp runtime capabilities` will report the runtime surfaces the plugin
+launcher needs for compatibility checks in one JSON response. The response will
+include the runtime version, source commit, MCP protocol version, prompt bundle
+metadata, the exposed MCP tool names, and the public CLI command surface.
+
+The capability response is the launcher-facing compatibility probe for new
+runtimes. It must describe the full lead runtime surface used by the plugin
+contract, independent of caller-local tool profile filters. Once the command is
+part of the runtime contract metadata, compatible new runtimes can be validated
+without starting a temporary MCP server or invoking each CLI command separately.
+
+Old runtimes that do not provide the command are not silently trusted. During
+the transition, the launcher either falls back to the existing bounded full
+validation path or repairs the runtime before writing a compatibility stamp.
+
 ## Windows Plugin-Managed Startup {#260505-windows-plugin-managed-startup}
 
 The runtime publishes Windows assets and verifies Windows executable startup in

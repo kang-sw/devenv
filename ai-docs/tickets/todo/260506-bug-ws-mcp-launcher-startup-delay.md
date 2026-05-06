@@ -4,6 +4,7 @@ related:
   260503-feat-agents-plugin-runtime-boundary: runtime launcher and Windows plugin-managed startup parent slice
 spec:
   - 260506-launcher-hot-path-compatibility-cache
+  - 260506-runtime-capabilities-single-probe
 related-mental-model:
   - plugin-runtime
 ---
@@ -175,6 +176,16 @@ Likely JSON payload:
   "commands": []
 }
 ```
+
+Contract decisions:
+
+- The command name is `ws-mcp runtime capabilities`.
+- The command returns JSON to stdout and reserves stderr for diagnostics.
+- The response describes the full lead MCP tool surface required by
+  `runtime.json`, independent of caller-local tool profile filters.
+- Old runtimes without the command may use a bounded fallback validation path,
+  but a successful fallback must still write the same launcher compatibility
+  stamp only after full validation succeeds.
 
 Estimated work from code survey: small-to-medium, about 1.5 to 2 focused
 implementation days. The runtime already owns most of the data, but the change
