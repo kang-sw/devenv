@@ -62,7 +62,7 @@ PROMPT
 
 ```bash
 ws-subquery --deep-research - <<'PROMPT'
-Survey all tickets under ai-docs/tickets/ (all statuses: idea/, todo/, wip/, .done/, .dropped/).
+Survey all tickets under ai-docs/tickets/ (all statuses: idea/, todo/, ready/, .done/, .dropped/).
 
 Steps:
 1. Glob ai-docs/tickets/**/*.md and read each file.
@@ -166,9 +166,9 @@ Module paths: <paths from task description>
 Steps:
 1. Glob ai-docs/tickets/**/*.md.
 2. Filter to tickets whose title or body mentions <domain> keywords or the module paths.
-3. For each match: extract the feature or behavior described and its ticket status (todo/wip/.done/.dropped).
+3. For each match: extract the feature or behavior described and its ticket status (ready/todo/idea/.done/.dropped).
 
-Return: list of features → ticket status. Wip/todo items are candidates for 🚧 planned markers.
+Return: list of features → ticket status. Ready items are candidates for 🚧 planned markers.
 PROMPT
 ```
 
@@ -236,7 +236,7 @@ Collect the confirmed list before writing anything.
 
 ### 6. Associate stems with tickets
 
-1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, commit the spec file changes now (`git add ai-docs/spec/ && git commit`) and skip to step 7.
+1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes now (`git add ai-docs/spec/ && git commit`) and skip to step 7.
 2. Dispatch clerk covering all collected tickets in a single call:
 
 ```bash
@@ -249,7 +249,7 @@ Run first:
 Spec stems generated for this domain:
 <list: {#YYMMDD-slug} — feature name, one per line>
 
-Tickets to update (wip/todo only):
+Tickets to update (ready only):
 <list: ai-docs/tickets/<status>/<stem>.md — one-line description>
 
 For each ticket:
@@ -296,7 +296,7 @@ Total stems generated: <count>
 ### 3. Suggested next steps
 
 - Run `ws-oneshot-agent -p spec-updater` to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
-- Review `🚧` entries with open tickets — confirm each has an active wip/todo ticket or drop the marker.
+- Review `🚧` entries with open tickets — confirm each has an active ready ticket or drop the marker.
 - Run `/write-spec` for any domain surfaces discovered after wrap-up.
 
 ## Judgments

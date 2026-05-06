@@ -17,13 +17,13 @@ Target: $ARGUMENTS
 - This skill routes. It does not implement, plan, or write skeletons itself.
 - Every routing decision is announced with rationale before execution begins.
 - Each pipeline sub-skill is invoked via the Skill tool with the appropriate arguments.
-- Pipeline order is fixed: skeleton → implementation.
+- Pipeline order is fixed: spec → ticket → ready promotion → skeleton → implementation.
 - Execution mode is always single. Split multi-scope work into separate tickets; parallel execution is not available.
 - Routing assessment uses conversation state (what has already been discussed or read this session) and artifacts only. Do not read source code during assessment.
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - Always invoke `ws:implement` for implementation — implement applies its own judge: execution-mode and routes to edit or write-code internally.
-- If the target is an actionable inline description, auto-invoke `/write-ticket` and continue.
-- If the target is an existing ticket path, skip `/write-ticket`.
+- If the target is an actionable inline description, auto-invoke `/write-ticket`, capture `Ticket:`, then re-check status; `todo/` output must promote to `ready/` before implementation.
+- If the target is an existing `ready/` ticket path, skip `/write-ticket`; existing `todo/` ticket paths route through ready promotion before implementation.
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
 - Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
@@ -37,7 +37,7 @@ Target: $ARGUMENTS
 Gather the facts needed for routing. Do not read source code — read only artifacts and metadata.
 
 1. Parse the target: ticket path or inline description.
-2. If ticket path: read the ticket. Extract scope, phases, and existing artifact references (`plans:`, `skeletons:` frontmatter).
+2. If ticket path: read the ticket. Extract status, scope, phases, and existing artifact references (`plans:`, `skeletons:` frontmatter).
 3. Check for existing artifacts:
    - **Plan exists?** — check ticket frontmatter `plans:` field, or scan `ai-docs/.plans/` for matching files.
    - **Skeleton exists?** — check ticket frontmatter `skeletons:` field, or grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs in relevant paths.
@@ -59,7 +59,8 @@ Prefix-stage gate-suppression context applies in all routing paths (direct-edit 
 
 Then apply the pipeline judgments in order. Each produces a yes/no that builds the pipeline.
 
-1. **judge: needs-skeleton** — Does this need contract stubs before implementation?
+1. **Ready gate** — If the current or captured ticket status is `todo/`, stop implementation routing and invoke `/discuss` for `todo/` → `ready/` promotion. Continue only after the target path is `ready/`.
+2. **judge: needs-skeleton** — Does this need contract stubs before implementation?
 
 Build the pipeline:
 
@@ -94,7 +95,9 @@ Invoke each pipeline stage sequentially via the Skill tool, passing the target a
 
 - After each stage, verify it completed (check for committed artifacts).
 - If a stage fails or the user interrupts, stop — do not continue the pipeline.
-- After `judge: needs-ticket` auto-invoke: capture the ticket path from `/write-ticket`'s output. Use it as the target for all downstream stages (skeleton, plan, implementation).
+- After `judge: needs-ticket` auto-invoke: capture the ticket path from `/write-ticket`'s output before any downstream stage.
+- If the captured path is under `ai-docs/tickets/todo/`, invoke `/discuss` for `todo/` → `ready/` promotion and stop; do not invoke skeleton or implementation.
+- Use only `ready/` ticket paths downstream.
 
 ## Judgments
 

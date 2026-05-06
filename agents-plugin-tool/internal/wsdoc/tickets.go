@@ -180,7 +180,7 @@ func scanTickets(root string, opts ticketScanOptions) ([]TicketInfo, error) {
 
 func ticketStatuses(opts ticketScanOptions) []string {
 	if len(opts.Statuses) == 0 {
-		statuses := []string{"idea", "todo", "wip"}
+		statuses := []string{"ready", "todo", "idea"}
 		if opts.IncludeDone {
 			statuses = append(statuses, ".done")
 		}
@@ -210,7 +210,7 @@ func ticketStatuses(opts ticketScanOptions) []string {
 
 func normalizeTicketStatus(status string) string {
 	switch strings.TrimSpace(status) {
-	case "idea", "todo", "wip":
+	case "idea", "todo", "ready", "wip":
 		return strings.TrimSpace(status)
 	case "done", ".done":
 		return ".done"
@@ -223,16 +223,18 @@ func normalizeTicketStatus(status string) string {
 
 func ticketStatusRank(status string) int {
 	switch status {
-	case "idea":
+	case "ready":
 		return 0
 	case "todo":
 		return 1
-	case "wip":
+	case "idea":
 		return 2
-	case ".done":
+	case "wip":
 		return 3
-	case ".dropped":
+	case ".done":
 		return 4
+	case ".dropped":
+		return 5
 	default:
 		return 9
 	}

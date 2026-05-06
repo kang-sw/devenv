@@ -76,7 +76,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 - Project state and cross-session context live in `ai-docs/`.
 - Before creating or editing tickets, load the write-ticket workflow skill for conventions.
 - Reference tickets by stem only, never full path; stems survive status moves.
-- Check `## Ticket Queue` in `ai-docs/_index.md` before starting a ticket.
+- Check `## Ticket Queue` in `ai-docs/_index.md` before starting implementation; it lists `ready/` work only.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
 - Claude Code compatibility is `CLAUDE.md` containing `@AGENTS.md`.
 - **Language:** AI-authored docs, plans, commits, tickets, and code comments are English. Human-facing UI strings are exempt.
@@ -90,7 +90,7 @@ ai-docs/
   mental-model/      - contracts, coupling, architecture narrative
   spec/              - external-perspective specs
   ref/               - static reference material
-  tickets/<status>/  - idea/ todo/ .done/ .dropped/
+  tickets/<status>/  - idea/ todo/ ready/ .done/ .dropped/
 
 CLAUDE.md compatibility shim:
 
@@ -156,6 +156,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0032: If `AGENTS.md` is absent and `CLAUDE.md` exists, create `AGENTS.md` from current `CLAUDE.md`.
 - v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
+- v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `ws:lead-discuss`.
 -->
 
-<!-- Template Version: v0034 -->
+<!-- Template Version: v0035 -->

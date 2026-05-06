@@ -52,14 +52,11 @@ stem.
 ## Ticket Document System {#260505-ticket-document-system}
 
 Tickets track workflow work under `ai-docs/tickets/` with directory-based
-status. Active status directories are `idea/` and `todo/`; completed or dropped
-work moves to `.done/` or `.dropped/`.
-
-> [!note] Planned 🚧
-> Ticket status will split accepted backlog from the implementation queue:
-> `idea/` captures rough ideas, `todo/` holds accepted backlog, `ready/` holds
-> spec-gated implementation work, and `.done/` / `.dropped/` remain archives.
-> `## Ticket Queue` will list `ready/` work only.
+status. Active status directories are `ready/`, `todo/`, and `idea/`: `idea/`
+captures rough ideas before triage, `todo/` holds accepted backlog with
+recoverable ticket intent, and `ready/` holds spec-gated implementation work.
+Completed or dropped work moves to `.done/` or `.dropped/`. `## Ticket Queue`
+lists `ready/` work only.
 
 Ticket stems are stable and are referenced by stem rather than path. Actionable
 tickets use phase sections with `### Result` blocks that freeze completed phase
@@ -110,15 +107,12 @@ adds missing implemented entries, strips `🚧` markers when implementation has
 landed, handles removed spec stems, verifies duplicate anchors, and commits all
 spec changes together.
 
-`lead-write-ticket` creates or updates tickets. It applies the spec gate for
-todo-or-higher work except `epic` and `research` tickets, reads ticket
-conventions, updates queue entries when needed, preserves stable ticket stems,
-and commits ticket changes.
-
-> [!note] Planned 🚧
-> Ticket authoring will apply the spec gate when a non-`epic`, non-`research`
-> ticket enters `ready/`. Creating or promoting accepted backlog into `todo/`
-> will preserve intent without requiring immediate spec linkage.
+`lead-write-ticket` creates or updates tickets. It applies the spec gate when a
+non-`epic`, non-`research` ticket enters `ready/`, reads ticket conventions,
+updates queue entries for `ready/` work, preserves stable ticket stems, and
+commits ticket changes. Creating or promoting accepted backlog into `todo/`
+preserves intent without requiring immediate spec linkage; optional `todo/`
+`spec:` links are recovery hints and promotion candidates.
 
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}
 

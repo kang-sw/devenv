@@ -764,7 +764,7 @@ func ticketStatusStem(path string) (string, string, bool) {
 	}
 	status := parts[0]
 	switch status {
-	case "idea", "todo", "wip", ".done", ".dropped":
+	case "idea", "todo", "ready", "wip", ".done", ".dropped":
 	default:
 		return "", "", false
 	}

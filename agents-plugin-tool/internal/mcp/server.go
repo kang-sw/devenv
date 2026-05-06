@@ -1188,7 +1188,7 @@ func tools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"root":                 stringProperty("Repository root. Defaults to the server root."),
-					"statuses":             stringArrayProperty("Optional ticket statuses to scan: idea, todo, wip, done, dropped."),
+					"statuses":             stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
 					"include_done":         boolProperty("Include ai-docs/tickets/.done when true."),
 					"include_dropped":      boolProperty("Include ai-docs/tickets/.dropped when true."),
 					"query":                stringProperty("Optional case-insensitive text query."),
@@ -1519,7 +1519,7 @@ func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"root":            stringProperty("Repository root. Defaults to the server root."),
-			"statuses":        stringArrayProperty("Optional ticket statuses to scan: idea, todo, wip, done, dropped."),
+			"statuses":        stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
 			"include_done":    boolProperty("Include ai-docs/tickets/.done when true."),
 			"include_dropped": boolProperty("Include ai-docs/tickets/.dropped when true."),
 		},

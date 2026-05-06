@@ -4,7 +4,7 @@
 Outputs three sections:
   1. ai-docs/ directory tree  (excluding tickets/, spec/, and dot-prefix dirs)
   2. spec: hierarchy with frontmatter stats (features, 🚧 count, ticket refs)
-  3. tickets: active status only (todo, idea); .done/.dropped omitted
+  3. tickets: active status only (ready, todo, idea); .done/.dropped omitted
      with frontmatter details for parent / related lookups.
 """
 
@@ -96,7 +96,7 @@ def parse_frontmatter(path: Path) -> dict:
 # Ticket helpers
 # ---------------------------------------------------------------------------
 
-STATUS_ORDER = ['todo', 'idea']
+STATUS_ORDER = ['ready', 'todo', 'idea']
 TICKET_REF_RE = re.compile(r'\[(\d{6}-[\w-]+/p\d+)\]')
 
 

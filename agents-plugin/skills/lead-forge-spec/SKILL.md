@@ -202,7 +202,7 @@ confirmed list before writing anything.
 
 ### 6. Associate stems with tickets
 
-1. From the step 2 survey output, collect all tickets in `wip/` or `todo/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
+1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
 2. Dispatch clerk covering all collected tickets in a single call, store the returned `subquery_key`, then wait for it:
 
 Call `ws/subquery(deep_research: false, question: <block below>)`:
@@ -216,7 +216,7 @@ Run first:
 Spec stems generated for this domain:
 <list: {#YYMMDD-slug} - feature name, one per line>
 
-Tickets to update (todo only):
+Tickets to update (ready only):
 <list: ai-docs/tickets/<status>/<stem>.md - one-line description>
 
 For each ticket:

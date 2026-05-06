@@ -25,9 +25,9 @@ implementation brief, identify docs the implementer must read before work.
    - `ws/specs.list()`
    - `ws/mental_models.list()`
    - `ws/mental_models.find(query: "<brief topic>")`
-   - `ws/tickets.list(status: "idea")`
+   - `ws/tickets.list(status: "ready")`
    - `ws/tickets.list(status: "todo")`
-   - `ws/tickets.list(status: "wip")`
+   - `ws/tickets.list(status: "idea")`
 2. Read returned paths.
 3. Judge each file's relevance:
    - **`[Must]`** — directly covers behavior, patterns, or constraints the implementer needs before starting.

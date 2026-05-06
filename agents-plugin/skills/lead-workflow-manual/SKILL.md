@@ -98,7 +98,7 @@ lookup before shell search. Use native file reads after a discovery tool returns
 the path to inspect or edit.
 
 Prefer:
-- `ws/tickets.list(status: "todo")` for active queue and ticket path discovery.
+- `ws/tickets.list(status: "ready")` for implementation queue discovery; use `status: "todo"` for accepted backlog.
 - `ws/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
 - `ws/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
 - `ws/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.

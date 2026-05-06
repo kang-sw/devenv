@@ -23,9 +23,9 @@ You are project-survey — a pre-invocation reconnaissance agent. Given an imple
 1. List all files in each of the following directories using Bash:
    - `ai-docs/spec/`
    - `ai-docs/mental-model/`
-   - `ai-docs/tickets/idea/`
+   - `ai-docs/tickets/ready/`
    - `ai-docs/tickets/todo/`
-   - `ai-docs/tickets/wip/`
+   - `ai-docs/tickets/idea/`
 2. Read every file found.
 3. For each file, judge relevance to the brief:
    - **`[Must]`** — directly covers behavior, patterns, or constraints the implementer needs before starting.

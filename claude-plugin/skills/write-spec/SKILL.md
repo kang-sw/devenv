@@ -49,7 +49,7 @@ Evaluate whether the work introduces or modifies behavior a caller can observe f
 
 ### judge: idea-level
 
-When about to write a `🚧` entry: write it. Then emit this session reminder: "Session reminder: a `todo/`-or-higher ticket must be created before this session ends for this `🚧` entry to be valid per spec-conventions." Do not ask the user whether to defer — write the entry and remind.
+When about to write a `🚧` entry: write it. Then emit this session reminder: "Session reminder: a non-`epic`, non-`research` `ready/` ticket must exist before this session ends for this `🚧` entry to be valid per spec-conventions." Do not ask the user whether to defer — write the entry and remind.
 
 ### judge: directory-vs-flat
 
