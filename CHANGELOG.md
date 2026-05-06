@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.19.0 - 2026-05-06
+
+### Added
+- Add `ws-mcp runtime capabilities`, a single-process JSON probe that reports
+  runtime version, MCP protocol, prompt bundle metadata, full lead MCP tool
+  names, and the public CLI command surface for launcher compatibility checks.
+
+### Changed
+- Teach the Python MCP launcher to prefer the runtime capabilities probe before
+  falling back to legacy full validation, reducing first-run validation
+  sensitivity to command-surface growth.
+- Resolve root-omitted MCP tool calls through host workspace metadata and
+  explicit non-dot server startup roots before `WS_MCP_PROJECT_ROOT`; invalid
+  explicit startup roots now fail closed.
+
+### Fixed
+- Avoid repeated launcher compatibility fanout on steady-state startup by using
+  a fail-closed compatibility stamp keyed to the runtime contract and binary
+  identity.
+
 ## v0.18.1 - 2026-05-06
 
 ### Fixed
