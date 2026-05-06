@@ -194,7 +194,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
 | `260503-feat-agents-plugin-runtime-boundary` | todo | Go stdio MCP/runtime boundary; Python launcher smoke in progress |
-| `260506-bug-ws-mcp-launcher-startup-delay` | todo | Launcher hot-path cache done; single capability command remains |
+| `260506-bug-ws-mcp-launcher-startup-delay` | todo | Launcher hot-path cache and runtime capabilities probe done; timeout mitigation remains optional follow-up |
 | `260429-feat-api-deps` | todo | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | todo | Verify native Windows behavior for claude-dash |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -205,7 +205,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 `260503-epic-ws-agent-workflow-stability` - keep open for future observed runtime failures; no active blocker after worktree lock, interrupt, and leaf deferral.
 `260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; Python launcher is the current shared startup path and needs installed-cache verification on Windows after Python 3 is available.
-`260506-bug-ws-mcp-launcher-startup-delay` - Phases 1 and 2 are done; Phase 3 single capability command remains larger follow-up scope if first-run validation cost still needs reduction.
+`260506-bug-ws-mcp-launcher-startup-delay` - Phases 1, 2, and 3 are done; Phase 4 startup timeout mitigation remains optional upgrade-buffer scope after release validation.
 `260505-feat-agent-backend-failure-diagnostics` - improve named-agent backend invocation failures with raw errors, PATH-detected backend hints, and explicit reconfiguration guidance.
 `260505-bug-codex-jsonl-trailing-noise` - hotfix Windows Codex persistent-agent results when process-control stdout appears after a valid JSONL agent message.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.

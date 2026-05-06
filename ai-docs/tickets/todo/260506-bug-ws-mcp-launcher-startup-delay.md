@@ -226,6 +226,27 @@ Success criteria:
   fallback path.
 - Windows steady-state startup is no longer sensitive to command count growth.
 
+### Result (df1afdd) - 2026-05-06
+
+Added `ws-mcp runtime capabilities` as a single-process JSON probe for runtime
+version, source commit, MCP protocol version, prompt bundle metadata, full lead
+MCP tool names, and the public CLI command surface. The Python launcher now
+tries that probe before legacy validation and returns to the existing full
+validation fanout when the command is absent, invalid, incomplete, or
+incompatible.
+
+The delegated review cycle found and fixed two issues before merge: invalid
+explicit server roots now fail closed instead of falling through to
+`WS_MCP_PROJECT_ROOT`, and launcher fallback tests now exercise the real
+capabilities probe path plus version, protocol, prompt-bundle, tool, and command
+mismatch cases. Final correctness, fit, and test re-reviews were clean.
+
+Verification passed on Linux/source-tree execution with `go test ./...`,
+`go test ./cmd/ws-mcp -run
+TestRuntimeCapabilitiesCommandReportsLauncherContractSurface`, Python launcher
+unit tests, Python compile checks, and `git diff --check`. Native Windows
+installed-cache verification remains a release/post-ship validation item.
+
 ### Phase 4: Startup timeout mitigation
 
 Consider raising `startup_timeout_sec` only after the hot-path fixes are designed.
