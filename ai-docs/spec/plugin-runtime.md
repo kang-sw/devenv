@@ -60,6 +60,14 @@ from the parent process environment when possible and exports it as
 `WS_MCP_PROJECT_ROOT`, while avoiding the plugin cache directory itself as the
 project root.
 
+> [!note] Planned 🚧
+> Compatible runtime startup will avoid repeated full surface validation on the
+> hot path. Once a cache-local runtime binary and runtime contract have been
+> validated together, later launcher invocations can reuse that compatibility
+> result until the contract or binary identity changes, while install or repair
+> paths still fail closed into full validation before handoff.
+> {#260506-launcher-hot-path-compatibility-cache}
+
 ## Release Asset Build And Checksum Pipeline {#260505-release-asset-build-checksum-pipeline}
 
 The runtime build script produces cross-platform `ws-mcp-*` release assets for

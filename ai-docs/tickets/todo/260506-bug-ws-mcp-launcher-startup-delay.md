@@ -2,6 +2,8 @@
 title: ws-mcp launcher startup delay
 related:
   260503-feat-agents-plugin-runtime-boundary: runtime launcher and Windows plugin-managed startup parent slice
+spec:
+  - 260506-launcher-hot-path-compatibility-cache
 related-mental-model:
   - plugin-runtime
 ---
@@ -60,10 +62,10 @@ timeout.
 - Keep runtime validation semantics equivalent: version range, MCP tool surface,
   CLI command surface, and prompt bundle hash still need protection against stale
   cache-local binaries.
-- Promotion to `todo/` should first update `ai-docs/spec/plugin-runtime.md` with
-  the startup preflight behavior and performance boundary. The existing spec
-  covers stale-runtime validation but does not yet define the hot-path cache or
-  single-probe capability behavior.
+- Promotion to `todo/` updated `ai-docs/spec/plugin-runtime.md` with the startup
+  preflight behavior and performance boundary. The existing spec already covered
+  stale-runtime validation, and now also tracks the hot-path compatibility cache
+  behavior.
 
 ## Open Questions
 
