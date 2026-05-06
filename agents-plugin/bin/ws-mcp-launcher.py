@@ -192,6 +192,61 @@ def prompt_bundle_compatible(binary: Path, contract: dict) -> bool:
     return True
 
 
+def compatibility_stamp_path(runtime_dir: Path) -> Path:
+    return runtime_dir / ".compatibility.json"
+
+
+def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Path) -> dict | None:
+    try:
+        stat = binary.stat()
+    except OSError:
+        return None
+    return {
+        "schema_version": 1,
+        "contract_sha256": sha256_file(contract_path),
+        "plugin_version": str(contract.get("plugin_version", "")),
+        "required_mcp": str(contract.get("required_mcp", "")),
+        "binary_path": str(binary.resolve()),
+        "binary_size": stat.st_size,
+        "binary_mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def compatibility_stamp_current(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path) -> bool:
+    expected = compatibility_stamp_payload(binary, contract, contract_path)
+    if expected is None:
+        return False
+    try:
+        actual = json.loads(compatibility_stamp_path(runtime_dir).read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if actual == expected:
+        note("using cached runtime compatibility stamp")
+        return True
+    return False
+
+
+def write_compatibility_stamp(binary: Path, contract: dict, contract_path: Path, runtime_dir: Path) -> None:
+    payload = compatibility_stamp_payload(binary, contract, contract_path)
+    if payload is None:
+        return
+    try:
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        stamp = compatibility_stamp_path(runtime_dir)
+        tmp = stamp.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+        os.replace(tmp, stamp)
+    except Exception as exc:
+        note(f"failed to write runtime compatibility stamp: {exc}")
+
+
+def clear_compatibility_stamp(runtime_dir: Path) -> None:
+    try:
+        compatibility_stamp_path(runtime_dir).unlink(missing_ok=True)
+    except Exception as exc:
+        note(f"failed to clear runtime compatibility stamp: {exc}")
+
+
 def install_downloaded_runtime(binary: Path, runtime_dir: Path, asset: str, contract: dict) -> None:
     base_url = os.environ.get("WS_MCP_RELEASE_BASE_URL")
     repository = os.environ.get("WS_MCP_RELEASE_REPOSITORY") or contract.get("release_repository")
@@ -372,7 +427,8 @@ def detect_project_root(plugin_dir: Path) -> None:
 def main() -> int:
     launcher_path = Path(__file__).resolve()
     plugin_dir = launcher_path.parent.parent
-    contract = read_runtime_contract(plugin_dir / "runtime.json")
+    contract_path = plugin_dir / "runtime.json"
+    contract = read_runtime_contract(contract_path)
 
     os_name = host_os()
     arch_name = host_arch()
@@ -382,11 +438,19 @@ def main() -> int:
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
 
-    if not runtime_fully_compatible(binary, contract, runtime_dir):
+    compatible = compatibility_stamp_current(binary, contract, contract_path, runtime_dir)
+    if not compatible:
+        compatible = runtime_fully_compatible(binary, contract, runtime_dir)
+        if compatible:
+            write_compatibility_stamp(binary, contract, contract_path, runtime_dir)
+
+    if not compatible:
         note("installing or repairing incompatible runtime")
+        clear_compatibility_stamp(runtime_dir)
         install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name)
-    if not runtime_fully_compatible(binary, contract, runtime_dir):
-        fail("incompatible ws-mcp runtime after repair")
+        if not runtime_fully_compatible(binary, contract, runtime_dir):
+            fail("incompatible ws-mcp runtime after repair")
+        write_compatibility_stamp(binary, contract, contract_path, runtime_dir)
 
     detect_project_root(plugin_dir)
     note(f"plugin_dir={plugin_dir}")
