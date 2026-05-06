@@ -144,6 +144,9 @@ Note the commit range from the report.
 #### 6a. Partition allocation
 
 Apply `judge: partition-allocation` based on the implementer's report and the nature of changes.
+Choose the smallest reviewer set that covers material risk.
+Record skipped partitions with one-line rationale.
+Prepare 2-4 review focus bullets for each selected partition.
 
 #### 6b. Spawn reviewers
 
@@ -155,6 +158,8 @@ ws-call-named-agent reviewer-correctness - <<'PROMPT'
 Diff range: <first-commit>..<last-commit>
 
 Instructions:
+- Review focus: <2-4 correctness invariants to verify>.
+- Ignore outside this partition unless directly broken by the diff.
 - Write your full findings to: <correctness-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 PROMPT
@@ -166,6 +171,8 @@ Diff range: <first-commit>..<last-commit>
 Brief path: <brief-path>
 
 Instructions:
+- Review focus: <2-4 fit or architecture concerns to verify>.
+- Ignore outside this partition unless directly broken by the diff.
 - Judge whether the implementation achieves what the brief intended and leaves room for future phases.
 - You may reference the ticket at <ticket-path> for architectural headroom checks (optional).
 - Write your full findings to: <fit-path>
@@ -178,6 +185,8 @@ ws-call-named-agent reviewer-test - <<'PROMPT'
 Diff range: <first-commit>..<last-commit>
 
 Instructions:
+- Review focus: <2-4 coverage or assertion risks to verify>.
+- Ignore outside this partition unless directly broken by the diff.
 - Write your full findings to: <test-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 PROMPT
@@ -193,7 +202,7 @@ Track relay cycle count starting at 0. Maximum 3 relay cycles.
 
 ```bash
 ws-call-named-agent implementer - <<'PROMPT'
-Review cycle <N>: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
+Review cycle <N>: <non-clean review paths only>. Read each file directly.
 For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
 Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
 Won't-fix not allowed: correctness, security, or contract violations — fix or escalate these.
@@ -202,7 +211,7 @@ PROMPT
 
 After notification: `ws-print-named-agent-output implementer`. Extract the won't-fix list.
 
-**Re-review** (parallel, same paths — reviewers overwrite):
+**Re-review** only partitions that returned `[non-clean]`; clean partitions remain accepted unless the fix commit touched their owned surface. Reviewers overwrite their own files.
 
 ```bash
 ws-call-named-agent reviewer-correctness - <<'PROMPT'
@@ -261,13 +270,19 @@ Soft judgment. Default to survey when uncertain between as-is and survey.
 
 ### judge: partition-allocation
 
+Soft judgment. Prefer the smallest partition set that covers material risk.
+When uncertain, add one secondary partition rather than defaulting to all three.
+Full review is reserved for risks spanning correctness, fit, and tests.
+
 | Partition | Assign when |
 |-----------|-------------|
 | **Correctness** | New logic introduced, error paths modified, contracts or security surface touched |
 | **Fit** | Existing components reused or modified, new patterns others will follow |
 | **Test** | Test files added or modified, or new code paths added without existing coverage |
-| **Default** | New feature or non-trivial cross-module change → all three partitions |
-| **Floor** | Purely mechanical change (format, rename with no semantic change) → Correctness only |
+| **Correctness + Test** | Executable behavior changed and coverage is material |
+| **Correctness + Fit** | Workflow/API semantics changed without a meaningful test surface |
+| **Full** | Cross-cutting behavior plus runtime/tooling plus test surface, or release/security/data-loss boundary |
+| **Floor** | Purely mechanical change → lead-only or one reviewer with rationale |
 
 ### judge: skeleton-check
 

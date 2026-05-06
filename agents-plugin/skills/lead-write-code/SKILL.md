@@ -105,6 +105,9 @@ Capture commit range from implementer output.
 #### 6a. Allocate
 
 Apply `judge: partition-allocation` from implementer report and changed files.
+Choose the smallest reviewer set that covers material risk.
+Record skipped partitions with one-line rationale.
+Prepare 2-4 review focus bullets for each selected partition.
 
 #### 6b. Spawn Reviewers
 
@@ -117,6 +120,8 @@ Correctness:
 Diff range: <first-commit>..<last-commit>
 
 Instructions:
+- Review focus: <2-4 correctness invariants to verify>.
+- Ignore outside this partition unless directly broken by the diff.
 - Write your full findings to: <correctness-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 ```
@@ -128,6 +133,8 @@ Diff range: <first-commit>..<last-commit>
 Brief path: <brief-path>
 
 Instructions:
+- Review focus: <2-4 fit or architecture concerns to verify>.
+- Ignore outside this partition unless directly broken by the diff.
 - Judge whether the implementation achieves the brief and leaves room for future phases.
 - You may reference the ticket at <ticket-path> for architectural headroom checks (optional).
 - Write your full findings to: <fit-path>
@@ -140,6 +147,8 @@ Test:
 Diff range: <first-commit>..<last-commit>
 
 Instructions:
+- Review focus: <2-4 coverage or assertion risks to verify>.
+- Ignore outside this partition unless directly broken by the diff.
 - Write your full findings to: <test-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 ```
@@ -154,14 +163,15 @@ Start relay cycle count at 0.
 Relay prompt:
 
 ```text
-Review cycle <N>: <correctness-path>, <fit-path>, <test-path>. Read each file directly.
+Review cycle <N>: <non-clean review paths only>. Read each file directly.
 For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
 Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
 Won't-fix not allowed: correctness, security, or contract violations - fix or escalate these.
 ```
 
-After implementer returns, extract won't-fix list and re-review in parallel.
-Reviewers overwrite the same files.
+After implementer returns, extract won't-fix list and re-review only partitions that returned `[non-clean]`.
+Clean partitions remain accepted unless the fix commit touched their owned surface.
+Reviewers overwrite their own files.
 
 Re-review prompt:
 
@@ -202,13 +212,19 @@ Default to survey when uncertain between as-is and survey.
 
 ### judge: partition-allocation
 
+Soft judgment. Prefer the smallest partition set that covers material risk.
+When uncertain, add one secondary partition rather than defaulting to all three.
+Full review is reserved for risks spanning correctness, fit, and tests.
+
 | Partition | Assign when |
 |-----------|-------------|
 | Correctness | New logic, modified error paths, contract/security surface |
 | Fit | Existing components reused/modified, or new pattern others will follow |
 | Test | Tests added/modified, or new code paths lack existing coverage |
-| Default | New feature or non-trivial cross-module change -> all three |
-| Floor | Pure mechanical change -> Correctness only |
+| Correctness + Test | Executable behavior changed and coverage is material |
+| Correctness + Fit | Workflow/API semantics changed without a meaningful test surface |
+| Full | Cross-cutting behavior plus runtime/tooling plus test surface, or release/security/data-loss boundary |
+| Floor | Pure mechanical change -> lead-only or one reviewer with rationale |
 
 ### judge: skeleton-check
 
