@@ -75,6 +75,11 @@ gate for todo-or-higher implementation-bearing tickets, skips that gate for
 `epic` and `research`, uses ticket conventions, maintains queue entries where
 needed, preserves stable ticket stems, and commits ticket changes.
 
+> [!note] Planned 🚧
+> Ticket authoring will treat `todo/` as accepted backlog and `ready/` as the
+> spec-gated implementation queue. The spec gate will run on entry to `ready/`,
+> while `todo/` tickets may carry optional `spec:` links as recovery hints.
+
 `lead-write-skeleton` locks public contracts before implementation when the
 scope needs stubs, integration tests, or interface scaffolding. It delegates
 skeleton authoring, then the lead reviews, commits, and links generated
@@ -116,6 +121,11 @@ Existing ticket paths skip ticket creation. Actionable inline targets go through
 `lead-write-ticket`; exploratory targets stop and suggest `lead-discuss`.
 Implementation always routes through `lead-implement`, with
 `lead-write-skeleton` inserted when the scope needs public contract scaffolding.
+
+> [!note] Planned 🚧
+> Existing `todo/` ticket paths will route through ready promotion before
+> implementation. Existing `ready/` ticket paths will be direct implementation
+> targets.
 
 ## Sprint Session Container {#260505-sprint-session-container}
 

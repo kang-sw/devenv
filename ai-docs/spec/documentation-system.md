@@ -55,6 +55,12 @@ Tickets track workflow work under `ai-docs/tickets/` with directory-based
 status. Active status directories are `idea/` and `todo/`; completed or dropped
 work moves to `.done/` or `.dropped/`.
 
+> [!note] Planned 🚧
+> Ticket status will split accepted backlog from the implementation queue:
+> `idea/` captures rough ideas, `todo/` holds accepted backlog, `ready/` holds
+> spec-gated implementation work, and `.done/` / `.dropped/` remain archives.
+> `## Ticket Queue` will list `ready/` work only.
+
 Ticket stems are stable and are referenced by stem rather than path. Actionable
 tickets use phase sections with `### Result` blocks that freeze completed phase
 content. Ticket frontmatter can connect work to specs, removed specs, parent
@@ -108,6 +114,11 @@ spec changes together.
 todo-or-higher work except `epic` and `research` tickets, reads ticket
 conventions, updates queue entries when needed, preserves stable ticket stems,
 and commits ticket changes.
+
+> [!note] Planned 🚧
+> Ticket authoring will apply the spec gate when a non-`epic`, non-`research`
+> ticket enters `ready/`. Creating or promoting accepted backlog into `todo/`
+> will preserve intent without requiring immediate spec linkage.
 
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}
 
