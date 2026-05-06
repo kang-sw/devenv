@@ -45,7 +45,7 @@ Evaluate whether work introduces or modifies behavior observable outside the imp
 
 ### judge: idea-level
 
-When about to write a `🚧` entry or `> [!note] Planned 🚧` callout: write it, then emit: "Session reminder: a `todo/`-or-higher ticket must be created before this session ends for this `🚧` entry to be valid per spec-conventions." Do not ask whether to defer.
+When about to write a `🚧` entry or `> [!note] Planned 🚧` callout: write it, then emit: "Session reminder: a non-`epic`, non-`research` `ready/` ticket must exist before this session ends for this `🚧` entry to be valid per spec-conventions." Do not ask whether to defer.
 
 ### judge: directory-vs-flat
 

@@ -171,6 +171,7 @@ Status is directory-based:
 ```text
 ai-docs/tickets/idea/
 ai-docs/tickets/todo/
+ai-docs/tickets/ready/
 ai-docs/tickets/.done/
 ai-docs/tickets/.dropped/
 ```
@@ -178,12 +179,13 @@ ai-docs/tickets/.dropped/
 - Reference tickets by stem, not path: `260429-research-host-neutral-ws-plugin`.
 - Creation-date prefixes are stable; never rename to change the date.
 - Move status with `git mv` when possible.
+- `todo/` is accepted backlog; `ready/` is the spec-gated implementation queue.
 - Research tickets use freeform topic sections and no phases.
 - Actionable tickets use `## Phases` and stable `### Phase N: <title>`.
 - Do not edit a phase after it has a `### Result` section.
 - To check ticket completion or prior phase results, use
   `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
-- Check `## Ticket Queue` in `ai-docs/_index.md` before starting a ticket.
+- Check `## Ticket Queue` in `ai-docs/_index.md` before starting implementation; it lists `ready/` work only.
 - All AI-authored ticket content must be English.
 
 ## Project Knowledge
@@ -208,4 +210,4 @@ ai-docs/tickets/.dropped/
      `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
      Context goes in `_index.md`; process goes in skills. -->
 
-<!-- Template Version: v0034 -->
+<!-- Template Version: v0035 -->

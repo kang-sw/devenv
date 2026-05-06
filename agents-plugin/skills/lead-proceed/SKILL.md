@@ -14,7 +14,7 @@ Target: user request
 - Pipeline order is fixed: spec -> ticket -> skeleton -> implementation.
 - Execution mode is single; split multi-scope work into separate tickets.
 - Always route implementation through `ws:lead-implement`.
-- Existing ticket path skips `ws:lead-write-ticket`.
+- Existing `ready/` ticket path skips `ws:lead-write-ticket`; existing `todo/` ticket path routes through ready promotion before implementation.
 - Actionable inline target invokes `ws:lead-write-ticket`, captures `Ticket:`, then continues.
 - Exploratory target stops and suggests `ws:lead-discuss`.
 - Announce routing before execution; chain stages without pausing for confirmation.
@@ -26,7 +26,7 @@ Target: user request
 ### 1. Assess
 
 1. Parse target: ticket path or inline description.
-2. If ticket path: read ticket; extract scope, phases, `plans:`, and `skeletons:`.
+2. If ticket path: read ticket; extract status, scope, phases, `plans:`, and `skeletons:`.
 3. Check artifacts: ticket frontmatter, `ai-docs/.plans/`, skeleton stubs, or integration tests.
 4. If inline: assess from description only.
 5. Classify warmth from conversation state.
@@ -39,8 +39,9 @@ Target: user request
 2. Apply `judge: needs-ticket`.
 3. If invoking `ws:lead-write-ticket`, append:
    `Chained from ws:lead-proceed - treat spec coverage as satisfied whether ws:lead-write-spec wrote anything or exited early.`
-4. Apply `judge: needs-skeleton`.
-5. Build pipeline:
+4. If the target ticket status is `todo/`, stop implementation routing and invoke `ws:lead-discuss` for `todo/` -> `ready/` promotion.
+5. Apply `judge: needs-skeleton`.
+6. Build pipeline:
    - No skeleton: `ws:lead-implement`.
    - Skeleton: `ws:lead-write-skeleton` -> `ws:lead-implement`.
 

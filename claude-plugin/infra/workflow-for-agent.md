@@ -19,7 +19,7 @@ points, invariants, coupling. They are kept in sync with code by the
 behavior before implementing.
 
 **`ai-docs/tickets/`** — Work units.
-Each ticket tracks a bounded scope of work through `idea/ → todo/ → wip/ → .done/`.
+Each ticket tracks a bounded scope of work through `idea/ → todo/ → ready/ → .done/`.
 A ticket's `spec:` frontmatter field (optional) lists the spec stems it covers.
 
 ## How They Connect

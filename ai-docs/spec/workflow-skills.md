@@ -70,15 +70,11 @@ behavior. It reads spec conventions, generates stable spec stems, writes planned
 or implemented entries according to the current behavior, verifies the spec
 index, and commits the spec update.
 
-`lead-write-ticket` creates or updates workflow tickets. It applies the spec
-gate for todo-or-higher implementation-bearing tickets, skips that gate for
-`epic` and `research`, uses ticket conventions, maintains queue entries where
-needed, preserves stable ticket stems, and commits ticket changes.
-
-> [!note] Planned 🚧
-> Ticket authoring will treat `todo/` as accepted backlog and `ready/` as the
-> spec-gated implementation queue. The spec gate will run on entry to `ready/`,
-> while `todo/` tickets may carry optional `spec:` links as recovery hints.
+`lead-write-ticket` creates or updates workflow tickets. It treats `todo/` as
+accepted backlog and `ready/` as the spec-gated implementation queue. The spec
+gate runs only when a non-`epic`, non-`research` action creates or moves a ticket
+into `ready/`; `todo/` tickets may carry optional `spec:` links as recovery
+hints. Queue entries are maintained for `ready/` work only.
 
 `lead-write-skeleton` locks public contracts before implementation when the
 scope needs stubs, integration tests, or interface scaffolding. It delegates
@@ -117,15 +113,12 @@ The pipeline order is fixed:
 spec -> ticket -> skeleton -> implementation
 ```
 
-Existing ticket paths skip ticket creation. Actionable inline targets go through
-`lead-write-ticket`; exploratory targets stop and suggest `lead-discuss`.
-Implementation always routes through `lead-implement`, with
+Existing `ready/` ticket paths skip ticket creation and are direct
+implementation targets. Existing `todo/` ticket paths route through `lead-discuss`
+for `todo/` -> `ready/` promotion before implementation. Actionable inline
+targets go through `lead-write-ticket`; exploratory targets stop and suggest
+`lead-discuss`. Implementation always routes through `lead-implement`, with
 `lead-write-skeleton` inserted when the scope needs public contract scaffolding.
-
-> [!note] Planned 🚧
-> Existing `todo/` ticket paths will route through ready promotion before
-> implementation. Existing `ready/` ticket paths will be direct implementation
-> targets.
 
 ## Sprint Session Container {#260505-sprint-session-container}
 

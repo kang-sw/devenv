@@ -90,7 +90,7 @@ ai-docs/
   mental-model/      - contracts, coupling, architecture narrative
   spec/              - external-perspective specs
   ref/               - static reference material
-  tickets/<status>/  - idea/ todo/ .done/ .dropped/
+  tickets/<status>/  - idea/ todo/ ready/ .done/ .dropped/
 
 CLAUDE.md compatibility shim:
 
@@ -156,6 +156,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0032: If `AGENTS.md` is absent and `CLAUDE.md` exists, create `AGENTS.md` from current `CLAUDE.md`.
 - v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
+- v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `ws:lead-discuss`.
 -->
 
-<!-- Template Version: v0034 -->
+<!-- Template Version: v0035 -->

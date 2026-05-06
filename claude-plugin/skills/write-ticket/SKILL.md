@@ -17,16 +17,16 @@ Target: $ARGUMENTS
 
 ## On: invoke
 
-0. For create, classify category/status and apply **judge: spec-gate** unless category is `epic` or `research`.
+0. Classify category/status; apply **judge: spec-gate** only when the operation creates or moves a non-`epic`, non-`research` ticket into `ready/`.
 1. If `$ARGUMENTS` references an existing ticket, read it.
 2. **Create** (new ticket):
    a. Determine category from the topic.
-   b. Choose initial status directory (`idea/` for vague, `todo/` for actionable — see `judge: initial-status`).
+   b. Choose initial status directory (`idea/` for vague, `todo/` for accepted actionable backlog — see `judge: initial-status`).
    c. Write the ticket using the **frontmatter template** and a clear problem/goal statement. Populate `related-mental-model` with the mental-model stems (filename without `.md`) that were consulted or arose during the current session — recovery hint for future sessions, not a validated link. Omit if no mental-model docs were relevant.
    d. If category is `epic`: body defines scope and decomposition (not implementation spec); list child ticket stems; completion means child work is done.
    e. If multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
    f. After drafting, verify scope — see `judge: ticket-scope`.
-   g. If status is `todo/`: add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` — one-line purpose and dependency notes ``.
+   g. If status is `ready/`: add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` — one-line purpose and dependency notes ``.
 3. **Edit** (existing ticket):
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
@@ -36,7 +36,7 @@ Target: $ARGUMENTS
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** — skip `epic` and `research`; otherwise confirm ticket↔spec linkage:
+6. **Spec-stem check** — skip `epic` and `research`; enforce ticket↔spec linkage for `ready/`, and treat `todo/` links as optional recovery hints:
    a. Run `ws-list-spec-stems <spec-file>` on the relevant spec file(s) to confirm canonical stems.
    b. Ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    c. Remind: commits implementing this ticket should include a `## Spec` section with those stems.
@@ -50,7 +50,7 @@ Target: $ARGUMENTS
 
 ### judge: spec-gate
 
-Fires on any non-`epic`, non-`research` action that results in `todo/`-or-higher status: direct `todo/` creation and `idea/` → `todo/` promotion moves. `idea/` creation is ungated.
+Fires on any non-`epic`, non-`research` action that creates or moves a ticket into `ready/`. `idea/` creation and `idea/` → `todo/` triage are ungated.
 
 Identify the relevant spec file for the topic.
 Run `ws-list-spec-stems <spec-file>` (Bash) if a spec file is identifiable.
@@ -58,7 +58,7 @@ If no relevant spec file exists, or no entry covers this behavior → stop. Name
 
 ### judge: initial-status
 
-Place in `idea/` when the topic is exploratory or underspecified; place in `todo/` when the scope and goal are actionable. When uncertain, prefer `idea/` — promotion is cheap.
+Place in `idea/` when the topic is exploratory or underspecified; place in `todo/` when the scope and goal are accepted actionable backlog. `todo/` `spec:` links are optional recovery hints; `ready/` is the spec-gated implementation queue. When uncertain, prefer `idea/` — triage is cheap.
 
 ### judge: ticket-scope
 

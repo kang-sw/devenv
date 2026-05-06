@@ -113,7 +113,7 @@ ai-docs/
   mental-model/      — project map: contracts, coupling, architectural narrative
   spec/              — external-perspective specs (area/ directories for multi-section areas)
   ref/               — static reference material (external specs, protocol docs, design notes)
-  tickets/<status>/  — idea/ todo/ .done/ .dropped/
+  tickets/<status>/  — idea/ todo/ ready/ .done/ .dropped/
 
 _index.md should cover:
   - Project summary (what it is, who it's for, current milestone)
@@ -234,7 +234,7 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          (a) Permanent behavioral invariants → move to body prose.
          (b) Known-but-unscheduled implementation gaps → convert to
              `[!note] Implementation Gap · <YYYY-MM-DD>` (use the date of migration).
-         (c) Planned features with an existing `todo/`-or-higher ticket → convert to
+         (c) Planned features with an existing `ready/` ticket → convert to
              `### 🚧 <Feature Name>` heading.
          Remove the `[!note] Constraints` form after reclassifying all items in a file.
 - v0025: If `ai-docs/_continue.local.md` exists, delete it. This file was written by
@@ -270,6 +270,10 @@ Adapt structure to fit the project — these are guidelines, not a rigid schema.
          held manually-maintained API delta docs; it is superseded by the
          `ws-ask-api` / `ai-docs/.deps/` cache system.
          If `ai-docs/deps/` exists: `git mv ai-docs/deps ai-docs/ref/deps-old`.
+- v0032: If `AGENTS.md` is absent and `CLAUDE.md` exists, create `AGENTS.md` from current `CLAUDE.md`.
+- v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
+- v0034: Treat `AGENTS.md` as the canonical managed template target.
+- v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `/discuss`.
 -->
 
-<!-- Template Version: v0031 -->
+<!-- Template Version: v0035 -->

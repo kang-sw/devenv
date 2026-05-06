@@ -19,7 +19,7 @@ related:
 
 - Spec identity is body-anchor based. Tools scan `{#YYMMDD-slug}` anchors under `ai-docs/spec/`, not frontmatter. {#260505-spec-document-system}
 - `ws/spec_index.verify` currently verifies duplicate anchors; it does not rebuild indexes or validate stale behavior.
-- Ticket status is directory state. `.done` and `.dropped` are invisible unless discovery calls opt in. {#260505-ticket-document-system}
+- Ticket status is directory state: `ready/`, `todo/`, and `idea/` are active; `.done` and `.dropped` are invisible unless discovery calls opt in. {#260505-ticket-document-system}
 - Mental-model hierarchy is path-derived; subdomain callers must load parent `index.md` before child docs. {#260505-mental-model-document-system}
 - Convention docs are embedded in the Go runtime; editing only `claude-plugin/infra/*` leaves `ws/convention.read` stale.
 
@@ -33,17 +33,17 @@ related:
 ## Extension Points & Change Recipes
 
 - **Add a convention**: add Markdown under `internal/wsdoc/conventions/`, then update any compatibility copy that remains authoritative for Claude fallbacks.
-- **Add a ticket status**: update status normalization, rank, scan defaults, project tree rendering, conventions, and skills.
+- **Add a ticket status**: update status normalization, rank, scan defaults, project tree rendering, conventions, Git move detection, MCP schemas, prompts, and skills.
 - **Add doc discovery tools**: update MCP dispatch, tool schema, parameter validation, tests, and docs. {#260505-documentation-authoring-workflows}
 
 ## Common Mistakes
 
 - Adding spec anchors manually without checking for duplicates.
-- Promoting non-epic, non-research todo work without matching spec entry/stem linkage.
+- Promoting non-epic, non-research work into `ready/` without matching spec entry/stem linkage.
 - Using full YAML features in frontmatter; the parser is deliberately minimal.
 - Loading mental-model child docs without ancestors and missing inherited Domain Rules.
 
 ## Technical Debt
 
-- `markerContext` treats `planned` and `wip` prose broadly, which can surface false-positive marker metadata.
+- `markerContext` treats `planned` and legacy `wip` prose broadly, which can surface false-positive marker metadata.
 - Project-tree spec feature stats are compatibility output, not the active spec index.

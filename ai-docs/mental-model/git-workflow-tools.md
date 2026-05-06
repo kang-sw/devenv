@@ -30,7 +30,7 @@ related:
 
 - Git operation additions require `wsgit`, MCP dispatch/schema, CLI handler/usage, tests, optional profile filtering, and docs.
 - Diff modes are shared constants across core, MCP enum, CLI default/help, and docs.
-- Ticket move expansion depends on `ai-docs/tickets/{idea,todo,wip,.done,.dropped}` layout.
+- Ticket move expansion depends on `ai-docs/tickets/{ready,todo,idea,.done,.dropped}` layout, with legacy `wip` accepted only for explicit old-path detection.
 - `git.commit` is hidden only when the optional leaf profile filter is active.
 
 ## Extension Points & Change Recipes

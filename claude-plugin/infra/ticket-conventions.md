@@ -10,12 +10,15 @@ Canonical reference for ticket structure, naming, and lifecycle.
 
 ## Status Flow
 
-- Status is directory-based only: `idea/` → `todo/` → `wip/` (optional) → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
+- Status is directory-based only: `idea/` → `todo/` → `ready/` → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
+- `idea/` is rough capture before triage; `todo/` is accepted backlog with recoverable intent; `ready/` is the spec-gated implementation queue.
 - Move tickets with `git mv`; no cross-link updates needed.
 - Add `completed:` date on move to `.done/`.
-- `idea/` tickets may not have `spec:` entries — spec linkage begins at `todo/` or higher.
-- `epic` and `research` tickets do not require `spec:` entries in `todo/`; epics decompose scope and research captures findings.
-- Promoting `idea/` → `todo/` for a non-`epic`, non-`research` ticket with spec-relevant behaviors: route through `/discuss` → `/write-spec` adds the `🚧` entry before or after the move.
+- `idea/` tickets may omit `spec:` entries.
+- `todo/` tickets may include optional `spec:` entries as recovery hints and promotion candidates.
+- Non-`epic`, non-`research` tickets entering `ready/` require `spec:` linkage; epics decompose scope and research captures findings.
+- Promoting `idea/` → `todo/` is triage and does not require spec creation.
+- Promoting `todo/` → `ready/` for a non-`epic`, non-`research` ticket: route through `/discuss` → `/write-spec` to ensure planned entries and ticket `spec:` frontmatter exist before the move.
 - Dropping a ticket with linked spec entries: route through `/discuss` → `/write-spec` removes orphaned `🚧` entries before the move.
 
 ## Phases

@@ -398,7 +398,7 @@ Input schema:
 
 Behavior:
 
-- Defaults to active ticket statuses: `idea`, `todo`, and `wip`.
+- Defaults to active ticket statuses: `ready`, `todo`, and `idea`.
 - `include_done` separately opts into `ai-docs/tickets/.done/`.
 - `include_dropped` separately opts into `ai-docs/tickets/.dropped/`.
 - Returns JSON objects with `stem`, `path`, directory-derived `status`, title,
@@ -410,7 +410,7 @@ Behavior:
 Compatibility fallback:
 
 ```bash
-ws-mcp tickets list [--status todo] [--include-done] [--include-dropped]
+ws-mcp tickets list [--status ready] [--include-done] [--include-dropped]
 ```
 
 ### `ws/tickets.find`

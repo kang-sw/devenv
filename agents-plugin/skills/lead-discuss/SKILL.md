@@ -44,16 +44,19 @@ Call `ws/project_tree()` to load the current project map.
 
 ## On: Ticket Status Transition
 
-Triggers when the user requests a ticket status change - promoting an idea ticket to `todo/`, or dropping a ticket to `.dropped/`.
+Triggers when the user requests a ticket status change - triaging an idea ticket to `todo/`, promoting a `todo/` ticket to `ready/`, or dropping a ticket to `.dropped/`.
 
 1. Read the ticket file. Extract any `spec:` frontmatter field and body references to `{#YYMMDD-slug}` anchors.
-2. **Promotion (idea/ -> todo/)**:
+2. **Triage (idea/ -> todo/)**:
+   a. Perform native `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
+   b. Do not require spec creation; `todo/` is accepted backlog, not the implementation queue.
+3. **Ready promotion (todo/ -> ready/)**:
    a. If category is `epic` or `research`, skip spec creation and spec frontmatter population.
    b. Otherwise, invoke `ws:lead-write-spec` to add a `🚧` entry for each caller-visible behavior in the ticket.
-   c. Perform native `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
-   d. If spec creation ran, invoke `ws:lead-write-ticket` (Edit path) on the promoted ticket to populate the `spec:` frontmatter field with the stems created in step (b).
+   c. Invoke `ws:lead-write-ticket` (Edit path) to populate the `spec:` frontmatter field when missing.
+   d. Perform native `git mv ai-docs/tickets/todo/<stem>.md ai-docs/tickets/ready/<stem>.md`.
    e. Add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` - one-line purpose and dependency notes ``.
-3. **Drop (-> .dropped/)**:
+4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
    b. No other ticket references this stem -> invoke `ws:lead-write-spec` to remove the `🚧` entry.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.

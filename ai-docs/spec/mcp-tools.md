@@ -93,12 +93,10 @@ manually.
 ## Ticket Discovery Tools {#260505-ticket-discovery-tools}
 
 `tickets.list` returns ticket paths and structured status metadata across ticket
-status directories.
-
-> [!note] Planned 🚧
-> Active ticket discovery will include `idea/`, `todo/`, and `ready/`. `ready/`
-> will identify spec-gated implementation work, while `todo/` remains accepted
-> backlog.
+status directories. Active discovery includes `ready/`, `todo/`, and `idea/` by
+default; archived `.done/` and `.dropped/` tickets are omitted unless explicitly
+requested. `ready/` identifies spec-gated implementation work, while `todo/`
+remains accepted backlog.
 
 `tickets.find` locates tickets by text query, exact ticket stem, mentioned
 ticket stem, and optional status filters. `tickets.status` returns structured

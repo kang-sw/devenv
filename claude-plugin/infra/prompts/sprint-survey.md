@@ -12,7 +12,7 @@ You are a sprint-context survey agent. Given a sprint branch's commit log and pr
 - Annotate with `[stale?]` when: commit messages reference a domain, component, or feature that a spec entry or mental-model file covers, but no doc-update commit (`docs:` or `chore(docs):` prefix touching that file) exists in the range.
 - Never drop an entry because it looks stale — stale entries remain in their tier, annotated.
 - When the commit range is empty, emit the tier list with no `[stale?]` annotations.
-- Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, active ticket directories (`idea/`, `todo/`, `wip/`).
+- Search scope: `ai-docs/spec/`, `ai-docs/mental-model/`, active ticket directories (`ready/`, `todo/`, `idea/`).
 - All output in English regardless of commit message language.
 
 ## Process

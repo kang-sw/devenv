@@ -26,7 +26,7 @@ description, abstract it further.
   callout beneath the existing feature body. Current behavior description stays unchanged.
 - No ticket reference in the marker — implementation traceability flows through commits that include `## Spec` sections referencing the spec-stem.
 - No `🚧` means implemented — verify each such feature actually exists before committing.
-- `🚧` entries — heading form or `> [!note] Planned 🚧` callout — require the feature to have a `todo/`-or-higher ticket. Idea-only tickets (`idea/`) do not qualify.
+- `🚧` entries — heading form or `> [!note] Planned 🚧` callout — require the feature to have a `ready/` ticket, except `epic` and `research` work that records decomposition or investigation rather than implementation. `idea/` and `todo/` tickets do not qualify.
 
 ## Implementation Gap Callout
 
@@ -38,7 +38,7 @@ Use `> [!note] Implementation Gap · YYYY-MM-DD` for a known-but-unscheduled gap
 The callout body text identifies which form applies.
 
 - The date records when the gap was first noted; use today's date when first authoring.
-- No ticket required — this distinguishes it from `🚧` entries, which must have a `todo/`-or-higher ticket.
+- No ticket required — this distinguishes it from `🚧` entries, which must have a `ready/` ticket or an exempt `epic`/`research` ticket.
 - Resolution path: at the next spec review, either create a ticket and convert to `🚧`, or accept the current state and absorb into body prose.
 - Discuss sessions surface a staleness warning for entries older than 90 days.
 
