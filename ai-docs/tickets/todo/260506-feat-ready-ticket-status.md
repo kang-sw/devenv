@@ -4,6 +4,12 @@ related-mental-model:
   - documentation-system
   - workflow-skills
   - git-workflow-tools
+spec:
+  - 260505-ticket-document-system
+  - 260505-documentation-authoring-workflows
+  - 260505-ticket-discovery-tools
+  - 260505-planning-workflow-skills
+  - 260505-proceed-routing-pipeline
 ---
 
 # Ready Ticket Status And Backlog Split
