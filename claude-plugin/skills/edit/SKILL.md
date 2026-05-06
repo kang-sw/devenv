@@ -52,6 +52,8 @@ Commit at logical checkpoints per CLAUDE.md rules. Include `## AI Context`.
 
 ### 4. Review
 
+Apply `judge: review-scope`. If lead-only review is selected, record the rationale and proceed to cleanup.
+
 Register reviewer and allocate review path (two separate Bash calls).
 
 Reviewer registration:
@@ -74,6 +76,9 @@ Diff range: <start-commit>..HEAD
 Scope: direct-edit — <brief scope description>
 
 Review for correctness and fit.
+Review focus:
+- <2-4 changed invariants, bug paths, or local fit risks>
+Ignore broad style or unrelated architecture unless directly broken by the diff.
 Write full findings to: <review-path>
 Return only: [clean|non-clean]: <one-line summary>
 PROMPT
@@ -88,6 +93,7 @@ After notification, read summary: `ws-print-named-agent-output reviewer`.
 ```bash
 ws-call-named-agent reviewer - <<'PROMPT'
 Re-review. Updated diff: <start-commit>..HEAD
+Focus only on prior findings and touched follow-up changes.
 PROMPT
 ```
 
@@ -113,6 +119,12 @@ Output the **completion report** (see Templates).
 |----------|------|
 | Proceed without skeleton | Change is a small isolated edit (single file, no new public contracts) |
 | Require skeleton | Change touches public interfaces or cross-module boundaries |
+
+### judge: review-scope
+
+Soft judgment. Direct edit uses one reviewer by default.
+Lead-only review is allowed for mechanical, low-risk edits with rationale.
+When calling a reviewer, provide 2-4 focus bullets.
 
 ## Templates
 

@@ -49,6 +49,8 @@ CLAUDE.md commit rules.
 
 ### 4. Review
 
+Apply `judge: review-scope`. If lead-only review is selected, record the rationale and proceed to cleanup.
+
 1. Register reviewer:
    `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`.
 2. Generate path:
@@ -60,6 +62,9 @@ Diff range: <start-commit>..HEAD
 Scope: direct-edit - <brief scope description>
 
 Review for correctness and fit.
+Review focus:
+- <2-4 changed invariants, bug paths, or local fit risks>
+Ignore broad style or unrelated architecture unless directly broken by the diff.
 Write full findings to: <review-path>
 Return only: [clean|non-clean]: <one-line summary>
 ```
@@ -76,6 +81,7 @@ Return only: [clean|non-clean]: <one-line summary>
 ```text
 Re-review. Updated diff: <start-commit>..HEAD
 Rejected findings: <list with reasons>
+Focus only on prior findings and touched follow-up changes.
 For each rejected finding: respond [accepted] or [maintained: <brief reason>].
 ```
 
@@ -98,6 +104,12 @@ Output completion report.
 |----------|------|
 | Proceed without skeleton | Small isolated edit: single file, no new public contracts |
 | Require skeleton | Public interface or cross-module boundary changes |
+
+### judge: review-scope
+
+Soft judgment. Direct edit uses one reviewer by default.
+Lead-only review is allowed for mechanical, low-risk edits with rationale.
+When calling a reviewer, provide 2-4 focus bullets.
 
 ## Templates
 
