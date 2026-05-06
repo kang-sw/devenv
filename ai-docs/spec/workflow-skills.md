@@ -157,13 +157,12 @@ and writes it to the appropriate authority document.
 the canonical workflow context while preserving Claude compatibility through a
 shim when needed.
 
-> [!note] Planned 🚧
-> Bootstrap will also install a project-local workflow guide under
-> `ai-docs/workflow/` and point `AGENTS.md` at it. The guide is a pinned
-> explanation of the ws workflow contract for plugin-less maintainers: it
-> explains the document layers, ticket lifecycle, spec stems, mental models,
-> commit traceability, and manual fallback expectations without becoming a
-> project-local override for runtime semantics. {#260506-bootstrap-workflow-guide}
+Bootstrap installs a project-local workflow guide under `ai-docs/workflow/` and
+points `AGENTS.md` at it. The guide is a pinned explanation of the ws workflow
+contract for plugin-less maintainers: it explains the document layers, ticket
+lifecycle, spec stems, mental models, commit traceability, and manual fallback
+expectations without becoming a project-local override for runtime semantics.
+{#260506-bootstrap-workflow-guide}
 
 `lead-ship` follows the repository ship configuration to prepare and execute a
 release. It confirms version, tag, and publish targets before any publishing
