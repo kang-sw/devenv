@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.20.2 - 2026-05-07
+
+### Changed
+- Load `lead-workflow-manual` from routing and delegated implementation skills
+  when workflow primitive context is absent.
+- Normalize embedded named-agent prompt tier frontmatter to the host-neutral
+  `light`, `core`, and `deep` vocabulary while preserving runtime alias
+  compatibility.
+- Document MCP-first workflow language for general-purpose named-agent
+  registration and role-specific prompt usage.
+
 ## v0.20.1 - 2026-05-06
 
 ### Changed
