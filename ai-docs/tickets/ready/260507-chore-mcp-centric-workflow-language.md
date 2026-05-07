@@ -2,6 +2,8 @@
 title: MCP-centric workflow language cleanup
 related:
   260429-research-host-neutral-ws-plugin: host-neutral migration anchor
+spec:
+  - 260507-mcp-centric-workflow-language
 related-mental-model:
   - workflow-skills
   - mcp-runtime

@@ -56,6 +56,13 @@ only primitives available in the runtime; when a needed surface is not exposed
 yet, skill text describes the required MCP contract instead of naming a
 host-specific helper.
 
+> [!note] Planned 🚧
+> Codex-facing workflow skill guidance will consistently present MCP
+> primitives as the primary ws runtime surface, document promptless
+> `ws/agents.register` as the general-purpose named-agent form, and keep CLI
+> adapter syntax scoped to compatibility or testing references.
+> {#260507-mcp-centric-workflow-language}
+
 ## Planning Workflow Skills {#260505-planning-workflow-skills}
 
 Planning skills prepare caller-visible work before implementation.

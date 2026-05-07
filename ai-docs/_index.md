@@ -213,6 +213,7 @@ dropped tickets live in hidden archive dirs and git history.
 `260505-bug-codex-jsonl-trailing-noise` - hotfix Windows Codex persistent-agent results when process-control stdout appears after a valid JSONL agent message.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+`260507-chore-mcp-centric-workflow-language` - audit Codex-facing workflow skill language so shared guidance teaches MCP primitives before CLI adapters.
 
 ## Session Notes
 
