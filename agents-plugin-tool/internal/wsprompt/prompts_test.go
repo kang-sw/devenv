@@ -16,7 +16,7 @@ func TestResolveEmbeddedPromptChain(t *testing.T) {
 	if resolved.Tier != "core" {
 		t.Fatalf("tier = %q", resolved.Tier)
 	}
-	if strings.Contains(resolved.Text, "model: sonnet") {
+	if strings.Contains(resolved.Text, "model: core") {
 		t.Fatalf("frontmatter was not stripped:\n%s", resolved.Text)
 	}
 	if !strings.Contains(resolved.Text, "You are a code reviewer.") {

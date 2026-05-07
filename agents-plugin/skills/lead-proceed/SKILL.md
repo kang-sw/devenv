@@ -10,6 +10,7 @@ Target: user request
 ## Invariants
 
 - Route only; do not implement, plan, or write skeletons here.
+- Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Assess from conversation state and artifacts only; do not read source code.
 - Pipeline order is fixed: spec -> ticket -> skeleton -> implementation.
 - Execution mode is single; split multi-scope work into separate tickets.

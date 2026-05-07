@@ -1,6 +1,6 @@
 ---
 name: implementer
-model: sonnet
+model: core
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 

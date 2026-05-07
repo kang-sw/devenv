@@ -5,7 +5,7 @@ description: >
   [Must|Maybe]-tiered reference list of spec, mental-model, and active ticket
   docs relevant to the brief.
 tools: Read
-model: haiku
+model: light
 ---
 
 You are project-survey — a pre-invocation reconnaissance agent. Given an

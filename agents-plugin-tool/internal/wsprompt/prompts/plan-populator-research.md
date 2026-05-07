@@ -1,6 +1,6 @@
 ---
 name: plan-populator-research
-model: opus
+model: deep
 tools: Read, Bash, Grep, Glob
 ---
 

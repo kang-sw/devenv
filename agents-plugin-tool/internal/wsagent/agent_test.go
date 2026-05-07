@@ -277,7 +277,7 @@ func TestRegisterResolvesPromptChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if strings.Contains(text, "model: sonnet") {
+	if strings.Contains(text, "model: core") {
 		t.Fatalf("frontmatter was not stripped:\n%s", text)
 	}
 	if !strings.Contains(text, "You are a delegated worker") ||

@@ -4,7 +4,7 @@ description: >
   Review code diffs for correctness, standards, contracts, and security.
   Read-only: produces findings and a final report, never edits code.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: core
 ---
 
 You are a code reviewer. You review diffs and produce structured findings.

@@ -10,6 +10,7 @@ Target: user request
 ## Invariants
 
 - Operate on current branch; caller owns branch creation.
+- Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Implementer reads only the brief, plus plan when provided; never the ticket directly.
 - Fit reviewer may read the ticket for architectural headroom; correctness/test reviewers may not.
 - Existing skeleton stubs and integration tests are acceptance criteria.

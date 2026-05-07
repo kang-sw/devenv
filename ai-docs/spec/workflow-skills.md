@@ -95,7 +95,8 @@ runs spec update handling, and reports the result.
 
 `lead-write-code` delegates an implementation target through an implementer
 agent, optional plan, partitioned reviewers, bounded fix relay, cleanup, and
-completion report.
+completion report. When workflow primitive context is not already active, it
+loads `lead-workflow-manual` before registering delegates or reviewers.
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,
@@ -106,6 +107,8 @@ handles removed spec stems, verifies the spec index, and commits the spec pass.
 `lead-proceed` is the first step for implementation tasks. It is route-only: it
 reads conversation state and existing workflow artifacts, then chains the needed
 pipeline stages without reading source code or performing implementation work.
+When workflow primitive context is not already active, it loads
+`lead-workflow-manual` before routing.
 
 The pipeline order is fixed:
 

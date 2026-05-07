@@ -1,6 +1,6 @@
 ---
 name: plan-populator-survey
-model: sonnet
+model: core
 tools: Read, Bash, Grep, Glob
 ---
 
