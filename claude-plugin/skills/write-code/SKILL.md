@@ -16,7 +16,7 @@ Target: $ARGUMENTS
 - Operates on the current branch — branch creation is the caller's responsibility.
 - Implementer reads only the brief — never the ticket directly.
 - Fit reviewer may reference the ticket for architectural headroom checks; correctness and test reviewers do not.
-- When skeleton exists, its stubs and integration tests are the acceptance criteria.
+- When skeleton exists, its contracts and integration tests are the acceptance criteria.
 - Ancestor loading: when implementer reads `mental-model/<domain>/<sub>.md`, it reads `mental-model/<domain>/index.md` first. Lead propagates this rule in the implementer spawn prompt.
 - Reviewers write findings to files; lead reads summaries only; implementer reads files directly when non-clean.
 - Implementer and reviewer sessions persist via `ws-call-named-agent` auto-resume throughout the review loop.
@@ -91,8 +91,8 @@ After the population agent returns, commit the plan file before proceeding.
 
 ### 4. Prepare
 
-1. Verify skeleton: grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs or check for integration tests referencing target contracts. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `/write-skeleton`.
-2. Collect integration test context: identify test file paths and the run command. Flows into the implementer spawn prompt.
+1. Collect existing skeleton references from ticket frontmatter, `todo!()`/`unimplemented`/`NotImplementedError` stubs, or integration tests referencing target contracts.
+2. Collect integration test context: identify test file paths and the run command. Include skeleton tests only when skeleton references exist.
 3. Register all agent slots:
    ```bash
    ws-new-named-agent implementer -p implementer
@@ -117,7 +117,9 @@ Brief path: <brief-path>
 
 Read only the brief (and plan if provided). Do not read the ticket directly.
 
-Acceptance criteria: skeleton integration tests must pass.
+Acceptance criteria:
+<if skeleton exists:> Existing skeleton contracts must be satisfied, and skeleton integration tests must pass.
+<if no skeleton exists:> Brief-scoped implementation tests must pass.
 - Test files: <integration test paths>
 - Run: <command to execute them>
 
@@ -284,13 +286,6 @@ Full review is reserved for risks spanning correctness, fit, and tests.
 | **Full** | Cross-cutting behavior plus runtime/tooling plus test surface, or release/security/data-loss boundary |
 | **Floor** | Purely mechanical change → lead-only or one reviewer with rationale |
 
-### judge: skeleton-check
-
-| Decision | When |
-|----------|------|
-| Proceed without skeleton | Brief is a small isolated change (single file, no public contracts) |
-| Require skeleton | Change touches public interfaces or cross-module boundaries |
-
 ## Templates
 
 ### Brief format
@@ -314,7 +309,7 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 
 ## Details
 <interface specs, data types, public contracts at ticket-level resolution>
-<required when no skeleton has been run; may be omitted when skeleton provides contracts>
+<required when no skeleton references exist; may be omitted when skeleton provides contracts>
 
 ## References
 <!-- Populated from project-survey [Must/Maybe] output. -->

@@ -83,10 +83,10 @@ gate runs only when a non-`epic`, non-`research` action creates or moves a ticke
 into `ready/`; `todo/` tickets may carry optional `spec:` links as recovery
 hints. Queue entries are maintained for `ready/` work only.
 
-`lead-write-skeleton` locks public contracts before implementation when the
-scope needs stubs, integration tests, or interface scaffolding. It delegates
-skeleton authoring, then the lead reviews, commits, and links generated
-skeleton artifacts to the ticket.
+`lead-write-skeleton` optionally locks high-risk caller-visible contracts before
+implementation when the scope needs a separate reviewable checkpoint. It
+delegates skeleton authoring, then the lead reviews, commits, and links
+generated skeleton artifacts to the ticket.
 
 ## Implementation Workflow Skills {#260505-implementation-workflow-skills}
 
@@ -96,13 +96,15 @@ Implementation skills execute code changes and close the documentation loop.
 delegated code writing, then runs the shared post-implementation documentation
 pipeline before reporting completion.
 
-`lead-edit` performs a narrow direct edit in the lead session. It verifies the
-change, uses one reviewer for correctness and fit, escalates if the scope grows,
-runs spec update handling, and reports the result.
+`lead-edit` performs a narrow direct edit in the lead session. It honors
+existing skeleton artifacts, verifies the change, uses one reviewer for
+correctness and fit, escalates if the scope grows, runs spec update handling,
+and reports the result.
 
 `lead-write-code` delegates an implementation target through an implementer
 agent, optional plan, partitioned reviewers, bounded fix relay, cleanup, and
-completion report. When workflow primitive context is not already active, it
+completion report. It honors existing skeleton artifacts but does not require
+missing skeletons. When workflow primitive context is not already active, it
 loads `lead-workflow-manual` before registering delegates or reviewers.
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
@@ -128,7 +130,8 @@ implementation targets. Existing `todo/` ticket paths route through `lead-discus
 for `todo/` -> `ready/` promotion before implementation. Actionable inline
 targets go through `lead-write-ticket`; exploratory targets stop and suggest
 `lead-discuss`. Implementation always routes through `lead-implement`, with
-`lead-write-skeleton` inserted when the scope needs public contract scaffolding.
+`lead-write-skeleton` inserted only when a separate contract checkpoint is
+needed before implementation.
 
 ## Sprint Session Container {#260505-sprint-session-container}
 

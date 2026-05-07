@@ -18,7 +18,7 @@ Target: $ARGUMENTS
 - Follow impl-playbook: run `ws-print-infra impl-playbook.md` for test strategy, verify, failure diagnosis, and mechanical-edit criteria.
 - Load relevant mental-model docs before editing: run `ws-list-mental-model <target-paths>` and read every listed file.
 - Ancestor loading: when a read touches `mental-model/<domain>/<sub>.md`, load `mental-model/<domain>/index.md` first.
-- When skeleton exists for the target scope, its stubs and integration tests are the acceptance criteria.
+- When skeleton exists for the target scope, its contracts and integration tests are the acceptance criteria.
 - Commit per logical unit following CLAUDE.md commit rules; include `## AI Context`.
 - Review relay cap: 2 cycles maximum; proceed to cleanup regardless of status after the cap.
 - Escalate to `/implement` if scope grows to multi-file with new public API or cross-module without established pattern.
@@ -32,8 +32,8 @@ Target: $ARGUMENTS
 
 1. Parse arguments: ticket path or inline brief.
 2. Record current HEAD as `<start-commit>`: `git rev-parse HEAD`.
-3. If ticket-driven: read the ticket; collect skeleton references from frontmatter.
-4. Apply `judge: skeleton-check`. If skeleton required but absent, stop and suggest `/write-skeleton`.
+3. If ticket-driven: read the ticket; collect existing skeleton references from frontmatter.
+4. Treat collected skeleton references as acceptance criteria.
 5. Load mental-model docs: `ws-list-mental-model <target-paths>`; read every listed file, ancestors first.
 6. Run `ws-print-infra impl-playbook.md`.
 7. Identify integration test file paths and the run command.
@@ -112,13 +112,6 @@ Invoke `ws:update-spec` via Skill tool with args `<start-commit>..HEAD`.
 Output the **completion report** (see Templates).
 
 ## Judgments
-
-### judge: skeleton-check
-
-| Decision | When |
-|----------|------|
-| Proceed without skeleton | Change is a small isolated edit (single file, no new public contracts) |
-| Require skeleton | Change touches public interfaces or cross-module boundaries |
 
 ### judge: review-scope
 

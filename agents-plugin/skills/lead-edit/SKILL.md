@@ -13,7 +13,7 @@ Target: user request
 - Load `ws/infra.read(name: "impl-playbook")` before editing.
 - Use `ws/mental_models.find` or `ws/mental_models.status`; read returned paths.
 - Ancestor loading: read `mental-model/<domain>/index.md` before `mental-model/<domain>/<sub>.md`.
-- Existing skeleton stubs and integration tests are acceptance criteria.
+- Honor existing skeleton contracts and integration tests as acceptance criteria.
 - Commit logical units per CLAUDE.md; include `## AI Context`.
 - Relay cap is 2 review cycles; clean up and return after the cap.
 - Lead fixes correctness, security, contract, and regression findings.
@@ -29,8 +29,8 @@ Target: user request
 
 1. Parse ticket path or inline brief.
 2. Record `<start-commit>` with `git rev-parse HEAD`.
-3. If ticket-driven: read ticket; collect skeleton references.
-4. Apply `judge: skeleton-check`; stop and suggest `ws:lead-write-skeleton` if required skeleton is absent.
+3. If ticket-driven: read ticket; collect existing skeleton references.
+4. Treat collected skeleton references as acceptance criteria.
 5. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 6. Call `ws/infra.read(name: "impl-playbook")`.
 7. Identify integration test paths and run command.
@@ -97,13 +97,6 @@ Invoke `ws:lead-update-spec` with `<start-commit>..HEAD`.
 Output completion report.
 
 ## Judgments
-
-### judge: skeleton-check
-
-| Decision | When |
-|----------|------|
-| Proceed without skeleton | Small isolated edit: single file, no new public contracts |
-| Require skeleton | Public interface or cross-module boundary changes |
 
 ### judge: review-scope
 

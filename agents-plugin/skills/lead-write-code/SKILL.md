@@ -13,7 +13,7 @@ Target: user request
 - Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Implementer reads only the brief, plus plan when provided; never the ticket directly.
 - Fit reviewer may read the ticket for architectural headroom; correctness/test reviewers may not.
-- Existing skeleton stubs and integration tests are acceptance criteria.
+- Honor existing skeleton contracts and integration tests as acceptance criteria.
 - Lead puts ancestor-loading rule in implementer prompt.
 - Reviewers write findings to files and return summaries only.
 - Lead relays review file paths, not findings content, to implementer.
@@ -63,9 +63,9 @@ Commit the plan file before Prepare.
 
 ### 4. Prepare
 
-1. Verify skeleton by frontmatter, integration tests, or stubs: `todo!()`, `unimplemented`, `NotImplementedError`.
-2. Apply `judge: skeleton-check`; stop and suggest `ws:lead-write-skeleton` if required skeleton is absent.
-3. Identify integration test paths and run command.
+1. Collect existing skeleton references from frontmatter, integration tests, or stubs: `todo!()`, `unimplemented`, `NotImplementedError`.
+2. Identify integration test paths and run command.
+3. Include skeleton test paths only when skeleton references exist.
 4. Register implementer:
    `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
 5. Register selected reviewers:
@@ -85,7 +85,9 @@ Brief path: <brief-path>
 
 Read only the brief (and plan if provided). Do not read the ticket directly.
 
-Acceptance criteria: skeleton integration tests must pass.
+Acceptance criteria:
+<if skeleton exists:> Existing skeleton contracts must be satisfied, and skeleton integration tests must pass.
+<if no skeleton exists:> Brief-scoped implementation tests must pass.
 - Test files: <integration test paths>
 - Run: <command to execute them>
 
@@ -227,13 +229,6 @@ Full review is reserved for risks spanning correctness, fit, and tests.
 | Full | Cross-cutting behavior plus runtime/tooling plus test surface, or release/security/data-loss boundary |
 | Floor | Pure mechanical change -> lead-only or one reviewer with rationale |
 
-### judge: skeleton-check
-
-| Decision | When |
-|----------|------|
-| Proceed without skeleton | Small isolated change: single file, no public contracts |
-| Require skeleton | Public interface or cross-module boundary changes |
-
 ## Templates
 
 ### Brief format
@@ -257,7 +252,7 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 
 ## Details
 <interface specs, data types, public contracts at ticket-level resolution>
-<required when no skeleton has been run; may be omitted when skeleton provides contracts>
+<required when no skeleton references exist; may be omitted when skeleton provides contracts>
 
 ## References
 <!-- Populated from project-survey [Must/Maybe] output. -->
