@@ -199,7 +199,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260429-feat-api-deps` | ready | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
-| `260507-chore-mcp-centric-workflow-language` | todo | Audit Codex-facing workflow skills so shared guidance teaches MCP primitives before CLI adapters |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
@@ -213,7 +212,6 @@ dropped tickets live in hidden archive dirs and git history.
 `260505-bug-codex-jsonl-trailing-noise` - hotfix Windows Codex persistent-agent results when process-control stdout appears after a valid JSONL agent message.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260507-chore-mcp-centric-workflow-language` - audit Codex-facing workflow skill language so shared guidance teaches MCP primitives before CLI adapters.
 
 ## Session Notes
 

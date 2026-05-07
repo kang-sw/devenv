@@ -8,6 +8,7 @@ related-mental-model:
   - workflow-skills
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-07
 ---
 
 # MCP-centric workflow language cleanup
@@ -50,3 +51,14 @@ Success criteria:
   general-purpose named-agent form.
 - Role-specific agent examples use `prompts: ["<prompt-stem>"]`.
 - Any retained CLI mention is explicitly scoped to compatibility or testing.
+
+### Result (1cdb9a1) - 2026-05-07
+
+Implemented MCP-first workflow language guidance in `lead-workflow-manual`:
+promptless `ws/agents.register(name: "<agent-name>")` is now the
+general-purpose named-agent form, role-specific delegates use `prompts:
+["<prompt-stem>"]`, and tier/model override guidance is expressed through MCP
+arguments. The audit preserved compatibility-specific Claude wording and
+generic caller-visible CLI classification text, while replacing the
+host-neutral bootstrap template's legacy `ws-ask-api` migration note with
+`ws/api.ask`.
