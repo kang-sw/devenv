@@ -63,9 +63,17 @@ timeout_seconds: 600)`. Set `deep_research: true` only for broad tracing.
 `ws/agents.cancel`
 `ws/agents.erase`
 
-Register a stable task name with prompt stems or a self-contained system prompt.
-Call it for each continuity turn. `ws/agents.call` starts async and returns
-promptly. Use `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds: 600)` or a longer bound for final output, `status` before waiting, `tail(lines: 3)` for small diagnostics, `print` only as a compatibility output alias, `cancel` to stop active work, and `erase` when task-scoped state should be removed.
+Register a stable task name with optional prompt stems or a self-contained
+system prompt. Omit `prompts` for a general-purpose named agent; registration
+uses delegate orientation and the default `core` tier. Use
+`tier: "light" | "core" | "deep"` for workload selection and `model` only for a
+one-off concrete model override. Call the agent for each continuity turn.
+`ws/agents.call` starts async and returns promptly. Use
+`wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
+600)` or a longer bound for final output, `status` before waiting,
+`tail(lines: 3)` for small diagnostics, `print` only as a compatibility output
+alias, `cancel` to stop active work, and `erase` when task-scoped state should
+be removed.
 
 ### Artifact paths
 
@@ -160,6 +168,7 @@ call `ws/subquery(deep_research: true, question: <block below>)` only for broad 
 call `ws/agents.result(name: "<subquery-key>", timeout_seconds: 600)` to read output.
 
 Persistent task:
+call `ws/agents.register(name: "<agent-name>")` for a general-purpose delegate.
 call `ws/agents.register(name: "<agent-name>", prompts: ["<prompt-stem>"])`.
 call `ws/agents.call(name: "<agent-name>", prompt: <block below>)`.
 wait for readiness, read final output with `result(timeout_seconds: 600)`, inspect status, or tail with `lines: 3`.

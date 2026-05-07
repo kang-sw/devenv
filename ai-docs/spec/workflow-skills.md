@@ -56,12 +56,12 @@ only primitives available in the runtime; when a needed surface is not exposed
 yet, skill text describes the required MCP contract instead of naming a
 host-specific helper.
 
-> [!note] Planned 🚧
-> Codex-facing workflow skill guidance will consistently present MCP
-> primitives as the primary ws runtime surface, document promptless
-> `ws/agents.register` as the general-purpose named-agent form, and keep CLI
-> adapter syntax scoped to compatibility or testing references.
-> {#260507-mcp-centric-workflow-language}
+Codex-facing workflow skill guidance presents MCP primitives as the primary ws
+runtime surface. Promptless `ws/agents.register(name: "<agent-name>")` is the
+general-purpose named-agent form; role-specific delegates use `prompts:
+["<prompt-stem>"]`, and optional `tier` or `model` arguments select workload or
+one-off concrete models. CLI adapter syntax belongs only in compatibility or
+testing references. {#260507-mcp-centric-workflow-language}
 
 ## Planning Workflow Skills {#260505-planning-workflow-skills}
 

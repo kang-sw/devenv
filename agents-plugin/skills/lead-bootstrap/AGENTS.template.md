@@ -154,7 +154,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0028: Reclassify domain-scoped rules from `## Architecture Rules` or `_index.md` into `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
 - v0029: If `ai-docs/tickets/wip/` exists, `git mv` tickets to `todo/`, remove empty `wip/`, add `## Ticket Queue` if absent, then use `ws:lead-discuss` to agree order.
 - v0030: Rename archive dirs to dot-prefix via `git mv`: `tickets/done` -> `.done`, `tickets/dropped` -> `.dropped`, `ai-docs/plans` -> `.plans`; update references.
-- v0031: If `ai-docs/deps/` exists, archive it to `ai-docs/ref/deps-old`; it is superseded by `ws-ask-api` / `ai-docs/.deps/`.
+- v0031: If `ai-docs/deps/` exists, archive it to `ai-docs/ref/deps-old`; it is superseded by `ws/api.ask` and `ai-docs/.deps/`.
 - v0032: If `AGENTS.md` is absent and `CLAUDE.md` exists, create `AGENTS.md` from current `CLAUDE.md`.
 - v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
