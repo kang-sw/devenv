@@ -31,18 +31,13 @@ embedded delegate-orientation prompt unless the caller explicitly suppresses it
 for an internal helper.
 
 The runtime strips prompt frontmatter, concatenates prompt bodies in caller
-order, and writes the resolved text to the agent's `system.md`. Workload tiers
-use `light`, `core`, and `deep`; each tier resolves to a backend/model mapping
-from user-local configuration or runtime defaults, with a concrete model
-overriding the tier mapping for a single registration.
-
-> [!note] Planned 🚧
-> Agent registration will treat `light`, `core`, and `deep` as portable model
-> aliases. `model` may name either one of those aliases or a concrete backend
-> model; concrete model names override alias and harness defaults. Legacy
-> `tier` inputs remain accepted only as compatibility alias selectors when
-> `model` is absent. Resolved agent metadata reports the requested alias, the
-> resolved backend, and the resolved concrete model. {#260508-harness-aware-model-aliases}
+order, and writes the resolved text to the agent's `system.md`. `light`,
+`core`, and `deep` are portable model aliases. `model` may name one of those
+aliases or a concrete backend model; concrete model names override alias and
+harness defaults. Legacy `tier` inputs remain accepted as compatibility alias
+selectors when `model` is absent. Resolved agent metadata reports the alias in
+the compatibility `tier` field, plus the resolved backend and concrete model.
+{#260508-harness-aware-model-aliases}
 
 ## Async Single-Call Lifecycle {#260505-agent-async-single-call-lifecycle}
 
@@ -145,12 +140,11 @@ incorporated into a final result instead of completing with empty output.
 Claude process failures will continue through the shared backend invocation
 diagnostics path, preserving raw backend errors and reconfiguration hints.
 
-> [!note] Planned 🚧
-> Portable model aliases resolve through the detected MCP harness. A `core`
-> registration from a Codex MCP session resolves through Codex alias defaults,
-> while the same alias from a Claude MCP session resolves through Claude alias
-> defaults. Unknown harnesses use a deterministic configured default.
-> {#260508-mcp-harness-detection}
+Portable model aliases resolve through the detected MCP harness. A `core`
+registration from a Codex MCP session resolves through Codex alias defaults,
+while the same alias from a Claude MCP session resolves through Claude alias
+defaults. Unknown harnesses use a deterministic configured default.
+{#260508-mcp-harness-detection}
 
 ## Backend Invocation Failure Diagnostics {#260505-agent-backend-failure-diagnostics}
 

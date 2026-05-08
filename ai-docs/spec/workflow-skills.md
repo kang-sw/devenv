@@ -59,17 +59,16 @@ host-specific helper.
 Codex-facing workflow skill guidance presents MCP primitives as the primary ws
 runtime surface. Promptless `ws/agents.register(name: "<agent-name>")` is the
 general-purpose named-agent form; role-specific delegates use `prompts:
-["<prompt-stem>"]`, and optional `tier` or `model` arguments select workload or
+["<prompt-stem>"]`, and optional `model` arguments select portable aliases or
 one-off concrete models. CLI adapter syntax belongs only in compatibility or
 testing references. {#260507-mcp-centric-workflow-language}
 
-> [!note] Planned 🚧
-> Workflow guidance will prefer `model` for both portable aliases and concrete
-> overrides. Examples use `model: "core"` or `model: "deep"` for portable
-> selection and concrete provider names such as `gpt-5.5` or
-> `claude-sonnet-4.6` only when backend-specific routing is intentional.
-> `tier` remains documented only as deprecated compatibility input.
-> {#260508-workflow-model-alias-guidance}
+Workflow guidance prefers `model` for both portable aliases and concrete
+overrides. Examples use `model: "core"` or `model: "deep"` for portable
+selection and concrete provider names such as `gpt-5.5` or
+`claude-sonnet-4.6` only when backend-specific routing is intentional. `tier`
+remains documented only as deprecated compatibility input.
+{#260508-workflow-model-alias-guidance}
 
 ## Planning Workflow Skills {#260505-planning-workflow-skills}
 
