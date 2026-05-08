@@ -20,6 +20,9 @@ import (
 const (
 	apiJobSchemaVersion = 1
 
+	apiJobWorkerHeartbeatInterval = time.Second
+	apiJobWorkerStaleAfter        = 15 * time.Second
+
 	apiJobStateQueued          = "queued"
 	apiJobStateRouting         = "routing"
 	apiJobStateRunning         = "running"
@@ -39,7 +42,7 @@ const (
 var (
 	apiJobKeyPattern = regexp.MustCompile(`^api-[0-9]+-[a-f0-9]{16}$`)
 	apiJobStateMu    sync.Mutex
-	apiJobCancels    sync.Map // map[root\x00api_job_key]context.CancelFunc
+	apiJobCancels    sync.Map // map[root\x00api_job_key]apiJobActiveWorker
 )
 
 type apiJobStartResponse struct {
@@ -75,26 +78,29 @@ type apiDomainJobProgress struct {
 }
 
 type apiJobRecord struct {
-	SchemaVersion   int                    `json:"schema_version"`
-	APIJobKey       string                 `json:"api_job_key"`
-	Root            string                 `json:"root"`
-	Prompt          string                 `json:"prompt"`
-	DomainHint      string                 `json:"domain_hint,omitempty"`
-	Status          string                 `json:"status"`
-	ResolvedDomains []string               `json:"resolved_domains,omitempty"`
-	Domains         []apiDomainJobProgress `json:"domains,omitempty"`
-	ResultText      string                 `json:"result_text,omitempty"`
-	Error           string                 `json:"error,omitempty"`
-	CancelRequested bool                   `json:"cancel_requested,omitempty"`
-	StartedAt       string                 `json:"started_at"`
-	UpdatedAt       string                 `json:"updated_at"`
-	CompletedAt     string                 `json:"completed_at,omitempty"`
+	SchemaVersion     int                    `json:"schema_version"`
+	APIJobKey         string                 `json:"api_job_key"`
+	Root              string                 `json:"root"`
+	Prompt            string                 `json:"prompt"`
+	DomainHint        string                 `json:"domain_hint,omitempty"`
+	Status            string                 `json:"status"`
+	WorkerPID         int                    `json:"worker_pid,omitempty"`
+	WorkerGeneration  string                 `json:"worker_generation,omitempty"`
+	WorkerStartedAt   string                 `json:"worker_started_at,omitempty"`
+	WorkerHeartbeatAt string                 `json:"worker_heartbeat_at,omitempty"`
+	ResolvedDomains   []string               `json:"resolved_domains,omitempty"`
+	Domains           []apiDomainJobProgress `json:"domains,omitempty"`
+	ResultText        string                 `json:"result_text,omitempty"`
+	Error             string                 `json:"error,omitempty"`
+	CancelRequested   bool                   `json:"cancel_requested,omitempty"`
+	StartedAt         string                 `json:"started_at"`
+	UpdatedAt         string                 `json:"updated_at"`
+	CompletedAt       string                 `json:"completed_at,omitempty"`
 }
 
-type apiJobDomainResult struct {
-	domain string
-	text   string
-	err    error
+type apiJobActiveWorker struct {
+	cancel     context.CancelFunc
+	generation string
 }
 
 // startAPIJob persists an apiJobRecord before returning and starts a process-local
@@ -110,16 +116,24 @@ func (s *Server) startAPIJob(ctx context.Context, root, prompt, hint string) (ap
 	if err != nil {
 		return apiJobStartResponse{}, err
 	}
+	generation, err := newAPIJobGeneration()
+	if err != nil {
+		return apiJobStartResponse{}, err
+	}
 	now := apiJobTimestamp()
 	record := apiJobRecord{
-		SchemaVersion: apiJobSchemaVersion,
-		APIJobKey:     key,
-		Root:          filepath.Clean(root),
-		Prompt:        prompt,
-		DomainHint:    hint,
-		Status:        apiJobStateQueued,
-		StartedAt:     now,
-		UpdatedAt:     now,
+		SchemaVersion:     apiJobSchemaVersion,
+		APIJobKey:         key,
+		Root:              filepath.Clean(root),
+		Prompt:            prompt,
+		DomainHint:        hint,
+		Status:            apiJobStateQueued,
+		WorkerPID:         os.Getpid(),
+		WorkerGeneration:  generation,
+		WorkerStartedAt:   now,
+		WorkerHeartbeatAt: now,
+		StartedAt:         now,
+		UpdatedAt:         now,
 	}
 	if err := createAPIJobRecord(root, record); err != nil {
 		return apiJobStartResponse{}, err
@@ -127,11 +141,11 @@ func (s *Server) startAPIJob(ctx context.Context, root, prompt, hint string) (ap
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	activeKey := apiJobActiveKey(root, key)
-	apiJobCancels.Store(activeKey, cancel)
+	apiJobCancels.Store(activeKey, apiJobActiveWorker{cancel: cancel, generation: generation})
 	go func() {
 		defer apiJobCancels.Delete(activeKey)
 		defer cancel()
-		s.runAPIJob(runCtx, root, key)
+		s.runAPIJob(runCtx, root, key, generation)
 	}()
 
 	return apiJobStartResponse{
@@ -150,7 +164,7 @@ func (s *Server) statusAPIJob(ctx context.Context, root, key string) (apiJobStat
 	if key == "" {
 		return apiJobStatusResponse{}, errors.New("api_job_key is required")
 	}
-	record, err := loadAPIJobRecord(root, key)
+	record, err := reconcileAPIJobRecord(root, key)
 	if err != nil {
 		return apiJobStatusResponse{}, err
 	}
@@ -163,7 +177,7 @@ func (s *Server) resultAPIJob(ctx context.Context, root, key string) (string, er
 	if key == "" {
 		return "", errors.New("api_job_key is required")
 	}
-	record, err := loadAPIJobRecord(root, key)
+	record, err := reconcileAPIJobRecord(root, key)
 	if err != nil {
 		return "", err
 	}
@@ -207,14 +221,22 @@ func (s *Server) cancelAPIJob(ctx context.Context, root, key string) (apiJobStat
 		return apiJobStatusResponse{}, err
 	}
 	if cancelValue, ok := apiJobCancels.Load(apiJobActiveKey(root, key)); ok {
-		if cancel, ok := cancelValue.(context.CancelFunc); ok {
-			cancel()
+		if worker, ok := cancelValue.(apiJobActiveWorker); ok {
+			worker.cancel()
 		}
+	}
+	record, err = reconcileAPIJobRecord(root, key)
+	if err != nil {
+		return apiJobStatusResponse{}, err
 	}
 	return apiJobStatusFromRecord(record), nil
 }
 
-func (s *Server) runAPIJob(ctx context.Context, root, key string) {
+func (s *Server) runAPIJob(ctx context.Context, root, key, generation string) {
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go heartbeatAPIJob(heartbeatCtx, root, key, generation)
+
 	if apiJobCancellationRequested(ctx, root, key) {
 		completeAPIJobCancelled(root, key)
 		return
@@ -261,14 +283,14 @@ func (s *Server) runAPIJob(ctx context.Context, root, key string) {
 		return
 	}
 
-	results := make([]apiJobDomainResult, len(domains))
+	results := make([]apiDomainResult, len(domains))
 	var wg sync.WaitGroup
 	for i, domain := range domains {
 		i, domain := i, domain
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i] = s.runAPIJobDomain(ctx, root, key, domain)
+			results[i] = s.runAPIJobDomain(ctx, root, key, domain, record.Prompt)
 		}()
 	}
 	wg.Wait()
@@ -278,7 +300,7 @@ func (s *Server) runAPIJob(ctx context.Context, root, key string) {
 		return
 	}
 
-	text, successes := formatAPIJobResults(results)
+	text, successes := formatAPIResults(results)
 	if successes == 0 {
 		completeAPIJobFailed(root, key, text, errors.New("api.ask failed for all resolved domains"))
 		return
@@ -290,8 +312,8 @@ func (s *Server) runAPIJob(ctx context.Context, root, key string) {
 	completeAPIJobSucceeded(root, key, text, status)
 }
 
-func (s *Server) runAPIJobDomain(ctx context.Context, root, key, domain string) apiJobDomainResult {
-	result := apiJobDomainResult{domain: domain}
+func (s *Server) runAPIJobDomain(ctx context.Context, root, key, domain, prompt string) apiDomainResult {
+	result := apiDomainResult{domain: domain}
 	if apiJobCancellationRequested(ctx, root, key) {
 		result.err = context.Canceled
 		markAPIJobDomain(root, key, domain, apiDomainStateCancelled, context.Canceled)
@@ -305,7 +327,7 @@ func (s *Server) runAPIJobDomain(ctx context.Context, root, key, domain string) 
 	}
 	lock := apiLockFor(root, domain)
 	lock.Lock()
-	text, err := s.apiRuntime().AskManager(ctx, root, domain, loadAPIJobPrompt(root, key))
+	text, err := s.apiRuntime().AskManager(ctx, root, domain, prompt)
 	lock.Unlock()
 	result.text = text
 	result.err = err
@@ -320,14 +342,6 @@ func (s *Server) runAPIJobDomain(ctx context.Context, root, key, domain string) 
 	}
 	markAPIJobDomain(root, key, domain, apiDomainStateSucceeded, nil)
 	return result
-}
-
-func loadAPIJobPrompt(root, key string) string {
-	record, err := loadAPIJobRecord(root, key)
-	if err != nil {
-		return ""
-	}
-	return record.Prompt
 }
 
 func markAPIJobDomain(root, key, domain, status string, err error) {
@@ -406,27 +420,6 @@ func completeAPIJobCancelled(root, key string) {
 	})
 }
 
-func formatAPIJobResults(results []apiJobDomainResult) (string, int) {
-	successes := 0
-	var b strings.Builder
-	b.WriteString("api.ask results\n")
-	for _, res := range results {
-		b.WriteString("\n## Domain: ")
-		b.WriteString(res.domain)
-		b.WriteString("\n")
-		if res.err != nil {
-			b.WriteString("ERROR: ")
-			b.WriteString(res.err.Error())
-			b.WriteByte('\n')
-			continue
-		}
-		successes++
-		b.WriteString(strings.TrimRight(res.text, "\n"))
-		b.WriteByte('\n')
-	}
-	return b.String(), successes
-}
-
 func apiJobCancellationRequested(ctx context.Context, root, key string) bool {
 	if ctx.Err() != nil {
 		return true
@@ -436,6 +429,61 @@ func apiJobCancellationRequested(ctx context.Context, root, key string) bool {
 		return false
 	}
 	return record.CancelRequested || record.Status == apiJobStateCancelRequested || record.Status == apiJobStateCancelled
+}
+
+func heartbeatAPIJob(ctx context.Context, root, key, generation string) {
+	ticker := time.NewTicker(apiJobWorkerHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, _ = updateAPIJobRecord(root, key, func(record *apiJobRecord, now string) {
+				if record.WorkerGeneration != generation || apiJobResultReady(record.Status) {
+					return
+				}
+				record.WorkerHeartbeatAt = now
+			})
+		}
+	}
+}
+
+func reconcileAPIJobRecord(root, key string) (apiJobRecord, error) {
+	record, err := loadAPIJobRecord(root, key)
+	if err != nil {
+		return apiJobRecord{}, err
+	}
+	if apiJobResultReady(record.Status) || apiJobWorkerLikelyLive(root, record) {
+		return record, nil
+	}
+	if record.CancelRequested || record.Status == apiJobStateCancelRequested {
+		completeAPIJobCancelled(root, key)
+	} else {
+		completeAPIJobFailed(root, key, record.ResultText, errors.New("api job worker is no longer active"))
+	}
+	return loadAPIJobRecord(root, key)
+}
+
+func apiJobWorkerLikelyLive(root string, record apiJobRecord) bool {
+	if cancelValue, ok := apiJobCancels.Load(apiJobActiveKey(root, record.APIJobKey)); ok {
+		if worker, ok := cancelValue.(apiJobActiveWorker); ok && worker.generation == record.WorkerGeneration {
+			return true
+		}
+	}
+	heartbeat := strings.TrimSpace(record.WorkerHeartbeatAt)
+	if heartbeat == "" {
+		return false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, heartbeat)
+	if err != nil {
+		if fallback, fallbackErr := time.Parse(time.RFC3339, heartbeat); fallbackErr == nil {
+			ts = fallback
+		} else {
+			return false
+		}
+	}
+	return time.Since(ts) <= apiJobWorkerStaleAfter
 }
 
 func apiJobStatusFromRecord(record apiJobRecord) apiJobStatusResponse {
@@ -586,6 +634,14 @@ func newAPIJobKey() (string, error) {
 		return "", fmt.Errorf("generate api job key: %w", err)
 	}
 	return fmt.Sprintf("api-%d-%s", time.Now().UTC().UnixNano(), hex.EncodeToString(random[:])), nil
+}
+
+func newAPIJobGeneration() (string, error) {
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", fmt.Errorf("generate api job worker generation: %w", err)
+	}
+	return hex.EncodeToString(random[:]), nil
 }
 
 func apiJobActiveKey(root, key string) string {

@@ -31,6 +31,12 @@ type apiRuntime interface {
 
 type wsagentAPIRuntime struct{}
 
+type apiDomainResult struct {
+	domain string
+	text   string
+	err    error
+}
+
 func (wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string, error) {
 	mgr := wsagent.NewManager(wsagent.Options{})
 	name := fmt.Sprintf("api-doc-pre-router-%d", time.Now().UTC().UnixNano())
@@ -80,7 +86,34 @@ func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt st
 	if _, err := mgr.Call(wsagent.CallOptions{Root: root, Name: name, Prompt: prompt}); err != nil {
 		return "", err
 	}
-	return mgr.Result(wsagent.ResultOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
+	if ctx == nil {
+		return mgr.Result(wsagent.ResultOptions{Root: root, Name: name, Timeout: apiAskTimeout})
+	}
+	done := make(chan struct{})
+	cancelled := make(chan struct{})
+	var cancelOnce sync.Once
+	cancelManager := func() {
+		cancelOnce.Do(func() {
+			_, _ = mgr.Cancel(root, name)
+		})
+	}
+	go func() {
+		defer close(cancelled)
+		select {
+		case <-ctx.Done():
+			cancelManager()
+		case <-done:
+		}
+	}()
+	text, err := mgr.Result(wsagent.ResultOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
+	if ctx.Err() != nil {
+		cancelManager()
+	}
+	close(done)
+	if ctx.Err() != nil {
+		<-cancelled
+	}
+	return text, err
 }
 
 func apiManagerExpired(agent wsagent.Agent, now time.Time) bool {
@@ -134,12 +167,7 @@ func (s *Server) askAPI(ctx context.Context, root, prompt, hint string) (string,
 		return "", errors.New("api.ask resolved no domains")
 	}
 
-	type result struct {
-		domain string
-		text   string
-		err    error
-	}
-	results := make([]result, len(domains))
+	results := make([]apiDomainResult, len(domains))
 	var wg sync.WaitGroup
 	for i, domain := range domains {
 		i, domain := i, domain
@@ -161,6 +189,14 @@ func (s *Server) askAPI(ctx context.Context, root, prompt, hint string) (string,
 	}
 	wg.Wait()
 
+	text, successes := formatAPIResults(results)
+	if successes == 0 {
+		return text, errors.New("api.ask failed for all resolved domains")
+	}
+	return text, nil
+}
+
+func formatAPIResults(results []apiDomainResult) (string, int) {
 	successes := 0
 	var b strings.Builder
 	b.WriteString("api.ask results\n")
@@ -178,10 +214,7 @@ func (s *Server) askAPI(ctx context.Context, root, prompt, hint string) (string,
 		b.WriteString(strings.TrimRight(res.text, "\n"))
 		b.WriteByte('\n')
 	}
-	if successes == 0 {
-		return b.String(), errors.New("api.ask failed for all resolved domains")
-	}
-	return b.String(), nil
+	return b.String(), successes
 }
 
 func (s *Server) resolveAPIDomains(ctx context.Context, root, prompt, hint string) ([]string, error) {

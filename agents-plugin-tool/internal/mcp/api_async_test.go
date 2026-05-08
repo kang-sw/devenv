@@ -39,20 +39,39 @@ func TestAPIAskAsyncImmediateStartReturnsRecoverableJobKeyAndStatus(t *testing.T
 	root := t.TempDir()
 	initGit(t, root)
 	mustWrite(t, root, "ai-docs/.deps/go/README.md", "go")
-	fake := &fakeAPIRuntime{
-		answers: map[string]string{"go": "go answer"},
-		delay:   250 * time.Millisecond,
-	}
+	fake := &cancelAwareAPIRuntime{ready: make(chan struct{}), release: make(chan struct{})}
+	released := false
+	defer func() {
+		if !released {
+			close(fake.release)
+		}
+	}()
 	server := NewServer(root, "test")
 	server.api = fake
 
-	start := time.Now()
-	startLine := callMCPToolForTest(t, server, "api.ask_async", map[string]any{
-		"prompt":      "How do modules work?",
-		"domain_hint": "go",
-	})
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
-		t.Fatalf("api.ask_async did not return immediately; elapsed=%s response=%s", elapsed, startLine)
+	startLineCh := make(chan struct {
+		line string
+		err  error
+	}, 1)
+	go func() {
+		line, err := callMCPToolForTestNoFatal(server, "api.ask_async", map[string]any{
+			"prompt":      "How do modules work?",
+			"domain_hint": "go",
+		})
+		startLineCh <- struct {
+			line string
+			err  error
+		}{line: line, err: err}
+	}()
+	var startLine string
+	select {
+	case result := <-startLineCh:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		startLine = result.line
+	case <-time.After(time.Second):
+		t.Fatal("api.ask_async did not return before blocked manager work was released")
 	}
 	if toolIsError(t, startLine) {
 		t.Fatalf("api.ask_async returned tool error: %s", startLine)
@@ -86,6 +105,22 @@ func TestAPIAskAsyncImmediateStartReturnsRecoverableJobKeyAndStatus(t *testing.T
 	if recovered.APIJobKey != startResponse.APIJobKey || recovered.Prompt != "How do modules work?" {
 		t.Fatalf("fresh server did not recover durable job state: %#v", recovered)
 	}
+
+	select {
+	case <-fake.ready:
+	case <-time.After(time.Second):
+		t.Fatal("async manager work did not start")
+	}
+	close(fake.release)
+	released = true
+	finalStatus := waitForAPIJobReadyForTest(t, recoveredServer, startResponse.APIJobKey)
+	if finalStatus.Status != apiJobStateSucceeded {
+		t.Fatalf("fresh server did not recover completed job status: %#v", finalStatus)
+	}
+	resultLine := callMCPToolForTest(t, recoveredServer, "api.result", map[string]any{"api_job_key": startResponse.APIJobKey})
+	if toolIsError(t, resultLine) || !strings.Contains(toolText(t, resultLine), "## Domain: go\nlate answer") {
+		t.Fatalf("fresh server did not recover completed job result: %s", resultLine)
+	}
 }
 
 func TestAPIAsyncPollingResultPreservesPartialFailureAggregation(t *testing.T) {
@@ -109,6 +144,8 @@ func TestAPIAsyncPollingResultPreservesPartialFailureAggregation(t *testing.T) {
 	if len(status.ResolvedDomains) != 2 {
 		t.Fatalf("status should expose resolved domains: %#v", status)
 	}
+	assertAPIDomainProgress(t, status, "go", apiDomainStateSucceeded, "")
+	assertAPIDomainProgress(t, status, "python", apiDomainStateFailed, "python unavailable")
 
 	resultLine := callMCPToolForTest(t, server, "api.result", map[string]any{"api_job_key": key})
 	if toolIsError(t, resultLine) {
@@ -136,6 +173,8 @@ func TestAPIAsyncAllDomainFailureReturnsToolErrorWithMetadata(t *testing.T) {
 	if status.Status != apiJobStateFailed {
 		t.Fatalf("all-domain failure should fail the job, got %#v", status)
 	}
+	assertAPIDomainProgress(t, status, "go", apiDomainStateFailed, "go failed")
+	assertAPIDomainProgress(t, status, "python", apiDomainStateFailed, "python failed")
 
 	resultLine := callMCPToolForTest(t, server, "api.result", map[string]any{"api_job_key": key})
 	if !toolIsError(t, resultLine) {
@@ -219,19 +258,52 @@ func TestAPIAsyncPreservesSynchronousAPIAskCompatibility(t *testing.T) {
 
 func callMCPToolForTest(t *testing.T, server *Server, name string, args map[string]any) string {
 	t.Helper()
+	line, err := callMCPToolForTestNoFatal(server, name, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return line
+}
+
+func callMCPToolForTestNoFatal(server *Server, name string, args map[string]any) (string, error) {
 	if args == nil {
 		args = map[string]any{}
 	}
 	rawArgs, err := json.Marshal(args)
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
 	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`, name, rawArgs) + "\n"
 	var out bytes.Buffer
 	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatalf("ServeStdio returned error: %v", err)
+		return "", fmt.Errorf("ServeStdio returned error: %w", err)
 	}
-	return responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"]
+	byID, err := responseLinesByIDNoFatal(strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if err != nil {
+		return "", err
+	}
+	line, ok := byID["1"]
+	if !ok {
+		return "", fmt.Errorf("missing response id 1: %s", out.String())
+	}
+	return line, nil
+}
+
+func responseLinesByIDNoFatal(lines []string) (map[string]string, error) {
+	byID := make(map[string]string, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var resp struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			return nil, err
+		}
+		byID[strings.Trim(string(resp.ID), `"`)] = line
+	}
+	return byID, nil
 }
 
 func decodeToolJSON[T any](t *testing.T, line string) T {
@@ -271,6 +343,26 @@ func waitForAPIJobReadyForTest(t *testing.T, server *Server, key string) apiJobS
 	}
 	t.Fatalf("api job %q did not become ready", key)
 	return apiJobStatusResponse{}
+}
+
+func assertAPIDomainProgress(t *testing.T, status apiJobStatusResponse, domain, wantStatus, wantError string) {
+	t.Helper()
+	for _, progress := range status.Domains {
+		if progress.Domain != domain {
+			continue
+		}
+		if progress.Status != wantStatus {
+			t.Fatalf("domain %q status = %q, want %q in %#v", domain, progress.Status, wantStatus, status)
+		}
+		if wantError != "" && !strings.Contains(progress.Error, wantError) {
+			t.Fatalf("domain %q error = %q, want containing %q in %#v", domain, progress.Error, wantError, status)
+		}
+		if wantError == "" && progress.Error != "" {
+			t.Fatalf("domain %q unexpected error = %q in %#v", domain, progress.Error, status)
+		}
+		return
+	}
+	t.Fatalf("domain %q missing from status progress: %#v", domain, status)
 }
 
 type cancelAwareAPIRuntime struct {
