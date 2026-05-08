@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,9 +33,12 @@ type RunnerRequest struct {
 }
 
 type RunnerResult struct {
-	SessionID   string
-	Text        string
-	Interrupted bool
+	SessionID       string
+	Text            string
+	Interrupted     bool
+	BackendVersion  string
+	PromptDelivery  string
+	FinalEventShape string
 }
 
 func runnerForBackend(backend string) (Runner, error) {
@@ -50,44 +54,40 @@ func runnerForBackend(backend string) (Runner, error) {
 
 type CodexRunner struct{}
 
-func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
-	args := []string{"exec"}
-	if req.SessionID != "" {
-		args = append(args, "resume")
-	}
-	args = append(args, "--dangerously-bypass-approvals-and-sandbox", "--json")
-	if req.Model != "" {
-		args = append(args, "-m", req.Model)
-	}
-	if req.SystemPromptPath != "" {
-		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", req.SystemPromptPath))
-	}
-	if req.InterruptHookCommand != "" {
-		hookCommand, err := json.Marshal(req.InterruptHookCommand)
-		if err != nil {
-			return RunnerResult{}, fmt.Errorf("quote interrupt hook command: %w", err)
-		}
-		hookTOML := fmt.Sprintf(`[{hooks=[{type="command",command=%s,timeout=5}]}]`, hookCommand)
-		args = append(args, "-c", "features.codex_hooks=true", "-c", "hooks.PostToolUse="+hookTOML)
-	}
-	if req.SessionID != "" {
-		args = append(args, req.SessionID)
-	}
-	args = append(args, req.Prompt)
+var (
+	codexVersionOnce  sync.Once
+	codexVersionValue string
+)
 
+type codexInvocation struct {
+	Args           []string
+	PromptStdin    string
+	PromptDelivery string
+}
+
+func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
+	invocation, err := buildCodexInvocation(req)
+	if err != nil {
+		return RunnerResult{}, err
+	}
+
+	backendVersion := codexVersion()
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if req.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, "codex", args...)
+	cmd := exec.CommandContext(ctx, "codex", invocation.Args...)
 	if !req.InheritProcessGroup {
 		configureRunnerCommand(cmd)
 	}
 	cmd.Dir = req.Root
 	if req.ToolProfile != "" {
 		cmd.Env = append(cmd.Environ(), "WS_MCP_TOOL_PROFILE="+req.ToolProfile)
+	}
+	if invocation.PromptDelivery == "stdin" {
+		cmd.Stdin = strings.NewReader(invocation.PromptStdin)
 	}
 	var stderr bytes.Buffer
 	if req.Stderr != nil {
@@ -125,7 +125,52 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if parseErr != nil {
 		return RunnerResult{}, parseErr
 	}
+	result.BackendVersion = backendVersion
+	result.PromptDelivery = invocation.PromptDelivery
 	return result, nil
+}
+
+func codexVersion() string {
+	codexVersionOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "codex", "--version").Output()
+		if err == nil {
+			codexVersionValue = strings.TrimSpace(string(out))
+		}
+	})
+	return codexVersionValue
+}
+
+func buildCodexInvocation(req RunnerRequest) (codexInvocation, error) {
+	args := []string{"exec"}
+	if req.SessionID != "" {
+		args = append(args, "resume")
+	}
+	args = append(args, "--dangerously-bypass-approvals-and-sandbox", "--json")
+	if req.Model != "" {
+		args = append(args, "-m", req.Model)
+	}
+	if req.SystemPromptPath != "" {
+		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", req.SystemPromptPath))
+	}
+	if req.InterruptHookCommand != "" {
+		hookCommand, err := json.Marshal(req.InterruptHookCommand)
+		if err != nil {
+			return codexInvocation{}, fmt.Errorf("quote interrupt hook command: %w", err)
+		}
+		hookTOML := fmt.Sprintf(`[{hooks=[{type="command",command=%s,timeout=5}]}]`, hookCommand)
+		args = append(args, "--enable", "hooks", "-c", "hooks.PostToolUse="+hookTOML)
+	}
+	if req.SessionID != "" {
+		args = append(args, req.SessionID)
+	}
+	args = append(args, "-")
+	return codexInvocation{
+		Args:           args,
+		PromptStdin:    req.Prompt,
+		PromptDelivery: "stdin",
+	}, nil
 }
 
 func parseCodexJSONL(raw []byte) (RunnerResult, error) {
@@ -189,6 +234,7 @@ func parseCodexJSONLStreamPartial(r io.Reader, onSessionID func(string) error) (
 		}
 		if event.Type == "item.completed" && event.Item.Type == "agent_message" {
 			result.Text = event.Item.Text
+			result.FinalEventShape = event.Type + "/" + event.Item.Type
 		}
 		if err == io.EOF {
 			break

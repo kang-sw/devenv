@@ -543,6 +543,11 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	if len(messages) > 0 {
 		prompt = composeLeadMessagePrompt(messages, prompt)
 	}
+	_ = appendRuntimeLog(layout, m.now(), "backend.prompt.delivery", map[string]any{
+		"backend":          agent.Backend,
+		"resume":           agent.SessionID != "",
+		"prompt_byte_size": len([]byte(prompt)),
+	})
 	result, err = runner.Call(RunnerRequest{
 		Root:                 layout.Root,
 		Prompt:               prompt,
@@ -569,9 +574,19 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 	if result.SessionID != "" {
 		agent.SessionID = result.SessionID
 	}
-	_ = appendRuntimeLog(layout, m.now(), "backend.call.complete", map[string]any{
+	completeFields := map[string]any{
 		"session_id": result.SessionID,
-	})
+	}
+	if result.BackendVersion != "" {
+		completeFields["backend_version"] = result.BackendVersion
+	}
+	if result.PromptDelivery != "" {
+		completeFields["prompt_delivery"] = result.PromptDelivery
+	}
+	if result.FinalEventShape != "" {
+		completeFields["final_event_shape"] = result.FinalEventShape
+	}
+	_ = appendRuntimeLog(layout, m.now(), "backend.call.complete", completeFields)
 	if result.SessionID != "" {
 		agent.SessionID = result.SessionID
 	}
