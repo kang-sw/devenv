@@ -1,6 +1,13 @@
 ---
 title: Harness-aware model aliases
 parent: 260503-epic-ws-agent-workflow-stability
+spec:
+  - 260508-harness-aware-model-aliases
+  - 260508-mcp-harness-detection
+  - 260508-mcp-payload-harness-detection
+  - 260508-model-alias-config-tools
+  - 260508-agents-register-model-alias-field
+  - 260508-workflow-model-alias-guidance
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime

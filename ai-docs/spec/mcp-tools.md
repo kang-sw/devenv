@@ -20,6 +20,15 @@ Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
 runtime failures return MCP text content with `isError: true`, preserving a
 normal MCP response envelope while still making the failure visible to callers.
 
+> [!note] Planned 🚧
+> The MCP server will detect the host harness from observable MCP payloads
+> before relying on environment variables. It inspects `initialize.params` and
+> request metadata for high-confidence Codex or Claude markers, treats
+> `tools/call.params._meta.x-codex-turn-metadata` as a Codex signal, and records
+> conflicting signals in diagnostics instead of silently changing the session
+> harness. The detected harness is exposed through an inspection surface.
+> {#260508-mcp-payload-harness-detection}
+
 ## Runtime And Debug Metadata Tools {#260505-runtime-debug-metadata-tools}
 
 `runtime.info` returns runtime compatibility metadata, including the runtime
@@ -66,6 +75,12 @@ configuration without modifying it.
 `config.agents_tier` updates the default backend/model mapping for a workload
 tier. Callers provide a tier and may provide a backend, a concrete model, or
 both. When backend is omitted, ws infers it from the model family where possible.
+
+> [!note] Planned 🚧
+> Configuration will expose harness-aware model alias mappings. `light`, `core`,
+> and `deep` map to backend/model defaults per harness, existing tier config is
+> migrated or wrapped for compatibility, and new documentation speaks in terms
+> of model aliases rather than workload tiers. {#260508-model-alias-config-tools}
 
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
@@ -153,6 +168,12 @@ The `agents.*` tool family exposes durable named-agent orchestration.
 `agents.register` creates or updates an agent record with backend, tier, model,
 prompt references, or materialized system prompt text. `agents.call` starts an
 asynchronous call and returns immediately.
+
+> [!note] Planned 🚧
+> `agents.register` will prefer `model` as the public model-selection field.
+> `model: "light"`, `model: "core"`, and `model: "deep"` select portable
+> aliases; concrete provider model names select a one-off backend model. The
+> `tier` field remains a deprecated compatibility input. {#260508-agents-register-model-alias-field}
 
 `agents.wait` waits for one or more agents to become ready and returns readiness
 metadata, not final output. `agents.result` is the result-consumption surface and
