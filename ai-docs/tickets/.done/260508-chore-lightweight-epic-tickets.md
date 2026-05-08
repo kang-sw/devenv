@@ -8,6 +8,7 @@ spec:
 related-mental-model:
   - documentation-system
   - workflow-skills
+completed: 2026-05-08
 ---
 
 # lightweight epic tickets
@@ -63,6 +64,13 @@ the expected epic contents:
 
 State that detailed discussion and implementation phases move to child tickets.
 
+### Result (24668e0) - 2026-05-08
+
+Implemented the lightweight epic convention in the bundled ticket conventions
+and Claude compatibility copy. Epic bodies now define scope, non-scope, child
+ticket boards, cross-child invariant decisions, and done/drop/defer criteria;
+detailed discussion and implementation phases belong in child tickets.
+
 ### Phase 2: Update workflow skills and guidance
 
 Update `lead-write-ticket` and related planning guidance so epic creation and
@@ -70,7 +78,22 @@ editing preserve the lightweight board model. When new detail appears during
 epic discussion, the skill should create or update a child ticket instead of
 expanding the epic body.
 
+### Result (24668e0) - 2026-05-08
+
+Updated Codex and Claude write-ticket guidance so epic operations update only
+the board ticket, while child-ticket creation or edits run as separate
+write-ticket invocations with their own lifecycle, commits, and output
+artifacts. Review follow-up also updated proceed routing so epic ticket paths
+stop before skeleton or implementation and route through child tickets instead.
+
 ### Phase 3: Refresh specs and mental models
 
 Update documentation-system and workflow-skills specs or mental models as
 needed so future ticket work keeps the same epic/child boundary.
+
+### Result (24668e0) - 2026-05-08
+
+Stripped the planned markers from the documentation-system and workflow-skills
+specs and refreshed the documentation-system and workflow-skills mental models.
+Verification passed with `go test ./internal/wsdoc ./internal/mcp`,
+`go test ./...`, and `git diff --check` on the implementation branch.

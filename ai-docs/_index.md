@@ -199,7 +199,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260505-bug-codex-jsonl-trailing-noise` | ready | Fix Windows Codex persistent-agent trailing stdout parsing |
 | `260429-feat-api-deps` | ready | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
-| `260508-chore-lightweight-epic-tickets` | ready | Keep epic tickets as milestone boards and move detail into child tickets |
 | `260508-chore-skill-description-attention-policy` | todo | Tune skill descriptions by entry-point strength and explicit rule persistence intent |
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -215,7 +214,6 @@ dropped tickets live in hidden archive dirs and git history.
 `260505-bug-codex-jsonl-trailing-noise` - hotfix Windows Codex persistent-agent results when process-control stdout appears after a valid JSONL agent message.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260508-chore-lightweight-epic-tickets` - keep epic tickets as milestone boards and move implementation detail into child tickets.
 
 ## Session Notes
 
