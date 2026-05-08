@@ -21,30 +21,30 @@ Target: user request
    a. Determine category from the topic.
    b. Choose initial status directory (`idea/` for vague, `todo/` for accepted actionable backlog - see `judge: initial-status`).
    c. Write the ticket using the **frontmatter template** and a clear problem/goal statement. Populate `related-mental-model` with the mental-model stems (filename without `.md`) that were consulted or arose during the current session - recovery hint for future sessions, not a validated link. Omit if no mental-model docs were relevant.
-   d. If category is `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria; create or reference child tickets for detailed work.
+   d. If category is `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria; reference existing/planned children and start a separate `ws:lead-write-ticket` invocation for any child creation or child edit.
    e. If category is not `epic` and multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
    f. After drafting, verify scope - see `judge: ticket-scope`.
    g. If status is `ready/`: add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` - one-line purpose and dependency notes ``.
 3. **Edit** (existing ticket):
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
-   c. If the target is an epic, keep edits at board level and move detailed implementation discussion into child tickets.
+   c. If the target is an epic, keep edits at board level; for detailed implementation discussion, stop after the epic edit and start a separate `ws:lead-write-ticket` invocation for the child ticket.
    d. For moves, use native `git mv` and add `completed:` date in frontmatter (-> `.done/`).
 4. **Phase content** - for non-epic actionable tickets, capture goals, constraints, rationale, rejected alternatives, and suggested approaches. Leave codebase-derived details (paths, type reuse, integration patterns, signatures, testing classifications) to the plan.
 5. **Intent review** - re-read the written/edited ticket against the preceding conversation:
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
-   - If the ticket is an epic, did detailed implementation material move into child tickets instead of the epic body?
+   - If the ticket is an epic, did detailed implementation material stay out of the epic and get routed to a separate child-ticket invocation?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
 6. **Spec-stem check** - skip `epic` and `research`:
    a. If status is `todo/`: preserve any existing `spec:` links as optional recovery hints; do not require stem discovery, do not fire `judge: missing-spec-entry`, and do not suppress the proceed prompt.
    b. If status is `ready/`: use `ws/specs.find` or `ws/specs.status` to confirm canonical stems.
    c. If status is `ready/`: ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    d. If status is `ready/`: remind that commits implementing this ticket should include a `## Spec` section with those stems.
-7. **Commit** - call `ws/git.commit(paths: ["<ticket-path>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed.
-8. **Proceed prompt** - suggest `ws:lead-proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
+7. **Commit** - call `ws/git.commit(paths: ["<ticket-path>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed. If separate child invocations changed child tickets, those invocations own their own commits and outputs.
+8. **Proceed prompt** - if the ticket is `epic`, do not suggest proceeding on the epic path; suggest creating, promoting, or proceeding a child ticket instead. Otherwise suggest `ws:lead-proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to skeleton, plan, or implementation based on artifacts and session warmth.
 
-   Emit the created ticket path on its own final line: `Ticket: ai-docs/tickets/<status>/<stem>.md`. Callers such as `ws:lead-proceed` capture this path from prefix-stage output.
+   Emit the created ticket path on its own final line: `Ticket: ai-docs/tickets/<status>/<stem>.md`. For epics, also state that this path is a board artifact, not an implementation target. Callers such as `ws:lead-proceed` capture this path from prefix-stage output.
 
 ## Judgments
 
