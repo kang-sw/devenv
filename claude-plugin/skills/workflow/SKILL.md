@@ -1,8 +1,9 @@
 ---
 name: workflow
 description: >
-  Loads WS orchestration primitives reference into session context.
-  Content survives compaction; re-invoke after compact if references are needed.
+  Mandatory reference for WS workflow orchestration. Use when writing or
+  executing workflow skills, MCP notation, named-agent primitives, model
+  aliases, or orchestration boundaries matter.
 ---
 
 # Workflow

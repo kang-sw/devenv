@@ -1,10 +1,8 @@
 ---
 name: ship
 description: >
-  Release a project: bump version, tag, build, and publish following
-  the project's ship configuration. Reads ai-docs/ship/<proj>.md for
-  instructions; if none exists, consults the user and writes the file
-  first.
+  Use when the user asks to ship, release, publish, tag, or deploy a
+  configured project; follows the ai-docs/ship configuration.
 argument-hint: "[proj-name — optional if only one config exists]"
 disable-model-invocation: true
 ---

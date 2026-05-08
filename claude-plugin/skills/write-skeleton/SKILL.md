@@ -1,9 +1,8 @@
 ---
 name: write-skeleton
 description: >
-  /proceed dispatches this after /write-ticket when public contracts need
-  to crystallize before implementation. Crystallize public contracts as
-  interface stubs and integration tests.
+  Skeleton primitive for ready tickets whose public contracts must be locked
+  before implementation.
 argument-hint: [ticket-path]
 ---
 

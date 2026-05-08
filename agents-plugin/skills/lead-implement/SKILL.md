@@ -1,6 +1,6 @@
 ---
 name: lead-implement
-description: Implementation harness. Routes to direct-edit or delegated write-code, then runs the shared doc pipeline, report/approval, and merge.
+description: Use when an approved task or ready ticket should be executed. Routes to direct edit or delegated write-code, then runs doc pipeline, report/approval, and merge.
 ---
 
 # Implement

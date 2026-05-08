@@ -1,10 +1,9 @@
 ---
 name: proceed
 description: >
-  First step for any implementation task. Reads what already exists —
-  tickets, plans, skeletons, session context — and determines the right
-  execution path before any code is touched. Use when starting
-  implementation work on a ticket or task description.
+  Required first step for implementation tasks. Use when starting from a
+  ticket path or task description so existing specs, tickets, plans,
+  skeletons, and session context are routed before code is touched.
 argument-hint: "<ticket-path or inline description>"
 ---
 

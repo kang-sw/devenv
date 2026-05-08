@@ -1,6 +1,6 @@
 ---
 name: lead-write-skeleton
-description: Crystallize ticket contracts as public interface stubs and integration tests before implementation. Use after a ticket exists and public contracts need to be locked before implementation.
+description: Skeleton primitive for ready tickets whose public contracts must be locked before implementation.
 ---
 
 # Write Skeleton

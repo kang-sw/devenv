@@ -1,6 +1,6 @@
 ---
 name: lead-sprint
-description: Multi-task session container for feature-branch work. Defers the doc pipeline to wrap-up while each task commits only source changes.
+description: Use when the user asks for a sprint or multi-task feature-branch session; defers the doc pipeline to wrap-up while each task commits source changes only.
 ---
 
 # Sprint

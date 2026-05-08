@@ -1,9 +1,8 @@
 ---
 name: discuss
 description: >
-  When the user explores approach or direction rather than requesting
-  immediate code changes, invoke this. Captures conclusions as tickets
-  or plans.
+  Use before code changes when the user wants to explore workflow design,
+  migration direction, ticket scope, risks, or implementation approach.
 argument-hint: "[topic, ticket path, or question — optional]"
 ---
 

@@ -42,13 +42,10 @@ lead-write-ticket
 ```
 
 Skill descriptions provide the natural-language trigger surface for Codex.
-Top-level entry skills, conditional utilities, and derived pipeline stages share
-that surface today.
-
-> [!note] Planned 🚧
-> Skill descriptions will distinguish strong top-level entry triggers from
-> lighter derived-stage triggers so Codex reliably invokes workflow entry points
-> without overmatching internal pipeline stages. {#260508-skill-description-attention-policy}
+Descriptions distinguish strong top-level entry triggers from lighter
+derived-stage triggers so Codex reliably invokes workflow entry points without
+overmatching internal pipeline stages.
+{#260508-skill-description-attention-policy}
 
 ## Workflow Primitive Reference {#260505-workflow-primitive-reference}
 
@@ -187,13 +184,10 @@ Utility skills handle project workflow maintenance outside the main
 implementation path.
 
 `lead-add-rule` classifies a persistent rule as cross-cutting or domain-scoped
-and writes it to the appropriate authority document.
-
-> [!note] Planned 🚧
-> `lead-add-rule` will trigger only when the user explicitly asks to save,
-> remember, persist, or add a durable rule for future sessions; ordinary
-> prescriptive task wording alone will not trigger rule persistence.
-> {#260508-add-rule-explicit-persistence-trigger}
+and writes it to the appropriate authority document. It triggers only when the
+user explicitly asks to save, remember, persist, or add a durable rule for
+future sessions; ordinary prescriptive task wording alone does not trigger rule
+persistence. {#260508-add-rule-explicit-persistence-trigger}
 
 `lead-bootstrap` bootstraps or upgrades downstream projects to `AGENTS.md` as
 the canonical workflow context while preserving Claude compatibility through a

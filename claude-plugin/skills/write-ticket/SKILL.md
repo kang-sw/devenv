@@ -1,8 +1,8 @@
 ---
 name: write-ticket
 description: >
-  When the user mentions creating, writing, or editing a ticket, or
-  when chained from /discuss or another workflow skill, invoke this.
+  Use when the user asks to create, edit, promote, drop, close, or durably
+  capture a repository workflow ticket.
 argument-hint: "[topic/description for new ticket, or ticket path to edit]"
 ---
 

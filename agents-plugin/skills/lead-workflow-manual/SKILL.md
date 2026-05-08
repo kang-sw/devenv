@@ -1,6 +1,6 @@
 ---
 name: lead-workflow-manual
-description: Load the ws workflow primitive manual before writing or executing workflow skills; use when MCP tool notation, named-agent primitives, or orchestration boundaries matter.
+description: Mandatory reference for ws workflow orchestration. Use when writing or executing workflow skills, MCP notation, named-agent primitives, model aliases, or orchestration boundaries matter.
 ---
 
 # Workflow Manual

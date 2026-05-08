@@ -1,6 +1,6 @@
 ---
 name: lead-write-spec
-description: Create or update behavioral spec documents for caller-visible workflow behavior. Use when the user asks to write, create, update, or audit a spec, or when a design discussion settles behavior that should be captured in ai-docs/spec.
+description: Spec-authoring primitive for explicit spec requests or workflow chains; creates or updates behavioral specs for caller-visible workflow behavior.
 ---
 
 # Write Spec

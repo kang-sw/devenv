@@ -1,6 +1,6 @@
 ---
 name: lead-update-spec
-description: Audit recent commits for caller-visible behavior changes and update ai-docs/spec accordingly. Use after implementation, edit, sprint, or release work when specs may need implemented entries, completed planned markers, or removal handling.
+description: Post-implementation spec audit primitive for explicit commit ranges or workflow wrap-up; updates ai-docs/spec for caller-visible behavior changes.
 ---
 
 # Update Spec
