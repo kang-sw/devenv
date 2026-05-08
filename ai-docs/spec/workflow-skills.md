@@ -90,6 +90,13 @@ gate runs only when a non-`epic`, non-`research` action creates or moves a ticke
 into `ready/`; `todo/` tickets may carry optional `spec:` links as recovery
 hints. Queue entries are maintained for `ready/` work only.
 
+> [!note] Planned 🚧
+> `lead-write-ticket` will preserve epics as lightweight milestone boards. When
+> detailed discussion, implementation phases, or slice-specific decisions arise
+> while editing an epic, the skill will create or update child tickets instead of
+> expanding the epic body.
+> {#260508-write-ticket-epic-child-boundary}
+
 `lead-write-skeleton` optionally locks high-risk caller-visible contracts before
 implementation when the scope needs a separate reviewable checkpoint. It
 delegates skeleton authoring, then the lead reviews, commits, and links
