@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.21.0 - 2026-05-08
+
+### Added
+- Add asynchronous API documentation jobs through `api.ask_async`,
+  `api.status`, `api.result`, and `api.cancel`.
+
+### Changed
+- Resolve `light`, `core`, and `deep` as portable model aliases with
+  harness-aware Codex/Claude defaults while preserving legacy `tier`
+  compatibility.
+- Keep epic tickets lightweight as milestone boards and route detailed
+  implementation discussion into child tickets.
+- Strengthen top-level workflow skill descriptions while keeping derived
+  primitive descriptions lighter and requiring explicit persistence intent for
+  rule storage.
+
+### Fixed
+- Deliver Codex named-agent prompts through stdin with the Codex CLI `-` marker
+  so multiline first-call and resumed prompts avoid Windows/argv delivery
+  issues.
+- Ignore downstream `ai-docs/.deps/` API documentation cache data during
+  bootstrap-generated `.gitignore` setup.
+
 ## v0.20.2 - 2026-05-07
 
 ### Changed
