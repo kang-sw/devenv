@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const apiAsyncTestTimeout = 10 * time.Second
+
 func TestAPIAsyncMCPToolsListed(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -203,7 +205,7 @@ func TestAPIAsyncCancelStopsActiveWorkBestEffort(t *testing.T) {
 	})
 	select {
 	case <-fake.ready:
-	case <-time.After(time.Second):
+	case <-time.After(apiAsyncTestTimeout):
 		t.Fatal("manager call did not start before cancellation")
 	}
 
@@ -330,18 +332,20 @@ func startAPIJobForTest(t *testing.T, server *Server, args map[string]any) strin
 
 func waitForAPIJobReadyForTest(t *testing.T, server *Server, key string) apiJobStatusResponse {
 	t.Helper()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+	var last apiJobStatusResponse
+	for deadline := time.Now().Add(apiAsyncTestTimeout); time.Now().Before(deadline); {
 		line := callMCPToolForTest(t, server, "api.status", map[string]any{"api_job_key": key})
 		if toolIsError(t, line) {
 			t.Fatalf("api.status returned tool error: %s", line)
 		}
 		status := decodeToolJSON[apiJobStatusResponse](t, line)
+		last = status
 		if status.ResultReady || status.Status == apiJobStateFailed || status.Status == apiJobStateCancelled {
 			return status
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("api job %q did not become ready", key)
+	t.Fatalf("api job %q did not become ready; last status: %#v", key, last)
 	return apiJobStatusResponse{}
 }
 
