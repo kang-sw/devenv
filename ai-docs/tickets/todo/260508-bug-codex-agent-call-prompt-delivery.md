@@ -38,6 +38,12 @@ handling under very large context.
   positional prompt argument to `codex exec` or `codex exec resume`.
 - Current `codex exec resume --help` accepts `[SESSION_ID] [PROMPT]`, so the
   existing argument order appears syntactically valid on Codex CLI 0.129.0.
+- In WSL2, `cmd.exe /c codex --version` reaches Windows Codex CLI 0.129.0, and
+  both `codex exec --help` and `codex exec resume --help` document `-` as a
+  stdin prompt source.
+- `cmd.exe /c codex` launched from a WSL UNC working directory warns that UNC
+  paths are not supported and defaults to the Windows directory, so repository
+  reproduction through the Windows binary must set a Windows path explicitly.
 
 ## Decisions
 
@@ -48,8 +54,9 @@ handling under very large context.
   run and adds noisy error events.
 - Prefer a small, reproducible sentinel-prompt test before changing prompt
   delivery mechanics.
-- Consider stdin `-` prompt delivery or another Codex CLI-supported mechanism
-  only after the argv-based resume path is proven to drop or obscure prompts.
+- Treat stdin `-` prompt delivery as the leading hardening candidate on Windows,
+  but preserve a sentinel smoke that compares argv and stdin behavior before
+  replacing the prompt path globally.
 
 ## Phases
 
@@ -62,15 +69,17 @@ Codex stdout/stderr and ws runtime events when the sentinel is not reflected in
 the answer.
 
 The test may be gated behind an opt-in environment variable if it requires a
-real Codex CLI session.
+real Codex CLI session. When available, include a Windows Codex path such as
+`cmd.exe /c codex` from WSL2, with an explicit Windows working directory rather
+than relying on the WSL UNC current directory.
 
 ### Phase 2: Harden CodexRunner prompt delivery
 
-Make CodexRunner argument construction directly testable and add unit coverage
-for first-call and resume prompt placement. If reproduction shows positional
-argv prompts are unreliable, switch to a Codex CLI-supported prompt delivery
-path such as stdin with `-`, while preserving system prompt, model selection,
-working directory, stream capture, session id capture, and hook behavior.
+Make CodexRunner command construction directly testable and add unit coverage
+for first-call and resume prompt delivery. Prefer stdin `-` for the user prompt
+when supported by Codex CLI, especially for Windows execution, while preserving
+system prompt, model selection, working directory, stream capture, session id
+capture, and hook behavior.
 
 Modernize the hook feature flag from deprecated `features.codex_hooks` to the
 current Codex hook flag if compatible with supported Codex CLI versions.
