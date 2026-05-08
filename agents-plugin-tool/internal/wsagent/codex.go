@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,6 +54,11 @@ func runnerForBackend(backend string) (Runner, error) {
 
 type CodexRunner struct{}
 
+var (
+	codexVersionOnce  sync.Once
+	codexVersionValue string
+)
+
 type codexInvocation struct {
 	Args           []string
 	PromptStdin    string
@@ -65,13 +71,13 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		return RunnerResult{}, err
 	}
 
+	backendVersion := codexVersion()
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if req.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
 		defer cancel()
 	}
-	backendVersion := codexVersion()
 	cmd := exec.CommandContext(ctx, "codex", invocation.Args...)
 	if !req.InheritProcessGroup {
 		configureRunnerCommand(cmd)
@@ -80,7 +86,7 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if req.ToolProfile != "" {
 		cmd.Env = append(cmd.Environ(), "WS_MCP_TOOL_PROFILE="+req.ToolProfile)
 	}
-	if invocation.PromptStdin != "" {
+	if invocation.PromptDelivery == "stdin" {
 		cmd.Stdin = strings.NewReader(invocation.PromptStdin)
 	}
 	var stderr bytes.Buffer
@@ -125,13 +131,15 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 }
 
 func codexVersion() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "codex", "--version").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	codexVersionOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "codex", "--version").Output()
+		if err == nil {
+			codexVersionValue = strings.TrimSpace(string(out))
+		}
+	})
+	return codexVersionValue
 }
 
 func buildCodexInvocation(req RunnerRequest) (codexInvocation, error) {

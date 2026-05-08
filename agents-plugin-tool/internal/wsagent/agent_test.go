@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -683,10 +684,11 @@ func TestClaudeRunnerNonZeroExitPreservesStderr(t *testing.T) {
 }
 
 func TestBuildCodexInvocationUsesStdinPromptForFirstCall(t *testing.T) {
+	systemPromptPath := filepath.Join(t.TempDir(), "system.md")
 	invocation, err := buildCodexInvocation(RunnerRequest{
 		Prompt:           "sentinel line 1\nsentinel line 2",
 		Model:            "gpt-5.5",
-		SystemPromptPath: "/tmp/system.md",
+		SystemPromptPath: systemPromptPath,
 	})
 	if err != nil {
 		t.Fatalf("buildCodexInvocation returned error: %v", err)
@@ -703,7 +705,7 @@ func TestBuildCodexInvocationUsesStdinPromptForFirstCall(t *testing.T) {
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--json",
 		"-m\x00gpt-5.5",
-		`model_instructions_file="/tmp/system.md"`,
+		fmt.Sprintf("model_instructions_file=%q", systemPromptPath),
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("codex args missing %q: %+v", want, invocation.Args)
