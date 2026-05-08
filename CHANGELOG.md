@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.1 - 2026-05-08
+
+### Fixed
+- Relax async API MCP test polling deadlines so Windows release smoke tests are
+  not blocked by slow runner scheduling.
+
 ## v0.21.0 - 2026-05-08
 
 ### Added
