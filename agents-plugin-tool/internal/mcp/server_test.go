@@ -458,10 +458,8 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 	root := initTicketRepo(t, "260508-feat-claude-harness")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
-	setupInput := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`,
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root),
-	}, "\n")
+	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
+	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
 	checkInput := strings.Join([]string{
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"reviewer"}}}`, root),
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"session.get_default_root","arguments":{}}}`,
@@ -469,8 +467,12 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 
 	var out bytes.Buffer
 	server := NewServer(t.TempDir(), "test")
-	if err := server.ServeStdio(context.Background(), strings.NewReader(setupInput), &out); err != nil {
-		t.Fatalf("ServeStdio setup returned error: %v", err)
+	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+		t.Fatalf("ServeStdio initialize returned error: %v", err)
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(registerInput), &out); err != nil {
+		t.Fatalf("ServeStdio register returned error: %v", err)
 	}
 	out.Reset()
 	if err := server.ServeStdio(context.Background(), strings.NewReader(checkInput), &out); err != nil {
