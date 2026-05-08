@@ -8,6 +8,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - prompt-bundle
+completed: 2026-05-08
 ---
 
 # skill description attention policy
