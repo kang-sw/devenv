@@ -5,6 +5,8 @@ related:
 spec:
   - 260508-api-docs-async-jobs
   - 260508-api-documentation-async-mcp-tools
+skeletons:
+  phase-2: 082141a
 related-mental-model:
   - api-documentation-cache
   - mcp-runtime
@@ -53,6 +55,13 @@ The likely MCP surface is:
 - `ws/api.status` reports routing, domain progress, failures, and final-output
   availability.
 - `ws/api.cancel` stops active work on a best-effort basis.
+
+### Result (05778dc) - 2026-05-08
+
+Planned spec entries were added for the async API docs job lifecycle and MCP
+tool surface. `ws/api.ask` remains documented as the synchronous quick path, and
+the async surface is tracked by spec stems `260508-api-docs-async-jobs` and
+`260508-api-documentation-async-mcp-tools`.
 
 ### Phase 2: Implement durable API docs jobs
 
