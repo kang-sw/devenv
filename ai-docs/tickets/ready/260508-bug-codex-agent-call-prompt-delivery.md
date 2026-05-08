@@ -76,6 +76,15 @@ real Codex CLI session. When available, include a Windows Codex path such as
 `cmd.exe /c codex` from WSL2, with an explicit Windows working directory rather
 than relying on the WSL UNC current directory.
 
+### Result (b97b38a) - 2026-05-08
+
+Added unit coverage for Codex first-call and resume command construction. The
+tests assert that multiline prompt content is delivered through stdin via the
+Codex CLI `-` marker and does not appear in argv. The Windows `cmd.exe /c codex`
+check remains manual/operator smoke because the runner executes the configured
+`codex` binary directly; the ticket records the explicit Windows-path constraint
+for downstream reproduction.
+
 ### Phase 2: Harden CodexRunner prompt delivery
 
 Make CodexRunner command construction directly testable and add unit coverage
@@ -86,6 +95,15 @@ capture, and hook behavior.
 
 Modernize the hook feature flag from deprecated `features.codex_hooks` to the
 current Codex hook flag if compatible with supported Codex CLI versions.
+
+### Result (b97b38a) - 2026-05-08
+
+Refactored CodexRunner command construction into a testable helper and switched
+Codex user prompt delivery from positional argv to stdin with `-` for both
+first-call and resumed sessions. Preserved model, system prompt, session id,
+working directory, stream capture, session-id capture, and tool-profile
+behavior. Replaced deprecated `features.codex_hooks=true` with `--enable hooks`
+while retaining the existing `hooks.PostToolUse` payload.
 
 ### Phase 3: Improve diagnostics for successful-but-wrong Codex calls
 
@@ -98,3 +116,11 @@ logging full prompt contents by default.
 Document a short operator workaround for affected downstream projects, such as
 using Claude-backed agents for read-only explorer work until the Codex prompt
 delivery path is verified.
+
+### Result (b97b38a, c223f52) - 2026-05-08
+
+Added runtime prompt-delivery diagnostics without logging prompt contents:
+`backend.prompt.delivery` records prompt byte size and resume state, while
+`backend.call.complete` records prompt delivery path, Codex CLI version when
+available, and final stdout event shape. Updated the named-agent runtime spec
+and mental model to document stdin prompt delivery and the bounded diagnostics.
