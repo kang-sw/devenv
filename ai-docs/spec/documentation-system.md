@@ -63,12 +63,11 @@ tickets use phase sections with `### Result` blocks that freeze completed phase
 content. Ticket frontmatter can connect work to specs, removed specs, parent
 tickets, plans, skeletons, related mental models, and completion metadata.
 
-> [!note] Planned 🚧
-> Epic tickets will be documented as lightweight milestone boards. Epic bodies
-> keep scope, non-scope, child-ticket boards, cross-child invariant decisions,
-> and done/drop/defer criteria; detailed discussion and implementation phases
-> move into child tickets.
-> {#260508-lightweight-epic-ticket-conventions}
+Epic tickets are documented as lightweight milestone boards. Epic bodies keep
+scope, non-scope, child-ticket boards, cross-child invariant decisions, and
+done/drop/defer criteria; detailed discussion and implementation phases move
+into child tickets. Epics remain decomposition artifacts exempt from ready spec
+gating. {#260508-lightweight-epic-ticket-conventions}
 
 `ws/tickets.list`, `ws/tickets.find`, and `ws/tickets.status` provide structured
 ticket discovery across active and archived statuses, including phase/result

@@ -14,6 +14,7 @@ Target: $ARGUMENTS
 
 - Ticket conventions: Run `ws-print-infra ticket-conventions.md` (Bash) — path format, status flow, phase rules, stem rules, templates.
 - Never `Read` a ticket file other than the current target — delegate any other ticket inspection to an Explore subagent.
+- Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 
 ## On: invoke
 
@@ -23,18 +24,20 @@ Target: $ARGUMENTS
    a. Determine category from the topic.
    b. Choose initial status directory (`idea/` for vague, `todo/` for accepted actionable backlog — see `judge: initial-status`).
    c. Write the ticket using the **frontmatter template** and a clear problem/goal statement. Populate `related-mental-model` with the mental-model stems (filename without `.md`) that were consulted or arose during the current session — recovery hint for future sessions, not a validated link. Omit if no mental-model docs were relevant.
-   d. If category is `epic`: body defines scope and decomposition (not implementation spec); list child ticket stems; completion means child work is done.
-   e. If multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
+   d. If category is `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria; create or reference child tickets for detailed work.
+   e. If category is not `epic` and multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
    f. After drafting, verify scope — see `judge: ticket-scope`.
    g. If status is `ready/`: add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` — one-line purpose and dependency notes ``.
 3. **Edit** (existing ticket):
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
-   c. For moves, `git mv` and add `completed:` date in frontmatter (→ `.done/`).
-4. **Phase content** — carry everything from discussion that informs implementation: goals, constraints, rationale, rejected alternatives, suggested approaches (pseudo code, struct shapes, data formats, algorithm sketches). Leave to the plan: codebase-derived details (file paths, existing type reuse, integration patterns, function signatures, testing classifications).
+   c. If the target is an epic, keep edits at board level and move detailed implementation discussion into child tickets.
+   d. For moves, `git mv` and add `completed:` date in frontmatter (→ `.done/`).
+4. **Phase content** — for non-epic actionable tickets, carry everything from discussion that informs implementation: goals, constraints, rationale, rejected alternatives, suggested approaches (pseudo code, struct shapes, data formats, algorithm sketches). Leave to the plan: codebase-derived details (file paths, existing type reuse, integration patterns, function signatures, testing classifications).
 5. **Intent review** — re-read the written/edited ticket against the preceding conversation:
    - Are decisions, constraints, rejected alternatives, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
+   - If the ticket is an epic, did detailed implementation material move into child tickets instead of the epic body?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
 6. **Spec-stem check** — skip `epic` and `research`:
    a. If status is `todo/`: preserve any existing `spec:` links as optional recovery hints; do not require stem discovery, do not fire `judge: missing-spec-entry`, and do not suppress the proceed prompt.
@@ -63,11 +66,11 @@ Place in `idea/` when the topic is exploratory or underspecified; place in `todo
 
 ### judge: ticket-scope
 
-Over ~200 lines is a soft signal; over 300 lines, act. First, prune plan-level detail (file paths, function signatures, integration specifics) — that belongs in a plan document. If still large, the scope is too wide: introduce an epic and split into child tickets, each covering one independently reviewable unit of work.
+Over ~200 lines is a soft signal; over 300 lines, act. First, prune plan-level detail (file paths, function signatures, integration specifics) — that belongs in a plan document. If an epic is still large, move details into child tickets; if a non-epic is still large, introduce an epic and split into child tickets.
 
 ### judge: phase-need
 
-Prefer more phases over fewer. An overly granular ticket is cheaper to merge than an oversized phase that stalls mid-implementation. Single-component, single-concern work may be one phase.
+Applies only to non-epic actionable tickets. Prefer more phases over fewer inside one cohesive child ticket; split unrelated reviewable units into separate child tickets. Single-component, single-concern work may be one phase.
 
 ### judge: missing-spec-entry
 

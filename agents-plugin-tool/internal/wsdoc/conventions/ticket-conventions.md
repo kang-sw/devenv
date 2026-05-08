@@ -17,9 +17,17 @@ Canonical reference for ticket structure, naming, and lifecycle.
 - `idea/` tickets may omit `spec:` entries.
 - `todo/` tickets may include optional `spec:` entries as recovery hints and promotion candidates.
 - Non-`epic`, non-`research` tickets entering `ready/` require `spec:` linkage; epics decompose scope and research captures findings.
+- Epic tickets are lightweight milestone boards and remain exempt from ready spec gating.
 - Promoting `idea/` → `todo/` is triage and does not require spec creation.
 - Promoting `todo/` → `ready/` for a non-`epic`, non-`research` ticket: route through `/discuss` → `/write-spec` to ensure planned entries and ticket `spec:` frontmatter exist before the move.
 - Dropping a ticket with linked spec entries: route through `/discuss` → `/write-spec` removes orphaned `🚧` entries before the move.
+
+## Epic Tickets
+
+- Epic bodies preserve board-level context: scope, non-scope, child ticket board, cross-child invariant decisions, and done/drop/defer criteria.
+- Detailed discussion, implementation approaches, constraints, and slice-specific decisions belong in child tickets, not in the epic body.
+- Epic tickets do not use implementation phases; child tickets carry phases when needed.
+- A single child ticket may carry multiple phases when they form one cohesive reviewable unit.
 
 ## Phases
 
@@ -112,7 +120,31 @@ Research tickets have no phases. Sections after `## Background` are freeform top
 
 ### Epic body (category = `epic`)
 
-- Body defines **scope and decomposition**, not implementation spec.
-- Lists child ticket stems (or planned descriptions).
-- Child tickets set `parent:` in frontmatter pointing back to the epic stem.
-- Epic moves to `.done/` when its scope is satisfied.
+```markdown
+# <title>
+
+## Scope
+
+<included milestone scope>
+
+## Non-Scope
+
+<explicit exclusions>
+
+## Child Tickets
+
+- `<stem>` - <slice purpose/status/dependency note>
+- Planned: <child ticket description>
+
+## Cross-Child Decisions
+
+<invariants that child tickets must preserve>
+
+## Completion Criteria
+
+- Done: <conditions for moving the epic to .done/>
+- Dropped: <conditions for moving the epic to .dropped/>
+- Deferred: <scope intentionally left for a later epic or child>
+```
+
+Epic bodies define scope and decomposition, not implementation spec. Child tickets set `parent:` in frontmatter pointing back to the epic stem and carry detailed discussion, approaches, constraints, and phases.
