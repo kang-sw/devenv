@@ -24,13 +24,14 @@ import (
 )
 
 type Server struct {
-	root         string
-	version      string
-	sourceCommit string
-	role         toolRole
-	api          apiRuntime
-	rootMu       sync.RWMutex
-	sessionRoot  string
+	root           string
+	version        string
+	sourceCommit   string
+	role           toolRole
+	api            apiRuntime
+	rootMu         sync.RWMutex
+	sessionRoot    string
+	sessionHarness string
 }
 
 type toolRole string
@@ -168,6 +169,7 @@ func (s *Server) handleNotification(req request, requests *sync.Map) {
 func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
+		s.observeHarness("initialize", detectHarnessFromRaw(req.Params))
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 			"protocolVersion": ProtocolVersion,
 			"serverInfo": map[string]string{
@@ -269,6 +271,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
+	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current ws MCP profile: %s", params.Name))
 	}
@@ -306,10 +309,12 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	case "session.get_default_root":
 		s.rootMu.RLock()
 		sessionRoot := s.sessionRoot
+		sessionHarness := s.sessionHarness
 		s.rootMu.RUnlock()
 		return toolJSONResponse(req.ID, map[string]any{
 			"session_default_root": sessionRoot,
 			"has_session_default":  sessionRoot != "",
+			"session_harness":      sessionHarness,
 			"env_project_root":     strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")),
 			"server_root":          s.root,
 		}, nil)
@@ -565,6 +570,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Root:         root,
 			Question:     question,
 			DeepResearch: deepResearch,
+			Harness:      s.currentHarness(),
 		})
 		return toolTextResponse(req.ID, text, err)
 	case "path.generate":
@@ -596,6 +602,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			Root:             root,
 			Name:             name,
 			Backend:          backend,
+			Harness:          s.currentHarness(),
 			Tier:             tier,
 			Model:            model,
 			Prompts:          stringList(params.Arguments["prompts"]),
@@ -832,6 +839,69 @@ func codexWorkspaceRoots(meta map[string]any) []string {
 	return roots
 }
 
+func (s *Server) observeHarness(source, harness string) {
+	harness = normalizedHarness(harness)
+	if harness == "" {
+		return
+	}
+	s.rootMu.Lock()
+	defer s.rootMu.Unlock()
+	if s.sessionHarness == "" {
+		s.sessionHarness = harness
+		appendDebugEvent("harness.detected", map[string]any{"source": source, "harness": harness})
+		return
+	}
+	if s.sessionHarness != harness {
+		appendDebugEvent("harness.conflict", map[string]any{
+			"source":   source,
+			"current":  s.sessionHarness,
+			"observed": harness,
+		})
+	}
+}
+
+func (s *Server) currentHarness() string {
+	s.rootMu.RLock()
+	defer s.rootMu.RUnlock()
+	return s.sessionHarness
+}
+
+func detectHarnessFromRaw(raw json.RawMessage) string {
+	text := strings.ToLower(string(raw))
+	if text == "" {
+		return ""
+	}
+	if strings.Contains(text, "x-codex-turn-metadata") || strings.Contains(text, "codex") {
+		return "codex"
+	}
+	if strings.Contains(text, "claude") || strings.Contains(text, "anthropic") {
+		return "claude"
+	}
+	return ""
+}
+
+func detectHarnessFromMeta(meta map[string]any) string {
+	if len(codexWorkspaceRoots(meta)) > 0 {
+		return "codex"
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return ""
+	}
+	return detectHarnessFromRaw(raw)
+}
+
+func normalizedHarness(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "codex":
+		return "codex"
+	case "claude":
+		return "claude"
+	default:
+		return ""
+	}
+}
+
 func toolJSONResponse(id json.RawMessage, value any, err error) response {
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -941,13 +1011,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.agents_tier",
-			"description": "Configure the default backend/model mapping for a ws agent workload tier.",
+			"description": "Compatibility surface for configuring the default backend/model mapping for a ws agent model alias.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"tier":    enumStringProperty("Workload tier to configure.", []string{"light", "core", "deep"}),
+					"tier":    enumStringProperty("Model alias to configure.", []string{"light", "core", "deep"}),
 					"backend": stringProperty("Optional backend name. When omitted, ws infers it from the model when possible."),
-					"model":   stringProperty("Concrete model for this tier."),
+					"model":   stringProperty("Concrete model for this alias."),
 				},
 				"required": []string{"tier"},
 			},
@@ -1219,7 +1289,7 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"root":          stringProperty("Repository root. Defaults to the server root."),
 					"question":      stringProperty("Scoped question to answer."),
-					"deep_research": boolProperty("Use deep workload tier for broad tracing or research."),
+					"deep_research": boolProperty("Use deep model alias for broad tracing or research."),
 				},
 				"required": []string{"question"},
 			},
@@ -1245,9 +1315,9 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"root":               stringProperty("Repository root. Defaults to the server root."),
 					"name":               stringProperty("Agent name."),
-					"backend":            stringProperty("Backend name. Defaults to codex."),
-					"tier":               stringProperty("Workload tier: light, core, or deep. Defaults to core."),
-					"model":              stringProperty("Optional concrete backend model override."),
+					"backend":            stringProperty("Optional backend name. Model aliases use the detected harness when omitted."),
+					"tier":               stringProperty("Deprecated compatibility alias selector: light, core, or deep."),
+					"model":              stringProperty("Optional model alias or concrete backend model. Aliases: light, core, deep."),
 					"prompts":            stringArrayProperty("Embedded prompt stems or absolute prompt paths."),
 					"prompt_refs":        stringArrayProperty("Logical role prompt references."),
 					"system_prompt_text": stringProperty("Optional materialized system prompt text."),

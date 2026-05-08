@@ -232,7 +232,8 @@ Report the volatile default root state for the current MCP server process.
 Output:
 
 - MCP text content containing JSON with `session_default_root`,
-  `has_session_default`, `env_project_root`, and `server_root`.
+  `has_session_default`, `session_harness`, `env_project_root`, and
+  `server_root`.
 
 ### `ws/api.list`
 
@@ -905,7 +906,7 @@ Input schema:
     },
     "deep_research": {
       "type": "boolean",
-      "description": "Use deep workload tier for broad tracing or research."
+      "description": "Use deep model alias for broad tracing or research."
     }
   },
   "required": ["question"]
@@ -917,7 +918,7 @@ Behavior:
 - The tool is the MCP replacement for the old `ws-subquery` CLI.
 - It registers a generated `subquery-tmp<base36-id>` named agent and starts it through
   the same async path as `ws/agents.call`.
-- Default workload tier is `light`; `deep_research: true` uses `deep`.
+- Default model alias is `light`; `deep_research: true` uses `deep`.
 - The system prompt is runtime-owned and self-contained.
 - The delegate is instructed to answer one scoped question with cited English
   output, assumptions when inferred, and searched gaps when evidence is missing.
@@ -977,21 +978,24 @@ Behavior:
 
 - The tool is read-only and does not create or modify `config.json`.
 - If no config file exists, the response contains the default config shape and
-  the path where config would be read from. Default Codex tier mappings are
-  `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` → `gpt-5.5`.
+  the path where config would be read from. Default Codex model aliases are
+  `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` → `gpt-5.5`;
+  default Claude aliases use `haiku`, `sonnet`, and `opus`.
 - The JSON response contains `path` and `config` fields.
 - Delegate and leaf MCP tool profiles hide and reject this tool together with
   the other `config.*` tools when optional profile filtering is active.
 
 ### `ws/config.agents_tier`
 
-Configure the user-local backend/model mapping for a workload tier.
+Compatibility surface for configuring the user-local backend/model mapping for
+a model alias.
 
 Input fields:
 
-- `tier` is required and accepts `light`, `core`, or `deep`.
+- `tier` is required for compatibility and accepts `light`, `core`, or `deep`;
+  it names the alias to configure.
 - `model` is the concrete model to use when an agent registration resolves to
-  that tier.
+  that alias.
 - `backend` is optional. When omitted, ws infers it from recognizable model
   names: `gpt-*` or names containing `codex` use `codex`; names containing
   `gemini` use `gemini`; names containing `haiku`, `sonnet`, `opus`, or
@@ -1001,13 +1005,11 @@ Behavior:
 
 - Configuration is written to `~/.cache/ws@kang-sw-devenv/config.json`, or to
   `$WS_CACHE_HOME/config.json` when `WS_CACHE_HOME` is set.
-- Missing tier mappings in an existing config are backfilled from the default
-  Codex tier mappings without overwriting user-provided entries.
-- `agents.register` applies this mapping after prompt frontmatter tier
-  resolution. If no concrete model is provided by the call or tier mapping, the
-  backend falls back to `codex`.
-- Explicit `model` on `agents.register` bypasses tier configuration while still
-  allowing backend inference when `backend` is omitted.
+- Missing alias mappings in an existing config are backfilled from default Codex
+  and Claude alias mappings without overwriting user-provided entries.
+- `agents.register` applies alias mapping after explicit model selection and
+  prompt frontmatter resolution. Concrete model names bypass alias mapping while
+  still allowing backend inference when `backend` is omitted.
 
 ### `ws/agents.register`
 
@@ -1016,12 +1018,13 @@ Register or replace one task-scoped named agent.
 Important input fields:
 
 - `name` is required.
-- `backend` is optional; when omitted, ws uses tier configuration or infers a
-  backend from recognizable concrete model names before falling back to `codex`.
-- `tier` may be `light`, `core`, or `deep`; omitted tier may be inferred from a
-  prompt frontmatter model and defaults to `core`.
-- `model` is an optional concrete backend model override. If `model` is present,
-  it takes precedence over tier configuration.
+- `backend` is optional; when omitted, model aliases use the detected MCP
+  harness and concrete model names infer a backend before falling back to
+  `codex`.
+- `model` may be a portable alias (`light`, `core`, or `deep`) or a concrete
+  backend model override. Concrete model names take precedence over aliases.
+- `tier` is a deprecated compatibility alias selector used only when `model` is
+  absent.
 - `prompts` is the canonical prompt chain field.
 - `prompt_refs` is a migration alias for older callers.
 - `system_prompt_text` appends materialized system instructions after resolved

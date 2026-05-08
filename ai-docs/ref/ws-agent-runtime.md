@@ -234,21 +234,21 @@ narrow the visible surface for tests, but cannot raise a filtered profile.
 
 ## Workload Tiers
 
-Shared skills use workload-depth tiers, not provider model names:
+Shared skills use portable model aliases for routine delegate selection:
 
-- `light` — mechanical filtering, routing, small surveys, or narrow lookups.
+- `light` — lower-cost mechanical filtering, routing, small surveys, or narrow lookups.
 - `core` — normal implementation, review, synthesis, and document updates.
 - `deep` — broad architecture, contract design, reconstruction, or high-risk work.
 
-Backend adapters map tiers to concrete models through defaults and user-local
+Backend adapters map aliases to concrete models through defaults and user-local
 configuration in `~/.cache/ws@kang-sw-devenv/config.json`. The default Codex
-mapping is `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` →
-`gpt-5.5`; missing entries in an existing config are backfilled from these
-defaults without overwriting user-provided mappings. A concrete `model` may
-override the tier mapping for one agent registration; when `backend` is omitted,
-ws infers the backend from recognizable model names (`gpt-*`/`codex` → `codex`,
-`gemini*` → `gemini`, `haiku`/`sonnet`/`opus`/`claude` → `claude`) and otherwise
-falls back to `codex`.
+aliases are `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` →
+`gpt-5.5`; the default Claude aliases are `haiku`, `sonnet`, and `opus`.
+Concrete model names override alias mapping for one registration. When
+`backend` is omitted, ws infers the backend from recognizable model names
+(`gpt-*`/`codex` → `codex`, `gemini*` → `gemini`,
+`haiku`/`sonnet`/`opus`/`claude` → `claude`) and otherwise falls back to
+`codex`.
 
 ## Tool Surface
 
@@ -266,7 +266,7 @@ MCP tools use server `ws` and the following tool names:
 - `agents.erase` — remove or mark erased a named agent and clean backend session state where possible. Implemented.
 - `agents.list` — list active agents for the current worktree or all cached worktrees. Planned.
 - `config.show` — inspect the current user-local configuration and resolved config path without modifying it. Implemented.
-- `config.agents_tier` — configure the user-local backend/model mapping for a workload tier. Implemented.
+- `config.agents_tier` — compatibility surface for configuring the user-local backend/model mapping for a model alias. Implemented.
 - `path.generate` — allocate worktree-scoped writable workflow artifact paths. Implemented for `kind: "review"`.
 - `runtime.info` — return runtime metadata, including embedded prompt bundle hash. Implemented.
 - `api.list` — list existing API documentation cache domains. Implemented.
@@ -284,7 +284,7 @@ are repaired when the CLI surface drifts even if the MCP tool list is unchanged.
 Implemented prototype commands:
 
 ```text
-ws-mcp agents register --root <repo> --name <name> [--backend codex] [--tier light|core|deep] [--model <model>] [--prompt <stem-or-absolute-path>] [--prompt-ref <logical-name>] [--system-prompt-file <path>]
+ws-mcp agents register --root <repo> --name <name> [--backend codex] [--harness codex|claude] [--model light|core|deep|<concrete-model>] [--tier light|core|deep] [--prompt <stem-or-absolute-path>] [--prompt-ref <logical-name>] [--system-prompt-file <path>]
 ws-mcp agents call --root <repo> --name <name> <prompt>
 ws-mcp agents call --root <repo> --name <name> --prompt-file -
 ws-mcp agents run-current --root <repo> --name <name>
@@ -299,7 +299,7 @@ ws-mcp agents cancel --root <repo> --name <name>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
 ws-mcp config show
-ws-mcp config agents-tier --tier <light|core|deep> [--backend <backend>] [--model <model>]
+ws-mcp config agents-tier --tier <light|core|deep> [--backend <backend>] [--model <concrete-model>]
 ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
 ws-mcp runtime info
 ```
@@ -396,10 +396,10 @@ prompt callers remain compatible.
 
 The first embedded bundle contains role prompts, review partition prompts,
 `delegate-orientation`, and `impl-playbook`. Frontmatter `model: haiku`,
-`model: sonnet`, and `model: opus` map to shared tiers `light`, `core`, and
-`deep` when the caller did not pass an explicit `tier` or `model`. Frontmatter
-may also use shared tiers directly. Unknown frontmatter model names become
-concrete backend model overrides only when no explicit model was supplied.
+`model: sonnet`, and `model: opus` map to aliases `light`, `core`, and `deep`
+when the caller did not pass an explicit `tier` or `model`. Frontmatter may also
+use aliases directly. Unknown frontmatter model names become concrete backend
+model overrides only when no explicit model was supplied.
 
 Registration writes the materialized prompt to `system.md` in the agent
 directory and stores the requested prompt chain in `agent.json` as `prompt_refs`

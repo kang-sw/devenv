@@ -22,7 +22,8 @@ type Config struct {
 }
 
 type AgentsConfig struct {
-	Tiers map[string]AgentTier `json:"tiers,omitempty"`
+	Tiers        map[string]AgentTier            `json:"tiers,omitempty"`
+	ModelAliases map[string]map[string]AgentTier `json:"model_aliases,omitempty"`
 }
 
 type View struct {
@@ -58,6 +59,10 @@ func Load(opts Options) (Config, error) {
 		cfg.Agents.Tiers = map[string]AgentTier{}
 	}
 	applyDefaultTiers(cfg.Agents.Tiers)
+	if cfg.Agents.ModelAliases == nil {
+		cfg.Agents.ModelAliases = map[string]map[string]AgentTier{}
+	}
+	applyDefaultModelAliases(cfg.Agents.Tiers, cfg.Agents.ModelAliases)
 	return cfg, nil
 }
 
@@ -88,16 +93,33 @@ func SetAgentsTier(opts Options, tier, backend, model string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.Agents.Tiers[tier] = AgentTier{Backend: backend, Model: model}
+	if cfg.Agents.ModelAliases == nil {
+		cfg.Agents.ModelAliases = map[string]map[string]AgentTier{}
+	}
+	if cfg.Agents.ModelAliases[tier] == nil {
+		cfg.Agents.ModelAliases[tier] = map[string]AgentTier{}
+	}
+	mapping := AgentTier{Backend: backend, Model: model}
+	cfg.Agents.ModelAliases[tier]["default"] = mapping
+	cfg.Agents.ModelAliases[tier]["codex"] = mapping
 	return cfg, save(opts, cfg)
 }
 
 func ResolveAgent(opts Options, tier, backend, model string) (string, string, error) {
+	return ResolveAgentForHarness(opts, tier, backend, model, "")
+}
+
+func ResolveAgentForHarness(opts Options, tier, backend, model, harness string) (string, string, error) {
 	tier = normalizedTier(tier)
+	backend = strings.TrimSpace(backend)
+	model = strings.TrimSpace(model)
+	if alias := ModelAlias(model); alias != "" {
+		tier = alias
+		model = ""
+	}
 	if tier == "" {
 		tier = "core"
 	}
-	backend = strings.TrimSpace(backend)
-	model = strings.TrimSpace(model)
 	if model != "" {
 		if backend == "" {
 			backend = InferBackend(model)
@@ -111,7 +133,7 @@ func ResolveAgent(opts Options, tier, backend, model string) (string, string, er
 	if err != nil {
 		return "", "", err
 	}
-	if mapping, ok := cfg.Agents.Tiers[tier]; ok {
+	if mapping, ok := resolveAliasMapping(cfg, tier, backend, harness); ok {
 		if model == "" {
 			model = strings.TrimSpace(mapping.Model)
 		}
@@ -126,6 +148,15 @@ func ResolveAgent(opts Options, tier, backend, model string) (string, string, er
 		backend = "codex"
 	}
 	return backend, model, nil
+}
+
+func ModelAlias(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "light", "core", "deep":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return ""
+	}
 }
 
 func InferBackend(model string) string {
@@ -159,7 +190,8 @@ func defaultConfig() Config {
 	return Config{
 		SchemaVersion: schemaVersion,
 		Agents: AgentsConfig{
-			Tiers: tiers,
+			Tiers:        tiers,
+			ModelAliases: defaultModelAliases(tiers),
 		},
 	}
 }
@@ -174,6 +206,99 @@ func applyDefaultTiers(tiers map[string]AgentTier) {
 		if _, ok := tiers[tier]; !ok {
 			tiers[tier] = mapping
 		}
+	}
+}
+
+func applyDefaultModelAliases(tiers map[string]AgentTier, aliases map[string]map[string]AgentTier) {
+	defaults := defaultModelAliases(tiers)
+	for alias, byHarness := range defaults {
+		if aliases[alias] == nil {
+			aliases[alias] = map[string]AgentTier{}
+		}
+		for harness, mapping := range byHarness {
+			if _, ok := aliases[alias][harness]; !ok {
+				aliases[alias][harness] = mapping
+			}
+		}
+	}
+}
+
+func defaultModelAliases(tiers map[string]AgentTier) map[string]map[string]AgentTier {
+	return map[string]map[string]AgentTier{
+		"light": {
+			"default": tierOrDefault(tiers, "light", AgentTier{Backend: "codex", Model: "gpt-5.4-mini"}),
+			"codex":   tierOrDefault(tiers, "light", AgentTier{Backend: "codex", Model: "gpt-5.4-mini"}),
+			"claude":  {Backend: "claude", Model: "haiku"},
+		},
+		"core": {
+			"default": tierOrDefault(tiers, "core", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+			"codex":   tierOrDefault(tiers, "core", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+			"claude":  {Backend: "claude", Model: "sonnet"},
+		},
+		"deep": {
+			"default": tierOrDefault(tiers, "deep", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+			"codex":   tierOrDefault(tiers, "deep", AgentTier{Backend: "codex", Model: "gpt-5.5"}),
+			"claude":  {Backend: "claude", Model: "opus"},
+		},
+	}
+}
+
+func tierOrDefault(tiers map[string]AgentTier, tier string, fallback AgentTier) AgentTier {
+	if mapping, ok := tiers[tier]; ok {
+		return mapping
+	}
+	return fallback
+}
+
+func resolveAliasMapping(cfg Config, alias, backend, harness string) (AgentTier, bool) {
+	value := alias
+	alias = ModelAlias(value)
+	if alias == "" {
+		alias = normalizedTier(value)
+	}
+	if alias == "" {
+		return AgentTier{}, false
+	}
+	byHarness := cfg.Agents.ModelAliases[alias]
+	for _, key := range aliasResolutionKeys(backend, harness) {
+		if mapping, ok := byHarness[key]; ok {
+			return mapping, true
+		}
+	}
+	if mapping, ok := cfg.Agents.Tiers[alias]; ok {
+		return mapping, true
+	}
+	return AgentTier{}, false
+}
+
+func aliasResolutionKeys(backend, harness string) []string {
+	keys := []string{}
+	if key := normalizedHarness(backend); key != "" {
+		keys = append(keys, key)
+	}
+	if key := normalizedHarness(harness); key != "" {
+		keys = append(keys, key)
+	}
+	keys = append(keys, "default", "codex")
+	seen := map[string]bool{}
+	result := []string{}
+	for _, key := range keys {
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, key)
+		}
+	}
+	return result
+}
+
+func normalizedHarness(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "codex":
+		return "codex"
+	case "claude":
+		return "claude"
+	default:
+		return ""
 	}
 }
 

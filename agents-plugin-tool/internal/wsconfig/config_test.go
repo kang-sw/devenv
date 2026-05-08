@@ -71,6 +71,45 @@ func TestResolveAgentDefaultTierModels(t *testing.T) {
 	}
 }
 
+func TestResolveAgentModelAliasUsesHarness(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	backend, model, err := ResolveAgentForHarness(Options{CacheHome: cache}, "", "", "core", "claude")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "claude" || model != "sonnet" {
+		t.Fatalf("resolved claude alias = %q/%q", backend, model)
+	}
+
+	backend, model, err = ResolveAgentForHarness(Options{CacheHome: cache}, "", "", "core", "codex")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "codex" || model != "gpt-5.5" {
+		t.Fatalf("resolved codex alias = %q/%q", backend, model)
+	}
+}
+
+func TestResolveAgentConcreteModelWinsOverHarnessAlias(t *testing.T) {
+	backend, model, err := ResolveAgentForHarness(Options{CacheHome: filepath.Join(t.TempDir(), "cache")}, "deep", "", "gpt-5.5", "claude")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "codex" || model != "gpt-5.5" {
+		t.Fatalf("resolved concrete model = %q/%q", backend, model)
+	}
+}
+
+func TestResolveAgentLegacyTierUsesHarness(t *testing.T) {
+	backend, model, err := ResolveAgentForHarness(Options{CacheHome: filepath.Join(t.TempDir(), "cache")}, "deep", "", "", "claude")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "claude" || model != "opus" {
+		t.Fatalf("resolved legacy tier = %q/%q", backend, model)
+	}
+}
+
 func TestShowReturnsPathAndDefaultWithoutCreatingFile(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	view, err := Show(Options{CacheHome: cache})

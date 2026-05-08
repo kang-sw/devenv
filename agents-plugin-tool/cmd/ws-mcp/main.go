@@ -210,7 +210,8 @@ func runtimeCapabilityCommandNames() []string {
 func subquery(args []string) {
 	fs := flag.NewFlagSet("subquery", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
-	deepResearch := fs.Bool("deep-research", false, "use deep workload tier for broad tracing or research")
+	deepResearch := fs.Bool("deep-research", false, "use deep model alias for broad tracing or research")
+	harness := fs.String("harness", "", "MCP host harness for model alias resolution")
 	promptFile := fs.String("prompt-file", "", "prompt file; use - for stdin")
 	_ = fs.Parse(args)
 
@@ -222,6 +223,7 @@ func subquery(args []string) {
 		Root:         defaultRoot(*root),
 		Question:     prompt,
 		DeepResearch: *deepResearch,
+		Harness:      *harness,
 	})
 	if err != nil {
 		fatal("subquery", err)
@@ -259,9 +261,9 @@ func configShow(args []string) {
 
 func configAgentsTier(args []string) {
 	fs := flag.NewFlagSet("config agents-tier", flag.ExitOnError)
-	tier := fs.String("tier", "", "workload tier: light, core, or deep")
+	tier := fs.String("tier", "", "model alias: light, core, or deep")
 	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
-	model := fs.String("model", "", "concrete model for this tier")
+	model := fs.String("model", "", "concrete model for this alias")
 	_ = fs.Parse(args)
 
 	cfg, err := wsconfig.SetAgentsTier(wsconfig.Options{}, *tier, *backend, *model)
@@ -711,8 +713,9 @@ func agentsRegister(args []string) {
 	root := fs.String("root", ".", "repository root")
 	name := fs.String("name", "", "agent name")
 	backend := fs.String("backend", "", "agent backend")
-	tier := fs.String("tier", "", "workload tier")
-	model := fs.String("model", "", "backend model override")
+	harness := fs.String("harness", "", "MCP host harness for model alias resolution")
+	tier := fs.String("tier", "", "deprecated model alias selector")
+	model := fs.String("model", "", "model alias or concrete backend model")
 	systemFile := fs.String("system-prompt-file", "", "system prompt file")
 	var prompts multiFlag
 	var promptRefs multiFlag
@@ -728,6 +731,7 @@ func agentsRegister(args []string) {
 		Root:             defaultRoot(*root),
 		Name:             *name,
 		Backend:          *backend,
+		Harness:          *harness,
 		Tier:             *tier,
 		Model:            *model,
 		Prompts:          prompts,

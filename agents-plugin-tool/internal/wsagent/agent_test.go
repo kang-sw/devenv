@@ -470,6 +470,28 @@ func TestRegisterExplicitModelBypassesTierConfig(t *testing.T) {
 	}
 }
 
+func TestRegisterModelAliasUsesHarness(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, _, err := manager.Register(RegisterOptions{
+		Root:    repo,
+		Name:    "reviewer",
+		Harness: "claude",
+		Model:   "core",
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if agent.Harness != "claude" || agent.Tier != "core" || agent.Backend != "claude" || agent.Model != "sonnet" {
+		t.Fatalf("harness/tier/backend/model = %q/%q/%q/%q", agent.Harness, agent.Tier, agent.Backend, agent.Model)
+	}
+}
+
 func TestCallCreatesAndResumesSession(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")

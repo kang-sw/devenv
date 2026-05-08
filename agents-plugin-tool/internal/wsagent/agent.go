@@ -76,6 +76,7 @@ type RegisterOptions struct {
 	Root                  string
 	Name                  string
 	Backend               string
+	Harness               string
 	Tier                  string
 	Model                 string
 	Prompts               []string
@@ -176,6 +177,7 @@ type oneShotOptions struct {
 	Root                string
 	Name                string
 	Backend             string
+	Harness             string
 	Tier                string
 	Model               string
 	Prompts             []string
@@ -190,6 +192,7 @@ type SubqueryOptions struct {
 	Root         string
 	Question     string
 	DeepResearch bool
+	Harness      string
 }
 
 type SelfWorkerStarter struct{}
@@ -230,6 +233,7 @@ type Agent struct {
 	SchemaVersion    int             `json:"schema_version"`
 	Name             string          `json:"name"`
 	Backend          string          `json:"backend"`
+	Harness          string          `json:"harness,omitempty"`
 	Tier             string          `json:"tier"`
 	Model            string          `json:"model"`
 	SessionID        string          `json:"session_id"`
@@ -327,10 +331,13 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if strings.TrimSpace(opts.Model) == "" {
 		opts.Model = resolved.Model
 	}
+	if alias := wsconfig.ModelAlias(opts.Model); alias != "" {
+		opts.Tier = alias
+	}
 	if strings.TrimSpace(opts.Tier) == "" {
 		opts.Tier = "core"
 	}
-	opts.Backend, opts.Model, err = wsconfig.ResolveAgent(wsconfig.Options{CacheHome: m.opts.CacheHome}, opts.Tier, explicitBackend, opts.Model)
+	opts.Backend, opts.Model, err = wsconfig.ResolveAgentForHarness(wsconfig.Options{CacheHome: m.opts.CacheHome}, opts.Tier, explicitBackend, opts.Model, opts.Harness)
 	if err != nil {
 		return Agent{}, Layout{}, err
 	}
@@ -358,6 +365,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		SchemaVersion:    schemaVersion,
 		Name:             name,
 		Backend:          opts.Backend,
+		Harness:          opts.Harness,
 		Tier:             opts.Tier,
 		Model:            opts.Model,
 		Status:           StatusIdle,
@@ -799,6 +807,7 @@ func (m Manager) oneShot(opts oneShotOptions) (string, error) {
 		Root:                opts.Root,
 		Name:                name,
 		Backend:             opts.Backend,
+		Harness:             opts.Harness,
 		Tier:                opts.Tier,
 		Model:               opts.Model,
 		Prompts:             opts.Prompts,
@@ -841,7 +850,7 @@ func (m Manager) Subquery(opts SubqueryOptions) (string, error) {
 	_, _, err := m.Register(RegisterOptions{
 		Root:                opts.Root,
 		Name:                name,
-		Backend:             "codex",
+		Harness:             opts.Harness,
 		Tier:                tier,
 		SystemPromptText:    SubquerySystemPrompt,
 		SuppressOrientation: true,
@@ -1105,6 +1114,9 @@ func (m Manager) Status(root, name string) (string, error) {
 	fmt.Fprintf(&b, "agent: %s\n", agent.Name)
 	fmt.Fprintf(&b, "agent_status: %s\n", agent.Status)
 	fmt.Fprintf(&b, "backend: %s\n", agent.Backend)
+	if agent.Harness != "" {
+		fmt.Fprintf(&b, "harness: %s\n", agent.Harness)
+	}
 	fmt.Fprintf(&b, "tier: %s\n", agent.Tier)
 	if agent.Model != "" {
 		fmt.Fprintf(&b, "model: %s\n", agent.Model)
@@ -1300,6 +1312,9 @@ func backendInvocationError(agent Agent, err error) error {
 	fmt.Fprintf(&b, "agent: %s\n", agent.Name)
 	if agent.Tier != "" {
 		fmt.Fprintf(&b, "tier: %s\n", agent.Tier)
+	}
+	if agent.Harness != "" {
+		fmt.Fprintf(&b, "harness: %s\n", agent.Harness)
 	}
 	if agent.Backend != "" {
 		fmt.Fprintf(&b, "backend: %s\n", agent.Backend)

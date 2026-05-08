@@ -453,6 +453,63 @@ func TestServeStdioCodexWorkspaceMetadataRootFallback(t *testing.T) {
 	}
 }
 
+func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260508-feat-claude-harness")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	setupInput := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root),
+	}, "\n")
+	checkInput := strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"reviewer"}}}`, root),
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"session.get_default_root","arguments":{}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	server := NewServer(t.TempDir(), "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(setupInput), &out); err != nil {
+		t.Fatalf("ServeStdio setup returned error: %v", err)
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(checkInput), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	status := toolText(t, byID["3"])
+	if !strings.Contains(status, "harness: claude") || !strings.Contains(status, "backend: claude") || !strings.Contains(status, "model: sonnet") {
+		t.Fatalf("status missing claude alias resolution:\n%s", status)
+	}
+	session := toolText(t, byID["4"])
+	if !strings.Contains(session, `"session_harness":"claude"`) {
+		t.Fatalf("session did not report claude harness: %s", session)
+	}
+}
+
+func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260508-feat-codex-harness")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	setupInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root)
+	checkInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"reviewer"}}}`, root)
+	var out bytes.Buffer
+	server := NewServer(t.TempDir(), "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(setupInput), &out); err != nil {
+		t.Fatalf("ServeStdio setup returned error: %v", err)
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(checkInput), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	status := toolText(t, byID["2"])
+	if !strings.Contains(status, "harness: codex") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.5") {
+		t.Fatalf("status missing codex alias resolution:\n%s", status)
+	}
+}
+
 func TestServeStdioCodexMultiWorkspaceMetadataRefusesToGuess(t *testing.T) {
 	useLeadProfile(t)
 	rootA := initTicketRepo(t, "260505-feat-alpha")

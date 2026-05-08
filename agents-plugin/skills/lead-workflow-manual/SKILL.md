@@ -65,9 +65,10 @@ timeout_seconds: 600)`. Set `deep_research: true` only for broad tracing.
 
 Register a stable task name with optional prompt stems or a self-contained
 system prompt. Omit `prompts` for a general-purpose named agent; registration
-uses delegate orientation and the default `core` tier. Use
-`tier: "light" | "core" | "deep"` for workload selection and `model` only for a
-one-off concrete model override. Call the agent for each continuity turn.
+uses delegate orientation and the default `core` model alias. Use
+`model: "light" | "core" | "deep"` for portable model selection and concrete
+provider model names only for intentional one-off overrides. `tier` remains a
+compatibility input. Call the agent for each continuity turn.
 `ws/agents.call` starts async and returns promptly. Use
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,
