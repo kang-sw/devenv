@@ -200,6 +200,14 @@ per-domain manager sessions. Callers provide a prompt and may provide a domain
 hint. The tool owns the API-doc routing and aggregation behavior internally and
 returns a synchronous answer to the caller.
 
+> [!note] Planned 🚧
+> The API documentation tool family will gain an async job surface for lookups
+> that can outlive the host tool-call timeout. `api.ask_async` starts a job and
+> returns an `api_job_key`; `api.status` reports routing and per-domain
+> progress; `api.result` returns the final answer when available; and
+> `api.cancel` stops active work on a best-effort basis.
+> {#260508-api-documentation-async-mcp-tools}
+
 ## Tool Profile Gating {#260505-tool-profile-gating}
 
 The MCP server defaults to the `lead` tool surface. It does not derive authority

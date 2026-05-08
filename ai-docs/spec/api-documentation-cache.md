@@ -63,6 +63,23 @@ run concurrently. Partial success is preserved: if at least one domain returns
 an answer, failed domains are reported alongside successful sections. The tool
 returns an error only when all resolved domains fail.
 
+## 🚧 API Docs Async Jobs {#260508-api-docs-async-jobs}
+
+Long-running API documentation lookups will have a separate asynchronous job
+surface while `ws/api.ask` remains the synchronous quick path. Starting an async
+job returns a stable `api_job_key` immediately. Callers can use that key to poll
+status, read the final answer, inspect partial failures, and cancel active work
+on a best-effort basis.
+
+Async jobs preserve the current API-doc behavior for domain routing, manager
+reuse, cache ownership, and partial-success aggregation. Job state records the
+original prompt, optional domain hint, resolved domains when known, per-domain
+progress, errors, final answer availability, timestamps, and cancellation state.
+
+If the caller times out after starting a job, the job key remains the recovery
+handle. A later caller can inspect status or collect the result without
+restarting cache bootstrap or manager fetch work.
+
 ## API Docs Manager Sessions {#260505-api-docs-manager-sessions}
 
 Each cache domain uses a named manager session:
