@@ -1,10 +1,8 @@
 ---
 name: add-rule
 description: >
-  Classify a natural-language rule as cross-cutting or domain-scoped and
-  write it to the correct document. Use when the user states a rule
-  ("always", "never", "must", or similar prescription) that should persist
-  across sessions.
+  Persist a user-requested workflow rule. Use only when the user explicitly
+  asks to save, remember, persist, or add a durable rule for future sessions.
 argument-hint: "<rule description>"
 ---
 

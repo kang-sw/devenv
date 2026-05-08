@@ -1,6 +1,6 @@
 ---
 name: lead-write-ticket
-description: Create or update repository workflow tickets. Use when the user asks to write, create, edit, promote, drop, or close a ticket, or when a discussion needs to be captured as a durable ticket.
+description: Use when the user asks to create, edit, promote, drop, close, or durably capture a repository workflow ticket.
 ---
 
 # Write Ticket

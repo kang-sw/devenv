@@ -1,9 +1,9 @@
 ---
 name: sprint
 description: >
-  Multi-task session container for feature-branch work. Holds routing,
-  implementation, and wrap-up in a single persistent session. Doc pipeline
-  is deferred to wrap-up; each task commits only source changes.
+  Use when the user asks for a sprint or multi-task feature-branch session;
+  defers the doc pipeline to wrap-up while each task commits source changes
+  only.
 argument-hint: "[sprint-name]"
 ---
 

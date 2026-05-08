@@ -1,6 +1,6 @@
 ---
 name: lead-write-code
-description: Delegate a ticket or inline implementation target through a brief, optional plan, Codex implementer session, partitioned reviewer fanout, bounded relay loop, cleanup, and completion report.
+description: Delegated implementation primitive used by lead-implement for broader changes; writes a brief, runs implementer/reviewer relay, cleanup, and completion report.
 ---
 
 # Write Code

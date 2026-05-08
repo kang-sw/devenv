@@ -1,9 +1,9 @@
 ---
 name: write-code
 description: >
-  Core implementation primitive. Reads a target, writes a brief, optionally
-  populates a plan, then runs a delegated implementer–reviewer cycle on the
-  current branch. Returns commit range and test status to the caller.
+  Delegated implementation primitive used by /implement for broader changes.
+  Writes a brief, runs implementer/reviewer relay, cleanup, and completion
+  report.
 argument-hint: "<ticket-path or inline description> [--ticket <stem>]"
 ---
 

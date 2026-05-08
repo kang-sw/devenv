@@ -1,6 +1,6 @@
 ---
 name: lead-edit
-description: Directly implement a narrow code change on the current branch, then verify it with one correctness-and-fit reviewer before updating specs and reporting completion.
+description: Direct-edit primitive for narrow changes routed by lead-implement or explicit user request; lead edits current branch, verifies, reviews once, updates specs, and reports.
 ---
 
 # Edit

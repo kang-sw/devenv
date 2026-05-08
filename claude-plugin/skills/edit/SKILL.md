@@ -1,10 +1,9 @@
 ---
 name: edit
 description: >
-  Direct-edit primitive. The lead reads, edits, verifies, and commits on the
-  current branch. One named-agent reviewer covers correctness and fit.
-  Runs ws:update-spec on the edit's commit range before returning.
-  No brief, no delegation — callers own mental-model updates.
+  Direct-edit primitive for narrow changes routed by /implement or explicit
+  user request. The lead edits current branch, verifies, reviews once, updates
+  specs, and reports.
 argument-hint: "[ticket-path or inline brief]"
 ---
 

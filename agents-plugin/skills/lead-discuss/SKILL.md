@@ -1,6 +1,6 @@
 ---
 name: lead-discuss
-description: Explore a workflow design, migration direction, ticket scope, or implementation approach before making code changes. Use when the user wants to reason through options, risks, or next steps rather than immediately edit files.
+description: Use before code changes when the user wants to explore workflow design, migration direction, ticket scope, risks, or implementation approach.
 ---
 
 # Discuss

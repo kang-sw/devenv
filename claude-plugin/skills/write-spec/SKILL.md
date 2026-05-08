@@ -1,8 +1,8 @@
 ---
 name: write-spec
 description: >
-  When the user mentions creating, writing, or updating a spec, or
-  when chained from /discuss before /write-ticket, invoke this.
+  Spec-authoring primitive for explicit spec requests or workflow chains;
+  creates or updates behavioral specs for caller-visible workflow behavior.
 argument-hint: "[area name, or spec file path to update]"
 ---
 

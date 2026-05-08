@@ -1,9 +1,8 @@
 ---
 name: update-spec
 description: >
-  Lead-driven spec audit for a commit range. Loads conventions, scans commits
-  for caller-visible behavior changes, adds missing entries, strips 🚧 markers,
-  and handles removals. Invoked by implement, edit, and sprint wrap-up.
+  Post-implementation spec audit primitive for explicit commit ranges or
+  workflow wrap-up; updates ai-docs/spec for caller-visible behavior changes.
 argument-hint: "[<start-commit>..<end-commit>]"
 ---
 

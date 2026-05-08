@@ -1,6 +1,6 @@
 ---
 name: lead-proceed
-description: First step for any implementation task. Reads existing tickets, plans, skeletons, and session context, then routes before code is touched.
+description: Required first step for implementation tasks. Use when starting from a ticket path or task description so existing specs, tickets, plans, skeletons, and session context are routed before code is touched.
 ---
 
 # Proceed

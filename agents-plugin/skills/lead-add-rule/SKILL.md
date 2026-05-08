@@ -1,6 +1,6 @@
 ---
 name: lead-add-rule
-description: Classify a natural-language rule as cross-cutting or domain-scoped and write it to the correct document. Use when the user states a persistent rule with words such as always, never, must, or should.
+description: Persist a user-requested workflow rule. Use only when the user explicitly asks to save, remember, persist, or add a durable rule for future sessions.
 ---
 
 # Add Rule
