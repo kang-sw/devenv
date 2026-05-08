@@ -25,6 +25,7 @@ related:
 - Codex-facing workflow guidance teaches MCP primitives first; CLI adapter syntax belongs only in compatibility or testing references. {#260507-mcp-centric-workflow-language}
 - Shared workflow examples use `model: light|core|deep` as portable delegate aliases; `tier` is legacy compatibility language and concrete provider model names are reserved for intentional overrides. {#260508-workflow-model-alias-guidance}
 - `lead-proceed` routes through prefix stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
+- `lead-proceed` must stop on epic ticket paths because epics are board artifacts; implementation routes through child tickets. {#260505-proceed-routing-pipeline}
 - `lead-write-ticket` runs the spec gate only when non-`epic`, non-`research` work enters `ready/`; `todo/` is accepted backlog with optional spec recovery hints. {#260505-planning-workflow-skills}
 - `lead-write-ticket` keeps epics at milestone-board scope and routes detailed discussion, implementation phases, and slice-specific decisions into child tickets. {#260508-write-ticket-epic-child-boundary}
 - `lead-bootstrap` has two template contracts: root context and `WORKFLOW.md`. Fresh and upgrade paths must install or preserve `ai-docs/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
