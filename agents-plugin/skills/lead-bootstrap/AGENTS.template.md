@@ -160,6 +160,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0034: Treat `AGENTS.md` as the canonical managed template target.
 - v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `ws:lead-discuss`.
 - v0036: If `ai-docs/WORKFLOW.md` is absent, create it from the bootstrap workflow guide source. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws runtime or MCP parser behavior.
+- v0037: Add `ai-docs/.deps/` to `.gitignore` if absent; API documentation cache contents are runtime-managed local data, not project memory.
 -->
 
-<!-- Template Version: v0036 -->
+<!-- Template Version: v0037 -->

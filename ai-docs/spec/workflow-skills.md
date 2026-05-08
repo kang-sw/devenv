@@ -184,6 +184,10 @@ lifecycle, spec stems, mental models, commit traceability, and manual fallback
 expectations without becoming a project-local override for runtime semantics.
 {#260506-bootstrap-workflow-guide}
 
+Bootstrap ensures downstream `.gitignore` covers local workflow state and
+runtime-managed API documentation cache data: `ai-docs/**/*.local.md` and
+`ai-docs/.deps/`. {#260508-bootstrap-api-deps-gitignore}
+
 `lead-ship` follows the repository ship configuration to prepare and execute a
 release. It confirms version, tag, and publish targets before any publishing
 step.

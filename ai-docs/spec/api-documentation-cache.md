@@ -36,6 +36,8 @@ for version detection, fetching, and staleness checks.
 
 Workflow guidance treats `.deps` contents as a managed cache. Ordinary workers
 ask through `ws/api.ask` rather than reading or editing cached files directly.
+Bootstrap guidance treats `ai-docs/.deps/` as Git-ignored local cache data, not
+durable project memory.
 
 ## API Docs Domain Routing {#260505-api-docs-domain-routing}
 

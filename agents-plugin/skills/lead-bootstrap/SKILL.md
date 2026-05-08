@@ -36,7 +36,7 @@ Mode: user request
 2. Leave placeholder markers in project-specific sections.
 3. Create `ai-docs/` structure per the template setup block.
 4. Copy `WORKFLOW.md` to `ai-docs/WORKFLOW.md`.
-5. Add `ai-docs/**/*.local.md` to `.gitignore` if not present.
+5. Add `ai-docs/**/*.local.md` and `ai-docs/.deps/` to `.gitignore` if absent.
 6. Set `<!-- Template Version: vNNNN -->` to the latest version from the template.
 7. Write `CLAUDE.md` with body `@AGENTS.md`.
 8. Commit scaffolding.

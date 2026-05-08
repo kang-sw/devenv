@@ -41,7 +41,7 @@ related:
 
 ## Common Mistakes
 
-- Hand-editing `ai-docs/.deps/` as ordinary workflow output; use `ws/api.ask` unless modifying the cache mechanism. {#260505-api-docs-worker-guidance}
+- Hand-editing or committing `ai-docs/.deps/` as ordinary workflow output; use `ws/api.ask` unless modifying the cache mechanism. {#260505-api-docs-worker-guidance}
 - Assuming fuzzy `domain_hint` creates or selects a domain directly.
 - Removing `## Domain: <domain>` aggregation headers and breaking caller/test boundaries.
 - Editing API docs prompts without refreshing `agents-plugin/runtime.json`.
