@@ -2,6 +2,9 @@
 title: api.ask async jobs
 related:
   260429-feat-api-deps: original API documentation cache implementation ticket
+spec:
+  - 260508-api-docs-async-jobs
+  - 260508-api-documentation-async-mcp-tools
 related-mental-model:
   - api-documentation-cache
   - mcp-runtime
@@ -69,4 +72,3 @@ potentially long bootstrap or broad multi-domain work uses the async surface.
 Add tests for immediate return, result polling, partial domain failure, all
 domain failure, cancellation, and compatibility with the existing synchronous
 tool.
-
