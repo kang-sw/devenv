@@ -108,7 +108,9 @@ checking or refreshing staleness, exact domain-hint routing, pre-router
 dispatch, parallel multi-domain calls, per-domain manager sessions, and
 per-domain locking behavior.
 
-The Codex-first API documentation surface is `ws/api.list` and `ws/api.ask`.
+The Codex-first API documentation surface is `ws/api.list`, `ws/api.ask`, and
+the async API job tools `ws/api.ask_async`, `ws/api.status`, `ws/api.result`, and
+`ws/api.cancel`.
 The Claude CLI remains the compatibility fallback for Claude workflows and
 older guidance that still invokes `ws-ask-api`.
 

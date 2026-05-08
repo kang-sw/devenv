@@ -308,10 +308,63 @@ Behavior:
 
 Constraints:
 
-- The public MCP surface intentionally exposes only `ws/api.list` and
-  `ws/api.ask`; refresh and stale-check operations remain manager-internal.
+- The public MCP surface intentionally exposes API lookup, async job control,
+  and domain listing only; refresh and stale-check operations remain
+  manager-internal.
 - Worker-facing guidance should use these tools and should not direct ordinary
   workers to read `ai-docs/.deps/` directly.
+
+### `ws/api.ask_async`
+
+Start a recoverable asynchronous third-party API documentation job and return an
+`api_job_key` immediately.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "API documentation question to answer asynchronously."
+    },
+    "domain_hint": {
+      "type": "string",
+      "description": "Optional API documentation domain hint."
+    }
+  },
+  "required": ["prompt"]
+}
+```
+
+Behavior:
+
+- The tool persists a job record under worktree-scoped ws state before returning.
+- The returned `api_job_key` is the recovery handle for later status, result, or
+  cancellation calls.
+- Async jobs reuse the same domain routing, per-domain manager sessions, cache
+  ownership, and aggregation format as `ws/api.ask`.
+
+### `ws/api.status`
+
+Return JSON status for an async API documentation job by `api_job_key`.
+
+### `ws/api.result`
+
+Return the final async API documentation answer by `api_job_key`. Partial
+success returns answer text; all-domain failure and cancellation return tool
+errors with preserved status text.
+
+### `ws/api.cancel`
+
+Best-effort cancel an async API documentation job by `api_job_key`. Cancellation
+is durable in job state and also propagates to active pre-router or domain
+manager workers when they are still running in the current process.
 
 ### `ws/git.diff`
 

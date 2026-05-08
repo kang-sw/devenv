@@ -81,7 +81,8 @@ Implemented MCP tools:
 - Agents: `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
   `ws/agents.result`, `ws/agents.status`, `ws/agents.tail`,
   `ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`
-- API docs: `ws/api.list`, `ws/api.ask`
+- API docs: `ws/api.list`, `ws/api.ask`, `ws/api.ask_async`,
+  `ws/api.status`, `ws/api.result`, `ws/api.cancel`
 
 Shared `agents-plugin` skill text uses MCP names, not repo-local
 `claude-plugin/infra/*` paths. Convention text is bundled into the runtime and

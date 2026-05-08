@@ -118,11 +118,13 @@ cache behavior.
 
 ## API Docs Worker Guidance {#260505-api-docs-worker-guidance}
 
-Workflow and delegate guidance direct agents to use `ws/api.ask` for external
-API documentation questions. `ws/api.list` is used when the caller needs to
-inspect available cache domains or choose a precise `domain_hint`.
+Workflow and delegate guidance direct agents to use `ws/api.ask` for ordinary
+external API documentation questions. `ws/api.ask_async` is used when cache
+bootstrap, slow upstream fetches, or broad multi-domain routing can outlive the
+host tool-call timeout. `ws/api.list` is used when the caller needs to inspect
+available cache domains or choose a precise `domain_hint`.
 
 Workers should not browse or fetch third-party API docs directly when
-`ws/api.ask` can answer the question. They should pass a domain hint only when
-the intended cache domain is known; otherwise the pre-router owns domain
-selection.
+`ws/api.ask` or `ws/api.ask_async` can answer the question. They should pass a
+domain hint only when the intended cache domain is known; otherwise the
+pre-router owns domain selection.
