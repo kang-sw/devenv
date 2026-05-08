@@ -51,6 +51,15 @@ each skill as top-level entry, conditional utility, or derived pipeline stage.
 Record any Claude compatibility skill whose trigger language should remain
 semantically aligned but host-specific.
 
+### Result (4d74813) - 2026-05-08
+
+Classified strong top-level entry descriptions as `lead-workflow-manual`,
+`lead-discuss`, `lead-implement`, `lead-proceed`, `lead-sprint`, `lead-ship`,
+and `lead-write-ticket`. Classified `lead-add-rule` as a conditional utility
+requiring explicit persistence intent. Kept `lead-edit`, `lead-write-code`,
+`lead-write-spec`, `lead-write-skeleton`, and `lead-update-spec` lighter as
+explicit primitives or workflow-routed stages.
+
 ### Phase 2: Update Codex skill descriptions
 
 Rewrite Codex-facing descriptions so top-level entry skills have strong
@@ -59,8 +68,23 @@ natural-language triggers and derived stages avoid overmatching.
 Use explicit persistence wording for `lead-add-rule`; do not trigger it from
 ordinary prescriptive task language alone.
 
+### Result (4d74813) - 2026-05-08
+
+Updated Codex `agents-plugin/skills/lead-*` frontmatter descriptions. Strong
+entry descriptions now use explicit "Use", "Required", or "Mandatory" wording;
+derived implementation/spec/skeleton primitives no longer read as broad
+top-level entry points; `lead-add-rule` now requires save, remember, persist, or
+add-rule intent for future sessions.
+
 ### Phase 3: Update compatibility docs and specs
 
 Update workflow-skill specs, mental models, and Claude compatibility skill
 descriptions where needed so the attention policy remains documented and
 portable without forcing identical host notation.
+
+### Result (4d74813) - 2026-05-08
+
+Aligned Claude compatibility skill descriptions with the same trigger semantics
+while preserving slash-command wording where relevant. Marked workflow skill spec
+anchors implemented and recorded the trigger-surface rule in the workflow-skills
+mental model.
