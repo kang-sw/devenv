@@ -117,13 +117,11 @@ with `codex exec resume --json <thread-id>`. The adapter sets the subprocess
 working directory for resumed calls and applies the resolved system prompt
 through Codex configuration.
 
-> [!note] Planned 🚧
-> Codex-backed named-agent calls will deliver the user prompt through a prompt
-> path that is reliable for multiline prompts on both first-call and resumed
-> sessions, including Windows Codex execution. When Codex CLI supports stdin
-> prompt input with `-`, the runtime may prefer stdin over positional argv
-> prompt delivery while preserving session id, model, system prompt, stream
-> capture, and hook behavior. {#260508-codex-stdin-prompt-delivery}
+Codex-backed named-agent calls deliver the user prompt through stdin with the
+Codex CLI `-` prompt marker for both first-call and resumed sessions. This keeps
+multiline prompts out of positional argv while preserving session id, model,
+system prompt, stream capture, and hook behavior.
+{#260508-codex-stdin-prompt-delivery}
 
 Codex assigns the thread id after startup. The runtime parses Codex JSONL output
 incrementally, persists `thread.started.thread_id` as soon as it appears, and
@@ -131,12 +129,10 @@ stores the final plain-text agent message as the caller-facing result. The JSONL
 reader accepts large single-line events so verbose tool output does not break
 session parsing.
 
-> [!note] Planned 🚧
-> Codex-backed named-agent diagnostics will record bounded prompt-delivery
-> metadata such as prompt byte size, resume state, Codex CLI version when
-> available, and final stdout event shape so operators can distinguish backend
-> success from prompt-delivery suspicion without logging prompt contents by
-> default. {#260508-codex-prompt-delivery-diagnostics}
+Codex-backed named-agent diagnostics record bounded prompt-delivery metadata:
+prompt byte size before invocation, prompt delivery path, Codex CLI version when
+available, resume state, and final stdout event shape. Diagnostics do not log
+prompt contents by default. {#260508-codex-prompt-delivery-diagnostics}
 
 ## Claude Agent Runner {#260505-claude-agent-runner}
 
