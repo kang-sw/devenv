@@ -16,6 +16,7 @@ related:
 
 - `cmd/ws-mcp/main.go` is the binary entry point for `serve --stdio`, `runtime info`, CLI mirrors, and local diagnostics. {#260505-runtime-cli-entrypoints}
 - `internal/mcp/server.go` owns MCP JSON-RPC request handling, tool schemas, tool dispatch, optional profile filtering, and cancellation. {#260505-mcp-server-protocol-surface}
+- `internal/mcp/api_async.go` owns recoverable API documentation job state behind the `api.ask_async` tool family. {#260508-api-documentation-async-mcp-tools}
 - `runtime.info` and `runtime.capabilities` are launcher-facing compatibility data; capabilities adds MCP protocol, lead tool names, and CLI commands. {#260505-runtime-debug-metadata-tools} {#260506-runtime-capabilities-single-probe}
 
 ## Module Contracts
@@ -36,7 +37,7 @@ related:
 
 - Tool additions require both `callTool` and `tools()` updates; role/profile filtering and runtime metadata must also be reviewed. `runtime.capabilities` derives MCP tool names from `tools()`, but `runtime.json` still must be updated. {#260505-tool-profile-gating}
 - CLI mirrors are separate adapters. MCP behavior changes do not update `cmd/ws-mcp` handlers automatically, and public launcher-required CLI commands must also be kept in `runtimeCapabilityCommandNames` plus `runtime.json.commands`. {#260505-cli-mirror-coverage}
-- `api.ask` and `subquery` use named-agent runtime semantics; changes to agent result/wait behavior must keep MCP tool descriptions and follow-up text coherent. {#260505-workflow-state-delegation-tools}
+- `api.ask`, async API jobs, and `subquery` use named-agent runtime semantics; changes to agent result/wait/cancel behavior must keep MCP tool descriptions, async job reconciliation, and follow-up text coherent. {#260505-workflow-state-delegation-tools}
 - Config tools read/write user-local config through `wsconfig`; compatibility tier names, model aliases, and harness-aware defaults must match agent registration behavior. {#260505-config-tools} {#260508-model-alias-config-tools}
 
 ## Extension Points & Change Recipes
@@ -52,6 +53,7 @@ related:
 - Treating MCP profile filters as an authority boundary creates false safety; prompt-level delegate rules remain the durable containment mechanism.
 - Assuming delegate agents can inspect arbitrary agents when `WS_MCP_TOOL_PROFILE` is applied; delegate profile can use selected `agents.*` tools only for `subquery-*` names, while leaf profile cannot use `agents.*`.
 - Treating `domain_hint` in `api.ask` as a direct domain selector; only exact existing domain names bypass routing. {#260505-api-documentation-mcp-tools}
+- Adding API-doc async tools without updating `agents-plugin/runtime.json`; launcher compatibility checks compare the required MCP tool surface against runtime metadata.
 - Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must ask for explicit `root` or `session.set_default_root` instead.
 - Letting `WS_MCP_PROJECT_ROOT` shadow an explicit non-dot server startup root makes tests pass in this dogfooding repo while plugin-managed calls target the wrong project.
