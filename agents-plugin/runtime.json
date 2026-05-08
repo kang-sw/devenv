@@ -72,7 +72,11 @@
     "git.merge_base": ">=0.20.2-dev <0.21.0",
     "git.commit": ">=0.20.2-dev <0.21.0",
     "api.list": ">=0.20.2-dev <0.21.0",
-    "api.ask": ">=0.20.2-dev <0.21.0"
+    "api.ask": ">=0.20.2-dev <0.21.0",
+    "api.ask_async": ">=0.20.2-dev <0.21.0",
+    "api.status": ">=0.20.2-dev <0.21.0",
+    "api.result": ">=0.20.2-dev <0.21.0",
+    "api.cancel": ">=0.20.2-dev <0.21.0"
   },
   "commands": {
     "runtime.info": ">=0.20.2-dev <0.21.0",
