@@ -63,9 +63,9 @@ run concurrently. Partial success is preserved: if at least one domain returns
 an answer, failed domains are reported alongside successful sections. The tool
 returns an error only when all resolved domains fail.
 
-## 🚧 API Docs Async Jobs {#260508-api-docs-async-jobs}
+## API Docs Async Jobs {#260508-api-docs-async-jobs}
 
-Long-running API documentation lookups will have a separate asynchronous job
+Long-running API documentation lookups have a separate asynchronous job
 surface while `ws/api.ask` remains the synchronous quick path. Starting an async
 job returns a stable `api_job_key` immediately. Callers can use that key to poll
 status, read the final answer, inspect partial failures, and cancel active work
