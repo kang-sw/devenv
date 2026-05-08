@@ -11,6 +11,7 @@ related-mental-model:
   - api-documentation-cache
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-08
 ---
 
 # api.ask async jobs
@@ -73,6 +74,15 @@ errors, timestamps, and cancellation state.
 The implementation must account for long-running manager fetch/bootstrap work
 that outlives the caller's initial MCP request.
 
+### Result (247b029) - 2026-05-08
+
+Implemented recoverable async API documentation jobs and merged the delegated
+branch to `main`. The MCP surface now includes `api.ask_async`, `api.status`,
+`api.result`, and `api.cancel`; job records persist under worktree-scoped ws
+state; async execution reuses the existing API docs routing and manager
+aggregation semantics; cancellation propagates to active pre-router and domain
+manager workers; and stale running jobs reconcile from durable worker metadata.
+
 ### Phase 3: Guidance, tests, and compatibility
 
 Update workflow guidance so ordinary API lookups still use `ws/api.ask`, while
@@ -81,3 +91,12 @@ potentially long bootstrap or broad multi-domain work uses the async surface.
 Add tests for immediate return, result polling, partial domain failure, all
 domain failure, cancellation, and compatibility with the existing synchronous
 tool.
+
+### Result (4c77951) - 2026-05-08
+
+Updated workflow manual guidance, API documentation specs, MCP reference docs,
+Claude compatibility notes, project inventory, and mental models so ordinary
+lookups keep using `ws/api.ask` while long-running lookups use the async job
+surface. Added MCP-level tests for tool listing, immediate start, durable
+status/result recovery, partial failure, all-domain failure, cancellation, and
+sync compatibility.
