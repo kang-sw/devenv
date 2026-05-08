@@ -15,7 +15,7 @@ related:
 
 ## Entry Points
 
-- `wsprompt.Resolve` resolves embedded stems or absolute prompt paths into system text and optional model/tier metadata.
+- `wsprompt.Resolve` resolves embedded stems or absolute prompt paths into system text and optional model metadata plus legacy tier metadata.
 - `wsprompt.Bundle` and `ContentSHA256` expose prompt bundle metadata to `runtime.info` and `runtime.capabilities`.
 - `wsagent.Manager.Register` materializes prompt chains into each agent's `system.md`. {#260505-agent-prompt-registration-tier-resolution}
 
@@ -25,8 +25,8 @@ related:
 - Embedded prompt specs are bare stems with optional `.md` suffix; absolute paths are valid; relative/slashed specs and specs containing `..` are rejected.
 - Prompt bodies concatenate in caller order, then inline `system_prompt_text` appends last with separators.
 - Only the first prompt with usable `model:` frontmatter sets alias/model when explicit values are absent.
-- Embedded prompt frontmatter uses `model: light|core|deep` for portable aliases; Claude tier aliases remain compatibility inputs, not shared authoring style.
-- If no explicit tier/model and no prompt frontmatter sets one, registration defaults to the `core` alias before harness-aware backend/model resolution.
+- Embedded prompt frontmatter uses `model: light|core|deep` for portable aliases; Claude compatibility aliases remain accepted inputs, not shared authoring style.
+- If no explicit `model` or legacy `tier` and no prompt frontmatter sets one, registration defaults to the `core` alias before harness-aware backend/model resolution.
 - Public named agents get `delegate-orientation` prepended unless suppressed or already first. {#260505-workflow-delegate-prompt-boundaries}
 - Subquery uses inline `SubquerySystemPrompt` and suppresses orientation because it is self-contained. {#260505-async-subquery-ephemeral-agent}
 

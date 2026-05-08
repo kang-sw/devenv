@@ -17,12 +17,12 @@ The directory contains registry metadata, the materialized system prompt, inbox
 messages, current-call state, diagnostic streams, an append-only event log, and
 the last plain-text output.
 
-Agent metadata records the backend, workload tier, concrete model when present,
-session id, status, prompt references, output path, capability flags, and
-whether the agent is ephemeral. Re-registering an existing agent replaces its
-directory only when it has no active current call.
+Agent metadata records the backend, compatibility alias field, resolved model
+when present, session id, status, prompt references, output path, capability
+flags, and whether the agent is ephemeral. Re-registering an existing agent
+replaces its directory only when it has no active current call.
 
-## Prompt Registration And Tier Resolution {#260505-agent-prompt-registration-tier-resolution}
+## Prompt Registration And Model Alias Resolution {#260505-agent-prompt-registration-tier-resolution}
 
 Agent registration accepts a prompt chain as logical prompt names or absolute
 prompt paths. Bare logical names resolve from the embedded runtime prompt bundle;
@@ -67,7 +67,7 @@ successful output. Successful result reads erase agents marked ephemeral.
 
 `subquery` starts a scoped read-only query as an asynchronous named-agent call
 and returns immediately with a generated subquery key. Deep-research requests use
-the `deep` tier; ordinary requests use the `light` tier.
+the `deep` model alias; ordinary requests use the `light` model alias.
 
 Generated subquery agents are marked ephemeral and suppress delegate orientation
 because their system prompt is self-contained. Callers collect answers with
@@ -149,9 +149,10 @@ defaults. Unknown harnesses use a deterministic configured default.
 ## Backend Invocation Failure Diagnostics {#260505-agent-backend-failure-diagnostics}
 
 Backend invocation failures preserve the raw backend error and append a bounded
-hint. The hint includes the configured agent name, tier, backend, and model;
+hint. The hint includes the configured agent name, compatibility alias field,
+backend, and model;
 PATH-detected backend binaries for known local backends; and explicit recovery
-guidance for re-registering an existing agent or changing future tier defaults.
+guidance for re-registering an existing agent or changing future alias defaults.
 
 ## Codex JSONL Trailing Noise Tolerance {#260505-codex-jsonl-trailing-noise-tolerance}
 

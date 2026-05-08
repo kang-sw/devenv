@@ -78,7 +78,7 @@ name and may provide a backend, a concrete model, or both. When backend is
 omitted, ws infers it from the model family where possible.
 
 Configuration exposes harness-aware model alias mappings. `light`, `core`, and
-`deep` map to backend/model defaults per harness, existing tier config is
+`deep` map to backend/model defaults per harness, existing tier-shaped config is
 migrated or wrapped for compatibility, and new documentation speaks in terms of
 model aliases rather than workload tiers. {#260508-model-alias-config-tools}
 
@@ -165,9 +165,10 @@ locations.
 
 The `agents.*` tool family exposes durable named-agent orchestration.
 
-`agents.register` creates or updates an agent record with backend, tier, model,
-prompt references, or materialized system prompt text. `agents.call` starts an
-asynchronous call and returns immediately.
+`agents.register` creates or updates an agent record with backend, model alias
+or compatibility tier field, resolved model, prompt references, or materialized
+system prompt text. `agents.call` starts an asynchronous call and returns
+immediately.
 
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable

@@ -232,7 +232,7 @@ selected lead-owned orchestration or mutation tools. Delegate may use
 agents; `leaf` also cannot see or call `subquery`. Explicit tool allowlists may
 narrow the visible surface for tests, but cannot raise a filtered profile.
 
-## Workload Tiers
+## Model Aliases
 
 Shared skills use portable model aliases for routine delegate selection:
 
@@ -395,11 +395,12 @@ provided, is appended after resolved prompt bodies so existing materialized
 prompt callers remain compatible.
 
 The first embedded bundle contains role prompts, review partition prompts,
-`delegate-orientation`, and `impl-playbook`. Frontmatter `model: haiku`,
-`model: sonnet`, and `model: opus` map to aliases `light`, `core`, and `deep`
-when the caller did not pass an explicit `tier` or `model`. Frontmatter may also
-use aliases directly. Unknown frontmatter model names become concrete backend
-model overrides only when no explicit model was supplied.
+`delegate-orientation`, and `impl-playbook`. Frontmatter `model: light`,
+`model: core`, or `model: deep` supplies a portable alias when the caller did
+not pass an explicit `model` or legacy `tier`. Compatibility frontmatter values
+`haiku`, `sonnet`, and `opus` still map to the same aliases. Unknown frontmatter
+model names become concrete backend model overrides only when no explicit model
+was supplied.
 
 Registration writes the materialized prompt to `system.md` in the agent
 directory and stores the requested prompt chain in `agent.json` as `prompt_refs`

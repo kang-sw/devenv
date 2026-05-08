@@ -69,7 +69,7 @@ Each cache domain uses a named manager session:
 api-doc-<domain>
 ```
 
-Manager sessions use the Codex backend, the `core` workload tier, and the
+Manager sessions use the Codex backend, the `core` model alias, and the
 embedded `api-doc-manager` prompt. Public delegate orientation is suppressed
 because the manager prompt is a complete domain-specific system prompt.
 
