@@ -1,5 +1,8 @@
 ---
 title: Codex agent call prompt delivery
+spec:
+  - 260508-codex-stdin-prompt-delivery
+  - 260508-codex-prompt-delivery-diagnostics
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime
