@@ -24,9 +24,9 @@ related:
 - Embedded prompt discovery includes only top-level Markdown under `prompts/*.md` and `infra/*.md`; nested files are invisible.
 - Embedded prompt specs are bare stems with optional `.md` suffix; absolute paths are valid; relative/slashed specs and specs containing `..` are rejected.
 - Prompt bodies concatenate in caller order, then inline `system_prompt_text` appends last with separators.
-- Only the first prompt with usable `model:` frontmatter sets tier/model when explicit values are absent.
-- Embedded prompt tier frontmatter uses `light`, `core`, or `deep`; Claude tier aliases remain compatibility inputs, not the shared authoring style.
-- If no explicit tier/model and no prompt frontmatter sets one, registration defaults to the `core` tier before backend/model resolution.
+- Only the first prompt with usable `model:` frontmatter sets alias/model when explicit values are absent.
+- Embedded prompt frontmatter uses `model: light|core|deep` for portable aliases; Claude tier aliases remain compatibility inputs, not shared authoring style.
+- If no explicit tier/model and no prompt frontmatter sets one, registration defaults to the `core` alias before harness-aware backend/model resolution.
 - Public named agents get `delegate-orientation` prepended unless suppressed or already first. {#260505-workflow-delegate-prompt-boundaries}
 - Subquery uses inline `SubquerySystemPrompt` and suppresses orientation because it is self-contained. {#260505-async-subquery-ephemeral-agent}
 

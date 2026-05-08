@@ -30,13 +30,14 @@ related:
 - `WS_MCP_TOOL_PROFILE` is an optional containment filter. If host environment propagation fails, delegated agents may see lead tools and must follow prompt-level role rules.
 - `session.set_default_root` stores a canonical Git worktree root in the current server instance only; it does not change process cwd and does not write config.
 - Plugin-managed MCP calls may lack a caller repository root on native Windows; if `WS_MCP_PROJECT_ROOT` and host metadata are unavailable, tools need an explicit `root` or `session.set_default_root` rather than the user's shell cwd.
+- The server records a session harness from MCP payloads, not as an authority boundary: `initialize.params` may identify Claude/Codex clients, and `tools/call._meta.x-codex-turn-metadata` is a Codex signal. Conflicts are debug events and do not silently switch the stored harness. {#260508-mcp-payload-harness-detection}
 
 ## Coupling
 
 - Tool additions require both `callTool` and `tools()` updates; role/profile filtering and runtime metadata must also be reviewed. `runtime.capabilities` derives MCP tool names from `tools()`, but `runtime.json` still must be updated. {#260505-tool-profile-gating}
 - CLI mirrors are separate adapters. MCP behavior changes do not update `cmd/ws-mcp` handlers automatically, and public launcher-required CLI commands must also be kept in `runtimeCapabilityCommandNames` plus `runtime.json.commands`. {#260505-cli-mirror-coverage}
 - `api.ask` and `subquery` use named-agent runtime semantics; changes to agent result/wait behavior must keep MCP tool descriptions and follow-up text coherent. {#260505-workflow-state-delegation-tools}
-- Config tools read/write user-local config through `wsconfig`; tier names and defaults must match agent registration behavior. {#260505-config-tools}
+- Config tools read/write user-local config through `wsconfig`; compatibility tier names, model aliases, and harness-aware defaults must match agent registration behavior. {#260505-config-tools} {#260508-model-alias-config-tools}
 
 ## Extension Points & Change Recipes
 

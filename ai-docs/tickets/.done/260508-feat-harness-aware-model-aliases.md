@@ -13,6 +13,7 @@ related-mental-model:
   - mcp-runtime
   - prompt-bundle
   - workflow-skills
+completed: 2026-05-08
 ---
 
 # Harness-aware model aliases
@@ -70,6 +71,13 @@ Keep status and diagnostics clear enough that callers can see the requested
 alias, resolved backend, and resolved concrete model. Avoid making `tier:
 sonnet` and `model: sonnet` mean different long-term public behaviors.
 
+### Result (600018c) - 2026-05-08
+
+Registration now treats `model: light|core|deep` as portable aliases and uses
+concrete model names as explicit backend/model overrides. Legacy `tier` remains
+accepted when `model` is absent, prompt frontmatter still fills only an absent
+selection, and missing selection defaults to the `core` alias.
+
 ### Phase 2: Detect MCP harness from request payloads
 
 Add session-level harness detection to the MCP server. Use high-confidence MCP
@@ -88,6 +96,15 @@ Expose the detected harness through an inspection surface such as
 `runtime.info`, `session.get_default_root`, `agents.status`, or a more focused
 status field if that is cleaner.
 
+### Result (f0659e9) - 2026-05-08
+
+The MCP server now records a session harness from `initialize.params` and
+`tools/call.params._meta`, including Codex turn metadata. Conflicting signals
+emit debug events and preserve the existing harness. Agent registration,
+subquery, status output, and default-root inspection receive or expose the
+detected harness. Tests split initialize/register calls to avoid relying on
+concurrent JSON-RPC request ordering.
+
 ### Phase 3: Add harness-aware alias configuration
 
 Replace the single tier-to-backend/model mapping with alias mappings that can
@@ -105,6 +122,13 @@ Keep the old `config.agents_tier` surface as a compatibility alias or migration
 wrapper. Prefer new documentation and any new tool surface to speak in terms of
 model aliases rather than workload tiers.
 
+### Result (600018c) - 2026-05-08
+
+User-local config now supports harness-aware `model_aliases` while preserving
+the existing `tiers` and `config.agents_tier` compatibility behavior. Defaults
+map Codex aliases to GPT models and Claude aliases to Haiku/Sonnet/Opus family
+models, with unknown harnesses falling back through deterministic defaults.
+
 ### Phase 4: Update workflow docs and compatibility guidance
 
 Update workflow manual, MCP reference docs, named-agent runtime docs, prompt
@@ -121,3 +145,10 @@ Use exact provider model names only where they are necessary to test backend
 inference or CLI argument passing. Elsewhere, prefer portable aliases or family
 aliases so documentation does not drift every time a provider revises model
 versions.
+
+### Result (ed8a658) - 2026-05-08
+
+Workflow manual, MCP reference docs, named-agent runtime reference, prompt
+frontmatter guidance, and specs now describe model aliases as the shared
+authoring style and `tier` as compatibility language. Examples prefer portable
+aliases except where concrete model override behavior is the point.

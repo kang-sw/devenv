@@ -30,6 +30,7 @@ related:
 - Codex JSONL parsing treats non-JSON stdout as fatal until both session id and final agent message are available; trailing process-control noise after completion is ignored. {#260505-codex-jsonl-trailing-noise-tolerance}
 - Backend adapters must fit `RunnerRequest` and `RunnerResult`; keep backend-specific session and output parsing inside the runner instead of branching the manager lifecycle. {#260505-claude-agent-runner}
 - Claude `terminal_reason: hook_stopped` is an intermediate adapter state: resume the same session so hook-delivered lead messages produce a final output instead of an empty completed result. {#260505-claude-agent-runner}
+- Model selection treats `light`/`core`/`deep` as portable aliases on the `model` field; concrete model names win, legacy `tier` is compatibility-only when `model` is absent, and alias resolution can branch by MCP harness. {#260508-harness-aware-model-aliases} {#260508-mcp-harness-detection}
 
 ## Coupling
 
@@ -37,6 +38,7 @@ related:
 - `ToolProfile` flows into subprocess env as `WS_MCP_TOOL_PROFILE` when the host preserves it; MCP treats it as an optional profile filter, not an authority boundary.
 - Worktree scoping is shared by agents, generated review paths, and orchestrator locks; changing cache layout affects all three.
 - Prompt registration is static: `system.md` is written at registration time and existing agents do not automatically pick up edited embedded prompts. {#260505-agent-prompt-registration-tier-resolution}
+- Agent status includes the detected harness when one influenced registration; backend error diagnostics include the harness to make alias misrouting visible.
 
 ## Extension Points & Change Recipes
 
