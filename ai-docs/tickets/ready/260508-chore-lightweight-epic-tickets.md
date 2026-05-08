@@ -2,6 +2,9 @@
 title: lightweight epic tickets
 related:
   260503-epic-ws-agent-workflow-stability: prior example of an epic reduced to a roadmap after child tickets carried implementation slices
+spec:
+  - 260508-lightweight-epic-ticket-conventions
+  - 260508-write-ticket-epic-child-boundary
 related-mental-model:
   - documentation-system
   - workflow-skills
@@ -71,4 +74,3 @@ expanding the epic body.
 
 Update documentation-system and workflow-skills specs or mental models as
 needed so future ticket work keeps the same epic/child boundary.
-
