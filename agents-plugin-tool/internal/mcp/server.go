@@ -337,6 +337,42 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolErrorTextResponse(req.ID, text+"\n"+err.Error())
 		}
 		return toolTextResponse(req.ID, text, err)
+	case "api.ask_async":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		prompt, _ := params.Arguments["prompt"].(string)
+		hint, _ := params.Arguments["domain_hint"].(string)
+		result, err := s.startAPIJob(ctx, root, prompt, hint)
+		return toolJSONResponse(req.ID, result, err)
+	case "api.status":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["api_job_key"].(string)
+		result, err := s.statusAPIJob(ctx, root, key)
+		return toolJSONResponse(req.ID, result, err)
+	case "api.result":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["api_job_key"].(string)
+		text, err := s.resultAPIJob(ctx, root, key)
+		if err != nil && text != "" {
+			return toolErrorTextResponse(req.ID, text+"\n"+err.Error())
+		}
+		return toolTextResponse(req.ID, text, err)
+	case "api.cancel":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["api_job_key"].(string)
+		result, err := s.cancelAPIJob(ctx, root, key)
+		return toolJSONResponse(req.ID, result, err)
 	case "config.show":
 		view, err := wsconfig.Show(wsconfig.Options{})
 		return toolJSONResponse(req.ID, view, err)
@@ -999,6 +1035,55 @@ func tools() []map[string]any {
 					"domain_hint": stringProperty("Optional API documentation domain hint."),
 				},
 				"required": []string{"prompt"},
+			},
+		},
+		{
+			"name":        "api.ask_async",
+			"description": "Start a recoverable asynchronous API documentation lookup job and return an api_job_key immediately.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":        stringProperty("Repository root. Defaults to the server root."),
+					"prompt":      stringProperty("API documentation question to answer asynchronously."),
+					"domain_hint": stringProperty("Optional API documentation domain hint."),
+				},
+				"required": []string{"prompt"},
+			},
+		},
+		{
+			"name":        "api.status",
+			"description": "Inspect a recoverable asynchronous API documentation job by api_job_key.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":        stringProperty("Repository root. Defaults to the server root."),
+					"api_job_key": stringProperty("Recoverable async API documentation job key."),
+				},
+				"required": []string{"api_job_key"},
+			},
+		},
+		{
+			"name":        "api.result",
+			"description": "Return the final answer for a recoverable asynchronous API documentation job by api_job_key.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":        stringProperty("Repository root. Defaults to the server root."),
+					"api_job_key": stringProperty("Recoverable async API documentation job key."),
+				},
+				"required": []string{"api_job_key"},
+			},
+		},
+		{
+			"name":        "api.cancel",
+			"description": "Best-effort cancel a recoverable asynchronous API documentation job by api_job_key.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":        stringProperty("Repository root. Defaults to the server root."),
+					"api_job_key": stringProperty("Recoverable async API documentation job key."),
+				},
+				"required": []string{"api_job_key"},
 			},
 		},
 		{
