@@ -7,6 +7,7 @@ related-mental-model:
   - named-agent-runtime
   - mcp-runtime
   - prompt-bundle
+completed: 2026-05-08
 ---
 
 # Codex agent call prompt delivery
