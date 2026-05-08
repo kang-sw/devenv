@@ -682,6 +682,71 @@ func TestClaudeRunnerNonZeroExitPreservesStderr(t *testing.T) {
 	}
 }
 
+func TestBuildCodexInvocationUsesStdinPromptForFirstCall(t *testing.T) {
+	invocation, err := buildCodexInvocation(RunnerRequest{
+		Prompt:           "sentinel line 1\nsentinel line 2",
+		Model:            "gpt-5.5",
+		SystemPromptPath: "/tmp/system.md",
+	})
+	if err != nil {
+		t.Fatalf("buildCodexInvocation returned error: %v", err)
+	}
+	if invocation.PromptStdin != "sentinel line 1\nsentinel line 2" || invocation.PromptDelivery != "stdin" {
+		t.Fatalf("prompt delivery mismatch: %+v", invocation)
+	}
+	if got := invocation.Args[len(invocation.Args)-1]; got != "-" {
+		t.Fatalf("last arg = %q, want stdin marker", got)
+	}
+	joined := strings.Join(invocation.Args, "\x00")
+	for _, want := range []string{
+		"exec",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"--json",
+		"-m\x00gpt-5.5",
+		`model_instructions_file="/tmp/system.md"`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("codex args missing %q: %+v", want, invocation.Args)
+		}
+	}
+	if strings.Contains(joined, "sentinel line") || strings.Contains(joined, "resume") {
+		t.Fatalf("prompt leaked into argv or unexpected resume: %+v", invocation.Args)
+	}
+}
+
+func TestBuildCodexInvocationResumeUsesStdinPromptAndModernHooks(t *testing.T) {
+	invocation, err := buildCodexInvocation(RunnerRequest{
+		Prompt:               "resume sentinel",
+		SessionID:            "thread-123",
+		InterruptHookCommand: "ws hook",
+	})
+	if err != nil {
+		t.Fatalf("buildCodexInvocation returned error: %v", err)
+	}
+	if invocation.PromptStdin != "resume sentinel" {
+		t.Fatalf("stdin prompt = %q", invocation.PromptStdin)
+	}
+	if got := invocation.Args[len(invocation.Args)-1]; got != "-" {
+		t.Fatalf("last arg = %q, want stdin marker", got)
+	}
+	joined := strings.Join(invocation.Args, "\x00")
+	for _, want := range []string{
+		"exec\x00resume",
+		"--enable\x00hooks",
+		"hooks.PostToolUse=",
+		"thread-123\x00-",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("codex args missing %q: %+v", want, invocation.Args)
+		}
+	}
+	for _, notWant := range []string{"resume sentinel", "features.codex_hooks"} {
+		if strings.Contains(joined, notWant) {
+			t.Fatalf("codex args contained %q: %+v", notWant, invocation.Args)
+		}
+	}
+}
+
 func TestClaudeRunnerResumesAfterHookStopped(t *testing.T) {
 	repo := initRepo(t)
 	binDir := t.TempDir()
@@ -885,13 +950,17 @@ func TestRunCurrentCompletesAsyncCallAndCapturesStreams(t *testing.T) {
 	if !strings.Contains(status, "call_status: completed") || !strings.Contains(status, "session_id: thread-async") {
 		t.Fatalf("status mismatch:\n%s", status)
 	}
-	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 30})
 	if err != nil {
 		t.Fatalf("Tail returned error: %v", err)
 	}
 	if !strings.Contains(tail, "== events ==") ||
 		!strings.Contains(tail, "== runtime ==") ||
 		!strings.Contains(tail, "backend.call.start") ||
+		!strings.Contains(tail, "backend.prompt.delivery") ||
+		!strings.Contains(tail, "prompt_byte_size") ||
+		!strings.Contains(tail, "prompt_delivery") ||
+		!strings.Contains(tail, "final_event_shape") ||
 		!strings.Contains(tail, "jsonl") ||
 		!strings.Contains(tail, "async reply") {
 		t.Fatalf("tail mismatch:\n%s", tail)
@@ -1473,7 +1542,13 @@ func (f *streamingFakeRunner) Call(req RunnerRequest) (RunnerResult, error) {
 			return RunnerResult{}, err
 		}
 	}
-	return RunnerResult{SessionID: "thread-async", Text: "async reply\n"}, nil
+	return RunnerResult{
+		SessionID:       "thread-async",
+		Text:            "async reply\n",
+		BackendVersion:  "fake-runner 1.0",
+		PromptDelivery:  "stdin",
+		FinalEventShape: "item.completed/agent_message",
+	}, nil
 }
 
 func TestCurrentCallLifecycleAndBusyRejection(t *testing.T) {
@@ -1729,7 +1804,7 @@ func TestParseCodexJSONL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCodexJSONL returned error: %v", err)
 	}
-	if result.SessionID != "019test" || result.Text != "hello" {
+	if result.SessionID != "019test" || result.Text != "hello" || result.FinalEventShape != "item.completed/agent_message" {
 		t.Fatalf("result mismatch: %+v", result)
 	}
 }

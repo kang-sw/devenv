@@ -32,9 +32,12 @@ type RunnerRequest struct {
 }
 
 type RunnerResult struct {
-	SessionID   string
-	Text        string
-	Interrupted bool
+	SessionID       string
+	Text            string
+	Interrupted     bool
+	BackendVersion  string
+	PromptDelivery  string
+	FinalEventShape string
 }
 
 func runnerForBackend(backend string) (Runner, error) {
@@ -50,30 +53,17 @@ func runnerForBackend(backend string) (Runner, error) {
 
 type CodexRunner struct{}
 
+type codexInvocation struct {
+	Args           []string
+	PromptStdin    string
+	PromptDelivery string
+}
+
 func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
-	args := []string{"exec"}
-	if req.SessionID != "" {
-		args = append(args, "resume")
+	invocation, err := buildCodexInvocation(req)
+	if err != nil {
+		return RunnerResult{}, err
 	}
-	args = append(args, "--dangerously-bypass-approvals-and-sandbox", "--json")
-	if req.Model != "" {
-		args = append(args, "-m", req.Model)
-	}
-	if req.SystemPromptPath != "" {
-		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", req.SystemPromptPath))
-	}
-	if req.InterruptHookCommand != "" {
-		hookCommand, err := json.Marshal(req.InterruptHookCommand)
-		if err != nil {
-			return RunnerResult{}, fmt.Errorf("quote interrupt hook command: %w", err)
-		}
-		hookTOML := fmt.Sprintf(`[{hooks=[{type="command",command=%s,timeout=5}]}]`, hookCommand)
-		args = append(args, "-c", "features.codex_hooks=true", "-c", "hooks.PostToolUse="+hookTOML)
-	}
-	if req.SessionID != "" {
-		args = append(args, req.SessionID)
-	}
-	args = append(args, req.Prompt)
 
 	ctx := context.Background()
 	var cancel context.CancelFunc
@@ -81,13 +71,17 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, "codex", args...)
+	backendVersion := codexVersion()
+	cmd := exec.CommandContext(ctx, "codex", invocation.Args...)
 	if !req.InheritProcessGroup {
 		configureRunnerCommand(cmd)
 	}
 	cmd.Dir = req.Root
 	if req.ToolProfile != "" {
 		cmd.Env = append(cmd.Environ(), "WS_MCP_TOOL_PROFILE="+req.ToolProfile)
+	}
+	if invocation.PromptStdin != "" {
+		cmd.Stdin = strings.NewReader(invocation.PromptStdin)
 	}
 	var stderr bytes.Buffer
 	if req.Stderr != nil {
@@ -125,7 +119,50 @@ func (CodexRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	if parseErr != nil {
 		return RunnerResult{}, parseErr
 	}
+	result.BackendVersion = backendVersion
+	result.PromptDelivery = invocation.PromptDelivery
 	return result, nil
+}
+
+func codexVersion() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "codex", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func buildCodexInvocation(req RunnerRequest) (codexInvocation, error) {
+	args := []string{"exec"}
+	if req.SessionID != "" {
+		args = append(args, "resume")
+	}
+	args = append(args, "--dangerously-bypass-approvals-and-sandbox", "--json")
+	if req.Model != "" {
+		args = append(args, "-m", req.Model)
+	}
+	if req.SystemPromptPath != "" {
+		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", req.SystemPromptPath))
+	}
+	if req.InterruptHookCommand != "" {
+		hookCommand, err := json.Marshal(req.InterruptHookCommand)
+		if err != nil {
+			return codexInvocation{}, fmt.Errorf("quote interrupt hook command: %w", err)
+		}
+		hookTOML := fmt.Sprintf(`[{hooks=[{type="command",command=%s,timeout=5}]}]`, hookCommand)
+		args = append(args, "--enable", "hooks", "-c", "hooks.PostToolUse="+hookTOML)
+	}
+	if req.SessionID != "" {
+		args = append(args, req.SessionID)
+	}
+	args = append(args, "-")
+	return codexInvocation{
+		Args:           args,
+		PromptStdin:    req.Prompt,
+		PromptDelivery: "stdin",
+	}, nil
 }
 
 func parseCodexJSONL(raw []byte) (RunnerResult, error) {
@@ -189,6 +226,7 @@ func parseCodexJSONLStreamPartial(r io.Reader, onSessionID func(string) error) (
 		}
 		if event.Type == "item.completed" && event.Item.Type == "agent_message" {
 			result.Text = event.Item.Text
+			result.FinalEventShape = event.Type + "/" + event.Item.Type
 		}
 		if err == io.EOF {
 			break
