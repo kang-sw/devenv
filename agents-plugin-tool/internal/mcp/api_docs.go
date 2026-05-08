@@ -55,7 +55,7 @@ func (wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string
 	if _, err := mgr.Call(wsagent.CallOptions{Root: root, Name: name, Prompt: prompt}); err != nil {
 		return "", err
 	}
-	return mgr.Result(wsagent.ResultOptions{Root: root, Name: name, Timeout: apiAskTimeout, Context: ctx})
+	return resultWithManagerCancel(ctx, mgr, root, name)
 }
 
 func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
@@ -86,6 +86,10 @@ func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt st
 	if _, err := mgr.Call(wsagent.CallOptions{Root: root, Name: name, Prompt: prompt}); err != nil {
 		return "", err
 	}
+	return resultWithManagerCancel(ctx, mgr, root, name)
+}
+
+func resultWithManagerCancel(ctx context.Context, mgr wsagent.Manager, root, name string) (string, error) {
 	if ctx == nil {
 		return mgr.Result(wsagent.ResultOptions{Root: root, Name: name, Timeout: apiAskTimeout})
 	}
