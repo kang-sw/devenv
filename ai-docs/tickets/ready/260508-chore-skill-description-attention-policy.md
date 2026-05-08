@@ -2,6 +2,9 @@
 title: skill description attention policy
 related:
   260508-chore-lightweight-epic-tickets: related workflow-authoring policy cleanup
+spec:
+  - 260508-skill-description-attention-policy
+  - 260508-add-rule-explicit-persistence-trigger
 related-mental-model:
   - workflow-skills
   - prompt-bundle
@@ -61,4 +64,3 @@ ordinary prescriptive task language alone.
 Update workflow-skill specs, mental models, and Claude compatibility skill
 descriptions where needed so the attention policy remains documented and
 portable without forcing identical host notation.
-
