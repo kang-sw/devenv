@@ -23,7 +23,8 @@ Target: $ARGUMENTS
 - Warmth is a property of the current session (has the main agent already engaged relevant code), not of the target itself.
 - Always invoke `ws:implement` for implementation — implement applies its own judge: execution-mode and routes to edit or write-code internally.
 - If the target is an actionable inline description, auto-invoke `/write-ticket`, capture `Ticket:`, then re-check status; `todo/` output must promote to `ready/` before implementation.
-- If the target is an existing `ready/` ticket path, skip `/write-ticket`; existing `todo/` ticket paths route through ready promotion before implementation.
+- If the target is an existing non-epic `ready/` ticket path, skip `/write-ticket`; existing `todo/` ticket paths route through ready promotion before implementation.
+- Epic ticket paths are board artifacts, never implementation targets; stop and route to child ticket creation, promotion, or proceed.
 - If the target is exploratory (user weighing approaches, not requesting implementation), stop and suggest `/discuss`.
 - Never skip announce.
 - Announce reflects routing decisions, not post-hoc outcomes. Include prefix stages in the pipeline line even when their gates exit without writing.
@@ -37,7 +38,7 @@ Target: $ARGUMENTS
 Gather the facts needed for routing. Do not read source code — read only artifacts and metadata.
 
 1. Parse the target: ticket path or inline description.
-2. If ticket path: read the ticket. Extract status, scope, phases, and existing artifact references (`plans:`, `skeletons:` frontmatter).
+2. If ticket path: read the ticket. Extract status, category, scope, phases, and existing artifact references (`plans:`, `skeletons:` frontmatter).
 3. Check for existing artifacts:
    - **Plan exists?** — check ticket frontmatter `plans:` field, or scan `ai-docs/.plans/` for matching files.
    - **Skeleton exists?** — check ticket frontmatter `skeletons:` field, or grep for `todo!()`/`unimplemented`/`NotImplementedError` stubs in relevant paths.
@@ -59,8 +60,9 @@ Prefix-stage gate-suppression context applies in all routing paths (direct-edit 
 
 Then apply the pipeline judgments in order. Each produces a yes/no that builds the pipeline.
 
-1. **Ready gate** — If the current or captured ticket status is `todo/`, stop implementation routing and invoke `/discuss` for `todo/` → `ready/` promotion. Continue only after the target path is `ready/`.
-2. **judge: needs-skeleton** — Does this need contract stubs before implementation?
+1. **Epic gate** — If the current or captured ticket category is `epic`, stop implementation routing; suggest `/write-ticket` for a child ticket, `/discuss` to promote an existing child, or `/proceed` on a ready child ticket.
+2. **Ready gate** — If the current or captured ticket status is `todo/`, stop implementation routing and invoke `/discuss` for `todo/` → `ready/` promotion. Continue only after the target path is `ready/`.
+3. **judge: needs-skeleton** — Does this need contract stubs before implementation?
 
 Build the pipeline:
 
@@ -96,8 +98,9 @@ Invoke each pipeline stage sequentially via the Skill tool, passing the target a
 - After each stage, verify it completed (check for committed artifacts).
 - If a stage fails or the user interrupts, stop — do not continue the pipeline.
 - After `judge: needs-ticket` auto-invoke: capture the ticket path from `/write-ticket`'s output before any downstream stage.
+- If the captured path stem category is `epic`, stop; do not invoke skeleton or implementation on the epic path. Route to child ticket creation, child ready promotion, or proceed on a ready child ticket.
 - If the captured path is under `ai-docs/tickets/todo/`, invoke `/discuss` for `todo/` → `ready/` promotion and stop; do not invoke skeleton or implementation.
-- Use only `ready/` ticket paths downstream.
+- Use only non-epic `ready/` ticket paths downstream.
 
 ## Judgments
 

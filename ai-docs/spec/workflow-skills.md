@@ -90,12 +90,11 @@ gate runs only when a non-`epic`, non-`research` action creates or moves a ticke
 into `ready/`; `todo/` tickets may carry optional `spec:` links as recovery
 hints. Queue entries are maintained for `ready/` work only.
 
-> [!note] Planned 🚧
-> `lead-write-ticket` will preserve epics as lightweight milestone boards. When
-> detailed discussion, implementation phases, or slice-specific decisions arise
-> while editing an epic, the skill will create or update child tickets instead of
-> expanding the epic body.
-> {#260508-write-ticket-epic-child-boundary}
+`lead-write-ticket` preserves epics as lightweight milestone boards. When
+detailed discussion, implementation phases, or slice-specific decisions arise
+while editing an epic, the skill creates or updates child tickets instead of
+expanding the epic body; a single child ticket may carry multiple phases when
+they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundary}
 
 `lead-write-skeleton` optionally locks high-risk caller-visible contracts before
 implementation when the scope needs a separate reviewable checkpoint. It
@@ -139,11 +138,14 @@ The pipeline order is fixed:
 spec -> ticket -> skeleton -> implementation
 ```
 
-Existing `ready/` ticket paths skip ticket creation and are direct
-implementation targets. Existing `todo/` ticket paths route through `lead-discuss`
-for `todo/` -> `ready/` promotion before implementation. Actionable inline
-targets go through `lead-write-ticket`; exploratory targets stop and suggest
-`lead-discuss`. Implementation always routes through `lead-implement`, with
+Existing non-epic `ready/` ticket paths skip ticket creation and are direct
+implementation targets. Epic ticket paths are milestone-board artifacts, not
+implementation targets; `lead-proceed` stops on epics and routes the user toward
+child ticket creation, child ready promotion, or proceeding a ready child ticket.
+Existing `todo/` ticket paths route through `lead-discuss` for `todo/` ->
+`ready/` promotion before implementation. Actionable inline targets go through
+`lead-write-ticket`; exploratory targets stop and suggest `lead-discuss`.
+Implementation always routes through `lead-implement`, with
 `lead-write-skeleton` inserted only when a separate contract checkpoint is
 needed before implementation.
 
