@@ -10,6 +10,7 @@ spec:
 related-mental-model:
   - executor-wrapup
   - personal-devenv
+completed: 2026-05-10
 ---
 
 # ws-ask-api — 2-layer API documentation cache system
@@ -34,6 +35,21 @@ This ticket builds a filesystem-backed API doc cache under `ai-docs/.deps/` and 
 - `ws-ask-api-internal` must check the `ws-named-agent` registry before calling `ws-new-named-agent` — calling `new` on a live session overwrites its UUID and destroys session state.
 - `ai-docs/.deps/` must not appear in CLAUDE.md or any agent-visible project index.
 - Lock timeout: 60 seconds; emit `lock timeout: <domain> is being updated by another agent` on failure.
+
+## Dropped
+
+Superseded by the Codex/MCP-first API documentation cache implementation. The
+caller-facing behavior now lives behind the `ws/api.*` MCP tools and the current
+spec anchors under `ai-docs/spec/api-documentation-cache.md` and
+`ai-docs/spec/mcp-tools.md`, including synchronous `api.ask`, `api.list`, and
+the later async API job tools.
+
+This ticket's remaining phases target the frozen legacy Claude fallback tree:
+`claude-plugin/infra/prompts`, `claude-plugin/bin/ws-ask-api`, `.cmd` shims, and
+Claude `ws:workflow` guidance. Those are no longer active migration targets
+after `claude-plugin/` was frozen. Any live dependency on the old CLI fallback
+should be handled through `260510-chore-retire-claude-plugin`, not by completing
+this stale ready ticket.
 
 ## Phases
 

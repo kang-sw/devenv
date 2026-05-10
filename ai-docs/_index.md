@@ -198,11 +198,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260505-feat-agent-backend-failure-diagnostics` | ready | Improve named-agent backend failure diagnostics |
-| `260505-bug-codex-jsonl-trailing-noise` | ready | Fix Windows Codex persistent-agent trailing stdout parsing |
-| `260429-feat-api-deps` | ready | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
-| `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
 | `260510-chore-retire-claude-plugin` | todo | Retire the frozen legacy Claude plugin fallback after live dependencies migrate |
 | `260510-feat-skeleton-contract-populator` | todo | Lead-owned skeleton contract drafts followed by delegate population |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -212,9 +208,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-`260505-feat-agent-backend-failure-diagnostics` - improve named-agent backend invocation failures with raw errors, PATH-detected backend hints, and explicit reconfiguration guidance.
-`260505-bug-codex-jsonl-trailing-noise` - hotfix Windows Codex persistent-agent results when process-control stdout appears after a valid JSONL agent message.
-`260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
 
 ## Session Notes
@@ -225,8 +218,9 @@ bootstrap template, active `lead-*` skills, delegate prompts, and
 `ai-docs/ref/skill-authoring.md`.
 
 In-flight: none.
-Next: choose between named-agent diagnostics, Codex JSONL trailing-noise handling,
-API docs cache work, or Windows claude-dash verification from the ready queue.
+Next: choose between Windows claude-dash verification from the ready queue or
+promoting accepted todo work such as Claude fallback retirement or skeleton
+contract population.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
 `agents-plugin-tool/internal/mcp/server.go`,

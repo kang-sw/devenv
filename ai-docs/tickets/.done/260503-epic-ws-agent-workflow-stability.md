@@ -14,6 +14,7 @@ related:
   260503-feat-ws-mcp-worktree-orchestrator-lock: completed Phase 6 child ticket for worktree-local authority lock
   260504-feat-ws-mcp-hook-driven-interrupt: follow-up for Codex hook-driven interrupt delivery without signal dependence
   260504-research-durable-leaf-role-assignment: deferred lower-ROI research follow-up for stricter leaf containment
+completed: 2026-05-10
 ---
 
 # ws agent workflow stability
@@ -124,3 +125,10 @@ worktree-local lock design now enforces lead/delegate containment independently
 of environment propagation. Stricter leaf-level role assignment is deferred to
 `260504-research-durable-leaf-role-assignment` because recursive helper policy
 does not currently block the remaining orchestration skill migration.
+
+### Result (closeout) - 2026-05-10
+
+The stabilization epic is complete. Its active child tickets have been closed or
+deferred, the named-agent runtime is stable enough to return to core
+orchestration skill migration, and later runtime gaps should be opened from new
+observed failures rather than kept on this parent board.

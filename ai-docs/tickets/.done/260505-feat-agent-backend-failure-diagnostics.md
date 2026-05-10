@@ -4,6 +4,7 @@ spec:
   - 260505-agent-backend-failure-diagnostics
 related-mental-model:
   - named-agent-runtime
+completed: 2026-05-10
 ---
 
 # agent backend failure diagnostics

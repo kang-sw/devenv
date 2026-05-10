@@ -4,6 +4,7 @@ spec:
   - 260505-codex-jsonl-trailing-noise-tolerance
 related-mental-model:
   - named-agent-runtime
+completed: 2026-05-10
 ---
 
 # Codex JSONL trailing noise breaks agent results
