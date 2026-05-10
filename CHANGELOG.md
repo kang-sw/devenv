@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.22.0 - 2026-05-10
+
+### Added
+- Add `lead-salvage` for premise-collapse recovery: evidence preservation,
+  blast-radius survey fanout, salvage reports, recovery epics, child tickets,
+  and affected-ticket disposition before destructive cleanup.
+
+### Changed
+- Align skill-authoring guidance with active `ws:` plugin skill invocation
+  syntax while preserving host-specific slash forms.
+
 ## v0.21.2 - 2026-05-10
 
 ### Changed
