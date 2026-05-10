@@ -13,7 +13,7 @@ tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
 Frozen legacy Claude package: `claude-plugin/` (`ws@0.15.0`).
-Codex-first candidate: `agents-plugin/` (`ws@0.21.1`).
+Codex-first candidate: `agents-plugin/` (`ws@0.21.2`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 
 ## Current Branch Rules

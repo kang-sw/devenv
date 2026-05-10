@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.21.2 - 2026-05-10
+
+### Changed
+- Rework `lead-write-skeleton` around lead-owned `CONTRACT:`, `HINT:`, and
+  `HOLE:` source drafts, delegated `skeleton-populator` normalization, and a
+  lightweight read-only `skeleton-reviewer` loop.
+- Remove the obsolete `skeleton-writer` compatibility prompt stem from the
+  active runtime bundle.
+- Add premise-aware intent framing and interview traversal to discussion
+  workflows, and keep discussion responses in the user's active conversation
+  language.
+- Mark the legacy `claude-plugin/` tree as frozen fallback while keeping
+  Codex-first workflow changes in `agents-plugin/` and `agents-plugin-tool/`.
+
 ## v0.21.1 - 2026-05-08
 
 ### Fixed
