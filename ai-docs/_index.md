@@ -12,7 +12,7 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Stable Claude package: `claude-plugin/` (`ws@0.15.0`).
+Frozen legacy Claude package: `claude-plugin/` (`ws@0.15.0`).
 Codex-first candidate: `agents-plugin/` (`ws@0.21.1`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 
@@ -24,8 +24,10 @@ Native MCP/tooling source: `agents-plugin-tool/`.
 
 ## Plugin Topology
 
-- Claude runtime uses `claude-plugin/`; after edits there, run
-  `claude plugin update ws@ws`.
+- `claude-plugin/` is frozen legacy fallback and not an active mirror target for
+  Codex workflow changes.
+- If an explicit Claude compatibility ticket edits `claude-plugin/`, run
+  `claude plugin update ws@ws` after the edit.
 - `./install.sh update` handles first-time install and settings patching on a
   new machine.
 - `claude-plugin/CLAUDE.home.md` is the repo copy of `~/.claude/CLAUDE.md`.
@@ -52,12 +54,12 @@ Native MCP/tooling source: `agents-plugin-tool/`.
 | `ai-docs/ref/ws-mcp.md` | MCP process, tools, CLI fallbacks, verification levels |
 | `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
 | `ai-docs/ship/ws.md` | Release process for `ws` |
-| `claude-plugin/infra/impl-playbook.md` | Implementation discipline |
-| `claude-plugin/infra/subagent-rules.md` | Subagent dispatch rules |
-| `claude-plugin/infra/executor-wrapup.md` | Shared post-implementation wrapup |
+| `ws/infra.read("impl-playbook")` | Implementation discipline |
+| `ws/infra.read("subagent-rules")` | Subagent dispatch rules |
+| `ws/infra.read("executor-wrapup")` | Shared post-implementation wrapup |
 
-Before editing tickets/specs/mental models, read the matching convention doc in
-`claude-plugin/infra/`. Before editing skill, agent, prompt, or convention text,
+Before editing tickets/specs/mental models, read the matching convention through
+`ws/convention.read`. Before editing skill, agent, prompt, or convention text,
 read `ai-docs/ref/skill-authoring.md`.
 
 ## Runtime Surfaces
@@ -88,7 +90,8 @@ Shared `agents-plugin` skill text uses MCP names, not repo-local
 `claude-plugin/infra/*` paths. Convention text is bundled into the runtime and
 read through `ws/convention.read`.
 
-CLI fallbacks still exist under `claude-plugin/bin/` for Claude compatibility:
+Legacy CLI fallbacks still exist under `claude-plugin/bin/` for Claude
+compatibility only:
 `ws-proj-tree`, `ws-print-infra`, `ws-list-mental-model`,
 `ws-list-spec-stems`, `ws-generate-spec-stem`, `ws-spec-build-index`,
 `ws-review-path`, `ws-oneshot-agent`, `ws-named-agent`, `ws-ask-api`, and shims.
@@ -116,8 +119,9 @@ rechecking `codex mcp list`.
 
 ## Prompt And Agent Inventory
 
-Claude prompt documents live in `claude-plugin/infra/prompts/` and are invoked
-through `ws-oneshot-agent -p <stem>` or `ws-named-agent new -p <stem>`.
+Legacy Claude prompt documents live in `claude-plugin/infra/prompts/` for
+fallback CLI workflows. Active Codex workflows use the embedded runtime prompt
+bundle.
 
 Key prompts: `clerk`, `code-reviewer`, `code-review-correctness`,
 `code-review-fit`, `code-review-test`, `mental-model-updater`,
@@ -131,8 +135,9 @@ prompt changes.
 
 ## Skill Inventory
 
-Claude package skills remain under `claude-plugin/skills/` as the compatibility
-reference.
+Claude package skills remain under `claude-plugin/skills/` as frozen legacy
+fallback. Do not mirror new `lead-*` skill behavior there unless an explicit
+Claude compatibility or retirement ticket requires it.
 
 Codex-first `agents-plugin/skills/` currently uses `lead-*` names:
 
@@ -157,8 +162,8 @@ lead-write-spec
 lead-write-ticket
 ```
 
-`manual-think` remains Claude-only while `claude-plugin/` exists as the
-compatibility tree.
+`manual-think` remains Claude-only while `claude-plugin/` exists as frozen
+legacy fallback.
 
 ## Canonical Flows
 
@@ -182,7 +187,7 @@ auto-chaining through the pipeline.
 | `ai-docs/spec/workflow-skills.md` | Workflow Skills | Codex-facing lead skills, routing, sprint work, reconstruction, utilities, and workflow primitives |
 | `ai-docs/spec/documentation-system.md` | Documentation System | Project memory, conventions, specs, tickets, mental models, reference tracing, and doc workflows |
 | `ai-docs/spec/api-documentation-cache.md` | API Documentation Cache | Host-neutral API documentation lookup through cached domain docs and manager sessions |
-| `ai-docs/spec/claude-compatibility.md` | Claude Compatibility | Claude shims, legacy plugin package, CLI fallbacks, installer behavior, and Windows shims |
+| `ai-docs/spec/claude-compatibility.md` | Claude Compatibility | Claude shims, frozen legacy plugin package, CLI fallbacks, installer behavior, and retirement boundaries |
 | `ai-docs/spec/developer-environment-tools.md` | Developer Environment Tools | Personal bootstrap, shell/terminal/editor config, tmux helpers, statusline, and Claude TUIs |
 
 ## Tickets
@@ -200,6 +205,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260429-feat-api-deps` | ready | `ws-ask-api` 2-layer API doc cache |
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260503-epic-ws-agent-workflow-stability` | todo | Named-agent workflow stabilization parent; active blockers closed |
+| `260510-chore-retire-claude-plugin` | todo | Retire the frozen legacy Claude plugin fallback after live dependencies migrate |
+| `260510-feat-skeleton-contract-populator` | todo | Lead-owned skeleton contract drafts followed by delegate population |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |

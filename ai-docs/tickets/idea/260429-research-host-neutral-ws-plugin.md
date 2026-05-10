@@ -21,12 +21,11 @@ idioms and user-local PATH setup. Because this plugin is intended for users beyo
 the original author, the long-term direction is still a host-neutral ws plugin with
 thin Claude and Codex adapters.
 
-The first implementation slice should not mutate `claude-plugin/` in place. Keep
-the existing Claude plugin as the stable reference implementation and create a
-parallel `agents-plugin/` directory for Codex-first porting and validation. Only
-after the Codex candidate works should the project decide whether to converge on a
-single shared plugin directory, keep separate adapters, or replace the old Claude
-package.
+The first implementation slice did not mutate `claude-plugin/` in place. It kept
+the existing Claude plugin isolated while creating a parallel `agents-plugin/`
+directory for Codex-first porting and validation. The current direction freezes
+`claude-plugin/` as legacy fallback while later work decides which remaining
+fallback surfaces migrate, stay unsupported, or are removed.
 
 ## Current Findings
 
@@ -55,15 +54,15 @@ available search/edit capabilities instead of naming host-specific tools.
 Create a parallel Codex-first plugin candidate:
 
 ```text
-claude-plugin/    # existing stable Claude Code plugin; do not mutate for porting experiments
+claude-plugin/    # frozen legacy Claude fallback; do not mirror Codex changes
 agents-plugin/    # Codex-first host-neutral port candidate
 ```
 
-`agents-plugin/` should start as the isolated workspace for adapting manifests,
+`agents-plugin/` should remain the isolated workspace for adapting manifests,
 skills, prompts, helper access, and root context to Codex. It may copy or subset
-material from `claude-plugin/`, but any copied content should be normalized as it
-enters the new tree rather than forcing host-neutral edits back into the stable
-Claude package.
+material from `claude-plugin/`, but copied content should be normalized as it
+enters the active tree rather than forcing host-neutral edits back into the
+frozen Claude fallback.
 
 Codex validation is the first completion gate:
 
@@ -76,7 +75,7 @@ Codex validation is the first completion gate:
 
 Claude compatibility is a best-effort second pass:
 
-- Use the current `claude-plugin/` layout as the compatibility reference.
+- Use the current `claude-plugin/` layout only as frozen legacy fallback.
 - Add Claude-compatible metadata to `agents-plugin/` only where it does not
   compromise Codex behavior.
 - Do not declare Claude compatibility complete until it is verified in a real
@@ -99,7 +98,8 @@ Current validation boundary:
 
 ## Later Convergence Target
 
-Move toward a single plugin directory:
+Move toward a single plugin directory or retire the legacy Claude package after
+all live fallback surfaces have migrated:
 
 ```text
 plugin/
@@ -114,11 +114,11 @@ plugin/
   .mcp.json
 ```
 
-The shared `skills/`, `infra/`, and `bin/` trees become the durable source. The
-Claude and Codex manifest directories become host adapters. This remains the
-preferred long-term shape, but only after `agents-plugin/` has proven the Codex
-contract and the Claude compatibility pass has identified which assumptions can be
-shared safely.
+The shared `skills/`, `infra/`, and `bin/` trees become the durable source if
+Claude remains supported. If no Claude runtime support remains, remove
+`claude-plugin/` after installer, docs, tests, and fallback references stop
+depending on it. In either path, `claude-plugin/` is no longer an active mirror
+for Codex workflow edits.
 
 ## Skill Normalization Direction
 
@@ -176,8 +176,8 @@ the core contract.
 
 ## Open Questions
 
-- How much content should the first `agents-plugin/` scaffold copy from
-  `claude-plugin/` versus starting with a minimal Codex-loadable subset?
+- Which remaining `claude-plugin/` surfaces must migrate before the frozen
+  legacy package can be removed?
 - Which `ws-*` commands are essential enough to expose through MCP first?
 - Should the installer create `~/.local/bin` symlinks for CLI compatibility, or
   should public Codex usage avoid CLI dependency entirely at first?

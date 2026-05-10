@@ -1,14 +1,15 @@
 ---
 title: Claude Compatibility
-summary: Compatibility shims, legacy Claude plugin packaging, CLI fallbacks, install behavior, and Windows shim coverage for ws.
+summary: Compatibility shims, frozen legacy Claude plugin packaging, CLI fallbacks, install behavior, and retirement boundaries for ws.
 ---
 
 # Claude Compatibility
 
-Claude compatibility preserves the existing Claude Code workflow package while
-the shared ws workflow moves toward host-neutral Agents/Codex conventions. The
-canonical shared context is `AGENTS.md`; `claude-plugin/` remains the stable
-Claude package and legacy reference surface.
+Claude compatibility preserves only the remaining legacy Claude fallback surface
+while the shared ws workflow moves toward host-neutral Agents/Codex
+conventions. The canonical shared context is `AGENTS.md`; `claude-plugin/` is a
+frozen legacy package, not a mirror target for new Codex workflow behavior.
+{#260510-claude-plugin-retirement-freeze}
 
 ## Claude Root Compatibility Shim {#260505-claude-root-compatibility-shim}
 
@@ -26,14 +27,14 @@ semantics change.
 
 ## Claude Plugin Compatibility Package {#260505-claude-plugin-compatibility-package}
 
-`claude-plugin/` is the stable Claude compatibility package. It contains Claude
-skills, prompts, infra/convention documents, hooks, and bin scripts used by
+`claude-plugin/` is the frozen Claude compatibility package. It contains Claude
+skills, prompts, infra/convention documents, hooks, and bin scripts retained for
 existing Claude workflows.
 
-The package remains the legacy reference while new shared guidance moves toward
-MCP tools and host-neutral skill text. Claude-specific commands and paths are
-treated as adapter or fallback behavior rather than the preferred shared
-surface.
+The package remains legacy fallback while new shared guidance moves through MCP
+tools, `agents-plugin/`, and host-neutral skill text. Ordinary workflow changes
+do not update `claude-plugin/`; edits there require an explicit Claude
+compatibility or retirement ticket.
 
 ## Downstream Claude Bootstrap Shim {#260505-downstream-claude-bootstrap-shim}
 
@@ -47,7 +48,7 @@ migration preserves relevant content by moving it into the canonical
 
 ## Claude Install And Update Snapshot {#260505-claude-install-update-snapshot}
 
-`install.sh` installs and updates the local Claude plugin environment. It
+`install.sh` installs and updates the local legacy Claude plugin environment. It
 installs global Claude home instructions, maintains user configuration,
 generates marketplace metadata, snapshots `claude-plugin/` into the Claude
 plugin cache, registers the local marketplace, and installs the ws plugin for
@@ -91,9 +92,10 @@ Codex backend bridge for host-neutral migration and parity testing.
 
 ## Claude Bin Windows Shims {#260505-claude-bin-windows-shims}
 
-Every new script added to `claude-plugin/bin/` must include a Windows-compatible
-variant, such as a `.cmd` shim or equivalent wrapper. Existing bin tools include
-matching Windows shims so Claude compatibility workflows can be invoked from
+If an explicit compatibility ticket adds or changes a script under
+`claude-plugin/bin/`, that script must include a Windows-compatible variant,
+such as a `.cmd` shim or equivalent wrapper. Existing bin tools include matching
+Windows shims so legacy Claude compatibility workflows can be invoked from
 PowerShell or Cmd.
 
 The shims dispatch to the underlying shell or Python implementation and preserve
@@ -122,5 +124,6 @@ the local ws plugin to Claude Code, and validation can be run against plugin
 manifests before installation.
 
 The Claude package identity is separate from the Codex plugin manifest and
-runtime contract. It exists to preserve Claude Code installation and invocation
-behavior while the Codex-first package evolves under `agents-plugin/`.
+runtime contract. It exists to preserve legacy Claude Code installation and
+invocation behavior until its remaining surfaces are migrated, frozen as
+historical references, or removed under explicit retirement work.

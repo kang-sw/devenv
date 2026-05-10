@@ -1,6 +1,6 @@
 ---
 domain: workflow-skills
-description: "Codex lead skills, Claude compatibility skills, and workflow prompt orchestration."
+description: "Codex lead skills, frozen Claude fallback skills, and workflow prompt orchestration."
 sources:
   - agents-plugin/skills/
   - claude-plugin/skills/
@@ -15,7 +15,7 @@ related:
 ## Entry Points
 
 - `agents-plugin/skills/lead-*` is the Codex-facing workflow surface and uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
-- `claude-plugin/skills/*` is the compatibility tree and may use slash commands and shell fallbacks.
+- `claude-plugin/skills/*` is frozen legacy fallback; do not mirror `lead-*` changes there without an explicit compatibility or retirement ticket.
 - `lead-workflow-manual` is the notation and primitive boundary reference for shared skill text. {#260505-workflow-primitive-reference}
 
 ## Module Contracts
@@ -42,13 +42,13 @@ related:
 - Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
 - Discuss ready-promotion logic and write-ticket spec-gate must agree that non-`epic`, non-`research` `ready/` entries require spec creation.
 - `lead-edit`, `lead-write-code`, and `lead-implement` each own a different review/doc-pipeline boundary; moving updater dispatch between them can double-run or skip documentation updates.
-- Bootstrap guide semantics are shared with Claude compatibility output. Change the Codex guide template and the Claude mirror together unless intentionally diverging by host.
-- Claude compatibility skills should be updated when Codex skill semantics change, but not blindly rewritten to MCP notation.
+- Bootstrap guide semantics are shared with Claude compatibility output only when a compatibility ticket keeps Claude in scope.
+- Claude compatibility skills are not ordinary edit targets for Codex semantic changes; update them only under explicit compatibility or retirement work.
 
 ## Extension Points & Change Recipes
 
 - **Add a Codex workflow skill**: create `agents-plugin/skills/lead-<name>/SKILL.md`, follow skill-authoring invariants, add OpenAI UI metadata only if needed, and update workflow specs.
-- **Port a Claude skill**: translate notation to `ws:`/`ws/<tool>`, keep host-neutral behavior, then verify Claude compatibility text still describes the fallback tree.
+- **Retire a Claude fallback**: migrate any live behavior to `agents-plugin/` or `agents-plugin-tool/`, update installer/docs/tests, then remove the legacy path under an explicit ticket.
 - **Add a delegate prompt to a workflow**: register by embedded stem through `ws/agents.register`, use portable `model` aliases for default selection, and omit `prompts` only for general-purpose delegates. Update runtime prompt bundle metadata and keep reviewer/implementer context boundaries explicit. {#260505-workflow-delegate-prompt-boundaries}
 
 ## Common Mistakes
@@ -61,4 +61,4 @@ related:
 
 ## Technical Debt
 
-- Some Claude compatibility skills still contain richer legacy details than the Codex-first surface. Preserve compatibility, but treat Codex `lead-*` skills as the active shared workflow.
+- Some Claude compatibility skills still contain richer legacy details than the Codex-first surface. Treat them as frozen fallback, not shared workflow source.

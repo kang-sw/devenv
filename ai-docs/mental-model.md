@@ -9,11 +9,11 @@ Cross-domain operational knowledge for modifying the devenv workflow system.
 | plugin-runtime | `mental-model/plugin-runtime.md` | Codex plugin manifests, launcher repair, runtime metadata, release assets |
 | mcp-runtime | `mental-model/mcp-runtime.md` | ws-mcp stdio server, tool registry, CLI mirror, concurrency, profile gates |
 | named-agent-runtime | `mental-model/named-agent-runtime.md` | File-backed agents, async calls, locks, subqueries, Codex backend handling |
-| workflow-skills | `mental-model/workflow-skills.md` | Codex lead skills, Claude compatibility skills, workflow prompt orchestration |
+| workflow-skills | `mental-model/workflow-skills.md` | Codex lead skills, frozen Claude fallback skills, workflow prompt orchestration |
 | documentation-system | `mental-model/documentation-system.md` | Project memory, conventions, specs, tickets, mental models, reference tracing |
 | git-workflow-tools | `mental-model/git-workflow-tools.md` | Constrained Git MCP/CLI tools and structured commit behavior |
 | api-documentation-cache | `mental-model/api-documentation-cache.md` | API docs domain routing, manager agents, cache ownership, prompt contracts |
-| claude-compatibility | `mental-model/claude-compatibility.md` | Claude shims, legacy package, CLI fallbacks, installer snapshot, Windows wrappers |
+| claude-compatibility | `mental-model/claude-compatibility.md` | Claude shims, frozen legacy package, CLI fallbacks, installer snapshot, retirement boundaries |
 | developer-environment-tools | `mental-model/developer-environment-tools.md` | install.sh, shell/editor config, tmux helpers, Claude TUIs |
 | prompt-bundle | `mental-model/prompt-bundle.md` | Embedded prompt discovery, resolution, delegate orientation, bundle metadata |
 
@@ -56,5 +56,5 @@ Discovery excludes `.done/` and `.dropped/` unless explicitly requested.
 prompt bundle hashes, and MCP tool/CLI surface lists staying synchronized.
 
 **Host split:** Codex-first behavior lives under `agents-plugin/` and
-`agents-plugin-tool/`; `claude-plugin/` remains the Claude compatibility
-reference and must not silently redefine shared workflow semantics.
+`agents-plugin-tool/`; `claude-plugin/` is frozen legacy fallback and must not be
+edited as a mirror of shared workflow semantics.

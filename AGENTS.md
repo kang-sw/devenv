@@ -13,7 +13,7 @@ a ticket replaces them:
 - `ai-docs/_index.md` - project memory, inventory, specs, tickets, queue.
 - `agents-plugin/` - Codex-first plugin distribution candidate.
 - `agents-plugin-tool/` - native MCP/tooling source tree.
-- `claude-plugin/` - stable Claude compatibility package and legacy reference.
+- `claude-plugin/` - frozen legacy Claude fallback; not an active mirror target.
 
 If shared host-neutral guidance and Claude compatibility guidance conflict,
 follow the more conservative rule and surface the conflict before changing
@@ -56,7 +56,7 @@ Root migration artifacts stay grouped by deliverable:
 
 - `agents-plugin/` - Codex-first plugin distribution candidate.
 - `agents-plugin-tool/` - native tooling and MCP source tree.
-- `claude-plugin/` - stable Claude compatibility package.
+- `claude-plugin/` - frozen legacy Claude fallback.
 
 Do not add loose root-level `cmd/`, `internal/`, `scripts/`, or language module
 files for this migration unless a ticket changes the layout.
@@ -134,9 +134,9 @@ not stage it unless explicitly requested.
    adapter or fallback behavior.
 4. **Shell state is ephemeral.** Shell state does not persist between tool calls;
    values needed later must be captured from output and passed explicitly.
-5. **Windows compatibility for Claude bin additions.** Every new script added to
-   `claude-plugin/bin/` must include a Windows-compatible variant (`.cmd` shim or
-   equivalent) verified under both PowerShell and Cmd.
+5. **Frozen Claude fallback.** Do not edit `claude-plugin/` as part of ordinary
+   workflow changes; touch it only for an explicit Claude compatibility or
+   retirement ticket.
 6. **Named-agent delegation first.** Prefer ws named agents over host-native
    subagents for repo workflow delegation so dogfooding preserves platform
    independence.
@@ -157,12 +157,11 @@ Before editing:
 - Skills, agents, prompts, or convention docs: read
   `ai-docs/ref/skill-authoring.md`.
 - Tickets: read ticket conventions through `ws/convention.read` or the
-  compatibility fallback `claude-plugin/infra/ticket-conventions.md`.
+  bundled convention fallback.
 - Specs: read spec conventions through `ws/convention.read` or the compatibility
-  fallback `claude-plugin/infra/spec-conventions.md`.
+  bundled convention fallback.
 - Mental models: read mental-model conventions through `ws/convention.read` or
-  the compatibility fallback
-  `claude-plugin/infra/mental-model-conventions.md`.
+  the bundled convention fallback.
 
 ## Ticket System
 
@@ -193,17 +192,16 @@ ai-docs/tickets/.dropped/
 - **Language:** AI-authored docs, plans, commits, tickets, and code comments are
   English. Human-facing UI strings are exempt.
 - Current priority is making the project and ticket system usable from
-  Agents/Codex while preserving Claude compatibility.
+  Agents/Codex while retiring the legacy Claude tree behind explicit tickets.
 - Research anchor: `260429-research-host-neutral-ws-plugin`. Promote or split it
   before broad structural changes.
-- Existing Claude workflows still assume `ws-*` on `PATH`; prefer MCP tools for
-  new shared guidance and keep CLI fallbacks documented until replacement and
-  compatibility paths are complete.
+- Existing Claude workflows may still assume `ws-*` on `PATH`; prefer MCP tools
+  for new shared guidance and change CLI fallbacks only under explicit tickets.
 - Key CLI fallbacks: `ws-print-infra`, `ws-list-mental-model`, `ws-proj-tree`,
   `ws-list-spec-stems`, `ws-generate-spec-stem`, and `ws-spec-build-index`.
-- Claude plugin artifacts under `claude-plugin/` remain the compatibility
-  reference; do not rewrite them just to port Codex behavior unless a ticket says
-  to.
+- Claude plugin artifacts under `claude-plugin/` are frozen legacy fallback;
+  do not mirror Codex behavior there unless a ticket explicitly targets Claude
+  compatibility or retirement.
 
 <!-- Inclusion test: if breaking this rule makes a skill produce wrong results
      AND it applies everywhere, keep it here. Domain-scoped rules belong in
