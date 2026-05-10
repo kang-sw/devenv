@@ -111,6 +111,32 @@ func TestResolveSkeletonPopulatorPrompt(t *testing.T) {
 	}
 }
 
+func TestResolveSkeletonReviewerPrompt(t *testing.T) {
+	resolved, err := Resolve([]string{"skeleton-reviewer"}, "", "", "")
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if resolved.Tier != "core" {
+		t.Fatalf("tier = %q", resolved.Tier)
+	}
+	if strings.Contains(resolved.Text, "model: core") {
+		t.Fatalf("frontmatter was not stripped:\n%s", resolved.Text)
+	}
+	for _, want := range []string{
+		"You are the skeleton-reviewer delegate",
+		"Read only",
+		"CONTRACT:",
+		"HINT:",
+		"HOLE:",
+		"[clean]:",
+		"[non-clean]:",
+	} {
+		if !strings.Contains(resolved.Text, want) {
+			t.Fatalf("missing %q in prompt:\n%s", want, resolved.Text)
+		}
+	}
+}
+
 func TestResolveWriteCodePromptSet(t *testing.T) {
 	cases := []struct {
 		stem string
@@ -222,6 +248,7 @@ func TestBundleMetadata(t *testing.T) {
 		"plan-populator-survey",
 		"project-survey",
 		"skeleton-populator",
+		"skeleton-reviewer",
 		"skeleton-writer",
 		"sprint-survey",
 		"code-review-correctness",

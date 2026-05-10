@@ -122,9 +122,13 @@ approximate references for source discovery, and `HOLE:` marks unknown concrete
 types, imports, fixtures, helpers, or harnesses. A `skeleton-populator` delegate
 researches and normalizes hints, fills clear holes, converts the draft into
 compile-clean stubs and build-valid test scaffolding, and escalates missing or
-conflicting contract elements instead of silently changing public shape. The
-lead reviews, verifies build or syntax checks, commits, and links generated
-skeleton artifacts to the ticket. {#260510-skeleton-contract-populator-flow}
+conflicting contract elements instead of silently changing public shape. A
+read-only `skeleton-reviewer` delegate checks contract preservation, marker
+resolution, stub-only scope, and build or syntax evidence before lead commit.
+The skeleton review loop stays lightweight: one reviewer, one amendment round,
+then stop and report if still non-clean. The lead makes contract amendments,
+verifies build or syntax checks, commits, and links generated skeleton artifacts
+to the ticket. {#260510-skeleton-contract-populator-flow}
 
 ## Implementation Workflow Skills {#260505-implementation-workflow-skills}
 

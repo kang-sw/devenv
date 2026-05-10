@@ -20,6 +20,8 @@ Target: user request
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
 - The delegate does not commit - lead reviews and commits.
 - Register the skeleton-populator agent once per invocation via `ws/agents.register`; resume via `ws/agents.call` for amendment rounds.
+- Register the skeleton-reviewer agent once per invocation via `ws/agents.register`; it is read-only.
+- Skeleton review loop is lightweight: one reviewer, one amendment round, then stop and report if still non-clean.
 
 ## On: invoke
 
@@ -60,18 +62,40 @@ Ticket: <ticket-path>
 - HOLE markers are open source-discovery tasks to fill when one clear project-local choice exists.
 ```
 
+Read the result with `ws/agents.result(name: "skeleton-populator", timeout_seconds: 600)`.
+
 ### 4. Review
 
-1. Call `ws/git.diff` and `ws/git.status` to review the skeleton output. Read specific files only if a reported deviation warrants deeper inspection.
-2. Verify `CONTRACT:` semantics match the ticket intent and survived population.
-3. Run build to confirm compilation. Do not run tests - tests will fail by design because stubs are unimplemented. Passing tests is the implementor's responsibility, not the skeleton's.
-4. If issues found:
-   - **Minor** - fix directly.
-   - **Structural** - relay amended contract markers with `ws/agents.call(name: "skeleton-populator", prompt: <block below>)`:
-     ```text
-     Amend: <issues and revised CONTRACT/HINT/HOLE markers>
-     ```
-     Re-review after each round.
+Call `ws/agents.register(name: "skeleton-reviewer", prompts: ["skeleton-reviewer"])`.
+
+Call `ws/agents.call(name: "skeleton-reviewer", prompt: <block below>)`:
+
+```text
+Ticket: <ticket-path>
+Lead draft files: <paths>
+Populator report: <summary or result path>
+Diff scope: current working tree
+
+Review only contract preservation, marker resolution, stub-only scope, and build/syntax evidence.
+Return [clean|non-clean] plus findings.
+```
+
+Read the result with `ws/agents.result(name: "skeleton-reviewer", timeout_seconds: 600)`.
+
+If review is `[clean]`, run build to confirm compilation. Do not run tests -
+tests will fail by design because stubs are unimplemented. Passing tests is the
+implementor's responsibility, not the skeleton's.
+
+If review is `[non-clean]`, run one amendment round:
+- **Contract issue** - amend the lead draft markers or ask the user for judgment.
+- **Population issue** - relay amended markers or findings with `ws/agents.call(name: "skeleton-populator", prompt: <block below>)`:
+  ```text
+  Amend: <issues and revised CONTRACT/HINT/HOLE markers>
+  ```
+- **Implementation leakage** - remove directly or send back for populator cleanup.
+
+After the amendment, re-call `skeleton-reviewer` once. If still non-clean, stop
+and report instead of continuing the relay.
 
 ### 5. Commit
 

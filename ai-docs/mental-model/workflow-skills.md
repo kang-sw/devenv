@@ -32,7 +32,7 @@ related:
 - `lead-write-ticket` keeps epics at milestone-board scope and routes detailed discussion, implementation phases, and slice-specific decisions into child tickets. {#260508-write-ticket-epic-child-boundary}
 - `lead-discuss` uses the user's active conversation language for discussion responses. {#260505-planning-workflow-skills}
 - `lead-discuss` uses premise-aware Intent Frames for proposal, evaluation, design-direction, causal-claim, scope-assumption, and trade-off turns; Interview Workflow starts only when unresolved branches need user priority or scope input. {#260510-discuss-intent-frame-interview}
-- `lead-write-skeleton` makes the lead write low-resolution source drafts with language-neutral `CONTRACT:`, `HINT:`, and `HOLE:` comment markers; `skeleton-populator` turns those drafts into compile-clean stubs without owning public contract design. {#260510-skeleton-contract-populator-flow}
+- `lead-write-skeleton` makes the lead write low-resolution source drafts with language-neutral `CONTRACT:`, `HINT:`, and `HOLE:` comment markers; `skeleton-populator` turns those drafts into compile-clean stubs, and `skeleton-reviewer` checks them through a one-reviewer, one-amendment lightweight loop. {#260510-skeleton-contract-populator-flow}
 - `lead-bootstrap` has two template contracts: root context and `WORKFLOW.md`. Fresh and upgrade paths must install or preserve `ai-docs/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
 - Orchestration-heavy skills load `lead-workflow-manual` when primitive context is not already active; skipping it causes notation drift and wrong agent-call forms. {#260505-workflow-primitive-reference}
 - Implementation skills honor existing skeleton artifacts but do not require missing skeletons; `lead-proceed` owns skeleton insertion before implementation. {#260505-implementation-workflow-skills}
@@ -42,7 +42,7 @@ related:
 ## Coupling
 
 - Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
-- `skeleton-writer` remains a compatibility prompt name; new skeleton flow should register `skeleton-populator`.
+- `skeleton-writer` remains a compatibility prompt name; new skeleton flow should register `skeleton-populator` and `skeleton-reviewer`.
 - Discuss ready-promotion logic and write-ticket spec-gate must agree that non-`epic`, non-`research` `ready/` entries require spec creation.
 - `lead-edit`, `lead-write-code`, and `lead-implement` each own a different review/doc-pipeline boundary; moving updater dispatch between them can double-run or skip documentation updates.
 - Bootstrap guide semantics are shared with Claude compatibility output only when a compatibility ticket keeps Claude in scope.

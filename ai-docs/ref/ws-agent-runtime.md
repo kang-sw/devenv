@@ -438,6 +438,7 @@ with an empty `session_id` before the first streamed event arrives.
 The first consumer skill needs:
 
 - named delegate registration for `skeleton-populator`
+- named read-only delegate registration for `skeleton-reviewer`
 - resume-backed amendment rounds
 - plain-text output for lead review
 - file edits performed by the delegate in the shared workspace

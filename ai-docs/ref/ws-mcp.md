@@ -1112,6 +1112,7 @@ Current embedded prompt stems:
 - `pre-router`
 - `project-survey`
 - `skeleton-populator`
+- `skeleton-reviewer`
 - `skeleton-writer`
 - `sprint-survey`
 
