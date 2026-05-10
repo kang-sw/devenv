@@ -24,6 +24,7 @@ Topic: $ARGUMENTS
 - When docs are stale or insufficient, say so — do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 - Evaluate each claim independently — call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
+- Intent frames summarize decision rationale; they do not expose raw hidden reasoning.
 - Never proactively ask to wrap up or persist; wait for the user's explicit signal.
 - All written artifacts must be in English regardless of conversation language.
 
@@ -32,9 +33,9 @@ Topic: $ARGUMENTS
 1. Invoke `ws:workflow` via Skill tool (loads orchestration primitives reference).
 2. Run `git branch --show-current`. If the result starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected — `/sprint` provides session continuity."
 3. If `$ARGUMENTS` references a ticket, read it.
-4. Enter discussion loop.
+4. Enter user-message handling.
 
-## On: discussion loop
+## On: user message
 
 1. Apply **judge: needs-survey** — identify every named component, skill, agent, spec, or ticket the current question touches. For each: was its doc loaded this session? If any was not, register and call `project-survey`:
    ```bash
@@ -42,11 +43,21 @@ Topic: $ARGUMENTS
    ws-call-named-agent project-survey "<topic brief>"
    ```
    Incorporate the returned reference list before responding.
-2. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-3. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
+2. Read mental-model docs as conversation touches relevant domains; read spec docs as topics touch external-visible behavior; dispatch Explore agents for implementation details.
    When reading a mental-model domain file, run `git log -1 --format="%ai" -- ai-docs/mental-model/<domain>.md`. If the result is more than 90 days before today, surface a staleness warning: "Domain `<domain>` last updated <date>."
-4. When discussion changes unimplemented ticket phases, update them in place with user agreement.
-5. Continue until the user signals done.
+3. Apply **judge: needs-intent-frame**. If it fires, emit an **Intent Frame** before advice.
+4. Apply **judge: needs-interview**. If it fires, enter **Interview Workflow** before proposing a settled direction.
+5. Brainstorm iteratively — suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
+6. When discussion changes unimplemented ticket phases, update them in place with user agreement.
+7. Continue until the user signals done.
+
+## On: Interview Workflow
+
+1. Track an implicit decision tree: parent intent, current branch, unresolved child decisions.
+2. Ask the highest-level unresolved question first; descend only after the parent branch is decided.
+3. Ask one question per turn unless batching clearly reduces user burden.
+4. When the user delegates remaining detail, close that child branch with an autonomous decision and return to the nearest unresolved parent branch.
+5. Stop interviewing when the next useful action is a proposal, spec direction, ticket edit, skeleton directive, or implementation route.
 
 ## On: Ticket Status Transition
 
@@ -99,8 +110,42 @@ Spawn `project-survey` when any of the following hold:
 
 Does NOT fire for session-continuity queries ("what were we doing?", "where were we?") — those draw from session state or git log.
 
+### judge: needs-intent-frame
+Emit an Intent Frame when the user message contains a proposal, evaluation, design direction, causal claim, scope assumption, or trade-off-heavy request.
+
+Does NOT fire for mechanical commands, status checks, or implementation requests whose premises do not affect the chosen action.
+
+### judge: needs-interview
+Enter Interview Workflow when a decision branch remains open after the Intent Frame and the next answer depends on user priorities, scope boundaries, or trade-off weighting.
+
+Do NOT interview when the user gave enough context for a proposal, when the remaining choices are local implementation details, or when a stated assumption is sufficient.
+
 ### judge: needs-integration-tests
 Include integration-test criteria in a ticket phase when the change has end-to-end observable behavior. Skip for internal refactors.
+
+## Templates
+
+### Intent Frame
+
+```text
+I read this as:
+- <claims, goals, constraints>
+
+Premise check:
+- <implicit premise> — fails if <condition>
+
+Objectified:
+- <neutral decision problem>
+
+Considered:
+- <viable interpretations or options>
+
+Dropped:
+- <rejected interpretations or options and why>
+
+Stance:
+- <agree | disagree | ambiguous | recommend X>
+```
 
 ## Doctrine
 

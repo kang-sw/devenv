@@ -30,6 +30,7 @@ related:
 - `lead-proceed` must stop on epic ticket paths because epics are board artifacts; implementation routes through child tickets. {#260505-proceed-routing-pipeline}
 - `lead-write-ticket` runs the spec gate only when non-`epic`, non-`research` work enters `ready/`; `todo/` is accepted backlog with optional spec recovery hints. {#260505-planning-workflow-skills}
 - `lead-write-ticket` keeps epics at milestone-board scope and routes detailed discussion, implementation phases, and slice-specific decisions into child tickets. {#260508-write-ticket-epic-child-boundary}
+- `lead-discuss` uses premise-aware Intent Frames for proposal, evaluation, design-direction, causal-claim, scope-assumption, and trade-off turns; Interview Workflow starts only when unresolved branches need user priority or scope input. {#260510-discuss-intent-frame-interview}
 - `lead-bootstrap` has two template contracts: root context and `WORKFLOW.md`. Fresh and upgrade paths must install or preserve `ai-docs/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
 - Orchestration-heavy skills load `lead-workflow-manual` when primitive context is not already active; skipping it causes notation drift and wrong agent-call forms. {#260505-workflow-primitive-reference}
 - Implementation skills honor existing skeleton artifacts but do not require missing skeletons; `lead-proceed` owns skeleton insertion before implementation. {#260505-implementation-workflow-skills}

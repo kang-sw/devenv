@@ -83,6 +83,17 @@ context, uses scoped subqueries when search is needed, can promote or move
 tickets when the discussion reaches an actionable state, and recommends an
 appropriate next workflow step.
 
+For proposal, evaluation, design-direction, causal-claim, scope-assumption, or
+trade-off-heavy user messages, `lead-discuss` frames the reply around a visible
+premise-aware intent summary before giving advice. The frame decomposes the
+message into claims, goals, and constraints, names implicit premises with failure
+conditions, reframes the topic as a neutral decision problem, lists considered
+and dropped options, and ends with a stance. If a decision branch remains open
+after that frame, the skill interviews through the highest unresolved branch
+first, descends only after parent decisions settle, and returns to the nearest
+unresolved parent when the user delegates lower-level detail.
+{#260510-discuss-intent-frame-interview}
+
 `lead-write-spec` writes or updates behavioral spec entries for caller-visible
 behavior. It reads spec conventions, generates stable spec stems, writes planned
 or implemented entries according to the current behavior, verifies the spec
