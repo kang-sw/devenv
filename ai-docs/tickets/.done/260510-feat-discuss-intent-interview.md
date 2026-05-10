@@ -2,9 +2,12 @@
 title: discuss intent interview judgment
 related:
   260429-research-host-neutral-ws-plugin: host-neutral skill semantics must stay portable across Codex and Claude surfaces
+spec:
+  - 260510-discuss-intent-frame-interview
 related-mental-model:
   - workflow-skills
   - claude-compatibility
+completed: 2026-05-10
 ---
 
 # discuss intent interview judgment
@@ -59,6 +62,14 @@ Success criteria:
 - The handler terminology no longer depends on the ambiguous phrase
   `discussion loop`.
 
+### Result (4b0070e) - 2026-05-10
+
+`lead-discuss` and the Claude compatibility `discuss` skill now use
+`On: user message` instead of `On: discussion loop`. Both skills apply
+`judge: needs-intent-frame` and `judge: needs-interview` after survey and
+domain/spec loading, so premise audits and stance output do not run from stale
+or unloaded context.
+
 ### Phase 2: Define interview output and traversal behavior
 
 Add concise output guidance for interview turns. The output should show:
@@ -78,6 +89,14 @@ Success criteria:
   "make the delegated lower-level decision and move back up".
 - The guidance is short enough to survive skill-authoring pressure.
 
+### Result (4b0070e) - 2026-05-10
+
+Both skills now define an Intent Frame template with parsed claims/goals,
+premise checks, objectified decision problem, considered and dropped options,
+and stance. Interview Workflow tracks an implicit decision tree, asks one
+highest-unresolved question at a time, treats delegated lower-level detail as an
+autonomous branch closure, and returns to the nearest unresolved parent branch.
+
 ### Phase 3: Align docs and compatibility surfaces
 
 Update the workflow-skills spec and mental model if the behavior changes the
@@ -88,3 +107,11 @@ Success criteria:
 - Codex-facing and Claude compatibility guidance intentionally agree or document
   the reason for divergence.
 - Any updated skill or prompt text passes the skill-authoring invariant checklist.
+
+### Result (4b0070e) - 2026-05-10
+
+The workflow-skills spec now records the caller-visible intent-frame and
+interview behavior under `260510-discuss-intent-frame-interview`. The
+workflow-skills mental model records the trigger surface and the Interview
+Workflow entry condition. A correctness/fit reviewer flagged ordering and
+trigger-surface gaps; those findings were fixed and the re-review returned clean.
