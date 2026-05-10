@@ -30,6 +30,7 @@ lead-forge-mental-model
 lead-forge-spec
 lead-implement
 lead-proceed
+lead-salvage
 lead-ship
 lead-skill-authoring
 lead-sprint
@@ -111,6 +112,23 @@ detailed discussion, implementation phases, or slice-specific decisions arise
 while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
 they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundary}
+
+`lead-salvage` handles failed large implementations, sprints, branches, and
+agent runs where a wrong premise may require rollback or recovery. It freezes
+evidence before cleanup, interviews the user to confirm the failure claim and
+invalidated premises, fans out named-agent or subquery surveys for code blast
+radius, ticket graph contamination, spec and mental-model impact, and preserved
+evidence, then classifies artifacts as keep, rework, discard, or unknown. It
+classifies affected tickets as keep, rewrite, drop, absorb, or unknown before
+any ticket move. Destructive actions require explicit approval immediately
+before execution.
+
+The salvage output uses the existing ticket system: a research ticket records
+the salvage report, a recovery epic is created when multiple tickets,
+components, phases, or cross-child invariants are affected, and concrete repair
+work moves into child tickets. The skill routes all ticket creation, edits,
+drops, and status moves through `lead-write-ticket`; it does not perform source
+edits. {#260510-salvage-recovery-workflow-skill}
 
 `lead-write-skeleton` optionally locks high-risk caller-visible contracts before
 implementation when the scope needs a separate reviewable checkpoint. It

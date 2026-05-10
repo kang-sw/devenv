@@ -32,6 +32,7 @@ related:
 - `lead-write-ticket` keeps epics at milestone-board scope and routes detailed discussion, implementation phases, and slice-specific decisions into child tickets. {#260508-write-ticket-epic-child-boundary}
 - `lead-discuss` uses the user's active conversation language for discussion responses. {#260505-planning-workflow-skills}
 - `lead-discuss` uses premise-aware Intent Frames for proposal, evaluation, design-direction, causal-claim, scope-assumption, and trade-off turns; Interview Workflow starts only when unresolved branches need user priority or scope input. {#260510-discuss-intent-frame-interview}
+- `lead-salvage` is the reverse workflow for premise-collapse recovery: freeze evidence, survey blast radius through agents, confirm invalidated premises with the user, then capture a research report plus recovery epic or child tickets. {#260510-salvage-recovery-workflow-skill}
 - `lead-write-skeleton` makes the lead write low-resolution source drafts with language-neutral `CONTRACT:`, `HINT:`, and `HOLE:` comment markers; `skeleton-populator` turns those drafts into compile-clean stubs, and `skeleton-reviewer` checks them through a one-reviewer, one-amendment lightweight loop. {#260510-skeleton-contract-populator-flow}
 - `lead-bootstrap` has two template contracts: root context and `WORKFLOW.md`. Fresh and upgrade paths must install or preserve `ai-docs/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
 - Orchestration-heavy skills load `lead-workflow-manual` when primitive context is not already active; skipping it causes notation drift and wrong agent-call forms. {#260505-workflow-primitive-reference}
@@ -45,6 +46,7 @@ related:
 - Skeleton flow registers `skeleton-populator` and `skeleton-reviewer`; no compatibility writer prompt remains active.
 - Discuss ready-promotion logic and write-ticket spec-gate must agree that non-`epic`, non-`research` `ready/` entries require spec creation.
 - `lead-edit`, `lead-write-code`, and `lead-implement` each own a different review/doc-pipeline boundary; moving updater dispatch between them can double-run or skip documentation updates.
+- `lead-salvage` routes ticket writes through `lead-write-ticket`; direct ticket graph mutation inside salvage would bypass ticket conventions and commit handling.
 - Bootstrap guide semantics are shared with Claude compatibility output only when a compatibility ticket keeps Claude in scope.
 - Claude compatibility skills are not ordinary edit targets for Codex semantic changes; update them only under explicit compatibility or retirement work.
 

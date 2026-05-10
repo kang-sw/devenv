@@ -152,6 +152,7 @@ lead-forge-mental-model
 lead-forge-spec
 lead-implement
 lead-proceed
+lead-salvage
 lead-ship
 lead-skill-authoring
 lead-sprint
@@ -173,6 +174,7 @@ Full ceremony:  discuss -> proceed -> write-skeleton? -> implement -> (write-cod
 Direct:         implement <description>
 Auto-route:     proceed <ticket-path>
 Sprint:         sprint -> write-code | edit per task -> wrap-up
+Recovery:       salvage -> research report -> recovery epic? -> child tickets
 ```
 
 User decides next step at each handoff. `proceed` is the explicit opt-in for

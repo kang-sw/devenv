@@ -15,7 +15,7 @@ These apply to both skill and agent documents.
 - The audience is the model re-reading under attention pressure, not a human reading fresh.
 - One-liners survive pressure; paragraphs dissolve. Every rule fits one line.
 - Directives at top, rationale (if any) as a single Doctrine paragraph at bottom. Never interleave.
-- Self-contained. Skills: no references to tickets, sessions, or sibling skills except `/`-prefixed invocations and CLAUDE.md. Agents: no references to session state or conversation history.
+- Self-contained. Skills: no references to tickets, sessions, or sibling skills except plugin skill invocations such as `ws:` and host-specific slash forms. Agents: no references to session state or conversation history.
 - Repeatedly violated rule -> mechanize (structured output block at entry point), do not repeat louder.
 - Mechanical rules and soft judgments do not mix. Soft decision points must be separated and stated explicitly.
 - After restructuring, request an authorized fresh audit: contradictions, duplication, orphan references, closure gaps.
