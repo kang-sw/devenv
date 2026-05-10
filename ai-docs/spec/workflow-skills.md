@@ -81,7 +81,8 @@ Planning skills prepare caller-visible work before implementation.
 `lead-discuss` explores a topic without editing source code. It loads project
 context, uses scoped subqueries when search is needed, can promote or move
 tickets when the discussion reaches an actionable state, and recommends an
-appropriate next workflow step.
+appropriate next workflow step. Discussion responses use the user's active
+conversation language.
 
 For proposal, evaluation, design-direction, causal-claim, scope-assumption, or
 trade-off-heavy user messages, `lead-discuss` frames the reply around a visible
