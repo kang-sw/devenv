@@ -68,25 +68,6 @@ func TestResolveExplicitTierAndModelWin(t *testing.T) {
 	}
 }
 
-func TestResolveSkeletonWriterPrompt(t *testing.T) {
-	resolved, err := Resolve([]string{"skeleton-writer"}, "", "", "")
-	if err != nil {
-		t.Fatalf("Resolve returned error: %v", err)
-	}
-	if resolved.Tier != "deep" {
-		t.Fatalf("tier = %q", resolved.Tier)
-	}
-	if strings.Contains(resolved.Text, "model: deep") {
-		t.Fatalf("frontmatter was not stripped:\n%s", resolved.Text)
-	}
-	if !strings.Contains(resolved.Text, "skeleton-writer compatibility delegate") {
-		t.Fatalf("missing skeleton prompt:\n%s", resolved.Text)
-	}
-	if !strings.Contains(resolved.Text, "CONTRACT:") || !strings.Contains(resolved.Text, "HINT:") || !strings.Contains(resolved.Text, "HOLE:") {
-		t.Fatalf("missing marker guidance:\n%s", resolved.Text)
-	}
-}
-
 func TestResolveSkeletonPopulatorPrompt(t *testing.T) {
 	resolved, err := Resolve([]string{"skeleton-populator"}, "", "", "")
 	if err != nil {
@@ -249,7 +230,6 @@ func TestBundleMetadata(t *testing.T) {
 		"project-survey",
 		"skeleton-populator",
 		"skeleton-reviewer",
-		"skeleton-writer",
 		"sprint-survey",
 		"code-review-correctness",
 		"code-review-fit",

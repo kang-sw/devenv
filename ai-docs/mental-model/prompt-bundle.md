@@ -36,7 +36,7 @@ related:
 - Launcher fast-path and fallback checks must report the same prompt bundle hash: `runtime.capabilities`, `runtime.info`, and `runtime.json` drift makes otherwise compatible binaries fail validation.
 - Release asset builds rewrite runtime prompt metadata from the built binary.
 - Skills and API docs code name prompt stems directly; renaming stems requires updating those callers.
-- `lead-write-skeleton` registers `skeleton-populator` and `skeleton-reviewer`; `skeleton-writer` remains a compatibility prompt name with the same contract-preserving populator boundary.
+- `lead-write-skeleton` registers `skeleton-populator` and `skeleton-reviewer`; no compatibility skeleton stem remains in the active prompt bundle.
 - `prompts` is canonical while `prompt_refs` is a migration alias; when both are present, `prompts` wins.
 
 ## Extension Points & Change Recipes

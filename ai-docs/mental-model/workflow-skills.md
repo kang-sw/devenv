@@ -42,7 +42,7 @@ related:
 ## Coupling
 
 - Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
-- `skeleton-writer` remains a compatibility prompt name; new skeleton flow should register `skeleton-populator` and `skeleton-reviewer`.
+- Skeleton flow registers `skeleton-populator` and `skeleton-reviewer`; no compatibility writer prompt remains active.
 - Discuss ready-promotion logic and write-ticket spec-gate must agree that non-`epic`, non-`research` `ready/` entries require spec creation.
 - `lead-edit`, `lead-write-code`, and `lead-implement` each own a different review/doc-pipeline boundary; moving updater dispatch between them can double-run or skip documentation updates.
 - Bootstrap guide semantics are shared with Claude compatibility output only when a compatibility ticket keeps Claude in scope.

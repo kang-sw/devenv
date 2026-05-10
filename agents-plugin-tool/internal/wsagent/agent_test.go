@@ -224,7 +224,7 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 
 	agent, layout, err := manager.Register(RegisterOptions{
 		Root:             repo,
-		Name:             "skeleton writer",
+		Name:             "review worker",
 		Backend:          "codex",
 		Tier:             "core",
 		Model:            "gpt-test",
@@ -235,7 +235,7 @@ func TestRegisterCreatesAgentDirectory(t *testing.T) {
 		t.Fatalf("Register returned error: %v", err)
 	}
 
-	if filepath.Base(layout.AgentDir) != "skeleton-writer" {
+	if filepath.Base(layout.AgentDir) != "review-worker" {
 		t.Fatalf("agent dir = %q", layout.AgentDir)
 	}
 	if agent.Status != StatusIdle || agent.SessionID != "" {

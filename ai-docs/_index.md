@@ -126,8 +126,8 @@ bundle.
 Key prompts: `clerk`, `code-reviewer`, `code-review-correctness`,
 `code-review-fit`, `code-review-test`, `mental-model-updater`,
 `spec-updater`, `project-survey`, `sprint-survey`, `implementer`,
-`searcher`, `skeleton-populator`, `skeleton-reviewer`, `skeleton-writer`,
-`subquery`, `api-doc-manager`, `pre-router`.
+`searcher`, `skeleton-populator`, `skeleton-reviewer`, `subquery`,
+`api-doc-manager`, `pre-router`.
 
 Embedded runtime prompt bundle currently includes reviewer, implementer,
 skeleton, subquery, API docs, and delegate-orientation material. Prompt bundle

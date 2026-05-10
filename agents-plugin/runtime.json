@@ -7,7 +7,7 @@
   "release_tag": "v0.21.1",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "664e289e1301e4f79098ac07cacbfefc9a38f603219ff7b1193293c986c6eaf0",
+    "content_sha256": "83527de1dad84142269222a4e9ec5e7f9bb3afff462ccaf78b3318e8f8f7b131",
     "prompts": [
       "api-doc-cargo-brief",
       "api-doc-manager",
@@ -25,7 +25,6 @@
       "project-survey",
       "skeleton-populator",
       "skeleton-reviewer",
-      "skeleton-writer",
       "sprint-survey"
     ]
   },

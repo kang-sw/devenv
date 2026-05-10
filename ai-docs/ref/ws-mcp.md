@@ -1113,7 +1113,6 @@ Current embedded prompt stems:
 - `project-survey`
 - `skeleton-populator`
 - `skeleton-reviewer`
-- `skeleton-writer`
 - `sprint-survey`
 
 ### `ws/agents.call`
