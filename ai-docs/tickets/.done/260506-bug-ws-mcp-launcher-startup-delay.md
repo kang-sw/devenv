@@ -9,6 +9,7 @@ skeletons:
   phase-3: 7d13546
 related-mental-model:
   - plugin-runtime
+completed: 2026-05-10
 ---
 
 # ws-mcp launcher startup delay
@@ -259,3 +260,15 @@ Success criteria:
   performance solution.
 - Documentation remains clear that normal steady-state startup should not spend
   tens of seconds in launcher preflight.
+
+### Result (downstream verified) - 2026-05-10
+
+Downstream installed-plugin verification confirmed that the launcher startup
+delay is resolved after the hot-path compatibility cache and
+`runtime capabilities` single-probe changes. No timeout increase is needed for
+the normal path.
+
+The 30-second startup timeout remains unchanged. It is still an upgrade-buffer
+knob if future release validation finds an old-runtime transition problem, but
+this ticket's root cause was fixed in launcher validation behavior rather than
+papered over by raising the timeout.

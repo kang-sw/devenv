@@ -198,8 +198,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260503-feat-agents-plugin-runtime-boundary` | ready | Go stdio MCP/runtime boundary; Python launcher smoke in progress |
-| `260506-bug-ws-mcp-launcher-startup-delay` | ready | Launcher hot-path cache and runtime capabilities probe done; timeout mitigation remains optional follow-up |
 | `260505-feat-agent-backend-failure-diagnostics` | ready | Improve named-agent backend failure diagnostics |
 | `260505-bug-codex-jsonl-trailing-noise` | ready | Fix Windows Codex persistent-agent trailing stdout parsing |
 | `260429-feat-api-deps` | ready | `ws-ask-api` 2-layer API doc cache |
@@ -214,8 +212,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-`260503-feat-agents-plugin-runtime-boundary` - macOS/Codex launcher, release download, and Windows Go runtime smoke are verified; Python launcher is the current shared startup path and needs installed-cache verification on Windows after Python 3 is available.
-`260506-bug-ws-mcp-launcher-startup-delay` - Phases 1, 2, and 3 are done; Phase 4 startup timeout mitigation remains optional upgrade-buffer scope after release validation.
 `260505-feat-agent-backend-failure-diagnostics` - improve named-agent backend invocation failures with raw errors, PATH-detected backend hints, and explicit reconfiguration guidance.
 `260505-bug-codex-jsonl-trailing-noise` - hotfix Windows Codex persistent-agent results when process-control stdout appears after a valid JSONL agent message.
 `260429-feat-api-deps` - API docs cache; phases: manager prompt -> pre-router -> bin tools -> workflow integration.
@@ -229,9 +225,8 @@ bootstrap template, active `lead-*` skills, delegate prompts, and
 `ai-docs/ref/skill-authoring.md`.
 
 In-flight: none.
-Next: verify native Windows plugin-managed Python launcher startup under
-`260503-feat-agents-plugin-runtime-boundary`, then prepare a patch release if
-the installed-cache smoke passes.
+Next: choose between named-agent diagnostics, Codex JSONL trailing-noise handling,
+API docs cache work, or Windows claude-dash verification from the ready queue.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
 `agents-plugin-tool/internal/mcp/server.go`,

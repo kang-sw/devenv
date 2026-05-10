@@ -6,6 +6,7 @@ spec:
 related:
   260429-research-host-neutral-ws-plugin: research anchor for host-neutral ws plugin architecture
   260502-feat-agents-plugin-workflow-skill-drafts: draft skills waiting on helper/runtime reconstruction
+completed: 2026-05-10
 ---
 
 # agents-plugin runtime and MCP boundary
@@ -61,6 +62,26 @@ dependencies.
   the POSIX launcher. Use `python3 ./bin/ws-mcp-launcher.py` as the shared
   plugin-managed launcher command; Windows users may need a one-time Python 3
   install when only the Windows Store alias is present.
+
+## Closeout Boundary
+
+This ticket is the broad runtime-boundary slice that made `agents-plugin` usable
+without relying on Claude plugin PATH mutation or user-local build tools. It is
+complete once the plugin can start a cache-local, prebuilt `ws-mcp` runtime
+through plugin-managed MCP configuration, verify or repair that runtime against
+`runtime.json`, and expose the lead MCP surface on macOS and native Windows.
+
+Follow-up bugs discovered while dogfooding that boundary are intentionally not
+kept in this ticket once they have their own recovery path:
+
+- Launcher validation cost was split to
+  `260506-bug-ws-mcp-launcher-startup-delay` and is now downstream-verified as
+  resolved without raising the startup timeout.
+- Plugin-managed default-root discovery gaps remain tracked by
+  `260505-bug-plugin-managed-default-root-discovery`.
+- Noninteractive `codex exec` returning `user cancelled MCP tool call` was
+  reproduced independently of the launcher path, so it is not a runtime-boundary
+  blocker.
 
 ## Phases
 
@@ -515,3 +536,16 @@ Verification:
 - Windows temporary runtime smoke with the patched `ws-mcp.exe` showed
   `config.show`, `agents.register`, and `agents.call` in `tools/list` despite the
   non-Git default root diagnostic.
+
+### Result (closeout) - 2026-05-10
+
+The runtime-boundary slice is complete. The plugin-managed startup path now uses
+the shared Python launcher, materializes through Codex plugin MCP configuration,
+repairs or reuses a cache-local native runtime, and exposes the lead tool surface
+after startup-root diagnostics.
+
+The remaining issues are no longer boundary blockers. Startup delay was fixed
+and downstream-verified under `260506-bug-ws-mcp-launcher-startup-delay`; default
+root discovery is captured as `260505-bug-plugin-managed-default-root-discovery`;
+and noninteractive `codex exec` cancellation behavior was reproduced outside the
+launcher path.
