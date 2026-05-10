@@ -126,7 +126,8 @@ bundle.
 Key prompts: `clerk`, `code-reviewer`, `code-review-correctness`,
 `code-review-fit`, `code-review-test`, `mental-model-updater`,
 `spec-updater`, `project-survey`, `sprint-survey`, `implementer`,
-`searcher`, `skeleton-writer`, `subquery`, `api-doc-manager`, `pre-router`.
+`searcher`, `skeleton-populator`, `skeleton-writer`, `subquery`,
+`api-doc-manager`, `pre-router`.
 
 Embedded runtime prompt bundle currently includes reviewer, implementer,
 skeleton, subquery, API docs, and delegate-orientation material. Prompt bundle
@@ -200,7 +201,6 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260510-chore-retire-claude-plugin` | todo | Retire the frozen legacy Claude plugin fallback after live dependencies migrate |
-| `260510-feat-skeleton-contract-populator` | todo | Lead-owned skeleton contract drafts followed by delegate population |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |

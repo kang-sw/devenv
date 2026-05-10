@@ -79,8 +79,35 @@ func TestResolveSkeletonWriterPrompt(t *testing.T) {
 	if strings.Contains(resolved.Text, "model: deep") {
 		t.Fatalf("frontmatter was not stripped:\n%s", resolved.Text)
 	}
-	if !strings.Contains(resolved.Text, "You are the skeleton-writer delegate") {
+	if !strings.Contains(resolved.Text, "skeleton-writer compatibility delegate") {
 		t.Fatalf("missing skeleton prompt:\n%s", resolved.Text)
+	}
+	if !strings.Contains(resolved.Text, "CONTRACT:") || !strings.Contains(resolved.Text, "HINT:") || !strings.Contains(resolved.Text, "HOLE:") {
+		t.Fatalf("missing marker guidance:\n%s", resolved.Text)
+	}
+}
+
+func TestResolveSkeletonPopulatorPrompt(t *testing.T) {
+	resolved, err := Resolve([]string{"skeleton-populator"}, "", "", "")
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if resolved.Tier != "deep" {
+		t.Fatalf("tier = %q", resolved.Tier)
+	}
+	if strings.Contains(resolved.Text, "model: deep") {
+		t.Fatalf("frontmatter was not stripped:\n%s", resolved.Text)
+	}
+	for _, want := range []string{
+		"You are the skeleton-populator delegate",
+		"Treat lead-authored source draft markers as authoritative input",
+		"CONTRACT:",
+		"HINT:",
+		"HOLE:",
+	} {
+		if !strings.Contains(resolved.Text, want) {
+			t.Fatalf("missing %q in prompt:\n%s", want, resolved.Text)
+		}
 	}
 }
 
@@ -194,6 +221,7 @@ func TestBundleMetadata(t *testing.T) {
 		"plan-populator-research",
 		"plan-populator-survey",
 		"project-survey",
+		"skeleton-populator",
 		"skeleton-writer",
 		"sprint-survey",
 		"code-review-correctness",

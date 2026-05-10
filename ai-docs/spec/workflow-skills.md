@@ -114,8 +114,17 @@ they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundar
 
 `lead-write-skeleton` optionally locks high-risk caller-visible contracts before
 implementation when the scope needs a separate reviewable checkpoint. It
-delegates skeleton authoring, then the lead reviews, commits, and links
-generated skeleton artifacts to the ticket.
+uses deep insertion-point research, then the lead writes a low-resolution source
+draft with language-neutral `CONTRACT:`, `HINT:`, and `HOLE:` comment markers.
+The lead-authored draft may be non-compiling only before populator handoff.
+`CONTRACT:` marks binding public shape and behavior targets, `HINT:` marks
+approximate references for source discovery, and `HOLE:` marks unknown concrete
+types, imports, fixtures, helpers, or harnesses. A `skeleton-populator` delegate
+researches and normalizes hints, fills clear holes, converts the draft into
+compile-clean stubs and build-valid test scaffolding, and escalates missing or
+conflicting contract elements instead of silently changing public shape. The
+lead reviews, verifies build or syntax checks, commits, and links generated
+skeleton artifacts to the ticket. {#260510-skeleton-contract-populator-flow}
 
 ## Implementation Workflow Skills {#260505-implementation-workflow-skills}
 
@@ -227,7 +236,7 @@ commit rules.
 ## Delegate Prompt Boundaries {#260505-workflow-delegate-prompt-boundaries}
 
 Workflow skills use embedded prompt chains for named delegates such as
-implementers, reviewers, skeleton writers, survey workers, and documentation
+implementers, reviewers, skeleton populators, survey workers, and documentation
 updaters. Public named-agent registrations receive delegate-orientation
 instructions before role-specific prompt material.
 

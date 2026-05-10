@@ -1097,17 +1097,23 @@ Prompt resolution:
 
 Current embedded prompt stems:
 
-- `code-reviewer`
-- `implementer`
-- `plan-populator-research`
-- `plan-populator-survey`
-- `project-survey`
-- `skeleton-writer`
+- `api-doc-cargo-brief`
+- `api-doc-manager`
 - `code-review-correctness`
 - `code-review-fit`
 - `code-review-test`
+- `code-reviewer`
 - `delegate-orientation`
 - `impl-playbook`
+- `implementer`
+- `mental-model-updater`
+- `plan-populator-research`
+- `plan-populator-survey`
+- `pre-router`
+- `project-survey`
+- `skeleton-populator`
+- `skeleton-writer`
+- `sprint-survey`
 
 ### `ws/agents.call`
 

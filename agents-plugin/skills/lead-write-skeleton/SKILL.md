@@ -10,48 +10,70 @@ Target: user request
 ## Invariants
 
 - Skeleton = the first code change for a ticket. No implementation code - only interface stubs and integration tests.
-- Lead is a lightweight coordinator: identify the ticket, pass contract directives, review, commit.
-- The delegate owns design: reads the ticket, explores the codebase, decides type shapes and test structure.
-- Contract directives = lead's judgment on points the delegate cannot derive from ticket + code alone.
+- Lead owns public contract draft: research insertion points, write low-resolution source, review, commit.
+- The populator owns source discovery and compile-clean normalization, not public contract design.
+- Draft markers are language-neutral comment text: `CONTRACT:`, `HINT:`, and `HOLE:`.
+- `CONTRACT:` markers bind public names, visibility, module placement, call shape, and behavior targets.
+- `HINT:` markers name approximate references the populator should research and normalize.
+- `HOLE:` markers name intentionally unknown concrete types, imports, fixtures, helpers, or harnesses.
+- Low-resolution source may be non-compiling only before populator handoff.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
 - The delegate does not commit - lead reviews and commits.
-- Register the skeleton-writer agent once per invocation via `ws/agents.register`; resume via `ws/agents.call` for amendment rounds.
+- Register the skeleton-populator agent once per invocation via `ws/agents.register`; resume via `ws/agents.call` for amendment rounds.
 
 ## On: invoke
 
-### 1. Identify contract directives
+### 1. Identify contract
 
 1. Read the ticket. Note ambiguities requiring lead judgment: scope boundaries, design choices, and non-obvious integration constraints.
 2. Skim relevant mental-model docs only if needed to resolve those ambiguities.
-3. Formulate **contract directives**: 2-5 binding decisions, not a full design.
+3. Call `ws/subquery(deep_research: true, question: "<candidate insertion points, adjacent conventions, public contracts, and integration test targets for this ticket>")`.
+4. Read the result with `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`.
+5. Choose insertion points, public shapes, and test target locations.
 
-### 2. Delegate
+### 2. Draft
 
-Call `ws/agents.register(name: "skeleton-writer", prompts: ["skeleton-writer"])`.
+Write the first source edit directly as low-resolution source:
 
-Call `ws/agents.call(name: "skeleton-writer", prompt: <block below>)`:
+- Public API stubs, public fields, trait/function/method signatures, and module placement.
+- Comment-only integration test targets that name the behavior or boundary to cover.
+- `CONTRACT:` comments for binding public shape and behavior targets.
+- `HINT:` comments for approximate type references, adjacent APIs, dependency direction, or "something like X" cues.
+- `HOLE:` comments for unknown concrete types, imports, fixtures, helpers, or test harness locations.
+
+Do not add implementation logic. Placeholder identifiers may be invalid when they
+reduce lead effort and leave clear `HINT:` or `HOLE:` markers for the populator.
+
+### 3. Populate
+
+Call `ws/agents.register(name: "skeleton-populator", prompts: ["skeleton-populator"])`.
+
+Call `ws/agents.call(name: "skeleton-populator", prompt: <block below>)`:
 
 ```text
 Ticket: <ticket-path>
 
-## Contract directives
-- <binding decisions only - things not derivable from ticket + codebase>
+## Lead-authored draft
+- Files and locations changed by the lead draft.
+- CONTRACT markers are binding; report conflicts with existing public interfaces.
+- HINT markers are research cues to normalize.
+- HOLE markers are open source-discovery tasks to fill when one clear project-local choice exists.
 ```
 
-### 3. Review
+### 4. Review
 
 1. Call `ws/git.diff` and `ws/git.status` to review the skeleton output. Read specific files only if a reported deviation warrants deeper inspection.
-2. Verify contracts match the ticket intent and honor the directives.
+2. Verify `CONTRACT:` semantics match the ticket intent and survived population.
 3. Run build to confirm compilation. Do not run tests - tests will fail by design because stubs are unimplemented. Passing tests is the implementor's responsibility, not the skeleton's.
 4. If issues found:
    - **Minor** - fix directly.
-   - **Structural** - relay amended directives with `ws/agents.call(name: "skeleton-writer", prompt: <block below>)`:
+   - **Structural** - relay amended contract markers with `ws/agents.call(name: "skeleton-populator", prompt: <block below>)`:
      ```text
-     Amend: <issues and revised directives>
+     Amend: <issues and revised CONTRACT/HINT/HOLE markers>
      ```
      Re-review after each round.
 
-### 4. Commit
+### 5. Commit
 
 1. Commit stubs and tests together as one logical unit.
 2. Commit message: `feat(<scope>): skeleton - <what contracts are established>`
@@ -59,7 +81,7 @@ Ticket: <ticket-path>
 4. Include `## Ticket Updates` with the ticket stem and what future phases must know.
 5. Update the ticket's `skeletons:` frontmatter with the phase and commit hash (e.g., `phase-1: abc1234`). Only add entries for phases that have a skeleton - no null placeholders.
 
-### 5. Suggest next step
+### 6. Suggest next step
 
 Recommend the next step from implementation width and session warmth:
 - **Wide** (multiple independent modules): suggest `ws:lead-write-code` (one scope at a time) or ask the user to split into separate tickets.
@@ -89,7 +111,7 @@ Present the recommendation with brief rationale. Do not auto-invoke.
 
 ## Doctrine
 
-The skeleton optimizes for **contract-first delegation with minimal coordinator
-overhead**. The lead passes only binding decisions the delegate cannot derive;
-the delegate owns design and exploration. When ambiguous, preserve contract
-stability while minimizing coordinator serialization.
+The skeleton optimizes for **contract visibility before implementation**. The
+lead spends context on low-resolution public shape; the populator spends context
+on source discovery and build cleanup. When ambiguous, preserve contract
+stability while minimizing lead serialization.
