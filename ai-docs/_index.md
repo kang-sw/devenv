@@ -12,9 +12,10 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Frozen legacy Claude package: `claude-plugin/` (`ws@0.15.0`).
-Codex-first candidate: `agents-plugin/` (`ws@0.22.3`).
+Active plugin package: `agents-plugin/` (`ws@0.22.3`).
 Native MCP/tooling source: `agents-plugin-tool/`.
+Retired Claude source material: `ai-docs/ref/claude-home-legacy.md` and git
+history.
 
 ## Current Branch Rules
 
@@ -24,15 +25,12 @@ Native MCP/tooling source: `agents-plugin-tool/`.
 
 ## Plugin Topology
 
-- `claude-plugin/` is frozen legacy fallback and not an active mirror target for
-  Codex workflow changes.
-- If an explicit Claude compatibility ticket edits `claude-plugin/`, run
-  `claude plugin update ws@ws` after the edit.
 - `./install.sh update` handles first-time install and settings patching on a
   new machine.
-- `claude-plugin/CLAUDE.home.md` is the repo copy of `~/.claude/CLAUDE.md`.
-- External Claude install: `/plugin marketplace add kang-sw/devenv`, then
-  `/plugin install ws@ws`.
+- Root `CLAUDE.md` is the only live Claude compatibility shim and points at
+  `AGENTS.md`.
+- `install.sh` snapshots `agents-plugin/` for Claude-compatible plugin installs
+  when Claude Code is available.
 - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
   Codex UI install has verified `ws:lead-skill-authoring`,
   `ws:lead-write-ticket`, and `ws:lead-discuss`.
@@ -43,7 +41,7 @@ Native MCP/tooling source: `agents-plugin-tool/`.
 - Changed plugin-managed Codex MCP config requires user-performed plugin cache
   refresh before installed-cache verification.
 - `claude plugin validate agents-plugin` passes; runtime Claude invocation of
-  `agents-plugin` remains manual closeout.
+  `agents-plugin` remains compatibility behavior, not a separate source tree.
 
 ## Read Before Editing
 
@@ -86,15 +84,9 @@ Implemented MCP tools:
 - API docs: `ws/api.list`, `ws/api.ask`, `ws/api.ask_async`,
   `ws/api.status`, `ws/api.result`, `ws/api.cancel`
 
-Shared `agents-plugin` skill text uses MCP names, not repo-local
-`claude-plugin/infra/*` paths. Infra and convention text are bundled into the
-runtime and read through `ws/infra.read` and `ws/convention.read`.
-
-Legacy CLI fallbacks still exist under `claude-plugin/bin/` for Claude
-compatibility only:
-`ws-proj-tree`, `ws-print-infra`, `ws-list-mental-model`,
-`ws-list-spec-stems`, `ws-generate-spec-stem`, `ws-spec-build-index`,
-`ws-review-path`, `ws-oneshot-agent`, `ws-named-agent`, `ws-ask-api`, and shims.
+Shared `agents-plugin` skill text uses MCP names, not repo-local paths. Infra
+and convention text are bundled into the runtime and read through
+`ws/infra.read` and `ws/convention.read`.
 
 ## MCP Runtime Notes
 
@@ -123,15 +115,12 @@ rechecking `codex mcp list`.
 
 ## Prompt And Agent Inventory
 
-Legacy Claude prompt documents live in `claude-plugin/infra/prompts/` for
-fallback CLI workflows. Active Codex workflows use the embedded runtime prompt
-bundle.
+Active workflows use the embedded runtime prompt bundle.
 
-Key prompts: `clerk`, `code-reviewer`, `code-review-correctness`,
-`code-review-fit`, `code-review-test`, `mental-model-updater`,
-`spec-updater`, `project-survey`, `sprint-survey`, `implementer`,
-`searcher`, `skeleton-populator`, `skeleton-reviewer`, `subquery`,
-`api-doc-manager`, `pre-router`.
+Key prompts: `code-reviewer`, `code-review-correctness`, `code-review-fit`,
+`code-review-test`, `mental-model-updater`, `project-survey`, `sprint-survey`,
+`implementer`, `skeleton-populator`, `skeleton-reviewer`, `api-doc-manager`,
+and `pre-router`.
 
 Embedded runtime prompt bundle currently includes reviewer, implementer,
 skeleton, subquery, API docs, and delegate-orientation material. Prompt bundle
@@ -139,10 +128,6 @@ hash is recorded in `agents-plugin/runtime.json`; update it after embedded
 prompt changes.
 
 ## Skill Inventory
-
-Claude package skills remain under `claude-plugin/skills/` as frozen legacy
-fallback. Do not mirror new `lead-*` skill behavior there unless an explicit
-Claude compatibility or retirement ticket requires it.
 
 Codex-first `agents-plugin/skills/` currently uses `lead-*` names:
 
@@ -168,9 +153,6 @@ lead-write-spec
 lead-write-ticket
 ```
 
-`manual-think` remains Claude-only while `claude-plugin/` exists as frozen
-legacy fallback.
-
 ## Canonical Flows
 
 ```text
@@ -194,7 +176,7 @@ auto-chaining through the pipeline.
 | `ai-docs/spec/workflow-skills.md` | Workflow Skills | Codex-facing lead skills, routing, sprint work, reconstruction, utilities, and workflow primitives |
 | `ai-docs/spec/documentation-system.md` | Documentation System | Project memory, conventions, specs, tickets, mental models, reference tracing, and doc workflows |
 | `ai-docs/spec/api-documentation-cache.md` | API Documentation Cache | Host-neutral API documentation lookup through cached domain docs and manager sessions |
-| `ai-docs/spec/claude-compatibility.md` | Claude Compatibility | Claude shims, frozen legacy plugin package, CLI fallbacks, installer behavior, and retirement boundaries |
+| `ai-docs/spec/claude-compatibility.md` | Claude Compatibility | Root Claude shim, agents-plugin compatibility metadata, installer behavior, and retired legacy boundaries |
 | `ai-docs/spec/developer-environment-tools.md` | Developer Environment Tools | Personal bootstrap, shell/terminal/editor config, tmux helpers, statusline, and Claude TUIs |
 
 ## Tickets

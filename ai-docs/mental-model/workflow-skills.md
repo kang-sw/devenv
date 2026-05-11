@@ -1,9 +1,8 @@
 ---
 domain: workflow-skills
-description: "Codex lead skills, frozen Claude fallback skills, and workflow prompt orchestration."
+description: "Codex lead skills and workflow prompt orchestration."
 sources:
   - agents-plugin/skills/
-  - claude-plugin/skills/
   - agents-plugin-tool/internal/wsprompt/
 related:
   documentation-system: "write-spec and write-ticket enforce documentation traceability before implementation."
@@ -15,13 +14,11 @@ related:
 ## Entry Points
 
 - `agents-plugin/skills/lead-*` is the Codex-facing workflow surface and uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
-- `claude-plugin/skills/*` is frozen legacy fallback; do not mirror `lead-*` changes there without an explicit compatibility or retirement ticket.
 - `lead-workflow-manual` is the notation and primitive boundary reference for shared skill text. {#260505-workflow-primitive-reference}
 
 ## Module Contracts
 
 - Codex skill directory names and `name:` frontmatter are externally visible invocation strings; renames break user workflows.
-- Claude and Codex skills are parallel, not identical. Porting must preserve host-specific notation while keeping workflow semantics aligned.
 - Codex-facing workflow guidance teaches MCP primitives first; CLI adapter syntax belongs only in compatibility or testing references. {#260507-mcp-centric-workflow-language}
 - Shared workflow examples use `model: light|core|deep` as portable delegate aliases; `tier` is legacy compatibility language and concrete provider model names are reserved for intentional overrides. {#260508-workflow-model-alias-guidance}
 - Skill descriptions are the runtime trigger surface: keep top-level entries strong, derived primitives lighter, and conditional utilities explicit. {#260508-skill-description-attention-policy}
@@ -47,13 +44,11 @@ related:
 - Discuss ready-promotion logic and write-ticket spec-gate must agree that non-`epic`, non-`research` `ready/` entries require spec creation.
 - `lead-edit`, `lead-write-code`, and `lead-implement` each own a different review/doc-pipeline boundary; moving updater dispatch between them can double-run or skip documentation updates.
 - `lead-salvage` routes ticket writes through `lead-write-ticket`; direct ticket graph mutation inside salvage would bypass ticket conventions and commit handling.
-- Bootstrap guide semantics are shared with Claude compatibility output only when a compatibility ticket keeps Claude in scope.
-- Claude compatibility skills are not ordinary edit targets for Codex semantic changes; update them only under explicit compatibility or retirement work.
+- Bootstrap guide semantics stay host-neutral; root `CLAUDE.md` only delegates to `AGENTS.md`.
 
 ## Extension Points & Change Recipes
 
 - **Add a Codex workflow skill**: create `agents-plugin/skills/lead-<name>/SKILL.md`, follow skill-authoring invariants, add OpenAI UI metadata only if needed, and update workflow specs.
-- **Retire a Claude fallback**: migrate any live behavior to `agents-plugin/` or `agents-plugin-tool/`, update installer/docs/tests, then remove the legacy path under an explicit ticket.
 - **Add a delegate prompt to a workflow**: register by embedded stem through `ws/agents.register`, use portable `model` aliases for default selection, and omit `prompts` only for general-purpose delegates. Update runtime prompt bundle metadata and keep reviewer/implementer context boundaries explicit. {#260505-workflow-delegate-prompt-boundaries}
 
 ## Common Mistakes
@@ -63,7 +58,3 @@ related:
 - Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
 - Relaying reviewer file contents instead of file paths, which breaks the write-code review protocol and inflates lead context.
-
-## Technical Debt
-
-- Some Claude compatibility skills still contain richer legacy details than the Codex-first surface. Treat them as frozen fallback, not shared workflow source.

@@ -47,9 +47,9 @@ ws-mcp subquery --root <repo-root> [--deep-research] <question>  # starts async;
 ```
 
 `doctor` is a host-independent smoke check. In this repository it verifies the
-repository root, `ai-docs/`, `agents-plugin/`, `claude-plugin/`, and
-`ai-docs/_index.md`; downstream projects may not have the same plugin source
-layout and should rely on MCP tools for conventions.
+repository root, `ai-docs/`, `agents-plugin/`, and `ai-docs/_index.md`;
+downstream projects may not have the same plugin source layout and should rely
+on MCP tools for conventions.
 
 ## Skill Porting Policy
 
@@ -58,11 +58,10 @@ preserve the source skill's wording and flow where possible, changing only the
 host-specific tool calls, shell interpolations, slash-command syntax, and local
 paths that would break outside Claude.
 
-Do not point shared skill text at repository-local paths such as
-`claude-plugin/infra/spec-conventions.md`. Infra and convention documents are
-distributed with the MCP runtime and read through `ws/infra.read` or
-`ws/convention.read`, so downstream projects can use the same skill text without
-carrying this repository's `claude-plugin/` source tree.
+Do not point shared skill text at repository-local legacy paths. Infra and
+convention documents are distributed with the MCP runtime and read through
+`ws/infra.read` or `ws/convention.read`, so downstream projects can use the same
+skill text without carrying this repository's source tree.
 
 ## Codex Plugin Configuration
 
@@ -663,15 +662,8 @@ Error behavior:
 - Tool-level errors return `isError: true` with text content.
 - Missing or invalid `ai-docs/` is reported as a tool error.
 
-Compatibility fallback:
-
-```bash
-ws-proj-tree
-```
-
-The MCP output does not have to be byte-identical to the legacy helper, but it
-must preserve the same workflow purpose: compact project orientation for
-discussion and ticket planning.
+The MCP output must preserve the workflow purpose: compact project orientation
+for discussion and ticket planning.
 
 ### `ws/convention.read`
 
@@ -746,12 +738,6 @@ Error behavior:
 - Tool-level errors return `isError: true` with text content.
 - Missing document, empty name, and path traversal attempts are tool errors.
 
-Compatibility fallback:
-
-```bash
-ws-print-infra <doc>
-```
-
 ## Candidate Read Surfaces
 
 These names are reserved as likely next additions, but they are not implemented in
@@ -760,7 +746,7 @@ the current baseline.
 | Candidate | Purpose | Current fallback |
 |-----------|---------|------------------|
 | `ws/project_index.read` | Read `ai-docs/_index.md` as project memory. | `cat ai-docs/_index.md` |
-| `ws/ticket_queue.list` | Return active ticket stems grouped by status. | `ws-proj-tree` or direct file listing |
+| `ws/ticket_queue.list` | Return active ticket stems grouped by status. | Direct file listing |
 
 ### `ws/spec_stem.generate`
 

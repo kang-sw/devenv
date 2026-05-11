@@ -16,7 +16,7 @@ Mode: user request
 - Merge surgically; flag unresolved conflicts inline with `<!-- CONFLICT: ... -->`.
 - Every migration item is idempotent; re-running on an already-migrated project produces no changes.
 - Commit each logical unit separately following the repository commit rules.
-- Claude plugin artifacts are out of support for this skill; do not edit `claude-plugin/`.
+- Retired Claude plugin artifacts are out of support for this skill; do not reintroduce `claude-plugin/`.
 
 ## On: invoke
 

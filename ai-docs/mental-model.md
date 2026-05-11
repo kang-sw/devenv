@@ -9,11 +9,11 @@ Cross-domain operational knowledge for modifying the devenv workflow system.
 | plugin-runtime | `mental-model/plugin-runtime.md` | Codex plugin manifests, launcher repair, runtime metadata, release assets |
 | mcp-runtime | `mental-model/mcp-runtime.md` | ws-mcp stdio server, tool registry, CLI mirror, concurrency, profile gates |
 | named-agent-runtime | `mental-model/named-agent-runtime.md` | File-backed agents, async calls, locks, subqueries, Codex backend handling |
-| workflow-skills | `mental-model/workflow-skills.md` | Codex lead skills, frozen Claude fallback skills, workflow prompt orchestration |
+| workflow-skills | `mental-model/workflow-skills.md` | Codex lead skills, workflow prompt orchestration |
 | documentation-system | `mental-model/documentation-system.md` | Project memory, conventions, specs, tickets, mental models, reference tracing |
 | git-workflow-tools | `mental-model/git-workflow-tools.md` | Constrained Git MCP/CLI tools and structured commit behavior |
 | api-documentation-cache | `mental-model/api-documentation-cache.md` | API docs domain routing, manager agents, cache ownership, prompt contracts |
-| claude-compatibility | `mental-model/claude-compatibility.md` | Claude shims, frozen legacy package, CLI fallbacks, installer snapshot, retirement boundaries |
+| claude-compatibility | `mental-model/claude-compatibility.md` | Claude shim, agents-plugin compatibility metadata, installer snapshot, retired legacy boundaries |
 | developer-environment-tools | `mental-model/developer-environment-tools.md` | install.sh, shell/editor config, tmux helpers, Claude TUIs |
 | prompt-bundle | `mental-model/prompt-bundle.md` | Embedded prompt discovery, resolution, delegate orientation, bundle metadata |
 
@@ -55,6 +55,6 @@ Discovery excludes `.done/` and `.dropped/` unless explicitly requested.
 `runtime.capabilities`, `runtime.info`, `agents-plugin/runtime.json`, embedded
 prompt bundle hashes, and MCP tool/CLI surface lists staying synchronized.
 
-**Host split:** Codex-first behavior lives under `agents-plugin/` and
-`agents-plugin-tool/`; `claude-plugin/` is frozen legacy fallback and must not be
-edited as a mirror of shared workflow semantics.
+**Host split:** Active workflow behavior lives under `agents-plugin/` and
+`agents-plugin-tool/`; retired Claude source material belongs only in historical
+references and git history.

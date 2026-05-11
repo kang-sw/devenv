@@ -13,7 +13,7 @@ a ticket replaces them:
 - `ai-docs/_index.md` - project memory, inventory, specs, tickets, queue.
 - `agents-plugin/` - Codex-first plugin distribution candidate.
 - `agents-plugin-tool/` - native MCP/tooling source tree.
-- `claude-plugin/` - frozen legacy Claude fallback; not an active mirror target.
+- Root `CLAUDE.md` - compatibility shim whose body is `@AGENTS.md`.
 
 If shared host-neutral guidance and Claude compatibility guidance conflict,
 follow the more conservative rule and surface the conflict before changing
@@ -56,7 +56,6 @@ Root migration artifacts stay grouped by deliverable:
 
 - `agents-plugin/` - Codex-first plugin distribution candidate.
 - `agents-plugin-tool/` - native tooling and MCP source tree.
-- `claude-plugin/` - frozen legacy Claude fallback.
 
 Do not add loose root-level `cmd/`, `internal/`, `scripts/`, or language module
 files for this migration unless a ticket changes the layout.
@@ -134,9 +133,8 @@ not stage it unless explicitly requested.
    adapter or fallback behavior.
 4. **Shell state is ephemeral.** Shell state does not persist between tool calls;
    values needed later must be captured from output and passed explicitly.
-5. **Frozen Claude fallback.** Do not edit `claude-plugin/` as part of ordinary
-   workflow changes; touch it only for an explicit Claude compatibility or
-   retirement ticket.
+5. **Retired Claude tree.** Do not reintroduce `claude-plugin/`; preserve
+   historical Claude material under `ai-docs/ref/` when needed.
 6. **Named-agent delegation first.** Prefer ws named agents over host-native
    subagents for repo workflow delegation so dogfooding preserves platform
    independence.
@@ -195,13 +193,10 @@ ai-docs/tickets/.dropped/
   Agents/Codex while retiring the legacy Claude tree behind explicit tickets.
 - Research anchor: `260429-research-host-neutral-ws-plugin`. Promote or split it
   before broad structural changes.
-- Existing Claude workflows may still assume `ws-*` on `PATH`; prefer MCP tools
-  for new shared guidance and change CLI fallbacks only under explicit tickets.
-- Key CLI fallbacks: `ws-print-infra`, `ws-list-mental-model`, `ws-proj-tree`,
-  `ws-list-spec-stems`, `ws-generate-spec-stem`, and `ws-spec-build-index`.
-- Claude plugin artifacts under `claude-plugin/` are frozen legacy fallback;
-  do not mirror Codex behavior there unless a ticket explicitly targets Claude
-  compatibility or retirement.
+- Existing historical Claude workflow notes may mention `ws-*` on `PATH`; new
+  shared guidance should use MCP tools and bundled runtime documents.
+- Claude plugin source artifacts were retired from the live tree; do not add a
+  new `claude-plugin/` mirror for Codex behavior.
 
 <!-- Inclusion test: if breaking this rule makes a skill produce wrong results
      AND it applies everywhere, keep it here. Domain-scoped rules belong in

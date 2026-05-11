@@ -17,30 +17,31 @@ bash install.sh --update # skip packages & sudo, refresh symlinks only
 
 ```
 nvim/     Neovim config (LazyVim distro, language support, debugger, etc.)
-claude-plugin/   Claude Code skills, agents, and per-project CLAUDE.md template
+agents-plugin/   ws plugin package for Codex and Claude-compatible plugin installs
+agents-plugin-tool/   native ws MCP runtime and tooling source
 shell/    tmux, WezTerm, starship, zsh dotfiles, helper scripts
 ```
 
 - **Neovim** — LazyVim-based config with LSP, formatter, DAP, and test runner support for Rust, C/C++, Python, Markdown, Typst. VSCode Dark+ colorscheme with semantic token overrides.
-- **Claude Code** — Custom skills (implement, discuss, write-plan, write-ticket, etc.) and subagents (mental-model, dependency docs, etc.) symlinked into `~/.claude/`. Includes a `CLAUDE.template.md` for bootstrapping per-project AI context.
+- **ws plugin** — Codex-first workflow skills plus the native `ws-mcp` runtime. Claude Code compatibility uses the `agents-plugin/` package metadata, not a separate legacy source tree.
 - **tmux** — Vim-aware pane navigation, cross-window jumping, vi copy-mode, platform-aware clipboard.
 - **WezTerm** — JetBrainsMono Nerd Font, tmux-style keybindings, IME auto-switching.
 - **Shell** — Starship prompt, eza, zoxide, delta, bat, fzf, zsh plugins.
 
 ## install.sh
 
-Detects the platform and handles: Homebrew, CLI tools, zsh plugins, dotfile symlinks, and Claude Code skill/agent symlinks. Stale symlinks are cleaned up automatically.
+Detects the platform and handles: Homebrew, CLI tools, zsh plugins, dotfile symlinks, and local ws plugin cache setup. Stale symlinks are cleaned up automatically.
 
-## Claude Code Plugin (`ws`)
+## ws Plugin
 
-The `claude-plugin/` directory is packaged as the `ws` Claude Code plugin. Install it on any machine:
+The active plugin package lives in `agents-plugin/`. Local bootstrap registers a
+Claude-compatible snapshot from that package when Claude Code is available:
 
 ```sh
-claude plugin marketplace add kang-sw/devenv
 claude plugin install ws@kang-sw-devenv
 ```
 
-After `install.sh` runs on the home machine, re-run the above if the plugin is not already present.
+Codex installs use the repository marketplace entry under `.agents/plugins/`.
 
 ## License
 

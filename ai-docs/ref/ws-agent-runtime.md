@@ -1,15 +1,13 @@
 # ws Agent Runtime Reference
 
-Host-neutral contract for sustainable ws agent sessions. This document extracts
-the shared behavior behind the current Claude `ws-named-agent` tools without
-requiring the Claude registry paths, model names, hooks, or session file formats.
+Host-neutral contract for sustainable ws agent sessions. This document preserves
+the durable agent-session behavior without requiring Claude registry paths,
+model names, hooks, or session file formats.
 
 ## Prior Art
 
-The current Claude implementation is documented in `ai-docs/spec/workflow-skills.md`
-under "Agent Orchestration Primitives" and implemented by
-`claude-plugin/bin/ws-named-agent`, `ws-new-named-agent`,
-`ws-call-named-agent`, and `ws-oneshot-agent`.
+Earlier Claude CLI implementations established the durable named-agent pattern;
+the live implementation now belongs to the ws MCP runtime.
 
 The shared contract keeps the durable pattern:
 
@@ -373,7 +371,7 @@ it does not yet provide backend-specific process-group cleanup.
 
 Prompt references are logical names or absolute prompt paths, not
 repository-local plugin source paths. Shared skill text must not point at
-`claude-plugin/infra/prompts/`.
+retired plugin prompt paths.
 
 `agents.register` accepts `prompts` as the canonical prompt chain field.
 `prompt_refs` remains a migration alias for older callers. Bare stems resolve

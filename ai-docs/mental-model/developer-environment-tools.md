@@ -7,21 +7,21 @@ sources:
   - nvim/
   - tools/
 related:
-  claude-compatibility: "install.sh also refreshes the Claude plugin snapshot and marketplace registration."
+  claude-compatibility: "install.sh refreshes the agents-plugin snapshot and marketplace registration."
 ---
 
 # Developer Environment Tools
 
 ## Entry Points
 
-- `install.sh` owns full/update bootstrap, package setup, symlinks, Claude plugin cache install, and local config generation. {#260505-developer-install-update-bootstrap}
+- `install.sh` owns full/update bootstrap, package setup, symlinks, ws plugin cache install, and local config generation. {#260505-developer-install-update-bootstrap}
 - `shell/` owns tmux, WezTerm, statusline, and helper scripts. {#260505-developer-shell-environment}
 - `nvim/` owns LazyVim plugin/config layers. {#260505-neovim-lazyvim-configuration}
 - `tools/claude-watch` and `tools/claude-dash` are Rust TUIs for Claude sessions and worktrees. {#260505-claude-watch-session-viewer} {#260505-claude-dash-worktree-tui}
 
 ## Module Contracts
 
-- `install.sh update` is the refresh path for dotfiles and the Claude plugin snapshot; package installation is mostly full-bootstrap territory. {#260505-developer-claude-plugin-config-install}
+- `install.sh update` is the refresh path for dotfiles and the `agents-plugin/` snapshot; package installation is mostly full-bootstrap territory. {#260505-developer-claude-plugin-config-install}
 - `shell/scripts` is symlinked as `~/.devenv-scripts`; tmux config hardcodes that path for helper execution. {#260505-developer-dotfile-symlink-management}
 - tmux Claude activity is daemon-driven: tmux reads `@claude-indicator`, while `tmux-claude-watcher.sh` writes it. Per-statusline polling defeats the batching contract. {#260505-tmux-claude-activity-watcher}
 - Cross-window tmux/Neovim navigation is opt-in through `TMUX_ENABLE_PANE_NAVIGATION_OVER_WINDOW=1`. {#260505-tmux-helper-scripts}

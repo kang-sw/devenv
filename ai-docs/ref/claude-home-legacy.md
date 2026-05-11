@@ -1,3 +1,16 @@
+---
+title: Legacy Claude Home Instructions
+summary: Historical copy of the former installer-managed ~/.claude/CLAUDE.md instructions retired with the claude-plugin source tree.
+---
+
+# Legacy Claude Home Instructions
+
+This file is historical reference material only. `install.sh` no longer links it
+to `~/.claude/CLAUDE.md`; repository workflow authority lives in `AGENTS.md`,
+with root `CLAUDE.md` kept only as an `@AGENTS.md` compatibility shim.
+
+## Former Content
+
 # Advanced Thinking Strategy
 
 ## Gate
@@ -343,4 +356,3 @@ terseness is load-bearing, not cosmetic — `> [thought(English)]` carries the
 discourse that produced them and stays discursive by design. When a
 rule is ambiguous, apply whichever interpretation more reliably
 produces assumption–observation pairs a later reader could falsify.
-

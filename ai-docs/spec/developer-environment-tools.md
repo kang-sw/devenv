@@ -98,11 +98,11 @@ information.
 
 ## Developer Claude Plugin Config Install {#260505-developer-claude-plugin-config-install}
 
-The installer integrates Claude configuration for this development environment.
-It links Claude home instructions, merges Claude settings, registers hooks and
-environment values, configures teammate mode, snapshots the Claude plugin into
-the local Claude plugin cache, writes marketplace metadata, and installs the
-local ws plugin when the Claude CLI is available.
+The installer integrates local ws plugin configuration for this development
+environment. It merges Claude settings, configures teammate mode, snapshots
+`agents-plugin/` into the local Claude plugin cache when Claude Code is
+available, writes marketplace metadata, and installs the local ws plugin when
+the Claude CLI is available.
 
 ## Claude Watch Session Viewer {#260505-claude-watch-session-viewer}
 

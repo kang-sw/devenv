@@ -1,8 +1,7 @@
 # Ship: ws
 
-The `ws` Codex-first workflow plugin and native `ws-mcp` runtime, published from
-`agents-plugin/` and `agents-plugin-tool/`. The legacy Claude package under
-`claude-plugin/` is frozen fallback and is not part of ordinary ship changes.
+The `ws` workflow plugin and native `ws-mcp` runtime, published from
+`agents-plugin/` and `agents-plugin-tool/`.
 
 ## Version Strategy
 
@@ -15,9 +14,6 @@ Source of truth:
 Version coupling:
 - `agents-plugin/.claude-plugin/plugin.json` mirrors the Codex-first candidate
   version for compatibility metadata inside `agents-plugin/`.
-- `claude-plugin/.claude-plugin/plugin.json` remains frozen legacy metadata and
-  is not bumped by this ship flow unless an explicit compatibility ticket
-  requires it.
 - `agents-plugin/runtime.json.release_tag` must be `v<version>`.
 - `agents-plugin/runtime.json.required_mcp`, all runtime tool ranges, and all
   command ranges must cover `<version>-dev` and stay below the next minor.

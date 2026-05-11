@@ -420,11 +420,8 @@ link "$REPO_DIR/shell/scripts" "$HOME/.devenv-scripts"
 # Neovim config
 link "$REPO_DIR/nvim" "$HOME/.config/nvim"
 
-# Claude Code CLAUDE.md — global instructions
-link "$REPO_DIR/claude-plugin/CLAUDE.home.md" "$HOME/.claude/CLAUDE.md"
-
-# Claude Code blueprint plugin — clean up old per-file symlinks we created
-# (skills/agents/infra were previously symlinked individually; now the plugin handles them).
+# Claude Code legacy cleanup — remove old per-file symlinks we created.
+# Skills/agents/infra were previously symlinked individually; now the plugin handles them.
 # Only removes symlinks whose target is inside REPO_DIR — never touches foreign symlinks.
 info "Cleaning up old blueprint skill/agent/infra symlinks..."
 for dir in "$HOME/.claude/skills" "$HOME/.claude/agents" "$HOME/.claude/infra"; do
@@ -442,14 +439,19 @@ if [ -L "$HOME/.claude/agents" ] && [[ "$(readlink "$HOME/.claude/agents")" == "
   warn "removing old agents folder symlink"
   rm "$HOME/.claude/agents"
 fi
-
-# Claude Code hooks — link hook scripts
-mkdir -p "$HOME/.claude/hooks"
-for hook_file in "$REPO_DIR/claude-plugin/hooks"/*.sh; do
-  [ -f "$hook_file" ] || continue
-  hook_name="$(basename "$hook_file")"
-  link "$hook_file" "$HOME/.claude/hooks/$hook_name"
-done
+if [ -L "$HOME/.claude/CLAUDE.md" ] && [[ "$(readlink "$HOME/.claude/CLAUDE.md")" == "$REPO_DIR"* ]]; then
+  warn "removing retired Claude home instructions symlink"
+  rm "$HOME/.claude/CLAUDE.md"
+fi
+if [ -d "$HOME/.claude/hooks" ]; then
+  for entry in "$HOME/.claude/hooks"/*; do
+    [ -L "$entry" ] || continue
+    if [[ "$(readlink "$entry")" == "$REPO_DIR"* ]]; then
+      rm "$entry"
+      muted "removed retired hook symlink: $entry"
+    fi
+  done
+fi
 
 # ── ws plugin snapshot copy ───────────────────────────────────────────────────
 # Defined early so settings.json and known_marketplaces.json can reference it.
@@ -482,35 +484,32 @@ for key, val in required_env.items():
         env[key] = val
         changed = True
 
-# ── hooks (merge without overwriting user hooks) ─────────────────────────────
-required_hooks = {
-    "TeammateIdle": [
-        {
-            "matcher": "",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash ~/.claude/hooks/teammate-idle-token-tracker.sh",
-                    "timeout": 10,
-                }
-            ],
-        }
-    ],
-}
-
-hooks = settings.setdefault("hooks", {})
-for event, entries in required_hooks.items():
-    existing = hooks.get(event, [])
-    # Check if our hook command is already present
-    our_commands = {h["command"] for e in entries for h in e.get("hooks", [])}
-    already = any(
-        h.get("command") in our_commands
-        for e in existing
-        for h in e.get("hooks", [])
-    )
-    if not already:
-        hooks[event] = existing + entries
+# ── retired Claude hook cleanup ──────────────────────────────────────────────
+legacy_hook_command = "bash ~/.claude/hooks/teammate-idle-token-tracker.sh"
+hooks = settings.get("hooks", {})
+for event in list(hooks):
+    entries = []
+    for entry in hooks.get(event, []):
+        kept_hooks = [
+            hook for hook in entry.get("hooks", [])
+            if hook.get("command") != legacy_hook_command
+        ]
+        if kept_hooks:
+            updated = dict(entry)
+            updated["hooks"] = kept_hooks
+            entries.append(updated)
+        elif entry.get("hooks"):
+            changed = True
+    if entries:
+        if entries != hooks.get(event, []):
+            hooks[event] = entries
+            changed = True
+    else:
+        del hooks[event]
         changed = True
+if not hooks and "hooks" in settings:
+    del settings["hooks"]
+    changed = True
 
 # ── blueprint plugin registration ────────────────────────────────────────────
 required_marketplaces = {
@@ -578,8 +577,8 @@ else:
 PYEOF
 
 # ── ws plugin snapshot copy ───────────────────────────────────────────────────
-# Copy claude-plugin/ to a stable cache; Claude Code reads from the cache, not the live repo.
-# Re-run install.sh update (or claude plugin update ws@kang-sw-devenv) after changes.
+# Copy agents-plugin/ to a stable cache; Claude Code reads from the cache, not the live repo.
+# Re-run install.sh update after changes.
 info "Syncing ws plugin snapshot to $PLUGIN_CACHE/ws/..."
 mkdir -p "$PLUGIN_CACHE/ws"
 # Remove stale subdirs from earlier layouts (claude/, claude-plugin/)

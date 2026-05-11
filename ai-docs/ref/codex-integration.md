@@ -240,9 +240,8 @@ instead of relying on a Claude-style `WS_AGENT_OUTBOX` environment variable.
 
 ## PATH Inheritance
 
-Codex agents inherit the calling process's PATH. Tools like `ws-infra-path`,
-`ws-print-infra`, and other devenv scripts are available inside codex sessions
-without additional configuration.
+Codex agents inherit the calling process's PATH. Shared ws workflow behavior
+should use MCP tools rather than retired `ws-*` helper scripts.
 
 ## Compression Notes
 
