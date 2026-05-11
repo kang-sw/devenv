@@ -110,7 +110,7 @@ func TestAPIAskAsyncImmediateStartReturnsRecoverableJobKeyAndStatus(t *testing.T
 
 	select {
 	case <-fake.ready:
-	case <-time.After(time.Second):
+	case <-time.After(apiAsyncTestTimeout):
 		t.Fatal("async manager work did not start")
 	}
 	close(fake.release)
