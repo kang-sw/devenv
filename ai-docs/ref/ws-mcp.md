@@ -125,6 +125,7 @@ Current launcher inputs:
 | Variable | Purpose |
 |----------|---------|
 | `WS_MCP_RUNTIME_DIR` | Override the runtime binary directory; defaults to plugin-local `.runtime/<os>-<arch>`. |
+| `WS_MCP_RUNTIME_BINARY` | Exact repaired runtime binary path exported by the launcher for async worker recovery. |
 | `WS_MCP_BOOTSTRAP_BINARY` | Copy a prebuilt local binary into the runtime directory. Used by the current dev POC. |
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
@@ -1259,6 +1260,44 @@ Behavior:
 - The tool returns `ws/agents.status` text after the cancellation attempt.
 - After an MCP server restart, cancellation is only as strong as the retained
   local pid. Backend-specific process-group cleanup is not implemented yet.
+
+### `ws/agents.recall`
+
+Recovery-only retry for a registered ws agent after `ws/agents.result` times out
+and `ws/agents.tail` shows no useful activity.
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Repository root. Defaults to the server root."
+    },
+    "name": {
+      "type": "string",
+      "description": "Agent name."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Optional recovery prompt. Defaults to a bounded continuation prompt."
+    }
+  },
+  "required": ["name"]
+}
+```
+
+Behavior:
+
+- Active `queued` or `running` calls are cancelled before retry.
+- Cleanup-needed cancellation aborts the retry and returns manual-cleanup
+  guidance.
+- Otherwise, the tool starts a resumed async call with either the supplied prompt
+  or the default recovery prompt.
+- This is not the normal continuation or redirect path; use `ws/agents.call` for
+  ordinary next turns and `ws/agents.interrupt` for active redirects.
 
 ## Deferred Write-Capable Operations
 

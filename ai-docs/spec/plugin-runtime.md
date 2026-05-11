@@ -64,6 +64,12 @@ from the parent process environment when possible and exports it as
 `WS_MCP_PROJECT_ROOT`, while avoiding the plugin cache directory itself as the
 project root.
 
+The launcher exports `WS_MCP_RUNTIME_BINARY` with the repaired runtime binary
+path before executing `ws-mcp`. Async named-agent workers may use that path, or a
+current plugin-cache launcher discovered from a stale executable path, when the
+parent MCP process was launched from a plugin cache directory that has since
+been replaced.
+
 Compatible runtime startup avoids repeated full surface validation on the hot
 path. Once a cache-local runtime binary and runtime contract have been validated
 together, later launcher invocations can reuse that compatibility result until

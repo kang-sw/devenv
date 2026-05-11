@@ -183,9 +183,12 @@ may optionally wait for completion; successful ephemeral agents are erased after
 their result is consumed.
 
 `agents.status`, `agents.tail`, and `agents.cancel` inspect or control current
-agent work. Normal `agents.tail` is context-bounded. Raw diagnostic inspection is
-available through `agents.debug.tail`, `agents.debug.stdout`,
-`agents.debug.stderr`, `agents.debug.runtime_log`, and `agents.debug.events`.
+agent work. `agents.recall` is a recovery-only retry after a result timeout and
+an inactive diagnostic tail; it cancels active work before starting a resumed
+call and aborts when cancellation requires manual cleanup. Normal `agents.tail`
+is context-bounded. Raw diagnostic inspection is available through
+`agents.debug.tail`, `agents.debug.stdout`, `agents.debug.stderr`,
+`agents.debug.runtime_log`, and `agents.debug.events`.
 
 `agents.interrupt` queues a redirect message for a running agent. `agents.print`
 remains a deprecated compatibility reader, and `agents.erase` removes an agent

@@ -28,6 +28,7 @@ Examples:
 
 - `ws/agents.register`
 - `ws/agents.call`
+- `ws/agents.recall`
 - `ws/agents.interrupt`
 
 `ws:` remains reserved for plugin skill names such as `ws:workflow`.
@@ -207,6 +208,14 @@ Creating/registering an agent with an existing name resets the previous
 task-scoped session when no current call is active. If `current/state.json` is
 `queued` or `running`, registration fails until the call is cancelled, failed,
 completed, or explicitly reset by a future operation that owns process cleanup.
+
+## Recall Recovery
+
+`agents.recall` is a recovery-only convenience around cancel-and-call. Use it
+after a 10-minute `agents.result` timeout when `agents.tail` shows no useful
+activity. It cancels an active current call, refuses to retry when cancellation
+reports `cleanup_needed`, and otherwise starts a resumed call with a recovery
+prompt.
 
 ## Orchestration Authority
 

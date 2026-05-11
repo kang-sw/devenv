@@ -48,6 +48,8 @@ const (
 	backendErrorRunes = 4000
 )
 
+const defaultRecallPrompt = "Continue from the previous session. This is a recovery retry after the lead observed a result timeout and no useful activity in diagnostics; resume the assigned task from the last useful state and report progress."
+
 var tailLargeFieldKeys = map[string]struct{}{
 	"aggregated_output": {},
 	"content":           {},
@@ -93,6 +95,12 @@ type ConditionalPromptRef struct {
 }
 
 type CallOptions struct {
+	Root   string
+	Name   string
+	Prompt string
+}
+
+type RecallOptions struct {
 	Root   string
 	Name   string
 	Prompt string
@@ -166,6 +174,11 @@ type WorkerStarter interface {
 type ProcessAliveFunc func(pid int) (bool, error)
 type ProcessCancelFunc func(pid int) error
 
+type asyncWorkerCommand struct {
+	Path string
+	Args []string
+}
+
 type syncCallOptions struct {
 	Root    string
 	Name    string
@@ -202,7 +215,13 @@ func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("locate ws-mcp executable: %w", err)
 	}
-	cmd := exec.Command(exe, "agents", "run-current", "--root", req.Root, "--name", req.Name)
+	worker, err := asyncWorkerCommandFor(exe)
+	if err != nil {
+		return 0, err
+	}
+	args := append([]string{}, worker.Args...)
+	args = append(args, "agents", "run-current", "--root", req.Root, "--name", req.Name)
+	cmd := exec.Command(worker.Path, args...)
 	configureAsyncCommand(cmd)
 	if req.StdoutPath != "" {
 		stdout, err := os.OpenFile(req.StdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -227,6 +246,77 @@ func (SelfWorkerStarter) StartAsyncCall(req AsyncWorkerRequest) (int, error) {
 		_ = cmd.Wait()
 	}()
 	return cmd.Process.Pid, nil
+}
+
+func asyncWorkerCommandFor(exe string) (asyncWorkerCommand, error) {
+	candidates := []asyncWorkerCommand{}
+	if env := strings.TrimSpace(os.Getenv("WS_MCP_RUNTIME_BINARY")); env != "" {
+		candidates = append(candidates, asyncWorkerCommand{Path: env})
+	}
+	if strings.TrimSpace(exe) != "" {
+		candidates = append(candidates, asyncWorkerCommand{Path: exe})
+	}
+	for _, candidate := range candidates {
+		if regularFileExists(candidate.Path) {
+			return candidate, nil
+		}
+	}
+	if command, ok := cacheLauncherCommand(exe); ok {
+		return command, nil
+	}
+	if exe != "" {
+		if path, err := exec.LookPath(filepath.Base(exe)); err == nil && regularFileExists(path) {
+			return asyncWorkerCommand{Path: path}, nil
+		}
+	}
+	return asyncWorkerCommand{}, fmt.Errorf("locate async worker executable: current executable %q is unavailable and no repaired launcher was found", exe)
+}
+
+func cacheLauncherCommand(exe string) (asyncWorkerCommand, bool) {
+	cacheRoot, ok := codexPluginCacheRoot(exe)
+	if !ok {
+		return asyncWorkerCommand{}, false
+	}
+	pluginDirs, err := filepath.Glob(filepath.Join(cacheRoot, "ws", "*"))
+	if err != nil || len(pluginDirs) == 0 {
+		return asyncWorkerCommand{}, false
+	}
+	sort.Strings(pluginDirs)
+	for i := len(pluginDirs) - 1; i >= 0; i-- {
+		shim := filepath.Join(pluginDirs[i], "bin", "ws-mcp-launcher")
+		if regularFileExists(shim) {
+			return asyncWorkerCommand{Path: shim}, true
+		}
+		py := filepath.Join(pluginDirs[i], "bin", "ws-mcp-launcher.py")
+		if regularFileExists(py) {
+			if python, err := exec.LookPath("python3"); err == nil {
+				return asyncWorkerCommand{Path: python, Args: []string{py}}, true
+			}
+			if python, err := exec.LookPath("python"); err == nil {
+				return asyncWorkerCommand{Path: python, Args: []string{py}}, true
+			}
+		}
+	}
+	return asyncWorkerCommand{}, false
+}
+
+func codexPluginCacheRoot(path string) (string, bool) {
+	clean := filepath.Clean(path)
+	marker := filepath.Join(".codex", "plugins", "cache", "kang-sw-devenv")
+	index := strings.Index(clean, marker)
+	if index < 0 {
+		return "", false
+	}
+	root := clean[:index+len(marker)]
+	if root == "" {
+		return "", false
+	}
+	return root, true
+}
+
+func regularFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 type Agent struct {
@@ -703,6 +793,63 @@ func (m Manager) Call(opts CallOptions) (CallResult, error) {
 		StdoutPath: call.StdoutPath,
 		StderrPath: call.StderrPath,
 	}, nil
+}
+
+func (m Manager) Recall(opts RecallOptions) (string, error) {
+	if strings.TrimSpace(opts.Root) == "" {
+		opts.Root = "."
+	}
+	layout, err := m.layout(opts.Root, opts.Name, false)
+	if err != nil {
+		return "", err
+	}
+	if _, err := readAgent(layout.AgentFile); err != nil {
+		return "", err
+	}
+	cancelled := false
+	if call, err := m.reconcileActiveCall(layout); err == nil && isActiveCallStatus(call.Status) {
+		cancelled = true
+		if _, err := m.Cancel(opts.Root, opts.Name); err != nil {
+			return "", err
+		}
+		cancelledCall, err := readCurrentCall(layout.CurrentStateFile)
+		if err != nil {
+			return "", err
+		}
+		if cancelledCall.CleanupNeeded {
+			status, statusErr := m.Status(opts.Root, opts.Name)
+			if statusErr != nil {
+				return "", statusErr
+			}
+			return status + "recall_recovery_only: true\nrecall_aborted: cleanup_needed\nrecall_guidance: manual cleanup is required before retrying.\n", nil
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	prompt := strings.TrimSpace(opts.Prompt)
+	if prompt == "" {
+		prompt = defaultRecallPrompt
+	}
+	result, err := m.Call(CallOptions{
+		Root:   opts.Root,
+		Name:   opts.Name,
+		Prompt: prompt,
+	})
+	if err != nil {
+		return "", err
+	}
+	if err := appendEvent(layout.EventsFile, m.now(), "recall.started", map[string]any{
+		"cancelled_active_call": cancelled,
+		"pid":                   result.PID,
+	}); err != nil {
+		return "", err
+	}
+	_ = appendRuntimeLog(layout, m.now(), "recall.started", map[string]any{
+		"cancelled_active_call": cancelled,
+		"pid":                   result.PID,
+	})
+	return fmt.Sprintf("recall_recovery_only: true\nrecall_cancelled_active_call: %t\n%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.tail | agents.status | agents.cancel\n", cancelled, result.AgentName, result.Status, result.PID), nil
 }
 
 func (m Manager) Interrupt(opts InterruptOptions) (InterruptResult, error) {

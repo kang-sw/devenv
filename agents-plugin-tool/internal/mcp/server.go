@@ -760,6 +760,19 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		name, _ := params.Arguments["name"].(string)
 		text, err := wsagent.NewManager(wsagent.Options{}).Cancel(root, name)
 		return toolTextResponse(req.ID, text, err)
+	case "agents.recall":
+		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		name, _ := params.Arguments["name"].(string)
+		prompt, _ := params.Arguments["prompt"].(string)
+		text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
+			Root:   root,
+			Name:   name,
+			Prompt: prompt,
+		})
+		return toolTextResponse(req.ID, text, err)
 	case "agents.print":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1516,6 +1529,19 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			"name":        "agents.recall",
+			"description": "Recovery-only retry for a registered ws agent after agents.result times out and agents.tail shows no useful activity; cancels active work before starting a resumed call.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"name":   stringProperty("Agent name."),
+					"prompt": stringProperty("Optional recovery prompt. Defaults to a bounded continuation prompt."),
 				},
 				"required": []string{"name"},
 			},

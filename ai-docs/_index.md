@@ -82,7 +82,8 @@ Implemented MCP tools:
   `ws/git.commit`
 - Agents: `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
   `ws/agents.result`, `ws/agents.status`, `ws/agents.tail`,
-  `ws/agents.cancel`, `ws/agents.print`, `ws/agents.erase`
+  `ws/agents.cancel`, `ws/agents.recall`, `ws/agents.print`,
+  `ws/agents.erase`
 - API docs: `ws/api.list`, `ws/api.ask`, `ws/api.ask_async`,
   `ws/api.status`, `ws/api.result`, `ws/api.cancel`
 

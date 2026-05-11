@@ -831,6 +831,136 @@ func TestCallStartsWorkerAndRejectsBusyAgent(t *testing.T) {
 	}
 }
 
+func TestRecallCancelsActiveCallAndStartsRecoveryRetry(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 4567}
+	var cancelledPID int
+	processAlive := true
+	manager := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+		ProcessCancel: func(pid int) error {
+			cancelledPID = pid
+			processAlive = false
+			return nil
+		},
+		ProcessAlive: func(int) (bool, error) { return processAlive, nil },
+	})
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "long work"}); err != nil {
+		t.Fatal(err)
+	}
+
+	text, err := manager.Recall(RecallOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatalf("Recall returned error: %v", err)
+	}
+	if cancelledPID != 4567 {
+		t.Fatalf("cancelled pid = %d, want 4567", cancelledPID)
+	}
+	if !strings.Contains(text, "recall_recovery_only: true") ||
+		!strings.Contains(text, "recall_cancelled_active_call: true") ||
+		!strings.Contains(text, "impl\trunning\tpid=4567") ||
+		!strings.Contains(text, "follow_up: agents.result --timeout 10m | agents.tail | agents.status | agents.cancel") {
+		t.Fatalf("recall text mismatch:\n%s", text)
+	}
+	if len(starter.requests) != 2 {
+		t.Fatalf("worker starts = %d, want 2", len(starter.requests))
+	}
+	rawPrompt, err := os.ReadFile(starter.requests[1].PromptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rawPrompt), "recovery retry") || !strings.Contains(string(rawPrompt), "result timeout") {
+		t.Fatalf("default recall prompt mismatch:\n%s", rawPrompt)
+	}
+	layout, err := manager.layout(repo, "impl", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call.Status != CallStatusRunning || call.CallSeq != 2 {
+		t.Fatalf("recall current call mismatch: %+v", call)
+	}
+}
+
+func TestRecallAbortsWhenCancelNeedsManualCleanup(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	starter := &fakeWorkerStarter{pid: 1357}
+	manager := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+		ProcessCancel: func(int) error { return nil },
+		ProcessAlive:  func(int) (bool, error) { return true, nil },
+	})
+	if _, _, err := manager.Register(RegisterOptions{Root: repo, Name: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Call(CallOptions{Root: repo, Name: "impl", Prompt: "long work"}); err != nil {
+		t.Fatal(err)
+	}
+
+	text, err := manager.Recall(RecallOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatalf("Recall returned error: %v", err)
+	}
+	if len(starter.requests) != 1 {
+		t.Fatalf("worker starts = %d, want no retry after cleanup-needed cancel", len(starter.requests))
+	}
+	if !strings.Contains(text, "cleanup_needed: true") ||
+		!strings.Contains(text, "recall_aborted: cleanup_needed") {
+		t.Fatalf("cleanup-needed recall text mismatch:\n%s", text)
+	}
+}
+
+func TestAsyncWorkerCommandUsesRuntimeBinaryEnvBeforeStaleExecutable(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "current-ws-mcp")
+	if err := os.WriteFile(current, []byte(""), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "missing-ws-mcp")
+	t.Setenv("WS_MCP_RUNTIME_BINARY", current)
+
+	command, err := asyncWorkerCommandFor(stale)
+	if err != nil {
+		t.Fatalf("asyncWorkerCommandFor returned error: %v", err)
+	}
+	if command.Path != current || len(command.Args) != 0 {
+		t.Fatalf("worker command = %+v, want current runtime binary", command)
+	}
+}
+
+func TestAsyncWorkerCommandFallsBackToCurrentCacheLauncher(t *testing.T) {
+	temp := t.TempDir()
+	cacheRoot := filepath.Join(temp, ".codex", "plugins", "cache", "kang-sw-devenv")
+	launcher := filepath.Join(cacheRoot, "ws", "0.22.4", "bin", "ws-mcp-launcher")
+	if err := os.MkdirAll(filepath.Dir(launcher), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(cacheRoot, "plugin-backup-old", "ws", "0.22.3", ".runtime", "linux-amd64", "ws-mcp")
+
+	command, err := asyncWorkerCommandFor(stale)
+	if err != nil {
+		t.Fatalf("asyncWorkerCommandFor returned error: %v", err)
+	}
+	if command.Path != launcher || len(command.Args) != 0 {
+		t.Fatalf("worker command = %+v, want current cache launcher", command)
+	}
+}
+
 func TestCallRejectsConcurrentSetupWithCurrentCallLock(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")

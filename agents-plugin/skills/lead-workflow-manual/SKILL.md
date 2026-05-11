@@ -61,6 +61,7 @@ timeout_seconds: 600)`. Set `deep_research: true` only for broad tracing.
 `ws/agents.tail`
 `ws/agents.print`
 `ws/agents.cancel`
+`ws/agents.recall`
 `ws/agents.erase`
 
 Register a stable task name with optional prompt stems or a self-contained
@@ -73,8 +74,8 @@ compatibility input. Call the agent for each continuity turn.
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,
 `tail(lines: 3)` for small diagnostics, `print` only as a compatibility output
-alias, `cancel` to stop active work, and `erase` when task-scoped state should
-be removed.
+alias, `cancel` to stop active work, `recall` only after result timeout plus
+inactive tail diagnostics, and `erase` when task-scoped state should be removed.
 
 ### Artifact paths
 
@@ -165,8 +166,9 @@ stop the job.
 
 Treat active-agent listing and broad message-queue semantics as planned contract
 surfaces unless the runtime exposes the exact tool. Basic async cancellation
-exists through `ws/agents.cancel`; check runtime before assuming richer
-interrupt behavior.
+exists through `ws/agents.cancel`; recovery retry exists through
+`ws/agents.recall` only after result timeout plus inactive tail diagnostics.
+Check runtime before assuming richer interrupt behavior.
 
 ## Usage Pattern
 

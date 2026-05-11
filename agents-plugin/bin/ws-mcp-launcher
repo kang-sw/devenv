@@ -372,4 +372,5 @@ note "runtime_dir=$runtime_dir"
 note "cwd=$(pwd -P)"
 note "project_root=${WS_MCP_PROJECT_ROOT:-}"
 
+export WS_MCP_RUNTIME_BINARY="$binary"
 exec "$binary" "$@"

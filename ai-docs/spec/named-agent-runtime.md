@@ -110,6 +110,18 @@ If the stored worker pid for a running call is no longer alive, readiness and
 result paths reconcile the call to a failed terminal state with diagnostic
 information.
 
+## Recall Recovery {#260511-agent-recall-recovery}
+
+`agents.recall` is a recovery-only retry path for a registered agent after
+`agents.result(timeout_seconds: 600)` times out and `agents.tail` shows no useful
+activity. It is not the normal continuation or redirect surface.
+
+When the current call is active, recall first performs the same best-effort
+cancellation as `agents.cancel`. If cancellation reports `cleanup_needed`, recall
+does not start a replacement call and returns manual-cleanup guidance. Otherwise
+it starts a new resumed `agents.call` with either the caller's recovery prompt or
+a default prompt that identifies the retry as timeout-and-no-activity recovery.
+
 ## Codex Session And JSONL Handling {#260505-codex-agent-session-jsonl-handling}
 
 The Codex backend starts sessions with `codex exec --json` and resumes sessions

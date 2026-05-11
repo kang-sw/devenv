@@ -523,6 +523,7 @@ def main() -> int:
     note(f"cwd={Path.cwd()}")
     note(f"project_root={os.environ.get('WS_MCP_PROJECT_ROOT', '')}")
 
+    os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
     args = [str(binary), *sys.argv[1:]]
     if os_name == "windows":
         return subprocess.call(args)

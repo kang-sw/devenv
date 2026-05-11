@@ -176,6 +176,7 @@ func runtimeCapabilityCommandNames() []string {
 		"agents.erase",
 		"agents.interrupt",
 		"agents.print",
+		"agents.recall",
 		"agents.register",
 		"agents.result",
 		"agents.run-current",
@@ -683,6 +684,8 @@ func agents(args []string) {
 		agentsDebug(args[1:])
 	case "cancel":
 		agentsCancel(args[1:])
+	case "recall":
+		agentsRecall(args[1:])
 	case "print":
 		agentsPrint(args[1:])
 	case "erase":
@@ -694,7 +697,7 @@ func agents(args []string) {
 }
 
 func agentsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|run-current|wait|result|status|interrupt|check-inbox|tail|debug|cancel|print|erase>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp agents <register|call|run-current|wait|result|status|interrupt|check-inbox|tail|debug|cancel|recall|print|erase>")
 }
 
 type multiFlag []string
@@ -947,6 +950,28 @@ func agentsCancel(args []string) {
 	fmt.Print(text)
 }
 
+func agentsRecall(args []string) {
+	fs := flag.NewFlagSet("agents recall", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	name := fs.String("name", "", "agent name")
+	promptFile := fs.String("prompt-file", "", "recovery prompt file; use - for stdin")
+	_ = fs.Parse(args)
+
+	prompt, err := optionalPromptFromArgs(fs.Args(), *promptFile)
+	if err != nil {
+		fatal("agents recall", err)
+	}
+	text, err := wsagent.NewManager(wsagent.Options{}).Recall(wsagent.RecallOptions{
+		Root:   defaultRoot(*root),
+		Name:   *name,
+		Prompt: prompt,
+	})
+	if err != nil {
+		fatal("agents recall", err)
+	}
+	fmt.Print(text)
+}
+
 func agentsPrint(args []string) {
 	fs := flag.NewFlagSet("agents print", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
@@ -977,6 +1002,16 @@ func promptFromArgs(args []string, promptFile string) (string, error) {
 	}
 	if len(args) == 0 {
 		return "", fmt.Errorf("prompt is required")
+	}
+	return strings.Join(args, " "), nil
+}
+
+func optionalPromptFromArgs(args []string, promptFile string) (string, error) {
+	if promptFile != "" {
+		return readInputFile(promptFile, "prompt")
+	}
+	if len(args) == 0 {
+		return "", nil
 	}
 	return strings.Join(args, " "), nil
 }

@@ -30,6 +30,7 @@ related:
 - Install and repair paths still clear stale compatibility stamps and run full validation before handoff, then write a fresh stamp only after success. {#260506-launcher-hot-path-compatibility-cache}
 - Version changes are multi-file and should use the bump helper rather than editing manifests manually. {#260505-runtime-version-bump-helper}
 - Runtime install/repair has explicit override env vars: `WS_MCP_RUNTIME_DIR`, release repository/tag/base URL overrides, and bootstrap binary/URL/checksum overrides.
+- The launcher exports `WS_MCP_RUNTIME_BINARY`; named-agent async workers use it to avoid spawning from stale plugin-cache executables after a plugin refresh.
 
 ## Coupling
 
