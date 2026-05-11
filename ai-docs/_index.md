@@ -188,7 +188,6 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
-| `260510-chore-retire-claude-plugin` | ready | Remove the retired Claude plugin source tree and update installer/runtime/docs |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
@@ -197,7 +196,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260510-chore-retire-claude-plugin` - remove retired `claude-plugin/` source after installer/runtime/docs stop depending on it.
 
 ## Session Notes
 
@@ -208,8 +206,7 @@ bootstrap template, active `lead-*` skills, delegate prompts, and
 
 In-flight: none.
 Next: choose between Windows claude-dash verification from the ready queue or
-promoting accepted todo work such as Claude fallback retirement or skeleton
-contract population.
+promoting accepted todo work such as skeleton contract population.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
 `agents-plugin-tool/internal/mcp/server.go`,
