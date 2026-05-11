@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.22.1 - 2026-05-11
+
+### Fixed
+- Start the `agents-plugin` Claude-facing MCP entrypoint through the
+  cross-platform Python launcher so native Windows startup no longer depends on
+  the POSIX shell wrapper.
+
 ## v0.22.0 - 2026-05-10
 
 ### Added
