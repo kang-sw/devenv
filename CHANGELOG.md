@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.22.4 - 2026-05-11
+
+### Changed
+- Retire the live `claude-plugin/` source tree after the Codex-first
+  `agents-plugin/` transition, preserving the old Claude home guidance as
+  historical reference only.
+- Stop installer and doctor flows from requiring the removed legacy Claude tree;
+  installer cleanup now removes old repo-owned Claude home and hook symlinks.
+- Move old spec archive material to `ai-docs/.old/spec/` and document
+  `ai-docs/.old/` as the tracked project archive hidden from default listings.
+
+### Fixed
+- Make `ws/infra.read` serve bundled runtime infra docs so downstream projects
+  without `claude-plugin/` can resolve executor infra such as
+  `executor-wrapup`.
+
 ## v0.22.3 - 2026-05-11
 
 ### Fixed
