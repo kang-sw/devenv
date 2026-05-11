@@ -87,7 +87,8 @@ model aliases rather than workload tiers. {#260508-model-alias-config-tools}
 `project_tree` renders the project document map, spec inventory, and active
 ticket queue for the current repository.
 
-`infra.read` reads repository-local ws infra documents by bare stem or filename.
+`infra.read` reads bundled ws infra documents shipped with the runtime by bare
+stem or filename.
 `convention.read` reads bundled convention documents shipped with the runtime,
 such as ticket, spec, or mental-model conventions. Shared workflow skills use
 these tools instead of hard-coded repository-local convention paths.

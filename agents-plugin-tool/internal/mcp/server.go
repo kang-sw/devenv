@@ -442,12 +442,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		text, err := wsdoc.ProjectTree(root)
 		return toolTextResponse(req.ID, text, err)
 	case "infra.read":
-		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsdoc.ReadInfra(root, name)
+		text, err := wsdoc.ReadInfra(name)
 		return toolTextResponse(req.ID, text, err)
 	case "convention.read":
 		name, _ := params.Arguments["name"].(string)
@@ -1189,13 +1185,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "infra.read",
-			"description": "Read a repository-local ws infra document by bare stem or filename.",
+			"description": "Read a bundled ws infra document by bare stem or filename.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"name": map[string]string{
 						"type":        "string",
-						"description": "Infra document stem or filename, for example ticket-conventions.",
+						"description": "Infra document stem or filename, for example impl-playbook.",
 					},
 				},
 				"required": []string{"name"},

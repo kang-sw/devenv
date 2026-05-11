@@ -59,10 +59,10 @@ host-specific tool calls, shell interpolations, slash-command syntax, and local
 paths that would break outside Claude.
 
 Do not point shared skill text at repository-local paths such as
-`claude-plugin/infra/spec-conventions.md`. Convention documents are distributed
-with the MCP runtime and read through `ws/convention.read`, so downstream
-projects can use the same skill text without carrying this repository's
-`claude-plugin/` source tree.
+`claude-plugin/infra/spec-conventions.md`. Infra and convention documents are
+distributed with the MCP runtime and read through `ws/infra.read` or
+`ws/convention.read`, so downstream projects can use the same skill text without
+carrying this repository's `claude-plugin/` source tree.
 
 ## Codex Plugin Configuration
 
@@ -712,7 +712,7 @@ Current bundled documents:
 
 ### `ws/infra.read`
 
-Read a ws infra convention document by bare stem or filename.
+Read a bundled ws infra document by bare stem or filename.
 
 Input schema:
 
@@ -722,7 +722,7 @@ Input schema:
   "properties": {
     "name": {
       "type": "string",
-      "description": "Infra document stem or filename, for example ticket-conventions."
+      "description": "Infra document stem or filename, for example impl-playbook."
     }
   },
   "required": ["name"]
@@ -738,8 +738,8 @@ Constraints:
 - `name` must be a bare stem or filename.
 - Path separators are rejected.
 - `.md` is appended when absent.
-- The document is read from this repository's local `claude-plugin/infra/` tree.
-  Shared `agents-plugin` skills should use `ws/convention.read` instead.
+- The document is read from the runtime's bundled infra document set.
+- Use `ws/convention.read` for ticket, spec, and mental-model conventions.
 
 Error behavior:
 

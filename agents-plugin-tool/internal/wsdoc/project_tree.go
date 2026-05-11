@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsprompt"
 )
 
 var ticketRefRE = regexp.MustCompile(`\[(\d{6}-[\w-]+/p\d+)\]`)
@@ -34,22 +36,8 @@ func ProjectTree(root string) (string, error) {
 	return strings.TrimRight(b.String(), "\n") + "\n", nil
 }
 
-func ReadInfra(root, name string) (string, error) {
-	if name == "" {
-		return "", fmt.Errorf("infra document name is required")
-	}
-	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
-		return "", fmt.Errorf("infra document name must be a bare filename or stem")
-	}
-	if !strings.HasSuffix(name, ".md") {
-		name += ".md"
-	}
-	path := filepath.Join(root, "claude-plugin", "infra", name)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+func ReadInfra(name string) (string, error) {
+	return wsprompt.ReadInfra(name)
 }
 
 func renderAIDocs(b *strings.Builder, aiDocs string) {

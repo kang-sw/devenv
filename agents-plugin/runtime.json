@@ -7,7 +7,7 @@
   "release_tag": "v0.22.3",
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "83527de1dad84142269222a4e9ec5e7f9bb3afff462ccaf78b3318e8f8f7b131",
+    "content_sha256": "5a05dbf1f613de07e342446882f5dda71a9cce9d41b18cb4a5a433326d5d8037",
     "prompts": [
       "api-doc-cargo-brief",
       "api-doc-manager",
@@ -16,6 +16,7 @@
       "code-review-test",
       "code-reviewer",
       "delegate-orientation",
+      "executor-wrapup",
       "impl-playbook",
       "implementer",
       "mental-model-updater",
@@ -25,7 +26,8 @@
       "project-survey",
       "skeleton-populator",
       "skeleton-reviewer",
-      "sprint-survey"
+      "sprint-survey",
+      "subagent-rules"
     ]
   },
   "tools": {

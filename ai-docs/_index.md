@@ -87,8 +87,8 @@ Implemented MCP tools:
   `ws/api.status`, `ws/api.result`, `ws/api.cancel`
 
 Shared `agents-plugin` skill text uses MCP names, not repo-local
-`claude-plugin/infra/*` paths. Convention text is bundled into the runtime and
-read through `ws/convention.read`.
+`claude-plugin/infra/*` paths. Infra and convention text are bundled into the
+runtime and read through `ws/infra.read` and `ws/convention.read`.
 
 Legacy CLI fallbacks still exist under `claude-plugin/bin/` for Claude
 compatibility only:
@@ -101,6 +101,10 @@ compatibility only:
 `agents-plugin-tool/cmd/ws-mcp` provides stdio MCP, `version`, and `doctor`.
 Runtime binaries are plugin cache-local under
 `agents-plugin/.runtime/<os>-<arch>/ws-mcp[.exe]`.
+Downstream simulation smoke: create a temp Git root with only `ai-docs/_index.md`,
+run `WS_MCP_PROJECT_ROOT=<tmp> go run ./cmd/ws-mcp serve --stdio` from
+`agents-plugin-tool/`, and call `infra.read("executor-wrapup")`; it must succeed
+without any `claude-plugin/` directory.
 
 The Python launcher `agents-plugin/bin/ws-mcp-launcher.py`:
 

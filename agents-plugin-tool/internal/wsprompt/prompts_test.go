@@ -136,6 +136,8 @@ func TestResolveWriteCodePromptSet(t *testing.T) {
 		{"code-review-test", "", "Test Partition"},
 		{"delegate-orientation", "", "You are a delegated worker"},
 		{"impl-playbook", "", "Implementation Playbook"},
+		{"executor-wrapup", "", "Executor Wrapup"},
+		{"subagent-rules", "", "Subagent Dispatch Rules"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.stem, func(t *testing.T) {
@@ -153,6 +155,19 @@ func TestResolveWriteCodePromptSet(t *testing.T) {
 				t.Fatalf("missing %q in prompt:\n%s", tc.want, resolved.Text)
 			}
 		})
+	}
+}
+
+func TestReadInfraUsesEmbeddedDocs(t *testing.T) {
+	got, err := ReadInfra("executor-wrapup.md")
+	if err != nil {
+		t.Fatalf("ReadInfra returned error: %v", err)
+	}
+	if !strings.Contains(got, "Executor Wrapup") {
+		t.Fatalf("ReadInfra returned unexpected text: %q", got[:min(len(got), 80)])
+	}
+	if _, err := ReadInfra("../executor-wrapup"); err == nil {
+		t.Fatal("ReadInfra accepted path traversal")
 	}
 }
 

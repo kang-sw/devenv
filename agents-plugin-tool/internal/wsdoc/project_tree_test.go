@@ -39,18 +39,15 @@ func TestProjectTreeRendersCoreSections(t *testing.T) {
 }
 
 func TestReadInfraRequiresBareName(t *testing.T) {
-	root := t.TempDir()
-	mustWrite(t, root, "claude-plugin/infra/example.md", "hello")
-
-	got, err := ReadInfra(root, "example")
+	got, err := ReadInfra("impl-playbook")
 	if err != nil {
 		t.Fatalf("ReadInfra returned error: %v", err)
 	}
-	if got != "hello" {
+	if !strings.Contains(got, "Implementation Playbook") {
 		t.Fatalf("ReadInfra = %q", got)
 	}
 
-	if _, err := ReadInfra(root, "../example"); err == nil {
+	if _, err := ReadInfra("../impl-playbook"); err == nil {
 		t.Fatal("ReadInfra accepted path traversal")
 	}
 }

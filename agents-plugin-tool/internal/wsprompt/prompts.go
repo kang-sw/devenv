@@ -75,6 +75,23 @@ func Resolve(specs []string, systemPromptText, explicitTier, explicitModel strin
 	return resolved, nil
 }
 
+func ReadInfra(name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("infra document name is required")
+	}
+	if !isBareStem(name) {
+		return "", fmt.Errorf("infra document name must be a bare filename or stem")
+	}
+	stem := strings.TrimSuffix(name, ".md")
+	path := filepath.ToSlash(filepath.Join("infra", stem+".md"))
+	data, err := promptFS.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	body, _ := stripFrontmatter(string(data))
+	return body, nil
+}
+
 func Bundle(sourceCommit string) (BundleInfo, error) {
 	prompts, err := embeddedPromptStems()
 	if err != nil {

@@ -22,7 +22,7 @@ related:
 - Ticket status is directory state: `ready/`, `todo/`, and `idea/` are active; `.done` and `.dropped` are invisible unless discovery calls opt in. {#260505-ticket-document-system}
 - Epic tickets are lightweight milestone boards for scope, child-ticket decomposition, cross-child decisions, and completion criteria; child tickets carry implementation detail and phases. {#260508-lightweight-epic-ticket-conventions}
 - Mental-model hierarchy is path-derived; subdomain callers must load parent `index.md` before child docs. {#260505-mental-model-document-system}
-- Convention docs are embedded in the Go runtime; editing only `claude-plugin/infra/*` leaves `ws/convention.read` stale.
+- Infra and convention docs are embedded in the Go runtime; editing only `claude-plugin/infra/*` leaves `ws/infra.read` and `ws/convention.read` stale.
 - `ai-docs/WORKFLOW.md` is bootstrap-installed explanatory documentation for plugin-less maintenance; wsdoc parsers and MCP tools do not treat it as convention, spec, ticket, or runtime input. {#260506-bootstrap-workflow-guide}
 
 ## Coupling
