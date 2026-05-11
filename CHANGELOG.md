@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.23.0 - 2026-05-11
+
+### Added
+- Add `agents.recall` as a recovery-only MCP and CLI surface for retrying a
+  named agent after a 10-minute result timeout and inactive diagnostics.
+
+### Fixed
+- Recover async named-agent worker startup when the parent MCP process was
+  launched from a plugin-cache runtime path that has since been replaced.
+
 ## v0.22.4 - 2026-05-11
 
 ### Changed
