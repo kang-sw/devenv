@@ -29,13 +29,13 @@ Target: user request
 ### 1. Archive gate
 
 1. List files currently under `ai-docs/spec/`. If the directory is empty or absent, skip to step 2.
-2. Present the file list to the user and state that these files will be moved to `ai-docs/ref/old-spec/YYMMDD/` (today's date) and used as reference only - not as a base to extend. Ask the user to confirm before proceeding.
+2. Present the file list to the user and state that these files will be moved to `ai-docs/.old/spec/YYMMDD/` (today's date) and used as reference only - not as a base to extend. Ask the user to confirm before proceeding.
 3. Wait for explicit user confirmation. Do not proceed on ambiguity.
 4. On confirmation, execute:
    ```text
    YYMMDD=$(date +%y%m%d)
-   mkdir -p ai-docs/ref/old-spec/$YYMMDD
-   git mv ai-docs/spec/* ai-docs/ref/old-spec/$YYMMDD/
+   mkdir -p ai-docs/.old/spec/$YYMMDD
+   git mv ai-docs/spec/* ai-docs/.old/spec/$YYMMDD/
    ```
 
 ### 2. Parallel codebase survey
@@ -65,9 +65,9 @@ Return: domain -> behaviors/features mentioned in tickets.
 Call `ws/subquery(deep_research: true, question: <block below>)`:
 
 ```text
-Survey the archived spec files in ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory).
+Survey the archived spec files in ai-docs/.old/spec/ (most recent YYMMDD subdirectory).
 
-Glob ai-docs/ref/old-spec/**/*.md. Extract title, summary, `##` headings, and
+Glob ai-docs/.old/spec/**/*.md. Extract title, summary, `##` headings, and
 `🚧` status. Return domain names and heading topics as reference candidates
 only; do not treat archived specs as authoritative.
 ```
@@ -151,7 +151,7 @@ Call `ws/subquery(deep_research: true, question: <block below>)`:
 
 ```text
 Survey the archived spec files for the <domain> domain.
-Archived location: ai-docs/ref/old-spec/ (most recent YYMMDD subdirectory)
+Archived location: ai-docs/.old/spec/ (most recent YYMMDD subdirectory)
 Old spec files for this domain: <files from task description, or scan all>
 
 Read relevant archived specs. For each `##` heading, note feature name,

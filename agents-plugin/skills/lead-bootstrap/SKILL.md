@@ -37,10 +37,11 @@ Mode: user request
 3. Create `ai-docs/` structure per the template setup block.
 4. Copy `WORKFLOW.md` to `ai-docs/WORKFLOW.md`.
 5. Add `ai-docs/**/*.local.md` and `ai-docs/.deps/` to `.gitignore` if absent.
-6. Set `<!-- Template Version: vNNNN -->` to the latest version from the template.
-7. Write `CLAUDE.md` with body `@AGENTS.md`.
-8. Commit scaffolding.
-9. Suggest `ws:lead-forge-spec` and `ws:lead-forge-mental-model` if baselines are absent.
+6. Create `ai-docs/.old/` as a tracked project archive when project archive material exists.
+7. Set `<!-- Template Version: vNNNN -->` to the latest version from the template.
+8. Write `CLAUDE.md` with body `@AGENTS.md`.
+9. Commit scaffolding.
+10. Suggest `ws:lead-forge-spec` and `ws:lead-forge-mental-model` if baselines are absent.
 
 ## On: upgrade
 

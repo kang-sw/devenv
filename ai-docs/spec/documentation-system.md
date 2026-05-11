@@ -21,6 +21,18 @@ The index is intentionally bounded: completed and dropped ticket history lives
 in the ticket archive directories and Git history, while the index keeps the
 current queue and context a future session should not have to re-derive.
 
+## Project Old Archive {#260511-project-old-archive}
+
+`ai-docs/.old/` is the tracked project archive for files that are no longer
+active workflow state but are kept as possible future reference. It is a Git
+tracked archive, not a local cache, and its dot-prefixed path keeps archived
+material out of default file listings and search results.
+
+Old reconstructed spec inputs live under `ai-docs/.old/spec/`. Bootstrap
+migrations move legacy archive paths such as `ai-docs/ref/old-spec`,
+`ai-docs/old-spec`, and project-level `ai-docs/old` material into
+`ai-docs/.old/` when upgrading downstream projects.
+
 ## Documentation Convention Access {#260505-documentation-convention-access}
 
 The runtime exposes canonical convention documents through
@@ -123,10 +135,10 @@ preserves intent without requiring immediate spec linkage; optional `todo/`
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}
 
 `lead-forge-spec` rebuilds specs from current evidence. It archives stale specs
-after explicit user confirmation, surveys source, tickets, archived specs, and
-commits, asks the user to confirm domains and behavior classifications, writes
-anchor-keyed entries, verifies duplicate anchors, and associates planned stems
-with active tickets when required.
+under `ai-docs/.old/spec/` after explicit user confirmation, surveys source,
+tickets, archived specs, and commits, asks the user to confirm domains and
+behavior classifications, writes anchor-keyed entries, verifies duplicate
+anchors, and associates planned stems with active tickets when required.
 
 `lead-forge-mental-model` rebuilds mental-model documents from current evidence.
 It surveys operational domains, asks the user to confirm the domain set, writes

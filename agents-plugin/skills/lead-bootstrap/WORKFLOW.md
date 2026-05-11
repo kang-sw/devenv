@@ -30,6 +30,8 @@ template rather than relying on a project-local guide override.
 - `mental-model.md` and `mental-model/` store modification-relevant operational
   knowledge and domain rules.
 - `ref/` stores static references that are not active workflow state.
+- `.old/` stores tracked project archive material kept only as possible future
+  reference and hidden from default listings.
 - `WORKFLOW.md` is this human-readable fallback guide.
 
 ## Tickets

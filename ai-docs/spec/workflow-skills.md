@@ -211,10 +211,11 @@ merges or deletes the sprint branch according to the remaining source changes.
 ## Workflow Reconstruction Skills {#260505-workflow-reconstruction-skills}
 
 `lead-forge-spec` reconstructs spec documents from scratch. It archives stale
-current specs after user confirmation, surveys source, tickets, archived specs,
-and commit history, asks the user to confirm behavioral domains and
-caller-visible classifications, writes anchor-keyed spec entries, verifies the
-index, and associates planned stems with active tickets when required.
+current specs under `ai-docs/.old/spec/` after user confirmation, surveys
+source, tickets, archived specs, and commit history, asks the user to confirm
+behavioral domains and caller-visible classifications, writes anchor-keyed spec
+entries, verifies the index, and associates planned stems with active tickets
+when required.
 
 `lead-forge-mental-model` reconstructs mental-model documents from scratch. It
 surveys operational domains, asks the user to confirm the domain set, writes
@@ -246,6 +247,10 @@ expectations without becoming a project-local override for runtime semantics.
 Bootstrap ensures downstream `.gitignore` covers local workflow state and
 runtime-managed API documentation cache data: `ai-docs/**/*.local.md` and
 `ai-docs/.deps/`. {#260508-bootstrap-api-deps-gitignore}
+
+Bootstrap templates document `ai-docs/.old/` as a tracked project archive and
+migrate legacy old-spec or old-material paths into that hidden archive during
+versioned upgrades.
 
 `lead-ship` follows the repository ship configuration to prepare and execute a
 release. It confirms version, tag, and publish targets before any publishing

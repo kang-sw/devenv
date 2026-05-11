@@ -90,6 +90,7 @@ ai-docs/
   mental-model.md    - overall mental-model index
   mental-model/      - contracts, coupling, architecture narrative
   spec/              - external-perspective specs
+  .old/              - tracked project archive hidden from default listings
   ref/               - static reference material
   WORKFLOW.md        - plugin-less maintenance guide
   tickets/<status>/  - idea/ todo/ ready/ .done/ .dropped/
@@ -161,6 +162,7 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `ws:lead-discuss`.
 - v0036: If `ai-docs/WORKFLOW.md` is absent, create it from the bootstrap workflow guide source. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws runtime or MCP parser behavior.
 - v0037: Add `ai-docs/.deps/` to `.gitignore` if absent; API documentation cache contents are runtime-managed local data, not project memory.
+- v0038: Create `ai-docs/.old/` as the tracked project archive for files kept only as possible future reference and hidden from default listings. Move legacy spec archives with `git mv`: `ai-docs/ref/old-spec` or `ai-docs/old-spec` -> `ai-docs/.old/spec`; move `ai-docs/old` -> `ai-docs/.old/misc` when present and not already project-specific.
 -->
 
-<!-- Template Version: v0037 -->
+<!-- Template Version: v0038 -->

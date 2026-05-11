@@ -111,9 +111,9 @@ func TestClientDiffNameOnlyIncludesPathFilteredUntrackedFiles(t *testing.T) {
 func TestClientDiffNameOnlyIncludesSpecificFileInsideUntrackedDirectory(t *testing.T) {
 	runner := &sequenceRunner{outs: [][]byte{
 		{},
-		[]byte("ai-docs/ref/old-spec/260505/agent-system.md\x00"),
+		[]byte("ai-docs/.old/spec/260505/agent-system.md\x00"),
 	}}
-	path := "ai-docs/ref/old-spec/260505/agent-system.md"
+	path := "ai-docs/.old/spec/260505/agent-system.md"
 	result, err := (Client{Runner: runner}).Diff(context.Background(), "/repo", DiffOptions{Mode: DiffModeNameOnly, Paths: []string{path}})
 	if err != nil {
 		t.Fatal(err)

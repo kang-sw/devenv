@@ -42,6 +42,8 @@ history.
   refresh before installed-cache verification.
 - `claude plugin validate agents-plugin` passes; runtime Claude invocation of
   `agents-plugin` remains compatibility behavior, not a separate source tree.
+- `ai-docs/.old/` is the Git-tracked project archive for inactive reference
+  material that should not appear in default file listings.
 
 ## Read Before Editing
 

@@ -18,6 +18,8 @@ related:
 ## Module Contracts
 
 - Spec identity is body-anchor based. Tools scan `{#YYMMDD-slug}` anchors under `ai-docs/spec/`, not frontmatter. {#260505-spec-document-system}
+- `ai-docs/.old/` is the Git-tracked project archive for inactive reference material; dot-prefix keeps it out of default listings. {#260511-project-old-archive}
+- Reconstructed old spec inputs live under `ai-docs/.old/spec/`, not `ai-docs/ref/old-spec/`. {#260511-project-old-archive}
 - `ws/spec_index.verify` currently verifies duplicate anchors; it does not rebuild indexes or validate stale behavior.
 - Ticket status is directory state: `ready/`, `todo/`, and `idea/` are active; `.done` and `.dropped` are invisible unless discovery calls opt in. {#260505-ticket-document-system}
 - Epic tickets are lightweight milestone boards for scope, child-ticket decomposition, cross-child decisions, and completion criteria; child tickets carry implementation detail and phases. {#260508-lightweight-epic-ticket-conventions}
