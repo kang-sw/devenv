@@ -29,6 +29,10 @@ the plugin-local Python launcher:
 python3 ./bin/ws-mcp-launcher.py serve --stdio
 ```
 
+The Claude-facing compatibility manifest inside `agents-plugin/` uses the same
+Python launcher instead of the POSIX shell wrapper so native Windows startup
+does not depend on `/bin/sh`.
+
 The MCP server runs with the plugin directory as its configured working
 directory. The bundled configuration gives the server a 30-second startup
 timeout and a 600-second per-tool timeout so long-running ws orchestration calls

@@ -15,6 +15,7 @@ related:
 
 - `agents-plugin/.codex-plugin/plugin.json` is the Codex-visible plugin manifest and points at the skill bundle and MCP config. {#260505-codex-plugin-manifest-skill-bundle}
 - `agents-plugin/.mcp.json` is the plugin-managed MCP startup contract; `cwd: "."` makes `./bin/ws-mcp-launcher.py` resolve relative to the installed plugin cache. {#260505-plugin-local-mcp-server-config}
+- `agents-plugin/.claude-plugin/plugin.json` is a Claude-facing compatibility manifest for the Codex-first candidate and should start the same Python launcher path, not the POSIX shell wrapper, so native Windows does not require `/bin/sh`. {#260505-plugin-local-mcp-server-config}
 - `agents-plugin/bin/ws-mcp-launcher.py` owns runtime lookup, compatibility checks, release download, checksum verification, local dev runtime repair, and final handoff. {#260505-runtime-launcher-repair-project-root}
 - `agents-plugin/runtime.json` is active compatibility data, not descriptive metadata. {#260505-runtime-contract-metadata}
 

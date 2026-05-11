@@ -9,8 +9,9 @@
   "license": "MIT",
   "mcpServers": {
     "ws": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/ws-mcp-launcher",
+      "command": "python3",
       "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/ws-mcp-launcher.py",
         "serve",
         "--stdio"
       ],
