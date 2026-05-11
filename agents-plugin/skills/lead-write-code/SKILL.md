@@ -68,11 +68,9 @@ Commit the plan file before Prepare.
 3. Include skeleton test paths only when skeleton references exist.
 4. Register implementer:
    `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
-5. Register selected reviewers:
-   `ws/agents.register(name: "<reviewer-name>", prompts: ["code-reviewer", "<partition-prompt>"])`.
-6. Generate review paths:
+5. Generate review paths:
    `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
-7. Store `<correctness-path>`, `<fit-path>`, `<test-path>`.
+6. Store `<correctness-path>`, `<fit-path>`, `<test-path>`.
 
 ### 5. Spawn Implementer
 
@@ -113,6 +111,14 @@ Record skipped partitions with one-line rationale.
 Prepare 2-4 review focus bullets for each selected partition.
 
 #### 6b. Spawn Reviewers
+
+For each selected partition, call `ws/agents.register(name: <Reviewer name>, prompts: <Prompts>)` from the table:
+
+| Partition | Reviewer name | Prompts | Output path |
+|-----------|---------------|---------|-------------|
+| Correctness | `reviewer-correctness` | `["code-reviewer", "code-review-correctness"]` | `<correctness-path>` |
+| Fit | `reviewer-fit` | `["code-reviewer", "code-review-fit"]` | `<fit-path>` |
+| Test | `reviewer-test` | `["code-reviewer", "code-review-test"]` | `<test-path>` |
 
 Call selected reviewers in parallel with `ws/agents.call`.
 Read `ws/agents.result(name: "<reviewer-name>", timeout_seconds: 600)` only if needed.
