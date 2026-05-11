@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.22.2 - 2026-05-11
+
+### Fixed
+- Clarify `lead-write-code` reviewer partition registration by naming the
+  reviewer agents and exact embedded prompt stems for correctness, fit, and
+  test review partitions.
+
 ## v0.22.1 - 2026-05-11
 
 ### Fixed
