@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.22.3 - 2026-05-11
+
+### Fixed
+- Relax the async API manager-start test wait so Windows smoke runs are not
+  blocked by scheduler delay before the background manager goroutine reaches
+  fake work.
+
 ## v0.22.2 - 2026-05-11
 
 ### Fixed
