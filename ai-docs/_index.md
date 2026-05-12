@@ -160,7 +160,7 @@ lead-write-ticket
 ## Canonical Flows
 
 ```text
-Full ceremony:  discuss -> proceed -> write-skeleton? -> implement -> (write-code | edit)
+Full ceremony:  discuss -> proceed -> implement -> (write-skeleton? -> write-code | edit)
 Direct:         implement <description>
 Auto-route:     proceed <ticket-path>
 Sprint:         sprint -> write-code | edit per task -> wrap-up
