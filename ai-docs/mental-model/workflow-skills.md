@@ -25,8 +25,8 @@ related:
 - `lead-add-rule` requires explicit persistence intent such as save, remember, persist, or add a durable rule; prescriptive task wording alone must not trigger it. {#260508-add-rule-explicit-persistence-trigger}
 - `lead-proceed` routes through prefix stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
 - `lead-proceed` must stop on epic ticket paths because epics are board artifacts; implementation routes through child tickets. {#260505-proceed-routing-pipeline}
-- `lead-proceed` passes skeleton decisions as directives to `lead-implement`; it does not invoke code-editing skeleton work directly. {#260512-skeleton-inside-implement-branch}
-- `lead-implement` owns skeleton execution inside the implementation branch lifecycle before edit/write-code runs. {#260512-skeleton-inside-implement-branch}
+- `lead-proceed` routes implementation-ready work to `lead-implement`; it does not decide skeleton need or invoke code-editing skeleton work directly. {#260512-skeleton-inside-implement-branch}
+- `lead-implement` owns skeleton decisions and execution inside the implementation branch lifecycle before edit/write-code runs. {#260512-skeleton-inside-implement-branch}
 - `lead-write-ticket` runs the spec gate only when non-`epic`, non-`research` work enters `ready/`; `todo/` is accepted backlog with optional spec recovery hints. {#260505-planning-workflow-skills}
 - `lead-write-ticket` keeps epics at milestone-board scope and routes detailed discussion, implementation phases, and slice-specific decisions into child tickets. {#260508-write-ticket-epic-child-boundary}
 - `lead-discuss` uses the user's active conversation language for discussion responses. {#260505-planning-workflow-skills}

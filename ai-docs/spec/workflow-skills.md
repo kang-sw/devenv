@@ -156,10 +156,10 @@ then stop and report if still non-clean. The lead makes contract amendments,
 verifies build or syntax checks, commits the final skeleton, and links generated
 skeleton artifacts to the ticket. {#260510-skeleton-contract-populator-flow}
 
-`lead-implement` owns skeleton execution inside the implementation branch
-lifecycle. `lead-proceed` only decides whether skeleton work is needed and passes
-that directive to `lead-implement`; it does not invoke `lead-write-skeleton`
-before implementation. {#260512-skeleton-inside-implement-branch}
+`lead-implement` owns skeleton decisions and execution inside the implementation
+branch lifecycle. `lead-proceed` only routes implementation-ready targets to
+`lead-implement`; it does not decide skeleton need or invoke
+`lead-write-skeleton` before implementation. {#260512-skeleton-inside-implement-branch}
 
 `lead-write-skeleton` preserves both authoring boundaries as commits on the
 current branch: a lead-authored skeleton draft commit, followed by a final
@@ -212,8 +212,8 @@ Existing `todo/` ticket paths route through `lead-discuss` for `todo/` ->
 `ready/` promotion before implementation. Actionable inline targets go through
 `lead-write-ticket`; exploratory targets stop and suggest `lead-discuss`.
 Implementation always routes through `lead-implement`. When a separate contract
-checkpoint is needed before implementation, `lead-proceed` passes a skeleton
-directive to `lead-implement` instead of invoking skeleton writing directly.
+checkpoint may be needed before implementation, `lead-implement` decides whether
+to run `lead-write-skeleton` before edit/write-code.
 
 ## Sprint Session Container {#260505-sprint-session-container}
 

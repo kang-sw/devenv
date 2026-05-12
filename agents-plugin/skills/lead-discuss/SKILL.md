@@ -51,7 +51,7 @@ Call `ws/project_tree()` to load the current project map.
 2. Ask the highest-level unresolved question first; descend only after the parent branch is decided.
 3. Ask one question per turn unless batching clearly reduces user burden.
 4. When the user delegates remaining detail, close that child branch with an autonomous decision and return to the nearest unresolved parent branch.
-5. Stop interviewing when the next useful action is a proposal, spec direction, ticket edit, skeleton directive, or implementation route.
+5. Stop interviewing when the next useful action is a proposal, spec direction, ticket edit, or implementation route.
 
 ## On: Ticket Status Transition
 
@@ -88,9 +88,9 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 Discussion outputs feed downstream skills:
 - Approach direction -> `ws:lead-write-spec` (always next; its judge handles no-op)
 - Scope, phases, acceptance criteria -> `ws:lead-write-ticket`
-- Type shapes, module boundaries, public API -> `ws:lead-write-skeleton`
+- Type shapes, module boundaries, public API -> implementation notes for `ws:lead-implement`
 
-Canonical chain: `ws:lead-discuss` -> `ws:lead-write-spec` -> `ws:lead-write-ticket` -> `ws:lead-proceed` -> `ws:lead-write-skeleton`? -> `ws:lead-edit` | `ws:lead-write-code`.
+Canonical chain: `ws:lead-discuss` -> `ws:lead-write-spec` -> `ws:lead-write-ticket` -> `ws:lead-proceed` -> `ws:lead-implement`.
 Frame conclusions as directives the downstream consumer can execute.
 
 ## Judgments

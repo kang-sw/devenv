@@ -18,9 +18,10 @@ Target: user request
 
 ### 1. Assess
 
-1. Parse target: ticket path or inline description plus optional skeleton directive from `ws:lead-proceed`.
+1. Parse target: ticket path or inline description.
 2. If ticket-driven: read ticket; extract scope, stem, artifacts, and existing skeletons.
-3. Apply `judge: execution-mode`.
+3. Apply `judge: needs-skeleton`.
+4. Apply `judge: execution-mode`.
 
 ### 2. Prepare
 
@@ -28,7 +29,7 @@ Target: user request
 2. Create and maintain this task list:
 
 ```text
-[ ] Resolve skeleton directive - invoke ws:lead-write-skeleton on the implementation branch when required
+[ ] Resolve skeleton need - invoke ws:lead-write-skeleton on the implementation branch when required
 [ ] Execute - invoke ws:lead-edit or ws:lead-write-code; capture commit range
 [ ] Doc pre-pass - update-spec then mental-model-updater; commit each
 [ ] Report to user - wait for approval; loop on tweaks
@@ -41,8 +42,8 @@ Target: user request
 
 1. Record `<implementation-start>` before creating or editing source.
 2. Delegated: create `implement/<scope>` before any source edit.
-3. If skeleton directive is required:
-   a. Invoke `ws:lead-write-skeleton` with the target and directive reason.
+3. If skeleton is required:
+   a. Invoke `ws:lead-write-skeleton` with the target and skeleton reason.
    b. Capture the final skeleton commit hash from its completion output.
    c. Continue implementation on the same branch.
 4. Execute the selected implementation mode:
@@ -104,8 +105,16 @@ Update ticket status when ticket-driven.
 | Decision | When |
 |----------|------|
 | Direct edit -> `ws:lead-edit` | Single file, internal-only, no callers affected, no new public symbols, no new test files, and no explicit delegation request |
-| Delegated -> `ws:lead-write-code` | Skeleton directive is required |
+| Delegated -> `ws:lead-write-code` | Skeleton is required |
 | Delegated -> `ws:lead-write-code` | Any direct-edit condition is unmet |
+
+### judge: needs-skeleton
+
+| Decision | When |
+|----------|------|
+| Skip | Ticket `skeletons:` already records a skeleton for this phase or scope |
+| Skip | Small isolated change: single file, no new public contracts |
+| Required | Public interface, cross-module boundary, or new type contract changes |
 
 ## Doctrine
 
