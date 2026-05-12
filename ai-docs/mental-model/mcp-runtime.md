@@ -12,6 +12,12 @@ related:
 
 # MCP Runtime
 
+## Domain Rules
+
+- MCP tool output is primarily consumed by LLMs: default responses should be
+  compact, readable text unless callers need stable machine parsing, protocol
+  metadata, or compatibility-preserving JSON.
+
 ## Entry Points
 
 - `cmd/ws-mcp/main.go` is the binary entry point for `serve --stdio`, `runtime info`, CLI mirrors, and local diagnostics. {#260505-runtime-cli-entrypoints}
