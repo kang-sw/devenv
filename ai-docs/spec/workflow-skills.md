@@ -156,6 +156,18 @@ then stop and report if still non-clean. The lead makes contract amendments,
 verifies build or syntax checks, commits, and links generated skeleton artifacts
 to the ticket. {#260510-skeleton-contract-populator-flow}
 
+> [!note] Planned 🚧
+> `lead-implement` will own skeleton execution inside the implementation branch
+> lifecycle. `lead-proceed` will only decide whether skeleton work is needed and
+> pass that directive to `lead-implement`; it will no longer invoke
+> `lead-write-skeleton` before implementation. {#260512-skeleton-inside-implement-branch}
+>
+> `lead-write-skeleton` will preserve both authoring boundaries as commits on
+> the current branch: a lead-authored skeleton draft commit, followed by a final
+> populated skeleton commit after populator and reviewer checks. Ticket
+> `skeletons:` frontmatter records only the final skeleton commit hash, not the
+> draft checkpoint. {#260512-skeleton-draft-and-final-commits}
+
 ## Implementation Workflow Skills {#260505-implementation-workflow-skills}
 
 Implementation skills execute code changes and close the documentation loop.
