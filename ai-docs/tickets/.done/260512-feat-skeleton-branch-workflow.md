@@ -6,6 +6,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - git-workflow-tools
+completed: 2026-05-12
 ---
 
 # Skeleton branch workflow
@@ -61,3 +62,19 @@ Success criteria:
 - `lead-write-skeleton` records draft and final commit boundaries without using
   amend.
 - Specs no longer mark the new behavior as planned after implementation.
+
+### Result (a2ce656) - 2026-05-12
+
+Moved skeleton workflow ownership under `lead-implement`. `lead-proceed` now
+routes only implementation-ready targets, while `lead-implement` owns skeleton
+need resolution, branch lifecycle, optional skeleton execution, implementation,
+documentation updates, report, and merge handling.
+
+`lead-write-skeleton` now documents separate lead draft and final populated
+skeleton commits, records only the final skeleton hash in ticket `skeletons:`,
+and routes standalone callers back to `lead-implement` instead of directly to
+edit/write-code.
+
+The discussion and ticket authoring guidance no longer expose
+`lead-write-skeleton` as a user-facing pre-implementation chain stage. Specs and
+the workflow-skills mental model were updated with the implemented behavior.

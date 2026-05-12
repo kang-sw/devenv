@@ -203,7 +203,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260512-feat-skeleton-branch-workflow` - move skeleton execution under implement branch ownership and split draft/final skeleton commits.
 
 ## Session Notes
 
