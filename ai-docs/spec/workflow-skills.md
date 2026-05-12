@@ -131,11 +131,11 @@ work moves into child tickets. The skill routes all ticket creation, edits,
 drops, and status moves through `lead-write-ticket`; it does not perform source
 edits. {#260510-salvage-recovery-workflow-skill}
 
-`lead-verify-discussion` gives users an explicit lightweight verification
-checkpoint during discussion. It restates the current assumptions or structure
-choices, uses scoped `ws/subquery` calls to check premise quality and, when the
-topic touches implementation shape, code hygiene or maintainability fit, then
-returns a short stance: continue, adjust, or stop and clarify.
+`lead-verify-discussion` gives users an explicit lightweight verification and
+validation checkpoint during discussion. It checks the current assumptions or
+structure choices through scoped `ws/subquery` calls, synthesizes corrected
+assumptions, observations, and code-hygiene findings, then steers the discussion
+toward the best-supported direction.
 {#260512-discussion-verification-skill}
 
 `lead-write-skeleton` optionally locks high-risk caller-visible contracts before
