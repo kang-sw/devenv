@@ -49,6 +49,7 @@ const (
 )
 
 const defaultRecallPrompt = "Continue from the previous session. This is a recovery retry after the lead observed a result timeout and no useful activity in diagnostics; resume the assigned task from the last useful state and report progress."
+const cancelRecoveryTip = "If this was cancelled because the agent did not respond and no result is available, call the same registered agent again with a recovery prompt; ws will resume the stored session when the backend supports it."
 
 var tailLargeFieldKeys = map[string]struct{}{
 	"aggregated_output": {},
@@ -1328,6 +1329,9 @@ func (m Manager) Status(root, name string) (string, error) {
 		fmt.Fprintf(&b, "cancel_pid: %d\n", call.CancelPID)
 	}
 	fmt.Fprintf(&b, "cleanup_needed: %t\n", call.CleanupNeeded)
+	if call.Status == CallStatusCancelled && !call.CleanupNeeded {
+		fmt.Fprintf(&b, "cancel_recovery_tip: %s\n", cancelRecoveryTip)
+	}
 	if call.StdoutPath != "" {
 		fmt.Fprintf(&b, "stdout_path: %s\n", call.StdoutPath)
 	}
@@ -2115,7 +2119,7 @@ func (m Manager) processAliveAfterCancel(pid int) (bool, error) {
 func followUpForCall(call CurrentCall) string {
 	switch call.Status {
 	case CallStatusQueued, CallStatusRunning:
-		return "agents.wait --timeout 10m | agents.status | agents.cancel | agents.tail"
+		return "agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel"
 	case CallStatusCompleted:
 		return "agents.result | agents.tail"
 	case CallStatusFailed:
@@ -2124,7 +2128,7 @@ func followUpForCall(call CurrentCall) string {
 		if call.CleanupNeeded {
 			return "inspect runtime log | manual cleanup | agents.erase"
 		}
-		return "agents.tail | agents.erase"
+		return "agents.call | agents.tail | agents.erase"
 	default:
 		return "agents.status"
 	}

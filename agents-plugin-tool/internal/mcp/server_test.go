@@ -93,10 +93,13 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
 	}
-	for _, tool := range []string{"agents.wait", "agents.result", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "agents.recall", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
+	for _, tool := range []string{"agents.wait", "agents.result", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
+	}
+	if strings.Contains(byID["2"], "agents.recall") {
+		t.Fatalf("tools/list should not advertise agents.recall: %s", byID["2"])
 	}
 	if !strings.Contains(byID["3"], "tickets:") {
 		t.Fatalf("project_tree response missing tickets: %s", byID["3"])

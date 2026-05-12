@@ -109,13 +109,10 @@ messages to the next resumed backend call.
 
 `agents.cancel` performs best-effort local process cancellation for the stored
 worker pid and marks the current call cancelled. Cancellation is the urgent
-termination path; normal redirects should use `agents.interrupt`.
-
-> [!note] Planned 🚧
-> Cancellation output will explicitly tell callers that when cancellation was
-> used because an agent did not respond and no result is available, they can
-> call the same registered agent again with a recovery prompt to attempt
-> session resume.
+termination path; normal redirects should use `agents.interrupt`. When
+cancellation followed an agent no-response timeout and no result is available,
+cancelled status output tells callers to retry `agents.call` on the same
+registered agent with a recovery prompt so stored-session backends can resume.
 
 After an MCP process restart, disk state remains sufficient for `agents.wait`,
 `agents.result`, `agents.status`, `agents.tail`, and compatibility output reads.
@@ -134,11 +131,9 @@ cancellation as `agents.cancel`. If cancellation reports `cleanup_needed`, recal
 does not start a replacement call and returns manual-cleanup guidance. Otherwise
 it starts a new resumed `agents.call` with either the caller's recovery prompt or
 a default prompt that identifies the retry as timeout-and-no-activity recovery.
-
-> [!note] Planned 🚧
-> The recall implementation and CLI mirror may remain available for manual
-> recovery, but MCP tool discovery and workflow guidance will stop advertising
-> `agents.recall` as a normal model-visible recovery option.
+This compatibility implementation is not advertised as the normal model-visible
+MCP recovery surface; ordinary recovery guidance points callers to `agents.call`
+on the same registered agent.
 
 ## Codex Session And JSONL Handling {#260505-codex-agent-session-jsonl-handling}
 
@@ -192,9 +187,8 @@ defaults. Unknown harnesses use a deterministic configured default.
 Named-agent registrations with `backend: gemini` execute through the same agent
 lifecycle as Codex- and Claude-backed agents. Callers use
 `agents.register`, `agents.call`, `agents.wait`, `agents.result`,
-`agents.status`, `agents.tail`, `agents.interrupt`, `agents.cancel`, and
-`agents.recall` without switching to a Gemini-specific registry, queue, status,
-or result surface.
+`agents.status`, `agents.tail`, `agents.interrupt`, and `agents.cancel` without
+switching to a Gemini-specific registry, queue, status, or result surface.
 
 The Gemini adapter invokes Gemini CLI in headless `stream-json` mode, delivers
 prompts through stdin, passes concrete models when configured, and resumes with

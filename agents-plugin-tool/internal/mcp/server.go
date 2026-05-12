@@ -657,7 +657,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
+		return toolTextResponse(req.ID, fmt.Sprintf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", result.AgentName, result.Status, result.PID), nil)
 	case "agents.wait":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1529,19 +1529,6 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
-				},
-				"required": []string{"name"},
-			},
-		},
-		{
-			"name":        "agents.recall",
-			"description": "Recovery-only retry for a registered ws agent after agents.result times out and agents.tail shows no useful activity; cancels active work before starting a resumed call.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
-					"name":   stringProperty("Agent name."),
-					"prompt": stringProperty("Optional recovery prompt. Defaults to a bounded continuation prompt."),
 				},
 				"required": []string{"name"},
 			},

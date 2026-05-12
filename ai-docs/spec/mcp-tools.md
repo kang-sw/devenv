@@ -185,24 +185,19 @@ may optionally wait for completion; successful ephemeral agents are erased after
 their result is consumed.
 
 `agents.status`, `agents.tail`, and `agents.cancel` inspect or control current
-agent work. `agents.recall` is a recovery-only retry after a result timeout and
-an inactive diagnostic tail; it cancels active work before starting a resumed
-call and aborts when cancellation requires manual cleanup. Normal `agents.tail`
-is context-bounded. Raw diagnostic inspection is available through
-`agents.debug.tail`, `agents.debug.stdout`, `agents.debug.stderr`,
+agent work. Cancelled status text points callers toward retrying `agents.call`
+on the same registered agent when no result is available, so timeout-driven
+cancellation does not look like a final erase-only state.
+{#260512-agent-cancel-resume-guidance}
+
+`agents.recall` is hidden from the advertised MCP tool surface and workflow
+guidance. The implementation may remain as a manual or compatibility path, but
+ordinary model-visible recovery uses `agents.call` on the same registered agent.
+{#260512-agent-recall-hidden-surface}
+
+Normal `agents.tail` is context-bounded. Raw diagnostic inspection is available
+through `agents.debug.tail`, `agents.debug.stdout`, `agents.debug.stderr`,
 `agents.debug.runtime_log`, and `agents.debug.events`.
-
-> [!note] Planned 🚧
-> `agents.cancel` responses and cancelled-agent follow-up guidance will point
-> callers toward retrying `agents.call` on the same registered agent when no
-> result is available, so timeout-driven cancellation does not look like a final
-> erase-only state. {#260512-agent-cancel-resume-guidance}
-
-> [!note] Planned 🚧
-> `agents.recall` will be hidden from the advertised MCP tool surface and
-> workflow guidance. The implementation may remain as a manual or compatibility
-> path, but ordinary model-visible recovery should use `agents.call` on the same
-> registered agent. {#260512-agent-recall-hidden-surface}
 
 `agents.interrupt` queues a redirect message for a running agent. `agents.print`
 remains a deprecated compatibility reader, and `agents.erase` removes an agent

@@ -13,7 +13,7 @@ related:
 
 ## Entry Points
 
-- `wsagent.Manager` owns registration, async calls, wait/result/status/tail/cancel/recall, inbox delivery, and erasure. {#260505-named-agent-registry-state-layout} {#260511-agent-recall-recovery}
+- `wsagent.Manager` owns registration, async calls, wait/result/status/tail/cancel/recall compatibility, inbox delivery, and erasure. {#260505-named-agent-registry-state-layout} {#260511-agent-recall-recovery}
 - `wsstate.Manager.Ensure` derives cache, project, worktree, agent, review, lock, and temp paths.
 - `CodexRunner` invokes `codex exec --json`, captures thread ids, and extracts final agent messages. {#260505-codex-agent-session-jsonl-handling}
 - `ClaudeRunner` invokes `claude -p --output-format json`, manages first-call session ids, resumes stored sessions, and extracts final result text. {#260505-claude-agent-runner}
@@ -26,7 +26,7 @@ related:
 - Only `queued` and `running` are active states. Any new status must update busy checks, wait readiness, result handling, register reset safety, cancel, and follow-up text.
 - `Result` requires terminal completed state and `output.md`; output must be written before current call completion is recorded. {#260505-agent-readiness-result-split}
 - Interrupts are inbox files delivered at hook/check-inbox boundaries, not OS signals. {#260505-agent-inbox-interrupt-delivery}
-- `Recall` is timeout-and-no-activity recovery only: it cancels active work, refuses to retry after cleanup-needed cancellation, then starts a resumed call. {#260511-agent-recall-recovery}
+- `Recall` remains a compatibility/manual path only; model-visible recovery after no-result cancellation should retry `Call` on the same registered agent with a recovery prompt. {#260511-agent-recall-recovery} {#260512-agent-cancel-resume-guidance}
 - Successful `Result` erases ephemeral agents; `Print` is legacy and does not consume them. {#260505-async-subquery-ephemeral-agent}
 - Backend invocation failures are formatted at the call site with raw error text, bounded PATH-detected backend hints, and reconfiguration guidance; do not run separate model/login probes during registration or config inspection. {#260505-agent-backend-failure-diagnostics}
 - Codex JSONL parsing treats non-JSON stdout as fatal until both session id and final agent message are available; trailing process-control noise after completion is ignored. {#260505-codex-jsonl-trailing-noise-tolerance}

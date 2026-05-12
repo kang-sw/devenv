@@ -28,7 +28,6 @@ Examples:
 
 - `ws/agents.register`
 - `ws/agents.call`
-- `ws/agents.recall`
 - `ws/agents.interrupt`
 
 `ws:` remains reserved for plugin skill names such as `ws:workflow`.
@@ -209,13 +208,13 @@ task-scoped session when no current call is active. If `current/state.json` is
 `queued` or `running`, registration fails until the call is cancelled, failed,
 completed, or explicitly reset by a future operation that owns process cleanup.
 
-## Recall Recovery
+## Cancel Recovery
 
-`agents.recall` is a recovery-only convenience around cancel-and-call. Use it
-after a 10-minute `agents.result` timeout when `agents.tail` shows no useful
-activity. It cancels an active current call, refuses to retry when cancellation
-reports `cleanup_needed`, and otherwise starts a resumed call with a recovery
-prompt.
+When `agents.cancel` was used because a named agent did not respond and no
+result is available, retry the same registered agent with `agents.call` and a
+recovery prompt. Backends that support stored sessions resume from the persisted
+session metadata. The compatibility `agents.recall` implementation may exist in
+CLI/manual paths, but it is not advertised as the normal MCP recovery surface.
 
 ## Orchestration Authority
 
@@ -375,6 +374,8 @@ and marks the current call `cancelled`. After process restart, `wait`, `result`,
 `status`, `tail`, and `print` still work from disk state; `cancel` can only
 terminate a process when the stored pid still refers to a live local worker, and
 it does not yet provide backend-specific process-group cleanup.
+Cancelled status output includes a recovery tip for no-result timeout cases and
+points callers toward `agents.call` on the same registered agent before erase.
 
 ## Prompt Resolution
 

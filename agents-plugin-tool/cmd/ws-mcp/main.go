@@ -176,7 +176,6 @@ func runtimeCapabilityCommandNames() []string {
 		"agents.erase",
 		"agents.interrupt",
 		"agents.print",
-		"agents.recall",
 		"agents.register",
 		"agents.result",
 		"agents.run-current",
@@ -766,7 +765,7 @@ func agentsCall(args []string) {
 	if err != nil {
 		fatal("agents call", err)
 	}
-	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.cancel\n", result.AgentName, result.Status, result.PID)
+	fmt.Printf("%s\t%s\tpid=%d\nfollow_up: agents.result --timeout 10m | agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel\n", result.AgentName, result.Status, result.PID)
 }
 
 func agentsRunCurrent(args []string) {

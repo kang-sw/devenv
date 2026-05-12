@@ -1692,7 +1692,7 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	if !strings.Contains(timeoutText, "wait_timeout: true") ||
 		!strings.Contains(timeoutText, "call_status: running") ||
 		!strings.Contains(timeoutText, "active: true") ||
-		!strings.Contains(timeoutText, "follow_up: agents.wait --timeout 10m | agents.status | agents.cancel | agents.tail") {
+		!strings.Contains(timeoutText, "follow_up: agents.wait --timeout 10m | agents.status | agents.tail | agents.cancel") {
 		t.Fatalf("timeout text mismatch:\n%s", timeoutText)
 	}
 	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 20})
@@ -1712,7 +1712,9 @@ func TestWaitTimeoutAndCancelCurrentCall(t *testing.T) {
 	if !strings.Contains(cancelled, "call_status: cancelled") ||
 		!strings.Contains(cancelled, "active: false") ||
 		!strings.Contains(cancelled, "cancel_pid: 2468") ||
-		!strings.Contains(cancelled, "cleanup_needed: false") {
+		!strings.Contains(cancelled, "cleanup_needed: false") ||
+		!strings.Contains(cancelled, "cancel_recovery_tip: If this was cancelled because the agent did not respond") ||
+		!strings.Contains(cancelled, "follow_up: agents.call | agents.tail | agents.erase") {
 		t.Fatalf("cancel status mismatch:\n%s", cancelled)
 	}
 	call, err := readCurrentCall(layout.CurrentStateFile)

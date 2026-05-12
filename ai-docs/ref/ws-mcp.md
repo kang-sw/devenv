@@ -1258,44 +1258,11 @@ Behavior:
   the stored local worker pid when one exists.
 - The agent is marked idle and the current call is marked `cancelled`.
 - The tool returns `ws/agents.status` text after the cancellation attempt.
+- Cancelled status text includes a `cancel_recovery_tip` telling callers to
+  retry `agents.call` on the same registered agent when cancellation followed a
+  no-result timeout.
 - After an MCP server restart, cancellation is only as strong as the retained
   local pid. Backend-specific process-group cleanup is not implemented yet.
-
-### `ws/agents.recall`
-
-Recovery-only retry for a registered ws agent after `ws/agents.result` times out
-and `ws/agents.tail` shows no useful activity.
-
-Input schema:
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "root": {
-      "type": "string",
-      "description": "Repository root. Defaults to the server root."
-    },
-    "name": {
-      "type": "string",
-      "description": "Agent name."
-    },
-    "prompt": {
-      "type": "string",
-      "description": "Optional recovery prompt. Defaults to a bounded continuation prompt."
-    }
-  },
-  "required": ["name"]
-}
-```
-
-Behavior:
-
-- Active `queued` or `running` calls are cancelled before retry.
-- Cleanup-needed cancellation aborts the retry and returns manual-cleanup
-  guidance.
-- Otherwise, the tool starts a resumed async call with either the supplied prompt
-  or the default recovery prompt.
 - This is not the normal continuation or redirect path; use `ws/agents.call` for
   ordinary next turns and `ws/agents.interrupt` for active redirects.
 
