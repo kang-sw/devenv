@@ -155,6 +155,7 @@ func TestGeminiRunnerExecutesFakeBinaryAndCapturesDiagnostics(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GEMINI_FAKE_LOG", logPath)
 	t.Setenv("GEMINI_FAKE_FAIL", "")
+	t.Setenv("GEMINI_FAKE_SLEEP_AFTER_INIT", "")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
