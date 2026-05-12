@@ -88,9 +88,15 @@ Each cache domain uses a named manager session:
 api-doc-<domain>
 ```
 
-Manager sessions use the Codex backend, the `core` model alias, and the
-embedded `api-doc-manager` prompt. Public delegate orientation is suppressed
-because the manager prompt is a complete domain-specific system prompt.
+Manager sessions use the `core` model alias and the embedded
+`api-doc-manager` prompt. Public delegate orientation is suppressed because the
+manager prompt is a complete domain-specific system prompt.
+
+> [!note] Planned 🚧
+> API-doc helpers will stop pinning Codex as the backend. The pre-router will
+> register with the `light` model alias and each per-domain manager will
+> register with the `core` model alias, both using the current MCP harness and
+> configured alias mappings to resolve backend/model selection. {#260512-api-doc-agent-backend-selection}
 
 Inactive manager sessions are reused while warm. If an idle inactive manager is
 older than the API-doc hot-cache TTL, the runtime erases and re-registers it

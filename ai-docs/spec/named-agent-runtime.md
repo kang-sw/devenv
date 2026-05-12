@@ -39,6 +39,14 @@ selectors when `model` is absent. Resolved agent metadata reports the alias in
 the compatibility `tier` field, plus the resolved backend and concrete model.
 {#260508-harness-aware-model-aliases}
 
+> [!note] Planned 🚧
+> When registration supplies an explicit backend with only alias-based model
+> selection, resolution will prefer a mapping keyed to that backend and will
+> not borrow a concrete model from a different backend's alias mapping.
+> Backends without a matching alias mapping may keep the backend with an empty
+> concrete model instead of producing a cross-backend mismatch.
+> {#260512-backend-model-resolution-consistency}
+
 ## Async Single-Call Lifecycle {#260505-agent-async-single-call-lifecycle}
 
 `agents.call` starts one asynchronous current call for a registered agent and
