@@ -169,6 +169,38 @@ while the same alias from a Claude MCP session resolves through Claude alias
 defaults. Unknown harnesses use a deterministic configured default.
 {#260508-mcp-harness-detection}
 
+## 🚧 Gemini Agent Runner {#260512-gemini-agent-runner}
+
+Named-agent registrations with `backend: gemini` will execute through the same
+agent lifecycle as Codex- and Claude-backed agents. Callers will use
+`agents.register`, `agents.call`, `agents.wait`, `agents.result`,
+`agents.status`, `agents.tail`, `agents.interrupt`, `agents.cancel`, and
+`agents.recall` without switching to a Gemini-specific registry, queue, status,
+or result surface.
+
+The Gemini adapter will invoke Gemini CLI in headless `stream-json` mode,
+deliver prompts through stdin, pass concrete models when configured, and resume
+with the stored Gemini session id when available. If an agent has a resolved
+system prompt, the adapter will include it in the stdin prompt using a clear
+system-instruction boundary rather than relying on backend-specific persistent
+configuration.
+
+Gemini stream parsing will tolerate non-JSON stdout notices before or between
+valid JSON events while preserving raw stdout and stderr in the existing
+diagnostic streams. Caller-facing result text will be accumulated from
+assistant `message.content` chunks, terminal success will require a
+`result.status == "success"` event, and terminal error events or missing
+terminal/session/text data will fail through the shared backend invocation
+diagnostics path.
+
+Gemini authentication remains external to ws. The runtime will not read, write,
+or probe Gemini credentials during registration, configuration, or calls; auth
+failures surface as backend invocation failures with the same diagnostic and
+reconfiguration hints as other local backends. Live hook-style interrupt
+delivery is not part of the initial Gemini contract: pending inbox messages may
+be prepended to the next resumed call until a stable Gemini live-delivery
+mechanism exists.
+
 ## Backend Invocation Failure Diagnostics {#260505-agent-backend-failure-diagnostics}
 
 Backend invocation failures preserve the raw backend error and append a bounded

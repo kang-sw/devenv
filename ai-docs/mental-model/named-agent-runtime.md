@@ -17,6 +17,7 @@ related:
 - `wsstate.Manager.Ensure` derives cache, project, worktree, agent, review, lock, and temp paths.
 - `CodexRunner` invokes `codex exec --json`, captures thread ids, and extracts final agent messages. {#260505-codex-agent-session-jsonl-handling}
 - `ClaudeRunner` invokes `claude -p --output-format json`, manages first-call session ids, resumes stored sessions, and extracts final result text. {#260505-claude-agent-runner}
+- `GeminiRunner` is planned to invoke Gemini CLI `stream-json`, tolerate non-JSON stdout notices, and extract final text from assistant message chunks. {#260512-gemini-agent-runner}
 
 ## Module Contracts
 
@@ -33,6 +34,7 @@ related:
 - Codex prompt-delivery diagnostics log bounded metadata such as prompt byte size, delivery path, backend version, resume state, and final event shape, not prompt contents. {#260508-codex-prompt-delivery-diagnostics}
 - Backend adapters must fit `RunnerRequest` and `RunnerResult`; keep backend-specific session and output parsing inside the runner instead of branching the manager lifecycle. {#260505-claude-agent-runner}
 - Claude `terminal_reason: hook_stopped` is an intermediate adapter state: resume the same session so hook-delivered lead messages produce a final output instead of an empty completed result. {#260505-claude-agent-runner}
+- Gemini parsing is intentionally more tolerant than Codex parsing: stdout notices can be diagnostics, but completion still requires a terminal success result, a session id, and accumulated assistant text. {#260512-gemini-agent-runner}
 - Model selection treats `light`/`core`/`deep` as portable aliases on the `model` field; concrete model names win, legacy `tier` is compatibility-only when `model` is absent, and alias resolution can branch by MCP harness. {#260508-harness-aware-model-aliases} {#260508-mcp-harness-detection}
 
 ## Coupling
@@ -46,7 +48,7 @@ related:
 
 ## Extension Points & Change Recipes
 
-- **Add a backend**: implement `Runner`, add it to backend runner selection, and keep session persistence, stream capture, status transitions, inbox delivery, and diagnostics on the shared manager path.
+- **Add a backend**: implement `Runner`, add it to backend runner selection, and keep session persistence, stream capture, status transitions, inbox delivery, and diagnostics on the shared manager path; only backend-specific parsing and invocation details belong in the runner.
 - **Add a diagnostic stream**: update stream path mapping, MCP debug tools, CLI debug tools, tail output, and tests. {#260505-agent-diagnostics-tail-debug}
 - **Add generated path kinds**: update `generatedPathTarget`, MCP schema, callers, and cleanup rules.
 

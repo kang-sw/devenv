@@ -3,6 +3,8 @@ title: Gemini named-agent backend
 related:
   260512-research-gemini-cli-stream-json: observed Gemini CLI headless contract
   260429-research-host-neutral-ws-plugin: backend abstraction architecture anchor
+spec:
+  - 260512-gemini-agent-runner
 related-mental-model:
   - named-agent-runtime
 ---
