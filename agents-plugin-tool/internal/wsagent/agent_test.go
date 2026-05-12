@@ -941,6 +941,7 @@ func TestAsyncWorkerCommandUsesRuntimeBinaryEnvBeforeStaleExecutable(t *testing.
 }
 
 func TestAsyncWorkerCommandFallsBackToCurrentCacheLauncher(t *testing.T) {
+	t.Setenv("WS_MCP_RUNTIME_BINARY", "")
 	temp := t.TempDir()
 	cacheRoot := filepath.Join(temp, ".codex", "plugins", "cache", "kang-sw-devenv")
 	launcher := filepath.Join(cacheRoot, "ws", "0.22.4", "bin", "ws-mcp-launcher")
@@ -1177,6 +1178,120 @@ func TestRunCurrentUsesClaudeBackendRunner(t *testing.T) {
 	}
 	log = string(logRaw)
 	if !strings.Contains(log, "--resume") || !strings.Contains(log, agent.SessionID) || !strings.Contains(log, "resume prompt") {
+		t.Fatalf("resume did not use stored session:\n%s", log)
+	}
+}
+
+func TestRunCurrentUsesGeminiBackendRunner(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gemini.log")
+	writeFakeGeminiExecutable(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GEMINI_FAKE_LOG", logPath)
+	t.Setenv("GEMINI_FAKE_FAIL", "")
+	t.Setenv("GEMINI_FAKE_SLEEP_AFTER_INIT", "")
+
+	starter := &fakeWorkerStarter{pid: 4567}
+	base := NewManager(Options{
+		CacheHome:     cache,
+		Now:           func() time.Time { return testNow },
+		WorkerStarter: starter,
+	})
+	if _, _, err := base.Register(RegisterOptions{
+		Root:             repo,
+		Name:             "impl",
+		Backend:          "gemini",
+		Model:            "gemini",
+		SystemPromptText: "sys",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+	if err := manager.RunCurrent(repo, "impl"); err != nil {
+		t.Fatalf("RunCurrent returned error: %v", err)
+	}
+	layout, err := manager.layout(repo, "impl", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := readAgent(layout.AgentFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := readCurrentCall(layout.CurrentStateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Backend != "gemini" || agent.SessionID != "gemini-session" ||
+		call.SessionID != agent.SessionID || call.Status != CallStatusCompleted {
+		t.Fatalf("gemini call state mismatch: agent=%+v call=%+v", agent, call)
+	}
+	result, err := manager.Result(ResultOptions{Root: repo, Name: "impl"})
+	if err != nil {
+		t.Fatalf("Result returned error: %v", err)
+	}
+	if result != "gemini reply" {
+		t.Fatalf("result = %q", result)
+	}
+	tail, err := manager.Tail(TailOptions{Root: repo, Name: "impl", Lines: 40})
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	for _, want := range []string{
+		"backend_version",
+		"gemini fake 1.2.3",
+		"prompt_delivery",
+		"final_event_shape",
+		"Gemini notice",
+	} {
+		if !strings.Contains(tail, want) {
+			t.Fatalf("tail missing %q:\n%s", want, tail)
+		}
+	}
+	logRaw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logRaw)
+	for _, want := range []string{
+		"--output-format stream-json --approval-mode yolo",
+		"ENV:leaf",
+		"System instructions:",
+		"sys",
+		"User prompt:",
+		"async prompt",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("gemini log missing %q:\n%s", want, log)
+		}
+	}
+	for _, line := range strings.Split(log, "\n") {
+		if strings.HasPrefix(line, "ARGS:") && strings.Contains(line, "-m ") {
+			t.Fatalf("gemini shorthand model should not be forwarded:\n%s", log)
+		}
+	}
+
+	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "resume prompt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RunCurrent(repo, "impl"); err != nil {
+		t.Fatalf("resume RunCurrent returned error: %v", err)
+	}
+	logRaw, err = os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log = string(logRaw)
+	if !strings.Contains(log, "--resume gemini-session") || !strings.Contains(log, "resume prompt") {
 		t.Fatalf("resume did not use stored session:\n%s", log)
 	}
 }

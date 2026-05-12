@@ -17,7 +17,7 @@ related:
 - `wsstate.Manager.Ensure` derives cache, project, worktree, agent, review, lock, and temp paths.
 - `CodexRunner` invokes `codex exec --json`, captures thread ids, and extracts final agent messages. {#260505-codex-agent-session-jsonl-handling}
 - `ClaudeRunner` invokes `claude -p --output-format json`, manages first-call session ids, resumes stored sessions, and extracts final result text. {#260505-claude-agent-runner}
-- `GeminiRunner` is planned to invoke Gemini CLI `stream-json`, tolerate non-JSON stdout notices, and extract final text from assistant message chunks. {#260512-gemini-agent-runner}
+- `GeminiRunner` invokes Gemini CLI `stream-json`, tolerates non-JSON stdout notices, and extracts final text from assistant message chunks. {#260512-gemini-agent-runner}
 
 ## Module Contracts
 
@@ -34,7 +34,9 @@ related:
 - Codex prompt-delivery diagnostics log bounded metadata such as prompt byte size, delivery path, backend version, resume state, and final event shape, not prompt contents. {#260508-codex-prompt-delivery-diagnostics}
 - Backend adapters must fit `RunnerRequest` and `RunnerResult`; keep backend-specific session and output parsing inside the runner instead of branching the manager lifecycle. {#260505-claude-agent-runner}
 - Claude `terminal_reason: hook_stopped` is an intermediate adapter state: resume the same session so hook-delivered lead messages produce a final output instead of an empty completed result. {#260505-claude-agent-runner}
-- Gemini parsing is intentionally more tolerant than Codex parsing: stdout notices can be diagnostics, but completion still requires a terminal success result, a session id, and accumulated assistant text. {#260512-gemini-agent-runner}
+- Gemini invocation is stdin-only: shorthand aliases such as `gemini` stay out of argv, concrete models are passed with `-m`, stored sessions resume with `--resume`, and resolved system prompts are prepended inside stdin with an explicit system/user boundary. {#260512-gemini-agent-runner}
+- Gemini parsing is intentionally more tolerant than Codex parsing: stdout notices can be diagnostics, nested or top-level message/result shapes are accepted, and tool-use/tool-result content is ignored, but completion still requires terminal success, a session id, and accumulated assistant text. {#260512-gemini-agent-runner}
+- Gemini session persistence happens as soon as the first init/session id appears; if that callback fails, the runner cancels the child process before returning so failed state writes do not leave a sleeping backend call behind.
 - Model selection treats `light`/`core`/`deep` as portable aliases on the `model` field; concrete model names win, legacy `tier` is compatibility-only when `model` is absent, and alias resolution can branch by MCP harness. {#260508-harness-aware-model-aliases} {#260508-mcp-harness-detection}
 
 ## Coupling
@@ -59,6 +61,7 @@ related:
 - Assuming agent names are arbitrary safe paths; `AgentKey` normalization can make distinct names collide.
 - Inferring login state from backend output is brittle; preserve raw backend errors and present configuration options as hints.
 - Treating every stdout line after a completed Codex result as model output can discard a valid Windows result when process-control messages are appended.
+- Assuming Gemini has live hook-style interrupt delivery; until a stable mechanism exists, inbox messages are delivered by prepending them to the next resumed call.
 - Cancelling by killing only the parent process can leave children alive on Unix; process-group behavior is intentional. {#260505-agent-cancel-recovery}
 
 ## Technical Debt
