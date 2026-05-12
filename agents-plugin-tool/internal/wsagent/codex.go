@@ -47,6 +47,8 @@ func runnerForBackend(backend string) (Runner, error) {
 		return CodexRunner{}, nil
 	case "claude":
 		return ClaudeRunner{}, nil
+	case "gemini":
+		return GeminiRunner{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported agent backend %q", backend)
 	}

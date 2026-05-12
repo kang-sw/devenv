@@ -5,6 +5,8 @@ related:
   260429-research-host-neutral-ws-plugin: backend abstraction architecture anchor
 spec:
   - 260512-gemini-agent-runner
+skeletons:
+  phase-1: a2f9d4b
 related-mental-model:
   - named-agent-runtime
 ---

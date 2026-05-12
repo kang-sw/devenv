@@ -1504,7 +1504,7 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 		Now:           func() time.Time { return testNow },
 		WorkerStarter: starter,
 	})
-	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl", Backend: "gemini", Model: "gemini-3-1-pro"}); err != nil {
+	if _, _, err := base.Register(RegisterOptions{Root: repo, Name: "impl", Backend: "bogus", Model: "bogus-model"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := base.Call(CallOptions{Root: repo, Name: "impl", Prompt: "async prompt"}); err != nil {
@@ -1520,9 +1520,9 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 		t.Fatal("RunCurrent returned nil error")
 	}
 	for _, want := range []string{
-		`unsupported agent backend "gemini"`,
-		"backend: gemini",
-		"model: gemini-3-1-pro",
+		`unsupported agent backend "bogus"`,
+		"backend: bogus",
+		"model: bogus-model",
 		"- gemini: " + geminiPath,
 		"re-run agents.register",
 		"config.agents_tier",
@@ -1535,7 +1535,7 @@ func TestRunCurrentUnsupportedBackendIncludesRecoveryHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if !strings.Contains(status, "call_status: failed") || !strings.Contains(status, `unsupported agent backend "gemini"`) {
+	if !strings.Contains(status, "call_status: failed") || !strings.Contains(status, `unsupported agent backend "bogus"`) {
 		t.Fatalf("status missing unsupported backend diagnostic:\n%s", status)
 	}
 }
