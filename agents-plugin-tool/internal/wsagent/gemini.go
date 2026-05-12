@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -41,7 +43,7 @@ func (GeminiRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		ctx, cancel = context.WithCancel(context.Background())
 	}
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "gemini", invocation.Args...)
+	cmd := geminiCommandContext(ctx, invocation.Args)
 	if !req.InheritProcessGroup {
 		configureRunnerCommand(cmd)
 	}
@@ -204,11 +206,31 @@ func parseGeminiStreamJSON(r io.Reader, onSessionID func(string) error) (RunnerR
 func geminiVersion() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "gemini", "--version").Output()
+	out, err := geminiCommandContext(ctx, []string{"--version"}).Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func geminiCommandContext(ctx context.Context, args []string) *exec.Cmd {
+	exe, err := exec.LookPath("gemini")
+	if err != nil {
+		return exec.CommandContext(ctx, "gemini", args...)
+	}
+	if runtime.GOOS == "windows" {
+		lower := strings.ToLower(exe)
+		if strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat") {
+			ps1 := strings.TrimSuffix(exe, filepath.Ext(exe)) + ".ps1"
+			if _, err := os.Stat(ps1); err == nil {
+				psArgs := append([]string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", ps1}, args...)
+				return exec.CommandContext(ctx, "powershell", psArgs...)
+			}
+			cmdArgs := append([]string{"/d", "/c", "call", exe}, args...)
+			return exec.CommandContext(ctx, "cmd", cmdArgs...)
+		}
+	}
+	return exec.CommandContext(ctx, exe, args...)
 }
 
 func geminiSessionID(event map[string]any) string {
