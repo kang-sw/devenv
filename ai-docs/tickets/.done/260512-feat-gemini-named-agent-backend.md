@@ -9,6 +9,7 @@ skeletons:
   phase-1: 22d24bd
 related-mental-model:
   - named-agent-runtime
+completed: 2026-05-12
 ---
 
 # Gemini named-agent backend
