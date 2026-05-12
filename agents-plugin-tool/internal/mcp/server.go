@@ -285,11 +285,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		raw, err := json.Marshal(info)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, info, nil)
 		}
-		return toolTextResponse(req.ID, string(raw)+"\n", nil)
+		return toolTextResponse(req.ID, formatRuntimeInfo(info), nil)
 	case "runtime.debug_events":
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
@@ -311,20 +310,27 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		sessionRoot := s.sessionRoot
 		sessionHarness := s.sessionHarness
 		s.rootMu.RUnlock()
-		return toolJSONResponse(req.ID, map[string]any{
+		result := map[string]any{
 			"session_default_root": sessionRoot,
 			"has_session_default":  sessionRoot != "",
 			"session_harness":      sessionHarness,
 			"env_project_root":     strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")),
 			"server_root":          s.root,
-		}, nil)
+		}
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, nil)
+		}
+		return toolTextResponse(req.ID, formatSessionRoot(result), nil)
 	case "api.list":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		domains, err := apiListDomains(root)
-		return toolJSONResponse(req.ID, domains, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, domains, err)
+		}
+		return toolTextResponse(req.ID, formatStringLines(domains), err)
 	case "api.ask":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -375,7 +381,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		return toolJSONResponse(req.ID, result, err)
 	case "config.show":
 		view, err := wsconfig.Show(wsconfig.Options{})
-		return toolJSONResponse(req.ID, view, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, view, err)
+		}
+		return toolTextResponse(req.ID, formatConfigView(view), err)
 	case "config.agents_tier":
 		tier, _ := params.Arguments["tier"].(string)
 		backend, _ := params.Arguments["backend"].(string)
@@ -389,7 +398,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsgit.NewClient().Status(context.Background(), root)
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatGitStatus(result), err)
 	case "git.diff":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -398,7 +410,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		rangeValue, _ := params.Arguments["range"].(string)
 		mode, _ := params.Arguments["mode"].(string)
 		result, err := wsgit.NewClient().Diff(context.Background(), root, wsgit.DiffOptions{Range: rangeValue, Mode: mode, Paths: stringList(params.Arguments["paths"])})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, result.Output, err)
 	case "git.log":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -407,7 +422,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		rangeValue, _ := params.Arguments["range"].(string)
 		includeBody, _ := params.Arguments["include_body"].(bool)
 		result, err := wsgit.NewClient().Log(context.Background(), root, wsgit.LogOptions{Range: rangeValue, Limit: intFromArgument(params.Arguments["limit"], 20), IncludeBody: includeBody})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatGitLog(result), err)
 	case "git.merge_base":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -416,7 +434,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		base, _ := params.Arguments["base"].(string)
 		head, _ := params.Arguments["head"].(string)
 		result, err := wsgit.NewClient().MergeBase(context.Background(), root, base, head)
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatMergeBase(result), err)
 	case "git.commit":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -473,7 +494,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsdoc.SpecsList(root)
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatSpecs(result), err)
 	case "specs.find":
 		if _, ok := params.Arguments["mentions_ticket_stem"]; ok {
 			return toolTextResponse(req.ID, "", fmt.Errorf("specs.find uses ticket_stem, not mentions_ticket_stem"))
@@ -486,7 +510,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		specStem, _ := params.Arguments["spec_stem"].(string)
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
 		result, err := wsdoc.SpecsFind(root, wsdoc.SpecFindOptions{Query: query, SpecStem: specStem, TicketStem: ticketStem})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatSpecs(result), err)
 	case "specs.status":
 		if hasTicketStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("specs.status uses spec_stem"))
@@ -497,7 +524,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		}
 		specStem, _ := params.Arguments["spec_stem"].(string)
 		result, err := wsdoc.SpecsStatus(root, wsdoc.SpecStatusOptions{SpecStem: specStem})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatSpecStatus(result), err)
 	case "mental_models.list":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -517,7 +547,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		specStem, _ := params.Arguments["spec_stem"].(string)
 		domain, _ := params.Arguments["domain"].(string)
 		result, err := wsdoc.MentalModelsFind(root, wsdoc.MentalModelFindOptions{Query: query, SpecStem: specStem, Domain: domain})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatMentalModels(result), err)
 	case "mental_models.status":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("mental_models.status uses domain or path"))
@@ -529,7 +562,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		domain, _ := params.Arguments["domain"].(string)
 		path, _ := params.Arguments["path"].(string)
 		result, err := wsdoc.MentalModelsStatus(root, wsdoc.MentalModelStatusOptions{Domain: domain, Path: path})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatMentalModels(result), err)
 	case "references.trace":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -538,7 +574,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		ticketStem, _ := params.Arguments["ticket_stem"].(string)
 		specStem, _ := params.Arguments["spec_stem"].(string)
 		result, err := wsdoc.ReferencesTrace(root, wsdoc.ReferenceTraceOptions{TicketStem: ticketStem, SpecStem: specStem})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatReferenceTrace(result), err)
 	case "tickets.list":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -552,7 +591,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			IncludeDone:    boolArgument(params.Arguments["include_done"]),
 			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
 		})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatTickets(result), err)
 	case "tickets.find":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -572,7 +614,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			TicketStem:         ticketStem,
 			MentionsTicketStem: mentionsTicketStem,
 		})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatTickets(result), err)
 	case "tickets.status":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -587,7 +632,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			IncludeDone:    boolArgument(params.Arguments["include_done"]),
 			IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
 		})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		if result == nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, formatTickets([]wsdoc.TicketInfo{*result}), err)
 	case "subquery":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -806,6 +857,405 @@ func runtimeInfo(version, sourceCommit string) (map[string]any, error) {
 	}, nil
 }
 
+func wantsJSON(arguments map[string]any) bool {
+	format, _ := arguments["format"].(string)
+	return strings.EqualFold(strings.TrimSpace(format), "json")
+}
+
+func formatRuntimeInfo(info map[string]any) string {
+	var b strings.Builder
+	if version, _ := info["version"].(string); version != "" {
+		fmt.Fprintf(&b, "version: %s\n", version)
+	}
+	if commit, _ := info["source_commit"].(string); commit != "" {
+		fmt.Fprintf(&b, "source_commit: %s\n", commit)
+	}
+	if bundle, ok := info["prompt_bundle"].(wsprompt.BundleInfo); ok {
+		formatPromptBundle(&b, bundle)
+	} else if bundle, ok := info["prompt_bundle"].(map[string]any); ok {
+		formatPromptBundleMap(&b, bundle)
+	}
+	return b.String()
+}
+
+func formatPromptBundle(b *strings.Builder, bundle wsprompt.BundleInfo) {
+	fmt.Fprintf(b, "prompt_bundle: %d prompts", len(bundle.Prompts))
+	if bundle.ContentSHA256 != "" {
+		fmt.Fprintf(b, " sha256=%s", bundle.ContentSHA256)
+	}
+	if bundle.SourceCommit != "" {
+		fmt.Fprintf(b, " source_commit=%s", bundle.SourceCommit)
+	}
+	b.WriteString("\n")
+	if len(bundle.Prompts) > 0 {
+		b.WriteString("prompts:\n")
+		for _, prompt := range bundle.Prompts {
+			fmt.Fprintf(b, "  - %s\n", prompt)
+		}
+	}
+}
+
+func formatPromptBundleMap(b *strings.Builder, bundle map[string]any) {
+	prompts := stringAnySlice(bundle["prompts"])
+	fmt.Fprintf(b, "prompt_bundle: %d prompts", len(prompts))
+	if sha, _ := bundle["content_sha256"].(string); sha != "" {
+		fmt.Fprintf(b, " sha256=%s", sha)
+	}
+	if commit, _ := bundle["source_commit"].(string); commit != "" {
+		fmt.Fprintf(b, " source_commit=%s", commit)
+	}
+	b.WriteString("\n")
+	if len(prompts) > 0 {
+		b.WriteString("prompts:\n")
+		for _, prompt := range prompts {
+			fmt.Fprintf(b, "  - %s\n", prompt)
+		}
+	}
+}
+
+func stringAnySlice(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func formatSessionRoot(values map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "session_default_root: %s\n", displayString(values["session_default_root"]))
+	fmt.Fprintf(&b, "has_session_default: %t\n", boolValue(values["has_session_default"]))
+	fmt.Fprintf(&b, "session_harness: %s\n", displayString(values["session_harness"]))
+	fmt.Fprintf(&b, "server_root: %s\n", displayString(values["server_root"]))
+	fmt.Fprintf(&b, "env_project_root: %s\n", displayString(values["env_project_root"]))
+	return b.String()
+}
+
+func formatStringLines(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.Join(values, "\n") + "\n"
+}
+
+func formatConfigView(view wsconfig.View) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "path: %s\n", view.Path)
+	aliases := []string{"light", "core", "deep"}
+	b.WriteString("model_aliases:\n")
+	for _, alias := range aliases {
+		byHarness := view.Config.Agents.ModelAliases[alias]
+		keys := sortedAgentTierKeys(byHarness)
+		if len(keys) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "  %s:\n", alias)
+		for _, key := range keys {
+			tier := byHarness[key]
+			fmt.Fprintf(&b, "    %s: %s/%s\n", key, displayOrDash(tier.Backend), displayOrDash(tier.Model))
+		}
+	}
+	return b.String()
+}
+
+func sortedAgentTierKeys(values map[string]wsconfig.AgentTier) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func formatGitStatus(result wsgit.StatusResult) string {
+	var b strings.Builder
+	head := displayOrDash(result.Branch.Head)
+	oid := shortHash(result.Branch.OID)
+	if oid != "" {
+		fmt.Fprintf(&b, "%s %s", head, oid)
+	} else {
+		fmt.Fprintf(&b, "%s", head)
+	}
+	if result.Branch.Upstream != "" {
+		fmt.Fprintf(&b, " %s", result.Branch.Upstream)
+	}
+	if result.Branch.Ahead != 0 || result.Branch.Behind != 0 {
+		fmt.Fprintf(&b, " ahead=%d behind=%d", result.Branch.Ahead, result.Branch.Behind)
+	}
+	if result.Clean {
+		b.WriteString(" clean\n")
+		return b.String()
+	}
+	fmt.Fprintf(&b, " dirty: %d files\n", len(result.ChangedFiles))
+	for _, file := range result.ChangedFiles {
+		status := file.Status
+		if status == "" {
+			status = file.IndexStatus + file.WorktreeStatus
+		}
+		if status == "" {
+			status = "??"
+		}
+		if file.OldPath != "" {
+			fmt.Fprintf(&b, "%s %s <- %s\n", status, file.Path, file.OldPath)
+		} else {
+			fmt.Fprintf(&b, "%s %s\n", status, file.Path)
+		}
+	}
+	return b.String()
+}
+
+func formatGitLog(result wsgit.LogResult) string {
+	var b strings.Builder
+	if result.Range != "" {
+		fmt.Fprintf(&b, "range: %s\n", result.Range)
+	}
+	if len(result.Commits) == 0 {
+		return b.String()
+	}
+	for i, commit := range result.Commits {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "commit %s\n", commit.Hash)
+		if commit.Subject != "" {
+			fmt.Fprintf(&b, "subject: %s\n", commit.Subject)
+		}
+		if commit.Author != "" {
+			fmt.Fprintf(&b, "author: %s\n", commit.Author)
+		}
+		if commit.Date != "" {
+			fmt.Fprintf(&b, "date: %s\n", commit.Date)
+		}
+		if strings.TrimSpace(commit.Body) != "" {
+			b.WriteString("\n")
+			b.WriteString(strings.TrimSpace(commit.Body))
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func formatMergeBase(result wsgit.MergeBaseResult) string {
+	return fmt.Sprintf("merge_base: %s (%s %s)\n", result.MergeBase, result.Base, result.Head)
+}
+
+func formatSpecs(specs []wsdoc.SpecInfo) string {
+	var b strings.Builder
+	for _, spec := range specs {
+		fmt.Fprintf(&b, "%s", spec.Path)
+		if spec.Title != "" {
+			fmt.Fprintf(&b, " - %s", spec.Title)
+		}
+		if spec.Summary != "" {
+			fmt.Fprintf(&b, " # %s", spec.Summary)
+		}
+		flags := []string{}
+		if spec.MatchesSpecStem {
+			flags = append(flags, "matches_spec_stem")
+		}
+		if spec.MatchesTicketRef {
+			flags = append(flags, "matches_ticket_ref")
+		}
+		if len(spec.Anchors) > 0 {
+			flags = append(flags, fmt.Sprintf("anchors=%d", len(spec.Anchors)))
+		}
+		if len(spec.TicketRefs) > 0 {
+			flags = append(flags, "tickets="+strings.Join(spec.TicketRefs, ","))
+		}
+		if len(flags) > 0 {
+			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
+		}
+		b.WriteString("\n")
+		writeIndentedLines(&b, "  snippet: ", spec.MatchingSnippets)
+		writeIndentedLines(&b, "  marker: ", spec.MarkerContexts)
+	}
+	return b.String()
+}
+
+func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
+	if status == nil {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "spec_stem: %s\n", status.SpecStem)
+	if len(status.Locations) > 0 {
+		b.WriteString("locations:\n")
+		for _, loc := range status.Locations {
+			fmt.Fprintf(&b, "  - line %d", loc.Line)
+			if loc.Heading != "" {
+				fmt.Fprintf(&b, " %s", loc.Heading)
+			}
+			if loc.MarkerContext != "" {
+				fmt.Fprintf(&b, " # %s", loc.MarkerContext)
+			}
+			b.WriteString("\n")
+		}
+	}
+	if len(status.Files) > 0 {
+		b.WriteString("files:\n")
+		for _, spec := range status.Files {
+			fmt.Fprintf(&b, "  - %s", spec.Path)
+			if spec.Title != "" {
+				fmt.Fprintf(&b, " - %s", spec.Title)
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func formatTickets(tickets []wsdoc.TicketInfo) string {
+	var b strings.Builder
+	for _, ticket := range tickets {
+		fmt.Fprintf(&b, "[%s] %s", ticket.Status, ticket.Stem)
+		if ticket.Title != "" {
+			fmt.Fprintf(&b, " - %s", ticket.Title)
+		}
+		if ticket.Path != "" {
+			fmt.Fprintf(&b, " (%s)", ticket.Path)
+		}
+		flags := []string{}
+		if ticket.ResultPresent {
+			flags = append(flags, "result")
+		}
+		if ticket.MentionsTicketStem {
+			flags = append(flags, "mentions_ticket_stem")
+		}
+		if ticket.Parent != "" {
+			flags = append(flags, "parent="+ticket.Parent)
+		}
+		if len(ticket.Specs) > 0 {
+			flags = append(flags, "spec="+strings.Join(ticket.Specs, ","))
+		}
+		if len(flags) > 0 {
+			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
+		}
+		b.WriteString("\n")
+		writeIndentedLines(&b, "  unresolved: ", ticket.UnresolvedPhases)
+		writeIndentedLines(&b, "  snippet: ", ticket.MatchingSnippets)
+	}
+	return b.String()
+}
+
+func formatMentalModels(models []wsdoc.MentalModelInfo) string {
+	var b strings.Builder
+	for _, model := range models {
+		fmt.Fprintf(&b, "%s - %s", model.Path, displayOrDash(model.Domain))
+		if model.Description != "" {
+			fmt.Fprintf(&b, " # %s", model.Description)
+		}
+		flags := []string{}
+		if model.MatchesDomain {
+			flags = append(flags, "matches_domain")
+		}
+		if model.MatchesSpecStem {
+			flags = append(flags, "matches_spec_stem")
+		}
+		if len(model.SpecRefs) > 0 {
+			flags = append(flags, fmt.Sprintf("spec_refs=%d", len(model.SpecRefs)))
+		}
+		if len(flags) > 0 {
+			fmt.Fprintf(&b, " [%s]", strings.Join(flags, " "))
+		}
+		b.WriteString("\n")
+		writeIndentedLines(&b, "  source: ", model.Sources)
+		writeIndentedLines(&b, "  ancestor: ", model.AncestorHints)
+		writeIndentedLines(&b, "  index: ", model.IndexHints)
+		writeIndentedLines(&b, "  snippet: ", model.MatchingSnippets)
+	}
+	return b.String()
+}
+
+func formatReferenceTrace(trace *wsdoc.ReferenceTrace) string {
+	if trace == nil {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "input: %s %s\n", trace.InputType, trace.Input)
+	if len(trace.Tickets) > 0 {
+		b.WriteString("tickets:\n")
+		for _, ticket := range trace.Tickets {
+			fmt.Fprintf(&b, "  [%s] %s", ticket.Status, ticket.Stem)
+			if ticket.Title != "" {
+				fmt.Fprintf(&b, " - %s", ticket.Title)
+			}
+			if ticket.Path != "" {
+				fmt.Fprintf(&b, " (%s)", ticket.Path)
+			}
+			b.WriteString("\n")
+		}
+	}
+	if len(trace.Specs) > 0 {
+		b.WriteString("specs:\n")
+		for _, spec := range trace.Specs {
+			fmt.Fprintf(&b, "  %s", spec.Path)
+			if spec.Title != "" {
+				fmt.Fprintf(&b, " - %s", spec.Title)
+			}
+			if len(spec.Anchors) > 0 {
+				fmt.Fprintf(&b, " [anchors=%d]", len(spec.Anchors))
+			}
+			b.WriteString("\n")
+		}
+	}
+	if len(trace.MentalModels) > 0 {
+		b.WriteString("mental_models:\n")
+		for _, model := range trace.MentalModels {
+			fmt.Fprintf(&b, "  %s - %s\n", model.Path, displayOrDash(model.Domain))
+		}
+	}
+	return b.String()
+}
+
+func writeIndentedLines(b *strings.Builder, prefix string, lines []string) {
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fmt.Fprintf(b, "%s%s\n", prefix, strings.TrimSpace(line))
+	}
+}
+
+func displayString(value any) string {
+	text, _ := value.(string)
+	return displayOrDash(text)
+}
+
+func displayOrDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}
+
+func boolValue(value any) bool {
+	got, _ := value.(bool)
+	return got
+}
+
+func shortHash(value string) string {
+	if len(value) > 7 && isHexString(value) {
+		return value[:7]
+	}
+	return value
+}
+
+func isHexString(value string) bool {
+	for _, ch := range value {
+		if (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F') {
+			continue
+		}
+		return false
+	}
+	return value != ""
+}
+
 func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) (string, error) {
 	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
 		return canonicalGitRoot(value)
@@ -990,8 +1440,10 @@ func tools() []map[string]any {
 			"name":        "runtime.info",
 			"description": "Return ws-mcp runtime metadata for compatibility checks.",
 			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
+				"type": "object",
+				"properties": map[string]any{
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
 			},
 		},
 		{
@@ -1019,8 +1471,10 @@ func tools() []map[string]any {
 			"name":        "session.get_default_root",
 			"description": "Report the volatile repository root default and root fallback state for this MCP server process.",
 			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
+				"type": "object",
+				"properties": map[string]any{
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
 			},
 		},
 		{
@@ -1029,7 +1483,8 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
@@ -1099,8 +1554,10 @@ func tools() []map[string]any {
 			"name":        "config.show",
 			"description": "Return the current ws user-local configuration and resolved config path without modifying it.",
 			"inputSchema": map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
+				"type": "object",
+				"properties": map[string]any{
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
+				},
 			},
 		},
 		{
@@ -1118,30 +1575,32 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.status",
-			"description": "Return read-only Git branch and worktree status.",
+			"description": "Return read-only Git branch and worktree status. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "git.diff",
-			"description": "Return read-only Git diff output. Defaults to stat mode; use mode=full for patch content.",
+			"description": "Return read-only Git diff output. Defaults to stat text; use mode=full for patch content or format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":  stringProperty("Repository root. Defaults to the server root."),
-					"range": stringProperty("Optional revision range."),
-					"paths": stringArrayProperty("Optional path filters appended after --."),
-					"mode":  enumStringProperty("Diff mode. Defaults to stat.", []string{"full", "stat", "name_only"}),
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"range":  stringProperty("Optional revision range."),
+					"paths":  stringArrayProperty("Optional path filters appended after --."),
+					"mode":   enumStringProperty("Diff mode. Defaults to stat.", []string{"full", "stat", "name_only"}),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "git.log",
-			"description": "Return a bounded read-only Git commit log.",
+			"description": "Return a bounded read-only Git commit log. Defaults to text blocks; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1149,18 +1608,20 @@ func tools() []map[string]any {
 					"range":        stringProperty("Optional revision range."),
 					"limit":        integerProperty("Maximum commits to return. Defaults to 20 and is capped at 100."),
 					"include_body": boolProperty("Include commit body text."),
+					"format":       stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "git.merge_base",
-			"description": "Return the read-only Git merge-base hash for two revisions.",
+			"description": "Return the read-only Git merge-base hash for two revisions. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
-					"base": stringProperty("Base revision."),
-					"head": stringProperty("Head revision."),
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"base":   stringProperty("Base revision."),
+					"head":   stringProperty("Head revision."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"base", "head"},
 			},
@@ -1257,17 +1718,18 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "specs.list",
-			"description": "List spec files with frontmatter, anchors, ticket refs, and marker context metadata.",
+			"description": "List spec files. Defaults to compact text; use format=json for frontmatter, anchors, ticket refs, and marker metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
+					"root":   stringProperty("Repository root. Defaults to the server root."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "specs.find",
-			"description": "Find spec files by query, spec anchor stem, or ticket stem reference.",
+			"description": "Find spec files by query, spec anchor stem, or ticket stem reference. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1275,17 +1737,19 @@ func tools() []map[string]any {
 					"query":       stringProperty("Optional case-insensitive text query."),
 					"spec_stem":   stringProperty("Optional exact spec anchor stem."),
 					"ticket_stem": stringProperty("Optional ticket stem referenced by spec frontmatter or feature entries."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "specs.status",
-			"description": "Return locations and file metadata for one spec anchor stem.",
+			"description": "Return locations and file metadata for one spec anchor stem. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"root":      stringProperty("Repository root. Defaults to the server root."),
 					"spec_stem": stringProperty("Spec anchor stem to inspect."),
+					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"spec_stem"},
 			},
@@ -1305,7 +1769,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "mental_models.find",
-			"description": "Find mental-model paths by query, spec stem reference, or domain.",
+			"description": "Find mental-model paths by query, spec stem reference, or domain. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1313,41 +1777,44 @@ func tools() []map[string]any {
 					"query":     stringProperty("Optional case-insensitive text query."),
 					"spec_stem": stringProperty("Optional spec anchor stem referenced by the mental model."),
 					"domain":    stringProperty("Optional mental-model domain."),
+					"format":    stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "mental_models.status",
-			"description": "Return path-first metadata for mental-model documents selected by domain or path.",
+			"description": "Return path-first metadata for mental-model documents selected by domain or path. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"domain": stringProperty("Optional mental-model domain."),
 					"path":   stringProperty("Optional relative path under ai-docs/mental-model."),
+					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "references.trace",
-			"description": "Trace ticket/spec/mental-model references from exactly one ticket_stem or spec_stem.",
+			"description": "Trace ticket/spec/mental-model references from exactly one ticket_stem or spec_stem. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"root":        stringProperty("Repository root. Defaults to the server root."),
 					"ticket_stem": stringProperty("Optional ticket stem to trace."),
 					"spec_stem":   stringProperty("Optional spec anchor stem to trace."),
+					"format":      stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "tickets.list",
-			"description": "List ticket paths and structured status metadata without reading full document bodies.",
+			"description": "List ticket paths and status metadata without reading full document bodies. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": ticketDiscoverySchema(false),
 		},
 		{
 			"name":        "tickets.find",
-			"description": "Find ticket paths by query, ticket stem, or mentions of another ticket stem.",
+			"description": "Find ticket paths by query, ticket stem, or mentions of another ticket stem. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1358,12 +1825,13 @@ func tools() []map[string]any {
 					"query":                stringProperty("Optional case-insensitive text query."),
 					"ticket_stem":          stringProperty("Optional exact ticket stem."),
 					"mentions_ticket_stem": stringProperty("Optional ticket stem that result tickets must mention."),
+					"format":               stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
 		},
 		{
 			"name":        "tickets.status",
-			"description": "Return structured status metadata for a single ticket stem.",
+			"description": "Return status metadata for a single ticket stem. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1371,6 +1839,7 @@ func tools() []map[string]any {
 					"ticket_stem":     stringProperty("Ticket stem to inspect."),
 					"include_done":    boolProperty("Allow lookup under ai-docs/tickets/.done when true."),
 					"include_dropped": boolProperty("Allow lookup under ai-docs/tickets/.dropped when true."),
+					"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"ticket_stem"},
 			},
@@ -1686,6 +2155,7 @@ func ticketDiscoverySchema(requireTicketStem bool) map[string]any {
 			"statuses":        stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
 			"include_done":    boolProperty("Include ai-docs/tickets/.done when true."),
 			"include_dropped": boolProperty("Include ai-docs/tickets/.dropped when true."),
+			"format":          stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 		},
 	}
 	if requireTicketStem {

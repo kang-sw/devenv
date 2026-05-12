@@ -7,8 +7,8 @@ summary: Host-neutral ws MCP tool contracts for project context, workflow state,
 
 The ws MCP server exposes workflow capabilities through named MCP tools rather
 than host-specific shell commands or repository-local paths. Tool outputs are
-plain text or JSON-in-text MCP content that callers can use from Codex, Claude,
-or another MCP-capable host.
+plain MCP text content that callers can use from Codex, Claude, or another
+MCP-capable host.
 
 ## MCP Server Protocol Surface {#260505-mcp-server-protocol-surface}
 
@@ -20,12 +20,10 @@ Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
 runtime failures return MCP text content with `isError: true`, preserving a
 normal MCP response envelope while still making the failure visible to callers.
 
-> [!note] Planned 🚧
-> Read-only tools whose primary consumer is an LLM will prefer compact readable
-> text defaults over JSON serialized into text content. Tools that need stable
-> machine parsing, launcher compatibility, or structured protocol metadata will
-> preserve an explicit JSON or full-detail escape hatch.
-> {#260512-mcp-llm-readable-output-defaults}
+Read-only tools whose primary consumer is an LLM prefer compact readable text
+defaults over JSON serialized into text content. Tools that need stable machine
+parsing, launcher compatibility, or structured protocol metadata preserve an
+explicit JSON or full-detail escape hatch. {#260512-mcp-llm-readable-output-defaults}
 
 The MCP server detects the host harness from observable MCP payloads before
 relying on environment variables. It inspects `initialize.params` and request
@@ -40,6 +38,8 @@ harness. The detected harness is exposed through session inspection output.
 `runtime.info` returns runtime compatibility metadata, including the runtime
 version, source commit, and prompt bundle metadata. Launchers and workflow
 checks use this output to detect stale or incompatible runtime binaries.
+The default response is compact labeled text; callers that need stable fields
+can request structured JSON.
 
 `runtime.debug_events` returns recent in-process MCP debug events as JSONL. The
 tool is bounded by an optional limit parameter and is intended for diagnosing MCP
@@ -63,7 +63,8 @@ that effective root. The value is volatile and does not write user config, ws
 cache config, or repository files. `session.get_default_root` reports whether a
 session default is set plus fallback state such as the server root and
 `WS_MCP_PROJECT_ROOT`. It also reports the detected session harness when one has
-been observed.
+been observed. The default response is compact labeled text; callers can request
+structured JSON for compatibility.
 
 When host metadata names multiple workspaces and no higher-priority root exists,
 root-aware tools refuse to guess and return an actionable error asking the caller
@@ -77,7 +78,8 @@ root is invalid, root-aware tools fail closed instead of silently falling back t
 ## Config Tools {#260505-config-tools}
 
 `config.show` returns the resolved ws user-local configuration path and current
-configuration without modifying it.
+configuration without modifying it. The default response is compact labeled
+text, and structured JSON remains available for callers that need stable fields.
 
 `config.agents_tier` is the compatibility surface for updating the default
 backend/model mapping for a model alias. Callers provide `tier` as the alias
@@ -115,12 +117,10 @@ They expose spec file metadata, anchors, ticket references, marker context, quer
 matches, and exact-stem status without requiring callers to scan the spec tree
 manually.
 
-> [!note] Planned 🚧
-> Spec, ticket, and mental-model discovery tools will default to compact
-> line-oriented summaries. Broad list/find calls will avoid expanding every
-> nested anchor, phase, related map, snippet, source, or spec-reference array
-> unless callers request full detail or JSON output.
-> {#260512-documentation-discovery-readable-output-defaults}
+Spec, ticket, and mental-model discovery tools default to compact line-oriented
+summaries. Broad list/find calls avoid expanding every nested anchor, phase,
+related map, snippet, source, or spec-reference array unless callers request
+JSON output. {#260512-documentation-discovery-readable-output-defaults}
 
 ## Ticket Discovery Tools {#260505-ticket-discovery-tools}
 
@@ -151,13 +151,11 @@ stem or spec stem. The result connects tickets, specs, and mental-model
 documents so callers can inspect traceability without manually searching each
 document system.
 
-> [!note] Planned 🚧
-> Small metadata and trace tools such as `api.list`,
-> `session.get_default_root`, selected runtime/config inspection views, and
-> `references.trace` will default to compact labeled text where no caller needs
-> stable structured fields. Launcher-facing compatibility data remains available
-> where required.
-> {#260512-metadata-trace-readable-output-defaults}
+Small metadata and trace tools such as `api.list`, `session.get_default_root`,
+selected runtime/config inspection views, and `references.trace` default to
+compact labeled text where no caller needs stable structured fields.
+Launcher-facing compatibility data remains available where required.
+{#260512-metadata-trace-readable-output-defaults}
 
 ## Git Workflow Tools {#260505-git-workflow-tools}
 
@@ -171,13 +169,12 @@ where applicable.
 `git.log` returns a bounded commit log with an optional body flag. `git.merge_base`
 returns the merge base for two revisions.
 
-> [!note] Planned 🚧
-> Git read tools will default to direct, LLM-readable text: `git.status` as a
-> branch/worktree summary with changed-file codes, `git.diff` as the selected
-> diff text, `git.log` as bounded commit blocks without JSON-escaped bodies, and
-> `git.merge_base` as a labeled hash line. JSON output remains available when a
-> caller explicitly asks for structured compatibility output.
-> {#260512-git-readable-output-defaults}
+Git read tools default to direct, LLM-readable text: `git.status` as a
+branch/worktree summary with changed-file codes, `git.diff` as the selected
+diff text, `git.log` as bounded commit blocks without JSON-escaped bodies, and
+`git.merge_base` as a labeled hash line. JSON output remains available when a
+caller explicitly asks for structured compatibility output.
+{#260512-git-readable-output-defaults}
 
 `git.commit` creates a workflow-aware commit from explicit paths and structured
 message fields. It stages only the requested paths and formats commit messages
@@ -236,7 +233,8 @@ directory for the current worktree.
 ## API Documentation MCP Tools {#260505-api-documentation-mcp-tools}
 
 `api.list` returns sorted API documentation cache domain names under
-`ai-docs/.deps`.
+`ai-docs/.deps`. The default response is one domain per line, with structured
+JSON available on request.
 
 `api.ask` asks cached or fetchable third-party API documentation through
 per-domain manager sessions. Callers provide a prompt and may provide a domain

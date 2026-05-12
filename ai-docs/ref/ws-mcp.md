@@ -189,9 +189,10 @@ Return runtime metadata used for plugin compatibility checks.
 
 Output:
 
-- MCP text content containing JSON with `version`, `source_commit`, and
-  `prompt_bundle`.
-- `prompt_bundle` contains `source_commit`, `content_sha256`, and `prompts`.
+- MCP text content with labeled `version`, `source_commit`, and prompt bundle
+  metadata.
+- Pass `format: "json"` for structured compatibility output containing
+  `version`, `source_commit`, and `prompt_bundle`.
 
 Behavior:
 
@@ -231,13 +232,15 @@ Report the volatile default root state for the current MCP server process.
 
 Output:
 
-- MCP text content containing JSON with `session_default_root`,
-  `has_session_default`, `session_harness`, `env_project_root`, and
-  `server_root`.
+- MCP text content with labeled root fallback fields.
+- Pass `format: "json"` for structured compatibility output with
+  `session_default_root`, `has_session_default`, `session_harness`,
+  `env_project_root`, and `server_root`.
 
 ### `ws/api.list`
 
-Return sorted third-party API documentation cache domain names.
+Return sorted third-party API documentation cache domain names. Defaults to one
+domain per line; pass `format: "json"` for the structured domain array.
 
 Input schema:
 
@@ -248,17 +251,18 @@ Input schema:
     "root": {
       "type": "string",
       "description": "Repository root. Defaults to the server root."
-    }
+    },
+    "format": { "type": "string" }
   }
 }
 ```
 
 Output:
 
-- MCP text content containing a JSON array of domain directory names from
-  `ai-docs/.deps/`.
+- MCP text content with one domain directory name per line.
 - Dot-prefixed directories and non-directories are excluded. Missing `.deps`
-  returns an empty array.
+  returns an empty response.
+- Pass `format: "json"` for a structured domain array.
 
 ### `ws/api.ask`
 
@@ -375,6 +379,8 @@ Behavior:
 - Defaults to `mode: "stat"` to avoid returning patch content unless requested.
 - `mode: "full"` returns patch content.
 - `mode: "name_only"` returns changed paths.
+- Defaults to direct diff text. Pass `format: "json"` for structured
+  compatibility output containing `mode`, `range`, `paths`, and `output`.
 - With no `range`, worktree output includes untracked files so `ws/git.diff`
   does not hide files visible in `ws/git.status`.
 - With a `range`, output is revision-scoped and does not include unrelated
@@ -445,7 +451,8 @@ Input schema:
     "root": { "type": "string" },
     "statuses": { "type": "array", "items": { "type": "string" } },
     "include_done": { "type": "boolean" },
-    "include_dropped": { "type": "boolean" }
+    "include_dropped": { "type": "boolean" },
+    "format": { "type": "string" }
   }
 }
 ```
@@ -455,9 +462,12 @@ Behavior:
 - Defaults to active ticket statuses: `ready`, `todo`, and `idea`.
 - `include_done` separately opts into `ai-docs/tickets/.done/`.
 - `include_dropped` separately opts into `ai-docs/tickets/.dropped/`.
-- Returns JSON objects with `stem`, `path`, directory-derived `status`, title,
-  parent, related ticket stems, spec/spec-remove frontmatter, plans, skeletons,
-  completed date, phase headings, unresolved phases, and result-present status.
+- Defaults to compact status lines with path, title, unresolved phases, snippets,
+  and important flags where relevant.
+- Pass `format: "json"` for structured objects with `stem`, `path`,
+  directory-derived `status`, title, parent, related ticket stems,
+  spec/spec-remove frontmatter, plans, skeletons, completed date, phase
+  headings, unresolved phases, and result-present status.
 - Status filters may use `done`/`.done` and `dropped`/`.dropped`, but archived
   statuses are still hidden unless their matching include flag is true.
 
@@ -484,7 +494,8 @@ Input schema:
     "include_dropped": { "type": "boolean" },
     "query": { "type": "string" },
     "ticket_stem": { "type": "string" },
-    "mentions_ticket_stem": { "type": "string" }
+    "mentions_ticket_stem": { "type": "string" },
+    "format": { "type": "string" }
   }
 }
 ```
@@ -497,6 +508,8 @@ Behavior:
   ticket stem, avoiding ad hoc shell pipelines.
 - `query` is a case-insensitive match over stem, path, title, and ticket text.
   Results include short matching snippets for disambiguation, not full bodies.
+- Defaults to compact status lines. Pass `format: "json"` for structured
+  metadata.
 
 Compatibility fallback:
 
@@ -506,7 +519,7 @@ ws-mcp tickets find --mentions-ticket-stem <ticket-stem>
 
 ### `ws/tickets.status`
 
-Return structured status metadata for one ticket stem.
+Return status metadata for one ticket stem.
 
 Input schema:
 
@@ -517,7 +530,8 @@ Input schema:
     "root": { "type": "string" },
     "ticket_stem": { "type": "string" },
     "include_done": { "type": "boolean" },
-    "include_dropped": { "type": "boolean" }
+    "include_dropped": { "type": "boolean" },
+    "format": { "type": "string" }
   },
   "required": ["ticket_stem"]
 }
@@ -528,7 +542,10 @@ Behavior:
 - Looks up a ticket by stable stem, not by path.
 - Active statuses are searched by default; `.done/` and `.dropped/` require the
   matching include flag.
-- Returns the same path-first metadata shape as `ws/tickets.list`.
+- Defaults to a compact status line with path, title, unresolved phases, and
+  important flags where relevant.
+- Pass `format: "json"` for the same path-first metadata shape as
+  `ws/tickets.list`.
 
 Compatibility fallback:
 
@@ -547,7 +564,8 @@ Input schema:
 {
   "type": "object",
   "properties": {
-    "root": { "type": "string" }
+    "root": { "type": "string" },
+    "format": { "type": "string" }
   }
 }
 ```
@@ -555,9 +573,11 @@ Input schema:
 Behavior:
 
 - Scans `ai-docs/spec/` recursively.
-- Returns JSON objects with relative path, duplicate-safe filename, title,
-  summary, anchors, ticket references found in frontmatter or feature entries,
-  and WIP/planned marker contexts.
+- Defaults to compact spec summary lines with anchor counts, ticket refs,
+  snippets, and marker contexts where relevant.
+- Pass `format: "json"` for structured objects with relative path,
+  duplicate-safe filename, title, summary, anchors, ticket references found in
+  frontmatter or feature entries, and WIP/planned marker contexts.
 - Anchor entries include `spec_stem`, line number, nearest heading, and marker
   context when detectable.
 - Does not return full document bodies.
@@ -581,7 +601,8 @@ Input schema:
     "root": { "type": "string" },
     "query": { "type": "string" },
     "spec_stem": { "type": "string" },
-    "ticket_stem": { "type": "string" }
+    "ticket_stem": { "type": "string" },
+    "format": { "type": "string" }
   }
 }
 ```
@@ -593,6 +614,8 @@ Behavior:
   spec text. Results include short snippets for disambiguation, not full bodies.
 - `ticket_stem` matches ticket references found in spec frontmatter or feature
   entries, and also falls back to raw text containment for existing prose refs.
+- Defaults to compact spec summary lines. Pass `format: "json"` for structured
+  metadata.
 
 Compatibility fallback:
 
@@ -612,7 +635,8 @@ Input schema:
   "type": "object",
   "properties": {
     "root": { "type": "string" },
-    "spec_stem": { "type": "string" }
+    "spec_stem": { "type": "string" },
+    "format": { "type": "string" }
   },
   "required": ["spec_stem"]
 }
@@ -622,6 +646,8 @@ Behavior:
 
 - Looks up exact spec anchors by `spec_stem`.
 - Returns all locations so duplicate anchors remain visible to callers.
+- Defaults to compact location and file summary text. Pass `format: "json"` for
+  structured metadata.
 - Rejects ticket-only parameters such as `ticket_stem`; ticket and spec
   identifiers stay distinct.
 
@@ -837,7 +863,8 @@ Input schema:
     "root": { "type": "string" },
     "query": { "type": "string" },
     "spec_stem": { "type": "string" },
-    "domain": { "type": "string" }
+    "domain": { "type": "string" },
+    "format": { "type": "string" }
   }
 }
 ```
@@ -845,8 +872,11 @@ Input schema:
 Behavior:
 
 - Scans `ai-docs/mental-model/` recursively.
-- Returns JSON objects with path, domain, description, sources, matching spec
-  refs, ancestor directory hints, nearby index hints, and short query snippets.
+- Defaults to compact mental-model summary lines with sources, ancestor/index
+  hints, and short query snippets where relevant.
+- Pass `format: "json"` for structured objects with path, domain, description,
+  sources, matching spec refs, ancestor directory hints, nearby index hints, and
+  short query snippets.
 - `spec_stem` matches explicit spec anchors in frontmatter sources/spec fields
   or in document text.
 - Does not return full mental-model bodies.
@@ -871,7 +901,8 @@ Input schema:
   "properties": {
     "root": { "type": "string" },
     "domain": { "type": "string" },
-    "path": { "type": "string" }
+    "path": { "type": "string" },
+    "format": { "type": "string" }
   }
 }
 ```
@@ -879,7 +910,8 @@ Input schema:
 Behavior:
 
 - Requires `domain` or a relative `path` under `ai-docs/mental-model/`.
-- Returns the same metadata shape as `ws/mental_models.find`.
+- Defaults to compact mental-model summary lines. Pass `format: "json"` for the
+  same metadata shape as `ws/mental_models.find`.
 - Rejects spec-selection parameters; spec filtering belongs to
   `ws/mental_models.find`.
 
@@ -902,7 +934,8 @@ Input schema:
   "properties": {
     "root": { "type": "string" },
     "ticket_stem": { "type": "string" },
-    "spec_stem": { "type": "string" }
+    "spec_stem": { "type": "string" },
+    "format": { "type": "string" }
   }
 }
 ```
@@ -910,6 +943,8 @@ Input schema:
 Behavior:
 
 - Requires exactly one of `ticket_stem` or `spec_stem`.
+- Defaults to compact text sections for tickets, specs, and mental models. Pass
+  `format: "json"` for structured graph output.
 - From `ticket_stem`, returns the ticket, specs referenced by ticket
   frontmatter or spec feature ticket refs, and mental models linked to those
   spec anchors.
@@ -1021,7 +1056,8 @@ Behavior:
   the path where config would be read from. Default Codex model aliases are
   `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` → `gpt-5.5`;
   default Claude aliases use `haiku`, `sonnet`, and `opus`.
-- The JSON response contains `path` and `config` fields.
+- The default response is compact labeled text. Pass `format: "json"` for the
+  structured `path` and `config` fields.
 - Delegate and leaf MCP tool profiles hide and reject this tool together with
   the other `config.*` tools when optional profile filtering is active.
 

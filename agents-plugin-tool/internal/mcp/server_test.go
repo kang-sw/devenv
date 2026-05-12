@@ -113,30 +113,30 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["6"], "prompt_bundle") || !strings.Contains(byID["6"], "code-reviewer") {
 		t.Fatalf("runtime.info response missing prompt bundle: %s", byID["6"])
 	}
-	if !strings.Contains(byID["7"], "changed_files") || !strings.Contains(byID["7"], "branch") {
-		t.Fatalf("git.status response missing status JSON: %s", byID["7"])
+	if !strings.Contains(toolText(t, byID["7"]), "dirty:") || !strings.Contains(toolText(t, byID["7"]), "ai-docs/") {
+		t.Fatalf("git.status response missing readable status: %s", byID["7"])
 	}
 	if !strings.Contains(toolText(t, byID["8"]), `"event":"request.received"`) {
 		t.Fatalf("runtime.debug_events missing request evidence: %s", byID["8"])
 	}
 	configText := toolText(t, byID["9"])
-	if !strings.Contains(configText, `"path"`) || !strings.Contains(configText, `config.json`) || !strings.Contains(configText, `"config"`) {
+	if !strings.Contains(configText, "path:") || !strings.Contains(configText, `config.json`) || !strings.Contains(configText, "model_aliases:") {
 		t.Fatalf("config.show response missing path/config: %s", byID["9"])
 	}
 	ticketsText := toolText(t, byID["10"])
-	if !strings.Contains(ticketsText, `"stem":"260503-feat-demo"`) || !strings.Contains(ticketsText, `"mentions_ticket_stem":true`) {
+	if !strings.Contains(ticketsText, "260503-feat-demo") || !strings.Contains(ticketsText, "mentions_ticket_stem") {
 		t.Fatalf("tickets.find response missing mention result: %s", byID["10"])
 	}
 	specsText := toolText(t, byID["11"])
-	if !strings.Contains(specsText, `"path":"ai-docs/spec/demo.md"`) || !strings.Contains(specsText, `"matches_spec_stem":true`) || !strings.Contains(specsText, `"matches_ticket_ref":true`) {
+	if !strings.Contains(specsText, "ai-docs/spec/demo.md") || !strings.Contains(specsText, "matches_spec_stem") || !strings.Contains(specsText, "matches_ticket_ref") {
 		t.Fatalf("specs.find response missing spec result: %s", byID["11"])
 	}
 	mentalModelsText := toolText(t, byID["12"])
-	if !strings.Contains(mentalModelsText, `"path":"ai-docs/mental-model/workflow.md"`) || !strings.Contains(mentalModelsText, `"matches_spec_stem":true`) || !strings.Contains(mentalModelsText, `"matches_domain":true`) {
+	if !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md") || !strings.Contains(mentalModelsText, "matches_spec_stem") || !strings.Contains(mentalModelsText, "matches_domain") {
 		t.Fatalf("mental_models.find response missing result: %s", byID["12"])
 	}
 	referencesText := toolText(t, byID["13"])
-	if !strings.Contains(referencesText, `"input_type":"spec"`) || !strings.Contains(referencesText, `"tickets"`) || !strings.Contains(referencesText, `"mental_models"`) {
+	if !strings.Contains(referencesText, "input: spec") || !strings.Contains(referencesText, "tickets:") || !strings.Contains(referencesText, "mental_models:") {
 		t.Fatalf("references.trace response missing graph result: %s", byID["13"])
 	}
 }
@@ -229,7 +229,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`+"\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.show","arguments":{"format":"json"}}}`+"\n",
 	), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
@@ -242,11 +242,11 @@ func TestServeStdioConfigShow(t *testing.T) {
 		} `json:"config"`
 	}
 	if err := json.Unmarshal([]byte(showBefore), &before); err != nil {
-		t.Fatalf("config.show default response is not JSON: %v\n%s", err, showBefore)
+		t.Fatalf("config.show json response is not JSON: %v\n%s", err, showBefore)
 	}
 	wantConfigPath := filepath.Join(canonicalTestPath(t, cache), "config.json")
 	if before.Path != wantConfigPath || before.Config.SchemaVersion != 1 {
-		t.Fatalf("config.show default response mismatch: %s", byID["1"])
+		t.Fatalf("config.show json response mismatch: %s", byID["1"])
 	}
 
 	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{}, "light", "", "gemini-3-1-pro"); err != nil {
@@ -254,7 +254,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 	}
 	out.Reset()
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`+"\n",
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.show","arguments":{"format":"json"}}}`+"\n",
 	), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestServeStdioSessionDefaultRootAndExplicitOverride(t *testing.T) {
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tickets.list","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"session.get_default_root","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"session.get_default_root","arguments":{"format":"json"}}}`,
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tickets.list","arguments":{"root":%q}}}`, rootB),
 	}, "\n")
 
@@ -498,7 +498,7 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 		t.Fatalf("status missing claude alias resolution:\n%s", status)
 	}
 	session := toolText(t, byID["4"])
-	if !strings.Contains(session, `"session_harness":"claude"`) {
+	if !strings.Contains(session, "session_harness: claude") {
 		t.Fatalf("session did not report claude harness: %s", session)
 	}
 }
@@ -823,10 +823,13 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	mustWrite(t, root, "ai-docs/tickets/todo/260503-feat-demo.md", "---\ntitle: Demo\n---\n# Demo\n\n### Result (abc123) - 2026-05-04\n\nImplemented.\n")
 
 	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.diff","arguments":{"mode":"name_only","paths":["file.txt"]}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.log","arguments":{"limit":1,"include_body":true}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.merge_base","arguments":{"base":"HEAD","head":"HEAD"}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.diff","arguments":{"mode":"name_only","paths":["file.txt"],"format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.log","arguments":{"limit":1,"include_body":true,"format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git.merge_base","arguments":{"base":"HEAD","head":"HEAD","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.diff","arguments":{"mode":"name_only","paths":["file.txt"]}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git.log","arguments":{"limit":1,"include_body":true}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"git.merge_base","arguments":{"base":"HEAD","head":"HEAD"}}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -835,8 +838,8 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 7 {
+		t.Fatalf("expected 7 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -878,6 +881,16 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	if mergeBase.Base != "HEAD" || mergeBase.Head != "HEAD" || mergeBase.MergeBase != head {
 		t.Fatalf("merge-base response = %#v, want hash %s", mergeBase, head)
 	}
+	if got := toolText(t, byID["4"]); got != "file.txt\n" {
+		t.Fatalf("git.diff text response = %q", got)
+	}
+	logText := toolText(t, byID["5"])
+	if !strings.Contains(logText, "commit "+head) || !strings.Contains(logText, "subject: initial") || !strings.Contains(logText, "body text") || strings.Contains(logText, `\"body text\"`) {
+		t.Fatalf("git.log text response = %q", logText)
+	}
+	if got := toolText(t, byID["6"]); !strings.Contains(got, "merge_base: "+head) || !strings.Contains(got, "(HEAD HEAD)") {
+		t.Fatalf("git.merge_base text response = %q", got)
+	}
 
 	var commit struct {
 		Hash          string `json:"hash"`
@@ -887,7 +900,7 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 			ResultAdded bool   `json:"result_added"`
 		} `json:"ticket_changes"`
 	}
-	if err := json.Unmarshal([]byte(toolText(t, byID["4"])), &commit); err != nil {
+	if err := json.Unmarshal([]byte(toolText(t, byID["7"])), &commit); err != nil {
 		t.Fatal(err)
 	}
 	if commit.Hash == "" || commit.Title != "test: mcp commit" || len(commit.TicketChanges) != 1 || commit.TicketChanges[0].Stem != "260503-feat-demo" || !commit.TicketChanges[0].ResultAdded {
@@ -1131,7 +1144,7 @@ func TestAPIListDomains(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	got := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"])
-	if got != "[\"go\",\"python\"]\n" {
+	if got != "go\npython\n" {
 		t.Fatalf("api.list = %q", got)
 	}
 }
