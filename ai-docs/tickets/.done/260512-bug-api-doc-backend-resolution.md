@@ -3,10 +3,12 @@ title: API docs backend selection and alias resolution
 spec:
   - 260512-api-doc-agent-backend-selection
   - 260512-backend-model-resolution-consistency
+  - 260508-model-alias-config-tools
 related-mental-model:
   - api-documentation-cache
   - named-agent-runtime
   - prompt-bundle
+completed: 2026-05-12
 ---
 
 # API docs backend selection and alias resolution
@@ -44,3 +46,14 @@ instead of hardcoded Codex backend pinning. Adjust wsconfig alias persistence
 and resolution so explicit backend selection cannot inherit a concrete model
 from another backend mapping. Cover both the routing change and the mismatch
 prevention with focused tests.
+
+### Result (d7b4b39) - 2026-05-12
+
+`api.ask` pre-router and per-domain managers now register through portable
+aliases plus the current MCP harness instead of pinning `backend: codex`.
+`config.agents_tier` updates only the default alias mapping and the matching
+backend-specific mapping, and explicit backend registrations reject
+cross-backend alias/model borrowing instead of constructing impossible pairs.
+
+Focused coverage was added in `wsconfig` and `mcp` tests, and the existing
+`wsagent` package continued to pass after the routing change.
