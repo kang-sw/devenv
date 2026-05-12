@@ -191,6 +191,8 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
+| `260512-feat-gemini-named-agent-backend` | todo | Add Gemini CLI as a ws named-agent backend |
+| `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
