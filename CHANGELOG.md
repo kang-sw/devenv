@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.2 - 2026-05-12
+
+### Fixed
+- Run Gemini PowerShell shims directly on Windows so backend cancellation and
+  Windows release smoke tests do not stall behind `.cmd` wrapper processes.
+
 ## v0.23.1 - 2026-05-12
 
 ### Added
