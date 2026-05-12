@@ -111,6 +111,12 @@ messages to the next resumed backend call.
 worker pid and marks the current call cancelled. Cancellation is the urgent
 termination path; normal redirects should use `agents.interrupt`.
 
+> [!note] Planned 🚧
+> Cancellation output will explicitly tell callers that when cancellation was
+> used because an agent did not respond and no result is available, they can
+> call the same registered agent again with a recovery prompt to attempt
+> session resume.
+
 After an MCP process restart, disk state remains sufficient for `agents.wait`,
 `agents.result`, `agents.status`, `agents.tail`, and compatibility output reads.
 If the stored worker pid for a running call is no longer alive, readiness and
@@ -128,6 +134,11 @@ cancellation as `agents.cancel`. If cancellation reports `cleanup_needed`, recal
 does not start a replacement call and returns manual-cleanup guidance. Otherwise
 it starts a new resumed `agents.call` with either the caller's recovery prompt or
 a default prompt that identifies the retry as timeout-and-no-activity recovery.
+
+> [!note] Planned 🚧
+> The recall implementation and CLI mirror may remain available for manual
+> recovery, but MCP tool discovery and workflow guidance will stop advertising
+> `agents.recall` as a normal model-visible recovery option.
 
 ## Codex Session And JSONL Handling {#260505-codex-agent-session-jsonl-handling}
 
