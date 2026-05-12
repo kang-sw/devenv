@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.23.4 - 2026-05-12
+
+### Changed
+- Default read-only MCP tool responses to compact LLM-readable text, with
+  `format=json` compatibility output where structured consumers need it.
+- Move skeleton workflow ownership under `lead-implement`: `lead-proceed` now
+  routes implementation-ready work only, while `lead-implement` decides and
+  runs optional skeleton work inside the implementation branch lifecycle.
+- Split `lead-write-skeleton` output into a lead draft checkpoint commit and a
+  final populated skeleton commit, recording only the final hash in ticket
+  `skeletons:` metadata.
+
 ## v0.23.3 - 2026-05-12
 
 ### Changed
