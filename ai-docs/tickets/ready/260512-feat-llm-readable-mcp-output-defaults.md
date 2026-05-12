@@ -1,5 +1,10 @@
 ---
 title: LLM-readable MCP output defaults
+spec:
+  - 260512-mcp-llm-readable-output-defaults
+  - 260512-git-readable-output-defaults
+  - 260512-metadata-trace-readable-output-defaults
+  - 260512-documentation-discovery-readable-output-defaults
 related-mental-model:
   - mcp-runtime
 ---

@@ -20,6 +20,13 @@ Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
 runtime failures return MCP text content with `isError: true`, preserving a
 normal MCP response envelope while still making the failure visible to callers.
 
+> [!note] Planned 🚧
+> Read-only tools whose primary consumer is an LLM will prefer compact readable
+> text defaults over JSON serialized into text content. Tools that need stable
+> machine parsing, launcher compatibility, or structured protocol metadata will
+> preserve an explicit JSON or full-detail escape hatch.
+> {#260512-mcp-llm-readable-output-defaults}
+
 The MCP server detects the host harness from observable MCP payloads before
 relying on environment variables. It inspects `initialize.params` and request
 metadata for high-confidence Codex or Claude markers, treats
@@ -108,6 +115,13 @@ They expose spec file metadata, anchors, ticket references, marker context, quer
 matches, and exact-stem status without requiring callers to scan the spec tree
 manually.
 
+> [!note] Planned 🚧
+> Spec, ticket, and mental-model discovery tools will default to compact
+> line-oriented summaries. Broad list/find calls will avoid expanding every
+> nested anchor, phase, related map, snippet, source, or spec-reference array
+> unless callers request full detail or JSON output.
+> {#260512-documentation-discovery-readable-output-defaults}
+
 ## Ticket Discovery Tools {#260505-ticket-discovery-tools}
 
 `tickets.list` returns ticket paths and structured status metadata across ticket
@@ -137,6 +151,14 @@ stem or spec stem. The result connects tickets, specs, and mental-model
 documents so callers can inspect traceability without manually searching each
 document system.
 
+> [!note] Planned 🚧
+> Small metadata and trace tools such as `api.list`,
+> `session.get_default_root`, selected runtime/config inspection views, and
+> `references.trace` will default to compact labeled text where no caller needs
+> stable structured fields. Launcher-facing compatibility data remains available
+> where required.
+> {#260512-metadata-trace-readable-output-defaults}
+
 ## Git Workflow Tools {#260505-git-workflow-tools}
 
 `git.status` returns the current branch and worktree status.
@@ -148,6 +170,14 @@ where applicable.
 
 `git.log` returns a bounded commit log with an optional body flag. `git.merge_base`
 returns the merge base for two revisions.
+
+> [!note] Planned 🚧
+> Git read tools will default to direct, LLM-readable text: `git.status` as a
+> branch/worktree summary with changed-file codes, `git.diff` as the selected
+> diff text, `git.log` as bounded commit blocks without JSON-escaped bodies, and
+> `git.merge_base` as a labeled hash line. JSON output remains available when a
+> caller explicitly asks for structured compatibility output.
+> {#260512-git-readable-output-defaults}
 
 `git.commit` creates a workflow-aware commit from explicit paths and structured
 message fields. It stages only the requested paths and formats commit messages
