@@ -10,7 +10,7 @@ Target: user request
 ## Invariants
 
 - Skeleton = the first code change for a ticket. No implementation code - only interface stubs and integration tests.
-- Lead owns public contract draft: research insertion points, write low-resolution source, review, commit.
+- Lead owns public contract draft: research insertion points, write low-resolution source, commit draft, review, commit final skeleton.
 - The populator owns source discovery and compile-clean normalization, not public contract design.
 - Draft markers are language-neutral comment text: `CONTRACT:`, `HINT:`, and `HOLE:`.
 - `CONTRACT:` markers bind public names, visibility, module placement, call shape, and behavior targets.
@@ -19,6 +19,9 @@ Target: user request
 - Low-resolution source may be non-compiling only before populator handoff.
 - Do not modify existing public interfaces unless the ticket explicitly mandates it.
 - The delegate does not commit - lead reviews and commits.
+- Operate on the current branch; caller owns branch creation and merge.
+- Standalone invocation is allowed only when the caller already owns branch and merge lifecycle.
+- Leave two source commits: one draft checkpoint and one final populated skeleton checkpoint.
 - Register the skeleton-populator agent once per invocation via `ws/agents.register`; resume via `ws/agents.call` for amendment rounds.
 - Register the skeleton-reviewer agent once per invocation via `ws/agents.register`; it is read-only.
 - Skeleton review loop is lightweight: one reviewer, one amendment round, then stop and report if still non-clean.
@@ -46,6 +49,13 @@ Write the first source edit directly as low-resolution source:
 Do not add implementation logic. Placeholder identifiers may be invalid when they
 reduce lead effort and leave clear `HINT:` or `HOLE:` markers for the populator.
 
+Commit the lead draft before population:
+
+1. Commit only draft files as one logical checkpoint.
+2. Commit message: `feat(<scope>): skeleton draft - <what contracts are sketched>`
+3. Include `## AI Context` with key contract decisions and note that the commit is a draft checkpoint for population.
+4. Store `<draft-commit>`.
+
 ### 3. Populate
 
 Call `ws/agents.register(name: "skeleton-populator", prompts: ["skeleton-populator"])`.
@@ -54,6 +64,7 @@ Call `ws/agents.call(name: "skeleton-populator", prompt: <block below>)`:
 
 ```text
 Ticket: <ticket-path>
+Draft commit: <draft-commit>
 
 ## Lead-authored draft
 - Files and locations changed by the lead draft.
@@ -74,7 +85,7 @@ Call `ws/agents.call(name: "skeleton-reviewer", prompt: <block below>)`:
 Ticket: <ticket-path>
 Lead draft files: <paths>
 Populator report: <summary or result path>
-Diff scope: current working tree
+Diff scope: <draft-commit>..working tree
 
 Review only contract preservation, marker resolution, stub-only scope, and build/syntax evidence.
 Return [clean|non-clean] plus findings.
@@ -99,22 +110,31 @@ and report instead of continuing the relay.
 
 ### 5. Commit
 
-1. Commit stubs and tests together as one logical unit.
+1. Commit populated stubs and tests together as one logical unit.
 2. Commit message: `feat(<scope>): skeleton - <what contracts are established>`
 3. Include `## AI Context` with key contract decisions.
 4. Include `## Ticket Updates` with the ticket stem and what future phases must know.
-5. Update the ticket's `skeletons:` frontmatter with the phase and commit hash (e.g., `phase-1: abc1234`). Only add entries for phases that have a skeleton - no null placeholders.
+5. Store `<final-skeleton-commit>`.
+6. Update the ticket's `skeletons:` frontmatter in a separate ticket commit with the phase and final skeleton commit hash (e.g., `phase-1: abc1234`). Only add entries for phases that have a skeleton - no null placeholders. Do not record the draft commit as a skeleton artifact.
+7. Commit message: `docs(ticket): record skeleton hash`.
+8. Store `<ticket-skeleton-commit>`.
 
-### 6. Suggest next step
+### 6. Return
 
-Recommend the next step from implementation width and session warmth:
-- **Wide** (multiple independent modules): suggest `ws:lead-write-code` (one scope at a time) or ask the user to split into separate tickets.
-- **Narrow + warm** (single module, main agent already engaged the code): suggest `ws:lead-edit`.
-- **Narrow + cold** (single module, main agent is cold on the target): suggest `ws:lead-write-code`.
+Return:
 
-Warmth means the main agent has read target files this session or the user explicitly signaled direct authorship. If ambiguous, suggest `ws:lead-proceed`.
+```text
+Skeleton draft commit: <draft-commit>
+Skeleton final commit: <final-skeleton-commit>
+Ticket skeletons updated: <yes|no - reason>
+Ticket skeleton commit: <ticket-skeleton-commit | none>
+Verification: <build or syntax command and result>
+Next: <caller-owned when invoked by ws:lead-implement | ws:lead-implement when invoked standalone>
+```
 
-Present the recommendation with brief rationale. Do not auto-invoke.
+When invoked standalone, recommend `ws:lead-implement` with the same target and
+"skeleton exists" context. Do not recommend `ws:lead-edit` or
+`ws:lead-write-code` directly from this skill.
 
 ## Judgments
 

@@ -18,8 +18,8 @@ Target: user request
 
 ### 1. Assess
 
-1. Parse target: ticket path or inline description.
-2. If ticket-driven: read ticket; extract scope, stem, artifacts.
+1. Parse target: ticket path or inline description plus optional skeleton directive from `ws:lead-proceed`.
+2. If ticket-driven: read ticket; extract scope, stem, artifacts, and existing skeletons.
 3. Apply `judge: execution-mode`.
 
 ### 2. Prepare
@@ -28,6 +28,7 @@ Target: user request
 2. Create and maintain this task list:
 
 ```text
+[ ] Resolve skeleton directive - invoke ws:lead-write-skeleton on the implementation branch when required
 [ ] Execute - invoke ws:lead-edit or ws:lead-write-code; capture commit range
 [ ] Doc pre-pass - update-spec then mental-model-updater; commit each
 [ ] Report to user - wait for approval; loop on tweaks
@@ -38,9 +39,16 @@ Target: user request
 
 ### 3. Execute
 
-- Direct edit: invoke `ws:lead-edit` with the target.
-- Delegated: create `implement/<scope>`, then invoke `ws:lead-write-code`.
-- Capture commit range from the completion report.
+1. Record `<implementation-start>` before creating or editing source.
+2. Delegated: create `implement/<scope>` before any source edit.
+3. If skeleton directive is required:
+   a. Invoke `ws:lead-write-skeleton` with the target and directive reason.
+   b. Capture the final skeleton commit hash from its completion output.
+   c. Continue implementation on the same branch.
+4. Execute the selected implementation mode:
+   - Direct edit: invoke `ws:lead-edit` with the target on the current branch.
+   - Delegated: invoke `ws:lead-write-code`.
+5. Capture commit range from `<implementation-start>..HEAD` plus the edit/write-code completion report.
 
 ### 4. Doc Pre-Pass
 
@@ -55,6 +63,7 @@ Run mental-model-updater after update-spec so it sees implemented-marker changes
 
 Report:
 
+- skeleton draft/final commit hashes and ticket-skeleton update status when skeleton ran;
 - implemented changes from edit/write-code output;
 - review result from edit `Review:` or write-code reviewer summaries;
 - test status;
@@ -95,6 +104,7 @@ Update ticket status when ticket-driven.
 | Decision | When |
 |----------|------|
 | Direct edit -> `ws:lead-edit` | Single file, internal-only, no callers affected, no new public symbols, no new test files, and no explicit delegation request |
+| Delegated -> `ws:lead-write-code` | Skeleton directive is required |
 | Delegated -> `ws:lead-write-code` | Any direct-edit condition is unmet |
 
 ## Doctrine

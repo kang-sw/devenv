@@ -153,20 +153,19 @@ read-only `skeleton-reviewer` delegate checks contract preservation, marker
 resolution, stub-only scope, and build or syntax evidence before lead commit.
 The skeleton review loop stays lightweight: one reviewer, one amendment round,
 then stop and report if still non-clean. The lead makes contract amendments,
-verifies build or syntax checks, commits, and links generated skeleton artifacts
-to the ticket. {#260510-skeleton-contract-populator-flow}
+verifies build or syntax checks, commits the final skeleton, and links generated
+skeleton artifacts to the ticket. {#260510-skeleton-contract-populator-flow}
 
-> [!note] Planned 🚧
-> `lead-implement` will own skeleton execution inside the implementation branch
-> lifecycle. `lead-proceed` will only decide whether skeleton work is needed and
-> pass that directive to `lead-implement`; it will no longer invoke
-> `lead-write-skeleton` before implementation. {#260512-skeleton-inside-implement-branch}
->
-> `lead-write-skeleton` will preserve both authoring boundaries as commits on
-> the current branch: a lead-authored skeleton draft commit, followed by a final
-> populated skeleton commit after populator and reviewer checks. Ticket
-> `skeletons:` frontmatter records only the final skeleton commit hash, not the
-> draft checkpoint. {#260512-skeleton-draft-and-final-commits}
+`lead-implement` owns skeleton execution inside the implementation branch
+lifecycle. `lead-proceed` only decides whether skeleton work is needed and passes
+that directive to `lead-implement`; it does not invoke `lead-write-skeleton`
+before implementation. {#260512-skeleton-inside-implement-branch}
+
+`lead-write-skeleton` preserves both authoring boundaries as commits on the
+current branch: a lead-authored skeleton draft commit, followed by a final
+populated skeleton commit after populator and reviewer checks. Ticket
+`skeletons:` frontmatter records only the final skeleton commit hash, not the
+draft checkpoint. {#260512-skeleton-draft-and-final-commits}
 
 ## Implementation Workflow Skills {#260505-implementation-workflow-skills}
 
@@ -202,7 +201,7 @@ When workflow primitive context is not already active, it loads
 The pipeline order is fixed:
 
 ```text
-spec -> ticket -> skeleton -> implementation
+spec -> ticket -> implementation
 ```
 
 Existing non-epic `ready/` ticket paths skip ticket creation and are direct
@@ -212,9 +211,9 @@ child ticket creation, child ready promotion, or proceeding a ready child ticket
 Existing `todo/` ticket paths route through `lead-discuss` for `todo/` ->
 `ready/` promotion before implementation. Actionable inline targets go through
 `lead-write-ticket`; exploratory targets stop and suggest `lead-discuss`.
-Implementation always routes through `lead-implement`, with
-`lead-write-skeleton` inserted only when a separate contract checkpoint is
-needed before implementation.
+Implementation always routes through `lead-implement`. When a separate contract
+checkpoint is needed before implementation, `lead-proceed` passes a skeleton
+directive to `lead-implement` instead of invoking skeleton writing directly.
 
 ## Sprint Session Container {#260505-sprint-session-container}
 
