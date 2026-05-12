@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -32,12 +33,14 @@ func (GeminiRunner) Call(req RunnerRequest) (RunnerResult, error) {
 	}
 
 	backendVersion := geminiVersion()
-	ctx := context.Background()
+	var ctx context.Context
 	var cancel context.CancelFunc
 	if req.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-		defer cancel()
+		ctx, cancel = context.WithTimeout(context.Background(), req.Timeout)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
 	}
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "gemini", invocation.Args...)
 	if !req.InheritProcessGroup {
 		configureRunnerCommand(cmd)
@@ -72,7 +75,15 @@ func (GeminiRunner) Call(req RunnerRequest) (RunnerResult, error) {
 		}
 	}
 	result, parseErr := parseGeminiStreamJSON(stdout, req.OnSessionID)
+	var callbackErr geminiSessionCallbackError
+	if errors.As(parseErr, &callbackErr) {
+		cancel()
+		_ = stdout.Close()
+	}
 	waitErr := cmd.Wait()
+	if errors.As(parseErr, &callbackErr) {
+		return RunnerResult{}, parseErr
+	}
 	if waitErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return RunnerResult{}, fmt.Errorf("gemini timed out after %s", req.Timeout)
@@ -147,7 +158,7 @@ func parseGeminiStreamJSON(r io.Reader, onSessionID func(string) error) (RunnerR
 				result.SessionID = sessionID
 				if onSessionID != nil {
 					if callbackErr := onSessionID(sessionID); callbackErr != nil {
-						return RunnerResult{}, fmt.Errorf("handle gemini session id: %w", callbackErr)
+						return RunnerResult{}, geminiSessionCallbackError{err: callbackErr}
 					}
 				}
 			}
@@ -228,6 +239,10 @@ func geminiAssistantContent(event map[string]any) string {
 		return ""
 	}
 	message, ok := mapField(event, "message")
+	if !ok && strings.EqualFold(stringField(event, "type"), "message") {
+		message = event
+		ok = true
+	}
 	if !ok {
 		return ""
 	}
@@ -333,4 +348,16 @@ func stringField(value map[string]any, key string) string {
 		return ""
 	}
 	return text
+}
+
+type geminiSessionCallbackError struct {
+	err error
+}
+
+func (e geminiSessionCallbackError) Error() string {
+	return fmt.Sprintf("handle gemini session id: %v", e.err)
+}
+
+func (e geminiSessionCallbackError) Unwrap() error {
+	return e.err
 }

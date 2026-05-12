@@ -1190,6 +1190,7 @@ func TestRunCurrentUsesGeminiBackendRunner(t *testing.T) {
 	writeFakeGeminiExecutable(t, binDir)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GEMINI_FAKE_LOG", logPath)
+	t.Setenv("GEMINI_FAKE_FAIL", "")
 
 	starter := &fakeWorkerStarter{pid: 4567}
 	base := NewManager(Options{

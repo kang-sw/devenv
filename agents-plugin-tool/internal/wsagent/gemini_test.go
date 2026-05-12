@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,7 +16,7 @@ func TestParseGeminiStreamJSONCapturesSessionTextAndIgnoresNoise(t *testing.T) {
 		"Gemini CLI notice before JSON",
 		`{"type":"init","init":{"session_id":"gemini-session-1"}}`,
 		`{"type":"message","message":{"role":"assistant","content":"hello "}}`,
-		`{"type":"message","message":{"role":"assistant","content":[{"type":"tool_use","name":"ignored"},{"text":"world"}]}}`,
+		`{"type":"message","role":"assistant","content":[{"type":"tool_use","text":"ignored"},{"text":"world"}]}`,
 		`{"type":"tool_use","tool_use":{"name":"ignored"}}`,
 		`{"type":"tool_result","tool_result":{"content":"ignored"}}`,
 		`{"type":"result","result":{"status":"success","duration_ms":12}}`,
@@ -153,6 +154,7 @@ func TestGeminiRunnerExecutesFakeBinaryAndCapturesDiagnostics(t *testing.T) {
 	writeFakeGeminiExecutable(t, binDir)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GEMINI_FAKE_LOG", logPath)
+	t.Setenv("GEMINI_FAKE_FAIL", "")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -200,6 +202,33 @@ func TestGeminiRunnerExecutesFakeBinaryAndCapturesDiagnostics(t *testing.T) {
 	}
 }
 
+func TestGeminiRunnerSessionCallbackErrorCancelsProcess(t *testing.T) {
+	repo := initRepo(t)
+	binDir := t.TempDir()
+	writeFakeGeminiExecutable(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GEMINI_FAKE_LOG", filepath.Join(t.TempDir(), "gemini.log"))
+	t.Setenv("GEMINI_FAKE_FAIL", "")
+	t.Setenv("GEMINI_FAKE_SLEEP_AFTER_INIT", "1")
+
+	start := time.Now()
+	_, err := GeminiRunner{}.Call(RunnerRequest{
+		Root:    repo,
+		Prompt:  "callback fail",
+		Timeout: time.Second,
+		OnSessionID: func(string) error {
+			return errors.New("state write failed")
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "handle gemini session id") ||
+		!strings.Contains(err.Error(), "state write failed") {
+		t.Fatalf("GeminiRunner.Call error = %v, want callback error", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("callback error was not propagated promptly: elapsed=%s err=%v", elapsed, err)
+	}
+}
+
 func TestGeminiRunnerNonZeroExitPreservesStderr(t *testing.T) {
 	repo := initRepo(t)
 	binDir := t.TempDir()
@@ -220,27 +249,38 @@ func writeFakeGeminiExecutable(t *testing.T, dir string) string {
 	if runtime.GOOS == "windows" {
 		path += ".cmd"
 		body := `@echo off
-if "%1"=="--version" (
-  echo gemini fake 1.2.3
-  exit /b 0
-)
-echo ARGS:%*>>"%GEMINI_FAKE_LOG%"
-echo ENV:%WS_MCP_TOOL_PROFILE%>>"%GEMINI_FAKE_LOG%"
-set /p PROMPT=
-echo STDIN:%PROMPT%>>"%GEMINI_FAKE_LOG%"
-if "%GEMINI_FAKE_FAIL%"=="1" (
-  echo login required 1>&2
-  exit /b 41
-)
-echo fake diagnostic 1>&2
-echo Gemini notice
-echo {^"type^":^"init^",^"init^":{^"session_id^":^"gemini-session^"}}
-echo {^"type^":^"message^",^"message^":{^"role^":^"assistant^",^"content^":^"gemini ^"}}
-echo {^"type^":^"message^",^"message^":{^"role^":^"assistant^",^"content^":^"reply^"}}
-echo {^"type^":^"result^",^"result^":{^"status^":^"success^"}}
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0gemini.ps1" %*
+exit /b %ERRORLEVEL%
 `
 		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 			t.Fatalf("write fake gemini cmd: %v", err)
+		}
+		ps1Path := filepath.Join(dir, "gemini.ps1")
+		ps1Body := `if ($args.Count -gt 0 -and $args[0] -eq "--version") {
+  Write-Output "gemini fake 1.2.3"
+  exit 0
+}
+$prompt = [Console]::In.ReadToEnd()
+Add-Content -Path $env:GEMINI_FAKE_LOG -Value ("ARGS:" + ($args -join " "))
+Add-Content -Path $env:GEMINI_FAKE_LOG -Value ("ENV:" + $env:WS_MCP_TOOL_PROFILE)
+Add-Content -Path $env:GEMINI_FAKE_LOG -Value ("STDIN:" + $prompt)
+if ($env:GEMINI_FAKE_FAIL -eq "1") {
+  [Console]::Error.WriteLine("login required")
+  exit 41
+}
+[Console]::Error.WriteLine("fake diagnostic")
+Write-Output "Gemini notice"
+Write-Output '{"type":"init","init":{"session_id":"gemini-session"}}'
+if ($env:GEMINI_FAKE_SLEEP_AFTER_INIT -eq "1") {
+  Start-Sleep -Seconds 10
+  exit 0
+}
+Write-Output '{"type":"message","message":{"role":"assistant","content":"gemini "}}'
+Write-Output '{"type":"message","role":"assistant","content":"reply"}'
+Write-Output '{"type":"result","result":{"status":"success"}}'
+`
+		if err := os.WriteFile(ps1Path, []byte(ps1Body), 0o755); err != nil {
+			t.Fatalf("write fake gemini ps1: %v", err)
 		}
 		return path
 	}
@@ -262,8 +302,12 @@ fi
 printf 'fake diagnostic\n' >&2
 printf 'Gemini notice\n'
 printf '{"type":"init","init":{"session_id":"gemini-session"}}\n'
+if [ "$GEMINI_FAKE_SLEEP_AFTER_INIT" = "1" ]; then
+  sleep 10
+  exit 0
+fi
 printf '{"type":"message","message":{"role":"assistant","content":"gemini "}}\n'
-printf '{"type":"message","message":{"role":"assistant","content":"reply"}}\n'
+printf '{"type":"message","role":"assistant","content":"reply"}\n'
 printf '{"type":"result","result":{"status":"success"}}\n'
 `
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
