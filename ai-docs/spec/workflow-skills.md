@@ -35,6 +35,7 @@ lead-ship
 lead-skill-authoring
 lead-sprint
 lead-update-spec
+lead-verify-discussion
 lead-workflow-manual
 lead-write-code
 lead-write-skeleton
@@ -129,6 +130,13 @@ components, phases, or cross-child invariants are affected, and concrete repair
 work moves into child tickets. The skill routes all ticket creation, edits,
 drops, and status moves through `lead-write-ticket`; it does not perform source
 edits. {#260510-salvage-recovery-workflow-skill}
+
+`lead-verify-discussion` gives users an explicit lightweight verification
+checkpoint during discussion. It restates the current assumptions or structure
+choices, uses scoped `ws/subquery` calls to check premise quality and, when the
+topic touches implementation shape, code hygiene or maintainability fit, then
+returns a short stance: continue, adjust, or stop and clarify.
+{#260512-discussion-verification-skill}
 
 `lead-write-skeleton` optionally locks high-risk caller-visible contracts before
 implementation when the scope needs a separate reviewable checkpoint. It
