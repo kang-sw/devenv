@@ -6,6 +6,7 @@ spec:
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime
+completed: 2026-05-12
 ---
 
 # Agent cancel recovery guidance
@@ -42,3 +43,14 @@ resume.
 Remove `agents.recall` from model-visible MCP tool discovery and workflow
 guidance while preserving compatibility implementation paths. Update tests and
 docs that assert the named-agent tool surface or follow-up text.
+
+### Result (ca26dcc) - 2026-05-12
+
+Implemented cancellation recovery guidance in status output and follow-up text.
+Cancelled calls without cleanup-needed state now include a `cancel_recovery_tip`
+that tells callers to retry `agents.call` on the same registered agent with a
+recovery prompt when cancellation followed a no-result timeout.
+
+Removed `agents.recall` from advertised MCP tool discovery, runtime capability
+metadata, and workflow guidance while keeping the compatibility implementation
+and CLI command path available for manual use.
