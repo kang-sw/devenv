@@ -75,7 +75,9 @@ configuration without modifying it.
 `config.agents_tier` is the compatibility surface for updating the default
 backend/model mapping for a model alias. Callers provide `tier` as the alias
 name and may provide a backend, a concrete model, or both. When backend is
-omitted, ws infers it from the model family where possible.
+omitted, ws infers it from the model family where possible. The update applies
+to the alias default plus the matching backend-specific mapping for the
+inferred or explicit backend; it does not rewrite other backend mappings.
 
 Configuration exposes harness-aware model alias mappings. `light`, `core`, and
 `deep` map to backend/model defaults per harness, existing tier-shaped config is
