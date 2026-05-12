@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.23.3 - 2026-05-12
+
+### Changed
+- Add cancelled-agent recovery guidance that points no-result timeout recovery
+  toward retrying `agents.call` on the same registered agent.
+- Hide `agents.recall` from advertised MCP tools, runtime capability metadata,
+  and workflow guidance while keeping the compatibility implementation
+  available for manual CLI use.
+
 ## v0.23.2 - 2026-05-12
 
 ### Fixed
