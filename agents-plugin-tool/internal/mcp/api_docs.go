@@ -29,7 +29,9 @@ type apiRuntime interface {
 	AskManager(ctx context.Context, root, domain, prompt string) (string, error)
 }
 
-type wsagentAPIRuntime struct{}
+type wsagentAPIRuntime struct {
+	harness string
+}
 
 type apiDomainResult struct {
 	domain string
@@ -37,14 +39,14 @@ type apiDomainResult struct {
 	err    error
 }
 
-func (wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string, error) {
+func (rt wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string, error) {
 	mgr := wsagent.NewManager(wsagent.Options{})
 	name := fmt.Sprintf("api-doc-pre-router-%d", time.Now().UTC().UnixNano())
 	_, _, err := mgr.Register(wsagent.RegisterOptions{
 		Root:                root,
 		Name:                name,
-		Backend:             "codex",
-		Tier:                "light",
+		Harness:             rt.harness,
+		Model:               "light",
 		Prompts:             []string{apiPreRouterPrompt},
 		SuppressOrientation: true,
 	})
@@ -58,7 +60,7 @@ func (wsagentAPIRuntime) Route(ctx context.Context, root, prompt string) (string
 	return resultWithManagerCancel(ctx, mgr, root, name)
 }
 
-func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
+func (rt wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt string) (string, error) {
 	mgr := wsagent.NewManager(wsagent.Options{})
 	name := apiManagerName(domain)
 	agent, active, err := mgr.Inspect(root, name)
@@ -72,8 +74,8 @@ func (wsagentAPIRuntime) AskManager(ctx context.Context, root, domain, prompt st
 		if _, _, regErr := mgr.Register(wsagent.RegisterOptions{
 			Root:    root,
 			Name:    name,
-			Backend: "codex",
-			Tier:    "core",
+			Harness: rt.harness,
+			Model:   "core",
 			Prompts: []string{apiDocManagerPrompt},
 			ConditionalPromptRefs: []wsagent.ConditionalPromptRef{
 				{Binary: "cargo-brief", PromptRef: apiCargoBriefPrompt},
@@ -333,5 +335,5 @@ func (s *Server) apiRuntime() apiRuntime {
 	if s.api != nil {
 		return s.api
 	}
-	return wsagentAPIRuntime{}
+	return wsagentAPIRuntime{harness: s.currentHarness()}
 }

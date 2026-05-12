@@ -307,6 +307,18 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 	}
 }
 
+func TestAPIRuntimeUsesObservedHarness(t *testing.T) {
+	server := NewServer(t.TempDir(), "test")
+	server.observeHarness("test", "claude")
+	runtime, ok := server.apiRuntime().(wsagentAPIRuntime)
+	if !ok {
+		t.Fatalf("apiRuntime returned %T", server.apiRuntime())
+	}
+	if runtime.harness != "claude" {
+		t.Fatalf("api runtime harness = %q", runtime.harness)
+	}
+}
+
 func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

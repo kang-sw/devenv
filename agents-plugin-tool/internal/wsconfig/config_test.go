@@ -110,6 +110,70 @@ func TestResolveAgentLegacyTierUsesHarness(t *testing.T) {
 	}
 }
 
+func TestSetAgentsTierDoesNotOverwriteOtherBackendAliasMappings(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := SetAgentsTier(Options{CacheHome: cache}, "core", "", "claude-sonnet-4-6"); err != nil {
+		t.Fatalf("SetAgentsTier returned error: %v", err)
+	}
+
+	backend, model, err := ResolveAgentForHarness(Options{CacheHome: cache}, "core", "codex", "", "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "codex" || model != "gpt-5.5" {
+		t.Fatalf("explicit codex alias was overwritten = %q/%q", backend, model)
+	}
+
+	backend, model, err = ResolveAgent(Options{CacheHome: cache}, "core", "", "")
+	if err != nil {
+		t.Fatalf("ResolveAgent returned error: %v", err)
+	}
+	if backend != "claude" || model != "claude-sonnet-4-6" {
+		t.Fatalf("default alias mapping = %q/%q", backend, model)
+	}
+}
+
+func TestResolveAgentExplicitBackendDoesNotBorrowCrossBackendModel(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	path, err := Path(Options{CacheHome: cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{
+  "schema_version": 1,
+  "agents": {
+    "tiers": {
+      "core": {
+        "backend": "claude",
+        "model": "claude-sonnet-4-6"
+      }
+    },
+    "model_aliases": {
+      "core": {
+        "default": {
+          "backend": "claude",
+          "model": "claude-sonnet-4-6"
+        }
+      }
+    }
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	backend, model, err := ResolveAgentForHarness(Options{CacheHome: cache}, "core", "codex", "", "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "codex" || model != "" {
+		t.Fatalf("explicit codex should not borrow claude model = %q/%q", backend, model)
+	}
+}
+
 func TestShowReturnsPathAndDefaultWithoutCreatingFile(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	view, err := Show(Options{CacheHome: cache})

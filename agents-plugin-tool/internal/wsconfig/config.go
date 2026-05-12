@@ -101,7 +101,9 @@ func SetAgentsTier(opts Options, tier, backend, model string) (Config, error) {
 	}
 	mapping := AgentTier{Backend: backend, Model: model}
 	cfg.Agents.ModelAliases[tier]["default"] = mapping
-	cfg.Agents.ModelAliases[tier]["codex"] = mapping
+	if key := normalizedHarness(backend); key != "" {
+		cfg.Agents.ModelAliases[tier][key] = mapping
+	}
 	return cfg, save(opts, cfg)
 }
 
@@ -134,14 +136,16 @@ func ResolveAgentForHarness(opts Options, tier, backend, model, harness string) 
 		return "", "", err
 	}
 	if mapping, ok := resolveAliasMapping(cfg, tier, backend, harness); ok {
-		if model == "" {
-			model = strings.TrimSpace(mapping.Model)
-		}
-		if backend == "" {
-			backend = strings.TrimSpace(mapping.Backend)
-		}
-		if backend == "" {
-			backend = InferBackend(model)
+		if useAliasMappingForBackend(backend, mapping) {
+			if model == "" {
+				model = strings.TrimSpace(mapping.Model)
+			}
+			if backend == "" {
+				backend = strings.TrimSpace(mapping.Backend)
+			}
+			if backend == "" {
+				backend = InferBackend(model)
+			}
 		}
 	}
 	if backend == "" {
@@ -297,9 +301,27 @@ func normalizedHarness(value string) string {
 		return "codex"
 	case "claude":
 		return "claude"
+	case "gemini":
+		return "gemini"
 	default:
 		return ""
 	}
+}
+
+func useAliasMappingForBackend(explicitBackend string, mapping AgentTier) bool {
+	explicitKey := normalizedHarness(explicitBackend)
+	if explicitKey == "" {
+		return true
+	}
+	mappingKey := normalizedHarness(mapping.Backend)
+	if mappingKey != "" {
+		return mappingKey == explicitKey
+	}
+	inferredKey := normalizedHarness(InferBackend(mapping.Model))
+	if inferredKey == "" {
+		return true
+	}
+	return inferredKey == explicitKey
 }
 
 func save(opts Options, cfg Config) error {
