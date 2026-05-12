@@ -7,6 +7,7 @@ spec:
   - 260512-documentation-discovery-readable-output-defaults
 related-mental-model:
   - mcp-runtime
+completed: 2026-05-12
 ---
 
 # LLM-readable MCP output defaults
@@ -76,6 +77,13 @@ Success criteria:
 - Tests cover text defaults and any compatibility JSON mode.
 - Existing MCP error envelopes and `isError` behavior remain unchanged.
 
+### Result (6beafb1) - 2026-05-12
+
+Implemented `format: "json"` compatibility handling for the affected read-only
+MCP tools while keeping normal tool errors and mutation inputs unchanged. The
+MCP spec now records compact LLM-readable defaults as implemented behavior, and
+the MCP tool schemas advertise the compatibility output option.
+
 ### Phase 2: Convert Git read surfaces
 
 Change `git.status`, `git.diff`, `git.log`, and `git.merge_base` defaults to
@@ -90,6 +98,13 @@ Success criteria:
 - `git.log` avoids JSON escaping in commit bodies.
 - Tests exercise clean, dirty, untracked, and body-included log output.
 
+### Result (6beafb1) - 2026-05-12
+
+Converted `git.status`, `git.diff`, `git.log`, and `git.merge_base` MCP
+defaults to compact text, with `format: "json"` preserving the previous
+structured payloads. Tests cover default text output and JSON compatibility for
+the Git read tools.
+
 ### Phase 3: Convert small metadata and trace surfaces
 
 Change small read-only metadata tools where text is clearly sufficient:
@@ -102,6 +117,13 @@ Success criteria:
 - Human/LLM default output is compact and labeled.
 - Launcher-facing compatibility data remains available and tested.
 - Existing docs identify which surfaces remain structured intentionally.
+
+### Result (6beafb1) - 2026-05-12
+
+Converted `runtime.info`, `config.show`, `session.get_default_root`,
+`api.list`, and `references.trace` defaults to compact labeled or sectioned
+text. Structured JSON remains available where compatibility consumers need
+stable fields.
 
 ### Phase 4: Convert documentation discovery surfaces
 
@@ -117,3 +139,10 @@ Success criteria:
   anchor or phase visible.
 - Full-detail behavior remains available for implementation workflows that need
   precise metadata without manual tree scans.
+
+### Result (6beafb1) - 2026-05-12
+
+Converted `specs.*`, `tickets.*`, and `mental_models.find/status` defaults to
+compact summaries while preserving `format: "json"` for structured metadata.
+The reference docs were updated after review to describe both the compact
+defaults and the JSON escape hatch.
