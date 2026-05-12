@@ -24,6 +24,7 @@ related:
 
 - `prompt` is required; `domain_hint` only bypasses routing when it exactly matches an existing domain directory.
 - Pre-router output is domain slugs only, one per line. Any valid slug can cause a manager/cache directory to be created.
+- API-doc helper agents rely on portable aliases plus the current MCP harness: the pre-router registers as `light` and per-domain managers register as `core`, so config overrides can intentionally move API-doc work off Codex. {#260512-api-doc-agent-backend-selection}
 - Same root/domain manager calls are serialized process-locally; different domains run concurrently and results are reassembled in original domain order. {#260505-api-docs-synchronous-aggregation}
 - Partial failure is intentional: mixed success returns text with `ERROR:` sections; all-domain failure returns a tool error. Sync and async result formatting share one formatter, so aggregation changes must keep both paths aligned.
 - Go runtime manages agent/session lifecycle; manager prompts own cache bootstrap, staleness checks, and fetching. {#260505-api-docs-staleness-fetch-bootstrap}
@@ -31,7 +32,7 @@ related:
 
 ## Coupling
 
-- `api.ask` depends on named-agent registration, result timeout, ephemeral pre-router cleanup, and per-domain manager reuse. Inactive managers older than the five-minute hot-cache TTL are erased and re-registered; active managers are preserved. {#260505-api-docs-manager-sessions}
+- `api.ask` depends on named-agent registration, result timeout, ephemeral pre-router cleanup, per-domain manager reuse, and current harness-aware alias resolution. Inactive managers older than the five-minute hot-cache TTL are erased and re-registered; active managers are preserved. {#260505-api-docs-manager-sessions} {#260512-api-doc-agent-backend-selection}
 - Async cancellation must reach both pre-router and per-domain manager waits through `wsagent.Manager.Cancel`; merely marking the API job cancelled leaves router/manager agents running until their own timeout.
 - Prompt stems in `api_docs.go` must match embedded prompt filenames and runtime bundle metadata.
 - `api-doc-cargo-brief` is conditional on a binary existing on `PATH`; changing this requires `ConditionalPromptRef` behavior. {#260505-api-docs-conditional-prompts}
