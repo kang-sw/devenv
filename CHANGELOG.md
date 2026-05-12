@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.23.1 - 2026-05-12
+
+### Added
+- Add Gemini named-agent backend support through the existing `agents.*`
+  surfaces, including stream-json parsing, session resume, diagnostics, and
+  model inference.
+
+### Changed
+- Route API documentation helper agents through harness-aware `light` and
+  `core` aliases instead of pinning Codex.
+- Add validation checkpoint guidance to discussion workflows.
+
+### Fixed
+- Prevent model alias overrides from creating cross-backend backend/model pairs,
+  such as a Codex backend with a Claude concrete model.
+- Harden Gemini backend parser and test isolation around callback failures and
+  ambient fake-backend environment controls.
+
 ## v0.23.0 - 2026-05-11
 
 ### Added
