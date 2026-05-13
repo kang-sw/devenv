@@ -129,6 +129,17 @@ Acceptance criteria:
   surface.
 - Launcher capability validation can distinguish full ws and wsflow contracts.
 
+### Result (9f066d9) - 2026-05-13
+
+Created `agents-plugin-wsflow/` with Codex and Claude manifests, package-local
+MCP configuration, shared launcher copies, an agentless `runtime.json`, an empty
+tracked skills root for later normalization, and package tests that verify the
+runtime contract against `ws-mcp runtime capabilities` under the same no-agent
+environment used by `.mcp.json`.
+
+The scaffold intentionally does not copy workflow skills yet. Phase 3 remains
+responsible for curated semantic rewrites under the `wsflow:lead-*` namespace.
+
 ### Phase 2: Package runtime contract integration
 
 Wire the wsflow package to the runtime mode delivered by

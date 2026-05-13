@@ -3,6 +3,7 @@ domain: plugin-runtime
 description: "Codex plugin packaging, launcher repair, and runtime compatibility contracts."
 sources:
   - agents-plugin/
+  - agents-plugin-wsflow/
   - agents-plugin/bin/
 related:
   mcp-runtime: "Launcher compatibility uses runtime.capabilities first, with runtime.info, tools/list, and CLI probes as fallback checks."
@@ -16,6 +17,7 @@ related:
 - `agents-plugin/.codex-plugin/plugin.json` is the Codex-visible plugin manifest and points at the skill bundle and MCP config. {#260505-codex-plugin-manifest-skill-bundle}
 - `agents-plugin/.mcp.json` is the plugin-managed MCP startup contract; `cwd: "."` makes `./bin/ws-mcp-launcher.py` resolve relative to the installed plugin cache. {#260505-plugin-local-mcp-server-config}
 - `agents-plugin/.claude-plugin/plugin.json` is a Claude-facing compatibility manifest for the Codex-first candidate and should start the same Python launcher path, not the POSIX shell wrapper, so native Windows does not require `/bin/sh`. {#260505-plugin-local-mcp-server-config}
+- `agents-plugin-wsflow/` is the scaffolded agentless derivative package; its `.mcp.json` selects `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=wsflow`, and `WS_MCP_SETUP_TOOL=setup`. {#260513-wsflow-agentless-plugin-package}
 - `agents-plugin/bin/ws-mcp-launcher.py` owns runtime lookup, compatibility checks, release download, checksum verification, local dev runtime repair, and final handoff. {#260505-runtime-launcher-repair-project-root}
 - `agents-plugin/runtime.json` is active compatibility data, not descriptive metadata. {#260505-runtime-contract-metadata}
 
@@ -45,6 +47,7 @@ related:
 
 - **Add a plugin skill**: add `agents-plugin/skills/<name>/SKILL.md`; keep the manifest pointing at `./skills` unless the bundle layout changes.
 - **Add a runtime requirement**: extend `runtime.json`, then add requirement-specific launcher checks; use `runtime.info` only for runtime metadata the binary can report.
+- **Change wsflow packaging**: keep `.mcp.json` env, `runtime.json`, and the package contract test aligned with no-agent `runtime.capabilities`.
 - **Change runtime version**: run `agents-plugin-tool/scripts/bump-ws-version.sh`, then verify manifests, launcher compatibility glob, build script, workflow, and docs changed together.
 
 ## Common Mistakes

@@ -13,6 +13,7 @@ tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
 Active plugin package: `agents-plugin/` (`ws@0.25.2`).
+Agentless derivative package scaffold: `agents-plugin-wsflow/` (`wsflow@0.25.2`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Retired Claude source material: `ai-docs/ref/claude-home-legacy.md` and git
 history.
@@ -34,6 +35,9 @@ history.
 - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
   Codex UI install has verified `ws:lead-skill-authoring`,
   `ws:lead-write-ticket`, and `ws:lead-discuss`.
+- `agents-plugin-wsflow/` is a scaffolded agentless derivative package with
+  Codex/Claude manifests, package-local no-agent MCP env, shared launcher
+  copies, and a reduced `runtime.json`; workflow skills are not copied yet.
 - Codex local plugin iteration has no known CLI refresh path; use UI
   uninstall/install or a fresh Codex session after editing the registered source.
 - `agents-plugin/.codex-plugin/plugin.json` references plugin-local `.mcp.json`

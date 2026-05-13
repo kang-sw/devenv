@@ -3,6 +3,7 @@ domain: claude-compatibility
 description: "Root Claude shim, agents-plugin compatibility metadata, installer snapshot, and retired legacy boundaries."
 sources:
   - agents-plugin/.claude-plugin/
+  - agents-plugin-wsflow/.claude-plugin/
   - CLAUDE.md
   - install.sh
   - ai-docs/ref/claude-home-legacy.md
@@ -18,6 +19,7 @@ related:
 - Root `CLAUDE.md` is a compatibility shim whose body is `@AGENTS.md`. {#260505-claude-root-compatibility-shim}
 - `claude-plugin/` is retired; do not reintroduce it as a live fallback or mirror target. {#260510-claude-plugin-retirement-freeze}
 - `agents-plugin/.claude-plugin/plugin.json` is the Claude-facing compatibility manifest for the active plugin package. {#260505-claude-plugin-manifest-marketplace}
+- `agents-plugin-wsflow/.claude-plugin/plugin.json` is the Claude-facing compatibility manifest for the agentless derivative package and must use package-local no-agent MCP environment. {#260513-wsflow-claude-compatible-package}
 - `install.sh update` refreshes the installed `agents-plugin/` snapshot and marketplace metadata. {#260505-claude-install-update-snapshot}
 
 ## Module Contracts
