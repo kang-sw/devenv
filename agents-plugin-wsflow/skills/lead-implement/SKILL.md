@@ -10,7 +10,7 @@ Target: user request
 ## Invariants
 
 - Lead-owned harness only: route, run doc pipeline, report, and gate continuation.
-- Execute code changes through `wsflow:lead-edit`; wsflow has no managed implementer relay.
+- Execute code changes through `wsflow:lead-edit`; `lead-edit` owns the implementation strategy.
 - Honor caller-provided scope or phase slices as hard implementation boundaries.
 - Do not route to excluded workflow skills.
 - Create the task list at prepare; every task is mandatory and ordered.
@@ -78,13 +78,13 @@ implementation slice; completed ticket Results are frozen.
 
 | Decision | When |
 |----------|------|
-| Stop | Current branch starts with `sprint/`; ask the user for an explicit target branch because wsflow has no sprint workflow. |
+| Stop | Current branch starts with `sprint/`; route sprint-scoped implementation through `wsflow:lead-sprint` or ask the user for an explicit non-sprint target branch. |
 | Continue current branch | Current branch is suitable for direct edits or already matches the requested implementation scope. |
 | Create implementation branch | The user explicitly asks for branch isolation or repository rules require it. |
 
 ## Doctrine
 
 Implement optimizes for **verified code reaching the current workflow branch**.
-wsflow removes managed delegation, so the harness keeps routing and docs
-lead-owned while `lead-edit` owns source changes and review. When a rule is
+The harness keeps routing and documentation explicit while `lead-edit` owns
+implementation strategy, source integration, and review. When a rule is
 ambiguous, preserve the caller-provided scope and keep mutation paths explicit.

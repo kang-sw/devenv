@@ -174,12 +174,12 @@ Config `## Contributor Workflow: ws` forces YES; `external` forces NO; `mixed` (
 
 Effect on intent phase:
 - YES → in-context analysis; `## AI Context` documents intention directly.
-- NO → spawn host-native one-shot subagent for intention inference; present inferred intent to user for confirmation before proceeding with remaining phases.
+- NO → use subagent analysis for intention inference; present inferred intent to user for confirmation before proceeding with remaining phases.
 
 ### judge: is-large-diff
 
 Fires when diff exceeds the configured threshold (default: 20 files or 500 lines).
-When fires: spawn host-native subagent(s) for parallel alignment and risk analysis across modules.
+When fires: use subagents for parallel alignment and risk analysis across modules.
 When silent: in-context analysis for all phases.
 
 ### judge: has-checklist

@@ -12,7 +12,7 @@ Target: user request
 - Call `wsflow/convention.read(name: "spec-conventions")` before any write or update - conventions are canonical there.
 - Location follows `judge: directory-vs-flat`.
 - Call `wsflow/spec_index.verify()` after every write or update.
-- Accuracy check: for every heading without `🚧`, confirm the feature exists through direct source inspection or a host-native one-shot read-only verifier when uncertain.
+- Accuracy check: for every heading without `🚧`, confirm the feature exists through direct source inspection or subagent verification when uncertain.
 
 ## On: invoke
 
@@ -34,7 +34,7 @@ Target: user request
    d. Apply `judge: idea-level` before adding any `> [!note] Planned 🚧` callouts. Remove `🚧` from confirmed-implemented features as needed.
    e. Call `wsflow/spec_index.verify()` for duplicate-anchor verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
-6. Accuracy check - confirm every heading without `🚧` exists in the codebase through direct source inspection or a host-native one-shot read-only verifier when uncertain. Never remove `🚧` without confirmation.
+6. Accuracy check - confirm every heading without `🚧` exists in the codebase through direct source inspection or subagent verification when uncertain. Never remove `🚧` without confirmation.
 7. **Commit** - call `wsflow/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
 
 ## Judgments

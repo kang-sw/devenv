@@ -15,9 +15,9 @@ Call `wsflow/project_tree()`.
 
 - Operate only on `sprint/` branches; create, continue, wrap up, or abandon explicitly.
 - Suppress documentation pipeline during task execution; run one wrap-up pass.
-- Execute source changes through `wsflow:lead-edit`; do not delegate implementation.
-- Use host-native one-shot subagents only for bounded read-only investigation or review.
-- Keep wrap-up mutations lead-owned: specs, mental models, tickets, index, commits, merge, and cleanup.
+- Execute source changes through `wsflow:lead-edit`; `lead-edit` chooses direct or subagent implementation.
+- Use subagents for bounded exploration, implementation support, verification, audit, or review.
+- Keep wrap-up integration lead-owned: specs, mental models, tickets, index, commits, merge, and cleanup.
 - Commit each logical source task before returning to the sprint loop.
 - All written artifacts are English.
 
@@ -90,7 +90,7 @@ Skip for follow-ups in an established domain, status, or continuity queries.
 
 ### Sprint-Aware Survey
 
-Use direct local search or a host-native one-shot read-only subagent.
+Use direct local search or a scoped subagent.
 
 ```text
 Sprint: <sprint-name>
@@ -115,7 +115,7 @@ Return:
 ## Doctrine
 
 Sprint optimizes for **sustained implementation throughput across a feature
-branch**. wsflow keeps throughput by batching documentation to wrap-up and
-routing mutations through lead-owned direct edits, while using only bounded
-read-only investigation for extra context. When ambiguous, preserve branch
+branch**. It keeps throughput by batching documentation to wrap-up and routing
+source tasks through `lead-edit`, while using scoped subagents when they improve
+exploration, implementation, or review. When ambiguous, preserve branch
 continuity without losing wrap-up accountability.

@@ -31,9 +31,9 @@ FORBIDDEN_PATTERNS = {
     "full ws MCP notation": re.compile(r"\bws/"),
     "full ws skill namespace": re.compile(r"\bws:"),
     "full ws dotted namespace": re.compile(r"\bws\."),
-    "managed query tool": re.compile(r"\bsubquery\b"),
-    "managed agent dotted tool": re.compile(r"\bagents\."),
-    "managed mental model updater": re.compile(r"\bmental-model-updater\b"),
+    "full ws query tool": re.compile(r"\bsubquery\b"),
+    "full ws agent dotted tool": re.compile(r"\bagents\."),
+    "full ws mental model updater": re.compile(r"\bmental-model-updater\b"),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
     "excluded salvage skill": re.compile(r"\blead-salvage\b"),
@@ -56,7 +56,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(missing_full_counterparts, [])
         self.assertEqual(unexpected_wsflow_skills, [])
 
-    def test_skill_files_do_not_reference_managed_agent_surface(self):
+    def test_skill_files_do_not_reference_full_ws_agent_surface(self):
         offenders = []
         for path in sorted(SKILLS_DIR.rglob("*")):
             if not path.is_file():
@@ -67,10 +67,10 @@ class WsflowSkillBundleTest(unittest.TestCase):
                     offenders.append(f"{path.relative_to(PLUGIN_DIR)}: {label}")
         self.assertEqual(offenders, [])
 
-    def test_workflow_manual_documents_native_subagent_boundary(self):
+    def test_workflow_manual_documents_subagent_guidance(self):
         text = (SKILLS_DIR / "lead-workflow-manual" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("wsflow has no managed named-agent runtime", text)
-        self.assertIn("host-native one-shot subagents", text)
+        self.assertIn("Use subagents when a task benefits from scoped exploration", text)
+        self.assertIn("The lead owns integration, verification, final judgment, and commits.", text)
 
 
 if __name__ == "__main__":

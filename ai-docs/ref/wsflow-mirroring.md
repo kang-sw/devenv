@@ -59,12 +59,12 @@ Excluded:
 - Do not mention `ws/`, `ws:`, `ws.`, `subquery`, or `agents.*` in
   distributed wsflow skill text.
 - Do not describe wsflow as ws-lite, a ws mode, or a ws-compatible product.
-- Do not describe persistent wsflow-managed agents, auto-resume sessions, or
-  multi-turn implementer/reviewer relays.
-- Use host-native one-shot subagents only for bounded read-only investigation,
-  verification, audit, or review.
-- Keep workflow mutations lead-owned: edits, docs, ticket/spec changes,
-  mental-model updates, and commits are performed by the lead.
+- Describe subagent use by task scope, permissions, expected output, and lead
+  integration responsibilities.
+- Use subagents for bounded exploration, implementation, verification, audit, or
+  review when useful.
+- Keep workflow integration lead-owned: docs, ticket/spec changes, mental-model
+  updates, commits, and final judgment stay with the lead.
 
 ## Static Verification
 

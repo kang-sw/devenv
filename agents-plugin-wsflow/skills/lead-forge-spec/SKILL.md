@@ -11,8 +11,8 @@ Target: repository spec reconstruction
 
 - Call `wsflow/convention.read(name: "spec-conventions")` before any spec write.
 - All surveys are read-only and self-contained.
-- Use host-native one-shot subagents only for bounded read-only investigation; use direct exploration when unavailable.
-- Lead owns domain selection, anchor generation, document authorship, final judgment, and commits.
+- Use direct exploration or subagent investigation for bounded read-only surveys.
+- Lead owns domain selection, anchor generation, document integration, final judgment, and commits.
 - Call `wsflow/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
 - Call `wsflow/spec_index.verify()` after every spec file write or update.
 - Domain task names use the prefix `forge-spec-<domain>` only as local progress labels.
@@ -28,8 +28,8 @@ Target: repository spec reconstruction
 
 ### 2. Repository Survey
 
-Run the following surveys through direct project exploration or host-native
-one-shot read-only subagent workers; each worker prompt must include the exact
+Run the following surveys through direct project exploration or subagent
+workers; each worker prompt must include the exact
 question, read-only boundary, expected bullet output, and permission to use
 wsflow read tools such as `wsflow/project_tree`, `wsflow/tickets.*`,
 `wsflow/specs.*`, `wsflow/mental_models.*`, and `wsflow/git.*`.
@@ -64,7 +64,7 @@ For each confirmed domain, run focused read-only investigation:
 4. Identify tickets in `ready/` whose phases belong to the domain.
 5. Identify spec anchors that should be reused, renamed, added, or removed.
 
-Use direct exploration or host-native one-shot subagent workers; keep prompts
+Use direct exploration or subagent workers; keep prompts
 self-contained and ask for file paths, stems, and short evidence notes.
 
 ### 4. Write Domain Spec
@@ -83,7 +83,7 @@ self-contained and ask for file paths, stems, and short evidence notes.
 ### 5. Ticket Association Check
 
 1. From the domain survey, collect relevant `ready/` tickets.
-2. Use direct inspection or one host-native read-only subagent to check whether
+2. Use direct inspection or one subagent audit to check whether
    each ticket phase maps to a spec stem.
 3. Resolve open ticket/spec association questions with the user before commit.
 
@@ -117,7 +117,7 @@ exists. Otherwise record the gap in the survey report, not the spec body.
 
 ## Templates
 
-### Native Survey Prompt Shape
+### Survey Prompt Shape
 
 ```text
 Read-only survey.
@@ -139,6 +139,6 @@ wsflow/spec_index.verify()
 ## Doctrine
 
 Forge-spec optimizes for **recovering behavioral truth from incomplete memory**.
-Surveys gather evidence, but the lead owns domain boundaries, spec authorship,
+Surveys gather evidence, but the lead owns domain boundaries, spec integration,
 and traceability. When ambiguous, preserve caller-visible behavior and ask the
 user before replacing broad coverage.

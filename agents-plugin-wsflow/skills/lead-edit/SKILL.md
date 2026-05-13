@@ -1,6 +1,6 @@
 ---
 name: lead-edit
-description: Direct-edit primitive for wsflow; lead edits current branch, verifies, performs bounded review, and reports.
+description: Edit primitive for wsflow; lead integrates changes on the current branch, verifies, performs bounded review, and reports.
 ---
 
 # Edit
@@ -9,13 +9,13 @@ Target: user request
 
 ## Invariants
 
-- Lead edits directly; do not delegate implementation.
+- Lead owns edit routing, integration, verification, and commits.
 - Load `wsflow/infra.read(name: "impl-playbook")` before editing.
 - Use `wsflow/mental_models.find` or `wsflow/mental_models.status`; read returned paths.
 - Ancestor loading: read `mental-model/<domain>/index.md` before `mental-model/<domain>/<sub>.md`.
 - Honor caller-provided scope or phase slices as hard edit boundaries.
 - Commit logical units per repository commit rules; include `## AI Context`.
-- Review once after verification; use host-native one-shot subagent review when available.
+- Review once after verification; use subagent review when useful.
 - Lead fixes correctness, security, contract, and regression findings.
 - Lead may reject style-only or scope-expanding findings with reasons.
 - Output the completion report format exactly.
@@ -33,8 +33,10 @@ Target: user request
 
 ### 2. Edit
 
-Edit directly per target and impl-playbook. Commit logical checkpoints with
-repository commit rules.
+Implement per target and impl-playbook. Use direct edits or scoped subagent
+implementation when it improves throughput. For subagent implementation, state
+scope, writable paths or modules, verification expectations, and required
+changed-file summary. Commit logical checkpoints with repository commit rules.
 
 ### 3. Verify
 
@@ -47,7 +49,7 @@ repository commit rules.
 
 Apply `judge: review-scope`.
 
-If host-native one-shot subagents are available, ask one read-only reviewer:
+If subagent review is useful, ask one read-only reviewer:
 
 ```text
 Review diff range: <start-commit>..HEAD
@@ -79,8 +81,8 @@ Output completion report.
 
 ### judge: review-scope
 
-Use a native one-shot reviewer by default for source changes. Lead-only review
-is allowed for mechanical, doc-only, or low-risk edits with rationale.
+Use a subagent reviewer by default for source changes. Lead-only review is
+allowed for mechanical, doc-only, or low-risk edits with rationale.
 
 ## Templates
 
@@ -97,6 +99,6 @@ Review: clean | non-clean (<one-line summary>)
 ## Doctrine
 
 Edit optimizes for **session-context preservation during code changes**. The
-lead owns implementation context and commits; a host-native reviewer supplies a
-fresh read-only check when available. When a rule is ambiguous, keep the lead's
+lead owns integration, verification, and commits; a subagent reviewer supplies
+a fresh read-only check when useful. When a rule is ambiguous, keep the lead's
 context continuous through the change.

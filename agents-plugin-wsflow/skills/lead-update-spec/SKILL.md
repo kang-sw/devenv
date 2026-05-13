@@ -9,7 +9,7 @@ Target: user request
 
 ## Invariants
 
-- Lead-driven - no subagent delegation.
+- Lead owns spec-impact judgment, final spec edits, and commits.
 - Call `wsflow/convention.read(name: "spec-conventions")` before any write or read.
 - Only add entries for confirmed-implemented features - no `🚧` entries unless explicitly directed.
 - Call `wsflow/spec_index.verify()` after any file modification.

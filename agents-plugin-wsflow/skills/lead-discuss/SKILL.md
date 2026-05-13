@@ -17,7 +17,7 @@ Call `wsflow/project_tree()` to load the current project map.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phases with a `### Result` section are frozen - do not edit them.
 - Read mental-model docs on-demand as topics emerge.
 - Read spec docs in `ai-docs/spec/` on-demand as topics emerge; Project Map lists available specs.
-- Use direct project search or a host-native one-shot read-only subagent for implementation details beyond mental-model docs.
+- Use direct project search or subagent exploration for implementation details beyond mental-model docs.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 - Evaluate each claim independently - call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
@@ -28,16 +28,16 @@ Call `wsflow/project_tree()` to load the current project map.
 ## On: invoke
 
 1. Invoke `wsflow:lead-workflow-manual` via Skill tool (loads orchestration primitives reference).
-2. Call `wsflow/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - wsflow has no sprint workflow; ask for an explicit target branch before implementation."
+2. Call `wsflow/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - route sprint-scoped implementation through `wsflow:lead-sprint` or ask for an explicit non-sprint target branch."
 3. If `user request` references a ticket, read it.
 4. Enter user-message handling.
 
 ## On: user message
 
 1. Apply **judge: needs-survey** to every named component, skill, spec, or ticket.
-   For each unloaded doc, use `wsflow/project_tree`, `wsflow/specs.*`, `wsflow/tickets.*`, `wsflow/mental_models.*`, direct file reads, or a host-native one-shot read-only subagent to collect references.
+   For each unloaded doc, use `wsflow/project_tree`, `wsflow/specs.*`, `wsflow/tickets.*`, `wsflow/mental_models.*`, direct file reads, or subagent exploration to collect references.
    Incorporate the returned reference list before responding.
-2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use direct project search or a host-native one-shot read-only subagent for implementation details.
+2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use direct project search or subagent exploration for implementation details.
    For mental-model staleness, use native path-filtered Git history when no wsflow path-history primitive exists.
 3. If the user explicitly wants implementation to start, invoke `wsflow:lead-proceed` with the current target; do not route directly to `wsflow:lead-implement`.
 4. Apply **judge: needs-intent-frame**. If it fires, emit an **Intent Frame** before advice.

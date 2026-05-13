@@ -1,6 +1,6 @@
 ---
 name: lead-workflow-manual
-description: Mandatory reference for wsflow workflow orchestration. Use when writing or executing wsflow skills, MCP notation, native subagent guidance, or orchestration boundaries matter.
+description: Mandatory reference for wsflow workflow orchestration. Use when writing or executing wsflow skills, MCP notation, subagent guidance, or orchestration boundaries matter.
 ---
 
 # Workflow Manual
@@ -28,9 +28,9 @@ Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
 
 When writing wsflow skill text, name only primitives that exist in the wsflow
-runtime. If a workflow needs broad read-only investigation, use direct local
-exploration or a host-native one-shot subagent; do not describe a wsflow-managed
-agent session.
+runtime. If a workflow needs extra context or bounded execution help, use direct
+local exploration or a scoped subagent; describe the task scope, permissions,
+and expected output.
 
 ## How To Document
 
@@ -128,26 +128,25 @@ branch creation, tag push, merge execution, or path-filtered file history.
 
 `wsflow/api.list`
 
-Use `wsflow/api.list()` to inspect cached documentation domains. wsflow does not
-provide managed documentation lookup sessions; use local cached docs or direct
-project references when a workflow needs API facts.
+Use `wsflow/api.list()` to inspect cached documentation domains. When a
+workflow needs API facts, read local cached docs or direct project references.
 
-### Native Subagents
+### Subagents
 
-wsflow has no managed named-agent runtime; Use host-native one-shot subagents
-only when the host offers them and the task is bounded, read-only investigation,
+Use subagents when a task benefits from scoped exploration, implementation,
 verification, audit, or review.
 
-Native subagent prompts must be self-contained:
+Subagent prompts must be self-contained:
 - State the exact question and expected output.
-- Tell the worker it is read-only unless the lead explicitly owns an edit path.
+- State scope, permissions, and any writable paths or modules.
+- Tell exploration, verification, audit, and review workers to stay read-only.
+- For implementation workers, require a changed-file list and verification notes.
 - Point the worker at wsflow read tools such as `wsflow/project_tree`,
   `wsflow/convention.read`, `wsflow/infra.read`, `wsflow/specs.*`,
   `wsflow/tickets.*`, `wsflow/mental_models.*`, and `wsflow/git.*`.
 - Ask for concise findings with file paths or stems, not broad narratives.
 
-The lead owns all workflow mutations: edits, docs, ticket/spec changes,
-mental-model updates, commits, and final judgment.
+The lead owns integration, verification, final judgment, and commits.
 
 ## Usage Pattern
 
@@ -157,10 +156,10 @@ call `wsflow/references.trace(ticket_stem: "<ticket-stem>")` for ticket/spec/mod
 call `wsflow/references.trace(spec_stem: "<spec-stem>")` for spec/ticket/model links.
 call domain discovery tools first when only paths or status metadata are needed.
 
-Native read-only investigation:
-Use a host-native one-shot subagent when available.
-Prompt it with the exact question, read-only boundary, wsflow read tools, and concise output format.
-If no native subagent exists, use direct local search and file reads.
+Subagent exploration:
+Use a scoped subagent when useful.
+Prompt it with the exact question, scope, permissions, wsflow read tools, and concise output format.
+If no subagent is useful, use direct local search and file reads.
 
 Commit:
 call `wsflow/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bullet>"])`.
@@ -170,7 +169,6 @@ call `wsflow/git.commit(paths: ["<path>"], title: "<title>", ai_context: ["<bull
 
 Workflow notation optimizes for **limited execution attention** during
 cross-host work. References must survive skill execution and map to each host's
-tool display. wsflow removes managed orchestration, so skills preserve attention
-by keeping lead-owned mutation explicit and pushing only bounded read-only
-investigation to host-native facilities. When ambiguous, preserve execution
-attention.
+tool display. Skills preserve attention by keeping integration and final
+judgment explicit while routing scoped work to direct exploration or subagents.
+When ambiguous, preserve execution attention.

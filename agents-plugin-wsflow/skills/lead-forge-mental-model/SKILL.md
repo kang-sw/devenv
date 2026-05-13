@@ -11,8 +11,8 @@ Target: repository mental-model reconstruction
 
 - Call `wsflow/convention.read(name: "mental-model-conventions")` before any document write.
 - All surveys and verification passes are read-only and self-contained.
-- Use host-native one-shot subagents only for bounded read-only investigation; use direct exploration when unavailable.
-- Lead owns domain selection, document authorship, final judgment, and commits.
+- Use direct exploration or subagent investigation for bounded read-only surveys.
+- Lead owns domain selection, document integration, final judgment, and commits.
 - Mental-model content must pass the inclusion test: wrong-outcome risk and not quickly derivable from source.
 - Preserve user-authored Domain Rules exactly; move rules only when conventions require ancestor promotion.
 - Stop for user confirmation before replacing broad domain coverage.
@@ -27,8 +27,8 @@ Target: repository mental-model reconstruction
 
 ### 2. Repository Survey
 
-Run the following surveys through direct project exploration or host-native
-one-shot read-only subagent workers; each worker prompt must include the exact
+Run the following surveys through direct project exploration or subagent
+workers; each worker prompt must include the exact
 question, read-only boundary, expected bullet output, and permission to use
 wsflow read tools such as `wsflow/project_tree`, `wsflow/specs.*`,
 `wsflow/tickets.*`, `wsflow/mental_models.*`, and `wsflow/git.*`.
@@ -63,7 +63,7 @@ For each confirmed domain, run focused read-only investigation:
 6. Technical debt that changes implementation decisions.
 7. Related spec stems worth referencing inline.
 
-Use direct exploration or host-native one-shot subagent workers; keep prompts
+Use direct exploration or subagent workers; keep prompts
 self-contained and ask for file paths, stems, and short evidence notes.
 
 ### 4. Write Domain Document
@@ -78,8 +78,7 @@ self-contained and ask for file paths, stems, and short evidence notes.
 
 ### 5. Verification
 
-Verify each drafted domain with direct reread or one host-native read-only
-subagent:
+Verify each drafted domain with direct reread or one subagent audit:
 
 ```text
 Read-only mental-model audit.
@@ -122,7 +121,7 @@ rules and cross-cutting context.
 
 ## Templates
 
-### Native Survey Prompt Shape
+### Survey Prompt Shape
 
 ```text
 Read-only survey.
@@ -140,5 +139,6 @@ Do not edit files.
 
 Forge-mental-model optimizes for **recovering modification judgment from
 incomplete memory**. Surveys gather evidence, but the lead owns domain
-boundaries, inclusion-test discipline, and rule preservation. When ambiguous,
-exclude derivable facts and ask the user before changing durable rules.
+boundaries, document integration, inclusion-test discipline, and rule
+preservation. When ambiguous, exclude derivable facts and ask the user before
+changing durable rules.
