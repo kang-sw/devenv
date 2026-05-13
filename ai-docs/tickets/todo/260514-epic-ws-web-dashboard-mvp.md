@@ -51,7 +51,8 @@ The MVP should cover:
 - Planned: workspace/repo picker with Git worktree discovery.
 - Planned: wsstate-backed named-agent dashboard API and event stream.
 - Planned: frontend MVP shell with terminals, workspace panels, agent views, and
-  multi-dashboard layout.
+  multi-dashboard layout, using `ai-docs/ref/design.md` as the initial visual
+  direction reference.
 - Planned: remote/WSL usage verification through SSH forwarding or equivalent
   loopback tunneling.
 
@@ -67,10 +68,18 @@ The MVP should cover:
 - Use Rust, Axum, Tokio, WebSockets, and a cross-platform PTY layer for the
   daemon. Use React, TypeScript, Vite, and xterm.js for the browser UI unless a
   later child ticket records a stronger reason to change stacks.
+- Use CodeMirror 6 as the initial browser-native editor base, with Vim-like
+  modal editing through an extension or custom ws modal layer. Keep terminal
+  nvim available as an optional PTY workflow, but do not make it the primary
+  editor path because Windows PTY behavior is a known stability concern.
 - The daemon exposes stable view-model APIs over wsstate and wsagent behavior.
   The browser must not treat the cache layout itself as the public contract.
 - Keep MCP root, harness, and session state scoped by project/worktree/session
   rather than making the web daemon a global authority over ws runtime state.
+- Treat `ai-docs/ref/design.md` as the initial visual system reference for the
+  web UI. Preserve its restrained, square-corner, hairline-driven operational
+  style while adapting density and component choices for dashboard use rather
+  than marketing-page composition.
 - For frontend UI implementation delegated through ws named agents, register the
   implementer and reviewer with `model: "opus"` unless the user overrides that
   choice for a specific child ticket.
@@ -78,7 +87,8 @@ The MVP should cover:
 ## Completion Criteria
 
 - Done: child tickets deliver a usable authenticated local/tunnel web dashboard
-  with PTY terminals, workspace selection, and ws named-agent visibility.
+  with PTY terminals, browser-native modal editing, workspace selection, and ws
+  named-agent visibility.
 - Dropped: a different host UI direction replaces the web dashboard approach or
   the MVP proves impractical for the intended personal workflow.
 - Deferred: multi-user access, full public deployment hardening, desktop shell
