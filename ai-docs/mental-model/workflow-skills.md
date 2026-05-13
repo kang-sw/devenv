@@ -48,6 +48,10 @@ related:
 - `lead-write-code` uses brief-bounded implementation and file-based reviewer output; reviewer allocation is risk-scoped, reviewers return summaries, and implementers read finding files directly. {#260505-implementation-workflow-skills}
 - Sprint defers doc pipeline until wrap-up; per-task doc updates inside sprint create partial checkpoints that confuse wrap-up. {#260505-sprint-session-container}
 - wsflow includes sprint as an agentless branch container but keeps implementation lead-owned through `lead-implement` or `lead-sprint` -> `lead-edit`; review, forge surveys, and sprint surveys use host-native one-shot read-only subagents only when available. {#260513-wsflow-agentless-skill-surface} {#260513-wsflow-sprint-skill}
+- `lead-review` loads `ai-docs/_review.local.md` for all environment-specific configuration (remote, phases, comment/merge/notification methods); when absent, it interviews the user and writes the config before the first review runs. {#260513-review-workflow-skill}
+- `lead-review` routes NEEDS FIX local-fix through `lead-discuss` with findings as context; re-review after fix is user-discretion, not automatic re-entry. {#260513-review-workflow-skill}
+- `lead-review` judge `follows-ws-workflow` auto-detects conventional commits and `## AI Context`; PARTIAL (some commits qualify) counts as NO (conservative); the `## Contributor Workflow` config setting can force YES or NO. {#260513-review-workflow-skill}
+- `lead-review` judge `is-large-diff` spawns host-native subagents for parallel alignment and risk phases when diff exceeds the configured threshold; both depth judges are independent and combinable. {#260513-review-workflow-skill}
 
 ## Coupling
 
@@ -60,7 +64,8 @@ related:
 
 ## Extension Points & Change Recipes
 
-- **Add a Codex workflow skill**: create `agents-plugin/skills/lead-<name>/SKILL.md`, follow skill-authoring invariants, add OpenAI UI metadata only if needed, and update workflow specs.
+- **Add a Codex workflow skill**: create `agents-plugin/skills/lead-<name>/SKILL.md`, follow skill-authoring invariants, add OpenAI UI metadata only if needed, and update workflow specs and mental models.
+- **Add a config-first review skill variant**: follow `lead-review` pattern — machine-local `ai-docs/_review.local.md` captures environment judgment, setup interview fires only when config is absent, judges gate subagent depth rather than hard-coding it.
 - **Change a full workflow skill included in wsflow**: update the corresponding `agents-plugin-wsflow/skills/lead-<name>/` surface in the same logical change or record a follow-up ticket; wsflow is curated, not text-identical.
 - **Change a full workflow skill excluded from wsflow**: check `ai-docs/ref/wsflow-mirroring.md` and update wsflow docs, workflow manual text, or exclusion rationale if the excluded skill's meaning changed.
 - **Add a delegate prompt to a workflow**: register by embedded stem through `ws/agents.register`, use portable `model` aliases for default selection, and omit `prompts` only for general-purpose delegates. Update runtime prompt bundle metadata and keep reviewer/implementer context boundaries explicit. {#260505-workflow-delegate-prompt-boundaries}
