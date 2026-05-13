@@ -30,6 +30,7 @@ lead-forge-mental-model
 lead-forge-spec
 lead-implement
 lead-proceed
+lead-review
 lead-salvage
 lead-ship
 lead-skill-authoring
@@ -85,8 +86,8 @@ bootstrap, release, session handoff, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
-`lead-ship`, `lead-sprint`, `lead-verify-discussion`, `lead-forge-spec`, and
-`lead-forge-mental-model`.
+`lead-ship`, `lead-sprint`, `lead-verify-discussion`, `lead-forge-spec`,
+`lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
 preserves deferred documentation wrap-up without exposing managed named-agent,
@@ -296,6 +297,37 @@ tasks. On wrap-up, the skill computes the branch range, runs the spec update
 pass, invokes the mental-model updater, follows the executor wrap-up document
 pipeline, commits documentation updates, reports the documentation changes, and
 merges or deletes the sprint branch according to the remaining source changes.
+
+## Review Workflow Skills {#260513-review-workflow-skills}
+
+`lead-review` reviews a pull request or merge request branch. It loads
+`ai-docs/_review.local.md` for environment configuration (remote access method,
+branch naming, review phases, blocked paths, comment and merge methods, and
+contributor workflow); when no config exists, it interviews the user and writes
+the config before proceeding. The config is machine-local and gitignored.
+
+Branch discovery uses the configured remote access method (glab, API token, git
+fetch, or equivalent); if no branch argument is supplied, `lead-review` lists
+available branches filtered by any configured naming pattern and asks the user to
+select one.
+
+Review phases run in order — intent, alignment, risk, and any configured custom
+phases — producing one of four verdicts: BLOCKED (a blocked path was found
+before phases ran), LGTM, NEEDS FIX, or OPEN.
+
+LGTM follows the configured merge approval sequence and optional post-merge
+notification. NEEDS FIX asks the user to fix locally or post findings to the
+contributor; local fix routes to `lead-discuss` with findings as context, leaving
+re-review to user discretion. OPEN enters discussion before re-routing to LGTM
+or NEEDS FIX.
+
+`lead-review` scales review depth automatically. When commits lack `## AI
+Context` and conventional commit format (`judge: follows-ws-workflow` does not
+fire), a host-native one-shot subagent infers intention before phases run. When
+diff size exceeds the configured threshold (`judge: is-large-diff`), host-native
+subagents run alignment and risk phases in parallel. The contributor workflow
+setting can force or suppress the subagent inference step.
+{#260513-review-workflow-skill}
 
 ## Workflow Reconstruction Skills {#260505-workflow-reconstruction-skills}
 
