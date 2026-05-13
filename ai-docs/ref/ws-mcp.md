@@ -148,13 +148,14 @@ and `ws-mcp` uses that environment variable whenever a tool or command omits
 root should resolve to the active project in plugin-managed Codex sessions.
 
 At tool-call time, root-aware MCP tools resolve omitted `root` arguments in this
-order: explicit `root`, volatile `session.set_default_root`, `WS_MCP_PROJECT_ROOT`,
-Codex `_meta.x-codex-turn-metadata.workspaces` when it contains exactly one
-workspace, then the server startup root. If Codex metadata contains multiple
-workspaces and no higher-priority root is available, the tool returns an
-actionable error instead of guessing. The session default exists only in the
-current stdio server process and is not written to user config, ws cache config,
-or repository files.
+order: explicit compatibility `root`, volatile root set by `ws.setup`, Codex
+`_meta.x-codex-turn-metadata.workspaces` when it contains exactly one workspace,
+explicit non-dot server startup root, `WS_MCP_PROJECT_ROOT`, then the server
+startup root. If Codex metadata contains multiple workspaces and no
+higher-priority root is available, the tool returns actionable `ws.setup`
+guidance instead of guessing. The session root exists only in the current stdio
+server process and is not written to user config, ws cache config, or repository
+files.
 
 ## Orchestrator Authority
 
@@ -201,9 +202,9 @@ Behavior:
 - A mismatch causes the launcher to repair the cache-local runtime binary just
   as tool or command drift does.
 
-### `ws/session.set_default_root`
+### `ws/ws.setup`
 
-Set the volatile repository root default for the current MCP server process.
+Configure volatile ws MCP session state for the current server process.
 
 Input schema:
 
@@ -213,29 +214,33 @@ Input schema:
   "properties": {
     "root": {
       "type": "string",
-      "description": "Git worktree root to use when later ws MCP tool calls omit root."
+      "description": "Git worktree root to store for later root-omitted ws MCP tool calls."
+    },
+    "format": {
+      "type": "string",
+      "description": "Optional output format. Use \"json\" for structured compatibility output."
     }
-  },
-  "required": ["root"]
+  }
 }
 ```
 
 Behavior:
 
-- Validates `root` with Git and stores the canonical worktree root in memory.
+- When `root` is present, validates it with Git and stores the canonical
+  worktree root in memory.
 - Affects later root-omitted root-aware tool calls handled by the same server.
+- Omitting `root` reports current setup state without guessing or persisting a
+  root.
 - Does not persist beyond the MCP server process and does not write config files.
-
-### `ws/session.get_default_root`
-
-Report the volatile default root state for the current MCP server process.
+- Legacy `session.set_default_root` and `session.get_default_root` may remain as
+  hidden compatibility dispatch, but they are not advertised in `tools/list` or
+  `agents-plugin/runtime.json`.
 
 Output:
 
-- MCP text content with labeled root fallback fields.
-- Pass `format: "json"` for structured compatibility output with
-  `session_default_root`, `has_session_default`, `session_harness`,
-  `env_project_root`, and `server_root`.
+- MCP text content with labeled setup fields by default.
+- Pass `format: "json"` for structured compatibility output with `root`,
+  `has_root`, `session_harness`, `env_project_root`, and `server_root`.
 
 ### `ws/api.list`
 
@@ -1092,6 +1097,11 @@ Behavior:
   prompt frontmatter resolution. Concrete model names bypass alias mapping while
   still allowing backend inference when `backend` is omitted.
 
+Public `agents.*` schemas intentionally omit `root`; establish the current
+worktree with `ws/ws.setup` before normal calls. Explicit `root` arguments may
+still work as a compatibility override, but they are not the advertised caller
+surface.
+
 ### `ws/agents.register`
 
 Register or replace one task-scoped named agent.
@@ -1153,10 +1163,6 @@ Input schema:
 {
   "type": "object",
   "properties": {
-    "root": {
-      "type": "string",
-      "description": "Repository root. Defaults to the server root."
-    },
     "name": {
       "type": "string",
       "description": "Agent name."
@@ -1195,10 +1201,6 @@ Input schema:
 {
   "type": "object",
   "properties": {
-    "root": {
-      "type": "string",
-      "description": "Repository root. Defaults to the server root."
-    },
     "name": {
       "type": "string",
       "description": "Agent name. Compatibility alias for a single name."
@@ -1239,10 +1241,6 @@ Input schema:
 {
   "type": "object",
   "properties": {
-    "root": {
-      "type": "string",
-      "description": "Repository root. Defaults to the server root."
-    },
     "name": {
       "type": "string",
       "description": "Agent name."

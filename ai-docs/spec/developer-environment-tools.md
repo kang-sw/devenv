@@ -67,10 +67,12 @@ without running expensive polling commands inside the statusline itself.
 tmux helper scripts provide Git status, cross-window pane navigation, and
 tmux-fzf command selection.
 
-The Git status helper reports branch, ahead/behind counts, and dirty-file
-counts, while skipping WSL Windows mounts. Cross-window pane navigation is
-opt-in through `TMUX_ENABLE_PANE_NAVIGATION_OVER_WINDOW=1`. The fzf helper wraps
-tmux command selection in a popup-friendly script.
+The Git status helper reports branch, ahead/behind counts, dirty-file counts,
+and line-level diff totals. On WSL Windows mounts, it uses Git for Windows when
+`git.exe` is available and otherwise falls back to the non-repository marker.
+Cross-window pane navigation is opt-in through
+`TMUX_ENABLE_PANE_NAVIGATION_OVER_WINDOW=1`. The fzf helper wraps tmux command
+selection in a popup-friendly script.
 
 ## WezTerm Terminal Behavior {#260505-wezterm-terminal-behavior}
 

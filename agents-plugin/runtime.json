@@ -33,8 +33,7 @@
   "tools": {
     "runtime.info": ">=0.24.0-dev <0.25.0",
     "runtime.debug_events": ">=0.24.0-dev <0.25.0",
-    "session.set_default_root": ">=0.24.0-dev <0.25.0",
-    "session.get_default_root": ">=0.24.0-dev <0.25.0",
+    "ws.setup": ">=0.24.0-dev <0.25.0",
     "config.show": ">=0.24.0-dev <0.25.0",
     "config.agents_tier": ">=0.24.0-dev <0.25.0",
     "project_tree": ">=0.24.0-dev <0.25.0",
