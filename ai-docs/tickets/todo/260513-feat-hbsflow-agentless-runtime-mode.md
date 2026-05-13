@@ -56,6 +56,9 @@ unchanged when the new environment variables are unset.
 - Namespace substitution is limited to user-facing guidance, errors, follow-up
   text, and runtime metadata where relevant. It must not rename the `ws-mcp`
   binary, Go packages, persisted ws state paths, or spec anchors.
+- In hbsflow/no-agent mode, ordinary user-facing runtime text should not require
+  ws awareness. Internal diagnostics may still name `ws-mcp`, Go packages, or
+  hidden compatibility paths when that is the precise implementation surface.
 - Do not create `agents-plugin-hbsflow/` in this ticket except as a test fixture
   if one is needed for runtime validation.
 
@@ -100,3 +103,6 @@ Acceptance criteria:
   ws still advertises `ws.setup`.
 - With `WS_MCP_NAMESPACE=hbsflow`, user-facing guidance and error text that name
   the MCP namespace use `hbsflow` notation.
+- With hbsflow/no-agent environment active, ordinary user-facing runtime text
+  does not present hbsflow as a ws variant or instruct users to call ws-named
+  tools.

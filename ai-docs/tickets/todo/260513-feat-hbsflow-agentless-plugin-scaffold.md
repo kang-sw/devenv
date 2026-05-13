@@ -47,6 +47,10 @@ constraints in the existing specs.
 - Keep `agents-plugin/` as the canonical full distribution. hbsflow follows the
   same semantic changes when copied or caller-visible surfaces are touched, but
   hbsflow does not get an independent spec tree.
+- Treat the ws relationship as internal maintenance context only. Distributed
+  hbsflow manifests, skills, default prompts, and ordinary user-facing guidance
+  should present hbsflow as its own workflow plugin, not as a ws-aware or
+  ws-lite product.
 
 ## Constraints
 
@@ -60,6 +64,11 @@ constraints in the existing specs.
   contract, not the full ws contract.
 - hbsflow skill text must not instruct users to call `ws/subquery`,
   `ws/agents.*`, or `ws:lead-*`.
+- hbsflow user-facing package text must avoid requiring ws knowledge. Use
+  `hbsflow`, `hbsflow:lead-*`, and `hbsflow/<tool>` notation in distributed
+  hbsflow files; keep ws references only in repository maintenance docs,
+  tests, compatibility comments, or hidden implementation details where they are
+  unavoidable.
 - Claude compatibility must use a package-local `.claude-plugin/plugin.json`
   and the shared launcher pattern. Do not revive `claude-plugin/`.
 - If a copied hbsflow surface cannot be updated with a full ws change, create a
@@ -140,9 +149,11 @@ Acceptance criteria:
 
 - hbsflow skills do not mention ws named-agent or subquery MCP calls.
 - hbsflow workflow manual documents the hbsflow MCP notation and the absence of
-  ws named-agent primitives.
+  hbsflow-managed named-agent primitives.
 - hbsflow skill descriptions and optional host metadata point to `hbsflow`
   invocations.
+- hbsflow distributed skill text and manifests do not describe the package as a
+  ws variant or require ws-aware user behavior.
 
 ### Phase 4: Documentation and drift guard
 

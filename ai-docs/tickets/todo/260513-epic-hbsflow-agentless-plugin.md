@@ -39,6 +39,11 @@ Do not port ws named-agent or subquery workflow semantics into hbsflow skill
 text. hbsflow should prefer host-native agent/subagent capabilities when a host
 offers them, and direct local investigation when it does not.
 
+Do not present hbsflow to end users as a ws variant, ws-lite package, or
+ws-compatible mode. The derivative relationship is an internal maintenance
+fact for this repository; distributed hbsflow manifests, skills, workflow
+guidance, and ordinary runtime output should speak in hbsflow terms.
+
 ## Child Tickets
 
 - `260513-feat-hbsflow-agentless-runtime-mode` - shared runtime slice for
@@ -71,6 +76,11 @@ The hbsflow distribution contract is:
 When full ws changes affect copied or caller-visible hbsflow surfaces, include
 the hbsflow update in the same logical change. If hbsflow cannot follow in the
 same patch, record a ticketed follow-up instead of silently leaving drift.
+
+Internal repository specs, tickets, and mental models may mention that hbsflow
+derives from the ws runtime to preserve maintenance traceability. The hbsflow
+package itself should not require users or host agents to know about ws naming,
+ws skill invocations, or ws-managed agents.
 
 ## Completion Criteria
 
