@@ -37,7 +37,6 @@ Included:
 - `lead-update-spec`
 - `lead-bootstrap`
 - `lead-add-rule`
-- `lead-exit-session`
 - `lead-ship`
 - `lead-sprint`
 - `lead-verify-discussion`

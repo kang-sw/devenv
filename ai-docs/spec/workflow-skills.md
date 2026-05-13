@@ -7,7 +7,7 @@ summary: Codex-facing ws lead skills for planning, implementation routing, sprin
 
 The ws workflow skill set gives Codex users a host-neutral project workflow for
 discussion, specification, ticketing, skeletons, implementation, review,
-documentation updates, release, and session handoff. The Codex-facing surface is
+documentation updates, and release. The Codex-facing surface is
 the `lead-*` skill namespace, backed by the ws MCP runtime and embedded delegate
 prompts.
 
@@ -25,7 +25,6 @@ lead-add-rule
 lead-bootstrap
 lead-discuss
 lead-edit
-lead-exit-session
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
@@ -82,11 +81,11 @@ remains documented only as deprecated compatibility input.
 The wsflow distribution ships a curated subset of lead workflow skills
 under `wsflow:lead-*` invocation names and `wsflow/<tool>` MCP notation.
 Shipped wsflow skills include planning, documentation, direct implementation,
-bootstrap, release, session handoff, verification, and reconstruction workflows:
+bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
-`lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
-`lead-ship`, `lead-sprint`, `lead-verify-discussion`, `lead-forge-spec`,
+`lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
+`lead-sprint`, `lead-verify-discussion`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
@@ -376,10 +375,6 @@ versioned upgrades.
 `lead-ship` follows the repository ship configuration to prepare and execute a
 release. It confirms version, tag, and publish targets before any publishing
 step.
-
-`lead-exit-session` writes and commits a next-session handoff note in the
-project index after handling current worktree changes according to repository
-commit rules.
 
 ## Delegate Prompt Boundaries {#260505-workflow-delegate-prompt-boundaries}
 

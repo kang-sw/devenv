@@ -153,7 +153,6 @@ lead-add-rule
 lead-bootstrap
 lead-discuss
 lead-edit
-lead-exit-session
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
