@@ -63,11 +63,9 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    a. Perform native `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
    b. Do not require spec creation; `todo/` is accepted backlog, not the implementation queue.
 3. **Ready promotion (todo/ -> ready/)**:
-   a. If category is `epic` or `research`, skip spec creation and spec frontmatter population.
-   b. Otherwise, invoke `ws:lead-write-spec` to add a `🚧` entry for each caller-visible behavior in the ticket.
-   c. Invoke `ws:lead-write-ticket` (Edit path) to populate the `spec:` frontmatter field when missing.
-   d. Perform native `git mv ai-docs/tickets/todo/<stem>.md ai-docs/tickets/ready/<stem>.md`.
-   e. Add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` - one-line purpose and dependency notes ``.
+   a. Invoke `ws:lead-write-ticket` (Edit path) for the `todo/` -> `ready/` promotion.
+   b. `ws:lead-write-ticket` owns spec coverage, frontmatter population, the `git mv`, queue update, and commit.
+   c. Stop this handler after `ws:lead-write-ticket` returns.
 4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.
    b. No other ticket references this stem -> invoke `ws:lead-write-spec` to remove the `🚧` entry.

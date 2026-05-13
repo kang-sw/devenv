@@ -46,7 +46,7 @@ related:
 
 - Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
 - Skeleton flow registers `skeleton-populator` and `skeleton-reviewer`; no compatibility writer prompt remains active.
-- Discuss ready-promotion logic and write-ticket spec-gate must agree that non-`epic`, non-`research` `ready/` entries require spec creation.
+- Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec gate and queue checks.
 - `lead-edit`, `lead-write-code`, and `lead-implement` each own a different review/doc-pipeline boundary; moving updater dispatch between them can double-run or skip documentation updates.
 - `lead-salvage` routes ticket writes through `lead-write-ticket`; direct ticket graph mutation inside salvage would bypass ticket conventions and commit handling.
 - Bootstrap guide semantics stay host-neutral; root `CLAUDE.md` only delegates to `AGENTS.md`.
