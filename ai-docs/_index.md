@@ -50,6 +50,7 @@ history.
 | File | Use |
 |------|-----|
 | `ai-docs/ref/skill-authoring.md` | Skill/agent/prompt/convention authoring rules |
+| `ai-docs/ref/hbsflow-mirroring.md` | Required before editing full ws skills or plugin surfaces that may need hbsflow mirrors |
 | `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
 | `ai-docs/ref/ws-mcp.md` | MCP process, tools, CLI fallbacks, verification levels |
 | `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
@@ -60,7 +61,10 @@ history.
 
 Before editing tickets/specs/mental models, read the matching convention through
 `ws/convention.read`. Before editing skill, agent, prompt, or convention text,
-read `ai-docs/ref/skill-authoring.md`.
+read `ai-docs/ref/skill-authoring.md`. Before editing full
+`agents-plugin/skills/lead-*` skills, plugin packaging, runtime contracts,
+launcher behavior, prompt guidance, or release validation that may affect
+hbsflow, read `ai-docs/ref/hbsflow-mirroring.md`.
 
 ## Runtime Surfaces
 
