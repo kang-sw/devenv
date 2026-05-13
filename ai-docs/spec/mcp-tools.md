@@ -184,6 +184,12 @@ message fields. It stages only the requested paths and formats commit messages
 with required AI Context and optional ticket, spec, or mental-model update
 sections.
 
+> [!note] Planned 🚧
+> Ticket update detection will recognize both added `### Result` headings and
+> added `#### Edition` headings so commit summaries can report first completion
+> records and later append-only tweak records.
+> {#260513-git-commit-result-edition-detection}
+
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
 `subquery` starts an asynchronous scoped codebase or documentation query and

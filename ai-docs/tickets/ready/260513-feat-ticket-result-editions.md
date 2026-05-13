@@ -1,6 +1,9 @@
 ---
 title: Ticket Result editions
 parent: 260513-epic-workflow-question-loop-hygiene
+spec:
+  - 260513-ticket-result-editions
+  - 260513-git-commit-result-edition-detection
 related-mental-model:
   - documentation-system
   - workflow-skills

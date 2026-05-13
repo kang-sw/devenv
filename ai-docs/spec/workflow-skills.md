@@ -186,6 +186,13 @@ corrected assumptions, observations, reuse opportunities, and code-hygiene
 findings, then steers the discussion toward the best-supported direction.
 {#260512-discussion-verification-skill}
 
+### 🚧 Is Finished Yet Checkpoint {#260513-is-finished-yet-skill}
+
+`lead-is-finished-yet` gives users a frequent spoken checkpoint for deciding
+whether a design discussion is ready to proceed. It does not edit files. It
+classifies remaining work into user-blocking design questions, ticket or spec
+capture gaps, autonomous code-hygiene items, and proceed readiness.
+
 `lead-write-skeleton` optionally locks high-risk caller-visible contracts before
 implementation when the scope needs a separate reviewable checkpoint. It
 uses deep insertion-point research, then the lead writes a low-resolution source
@@ -281,6 +288,14 @@ trade-offs, or missing spec coverage that cannot be created. Actionable inline
 targets go through `lead-write-ticket`, whose ready gate creates missing spec
 coverage through `lead-write-spec` when possible; exploratory targets stop and
 suggest `lead-discuss`.
+
+> [!note] Planned 🚧
+> Warm discussion state with an existing related ticket will gain a ticket
+> freshness gate. Before implementation routing, `lead-proceed` will compare
+> the active conversation and ticket artifact only; when settled decisions are
+> missing from the ticket, it will route through `lead-write-ticket` edit,
+> re-read the refreshed ticket, and then continue slice selection.
+> {#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected slice as
 a hard scope boundary. `lead-proceed` does not rejudge ticket quality, demand

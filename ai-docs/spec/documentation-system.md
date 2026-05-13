@@ -80,6 +80,14 @@ Workflow routing may implement unfinished phases one slice at a time without
 renaming or splitting the ticket; ticket authoring remains responsible for
 decomposition.
 
+> [!note] Planned 🚧
+> Ticket Result sections will support append-only tweak capture. The first
+> completion record remains `### Result (<short-hash>) - YYYY-MM-DD`; later
+> implementation passes for the same completed phase append
+> `#### Edition (<short-hash>) - YYYY-MM-DD` entries under that Result area.
+> Existing Result and Edition entries remain frozen once written.
+> {#260513-ticket-result-editions}
+
 Epic tickets are documented as lightweight milestone boards. Epic bodies keep
 scope, non-scope, child-ticket boards, cross-child invariant decisions, and
 done/drop/defer criteria; detailed discussion and implementation phases move

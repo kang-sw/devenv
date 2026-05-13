@@ -1,6 +1,9 @@
 ---
 title: Is finished yet workflow check
 parent: 260513-epic-workflow-question-loop-hygiene
+spec:
+  - 260513-is-finished-yet-skill
+  - 260513-proceed-ticket-freshness-gate
 related-mental-model:
   - workflow-skills
   - documentation-system
