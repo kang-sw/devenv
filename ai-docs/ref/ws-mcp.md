@@ -134,11 +134,20 @@ Current launcher inputs:
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_PROJECT_ROOT` | Project root used as the default when a tool or CLI command omits `root`; normally derived by the launcher from the parent Codex process. |
+| `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions. When set to `1`, `true`, `yes`, or `on`, agent-backed MCP tools and CLI commands are hidden or disabled. Unset preserves the full ws surface. |
+| `WS_MCP_NAMESPACE` | User-facing MCP namespace text override. Empty or unset defaults to `ws`; hbsflow sets this to `hbsflow`. |
+| `WS_MCP_SETUP_TOOL` | Advertised setup tool name override. Empty or unset defaults to `ws.setup`; hbsflow sets this to `setup`. |
 
 The plugin-managed MCP path is proven for `codex exec` when `.mcp.json` sets
 `cwd: "."`. Without that field, Codex registers the server but startup fails
 with `No such file or directory` because the relative launcher argument is
 interpreted from the workspace process context, not the plugin cache.
+
+The full `agents-plugin/.mcp.json` intentionally does not set
+`WS_MCP_NO_AGENT`, `WS_MCP_NAMESPACE`, or `WS_MCP_SETUP_TOOL`; installed ws
+therefore continues to advertise the full `ws` MCP server surface and
+`ws.setup`. Agentless derivative packages inject those variables in their own
+package-local `.mcp.json` instead of changing the shared ws plugin config.
 
 Because `cwd: "."` points the MCP process at the installed plugin cache, tools
 must not treat process cwd as the downstream project root. The Python launcher
@@ -169,6 +178,12 @@ When the host propagates it, `delegate` and `leaf` hide and reject selected
 lead-owned orchestration or mutation tools. Delegate may use
 `agents.wait/result/status/tail/cancel/print` only for generated `subquery-*`
 agents. Leaf also hides `subquery`.
+
+`WS_MCP_NO_AGENT=1` is separate from tool profiles. It is a product-mode gate for
+agentless derivative packages: tools/list, explicit tools/call dispatch,
+`runtime capabilities`, and CLI command dispatch hide or disable `agents.*`,
+`subquery`, `config.agents_tier`, and agent-backed API documentation tools while
+keeping read-only surfaces such as `api.list`.
 
 If profile propagation fails, delegated agents may see the full lead MCP surface.
 Containment therefore depends on prompt-level role rules such as delegate
