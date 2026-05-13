@@ -45,16 +45,27 @@ The MVP should cover:
 
 ## Child Tickets
 
-- Planned: daemon skeleton and security model for local, tunnel, and public bind
-  modes.
-- Planned: PTY session manager and xterm.js WebSocket bridge.
-- Planned: workspace/repo picker with Git worktree discovery.
-- Planned: wsstate-backed named-agent dashboard API and event stream.
-- Planned: frontend MVP shell with terminals, workspace panels, agent views, and
-  multi-dashboard layout, using `ai-docs/ref/design.md` as the initial visual
-  direction reference.
-- Planned: remote/WSL usage verification through SSH forwarding or equivalent
-  loopback tunneling.
+- `260514-feat-ws-web-daemon-foundation` - daemon shell, owner auth,
+  WebSocket auth, and local/tunnel/public bind-mode guards. First substrate.
+- `260514-feat-ws-web-frontend-substrate` - extension-ready React shell, panel
+  and command registries, dock layout, design primitives, and mock/live data
+  boundary. Depends on daemon serving shape; UI work uses `model: "opus"` for
+  delegated ws agents.
+- `260514-feat-ws-web-workspace-substrate` - host folder selection, Git
+  root/worktree discovery, recent workspace state, and workspace boundary model.
+- `260514-feat-ws-web-terminal-substrate` - PTY session manager, xterm.js
+  WebSocket bridge, and terminal panel contribution.
+- `260514-feat-ws-web-agent-dashboard-substrate` - wsstate-backed agent status,
+  current-call, event, and diagnostic view-model APIs plus panels.
+- `260514-feat-ws-web-editor-substrate` - CodeMirror 6 browser-native editor
+  substrate with Vim-like modal editing and future editor extension hooks. UI
+  work uses `model: "opus"` for delegated ws agents.
+- `260514-feat-ws-web-server-link-forwarding` - authenticated daemon-to-daemon
+  linking and forwarding so local, WSL, or remote ws web servers can appear in
+  one dashboard without making native Windows process scraping the primary
+  integration path.
+- `260514-feat-ws-web-remote-wsl-hardening` - remote tunnel, WSL, and public
+  bind verification after the core substrates and linked-server behavior exist.
 
 ## Cross-Child Decisions
 
@@ -76,6 +87,10 @@ The MVP should cover:
   The browser must not treat the cache layout itself as the public contract.
 - Keep MCP root, harness, and session state scoped by project/worktree/session
   rather than making the web daemon a global authority over ws runtime state.
+- Prefer linked ws web daemons over host-specific scraping for cross-environment
+  visibility. Native Windows may use WSL-exposed tools as a fallback or
+  discovery aid, but WSL process and workspace control should primarily happen
+  inside a daemon running in WSL.
 - Treat `ai-docs/ref/design.md` as the initial visual system reference for the
   web UI. Preserve its restrained, square-corner, hairline-driven operational
   style while adapting density and component choices for dashboard use rather
@@ -92,4 +107,5 @@ The MVP should cover:
 - Dropped: a different host UI direction replaces the web dashboard approach or
   the MVP proves impractical for the intended personal workflow.
 - Deferred: multi-user access, full public deployment hardening, desktop shell
-  packaging, and complete IDE/editor features belong to later epics.
+  packaging, complete IDE/editor features, and broad multi-owner server
+  federation belong to later epics.
