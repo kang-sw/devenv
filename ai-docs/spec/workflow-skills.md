@@ -140,9 +140,10 @@ edits. {#260510-salvage-recovery-workflow-skill}
 
 `lead-verify-discussion` gives users an explicit lightweight verification and
 validation checkpoint during discussion. It checks the current assumptions or
-structure choices through scoped `ws/subquery` calls, synthesizes corrected
-assumptions, observations, and code-hygiene findings, then steers the discussion
-toward the best-supported direction.
+structure choices through scoped `ws/subquery` calls, searches for already
+implemented items that can be reused or merged to avoid duplication, synthesizes
+corrected assumptions, observations, reuse opportunities, and code-hygiene
+findings, then steers the discussion toward the best-supported direction.
 {#260512-discussion-verification-skill}
 
 `lead-write-skeleton` optionally locks high-risk caller-visible contracts before
