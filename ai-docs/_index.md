@@ -30,8 +30,9 @@ history.
   new machine.
 - Root `CLAUDE.md` is the only live Claude compatibility shim and points at
   `AGENTS.md`.
-- `install.sh` snapshots `agents-plugin/` and `agents-plugin-wsflow/` for
-  Claude-compatible plugin installs when Claude Code is available.
+- `install.sh` snapshots only `agents-plugin/` for Claude-compatible plugin
+  installs when Claude Code is available; it intentionally does not install
+  wsflow into Claude.
 - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
   Codex UI install has verified `ws:lead-skill-authoring`,
   `ws:lead-write-ticket`, and `ws:lead-discuss`.

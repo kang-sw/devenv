@@ -47,7 +47,9 @@ At ship time:
 - `claude plugin validate agents-plugin-wsflow`
 - `bash -n install.sh`
 - Confirm `.agents/plugins/marketplace.json` contains both `ws` and `wsflow`
-  local plugin entries when packaging or install behavior changed.
+  local Codex plugin entries when packaging changed.
+- Confirm `install.sh update` snapshots and installs only the `ws` Claude
+  plugin, and does not enable or install `wsflow@kang-sw-devenv`.
 
 ## Changelog
 

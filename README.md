@@ -34,18 +34,19 @@ shell/    tmux, WezTerm, starship, zsh dotfiles, helper scripts
 
 Detects the platform and handles: Homebrew, CLI tools, zsh plugins, dotfile symlinks, and local ws plugin cache setup. Stale symlinks are cleaned up automatically.
 
-## Workflow Plugins
+## ws Plugin
 
-The active ws plugin package lives in `agents-plugin/`. The agentless wsflow
-package lives in `agents-plugin-wsflow/`. Local bootstrap registers
-Claude-compatible snapshots for both packages when Claude Code is available:
+The active ws plugin package lives in `agents-plugin/`. Local bootstrap
+registers a Claude-compatible snapshot from that package when Claude Code is
+available:
 
 ```sh
 claude plugin install ws@kang-sw-devenv
-claude plugin install wsflow@kang-sw-devenv
 ```
 
 Codex installs use the repository marketplace entries under `.agents/plugins/`.
+The agentless wsflow package lives in `agents-plugin-wsflow/` for separate
+Codex marketplace installation; `install.sh` does not install it into Claude.
 
 ## License
 

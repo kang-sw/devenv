@@ -59,3 +59,9 @@ snapshot and install both ws and wsflow through the local Claude marketplace,
 and updated release and README guidance for separate wsflow installation.
 Verification covered syntax, temp-HOME update-mode install behavior, package
 tests, and Claude manifest validation for both plugin packages.
+
+## Correction (2026-05-13)
+
+The first implementation incorrectly made `install.sh update` snapshot, enable,
+and install wsflow for Claude. Follow-up commit removes wsflow from `install.sh`
+and keeps wsflow available through the Codex marketplace entry only.

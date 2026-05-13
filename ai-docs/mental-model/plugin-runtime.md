@@ -49,7 +49,7 @@ related:
 - **Add a plugin skill**: add `agents-plugin/skills/<name>/SKILL.md`; keep the manifest pointing at `./skills` unless the bundle layout changes.
 - **Add a runtime requirement**: extend `runtime.json`, then add requirement-specific launcher checks; use `runtime.info` only for runtime metadata the binary can report.
 - **Change wsflow packaging**: keep `.mcp.json` env, exact `runtime.json`, and the package contract test aligned with no-agent `runtime.capabilities`.
-- **Change local plugin marketplace entries**: update `.agents/plugins/marketplace.json`, then check whether `install.sh` and `ai-docs/ship/ws.md` need matching ws/wsflow registration or validation changes. {#260513-wsflow-marketplace-install}
+- **Change local Codex plugin marketplace entries**: update `.agents/plugins/marketplace.json`, then check `ai-docs/ship/ws.md`; do not mirror wsflow into `install.sh` unless the user explicitly reopens Claude auto-install scope. {#260513-wsflow-marketplace-install}
 - **Change copied plugin packaging or launcher behavior**: check whether `agents-plugin-wsflow/` carries the same file, mirror semantic changes when the wsflow package is affected, then run `python3 -m unittest discover agents-plugin-wsflow/tests`.
 - **Change runtime version**: run `agents-plugin-tool/scripts/bump-ws-version.sh`, then verify manifests, launcher compatibility glob, build script, workflow, and docs changed together.
 

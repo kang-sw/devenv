@@ -453,7 +453,7 @@ if [ -d "$HOME/.claude/hooks" ]; then
   done
 fi
 
-# ── local plugin marketplace snapshot ─────────────────────────────────────────
+# ── ws plugin snapshot copy ───────────────────────────────────────────────────
 # Defined early so settings.json and known_marketplaces.json can reference it.
 PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
 
@@ -517,13 +517,10 @@ required_marketplaces = {
         "source": {"source": "directory", "path": plugin_cache}
     }
 }
-required_plugins = {
-    "ws@kang-sw-devenv": True,
-    "wsflow@kang-sw-devenv": True,
-}
+required_plugins = {"ws@kang-sw-devenv": True}
 
 obsolete_marketplaces = {"ws"}
-obsolete_plugins = {"ws@ws"}
+obsolete_plugins = {"ws@ws", "wsflow@kang-sw-devenv"}
 
 marketplaces = settings.setdefault("extraKnownMarketplaces", {})
 for name in obsolete_marketplaces:
@@ -579,44 +576,37 @@ else:
     print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
-# ── local plugin marketplace snapshot ─────────────────────────────────────────
-# Copy plugin packages to a stable cache; Claude Code reads from the cache, not the live repo.
+# ── ws plugin snapshot copy ───────────────────────────────────────────────────
+# Copy agents-plugin/ to a stable cache; Claude Code reads from the cache, not the live repo.
 # Re-run install.sh update after changes.
-info "Syncing local plugin snapshots to $PLUGIN_CACHE/..."
-mkdir -p "$PLUGIN_CACHE/ws" "$PLUGIN_CACHE/wsflow"
+info "Syncing ws plugin snapshot to $PLUGIN_CACHE/ws/..."
+mkdir -p "$PLUGIN_CACHE/ws"
 # Remove stale subdirs from earlier layouts (claude/, claude-plugin/)
-rm -rf "$PLUGIN_CACHE/claude" "$PLUGIN_CACHE/claude-plugin"
+rm -rf "$PLUGIN_CACHE/claude" "$PLUGIN_CACHE/claude-plugin" "$PLUGIN_CACHE/wsflow"
 rsync -a --delete "$REPO_DIR/agents-plugin/" "$PLUGIN_CACHE/ws/"
-rsync -a --delete "$REPO_DIR/agents-plugin-wsflow/" "$PLUGIN_CACHE/wsflow/"
-# Generate marketplace.json that registers local plugins by package directory.
+# Generate marketplace.json that registers ws as a plugin at ./ws
 mkdir -p "$PLUGIN_CACHE/.claude-plugin"
-python3 - "$PLUGIN_CACHE/.claude-plugin/marketplace.json" \
-  "$PLUGIN_CACHE/ws/.claude-plugin/plugin.json" ./ws \
-  "$PLUGIN_CACHE/wsflow/.claude-plugin/plugin.json" ./wsflow <<'MKTEOF'
+python3 - "$PLUGIN_CACHE/.claude-plugin/marketplace.json" "$PLUGIN_CACHE/ws/.claude-plugin/plugin.json" <<'MKTEOF'
 import json, sys, os
-mkt_path, plugin_args = sys.argv[1], sys.argv[2:]
-plugins = []
-for idx in range(0, len(plugin_args), 2):
-    plugin_json_path, source = plugin_args[idx], plugin_args[idx + 1]
-    plugin = json.load(open(plugin_json_path))
-    plugins.append({
-        "name": plugin["name"],
-        "version": plugin.get("version"),
-        "description": plugin.get("description", ""),
-        "author": plugin.get("author", {"name": "kang-sw"}),
-        "source": source,
-    })
+mkt_path, plugin_json_path = sys.argv[1], sys.argv[2]
+plugin = json.load(open(plugin_json_path))
 marketplace = {
     "name": "kang-sw-devenv",
     "description": "kang-sw personal devenv plugin marketplace",
     "owner": {"name": "kang-sw"},
-    "plugins": plugins,
+    "plugins": [{
+        "name": plugin["name"],
+        "version": plugin.get("version"),
+        "description": plugin.get("description", ""),
+        "author": plugin.get("author", {"name": "kang-sw"}),
+        "source": "./ws",
+    }],
 }
 with open(mkt_path, "w") as f:
     json.dump(marketplace, f, indent=2)
     f.write("\n")
 MKTEOF
-success "local plugin snapshots synced"
+success "ws plugin snapshot synced"
 
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it
 # before Claude Code has had a chance to process extraKnownMarketplaces itself.
@@ -676,11 +666,23 @@ PYEOF
 
 if has claude; then
   INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
+  if [[ -f "$INSTALLED_PLUGINS" ]]; then
+    python3 - "$INSTALLED_PLUGINS" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+d = json.load(open(path))
+plugins = d.get("plugins", {})
+if "wsflow@kang-sw-devenv" in plugins:
+    del plugins["wsflow@kang-sw-devenv"]
+    with open(path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+    print("  \033[1;32m  ✔ removed wsflow Claude plugin install record\033[0m")
+PYEOF
+  fi
   install_claude_plugin ws
-  install_claude_plugin wsflow
 else
   warn "claude not found — run manually after install: claude plugin install ws@kang-sw-devenv"
-  warn "claude not found — run manually after install: claude plugin install wsflow@kang-sw-devenv"
 fi
 
 # Clean up dead symlinks (skills and agents)
