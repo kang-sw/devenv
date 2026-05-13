@@ -412,11 +412,13 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	var setResponse struct {
 		SessionDefaultRoot string `json:"session_default_root"`
+		Root               string `json:"root"`
+		HasRoot            bool   `json:"has_root"`
 	}
 	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &setResponse); err != nil {
 		t.Fatalf("ws.setup response is not JSON: %v\n%s", err, byID["1"])
 	}
-	if setResponse.SessionDefaultRoot != canonicalTestPath(t, rootA) {
+	if setResponse.Root != canonicalTestPath(t, rootA) || !setResponse.HasRoot || setResponse.SessionDefaultRoot != canonicalTestPath(t, rootA) {
 		t.Fatalf("ws.setup response mismatch: %s", byID["1"])
 	}
 
@@ -437,11 +439,13 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	var getResponse struct {
 		SessionDefaultRoot string `json:"session_default_root"`
 		HasSessionDefault  bool   `json:"has_session_default"`
+		Root               string `json:"root"`
+		HasRoot            bool   `json:"has_root"`
 	}
 	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &getResponse); err != nil {
 		t.Fatalf("ws.setup response is not JSON: %v\n%s", err, byID["3"])
 	}
-	if !getResponse.HasSessionDefault || getResponse.SessionDefaultRoot != canonicalTestPath(t, rootA) {
+	if !getResponse.HasRoot || getResponse.Root != canonicalTestPath(t, rootA) || !getResponse.HasSessionDefault || getResponse.SessionDefaultRoot != canonicalTestPath(t, rootA) {
 		t.Fatalf("ws.setup response mismatch: %s", byID["3"])
 	}
 	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
@@ -453,7 +457,8 @@ func TestServeStdioSetupRootDoesNotPersistAcrossServers(t *testing.T) {
 	useLeadProfile(t)
 	rootA := initTicketRepo(t, "260505-feat-alpha")
 	rootB := initTicketRepo(t, "260505-feat-beta")
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cacheRoot)
 
 	firstInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"root":%q}}}`+"\n", rootA)
 	var firstOut bytes.Buffer
@@ -470,6 +475,9 @@ func TestServeStdioSetupRootDoesNotPersistAcrossServers(t *testing.T) {
 	if !strings.Contains(toolText(t, byID["2"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["2"]), "260505-feat-alpha") {
 		t.Fatalf("session default root leaked across server instances: %s", byID["2"])
 	}
+	assertStringAbsentFromTree(t, cacheRoot, canonicalTestPath(t, rootA))
+	assertStringAbsentFromTree(t, rootA, canonicalTestPath(t, rootA))
+	assertStringAbsentFromTree(t, rootB, canonicalTestPath(t, rootA))
 }
 
 func TestServeStdioServerRootTakesPrecedenceOverProjectEnv(t *testing.T) {
@@ -680,6 +688,9 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 	if strings.Contains(byID["1"], "agents.status") || strings.Contains(byID["1"], "subquery") || strings.Contains(byID["1"], "config.agents_tier") || strings.Contains(byID["1"], "config.show") {
 		t.Fatalf("leaf tools/list exposed recursive tools: %s", byID["1"])
 	}
+	if strings.Contains(byID["1"], "ws.setup") {
+		t.Fatalf("leaf tools/list exposed setup mutation tool: %s", byID["1"])
+	}
 	if !strings.Contains(byID["1"], "runtime.info") {
 		t.Fatalf("leaf tools/list hid runtime.info: %s", byID["1"])
 	}
@@ -702,12 +713,13 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_MCP_TOOL_PROFILE", "leaf")
-	t.Setenv("WS_MCP_ALLOWED_TOOLS", "agents.status,runtime.info")
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "agents.status,runtime.info,ws.setup")
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.status","arguments":{"name":"impl"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"ws.setup","arguments":{}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -718,6 +730,9 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	if strings.Contains(byID["1"], "agents.status") {
 		t.Fatalf("explicit allowlist bypassed leaf role in tools/list: %s", byID["1"])
 	}
+	if strings.Contains(byID["1"], "ws.setup") {
+		t.Fatalf("explicit allowlist exposed setup mutation tool: %s", byID["1"])
+	}
 	if !strings.Contains(byID["1"], "runtime.info") {
 		t.Fatalf("explicit allowlist hid runtime.info: %s", byID["1"])
 	}
@@ -726,6 +741,9 @@ func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	}
 	if !strings.Contains(byID["3"], "prompt_bundle") {
 		t.Fatalf("explicit allowlist rejected allowed runtime.info: %s", byID["3"])
+	}
+	if !strings.Contains(byID["4"], "tool not available") {
+		t.Fatalf("explicit allowlist bypassed leaf role for ws.setup: %s", byID["4"])
 	}
 }
 
@@ -846,6 +864,41 @@ func mustMarshalForTest(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func assertStringAbsentFromTree(t *testing.T, root, needle string) {
+	t.Helper()
+	if strings.TrimSpace(root) == "" {
+		return
+	}
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return
+	}
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Size() > 1<<20 {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), needle) {
+			t.Fatalf("found persisted setup root %q in %s", needle, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func initGit(t *testing.T, root string) {

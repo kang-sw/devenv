@@ -2126,7 +2126,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 	case roleLead:
 		return true
 	case roleDelegate:
-		if strings.HasPrefix(name, "session.") {
+		if strings.HasPrefix(name, "session.") || name == "ws.setup" {
 			return false
 		}
 		if isSubqueryAgentTool(name) {
@@ -2134,7 +2134,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 		}
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "subquery" && name != "git.commit"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "ws.setup" && name != "subquery" && name != "git.commit"
 	default:
 		return false
 	}
