@@ -39,6 +39,7 @@ Included:
 - `lead-add-rule`
 - `lead-exit-session`
 - `lead-ship`
+- `lead-sprint`
 - `lead-verify-discussion`
 - `lead-forge-spec`
 - `lead-forge-mental-model`
@@ -47,7 +48,6 @@ Excluded:
 
 - `lead-write-code`
 - `lead-write-skeleton`
-- `lead-sprint`
 - `lead-salvage`
 - `lead-skill-authoring`
 
@@ -93,7 +93,6 @@ Forbidden distributed-skill references include:
 - `mental-model-updater`
 - `lead-write-code`
 - `lead-write-skeleton`
-- `lead-sprint`
 - `lead-salvage`
 - `lead-skill-authoring`
 

@@ -85,23 +85,23 @@ bootstrap, release, session handoff, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
-`lead-ship`, `lead-verify-discussion`, `lead-forge-spec`, and
+`lead-ship`, `lead-sprint`, `lead-verify-discussion`, `lead-forge-spec`, and
 `lead-forge-mental-model`.
 
-The wsflow package excludes persistent multi-turn orchestration and upstream
-authoring helper skills: `lead-write-code`, `lead-write-skeleton`,
-`lead-sprint`, `lead-salvage`, and `lead-skill-authoring`. wsflow skill text
-does not instruct callers to use managed named-agent or subquery tools. Where
-broad investigation, verification, audit, or review is useful, wsflow guidance
-uses host-native one-shot subagents when available, with the lead retaining
-ownership of edits, docs, tickets, specs, mental-model updates, and commits.
+The wsflow `lead-sprint` skill is a sprint-branch session container that
+preserves deferred documentation wrap-up without exposing managed named-agent,
+subquery, write-code, or skeleton orchestration. Sprint task execution remains
+lead-owned and routes through wsflow direct-edit workflow when source changes
+are needed. {#260513-wsflow-sprint-skill}
 
-> [!note] Planned 🚧
-> wsflow will include `lead-sprint` as a sprint-branch session container that
-> preserves deferred documentation wrap-up without exposing managed named-agent,
-> subquery, write-code, or skeleton orchestration. Sprint task execution remains
-> lead-owned and routes through wsflow direct-edit workflow when source changes
-> are needed. {#260513-wsflow-sprint-skill}
+The wsflow package excludes persistent implementation relays, skeleton flows,
+recovery orchestration, and upstream authoring helper skills:
+`lead-write-code`, `lead-write-skeleton`, `lead-salvage`, and
+`lead-skill-authoring`. wsflow skill text does not instruct callers to use
+managed named-agent or subquery tools. Where broad investigation, verification,
+audit, or review is useful, wsflow guidance uses host-native one-shot subagents
+when available, with the lead retaining ownership of edits, docs, tickets,
+specs, mental-model updates, and commits.
 
 wsflow skills are curated semantic rewrites, not generated copies. A change to
 a full `agents-plugin/skills/lead-*` skill that is shipped in wsflow must either

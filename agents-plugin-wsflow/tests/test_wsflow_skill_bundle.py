@@ -18,6 +18,7 @@ EXPECTED_SKILLS = {
     "lead-implement",
     "lead-proceed",
     "lead-ship",
+    "lead-sprint",
     "lead-update-spec",
     "lead-verify-discussion",
     "lead-workflow-manual",
@@ -34,7 +35,6 @@ FORBIDDEN_PATTERNS = {
     "managed mental model updater": re.compile(r"\bmental-model-updater\b"),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
-    "excluded sprint skill": re.compile(r"\blead-sprint\b"),
     "excluded salvage skill": re.compile(r"\blead-salvage\b"),
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }

@@ -47,7 +47,7 @@ related:
 - `lead-edit` and `lead-write-code` are code-and-review primitives; `lead-implement` and `lead-sprint` own documentation pipeline timing. {#260505-implementation-workflow-skills}
 - `lead-write-code` uses brief-bounded implementation and file-based reviewer output; reviewer allocation is risk-scoped, reviewers return summaries, and implementers read finding files directly. {#260505-implementation-workflow-skills}
 - Sprint defers doc pipeline until wrap-up; per-task doc updates inside sprint create partial checkpoints that confuse wrap-up. {#260505-sprint-session-container}
-- wsflow excludes managed orchestration skills and keeps implementation lead-owned through `lead-implement` -> `lead-edit`; review and forge surveys use host-native one-shot read-only subagents only when available. {#260513-wsflow-agentless-skill-surface}
+- wsflow includes sprint as an agentless branch container but keeps implementation lead-owned through `lead-implement` or `lead-sprint` -> `lead-edit`; review, forge surveys, and sprint surveys use host-native one-shot read-only subagents only when available. {#260513-wsflow-agentless-skill-surface} {#260513-wsflow-sprint-skill}
 
 ## Coupling
 
@@ -71,5 +71,5 @@ related:
 - Skipping `lead-workflow-manual` before executing or editing orchestration-heavy skills, which causes notation drift back to Claude shell helpers.
 - Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
-- Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve the workflow intent while removing managed named-agent, subquery, skeleton, sprint, and upstream authoring surfaces.
+- Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve the workflow intent while removing managed named-agent, subquery, skeleton, recovery, and upstream authoring surfaces.
 - Relaying reviewer file contents instead of file paths, which breaks the write-code review protocol and inflates lead context.
