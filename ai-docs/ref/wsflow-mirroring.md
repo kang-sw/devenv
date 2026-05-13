@@ -43,6 +43,7 @@ Included:
 - `lead-verify-discussion`
 - `lead-forge-spec`
 - `lead-forge-mental-model`
+- `lead-review`
 
 Excluded:
 

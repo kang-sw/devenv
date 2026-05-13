@@ -17,6 +17,7 @@ EXPECTED_SKILLS = {
     "lead-forge-spec",
     "lead-implement",
     "lead-proceed",
+    "lead-review",
     "lead-ship",
     "lead-sprint",
     "lead-update-spec",
