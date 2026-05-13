@@ -63,16 +63,17 @@ constraints in the existing specs.
   project bootstrap depends on spec and mental-model reconstruction. Rewrite
   their survey and validation steps around self-contained native subagents or
   direct exploration instead of hbsflow-managed agent sessions.
-- Exclude persistent multi-turn orchestration skills from the shipped hbsflow
-  skill set: `lead-write-code`, `lead-write-skeleton`, `lead-sprint`,
-  and `lead-salvage`.
+- Exclude persistent multi-turn orchestration skills and upstream-maintenance
+  authoring helpers from the shipped hbsflow skill set: `lead-write-code`,
+  `lead-write-skeleton`, `lead-sprint`, `lead-salvage`, and
+  `lead-skill-authoring`.
 - Keep direct, documentation, bootstrap, and reconstruction workflows in the
   shipped hbsflow skill set:
   `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
   `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
   `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
-  `lead-skill-authoring`, `lead-ship`, `lead-verify-discussion`,
-  `lead-forge-spec`, and `lead-forge-mental-model`.
+  `lead-ship`, `lead-verify-discussion`, `lead-forge-spec`, and
+  `lead-forge-mental-model`.
 
 ## Constraints
 
@@ -167,6 +168,9 @@ Suggested approach:
   lead-only risk review with rationale for low-risk changes.
 - Keep `lead-ship` in the hbsflow package, but use hbsflow naming and package
   configuration once hbsflow ship configuration exists.
+- Do not include `lead-skill-authoring` in the hbsflow package. It is an
+  upstream maintenance helper for authoring and auditing workflow skills, not a
+  downstream hbsflow workflow surface.
 - Rewrite `lead-forge-spec` and `lead-forge-mental-model` so survey fan-out,
   verification, and ticket-association checks use self-contained native
   subagents or direct exploration. The lead still owns conventions, anchor
@@ -180,10 +184,11 @@ Acceptance criteria:
   `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
   `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
   `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
-  `lead-skill-authoring`, `lead-ship`, `lead-verify-discussion`,
-  `lead-forge-spec`, and `lead-forge-mental-model`.
+  `lead-ship`, `lead-verify-discussion`, `lead-forge-spec`, and
+  `lead-forge-mental-model`.
 - The shipped hbsflow skill set excludes `lead-write-code`,
-  `lead-write-skeleton`, `lead-sprint`, and `lead-salvage`.
+  `lead-write-skeleton`, `lead-sprint`, `lead-salvage`, and
+  `lead-skill-authoring`.
 - hbsflow forge workflows use native self-contained survey or audit workers only
   for read-only investigation. They do not refer to hbsflow-managed subquery
   keys, persistent agents, or result collection through `agents.*`.
@@ -220,6 +225,10 @@ Suggested approach:
   record an explicit follow-up ticket explaining why it cannot be mirrored.
   Editing a full skill excluded from hbsflow must still check whether hbsflow
   docs, workflow manual, or exclusion rationale drifted.
+- Update the upstream `agents-plugin/skills/lead-skill-authoring` skill to read
+  `ai-docs/ref/skill-authoring.md` at invocation before applying authoring
+  rules. The skill should stay upstream-only and must not be copied into the
+  hbsflow distributed skill set.
 - Add a static hbsflow skill-bundle verification command and wire it into the
   relevant local or release verification path. The check should fail when
   distributed hbsflow skills contain forbidden full-ws references such as
@@ -242,6 +251,9 @@ Acceptance criteria:
 - No separate hbsflow spec corpus is introduced.
 - `ai-docs/ref/skill-authoring.md` tells future skill edits how to update or
   explicitly defer hbsflow mirrors.
+- Upstream `lead-skill-authoring` reads the repository skill-authoring reference
+  before applying authoring rules, so future mirror guidance is not duplicated
+  only in stale skill text.
 - A static verification path checks the hbsflow distributed skill set for
   forbidden full-ws references and shipped-skill inventory drift.
 - The verification path distinguishes curated semantic rewrites from mechanical
