@@ -204,14 +204,27 @@ def _capabilities_string_list(payload: dict, key: str) -> list[str] | None:
     return result
 
 
-def _capabilities_contains_required(payload: dict, key: str, required: list[str]) -> bool:
+def _capabilities_match_exact(contract: dict) -> bool:
+    settings = contract.get("runtime_capabilities", {})
+    if not isinstance(settings, dict):
+        return False
+    return str(settings.get("match", "")).lower() == "exact"
+
+
+def _capabilities_match_contract(payload: dict, key: str, required: list[str], *, exact: bool) -> bool:
     actual = _capabilities_string_list(payload, key)
     if actual is None:
         return False
     actual_set = set(actual)
-    for name in required:
+    required_set = set(required)
+    for name in required_set:
         if name not in actual_set:
             note(f"runtime capabilities missing required {key[:-1]}: {name}")
+            return False
+    if exact:
+        unexpected = actual_set - required_set
+        if unexpected:
+            note(f"runtime capabilities exposed unexpected {key[:-1]}: {sorted(unexpected)[0]}")
             return False
     return True
 
@@ -407,9 +420,10 @@ def runtime_capabilities_compatible(binary: Path, contract: dict) -> bool:
             note("runtime capabilities prompt bundle hash mismatch")
             return False
 
-    if not _capabilities_contains_required(payload, "tools", runtime_tools(contract)):
+    exact = _capabilities_match_exact(contract)
+    if not _capabilities_match_contract(payload, "tools", runtime_tools(contract), exact=exact):
         return False
-    if not _capabilities_contains_required(payload, "commands", runtime_commands(contract)):
+    if not _capabilities_match_contract(payload, "commands", runtime_commands(contract), exact=exact):
         return False
     return True
 
@@ -418,6 +432,8 @@ def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path) ->
         return False
     if runtime_capabilities_compatible(binary, contract):
         return True
+    if _capabilities_match_exact(contract):
+        return False
     try:
         proc = run_binary(binary, ["version"])
     except Exception:

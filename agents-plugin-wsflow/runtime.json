@@ -5,6 +5,9 @@
   "mcp_protocol": "2025-03-26",
   "release_repository": "kang-sw/devenv",
   "release_tag": "v0.25.2",
+  "runtime_capabilities": {
+    "match": "exact"
+  },
   "prompt_bundle": {
     "source_commit": "dev",
     "content_sha256": "6b5f483ea382655c57b0fbb1076baab8d65787f319772dd4412c1cb5d5f73aa4",

@@ -75,6 +75,48 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
                 self.assertFalse(launcher.runtime_capabilities_compatible(binary, contract))
 
+    def test_exact_capabilities_contract_rejects_extra_surface(self):
+        launcher = load_launcher()
+        binary = Path("/tmp/ws-mcp")
+        contract = self.capability_contract()
+        contract["runtime_capabilities"] = {"match": "exact"}
+
+        payload = self.capability_payload()
+        payload["tools"] = ["runtime.info", "agents.call"]
+        payload["commands"] = ["runtime.info"]
+        launcher.run_binary = lambda got_binary, args, **kwargs: subprocess.CompletedProcess(
+            [str(got_binary), *args], 0, stdout=json.dumps(payload), stderr=""
+        )
+
+        self.assertFalse(launcher.runtime_capabilities_compatible(binary, contract))
+
+        payload["tools"] = ["runtime.info"]
+        self.assertTrue(launcher.runtime_capabilities_compatible(binary, contract))
+
+    def test_exact_capabilities_contract_disables_weaker_fallback(self):
+        launcher = load_launcher()
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            binary = temp / "ws-mcp"
+            binary.write_text("stub", encoding="utf-8")
+            contract = self.capability_contract()
+            contract["runtime_capabilities"] = {"match": "exact"}
+
+            launcher.run_binary = lambda got_binary, args, **kwargs: subprocess.CompletedProcess(
+                [str(got_binary), *args], 0, stdout=json.dumps({"version": "0.18.1"}), stderr=""
+            )
+
+            def forbidden_fallback(*args, **kwargs):
+                raise AssertionError("exact capability contracts must not use weaker fallback checks")
+
+            launcher.tools_compatible = forbidden_fallback
+            launcher.commands_compatible = forbidden_fallback
+            launcher.prompt_bundle_compatible = forbidden_fallback
+
+            self.assertFalse(launcher.runtime_fully_compatible(binary, contract, temp))
+
     def test_successful_capabilities_probe_skips_fanout(self):
         launcher = load_launcher()
         import tempfile

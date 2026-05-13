@@ -87,6 +87,8 @@ class WsflowRuntimeContractTest(unittest.TestCase):
         env = os.environ.copy()
         env.update(self.load_mcp_env())
 
+        self.assertEqual(contract["runtime_capabilities"], {"match": "exact"})
+
         proc = subprocess.run(
             ["go", "run", "./cmd/ws-mcp", "runtime", "capabilities"],
             cwd=TOOL_DIR,
