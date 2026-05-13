@@ -133,6 +133,35 @@ func TestSetAgentsTierDoesNotOverwriteOtherBackendAliasMappings(t *testing.T) {
 	}
 }
 
+func TestSetAgentsTierForHarnessTargetsHarnessAlias(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "claude")
+	if err != nil {
+		t.Fatalf("SetAgentsTierForHarness returned error: %v", err)
+	}
+	if mapping := cfg.Agents.ModelAliases["core"]["claude"]; mapping.Backend != "codex" || mapping.Model != "gpt-5.4" {
+		t.Fatalf("claude alias mapping = %#v", mapping)
+	}
+	if mapping := cfg.Agents.ModelAliases["core"]["default"]; mapping.Backend != "codex" || mapping.Model != "gpt-5.5" {
+		t.Fatalf("default alias mapping was overwritten = %#v", mapping)
+	}
+
+	backend, model, err := ResolveAgentForHarness(Options{CacheHome: cache}, "core", "", "", "claude")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
+	}
+	if backend != "codex" || model != "gpt-5.4" {
+		t.Fatalf("claude harness resolution = %q/%q", backend, model)
+	}
+}
+
+func TestSetAgentsTierForHarnessRejectsUnknownHarness(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "unknown"); err == nil {
+		t.Fatal("SetAgentsTierForHarness accepted unknown harness")
+	}
+}
+
 func TestResolveAgentExplicitBackendDoesNotBorrowCrossBackendModel(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	path, err := Path(Options{CacheHome: cache})

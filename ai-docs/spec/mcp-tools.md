@@ -81,18 +81,14 @@ root is invalid, root-aware tools fail closed instead of silently falling back t
 configuration without modifying it. The default response is compact labeled
 text, and structured JSON remains available for callers that need stable fields.
 
-`config.agents_tier` is the compatibility surface for updating the default
+`config.agents_tier` is the compatibility surface for updating the
 backend/model mapping for a model alias. Callers provide `tier` as the alias
-name and may provide a backend, a concrete model, or both. When backend is
-omitted, ws infers it from the model family where possible. The update applies
-to the alias default plus the matching backend-specific mapping for the
-inferred or explicit backend; it does not rewrite other backend mappings.
-
-> [!note] Planned 🚧
-> Alias updates will target the explicit harness when provided, otherwise the
-> detected MCP session harness when available, and otherwise the default alias
-> mapping. This makes `backend` mean the execution backend rather than the
-> alias-table key. {#260513-harness-local-agent-tier-config}
+name and may provide a backend, a concrete model, a harness selector, or all
+three. When backend is omitted, ws infers it from the model family where
+possible. The update applies to the explicit harness when provided, otherwise
+the detected MCP session harness when available, and otherwise the default
+alias mapping. This makes `backend` mean the execution backend rather than the
+alias-table key. {#260513-harness-local-agent-tier-config}
 
 Configuration exposes harness-aware model alias mappings. `light`, `core`, and
 `deep` map to backend/model defaults per harness, existing tier-shaped config is

@@ -389,7 +389,11 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		tier, _ := params.Arguments["tier"].(string)
 		backend, _ := params.Arguments["backend"].(string)
 		model, _ := params.Arguments["model"].(string)
-		cfg, err := wsconfig.SetAgentsTier(wsconfig.Options{}, tier, backend, model)
+		harness, _ := params.Arguments["harness"].(string)
+		if strings.TrimSpace(harness) == "" {
+			harness = s.currentHarness()
+		}
+		cfg, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
 		return toolJSONResponse(req.ID, cfg, err)
 
 	case "git.status":
@@ -1562,13 +1566,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.agents_tier",
-			"description": "Compatibility surface for configuring the default backend/model mapping for a ws agent model alias.",
+			"description": "Compatibility surface for configuring the current or selected harness backend/model mapping for a ws agent model alias.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"tier":    enumStringProperty("Model alias to configure.", []string{"light", "core", "deep"}),
 					"backend": stringProperty("Optional backend name. When omitted, ws infers it from the model when possible."),
 					"model":   stringProperty("Concrete model for this alias."),
+					"harness": stringProperty("Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known."),
 				},
 				"required": []string{"tier"},
 			},

@@ -263,6 +263,10 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 					Backend string `json:"backend"`
 					Model   string `json:"model"`
 				} `json:"tiers"`
+				ModelAliases map[string]map[string]struct {
+					Backend string `json:"backend"`
+					Model   string `json:"model"`
+				} `json:"model_aliases"`
 			} `json:"agents"`
 		} `json:"config"`
 	}
@@ -293,6 +297,10 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 					Backend string `json:"backend"`
 					Model   string `json:"model"`
 				} `json:"tiers"`
+				ModelAliases map[string]map[string]struct {
+					Backend string `json:"backend"`
+					Model   string `json:"model"`
+				} `json:"model_aliases"`
 			} `json:"agents"`
 		} `json:"config"`
 	}
@@ -300,6 +308,23 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	light := after.Config.Agents.Tiers["light"]
 	if after.Path != wantConfigPath() || light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
 		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
+	}
+
+	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.4")
+	var harnessAfter struct {
+		Config struct {
+			Agents struct {
+				ModelAliases map[string]map[string]struct {
+					Backend string `json:"backend"`
+					Model   string `json:"model"`
+				} `json:"model_aliases"`
+			} `json:"agents"`
+		} `json:"config"`
+	}
+	mustUnmarshalCLIJSON(t, show("config", "show"), &harnessAfter)
+	claudeCore := harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
+	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.4" {
+		t.Fatalf("claude core alias = %#v", claudeCore)
 	}
 }
 

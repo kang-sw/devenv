@@ -310,6 +310,43 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 	}
 }
 
+func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260513-feat-harness-local-agent-tier-config")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(t.TempDir(), "test")
+	var out bytes.Buffer
+	initializeInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code","version":"test"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(initializeInput), &out); err != nil {
+		t.Fatalf("ServeStdio initialize returned error: %v", err)
+	}
+
+	out.Reset()
+	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","backend":"codex","model":"gpt-5.4"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(configInput), &out); err != nil {
+		t.Fatalf("ServeStdio config returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	configText := toolText(t, byID["2"])
+	if !strings.Contains(configText, `"claude":{"backend":"codex","model":"gpt-5.4"}`) {
+		t.Fatalf("config response missing claude harness mapping: %s", byID["2"])
+	}
+
+	out.Reset()
+	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
+	if err := server.ServeStdio(context.Background(), strings.NewReader(registerInput), &out); err != nil {
+		t.Fatalf("ServeStdio register returned error: %v", err)
+	}
+	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, "harness: claude") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.4") {
+		t.Fatalf("registered status missing configured claude harness mapping:\n%s", status)
+	}
+}
+
 func TestAPIRuntimeUsesObservedHarness(t *testing.T) {
 	server := NewServer(t.TempDir(), "test")
 	server.observeHarness("test", "claude")

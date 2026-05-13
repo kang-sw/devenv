@@ -1064,7 +1064,7 @@ Behavior:
 ### `ws/config.agents_tier`
 
 Compatibility surface for configuring the user-local backend/model mapping for
-a model alias.
+a model alias in the selected or current harness.
 
 Input fields:
 
@@ -1076,11 +1076,16 @@ Input fields:
   names: `gpt-*` or names containing `codex` use `codex`; names containing
   `gemini` use `gemini`; names containing `haiku`, `sonnet`, `opus`, or
   `claude` use `claude`.
+- `harness` is optional and accepts `codex`, `claude`, `gemini`, or `default`.
+  When omitted, MCP calls use the detected session harness when one is known;
+  callers without a detected harness update `default`.
 
 Behavior:
 
 - Configuration is written to `~/.cache/ws@kang-sw-devenv/config.json`, or to
   `$WS_CACHE_HOME/config.json` when `WS_CACHE_HOME` is set.
+- The stored alias entry is `model_aliases.<tier>.<target>`, where `<target>` is
+  the explicit harness, detected MCP session harness, or `default`.
 - Missing alias mappings in an existing config are backfilled from default Codex
   and Claude alias mappings without overwriting user-provided entries.
 - `agents.register` applies alias mapping after explicit model selection and

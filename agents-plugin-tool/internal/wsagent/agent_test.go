@@ -493,6 +493,31 @@ func TestRegisterModelAliasUsesHarness(t *testing.T) {
 	}
 }
 
+func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+	})
+
+	agent, _, err := manager.Register(RegisterOptions{
+		Root:    repo,
+		Name:    "reviewer",
+		Harness: "claude",
+		Model:   "core",
+	})
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	if agent.Harness != "claude" || agent.Tier != "core" || agent.Backend != "codex" || agent.Model != "gpt-5.4" {
+		t.Fatalf("harness/tier/backend/model = %q/%q/%q/%q", agent.Harness, agent.Tier, agent.Backend, agent.Model)
+	}
+}
+
 func TestCallCreatesAndResumesSession(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")

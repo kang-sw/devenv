@@ -79,6 +79,10 @@ func Show(opts Options) (View, error) {
 }
 
 func SetAgentsTier(opts Options, tier, backend, model string) (Config, error) {
+	return SetAgentsTierForHarness(opts, tier, backend, model, "")
+}
+
+func SetAgentsTierForHarness(opts Options, tier, backend, model, harness string) (Config, error) {
 	tier = normalizedTier(tier)
 	if tier == "" {
 		return Config{}, fmt.Errorf("tier must be light, core, or deep")
@@ -92,7 +96,6 @@ func SetAgentsTier(opts Options, tier, backend, model string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.Agents.Tiers[tier] = AgentTier{Backend: backend, Model: model}
 	if cfg.Agents.ModelAliases == nil {
 		cfg.Agents.ModelAliases = map[string]map[string]AgentTier{}
 	}
@@ -100,9 +103,13 @@ func SetAgentsTier(opts Options, tier, backend, model string) (Config, error) {
 		cfg.Agents.ModelAliases[tier] = map[string]AgentTier{}
 	}
 	mapping := AgentTier{Backend: backend, Model: model}
-	cfg.Agents.ModelAliases[tier]["default"] = mapping
-	if key := normalizedHarness(backend); key != "" {
-		cfg.Agents.ModelAliases[tier][key] = mapping
+	key, err := aliasTargetKey(harness)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Agents.ModelAliases[tier][key] = mapping
+	if key == "default" {
+		cfg.Agents.Tiers[tier] = mapping
 	}
 	return cfg, save(opts, cfg)
 }
@@ -306,6 +313,17 @@ func normalizedHarness(value string) string {
 	default:
 		return ""
 	}
+}
+
+func aliasTargetKey(harness string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(harness))
+	if value == "" || value == "default" {
+		return "default", nil
+	}
+	if key := normalizedHarness(value); key != "" {
+		return key, nil
+	}
+	return "", fmt.Errorf("harness must be codex, claude, gemini, or default")
 }
 
 func useAliasMappingForBackend(explicitBackend string, mapping AgentTier) bool {

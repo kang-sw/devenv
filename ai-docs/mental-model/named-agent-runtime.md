@@ -38,7 +38,7 @@ related:
 - Gemini parsing is intentionally more tolerant than Codex parsing: stdout notices can be diagnostics, nested or top-level message/result shapes are accepted, and tool-use/tool-result content is ignored, but completion still requires terminal success, a session id, and accumulated assistant text. {#260512-gemini-agent-runner}
 - Gemini session persistence happens as soon as the first init/session id appears; if that callback fails, the runner cancels the child process before returning so failed state writes do not leave a sleeping backend call behind.
 - Model selection treats `light`/`core`/`deep` as portable aliases on the `model` field; concrete model names win, legacy `tier` is compatibility-only when `model` is absent, and alias resolution can branch by MCP harness. {#260508-harness-aware-model-aliases} {#260508-mcp-harness-detection}
-- Alias override persistence updates the default mapping and the matching backend key only; explicit backend registrations reject alias mappings whose backend/model imply a different backend, leaving the concrete model empty rather than constructing a mismatched pair. {#260512-backend-model-resolution-consistency}
+- Alias override persistence updates the explicit harness key, detected MCP session harness key, or default key; `backend` remains the execution backend in the stored mapping. Explicit backend registrations reject alias mappings whose backend/model imply a different backend, leaving the concrete model empty rather than constructing a mismatched pair. {#260512-backend-model-resolution-consistency} {#260513-harness-local-agent-tier-config}
 
 ## Coupling
 

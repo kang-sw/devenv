@@ -264,9 +264,10 @@ func configAgentsTier(args []string) {
 	tier := fs.String("tier", "", "model alias: light, core, or deep")
 	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
 	model := fs.String("model", "", "concrete model for this alias")
+	harness := fs.String("harness", "", "harness alias key to configure: codex, claude, gemini, or default")
 	_ = fs.Parse(args)
 
-	cfg, err := wsconfig.SetAgentsTier(wsconfig.Options{}, *tier, *backend, *model)
+	cfg, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, *tier, *backend, *model, *harness)
 	printJSONOrFatal("config agents-tier", cfg, err)
 }
 

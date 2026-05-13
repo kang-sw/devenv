@@ -250,7 +250,9 @@ Backend adapters map aliases to concrete models through defaults and user-local
 configuration in `~/.cache/ws@kang-sw-devenv/config.json`. The default Codex
 aliases are `light` → `gpt-5.4-mini`, `core` → `gpt-5.5`, and `deep` →
 `gpt-5.5`; the default Claude aliases are `haiku`, `sonnet`, and `opus`.
-Concrete model names override alias mapping for one registration. When
+`config.agents_tier` updates an explicit harness key, the detected MCP session
+harness key, or `default` when no harness is known. Concrete model names
+override alias mapping for one registration. When
 `backend` is omitted, ws infers the backend from recognizable model names
 (`gpt-*`/`codex` → `codex`, `gemini*` → `gemini`,
 `haiku`/`sonnet`/`opus`/`claude` → `claude`) and otherwise falls back to
@@ -305,7 +307,7 @@ ws-mcp agents cancel --root <repo> --name <name>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
 ws-mcp config show
-ws-mcp config agents-tier --tier <light|core|deep> [--backend <backend>] [--model <concrete-model>]
+ws-mcp config agents-tier --tier <light|core|deep> [--harness <harness|default>] [--backend <backend>] [--model <concrete-model>]
 ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
 ws-mcp runtime info
 ```
