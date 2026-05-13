@@ -71,6 +71,12 @@ Update mode refreshes configuration and plugin artifacts without repeating the
 full package installation. The installed plugin is an isolated snapshot of
 `agents-plugin/`, not a live reference to the working tree.
 
+> [!note] Planned 🚧
+> `install.sh update` will also snapshot `agents-plugin-wsflow/` and register
+> the wsflow Claude-compatible package when Claude Code is available, using a
+> package-local plugin cache path and the wsflow no-agent MCP environment.
+> {#260513-wsflow-installer-snapshot}
+
 ## Claude Global Home Instructions {#260505-claude-global-home-instructions}
 
 The former installer-managed Claude home instructions are retained only as

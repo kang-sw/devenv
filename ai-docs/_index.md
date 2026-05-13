@@ -206,6 +206,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |
 | `260513-epic-wsflow-agentless-plugin` | todo | Create an internal wsflow agentless derivative plugin distribution |
+| `260513-feat-wsflow-marketplace-install` | ready | Register wsflow in local marketplace/install paths and release validation |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -216,6 +217,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+`260513-feat-wsflow-marketplace-install` - register wsflow marketplace/install and validation path.
 
 ## Session Notes
 

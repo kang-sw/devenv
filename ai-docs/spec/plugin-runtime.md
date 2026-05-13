@@ -85,6 +85,12 @@ The local verification path includes `python3 -m unittest discover
 agents-plugin-wsflow/tests`, which checks the agentless runtime contract and
 the curated skill inventory without requiring text-identical skills.
 
+> [!note] Planned 🚧
+> Local marketplace and installer flows will expose wsflow as a separate
+> installable plugin entry alongside the full ws plugin. Codex-facing metadata
+> will keep distinct wsflow identity, display text, source path, and local
+> install path. {#260513-wsflow-marketplace-install}
+
 ## Runtime Launcher Repair And Project-Root Detection {#260505-runtime-launcher-repair-project-root}
 
 The plugin launcher resolves the current operating system and architecture,
