@@ -161,6 +161,19 @@ Acceptance criteria:
   non-agent workflow tools.
 - wsflow startup does not require or advertise ws named-agent capabilities.
 
+### Result (c7cd740) - 2026-05-13
+
+Added an exact runtime capability contract mode to the shared launcher and
+enabled it for `agents-plugin-wsflow/runtime.json`. The full ws package keeps
+the existing required-surface compatibility behavior, while wsflow now requires
+the runtime-reported tool and command sets to exactly match its agentless
+contract and skips weaker fallback probes after exact capability mismatch.
+
+Package tests verify wsflow `.mcp.json` selects `WS_MCP_NO_AGENT=1`,
+`WS_MCP_NAMESPACE=wsflow`, and `WS_MCP_SETUP_TOOL=setup`; verify
+`runtime.json` opts into exact matching; and compare the package contract
+against no-agent `ws-mcp runtime capabilities`.
+
 ### Phase 3: wsflow skill normalization
 
 Create or trim wsflow skills so users see agentless workflow instructions under

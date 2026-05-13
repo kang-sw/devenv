@@ -1356,6 +1356,10 @@ Expected direction:
 - major/minor compatibility is strict, patch compatibility can be flexible
 - missing or incompatible binaries can trigger automatic first-run download when
   network access is available
+- contracts can opt into exact runtime capability matching with
+  `runtime_capabilities.match: exact`; exact contracts reject extra tool or
+  command names and do not use weaker fallback surface checks after a capability
+  mismatch
 - stale binaries produce actionable diagnostics when automatic repair is not
   possible
 
@@ -1421,8 +1425,10 @@ Update/drift behavior:
 - Compatible binary: run without network access.
 - Incompatible version: replace it if release download and checksum verification
   succeed; otherwise fail with an actionable stderr diagnostic.
-- Incompatible tool surface: call `tools/list` before exec and compare it against
-  `runtime.json.tools`; replace the binary if any required tool is missing.
+- Incompatible tool surface: prefer `runtime capabilities`; replace the binary
+  if any required tool or command is missing, or if an exact contract reports
+  any extra tool or command. Legacy `tools/list` and CLI fan-out checks are a
+  fallback only for non-exact contracts.
 - Offline/proxy failure: keep stdout clean, fail startup, and tell the user which
   URL or runtime directory needs manual repair.
 

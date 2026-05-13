@@ -58,7 +58,10 @@ the full ws contract.
 
 Unset environment variables preserve the full ws contract. wsflow contract
 validation does not treat tool profiles as product modes; profile filters remain
-containment and test surfaces only.
+containment and test surfaces only. A wsflow runtime contract may set
+`runtime_capabilities.match` to `exact`; when it does, launcher compatibility
+requires the reported tool and command sets to equal the package contract and
+does not fall back to weaker required-surface probes after a capability mismatch.
 
 ## 🚧 wsflow Agentless Plugin Package {#260513-wsflow-agentless-plugin-package}
 
@@ -167,6 +170,12 @@ runtimes. It must describe the full lead runtime surface used by the plugin
 contract, independent of caller-local tool profile filters. Compatible new
 runtimes can be validated without starting a temporary MCP server or invoking
 each CLI command separately.
+
+Contracts default to required-surface matching: the capability response may
+include additional tools or commands as long as every declared contract entry is
+present. A contract that declares `runtime_capabilities.match: exact` instead
+requires set equality for tools and commands, and a failed exact capability
+match is not followed by legacy tools/list or CLI fan-out validation.
 
 Old runtimes that do not provide the command are not silently trusted. During
 the transition, the launcher either falls back to the existing bounded full
