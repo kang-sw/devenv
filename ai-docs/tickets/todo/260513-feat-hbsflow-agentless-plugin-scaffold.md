@@ -1,0 +1,175 @@
+---
+title: hbsflow agentless plugin scaffold
+parent: 260513-epic-hbsflow-agentless-plugin
+related:
+  260429-research-host-neutral-ws-plugin: host-neutral plugin architecture anchor
+related-mental-model:
+  - plugin-runtime
+  - mcp-runtime
+  - named-agent-runtime
+  - workflow-skills
+  - claude-compatibility
+---
+
+# hbsflow agentless plugin scaffold
+
+## Background
+
+The full `ws` plugin now ships as `agents-plugin/` with Codex and Claude
+metadata, a launcher-managed `ws-mcp` runtime, a runtime contract in
+`runtime.json`, and workflow skills that use `ws/<tool>` MCP notation plus
+`ws:lead-*` plugin skill invocations.
+
+Internal users need a separate lightweight distribution named `hbsflow` that
+keeps the project workflow, documentation, Git, ticket, spec, and setup tools,
+but removes ws named-agent and subquery orchestration. The package should be a
+derivative copy rather than a separate product line: specs and workflow meaning
+remain anchored to the canonical ws runtime, while hbsflow records only variant
+constraints in the existing specs.
+
+## Decisions
+
+- Create the package under `agents-plugin-hbsflow/`.
+- Use `hbsflow` as the plugin name, MCP server key, skill namespace prefix, and
+  user-facing MCP notation stem.
+- Reuse the same `ws-mcp` binary and launcher rather than building a separate
+  runtime.
+- Add environment-driven runtime behavior for hbsflow:
+  `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=hbsflow`, and
+  `WS_MCP_SETUP_TOOL=setup`.
+- Keep actual MCP tool names stable where they are already generic, such as
+  `project_tree`, `git.status`, `tickets.list`, and `specs.find`. The host MCP
+  server key supplies the `hbsflow/<tool>` namespace.
+- Treat `ws.setup` as the special legacy name. hbsflow should advertise `setup`
+  and may keep `ws.setup` only as hidden compatibility dispatch if that keeps
+  shared runtime reuse simple.
+- Keep `agents-plugin/` as the canonical full distribution. hbsflow follows the
+  same semantic changes when copied or caller-visible surfaces are touched, but
+  hbsflow does not get an independent spec tree.
+
+## Constraints
+
+- Do not expose `agents.*`, `subquery`, agent debug tools, agent CLI commands,
+  agent prompt requirements, or follow-up text that tells users to call ws
+  named-agent tools when `WS_MCP_NO_AGENT=1` is active.
+- Do not use `WS_MCP_TOOL_PROFILE=leaf` as the product mechanism. Tool profiles
+  are containment filters; hbsflow needs a distribution contract.
+- Runtime compatibility checks must compare against the hbsflow tool and command
+  contract, not the full ws contract.
+- hbsflow skill text must not instruct users to call `ws/subquery`,
+  `ws/agents.*`, or `ws:lead-*`.
+- Claude compatibility must use a package-local `.claude-plugin/plugin.json`
+  and the shared launcher pattern. Do not revive `claude-plugin/`.
+- If a copied hbsflow surface cannot be updated with a full ws change, create a
+  follow-up ticket rather than leaving untracked drift.
+
+## Open Questions
+
+- `api.ask` and API async jobs currently use the named-agent runtime internally.
+  Decide whether hbsflow disables API documentation tools under
+  `WS_MCP_NO_AGENT=1` or keeps a reduced API-doc path that does not depend on
+  ws named-agent workers.
+- Decide whether `WS_MCP_SETUP_TOOL=setup` should be an explicit env var or a
+  derived default when `WS_MCP_NAMESPACE` is not `ws`. The current preference is
+  explicit env for easier test diagnostics.
+- Decide how much of the current full workflow skill set belongs in hbsflow
+  after agent/subquery steps are removed. Some orchestration-heavy skills may
+  need native-agent wording or may be omitted from the first package.
+
+## Phases
+
+### Phase 1: Package and runtime contract scaffold
+
+Create `agents-plugin-hbsflow/` as a derivative package with Codex and Claude
+metadata, package-local MCP config, a hbsflow `runtime.json`, and launcher
+coverage for the hbsflow runtime contract.
+
+Suggested approach:
+
+- Copy the full plugin package structure only where hbsflow needs it.
+- Set the Codex plugin name and Claude manifest name to `hbsflow`.
+- Configure the MCP server key as `hbsflow`.
+- Inject `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=hbsflow`, and
+  `WS_MCP_SETUP_TOOL=setup` through hbsflow `.mcp.json`.
+- Remove `agents.*`, `subquery`, and agent CLI commands from the hbsflow
+  `runtime.json` requirements.
+- Keep version and launcher compatibility aligned with the full ws release
+  mechanism unless a later ticket intentionally separates them.
+
+Acceptance criteria:
+
+- Codex and Claude manifests exist under `agents-plugin-hbsflow/`.
+- hbsflow `.mcp.json` starts the shared launcher with the hbsflow env contract.
+- hbsflow `runtime.json` represents the agentless required tool and command
+  surface.
+- Launcher capability validation can distinguish full ws and hbsflow contracts.
+
+### Phase 2: Runtime no-agent and namespace behavior
+
+Add runtime support for the hbsflow env contract while preserving the full ws
+default behavior.
+
+Suggested approach:
+
+- Gate MCP `tools/list`, `tools/call`, and `runtime.capabilities` with
+  `WS_MCP_NO_AGENT=1`.
+- Return a clear disabled error for hidden agent/subquery calls instead of
+  accidentally dispatching to `wsagent`.
+- Gate CLI `agents` and `subquery` commands under no-agent mode.
+- Update follow-up strings, setup guidance, and relevant descriptions through
+  the namespace value exposed by `WS_MCP_NAMESPACE`.
+- Advertise `setup` instead of `ws.setup` when `WS_MCP_SETUP_TOOL=setup`, while
+  deciding whether `ws.setup` remains hidden compatibility dispatch.
+
+Acceptance criteria:
+
+- Full ws still advertises the existing full tool surface.
+- hbsflow mode does not advertise or accept ordinary agent/subquery surfaces.
+- hbsflow mode reports a runtime capability surface compatible with hbsflow
+  `runtime.json`.
+- User-facing guidance and error text use `hbsflow` notation where the namespace
+  matters.
+
+### Phase 3: hbsflow skill normalization
+
+Create or trim hbsflow skills so users see agentless workflow instructions under
+the `hbsflow:lead-*` namespace.
+
+Suggested approach:
+
+- Replace `ws/` MCP notation with `hbsflow/` in hbsflow skill text.
+- Replace `ws:lead-*` plugin-skill invocations with `hbsflow:lead-*`.
+- Remove instructions that require `ws/subquery` or `ws/agents.*`.
+- Prefer native host agent/subagent guidance for broad exploration or review
+  when the host offers it, and direct local search/read/edit guidance when it
+  does not.
+- Keep detailed implementation decisions in child tickets and specs rather than
+  creating a separate hbsflow doctrine.
+
+Acceptance criteria:
+
+- hbsflow skills do not mention ws named-agent or subquery MCP calls.
+- hbsflow workflow manual documents the hbsflow MCP notation and the absence of
+  ws named-agent primitives.
+- hbsflow skill descriptions and optional host metadata point to `hbsflow`
+  invocations.
+
+### Phase 4: Documentation and drift guard
+
+Record the hbsflow derivative-maintenance rule in the existing specs and project
+memory without creating a parallel spec set.
+
+Suggested approach:
+
+- Update `plugin-runtime`, `mcp-tools`, `workflow-skills`, and
+  `claude-compatibility` specs with hbsflow variant constraints.
+- Update relevant mental models so future implementation changes check hbsflow
+  when copied, packaged, or caller-visible surfaces change.
+- Update project memory to list `agents-plugin-hbsflow/` as an active derivative
+  distribution after the package exists.
+
+Acceptance criteria:
+
+- Existing specs describe hbsflow as an internal derivative distribution.
+- Future full ws changes have a documented rule to evaluate hbsflow drift.
+- No separate hbsflow spec corpus is introduced.
