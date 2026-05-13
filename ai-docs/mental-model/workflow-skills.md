@@ -39,6 +39,7 @@ related:
 - `lead-bootstrap` has two template contracts: root context and `WORKFLOW.md`. Fresh and upgrade paths must install or preserve `ai-docs/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
 - Orchestration-heavy skills load `lead-workflow-manual` when primitive context is not already active; skipping it causes notation drift and wrong agent-call forms. {#260505-workflow-primitive-reference}
 - Implementation skills honor existing skeleton artifacts but do not require missing skeletons; `lead-implement` owns optional skeleton execution before implementation edits. {#260505-implementation-workflow-skills}
+- `lead-edit` and `lead-write-code` are code-and-review primitives; `lead-implement` and `lead-sprint` own documentation pipeline timing. {#260505-implementation-workflow-skills}
 - `lead-write-code` uses brief-bounded implementation and file-based reviewer output; reviewer allocation is risk-scoped, reviewers return summaries, and implementers read finding files directly. {#260505-implementation-workflow-skills}
 - Sprint defers doc pipeline until wrap-up; per-task doc updates inside sprint create partial checkpoints that confuse wrap-up. {#260505-sprint-session-container}
 
@@ -47,7 +48,7 @@ related:
 - Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
 - Skeleton flow registers `skeleton-populator` and `skeleton-reviewer`; no compatibility writer prompt remains active.
 - Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec gate and queue checks.
-- `lead-edit`, `lead-write-code`, and `lead-implement` each own a different review/doc-pipeline boundary; moving updater dispatch between them can double-run or skip documentation updates.
+- Moving updater dispatch into `lead-edit` or `lead-write-code` can double-run `lead-implement` documentation updates or break sprint batching.
 - `lead-salvage` routes ticket writes through `lead-write-ticket`; direct ticket graph mutation inside salvage would bypass ticket conventions and commit handling.
 - Bootstrap guide semantics stay host-neutral; root `CLAUDE.md` only delegates to `AGENTS.md`.
 

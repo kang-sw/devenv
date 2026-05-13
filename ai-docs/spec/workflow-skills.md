@@ -184,14 +184,18 @@ pipeline before reporting completion.
 
 `lead-edit` performs a narrow direct edit in the lead session. It honors
 existing skeleton artifacts, verifies the change, uses one reviewer for
-correctness and fit, escalates if the scope grows, runs spec update handling,
-and reports the result.
+correctness and fit, escalates if the scope grows, and reports the commit range
+and test status to its caller.
 
 `lead-write-code` delegates an implementation target through an implementer
 agent, optional plan, partitioned reviewers, bounded fix relay, cleanup, and
 completion report. It honors existing skeleton artifacts but does not require
 missing skeletons. When workflow primitive context is not already active, it
 loads `lead-workflow-manual` before registering delegates or reviewers.
+
+`lead-edit` and `lead-write-code` are code-and-review primitives; callers own
+documentation pipeline timing. `lead-implement` runs the documentation pre-pass
+after either primitive returns, while `lead-sprint` defers that pass to wrap-up.
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,

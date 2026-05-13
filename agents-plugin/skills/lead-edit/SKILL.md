@@ -1,6 +1,6 @@
 ---
 name: lead-edit
-description: Direct-edit primitive for narrow changes routed by lead-implement or explicit user request; lead edits current branch, verifies, reviews once, updates specs, and reports.
+description: Direct-edit primitive for narrow changes routed by lead-implement or explicit user request; lead edits current branch, verifies, reviews once, and reports.
 ---
 
 # Edit
@@ -20,7 +20,6 @@ Target: user request
 - Lead may reject style-only or scope-expanding findings with reasons.
 - Escalate to `ws:lead-write-code` if scope becomes multi-file with new public API or cross-module new pattern.
 - Delete review path before returning.
-- Run `ws:lead-update-spec` on the edit range before reporting.
 - Output the completion report format exactly.
 
 ## On: invoke
@@ -91,9 +90,8 @@ For each rejected finding: respond [accepted] or [maintained: <brief reason>].
 
 Delete `<review-path>`.
 
-### 6. Spec Update
+### 6. Report
 
-Invoke `ws:lead-update-spec` with `<start-commit>..HEAD`.
 Output completion report.
 
 ## Judgments
@@ -113,7 +111,6 @@ Edit complete.
 Commit range: <start-commit>..HEAD
 Test status: pass | fail | skipped
 Review: clean | non-clean (<one-line summary>)
-Spec: <N entries added, M 🚧 stripped> | no changes
 <if issues remain after cap:> Open issues: <list>
 ```
 
