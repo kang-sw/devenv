@@ -453,7 +453,7 @@ if [ -d "$HOME/.claude/hooks" ]; then
   done
 fi
 
-# ── ws plugin snapshot copy ───────────────────────────────────────────────────
+# ── local plugin marketplace snapshot ─────────────────────────────────────────
 # Defined early so settings.json and known_marketplaces.json can reference it.
 PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
 
@@ -517,7 +517,10 @@ required_marketplaces = {
         "source": {"source": "directory", "path": plugin_cache}
     }
 }
-required_plugins = {"ws@kang-sw-devenv": True}
+required_plugins = {
+    "ws@kang-sw-devenv": True,
+    "wsflow@kang-sw-devenv": True,
+}
 
 obsolete_marketplaces = {"ws"}
 obsolete_plugins = {"ws@ws"}
@@ -576,37 +579,44 @@ else:
     print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
 
-# ── ws plugin snapshot copy ───────────────────────────────────────────────────
-# Copy agents-plugin/ to a stable cache; Claude Code reads from the cache, not the live repo.
+# ── local plugin marketplace snapshot ─────────────────────────────────────────
+# Copy plugin packages to a stable cache; Claude Code reads from the cache, not the live repo.
 # Re-run install.sh update after changes.
-info "Syncing ws plugin snapshot to $PLUGIN_CACHE/ws/..."
-mkdir -p "$PLUGIN_CACHE/ws"
+info "Syncing local plugin snapshots to $PLUGIN_CACHE/..."
+mkdir -p "$PLUGIN_CACHE/ws" "$PLUGIN_CACHE/wsflow"
 # Remove stale subdirs from earlier layouts (claude/, claude-plugin/)
 rm -rf "$PLUGIN_CACHE/claude" "$PLUGIN_CACHE/claude-plugin"
 rsync -a --delete "$REPO_DIR/agents-plugin/" "$PLUGIN_CACHE/ws/"
-# Generate marketplace.json that registers ws as a plugin at ./ws
+rsync -a --delete "$REPO_DIR/agents-plugin-wsflow/" "$PLUGIN_CACHE/wsflow/"
+# Generate marketplace.json that registers local plugins by package directory.
 mkdir -p "$PLUGIN_CACHE/.claude-plugin"
-python3 - "$PLUGIN_CACHE/.claude-plugin/marketplace.json" "$PLUGIN_CACHE/ws/.claude-plugin/plugin.json" <<'MKTEOF'
+python3 - "$PLUGIN_CACHE/.claude-plugin/marketplace.json" \
+  "$PLUGIN_CACHE/ws/.claude-plugin/plugin.json" ./ws \
+  "$PLUGIN_CACHE/wsflow/.claude-plugin/plugin.json" ./wsflow <<'MKTEOF'
 import json, sys, os
-mkt_path, plugin_json_path = sys.argv[1], sys.argv[2]
-plugin = json.load(open(plugin_json_path))
-marketplace = {
-    "name": "kang-sw-devenv",
-    "description": "kang-sw personal devenv plugin marketplace",
-    "owner": {"name": "kang-sw"},
-    "plugins": [{
+mkt_path, plugin_args = sys.argv[1], sys.argv[2:]
+plugins = []
+for idx in range(0, len(plugin_args), 2):
+    plugin_json_path, source = plugin_args[idx], plugin_args[idx + 1]
+    plugin = json.load(open(plugin_json_path))
+    plugins.append({
         "name": plugin["name"],
         "version": plugin.get("version"),
         "description": plugin.get("description", ""),
         "author": plugin.get("author", {"name": "kang-sw"}),
-        "source": "./ws",
-    }],
+        "source": source,
+    })
+marketplace = {
+    "name": "kang-sw-devenv",
+    "description": "kang-sw personal devenv plugin marketplace",
+    "owner": {"name": "kang-sw"},
+    "plugins": plugins,
 }
 with open(mkt_path, "w") as f:
     json.dump(marketplace, f, indent=2)
     f.write("\n")
 MKTEOF
-success "ws plugin snapshot synced"
+success "local plugin snapshots synced"
 
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it
 # before Claude Code has had a chance to process extraKnownMarketplaces itself.
@@ -633,35 +643,44 @@ else:
     print("  \033[1;32m  ✔ kang-sw-devenv marketplace registered\033[0m")
 PYEOF
 
-if has claude; then
-  INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
+install_claude_plugin() {
+  local plugin_name="$1"
+  local plugin_ref="${plugin_name}@kang-sw-devenv"
+
   if [[ -f "$INSTALLED_PLUGINS" ]] && python3 -c "
 import json, sys
 d = json.load(open(sys.argv[1]))
-p = d.get('plugins', {}).get('ws@kang-sw-devenv', {})
+p = d.get('plugins', {}).get(sys.argv[3], {})
 sys.exit(0 if p and p.get('installLocation') == sys.argv[2] else 1)
-" "$INSTALLED_PLUGINS" "$PLUGIN_CACHE" 2>/dev/null; then
-    muted "ws plugin already installed at snapshot path"
+" "$INSTALLED_PLUGINS" "$PLUGIN_CACHE" "$plugin_ref" 2>/dev/null; then
+    muted "$plugin_name plugin already installed at snapshot path"
   else
-    info "Installing ws plugin..."
+    info "Installing $plugin_name plugin..."
     # Remove stale entry so claude plugin install writes a fresh installLocation.
     # Version equality would otherwise cause the install to no-op without updating the path.
     if [[ -f "$INSTALLED_PLUGINS" ]]; then
-      python3 - "$INSTALLED_PLUGINS" <<'PYEOF'
+      python3 - "$INSTALLED_PLUGINS" "$plugin_ref" <<'PYEOF'
 import json, sys
-path = sys.argv[1]
+path, plugin_ref = sys.argv[1], sys.argv[2]
 d = json.load(open(path))
-if 'ws@kang-sw-devenv' in d.get('plugins', {}):
-    del d['plugins']['ws@kang-sw-devenv']
+if plugin_ref in d.get('plugins', {}):
+    del d['plugins'][plugin_ref]
     with open(path, 'w') as f:
         json.dump(d, f, indent=2)
         f.write('\n')
 PYEOF
     fi
-    claude plugin install ws@kang-sw-devenv && success "ws plugin installed" || warn "ws plugin install failed — run manually: claude plugin install ws@kang-sw-devenv"
+    claude plugin install "$plugin_ref" && success "$plugin_name plugin installed" || warn "$plugin_name plugin install failed — run manually: claude plugin install $plugin_ref"
   fi
+}
+
+if has claude; then
+  INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
+  install_claude_plugin ws
+  install_claude_plugin wsflow
 else
   warn "claude not found — run manually after install: claude plugin install ws@kang-sw-devenv"
+  warn "claude not found — run manually after install: claude plugin install wsflow@kang-sw-devenv"
 fi
 
 # Clean up dead symlinks (skills and agents)

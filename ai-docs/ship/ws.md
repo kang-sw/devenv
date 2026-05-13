@@ -45,6 +45,9 @@ At ship time:
 - `cd agents-plugin-tool && scripts/smoke-ws-mcp.sh ..`
 - `claude plugin validate agents-plugin`
 - `claude plugin validate agents-plugin-wsflow`
+- `bash -n install.sh`
+- Confirm `.agents/plugins/marketplace.json` contains both `ws` and `wsflow`
+  local plugin entries when packaging or install behavior changed.
 
 ## Changelog
 
@@ -110,7 +113,8 @@ Publish targets:
 - GitHub Actions release assets uploaded by `.github/workflows/ws-mcp-release.yml`
   when the `v*` tag is pushed
 - Codex GitHub plugin marketplace install from repository
-  `.agents/plugins/marketplace.json` pointing at `./agents-plugin`
+  `.agents/plugins/marketplace.json` pointing at `./agents-plugin` for `ws`
+  and `./agents-plugin-wsflow` for `wsflow`
 
 Publish command after explicit final approval:
 
@@ -139,8 +143,13 @@ Expected GitHub Actions behavior:
 3. Dogfood Codex GitHub plugin install from `kang-sw/devenv`.
 4. In a fresh Codex session, confirm:
    - `ws` plugin is installed from the GitHub marketplace entry
+   - `wsflow` plugin is installed from the GitHub marketplace entry when the
+     agentless derivative is part of the release
    - `$ws:lead-workflow-manual` is visible
+   - `$wsflow:lead-workflow-manual` is visible when wsflow is installed
    - MCP server `ws` starts from plugin-managed `.mcp.json`
+   - MCP server `wsflow` starts from plugin-managed `.mcp.json` without
+     named-agent or subquery tools
    - `runtime.info` reports the shipped version and matching prompt bundle hash
    - `project_tree` returns `ai-docs/` as its first non-empty line
 5. Optional local dogfood: if a Windows host is available, build the Windows
