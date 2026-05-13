@@ -51,6 +51,22 @@ constraints in the existing specs.
   hbsflow manifests, skills, default prompts, and ordinary user-facing guidance
   should present hbsflow as its own workflow plugin, not as a ws-aware or
   ws-lite product.
+- Keep one-shot native subagent guidance where it improves investigation or
+  review. Native subagents have been verified able to use MCP documentation and
+  discovery tools, so hbsflow skills may instruct them to use hbsflow read tools
+  such as `hbsflow/convention.read`, `hbsflow/infra.read`,
+  `hbsflow/project_tree`, `hbsflow/specs.*`, `hbsflow/tickets.*`,
+  `hbsflow/mental_models.*`, and `hbsflow/git.*`.
+- Include `lead-ship` in the first hbsflow skill set for workflow
+  centralization and documentation completeness.
+- Exclude persistent multi-turn orchestration skills from the first hbsflow
+  skill set: `lead-write-code`, `lead-write-skeleton`, `lead-sprint`,
+  `lead-forge-spec`, `lead-forge-mental-model`, and `lead-salvage`.
+- Keep direct and documentation workflow skills in the first hbsflow skill set:
+  `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
+  `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
+  `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
+  `lead-skill-authoring`, `lead-ship`, and `lead-verify-discussion`.
 
 ## Constraints
 
@@ -73,12 +89,6 @@ constraints in the existing specs.
   and the shared launcher pattern. Do not revive `claude-plugin/`.
 - If a copied hbsflow surface cannot be updated with a full ws change, create a
   follow-up ticket rather than leaving untracked drift.
-
-## Open Questions
-
-- Decide how much of the current full workflow skill set belongs in hbsflow
-  after agent/subquery steps are removed. Some orchestration-heavy skills may
-  need native-agent wording or may be omitted from the first package.
 
 ## Phases
 
@@ -142,11 +152,28 @@ Suggested approach:
 - Prefer native host agent/subagent guidance for broad exploration or review
   when the host offers it, and direct local search/read/edit guidance when it
   does not.
+- In native subagent prompts, point workers at hbsflow read tools for project
+  context and conventions instead of assuming hbsflow-managed agent sessions.
+- Rewrite `lead-implement` as a direct-edit harness. Remove skeleton routing,
+  delegated write-code routing, ws-managed mental-model updater calls, and
+  delegated merge-path assumptions.
+- Rewrite `lead-edit` to use native subagent review when available, or a
+  lead-only risk review with rationale for low-risk changes.
+- Keep `lead-ship` in the hbsflow package, but use hbsflow naming and package
+  configuration once hbsflow ship configuration exists.
 - Keep detailed implementation decisions in child tickets and specs rather than
   creating a separate hbsflow doctrine.
 
 Acceptance criteria:
 
+- The first hbsflow skill set includes only:
+  `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
+  `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
+  `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
+  `lead-skill-authoring`, `lead-ship`, and `lead-verify-discussion`.
+- The first hbsflow skill set excludes `lead-write-code`,
+  `lead-write-skeleton`, `lead-sprint`, `lead-forge-spec`,
+  `lead-forge-mental-model`, and `lead-salvage`.
 - hbsflow skills do not mention ws named-agent or subquery MCP calls.
 - hbsflow workflow manual documents the hbsflow MCP notation and the absence of
   hbsflow-managed named-agent primitives.
@@ -154,6 +181,9 @@ Acceptance criteria:
   invocations.
 - hbsflow distributed skill text and manifests do not describe the package as a
   ws variant or require ws-aware user behavior.
+- Native subagent guidance is one-shot and host-native. It tells workers to use
+  hbsflow MCP read/context tools where useful, and never describes a persistent
+  hbsflow-managed agent session.
 
 ### Phase 4: Documentation and drift guard
 
