@@ -62,20 +62,15 @@ migration preserves relevant content by moving it into the canonical
 
 ## Claude Install And Update Snapshot {#260505-claude-install-update-snapshot}
 
-`install.sh` installs and updates the local ws plugin environment. It maintains
-user configuration, generates marketplace metadata, snapshots `agents-plugin/`
-into the Claude plugin cache when Claude Code is available, registers the local
-marketplace, and installs the ws plugin for Claude Code.
+`install.sh` installs and updates the local ws and wsflow plugin environment.
+It maintains user configuration, generates marketplace metadata, snapshots
+`agents-plugin/` and `agents-plugin-wsflow/` into the Claude plugin cache when
+Claude Code is available, registers the local marketplace, and installs the ws
+and wsflow plugins for Claude Code. {#260513-wsflow-installer-snapshot}
 
 Update mode refreshes configuration and plugin artifacts without repeating the
-full package installation. The installed plugin is an isolated snapshot of
-`agents-plugin/`, not a live reference to the working tree.
-
-> [!note] Planned 🚧
-> `install.sh update` will also snapshot `agents-plugin-wsflow/` and register
-> the wsflow Claude-compatible package when Claude Code is available, using a
-> package-local plugin cache path and the wsflow no-agent MCP environment.
-> {#260513-wsflow-installer-snapshot}
+full package installation. Installed plugins are isolated snapshots of their
+source packages, not live references to the working tree.
 
 ## Claude Global Home Instructions {#260505-claude-global-home-instructions}
 
