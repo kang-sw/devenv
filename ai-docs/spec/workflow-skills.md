@@ -183,15 +183,16 @@ delegated code writing, then runs the shared post-implementation documentation
 pipeline before reporting completion.
 
 `lead-edit` performs a narrow direct edit in the lead session. It honors
-existing skeleton artifacts, verifies the change, uses one reviewer for
-correctness and fit, escalates if the scope grows, and reports the commit range
-and test status to its caller.
+existing skeleton artifacts and caller-provided scope boundaries, verifies the
+change, uses one reviewer for correctness and fit, escalates if the scope grows,
+and reports the commit range and test status to its caller.
 
 `lead-write-code` delegates an implementation target through an implementer
 agent, optional plan, partitioned reviewers, bounded fix relay, cleanup, and
-completion report. It honors existing skeleton artifacts but does not require
-missing skeletons. When workflow primitive context is not already active, it
-loads `lead-workflow-manual` before registering delegates or reviewers.
+completion report. It honors existing skeleton artifacts and caller-provided
+scope boundaries but does not require missing skeletons. When workflow primitive
+context is not already active, it loads `lead-workflow-manual` before
+registering delegates or reviewers.
 
 `lead-edit` and `lead-write-code` are code-and-review primitives; callers own
 documentation pipeline timing. `lead-implement` runs the documentation pre-pass
@@ -215,17 +216,31 @@ The pipeline order is fixed:
 spec -> ticket -> implementation
 ```
 
-Existing non-epic `ready/` ticket paths skip ticket creation and are direct
-implementation targets. Epic ticket paths are milestone-board artifacts, not
-implementation targets; `lead-proceed` stops on epics and routes the user toward
-child ticket creation, child ready promotion, or proceeding a ready child ticket.
-Existing `todo/` ticket paths route through `lead-discuss` for `todo/` ->
-`ready/` promotion before implementation. Actionable inline targets go through
-`lead-write-ticket`, whose ready gate creates missing spec coverage through
-`lead-write-spec` when possible; exploratory targets stop and suggest `lead-discuss`.
-Implementation always routes through `lead-implement`. When a separate contract
-checkpoint may be needed before implementation, `lead-implement` decides whether
-to run `lead-write-skeleton` before edit/write-code.
+Existing non-epic `ready/` ticket paths skip ticket creation and become
+implementation targets after `lead-proceed` selects an implementation slice.
+The default slice is the first unfinished phase; targets without phase sections
+use the whole target. Multiple phases are selected only when the user explicitly
+requests them or the ticket artifacts show the phases cannot be verified
+separately.
+
+Epic ticket paths are milestone-board artifacts, not implementation targets;
+`lead-proceed` stops on epics and routes the user toward child ticket creation,
+child ready promotion, or proceeding a ready child ticket. Existing `todo/`
+ticket paths are treated as implementation intent: `lead-proceed` invokes
+`lead-write-ticket` for autonomous `todo/` -> `ready/` promotion before slice
+selection, and escalates to `lead-discuss` only when promotion or implementation
+scope exposes unresolved design decisions, unclear completion criteria, user
+trade-offs, or missing spec coverage that cannot be created. Actionable inline
+targets go through `lead-write-ticket`, whose ready gate creates missing spec
+coverage through `lead-write-spec` when possible; exploratory targets stop and
+suggest `lead-discuss`.
+
+Implementation always routes through `lead-implement` with the selected slice as
+a hard scope boundary. `lead-proceed` does not rejudge ticket quality, demand
+ticket splitting, mutate ticket structure, decide skeleton need, or invoke
+`lead-write-skeleton` before implementation. When a separate contract checkpoint
+may be needed before implementation, `lead-implement` decides whether to run
+`lead-write-skeleton` before edit/write-code.
 
 ## Sprint Session Container {#260505-sprint-session-container}
 

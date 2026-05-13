@@ -1,5 +1,9 @@
 ---
 title: Proceed phase-slice routing
+spec:
+  - 260505-proceed-routing-pipeline
+  - 260505-implementation-workflow-skills
+  - 260505-ticket-document-system
 related-mental-model:
   - workflow-skills
   - documentation-system

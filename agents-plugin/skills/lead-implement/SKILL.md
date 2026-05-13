@@ -13,13 +13,14 @@ Target: user request
 - User approval gates merge to the target branch.
 - Merge commits follow CLAUDE.md commit rules and include `## AI Context`.
 - Create the task list at prepare; every task is mandatory and ordered.
+- Honor caller-provided scope or phase slices as hard implementation boundaries.
 
 ## On: invoke
 
 ### 1. Assess
 
 1. Parse target: ticket path or inline description.
-2. If ticket-driven: read ticket; extract scope, stem, artifacts, and existing skeletons.
+2. If ticket-driven: read ticket; extract scope, stem, artifacts, existing skeletons, and caller-provided slice.
 3. Apply `judge: needs-skeleton`.
 4. Apply `judge: execution-mode`.
 
@@ -29,6 +30,7 @@ Target: user request
 2. Create and maintain this task list:
 
 ```text
+[ ] Confirm scope boundary - preserve caller-provided slice or whole-target scope
 [ ] Resolve skeleton need - invoke ws:lead-write-skeleton on the implementation branch when required
 [ ] Execute - invoke ws:lead-edit or ws:lead-write-code; capture commit range
 [ ] Doc pre-pass - update-spec then mental-model-updater; commit each
@@ -47,8 +49,8 @@ Target: user request
    b. Capture the final skeleton commit hash from its completion output.
    c. Continue implementation on the same branch.
 4. Execute the selected implementation mode:
-   - Direct edit: invoke `ws:lead-edit` with the target on the current branch.
-   - Delegated: invoke `ws:lead-write-code`.
+   - Direct edit: invoke `ws:lead-edit` with the target and scope boundary on the current branch.
+   - Delegated: invoke `ws:lead-write-code` with the target and scope boundary.
 5. Capture commit range from `<implementation-start>..HEAD` plus the edit/write-code completion report.
 
 ### 4. Doc Pre-Pass

@@ -14,6 +14,7 @@ Target: user request
 - Use `ws/mental_models.find` or `ws/mental_models.status`; read returned paths.
 - Ancestor loading: read `mental-model/<domain>/index.md` before `mental-model/<domain>/<sub>.md`.
 - Honor existing skeleton contracts and integration tests as acceptance criteria.
+- Honor caller-provided scope or phase slices as hard edit boundaries.
 - Commit logical units per CLAUDE.md; include `## AI Context`.
 - Relay cap is 2 review cycles; clean up and return after the cap.
 - Lead fixes correctness, security, contract, and regression findings.
@@ -28,8 +29,8 @@ Target: user request
 
 1. Parse ticket path or inline brief.
 2. Record `<start-commit>` with `git rev-parse HEAD`.
-3. If ticket-driven: read ticket; collect existing skeleton references.
-4. Treat collected skeleton references as acceptance criteria.
+3. If ticket-driven: read ticket; collect existing skeleton references and caller-provided scope boundary.
+4. Treat collected skeleton references and scope boundary as acceptance criteria.
 5. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 6. Call `ws/infra.read(name: "impl-playbook")`.
 7. Identify integration test paths and run command.

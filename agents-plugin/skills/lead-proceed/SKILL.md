@@ -13,12 +13,15 @@ Target: user request
 - Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Assess from conversation state and artifacts only; do not read source code.
 - Pipeline order is fixed: spec -> ticket -> implementation.
-- Execution mode is single; split multi-scope work into separate tickets.
+- Execution slice defaults to one unfinished phase; include multiple phases only by user request or inseparable verification.
+- Do not rejudge ticket quality, demand ticket splitting, or mutate ticket structure.
 - Always route code-editing work through `ws:lead-implement`, including skeleton work.
-- Existing non-epic `ready/` ticket path skips `ws:lead-write-ticket`; existing `todo/` ticket path routes through ready promotion before implementation.
+- Existing non-epic `ready/` ticket path skips `ws:lead-write-ticket`, then selects an implementation slice.
+- Existing `todo/` ticket path invokes `ws:lead-write-ticket` for autonomous ready promotion before slice selection.
 - Epic ticket paths are board artifacts, never implementation targets; stop and route to child ticket creation, promotion, or proceed.
 - Actionable inline target invokes `ws:lead-write-ticket`, captures `Ticket:`, then re-checks status; `todo/` output must promote to `ready/` before implementation.
 - Exploratory target stops and suggests `ws:lead-discuss`.
+- Escalate to `ws:lead-discuss` only for unresolved design choices that block ready promotion or implementation scope.
 - Announce routing before execution; chain stages without pausing for confirmation.
 - Prefix stages receive gate-suppression context in arguments.
 - Warmth is current-session context, not target identity.
@@ -28,7 +31,7 @@ Target: user request
 ### 1. Assess
 
 1. Parse target: ticket path or inline description.
-2. If ticket path: read ticket; extract status, category, scope, phases, and `plans:`.
+2. If ticket path: read ticket; extract status, category, scope, phases, phase results, open questions, and `plans:`.
 3. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs, skeletons, or tests.
 4. If inline: assess from description only.
 5. Classify warmth from conversation state.
@@ -42,8 +45,14 @@ Target: user request
 3. If invoking `ws:lead-write-ticket`, append:
    `Chained from ws:lead-proceed - re-check spec coverage before invoking ws:lead-write-spec again; do not pause for approval when coverage can be created autonomously.`
 4. If the current or captured ticket category is `epic`, stop implementation routing; suggest `ws:lead-write-ticket` for a child ticket, `ws:lead-discuss` to promote an existing child, or `ws:lead-proceed` on a ready child ticket.
-5. If the current or captured ticket status is `todo/`, stop implementation routing and invoke `ws:lead-discuss` for `todo/` -> `ready/` promotion. Continue only after the target path is `ready/`.
-6. Build pipeline: `ws:lead-implement`.
+5. If the current or captured ticket status is `todo/`, apply `judge: escalation-needed`.
+6. If escalation is needed, stop and invoke `ws:lead-discuss` with the blocker.
+7. If the current or captured ticket status is `todo/`, invoke `ws:lead-write-ticket` for `todo/` -> `ready/` promotion and append:
+   `Chained from ws:lead-proceed - treat this as implementation intent; promote autonomously when only spec coverage, frontmatter, or queue updates are needed; escalate only unresolved design blockers.`
+   Capture the moved ticket path.
+8. Use only non-epic `ready/` ticket paths downstream.
+9. Apply `judge: implementation-slice`.
+10. Build pipeline: `ws:lead-implement`.
 
 ### 3. Announce
 
@@ -52,6 +61,7 @@ Target: user request
 
 - **Target**: <ticket path or brief summary>
 - **Warmth**: <warm | cold> - <evidence from conversation state>
+- **Slice**: <Phase N[: title] | Phase N-M[: title summary] | whole target - no phases>
 - **Execution**: ws:lead-implement - owns skeleton decisions, code-editing stages, and branch lifecycle
 - **Gate suppression**: prefix stages receive override context.
 
@@ -68,9 +78,9 @@ Do not ask for confirmation; the user can interrupt.
 3. Stop on failure or user interruption.
 4. If `ws:lead-write-ticket` ran, capture its `Ticket:` path before any downstream stage.
 5. If the captured path stem category is `epic`, stop; do not invoke skeleton or implementation on the epic path. Route to child ticket creation, child ready promotion, or proceed on a ready child ticket.
-6. If the captured path is under `ai-docs/tickets/todo/`, invoke `ws:lead-discuss` for `todo/` -> `ready/` promotion and stop; do not invoke skeleton or implementation.
-7. Use only non-epic `ready/` ticket paths downstream.
-8. Invoke `ws:lead-implement` with the target.
+6. If the captured path remains under `ai-docs/tickets/todo/`, stop and report the ready-promotion blocker; do not invoke implementation.
+7. Re-read the ready ticket after promotion and select the implementation slice.
+8. Invoke `ws:lead-implement` with the target and `Scope: implement <slice> only`.
 
 ## Judgments
 
@@ -82,10 +92,27 @@ Do not ask for confirmation; the user can interrupt.
 | Proceed | Target is an existing ticket path |
 | Invoke `ws:lead-write-ticket` | Target is an actionable inline description |
 
+### judge: escalation-needed
+
+| Decision | When |
+|----------|------|
+| Escalate to `ws:lead-discuss` | Ticket has unresolved design decisions, unclear completion criteria, unresolved user trade-offs, or cannot gain spec coverage |
+| Continue autonomously | Promotion needs only spec coverage, frontmatter, queue entry, or routine ready-gate normalization |
+
+### judge: implementation-slice
+
+| Decision | When |
+|----------|------|
+| Whole target | Ready target has no phase sections |
+| First unfinished phase | Ready target has unfinished phases and the user did not request a broader slice |
+| User-requested phase range | User explicitly named phases to implement |
+| Inseparable phase range | Adjacent phases cannot be verified separately from ticket artifacts |
+
 ## Doctrine
 
 Proceed optimizes for **full-pipeline routing accuracy**. Conversation state and
 artifacts are the finite signal: use them to choose readiness stages, not to
-perform or pre-decide code-editing stages. Warmth sharpens routing; it does not
-skip stages. When a rule is ambiguous, apply whichever interpretation better
-preserves the user's ability to intervene at any pipeline stage.
+perform code-editing stages. Warmth sharpens routing; slice selection bounds
+execution without replacing ticket authoring. When a rule is ambiguous, apply
+whichever interpretation better preserves the user's ability to intervene at any
+pipeline stage.

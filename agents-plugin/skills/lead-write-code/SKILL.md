@@ -14,6 +14,7 @@ Target: user request
 - Implementer reads only the brief, plus plan when provided; never the ticket directly.
 - Fit reviewer may read the ticket for architectural headroom; correctness/test reviewers may not.
 - Honor existing skeleton contracts and integration tests as acceptance criteria.
+- Honor caller-provided scope or phase slices as hard implementation boundaries.
 - Lead puts ancestor-loading rule in implementer prompt.
 - Reviewers write findings to files and return summaries only.
 - Lead relays review file paths, not findings content, to implementer.
@@ -27,7 +28,7 @@ Target: user request
 ### 1. Read Target
 
 1. Parse ticket path or inline description; accept optional `--ticket <stem>`.
-2. If ticket-driven: read ticket; extract scope, stem, phase context.
+2. If ticket-driven: read ticket; extract scope, stem, phase context, and caller-provided boundary.
 3. Survey project:
 
 ```text
@@ -82,6 +83,7 @@ Brief path: <brief-path>
 <if plan exists:> Plan path: <plan-path>
 
 Read only the brief (and plan if provided). Do not read the ticket directly.
+Implement only the brief's scope boundary; leave later ticket phases untouched.
 
 Acceptance criteria:
 <if skeleton exists:> Existing skeleton contracts must be satisfied, and skeleton integration tests must pass.

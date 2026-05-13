@@ -25,7 +25,9 @@ related:
 - `lead-add-rule` requires explicit persistence intent such as save, remember, persist, or add a durable rule; prescriptive task wording alone must not trigger it. {#260508-add-rule-explicit-persistence-trigger}
 - `lead-proceed` routes through prefix stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
 - `lead-proceed` must stop on epic ticket paths because epics are board artifacts; implementation routes through child tickets. {#260505-proceed-routing-pipeline}
-- `lead-proceed` routes implementation-ready work to `lead-implement`; it does not decide skeleton need or invoke code-editing skeleton work directly. {#260512-skeleton-inside-implement-branch}
+- `lead-proceed` routes implementation-ready work to `lead-implement`; it selects an implementation slice but does not decide skeleton need or invoke code-editing skeleton work directly. {#260505-proceed-routing-pipeline} {#260512-skeleton-inside-implement-branch}
+- `lead-proceed` treats `todo/` ticket paths as implementation intent, promotes through `lead-write-ticket`, and escalates only for unresolved design or ready-gate blockers. {#260505-proceed-routing-pipeline}
+- `lead-proceed` does not rejudge ticket decomposition; default execution is the first unfinished phase, and selected slices are hard downstream scope. {#260505-proceed-routing-pipeline}
 - `lead-implement` owns skeleton decisions and execution inside the implementation branch lifecycle before edit/write-code runs. {#260512-skeleton-inside-implement-branch}
 - `lead-write-ticket` runs the spec gate only when non-`epic`, non-`research` work enters `ready/`; `todo/` is accepted backlog with optional spec recovery hints. {#260505-planning-workflow-skills}
 - `lead-write-ticket` invokes `lead-write-spec` autonomously when ready-ticket coverage is missing, then stops only if coverage still cannot be established. {#260505-planning-workflow-skills}
@@ -59,7 +61,7 @@ related:
 
 ## Common Mistakes
 
-- Treating `lead-proceed` as an implementation skill; it routes, sends `todo/` tickets through ready promotion, and does not read source.
+- Treating `lead-proceed` as an implementation skill; it routes, sends `todo/` tickets through ready promotion, selects scope slices, and does not read source.
 - Skipping `lead-workflow-manual` before executing or editing orchestration-heavy skills, which causes notation drift back to Claude shell helpers.
 - Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
