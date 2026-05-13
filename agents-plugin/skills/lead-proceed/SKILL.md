@@ -40,7 +40,7 @@ Target: user request
    `Chained from ws:lead-proceed - write any planned entries without asking; the session reminder will still emit.`
 2. Apply `judge: needs-ticket`.
 3. If invoking `ws:lead-write-ticket`, append:
-   `Chained from ws:lead-proceed - treat spec coverage as satisfied whether ws:lead-write-spec wrote anything or exited early.`
+   `Chained from ws:lead-proceed - re-check spec coverage before invoking ws:lead-write-spec again; do not pause for approval when coverage can be created autonomously.`
 4. If the current or captured ticket category is `epic`, stop implementation routing; suggest `ws:lead-write-ticket` for a child ticket, `ws:lead-discuss` to promote an existing child, or `ws:lead-proceed` on a ready child ticket.
 5. If the current or captured ticket status is `todo/`, stop implementation routing and invoke `ws:lead-discuss` for `todo/` -> `ready/` promotion. Continue only after the target path is `ready/`.
 6. Build pipeline: `ws:lead-implement`.

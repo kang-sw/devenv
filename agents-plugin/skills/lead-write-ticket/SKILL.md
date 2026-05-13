@@ -15,7 +15,7 @@ Target: user request
 
 ## On: invoke
 
-0. Classify category/status; apply **judge: spec-gate** only when the operation creates or moves a non-`epic`, non-`research` ticket into `ready/`.
+0. Classify category/status; mark **judge: spec-gate** for any operation that creates or moves a non-`epic`, non-`research` ticket into `ready/`.
 1. If `user request` references an existing ticket, read it.
 2. **Create** (new ticket):
    a. Determine category from the topic.
@@ -24,7 +24,7 @@ Target: user request
    d. If category is `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria; reference existing/planned children and start a separate `ws:lead-write-ticket` invocation for any child creation or child edit.
    e. If category is not `epic` and multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
    f. After drafting, verify scope - see `judge: ticket-scope`.
-   g. If status is `ready/`: add an entry to the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` - one-line purpose and dependency notes ``.
+   g. If status is `ready/`: defer queue entry until after **Spec-stem check** passes.
 3. **Edit** (existing ticket):
    a. Read the ticket first.
    b. Apply the requested changes (update phase, move status).
@@ -36,11 +36,12 @@ Target: user request
    - Does the ticket distort or omit any discussed intent?
    - If the ticket is an epic, did detailed implementation material stay out of the epic and get routed to a separate child-ticket invocation?
    - Fix gaps in-place; present a brief summary of corrections (or confirm nothing was missed).
-6. **Spec-stem check** - skip `epic` and `research`:
+6. **Spec-stem check** - skip `epic` and `research`; apply **judge: spec-gate** before any `ready/` queue entry or commit:
    a. If status is `todo/`: preserve any existing `spec:` links as optional recovery hints; do not require stem discovery, do not fire `judge: missing-spec-entry`, and do not suppress the proceed prompt.
    b. If status is `ready/`: use `ws/specs.find` or `ws/specs.status` to confirm canonical stems.
    c. If status is `ready/`: ensure the ticket frontmatter `spec:` field lists every stem the phases implement. Add missing stems. If a phase implements behavior with no spec entry, see `judge: missing-spec-entry`.
    d. If status is `ready/`: remind that commits implementing this ticket should include a `## Spec` section with those stems.
+   e. If status is `ready/`: ensure an entry exists in the `## Ticket Queue` section in `ai-docs/_index.md`. Format: `` `stem` - one-line purpose and dependency notes ``.
 7. **Commit** - call `ws/git.commit(paths: ["<ticket-path>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed. If separate child invocations changed child tickets, those invocations own their own commits and outputs.
 8. **Proceed prompt** - if the ticket is `epic`, do not suggest proceeding on the epic path; suggest creating, promoting, or proceeding a child ticket instead. Otherwise suggest `ws:lead-proceed` as the next step after ticket authoring, unless `judge: missing-spec-entry` fired in step 6. Proceed routes to implementation readiness; `ws:lead-implement` resolves skeleton, plan, or direct execution needs.
 
@@ -54,7 +55,10 @@ Fires on any non-`epic`, non-`research` action that creates or moves a ticket in
 
 Identify the relevant spec file for the topic.
 Use `ws/specs.find` or `ws/specs.status` if a relevant spec file or stem is identifiable.
-If no relevant spec file exists, or no entry covers this behavior -> stop. Name the uncovered behavior; suggest `ws:lead-write-spec` before continuing.
+If no relevant spec file exists, or no entry covers this behavior -> invoke `ws:lead-write-spec` with:
+`Chained from ws:lead-write-ticket - create planned coverage for this ready ticket without asking; ticket frontmatter will be populated from the follow-up coverage check.`
+After `ws:lead-write-spec` returns, re-check coverage through `ws/specs.find` or `ws/specs.status`.
+Stop only when coverage is still missing after the attempt, `ws:lead-write-spec` failed, or the behavior is too underspecified to spec. Name the blocker.
 
 ### judge: initial-status
 
@@ -70,7 +74,7 @@ Applies only to non-epic actionable tickets. Prefer more phases over fewer insid
 
 ### judge: missing-spec-entry
 
-Fires when a phase implements caller-visible behavior with no entry in any spec file. Stop the authoring flow, tell the user which phase surfaces un-specced behavior, and suggest `ws:lead-write-spec` before continuing. Skipping this loses traceability for the new behavior and bypasses the canonical chain's spec-impact gate.
+Fires when a phase implements caller-visible behavior with no entry in any spec file after **judge: spec-gate** has invoked `ws:lead-write-spec` and re-checked coverage. Stop the authoring flow, tell the user which phase remains uncovered, and name the blocker. Skipping this loses traceability for the new behavior and bypasses the canonical chain's spec-impact gate.
 
 ## Doctrine
 

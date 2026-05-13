@@ -127,10 +127,12 @@ spec changes together.
 
 `lead-write-ticket` creates or updates tickets. It applies the spec gate when a
 non-`epic`, non-`research` ticket enters `ready/`, reads ticket conventions,
-updates queue entries for `ready/` work, preserves stable ticket stems, and
-commits ticket changes. Creating or promoting accepted backlog into `todo/`
-preserves intent without requiring immediate spec linkage; optional `todo/`
-`spec:` links are recovery hints and promotion candidates.
+invokes `lead-write-spec` when ready-ticket coverage is missing, re-checks
+coverage before finalizing the ticket, updates queue entries for `ready/` work,
+preserves stable ticket stems, and commits ticket changes. Creating or promoting
+accepted backlog into `todo/` preserves intent without requiring immediate spec
+linkage; optional `todo/` `spec:` links are recovery hints and promotion
+candidates.
 
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}
 

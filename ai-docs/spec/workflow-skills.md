@@ -84,17 +84,20 @@ Planning skills prepare caller-visible work before implementation.
 context, uses scoped subqueries when search is needed, can promote or move
 tickets when the discussion reaches an actionable state, and recommends an
 appropriate next workflow step. Discussion responses use the user's active
-conversation language.
+conversation language. When the user explicitly wants implementation to start,
+`lead-discuss` invokes `lead-proceed` instead of routing directly to
+`lead-implement`.
 
 For proposal, evaluation, design-direction, causal-claim, scope-assumption, or
 trade-off-heavy user messages, `lead-discuss` frames the reply around a visible
-premise-aware intent summary before giving advice. The frame decomposes the
-message into claims, goals, and constraints, names implicit premises with failure
-conditions, reframes the topic as a neutral decision problem, lists considered
-and dropped options, and ends with a stance. If a decision branch remains open
-after that frame, the skill interviews through the highest unresolved branch
-first, descends only after parent decisions settle, and returns to the nearest
-unresolved parent when the user delegates lower-level detail.
+premise-aware intent summary before giving advice. The frame uses symbolic
+bracket labels so the user's active conversation language carries the prose. It
+keeps bullet structure for the initial reading, then names implicit premises
+with failure conditions, reframes the topic as a neutral decision problem, lists
+considered and dropped options, and ends with a stance. If a decision branch
+remains open after that frame, the skill interviews through the highest
+unresolved branch first, descends only after parent decisions settle, and returns
+to the nearest unresolved parent when the user delegates lower-level detail.
 {#260510-discuss-intent-frame-interview}
 
 `lead-write-spec` writes or updates behavioral spec entries for caller-visible
@@ -106,7 +109,11 @@ index, and commits the spec update.
 accepted backlog and `ready/` as the spec-gated implementation queue. The spec
 gate runs only when a non-`epic`, non-`research` action creates or moves a ticket
 into `ready/`; `todo/` tickets may carry optional `spec:` links as recovery
-hints. Queue entries are maintained for `ready/` work only.
+hints. For `ready/` creation or promotion, missing coverage causes
+`lead-write-ticket` to invoke `lead-write-spec` autonomously, re-check coverage,
+and stop only when coverage remains missing, spec writing fails, or the behavior
+is too underspecified to spec. Queue entries are maintained for `ready/` work
+only.
 
 `lead-write-ticket` preserves epics as lightweight milestone boards. When
 detailed discussion, implementation phases, or slice-specific decisions arise
@@ -210,7 +217,8 @@ implementation targets; `lead-proceed` stops on epics and routes the user toward
 child ticket creation, child ready promotion, or proceeding a ready child ticket.
 Existing `todo/` ticket paths route through `lead-discuss` for `todo/` ->
 `ready/` promotion before implementation. Actionable inline targets go through
-`lead-write-ticket`; exploratory targets stop and suggest `lead-discuss`.
+`lead-write-ticket`, whose ready gate creates missing spec coverage through
+`lead-write-spec` when possible; exploratory targets stop and suggest `lead-discuss`.
 Implementation always routes through `lead-implement`. When a separate contract
 checkpoint may be needed before implementation, `lead-implement` decides whether
 to run `lead-write-skeleton` before edit/write-code.

@@ -19,7 +19,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 - Non-`epic`, non-`research` tickets entering `ready/` require `spec:` linkage; epics decompose scope and research captures findings.
 - Epic tickets are lightweight milestone boards and remain exempt from ready spec gating.
 - Promoting `idea/` → `todo/` is triage and does not require spec creation.
-- Promoting `todo/` → `ready/` for a non-`epic`, non-`research` ticket: route through `/discuss` → `/write-spec` to ensure planned entries and ticket `spec:` frontmatter exist before the move.
+- Promoting or creating a non-`epic`, non-`research` ticket in `ready/`: `/write-ticket` invokes `/write-spec` when needed, then verifies planned entries and ticket `spec:` frontmatter before the move or commit.
 - Dropping a ticket with linked spec entries: route through `/discuss` → `/write-spec` removes orphaned `🚧` entries before the move.
 
 ## Epic Tickets

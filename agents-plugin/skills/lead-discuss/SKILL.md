@@ -39,11 +39,12 @@ Call `ws/project_tree()` to load the current project map.
    Incorporate the returned reference list before responding.
 2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery(question: "<focused implementation-detail question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, for implementation details.
    For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
-3. Apply **judge: needs-intent-frame**. If it fires, emit an **Intent Frame** before advice.
-4. Apply **judge: needs-interview**. If it fires, enter **Interview Workflow** before proposing a settled direction.
-5. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-6. When discussion changes unimplemented ticket phases, update them in place with user agreement.
-7. Continue until the user signals done.
+3. If the user explicitly wants implementation to start, invoke `ws:lead-proceed` with the current target; do not route directly to `ws:lead-implement`.
+4. Apply **judge: needs-intent-frame**. If it fires, emit an **Intent Frame** before advice.
+5. Apply **judge: needs-interview**. If it fires, enter **Interview Workflow** before proposing a settled direction.
+6. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
+7. When discussion changes unimplemented ticket phases, update them in place with user agreement.
+8. Continue until the user signals done.
 
 ## On: Interview Workflow
 
@@ -76,19 +77,21 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 
 ## On: user signals done
 
-1. Always suggest `ws:lead-write-spec` as the next step - write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
-2. Then offer ticket persistence:
+1. If the user wants implementation to start, invoke `ws:lead-proceed` with the current target and exit this handler.
+2. For persistence without implementation, always suggest `ws:lead-write-spec` as the next step - write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
+3. Then offer ticket persistence:
    - **New ticket** - invoke `ws:lead-write-ticket`.
    - **Ticket update** - invoke `ws:lead-write-ticket`, then append design notes to an existing ticket phase.
-3. Apply **judge: needs-integration-tests** to ticket writes.
-4. Write only what the user approves. No artifact needed for exploratory discussions.
+4. Apply **judge: needs-integration-tests** to ticket writes.
+5. Write only what the user approves. No artifact needed for exploratory discussions.
 
 ## Workflow Context
 
 Discussion outputs feed downstream skills:
 - Approach direction -> `ws:lead-write-spec` (always next; its judge handles no-op)
 - Scope, phases, acceptance criteria -> `ws:lead-write-ticket`
-- Type shapes, module boundaries, public API -> implementation notes for `ws:lead-implement`
+- Implementation intent -> `ws:lead-proceed`, which routes to `ws:lead-implement`
+- Type shapes, module boundaries, public API -> implementation notes consumed through `ws:lead-proceed`
 
 Canonical chain: `ws:lead-discuss` -> `ws:lead-write-spec` -> `ws:lead-write-ticket` -> `ws:lead-proceed` -> `ws:lead-implement`.
 Frame conclusions as directives the downstream consumer can execute.
@@ -120,23 +123,23 @@ Include integration-test criteria in a ticket phase when the change has end-to-e
 ### Intent Frame
 
 ```text
-I read this as:
+[reading]
 - <claims, goals, constraints>
 
-Premise check:
-- <implicit premise> - fails if <condition>
+[check]
+<implicit premise and failure condition>
 
-Objectified:
-- <neutral decision problem>
+[problem]
+<neutral decision problem>
 
-Considered:
-- <viable interpretations or options>
+[options]
+<viable interpretations or options>
 
-Dropped:
-- <rejected interpretations or options and why>
+[excluded]
+<rejected interpretations or options and why>
 
-Stance:
-- <agree | disagree | ambiguous | recommend X>
+[stance]
+<agree | disagree | ambiguous | recommend X>
 ```
 
 ## Doctrine
