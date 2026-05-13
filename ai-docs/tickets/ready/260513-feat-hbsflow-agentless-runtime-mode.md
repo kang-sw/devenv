@@ -4,6 +4,9 @@ parent: 260513-epic-hbsflow-agentless-plugin
 related:
   260513-feat-hbsflow-agentless-plugin-scaffold: provides the shared runtime mode required before packaging hbsflow
   260429-research-host-neutral-ws-plugin: host-neutral plugin architecture anchor
+spec:
+  - 260513-hbsflow-agentless-runtime-mode
+  - 260513-hbsflow-runtime-contract-mode
 related-mental-model:
   - plugin-runtime
   - mcp-runtime

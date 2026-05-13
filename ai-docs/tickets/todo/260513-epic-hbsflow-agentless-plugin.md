@@ -46,10 +46,10 @@ guidance, and ordinary runtime output should speak in hbsflow terms.
 
 ## Child Tickets
 
-- `260513-feat-hbsflow-agentless-runtime-mode` - shared runtime slice for
+- `260513-feat-hbsflow-agentless-runtime-mode` - ready shared runtime slice for
   `WS_MCP_NO_AGENT`, namespace text, setup alias behavior, and default full ws
   regression coverage.
-- `260513-feat-hbsflow-agentless-plugin-scaffold` - package scaffold and
+- `260513-feat-hbsflow-agentless-plugin-scaffold` - ready package scaffold and
   derivative distribution slice after the runtime mode is available.
 - Planned: installer, marketplace, and release verification slice after the
   scaffold establishes the hbsflow package and runtime contract.

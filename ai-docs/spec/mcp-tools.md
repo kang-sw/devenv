@@ -194,6 +194,26 @@ the named-agent result/status/tail/cancel surfaces.
 files, so workflow agents can exchange file paths without inventing cache
 locations.
 
+## 🚧 hbsflow Agentless Runtime Mode {#260513-hbsflow-agentless-runtime-mode}
+
+The MCP server will support an environment-selected agentless product mode for
+the internal `hbsflow` distribution. With `WS_MCP_NO_AGENT=1`, advertised tools
+omit named-agent, subquery, model-alias configuration, and agent-backed API
+documentation surfaces: `agents.*`, `subquery`, `config.agents_tier`,
+`api.ask`, `api.ask_async`, `api.status`, `api.result`, and `api.cancel`.
+`api.list` remains available as read-only cache discovery.
+
+Explicit calls to hidden agent-backed tools fail with a clear disabled error and
+do not start named-agent workers. Runtime capability output and CLI command
+surfaces match the selected mode, so no-agent mode omits the hidden MCP tools
+and matching CLI groups such as `agents`, `subquery`, and
+`config agents-tier`.
+
+`WS_MCP_NAMESPACE=hbsflow` changes ordinary user-facing namespace text to
+`hbsflow` without renaming generic MCP tool names. `WS_MCP_SETUP_TOOL=setup`
+advertises `setup` instead of `ws.setup`; `ws.setup` may remain available only
+as hidden compatibility dispatch.
+
 ## Named-Agent MCP Tools {#260505-named-agent-mcp-tools}
 
 The `agents.*` tool family exposes durable named-agent orchestration.

@@ -4,6 +4,10 @@ parent: 260513-epic-hbsflow-agentless-plugin
 related:
   260513-feat-hbsflow-agentless-runtime-mode: prerequisite shared runtime mode
   260429-research-host-neutral-ws-plugin: host-neutral plugin architecture anchor
+spec:
+  - 260513-hbsflow-agentless-plugin-package
+  - 260513-hbsflow-agentless-skill-surface
+  - 260513-hbsflow-claude-compatible-package
 related-mental-model:
   - plugin-runtime
   - mcp-runtime
@@ -206,9 +210,12 @@ Acceptance criteria:
 ### Phase 4: Documentation and drift guard
 
 Record the hbsflow derivative-maintenance rule in the existing specs and project
-memory without creating a parallel spec set. Add authoring and verification
-guards so future full `agents-plugin/` skill edits evaluate hbsflow drift
-automatically during normal workflow hygiene.
+memory without creating a parallel spec set. The repository already has
+`ai-docs/ref/hbsflow-mirroring.md` and an index reminder to read it before
+hbsflow-relevant full ws edits; this phase keeps those rules current and adds
+the remaining automated verification guards so future full `agents-plugin/`
+skill edits evaluate hbsflow drift automatically during normal workflow
+hygiene.
 
 Suggested approach:
 
@@ -218,16 +225,14 @@ Suggested approach:
   when copied, packaged, or caller-visible surfaces change.
 - Update project memory to list `agents-plugin-hbsflow/` as an active derivative
   distribution after the package exists.
-- Create `ai-docs/ref/hbsflow-mirroring.md` with an hbsflow mirror checklist.
+- Keep `ai-docs/ref/hbsflow-mirroring.md` and the `ai-docs/_index.md`
+  read-before-editing reminder aligned with the final shipped hbsflow package.
   Editing a full `agents-plugin/skills/lead-*` skill that is included in the
   shipped hbsflow skill set must either update the corresponding
   `agents-plugin-hbsflow/skills/lead-*` skill in the same logical change or
   record an explicit follow-up ticket explaining why it cannot be mirrored.
   Editing a full skill excluded from hbsflow must still check whether hbsflow
   docs, workflow manual, or exclusion rationale drifted.
-- Update `ai-docs/_index.md` so future sessions read
-  `ai-docs/ref/hbsflow-mirroring.md` before full ws skill or plugin-surface
-  edits that may affect hbsflow.
 - Keep `lead-skill-authoring` self-contained. Do not make it read
   repository-local reference files at invocation; that would break downstream
   plugin use. Mirror policy belongs in repository authoring guidance,
@@ -253,7 +258,8 @@ Acceptance criteria:
 - Existing specs describe hbsflow as an internal derivative distribution.
 - Future full ws changes have a documented rule to evaluate hbsflow drift.
 - No separate hbsflow spec corpus is introduced.
-- `ai-docs/ref/hbsflow-mirroring.md` tells future skill edits how to update or
+- `ai-docs/ref/hbsflow-mirroring.md` remains accurate for the final shipped
+  hbsflow skill inventory and tells future skill edits how to update or
   explicitly defer hbsflow mirrors.
 - `lead-skill-authoring` remains self-contained and does not depend on
   `ai-docs/ref/skill-authoring.md` at invocation.

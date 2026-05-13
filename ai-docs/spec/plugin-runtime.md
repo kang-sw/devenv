@@ -48,6 +48,33 @@ The launcher and release checks use this metadata as the caller-visible
 compatibility contract. A runtime is considered stale when it cannot satisfy the
 declared version range, tool list, command list, or prompt bundle hash.
 
+## 🚧 hbsflow Runtime Contract Mode {#260513-hbsflow-runtime-contract-mode}
+
+The shared runtime contract will support validating a reduced hbsflow surface.
+When hbsflow starts the shared launcher with `WS_MCP_NO_AGENT=1`,
+`WS_MCP_NAMESPACE=hbsflow`, and `WS_MCP_SETUP_TOOL=setup`, runtime capability
+checks compare against the agentless tool and command list rather than the full
+ws contract.
+
+Unset environment variables preserve the full ws contract. hbsflow contract
+validation does not treat tool profiles as product modes; profile filters remain
+containment and test surfaces only.
+
+## 🚧 hbsflow Agentless Plugin Package {#260513-hbsflow-agentless-plugin-package}
+
+The repository will ship `agents-plugin-hbsflow/` as a curated internal
+derivative plugin package named `hbsflow`. Its Codex and Claude manifests expose
+the hbsflow name, its MCP configuration registers the server under the `hbsflow`
+key, and its package-local runtime contract requires the hbsflow agentless
+surface.
+
+The package reuses the shared `ws-mcp` binary and launcher. Distributed
+hbsflow package text presents hbsflow naming to users and does not describe the
+package as a ws-lite or ws-compatible mode. Repository maintenance documents,
+tests, compatibility comments, and hidden implementation details may still name
+the shared ws implementation surface when that is the precise behavior under
+test.
+
 ## Runtime Launcher Repair And Project-Root Detection {#260505-runtime-launcher-repair-project-root}
 
 The plugin launcher resolves the current operating system and architecture,

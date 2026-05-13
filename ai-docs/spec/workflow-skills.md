@@ -76,6 +76,26 @@ selection and concrete provider names such as `gpt-5.5` or
 remains documented only as deprecated compatibility input.
 {#260508-workflow-model-alias-guidance}
 
+## 🚧 hbsflow Agentless Skill Surface {#260513-hbsflow-agentless-skill-surface}
+
+The hbsflow distribution will ship a curated subset of lead workflow skills
+under `hbsflow:lead-*` invocation names and `hbsflow/<tool>` MCP notation.
+Shipped hbsflow skills include planning, documentation, direct implementation,
+bootstrap, release, session handoff, verification, and reconstruction workflows:
+`lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
+`lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
+`lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
+`lead-ship`, `lead-verify-discussion`, `lead-forge-spec`, and
+`lead-forge-mental-model`.
+
+The hbsflow package excludes persistent multi-turn orchestration and upstream
+authoring helper skills: `lead-write-code`, `lead-write-skeleton`,
+`lead-sprint`, `lead-salvage`, and `lead-skill-authoring`. hbsflow skill text
+does not instruct callers to use ws named-agent or subquery tools. Where broad
+investigation, verification, audit, or review is useful, hbsflow guidance uses
+host-native one-shot subagents when available, with the lead retaining
+ownership of edits, docs, tickets, specs, mental-model updates, and commits.
+
 ## Planning Workflow Skills {#260505-planning-workflow-skills}
 
 Planning skills prepare caller-visible work before implementation.

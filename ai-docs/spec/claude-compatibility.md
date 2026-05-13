@@ -35,6 +35,14 @@ Claude-compatible plugin behavior uses `agents-plugin/.claude-plugin/plugin.json
 and the shared `agents-plugin/` package. Historical material is preserved only
 under `ai-docs/ref/` or git history.
 
+## 🚧 hbsflow Claude-Compatible Package {#260513-hbsflow-claude-compatible-package}
+
+The hbsflow derivative package will carry its own package-local
+`.claude-plugin/plugin.json` metadata and use the same shared launcher pattern
+as the active ws plugin package. Claude compatibility for hbsflow must not
+reintroduce a live `claude-plugin/` source tree or fork workflow behavior away
+from the hbsflow Codex manifest and runtime contract.
+
 ## Downstream Claude Bootstrap Shim {#260505-downstream-claude-bootstrap-shim}
 
 The Codex bootstrap flow creates or upgrades downstream projects with
