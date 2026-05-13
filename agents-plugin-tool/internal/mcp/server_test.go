@@ -835,6 +835,7 @@ func initGit(t *testing.T, root string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init failed: %v\n%s", err, string(out))
 	}
+	runGit(t, root, "config", "core.autocrlf", "false")
 }
 
 func initTicketRepo(t *testing.T, stem string) string {
