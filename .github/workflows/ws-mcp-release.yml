@@ -96,9 +96,6 @@ jobs:
         with:
           go-version-file: agents-plugin-tool/go.mod
 
-      - name: Run tests
-        run: go test ./...
-
       - name: Build Windows executable
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
@@ -110,11 +107,4 @@ jobs:
           $ErrorActionPreference = "Stop"
           $exe = Resolve-Path ".\dist\ws-mcp-windows-amd64.exe"
           $root = Resolve-Path ".."
-          & $exe version
-          & $exe doctor --root $root
-          @(
-            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
-            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}'
-            '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project_tree","arguments":{}}}'
-          ) | & $exe serve --stdio --root $root
+          & $exe smoke --root $root

@@ -275,8 +275,8 @@ profile.
 The `ws-mcp` binary mirrors selected MCP behavior as CLI commands for smoke
 tests, compatibility probes, and fallback usage.
 
-CLI mirrors exist for runtime info, config, path generation, subquery, named
-agents, Git, tickets, specs, selected mental-model discovery, and reference
-tracing. Not every MCP tool has a CLI mirror; the MCP surface is the canonical
-host-neutral interface, and CLI coverage is limited to the surfaces needed for
-runtime checks and workflow fallback use.
+CLI mirrors exist for runtime info, single-process smoke checks, config, path
+generation, subquery, named agents, Git, tickets, specs, selected mental-model
+discovery, and reference tracing. Not every MCP tool has a CLI mirror; the MCP
+surface is the canonical host-neutral interface, and CLI coverage is limited to
+the surfaces needed for runtime checks and workflow fallback use.

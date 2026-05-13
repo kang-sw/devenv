@@ -1443,11 +1443,14 @@ accepts that trigger when the workflow file exists on the default branch. The
 workflow currently uses official GitHub actions `actions/checkout@v5`,
 `actions/setup-go@v6`, and `actions/upload-artifact@v7`.
 
-Windows host verification remains separate from Go cross-compilation. Parallels
-can verify that `python3 ./bin/ws-mcp-launcher.py version`, `runtime info`, and
-stdio MCP smoke tests work from the installed plugin cache. If `python3` resolves
-to the Windows Store alias instead of an installed interpreter, install Python 3
-and refresh the plugin so Codex rematerializes the plugin-managed MCP entry.
+Windows host verification remains separate from Go cross-compilation. The
+release workflow builds a native Windows `ws-mcp` executable and runs one
+`smoke --root <repo>` process, which performs version, doctor, runtime info, and
+stdio MCP checks internally. Parallels can still verify plugin-managed startup
+from the installed plugin cache with `python3 ./bin/ws-mcp-launcher.py version`.
+If `python3` resolves to the Windows Store alias instead of an installed
+interpreter, install Python 3 and refresh the plugin so Codex rematerializes the
+plugin-managed MCP entry.
 
 ## Development Verification
 

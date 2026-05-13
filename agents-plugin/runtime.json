@@ -84,6 +84,7 @@
   "commands": {
     "runtime.info": ">=0.23.5-dev <0.24.0",
     "runtime.capabilities": ">=0.23.5-dev <0.24.0",
+    "smoke": ">=0.23.5-dev <0.24.0",
     "config.show": ">=0.23.5-dev <0.24.0",
     "config.agents-tier": ">=0.23.5-dev <0.24.0",
     "subquery": ">=0.23.5-dev <0.24.0",

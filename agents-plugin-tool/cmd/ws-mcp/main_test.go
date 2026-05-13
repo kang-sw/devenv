@@ -89,6 +89,30 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	}
 }
 
+func TestSmokeCommandRunsExecutableChecksInOneProcess(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "smoke", "--root", root)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp smoke failed: %v\n%s", err, string(out))
+	}
+	text := string(out)
+	for _, want := range []string{"version:", "ok repo root:", "ok stdio smoke:"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("smoke output missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestGitCLICommandsReturnJSON(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")

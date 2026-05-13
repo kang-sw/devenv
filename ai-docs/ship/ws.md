@@ -136,8 +136,8 @@ Expected GitHub Actions behavior:
    - MCP server `ws` starts from plugin-managed `.mcp.json`
    - `runtime.info` reports the shipped version and matching prompt bundle hash
    - `project_tree` returns `ai-docs/` as its first non-empty line
-5. Optional local dogfood: if a Windows host is available, run the same commands
-   as `.github/workflows/ws-mcp-release.yml`'s Windows smoke job before relying on
-   the GitHub Actions result.
+5. Optional local dogfood: if a Windows host is available, build the Windows
+   executable and run `ws-mcp-windows-amd64.exe smoke --root <repo>` before
+   relying on the GitHub Actions result.
 6. Keep the Claude package untouched unless a separate Claude compatibility ship
    is requested.

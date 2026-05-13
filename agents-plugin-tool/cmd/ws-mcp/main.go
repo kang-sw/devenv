@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -37,6 +38,8 @@ func main() {
 		runtime(os.Args[2:])
 	case "serve":
 		serve(os.Args[2:])
+	case "smoke":
+		smoke(os.Args[2:])
 	case "subquery":
 		subquery(os.Args[2:])
 	case "config":
@@ -62,7 +65,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|subquery|config|path|agents|git|tickets|specs|mental-models|references>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|subquery|config|path|agents|git|tickets|specs|mental-models|references>")
 }
 
 func doctor(args []string) {
@@ -95,6 +98,49 @@ func serve(args []string) {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func smoke(args []string) {
+	fs := flag.NewFlagSet("smoke", flag.ExitOnError)
+	root := fs.String("root", ".", "repository root")
+	_ = fs.Parse(args)
+
+	if err := runSmoke(defaultRoot(*root), os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "ws-mcp smoke: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runSmoke(root string, out io.Writer) error {
+	fmt.Fprintf(out, "version: %s\n", version)
+
+	report := wsdoc.Doctor(root)
+	for _, line := range report.Lines {
+		fmt.Fprintln(out, line)
+	}
+	if !report.OK {
+		return fmt.Errorf("doctor failed")
+	}
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project_tree","arguments":{}}}`,
+	}, "\n") + "\n"
+	var responses bytes.Buffer
+	server := mcp.NewServer(root, version, sourceCommit)
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &responses); err != nil {
+		return fmt.Errorf("stdio smoke failed: %w", err)
+	}
+	text := responses.String()
+	for _, want := range []string{"runtime.info", "project_tree", "prompt_bundle", "ai-docs/"} {
+		if !strings.Contains(text, want) {
+			return fmt.Errorf("stdio smoke response missing %q", want)
+		}
+	}
+	fmt.Fprintf(out, "ok stdio smoke: %d bytes\n", responses.Len())
+	return nil
 }
 
 func runtime(args []string) {
@@ -195,6 +241,7 @@ func runtimeCapabilityCommandNames() []string {
 		"references.trace",
 		"runtime.capabilities",
 		"runtime.info",
+		"smoke",
 		"specs.find",
 		"specs.list",
 		"specs.status",

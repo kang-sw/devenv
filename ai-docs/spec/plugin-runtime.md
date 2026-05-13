@@ -86,6 +86,8 @@ runtime version and source commit into each binary.
 The release artifact set includes `SHA256SUMS`. The release workflow verifies
 release asset construction and includes Windows executable smoke coverage so
 published runtime assets can be consumed by plugin installations.
+Windows executable smoke uses a single `ws-mcp smoke --root <repo>` process that
+performs version, doctor, runtime metadata, and stdio MCP checks internally.
 
 ## Runtime Version Bump Helper {#260505-runtime-version-bump-helper}
 
@@ -109,6 +111,7 @@ version
 doctor
 runtime
 serve
+smoke
 subquery
 config
 path
