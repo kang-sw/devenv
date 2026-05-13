@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.26.0 - 2026-05-13
+
+### Added
+- Add the `lead-review` workflow skill for config-first PR/MR review routing
+  in both ws and wsflow.
+- Add the `lead-is-finished-yet` checkpoint skill for separating blocking
+  design questions from autonomous hygiene before proceeding.
+- Add wsflow marketplace packaging, sprint support, and the curated wsflow skill
+  bundle for the agentless derivative plugin.
+
+### Changed
+- Let `lead-proceed` refresh warm related tickets from active conversation
+  context before implementation routing.
+- Support append-only ticket Result editions through `#### Edition` entries and
+  include Edition headings in `git.commit` ticket update detection.
+- Reset wsflow bootstrap template lineage to a package-local v0001 baseline and
+  normalize wsflow subagent wording.
+- Remove the unused `lead-exit-session` workflow skill from ws and wsflow.
+- Keep `install.sh` from installing or enabling wsflow in Claude while leaving
+  wsflow available through Codex marketplace registration.
+
+### Fixed
+- Keep wsflow version metadata aligned with ws release bumps.
+
 ## v0.25.2 - 2026-05-13
 
 ### Fixed

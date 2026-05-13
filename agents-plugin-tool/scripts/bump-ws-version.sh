@@ -72,6 +72,9 @@ def update_runtime(data) -> None:
 update_json("agents-plugin/.codex-plugin/plugin.json", update_plugin_manifest)
 update_json("agents-plugin/.claude-plugin/plugin.json", update_plugin_manifest)
 update_json("agents-plugin/runtime.json", update_runtime)
+update_json("agents-plugin-wsflow/.codex-plugin/plugin.json", update_plugin_manifest)
+update_json("agents-plugin-wsflow/.claude-plugin/plugin.json", update_plugin_manifest)
+update_json("agents-plugin-wsflow/runtime.json", update_runtime)
 
 launcher = read_text("agents-plugin/bin/ws-mcp-launcher")
 launcher = re.sub(
@@ -106,6 +109,7 @@ write_text(".github/workflows/ws-mcp-release.yml", workflow)
 
 project_index = read_text("ai-docs/_index.md")
 project_index = re.sub(r"agents-plugin/` \(`ws@[0-9]+\.[0-9]+\.[0-9]+`\)", f"agents-plugin/` (`ws@{version}`)", project_index)
+project_index = re.sub(r"agents-plugin-wsflow/` \(`wsflow@[0-9]+\.[0-9]+\.[0-9]+`\)", f"agents-plugin-wsflow/` (`wsflow@{version}`)", project_index)
 project_index = re.sub(r"create `v[0-9]+\.[0-9]+\.[0-9]+`", f"create `{release_tag}`", project_index)
 write_text("ai-docs/_index.md", project_index)
 
