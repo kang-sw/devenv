@@ -201,7 +201,9 @@ Acceptance criteria:
 ### Phase 4: Documentation and drift guard
 
 Record the hbsflow derivative-maintenance rule in the existing specs and project
-memory without creating a parallel spec set.
+memory without creating a parallel spec set. Add authoring and verification
+guards so future full `agents-plugin/` skill edits evaluate hbsflow drift
+automatically during normal workflow hygiene.
 
 Suggested approach:
 
@@ -211,9 +213,37 @@ Suggested approach:
   when copied, packaged, or caller-visible surfaces change.
 - Update project memory to list `agents-plugin-hbsflow/` as an active derivative
   distribution after the package exists.
+- Update `ai-docs/ref/skill-authoring.md` with an hbsflow mirror checklist.
+  Editing a full `agents-plugin/skills/lead-*` skill that is included in the
+  shipped hbsflow skill set must either update the corresponding
+  `agents-plugin-hbsflow/skills/lead-*` skill in the same logical change or
+  record an explicit follow-up ticket explaining why it cannot be mirrored.
+  Editing a full skill excluded from hbsflow must still check whether hbsflow
+  docs, workflow manual, or exclusion rationale drifted.
+- Add a static hbsflow skill-bundle verification command and wire it into the
+  relevant local or release verification path. The check should fail when
+  distributed hbsflow skills contain forbidden full-ws references such as
+  `ws/`, `ws:`, `ws.`, `subquery`, `agents.register`, `agents.call`,
+  `agents.result`, `mental-model-updater`, `lead-write-code`,
+  `lead-write-skeleton`, `lead-sprint`, or `lead-salvage`, except for explicit
+  internal-maintenance allowlist paths.
+- Add a drift inventory check for the shipped hbsflow skill set. The check
+  should report included full skills that have no hbsflow counterpart, hbsflow
+  skills that are not in the shipped allowlist, and excluded full skills that
+  accidentally appear in `agents-plugin-hbsflow/skills/`.
+- Document that hbsflow is not a generated mirror. It is a curated derivative:
+  automatic checks should force review and drift detection, while semantic
+  rewrites remain lead-owned.
 
 Acceptance criteria:
 
 - Existing specs describe hbsflow as an internal derivative distribution.
 - Future full ws changes have a documented rule to evaluate hbsflow drift.
 - No separate hbsflow spec corpus is introduced.
+- `ai-docs/ref/skill-authoring.md` tells future skill edits how to update or
+  explicitly defer hbsflow mirrors.
+- A static verification path checks the hbsflow distributed skill set for
+  forbidden full-ws references and shipped-skill inventory drift.
+- The verification path distinguishes curated semantic rewrites from mechanical
+  mirroring; it should not require hbsflow skills to be text-identical to full
+  ws skills.
