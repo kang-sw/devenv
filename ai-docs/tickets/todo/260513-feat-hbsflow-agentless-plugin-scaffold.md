@@ -57,16 +57,22 @@ constraints in the existing specs.
   such as `hbsflow/convention.read`, `hbsflow/infra.read`,
   `hbsflow/project_tree`, `hbsflow/specs.*`, `hbsflow/tickets.*`,
   `hbsflow/mental_models.*`, and `hbsflow/git.*`.
-- Include `lead-ship` in the first hbsflow skill set for workflow
+- Include `lead-ship` in the shipped hbsflow skill set for workflow
   centralization and documentation completeness.
-- Exclude persistent multi-turn orchestration skills from the first hbsflow
+- Include forge workflows in the shipped hbsflow skill set because legacy
+  project bootstrap depends on spec and mental-model reconstruction. Rewrite
+  their survey and validation steps around self-contained native subagents or
+  direct exploration instead of hbsflow-managed agent sessions.
+- Exclude persistent multi-turn orchestration skills from the shipped hbsflow
   skill set: `lead-write-code`, `lead-write-skeleton`, `lead-sprint`,
-  `lead-forge-spec`, `lead-forge-mental-model`, and `lead-salvage`.
-- Keep direct and documentation workflow skills in the first hbsflow skill set:
+  and `lead-salvage`.
+- Keep direct, documentation, bootstrap, and reconstruction workflows in the
+  shipped hbsflow skill set:
   `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
   `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
   `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
-  `lead-skill-authoring`, `lead-ship`, and `lead-verify-discussion`.
+  `lead-skill-authoring`, `lead-ship`, `lead-verify-discussion`,
+  `lead-forge-spec`, and `lead-forge-mental-model`.
 
 ## Constraints
 
@@ -161,19 +167,26 @@ Suggested approach:
   lead-only risk review with rationale for low-risk changes.
 - Keep `lead-ship` in the hbsflow package, but use hbsflow naming and package
   configuration once hbsflow ship configuration exists.
+- Rewrite `lead-forge-spec` and `lead-forge-mental-model` so survey fan-out,
+  verification, and ticket-association checks use self-contained native
+  subagents or direct exploration. The lead still owns conventions, anchor
+  generation, document authorship, final judgment, and commits.
 - Keep detailed implementation decisions in child tickets and specs rather than
   creating a separate hbsflow doctrine.
 
 Acceptance criteria:
 
-- The first hbsflow skill set includes only:
+- The shipped hbsflow skill set includes only:
   `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
   `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
   `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
-  `lead-skill-authoring`, `lead-ship`, and `lead-verify-discussion`.
-- The first hbsflow skill set excludes `lead-write-code`,
-  `lead-write-skeleton`, `lead-sprint`, `lead-forge-spec`,
-  `lead-forge-mental-model`, and `lead-salvage`.
+  `lead-skill-authoring`, `lead-ship`, `lead-verify-discussion`,
+  `lead-forge-spec`, and `lead-forge-mental-model`.
+- The shipped hbsflow skill set excludes `lead-write-code`,
+  `lead-write-skeleton`, `lead-sprint`, and `lead-salvage`.
+- hbsflow forge workflows use native self-contained survey or audit workers only
+  for read-only investigation. They do not refer to hbsflow-managed subquery
+  keys, persistent agents, or result collection through `agents.*`.
 - hbsflow skills do not mention ws named-agent or subquery MCP calls.
 - hbsflow workflow manual documents the hbsflow MCP notation and the absence of
   hbsflow-managed named-agent primitives.
