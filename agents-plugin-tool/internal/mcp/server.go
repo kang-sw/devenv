@@ -292,6 +292,21 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	case "runtime.debug_events":
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
+	case "ws.setup":
+		if root, _ := params.Arguments["root"].(string); strings.TrimSpace(root) != "" {
+			canonical, err := canonicalGitRoot(root)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			s.rootMu.Lock()
+			s.sessionRoot = canonical
+			s.rootMu.Unlock()
+		}
+		state := s.setupState("ws.setup")
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, state, nil)
+		}
+		return toolTextResponse(req.ID, formatSetupState(state), nil)
 	case "session.set_default_root":
 		root, _ := params.Arguments["root"].(string)
 		canonical, err := canonicalGitRoot(root)
@@ -301,26 +316,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		s.rootMu.Lock()
 		s.sessionRoot = canonical
 		s.rootMu.Unlock()
-		return toolJSONResponse(req.ID, map[string]any{
-			"session_default_root": canonical,
-			"source":               "session",
-		}, nil)
+		return toolJSONResponse(req.ID, s.setupState("session.compat"), nil)
 	case "session.get_default_root":
-		s.rootMu.RLock()
-		sessionRoot := s.sessionRoot
-		sessionHarness := s.sessionHarness
-		s.rootMu.RUnlock()
-		result := map[string]any{
-			"session_default_root": sessionRoot,
-			"has_session_default":  sessionRoot != "",
-			"session_harness":      sessionHarness,
-			"env_project_root":     strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")),
-			"server_root":          s.root,
-		}
+		result := s.setupState("session.compat")
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, nil)
 		}
-		return toolTextResponse(req.ID, formatSessionRoot(result), nil)
+		return toolTextResponse(req.ID, formatSetupState(result), nil)
 	case "api.list":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -931,10 +933,27 @@ func stringAnySlice(value any) []string {
 	return out
 }
 
-func formatSessionRoot(values map[string]any) string {
+func (s *Server) setupState(source string) map[string]any {
+	s.rootMu.RLock()
+	sessionRoot := s.sessionRoot
+	sessionHarness := s.sessionHarness
+	s.rootMu.RUnlock()
+	return map[string]any{
+		"root":                 sessionRoot,
+		"has_root":             sessionRoot != "",
+		"session_default_root": sessionRoot,
+		"has_session_default":  sessionRoot != "",
+		"session_harness":      sessionHarness,
+		"env_project_root":     strings.TrimSpace(os.Getenv("WS_MCP_PROJECT_ROOT")),
+		"server_root":          s.root,
+		"source":               source,
+	}
+}
+
+func formatSetupState(values map[string]any) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "session_default_root: %s\n", displayString(values["session_default_root"]))
-	fmt.Fprintf(&b, "has_session_default: %t\n", boolValue(values["has_session_default"]))
+	fmt.Fprintf(&b, "root: %s\n", displayString(values["root"]))
+	fmt.Fprintf(&b, "has_root: %t\n", boolValue(values["has_root"]))
 	fmt.Fprintf(&b, "session_harness: %s\n", displayString(values["session_harness"]))
 	fmt.Fprintf(&b, "server_root: %s\n", displayString(values["server_root"]))
 	fmt.Fprintf(&b, "env_project_root: %s\n", displayString(values["env_project_root"]))
@@ -1277,14 +1296,14 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 		return canonicalGitRoot(workspaces[0])
 	}
 	if len(workspaces) > 1 {
-		return "", fmt.Errorf("multiple host workspaces are available; pass root explicitly or call session.set_default_root before using root-omitted ws tools")
+		return "", fmt.Errorf("multiple host workspaces are available; pass root explicitly or call ws.setup with root set to the current directory before using root-omitted ws tools")
 	}
 
 	serverRoot := strings.TrimSpace(s.root)
 	if serverRoot != "" && serverRoot != "." {
 		root, err := canonicalGitRoot(serverRoot)
 		if err != nil {
-			return "", fmt.Errorf("could not resolve the MCP server root; pass root explicitly or call session.set_default_root: %w", err)
+			return "", fmt.Errorf("could not resolve the MCP server root; pass root explicitly or call ws.setup with root set to the current directory: %w", err)
 		}
 		return root, nil
 	}
@@ -1295,7 +1314,7 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 
 	root, err := canonicalGitRoot(s.root)
 	if err != nil {
-		return "", fmt.Errorf("could not resolve a repository root from the MCP session; pass root explicitly or call session.set_default_root: %w", err)
+		return "", fmt.Errorf("could not resolve a repository root from the MCP session; pass root explicitly or call ws.setup with root set to the current directory: %w", err)
 	}
 	return root, nil
 }
@@ -1461,22 +1480,12 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "session.set_default_root",
-			"description": "Set the volatile repository root default for this MCP server process.",
+			"name":        "ws.setup",
+			"description": "Configure volatile ws MCP session state such as the repository root for this server process.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Git worktree root to use when later ws MCP tool calls omit root."),
-				},
-				"required": []string{"root"},
-			},
-		},
-		{
-			"name":        "session.get_default_root",
-			"description": "Report the volatile repository root default and root fallback state for this MCP server process.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+					"root":   stringProperty("Git worktree root to store for later root-omitted ws MCP tool calls."),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
@@ -2052,10 +2061,41 @@ func (s *Server) filteredTools() []map[string]any {
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
 		if s.toolAllowed(name) {
-			filtered = append(filtered, tool)
+			filtered = append(filtered, publicToolDefinition(tool))
 		}
 	}
 	return filtered
+}
+
+func publicToolDefinition(tool map[string]any) map[string]any {
+	name, _ := tool["name"].(string)
+	if !strings.HasPrefix(name, "agents.") {
+		return tool
+	}
+	clone := make(map[string]any, len(tool))
+	for key, value := range tool {
+		clone[key] = value
+	}
+	schema, ok := tool["inputSchema"].(map[string]any)
+	if !ok {
+		return clone
+	}
+	schemaClone := make(map[string]any, len(schema))
+	for key, value := range schema {
+		schemaClone[key] = value
+	}
+	if properties, ok := schema["properties"].(map[string]any); ok {
+		propertiesClone := make(map[string]any, len(properties))
+		for key, value := range properties {
+			if key == "root" {
+				continue
+			}
+			propertiesClone[key] = value
+		}
+		schemaClone["properties"] = propertiesClone
+	}
+	clone["inputSchema"] = schemaClone
+	return clone
 }
 
 func (s *Server) toolAllowed(name string) bool {

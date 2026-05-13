@@ -84,6 +84,12 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "runtime.info") {
 		t.Fatalf("tools/list missing runtime.info: %s", byID["2"])
 	}
+	if !strings.Contains(byID["2"], "ws.setup") {
+		t.Fatalf("tools/list missing ws.setup: %s", byID["2"])
+	}
+	if strings.Contains(byID["2"], "session.set_default_root") || strings.Contains(byID["2"], "session.get_default_root") {
+		t.Fatalf("tools/list still advertises session root compatibility tools: %s", byID["2"])
+	}
 	if !strings.Contains(byID["2"], "config.agents_tier") {
 		t.Fatalf("tools/list missing config.agents_tier: %s", byID["2"])
 	}
@@ -92,6 +98,20 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 	if !strings.Contains(byID["2"], "\"prompts\"") {
 		t.Fatalf("tools/list missing prompts field: %s", byID["2"])
+	}
+	toolsResult, _ := listResp["result"].(map[string]any)
+	listedTools, _ := toolsResult["tools"].([]any)
+	for _, rawTool := range listedTools {
+		tool, _ := rawTool.(map[string]any)
+		name, _ := tool["name"].(string)
+		if !strings.HasPrefix(name, "agents.") {
+			continue
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		if _, ok := properties["root"]; ok {
+			t.Fatalf("agents tool %s publicly advertises root in schema: %s", name, byID["2"])
+		}
 	}
 	for _, tool := range []string{"agents.wait", "agents.result", "agents.status", "agents.tail", "agents.debug.tail", "agents.debug.stdout", "agents.debug.stderr", "agents.debug.runtime_log", "agents.debug.events", "agents.cancel", "git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "tickets.list", "tickets.find", "tickets.status", "specs.list", "specs.find", "specs.status", "mental_models.find", "mental_models.status", "references.trace"} {
 		if !strings.Contains(byID["2"], tool) {
@@ -376,7 +396,7 @@ func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T
 	}
 }
 
-func TestServeStdioSessionDefaultRootAndExplicitOverride(t *testing.T) {
+func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	useLeadProfile(t)
 	rootA := initTicketRepo(t, "260505-feat-alpha")
 	rootB := initTicketRepo(t, "260505-feat-beta")
@@ -385,7 +405,7 @@ func TestServeStdioSessionDefaultRootAndExplicitOverride(t *testing.T) {
 	server := NewServer(t.TempDir(), "test")
 	var out bytes.Buffer
 	if err := server.ServeStdio(context.Background(), strings.NewReader(
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session.set_default_root","arguments":{"root":%q}}}`+"\n", rootA),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"root":%q,"format":"json"}}}`+"\n", rootA),
 	), &out); err != nil {
 		t.Fatalf("set default ServeStdio returned error: %v", err)
 	}
@@ -394,15 +414,15 @@ func TestServeStdioSessionDefaultRootAndExplicitOverride(t *testing.T) {
 		SessionDefaultRoot string `json:"session_default_root"`
 	}
 	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &setResponse); err != nil {
-		t.Fatalf("session.set_default_root response is not JSON: %v\n%s", err, byID["1"])
+		t.Fatalf("ws.setup response is not JSON: %v\n%s", err, byID["1"])
 	}
 	if setResponse.SessionDefaultRoot != canonicalTestPath(t, rootA) {
-		t.Fatalf("session.set_default_root response mismatch: %s", byID["1"])
+		t.Fatalf("ws.setup response mismatch: %s", byID["1"])
 	}
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tickets.list","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"session.get_default_root","arguments":{"format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.setup","arguments":{"format":"json"}}}`,
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tickets.list","arguments":{"root":%q}}}`, rootB),
 	}, "\n")
 
@@ -419,23 +439,23 @@ func TestServeStdioSessionDefaultRootAndExplicitOverride(t *testing.T) {
 		HasSessionDefault  bool   `json:"has_session_default"`
 	}
 	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &getResponse); err != nil {
-		t.Fatalf("session.get_default_root response is not JSON: %v\n%s", err, byID["3"])
+		t.Fatalf("ws.setup response is not JSON: %v\n%s", err, byID["3"])
 	}
 	if !getResponse.HasSessionDefault || getResponse.SessionDefaultRoot != canonicalTestPath(t, rootA) {
-		t.Fatalf("session.get_default_root response mismatch: %s", byID["3"])
+		t.Fatalf("ws.setup response mismatch: %s", byID["3"])
 	}
 	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
 		t.Fatalf("explicit root did not override session default: %s", byID["4"])
 	}
 }
 
-func TestServeStdioSessionDefaultRootDoesNotPersistAcrossServers(t *testing.T) {
+func TestServeStdioSetupRootDoesNotPersistAcrossServers(t *testing.T) {
 	useLeadProfile(t)
 	rootA := initTicketRepo(t, "260505-feat-alpha")
 	rootB := initTicketRepo(t, "260505-feat-beta")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
-	firstInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"session.set_default_root","arguments":{"root":%q}}}`+"\n", rootA)
+	firstInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"root":%q}}}`+"\n", rootA)
 	var firstOut bytes.Buffer
 	if err := NewServer(rootB, "test").ServeStdio(context.Background(), strings.NewReader(firstInput), &firstOut); err != nil {
 		t.Fatalf("first ServeStdio returned error: %v", err)
@@ -483,8 +503,8 @@ func TestServeStdioInvalidServerRootDoesNotFallBackToProjectEnv(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !toolIsError(t, byID["1"]) || strings.Contains(toolText(t, byID["1"]), "260505-feat-env") {
-		t.Fatalf("invalid server root fell back to project env: %s", byID["1"])
+	if !toolIsError(t, byID["1"]) || strings.Contains(toolText(t, byID["1"]), "260505-feat-env") || !strings.Contains(toolText(t, byID["1"]), "ws.setup") {
+		t.Fatalf("invalid server root fell back to project env or lacked setup guidance: %s", byID["1"])
 	}
 }
 
@@ -513,7 +533,7 @@ func TestServeStdioInitializeDetectsClaudeHarnessForAgentAlias(t *testing.T) {
 	registerInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"}}}`, root)
 	checkInput := strings.Join([]string{
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.status","arguments":{"root":%q,"name":"reviewer"}}}`, root),
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"session.get_default_root","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"ws.setup","arguments":{}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -575,7 +595,7 @@ func TestServeStdioCodexMultiWorkspaceMetadataRefusesToGuess(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
-	if !toolIsError(t, byID["1"]) || !strings.Contains(toolText(t, byID["1"]), "multiple host workspaces") || !strings.Contains(toolText(t, byID["1"]), "session.set_default_root") {
+	if !toolIsError(t, byID["1"]) || !strings.Contains(toolText(t, byID["1"]), "multiple host workspaces") || !strings.Contains(toolText(t, byID["1"]), "ws.setup") {
 		t.Fatalf("multi-workspace metadata did not produce actionable error: %s", byID["1"])
 	}
 }

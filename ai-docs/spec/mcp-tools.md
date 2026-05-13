@@ -57,18 +57,19 @@ server session before falling back to startup state. The priority is:
 5. `WS_MCP_PROJECT_ROOT`.
 6. Server startup root.
 
-`session.set_default_root` validates that its `root` is inside a Git worktree,
-stores the canonical worktree root in the current server process, and returns
-that effective root. The value is volatile and does not write user config, ws
-cache config, or repository files. `session.get_default_root` reports whether a
-session default is set plus fallback state such as the server root and
-`WS_MCP_PROJECT_ROOT`. It also reports the detected session harness when one has
-been observed. The default response is compact labeled text; callers can request
-structured JSON for compatibility.
+`ws.setup` is the public setup surface for volatile session state. When called
+with `root`, it validates that the path is inside a Git worktree, stores the
+canonical worktree root in the current server process, and returns setup state.
+The value is volatile and does not write user config, ws cache config, or
+repository files. Calling `ws.setup` without `root` reports the current setup
+state, including the detected session harness when one has been observed. The
+default response is compact labeled text; callers can request structured JSON
+for compatibility. Legacy `session.*` root tools may remain callable as hidden
+compatibility dispatch, but they are not advertised as canonical tools.
 
 When host metadata names multiple workspaces and no higher-priority root exists,
 root-aware tools refuse to guess and return an actionable error asking the caller
-to pass `root` explicitly or call `session.set_default_root`.
+to pass `root` explicitly or call `ws.setup` with the current directory.
 
 An explicit non-dot server startup root is treated as authoritative before the
 launcher-provided project-root environment fallback. If that explicit startup
@@ -153,9 +154,9 @@ stem or spec stem. The result connects tickets, specs, and mental-model
 documents so callers can inspect traceability without manually searching each
 document system.
 
-Small metadata and trace tools such as `api.list`, `session.get_default_root`,
-selected runtime/config inspection views, and `references.trace` default to
-compact labeled text where no caller needs stable structured fields.
+Small metadata and trace tools such as `api.list`, `ws.setup`, selected
+runtime/config inspection views, and `references.trace` default to compact
+labeled text where no caller needs stable structured fields.
 Launcher-facing compatibility data remains available where required.
 {#260512-metadata-trace-readable-output-defaults}
 
@@ -200,7 +201,9 @@ The `agents.*` tool family exposes durable named-agent orchestration.
 `agents.register` creates or updates an agent record with backend, model alias
 or compatibility tier field, resolved model, prompt references, or materialized
 system prompt text. `agents.call` starts an asynchronous call and returns
-immediately.
+immediately. Public `agents.*` schemas do not advertise `root`; callers should
+use `ws.setup` for session root selection, while explicit root arguments may
+remain accepted as a hidden compatibility override.
 
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable
