@@ -7,7 +7,7 @@ sources:
   - agents-plugin-tool/cmd/ws-mcp/
 related:
   mcp-runtime: "git.* tools are exposed through MCP schemas and CLI mirrors."
-  documentation-system: "git.commit detects ticket moves and Result headings from documentation conventions."
+  documentation-system: "git.commit detects ticket moves and Result/Edition headings from documentation conventions."
 ---
 
 # Git Workflow Tools
@@ -24,7 +24,7 @@ related:
 - Status parsing depends on `git status --porcelain=v2 --branch`. Changing flags changes branch and file-state parsing.
 - Range-less diffs append untracked files; ranged diffs do not. This is user-visible behavior.
 - Path filters are appended after `--`; commit paths reject absolute paths, `..`, and option-like values.
-- `git.commit` stages only explicit paths, expands ticket moves by stem, rejects unrelated staged paths, detects ticket Result additions from cached diffs, builds a structured message, then commits.
+- `git.commit` stages only explicit paths, expands ticket moves by stem, rejects unrelated staged paths, detects ticket Result and Edition additions from cached diffs, builds a structured message, then commits.
 
 ## Coupling
 
@@ -48,5 +48,5 @@ related:
 
 ## Technical Debt
 
-- Ticket Result detection is textual and narrow: only cached diff lines beginning `+### Result` under tickets are summarized.
+- Ticket Result detection is textual and narrow: only cached diff lines beginning `+### Result` or `+#### Edition` under tickets are summarized.
 - Revision validation mainly prevents option injection; it does not fully parse Git revision syntax.

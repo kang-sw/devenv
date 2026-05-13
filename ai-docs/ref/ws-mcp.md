@@ -439,9 +439,9 @@ Behavior:
 - Refuses commits when unrelated staged paths exist.
 - Builds a commit message with title, optional description, `## AI Context`,
   and optional document-update sections.
-- If `updated_tickets` is omitted, staged ticket moves and added
-  `### Result` headings under `ai-docs/tickets/` are detected and summarized in
-  `## Updated Tickets`.
+- If `updated_tickets` is omitted, staged ticket moves and added `### Result`
+  or `#### Edition` headings under `ai-docs/tickets/` are detected and
+  summarized in `## Updated Tickets`.
 - Returns JSON containing the new hash, paths, title, and detected
   `ticket_changes`.
 

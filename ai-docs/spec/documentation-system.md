@@ -72,21 +72,16 @@ lists `ready/` work only.
 
 Ticket stems are stable and are referenced by stem rather than path. Actionable
 tickets use phase sections with `### Result` blocks that freeze completed phase
-content. A Result hash identifies the commit that first made the phase
+plan text. A Result hash identifies the commit that first made the phase
 reviewable on its current branch; already-merged phase updates may use the merge
-commit. Ticket frontmatter can connect work to specs, removed specs, parent
-tickets, plans, skeletons, related mental models, and completion metadata.
-Workflow routing may implement unfinished phases one slice at a time without
-renaming or splitting the ticket; ticket authoring remains responsible for
-decomposition.
-
-> [!note] Planned 🚧
-> Ticket Result sections will support append-only tweak capture. The first
-> completion record remains `### Result (<short-hash>) - YYYY-MM-DD`; later
-> implementation passes for the same completed phase append
-> `#### Edition (<short-hash>) - YYYY-MM-DD` entries under that Result area.
-> Existing Result and Edition entries remain frozen once written.
-> {#260513-ticket-result-editions}
+commit. Later implementation passes for the same completed phase append
+`#### Edition (<short-hash>) - YYYY-MM-DD` entries under that phase's Result
+area; existing Result and Edition entries remain frozen once written.
+{#260513-ticket-result-editions} Ticket frontmatter can connect work to specs,
+removed specs, parent tickets, plans, skeletons, related mental models, and
+completion metadata. Workflow routing may implement unfinished phases one slice
+at a time without renaming or splitting the ticket; ticket authoring remains
+responsible for decomposition.
 
 Epic tickets are documented as lightweight milestone boards. Epic bodies keep
 scope, non-scope, child-ticket boards, cross-child invariant decisions, and

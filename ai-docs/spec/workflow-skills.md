@@ -234,8 +234,8 @@ on the current branch; otherwise delegated implementation creates an
 `implement/<scope>` branch. After verification, `lead-implement` records the
 phase result commit, closes spec, mental-model, ticket, and index updates, then
 asks the user to merge, continue, or stop. Follow-up changes after this gate
-route to another implementation slice or sprint because completed ticket Results
-are frozen.
+route to another implementation slice or sprint and are captured in tickets as
+append-only Result editions for already completed phases.
 
 `lead-edit` performs a narrow direct edit in the lead session. It honors
 existing skeleton artifacts and caller-provided scope boundaries, verifies the

@@ -87,9 +87,9 @@ Report:
 - cycle-3 unresolved disputes, if any.
 
 Wait for merge, continue, or stop. If the user wants more changes, route to a
-new implementation slice or `ws:lead-sprint`; completed ticket Results are
-frozen. Direct-current mode exits after docs because no implementation branch
-exists.
+new implementation slice or `ws:lead-sprint`; already completed phases capture
+follow-up implementation through append-only ticket Result editions. Direct-current
+mode exits after docs because no implementation branch exists.
 
 ### 7. Merge
 

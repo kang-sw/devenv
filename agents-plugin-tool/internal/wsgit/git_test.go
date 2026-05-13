@@ -373,6 +373,13 @@ func TestParseTicketResultAdditions(t *testing.T) {
 	}
 }
 
+func TestParseTicketEditionAdditions(t *testing.T) {
+	changes := parseTicketResultAdditions([]byte("diff --git a/ai-docs/tickets/ready/260503-feat-demo.md b/ai-docs/tickets/ready/260503-feat-demo.md\n+++ b/ai-docs/tickets/ready/260503-feat-demo.md\n+#### Edition (def456) - 2026-05-05\n+Follow-up tweak.\n"))
+	if len(changes) != 1 || changes[0].Stem != "260503-feat-demo" || changes[0].ResultHeading != "#### Edition (def456) - 2026-05-05" {
+		t.Fatalf("changes = %#v", changes)
+	}
+}
+
 type sequenceRunner struct {
 	calls []gitCall
 	outs  [][]byte

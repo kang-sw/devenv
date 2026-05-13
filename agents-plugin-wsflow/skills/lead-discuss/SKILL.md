@@ -14,7 +14,7 @@ Call `wsflow/project_tree()` to load the current project map.
 ## Invariants
 
 - No source edits. Only documentation writes, only in the capture step.
-- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phases with a `### Result` section are frozen - do not edit them.
+- Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phase plan text before a `### Result` is frozen after completion; append a `#### Edition` for later implementation tweaks.
 - Read mental-model docs on-demand as topics emerge.
 - Read spec docs in `ai-docs/spec/` on-demand as topics emerge; Project Map lists available specs.
 - Use direct project search or subagent exploration for implementation details beyond mental-model docs.

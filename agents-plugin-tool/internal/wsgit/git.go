@@ -732,7 +732,7 @@ func parseTicketResultAdditions(out []byte) []TicketChange {
 			}
 			continue
 		}
-		if current.Stem == "" || !strings.HasPrefix(line, "+### Result") {
+		if current.Stem == "" || !isAddedTicketResultHeading(line) {
 			continue
 		}
 		change := current
@@ -741,6 +741,10 @@ func parseTicketResultAdditions(out []byte) []TicketChange {
 		changes = append(changes, change)
 	}
 	return changes
+}
+
+func isAddedTicketResultHeading(line string) bool {
+	return strings.HasPrefix(line, "+### Result") || strings.HasPrefix(line, "+#### Edition")
 }
 
 func ticketChangeForPath(path string) (TicketChange, bool) {

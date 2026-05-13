@@ -44,8 +44,9 @@ template rather than relying on a project-local guide override.
   or `.dropped/` tickets there.
 - Actionable tickets use `## Phases` with stable `### Phase N: <title>`
   headings. Research tickets may use freeform topic sections.
-- After a phase has a `### Result` section, treat that phase as frozen. Add new
-  findings to a later phase or to a commit `## Ticket Updates` note.
+- After a phase has a `### Result` section, treat its plan text and existing
+  result entries as frozen. Add later implementation tweaks as a
+  `#### Edition` entry under that Result area.
 - Move tickets with `git mv` when possible so history preserves status changes.
 
 ## Specs

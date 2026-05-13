@@ -35,10 +35,13 @@ git status --porcelain ai-docs/
 
 Ticket-driven only:
 
-1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase.
+1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each newly completed phase.
    Use the result commit supplied by the caller.
-2. Move completed tickets to the next status directory when all phases complete.
-3. Remove completed ready tickets from the `## Ticket Queue` section in `ai-docs/_index.md`.
+2. For follow-up implementation on an already completed phase, append
+   `#### Edition (<short-hash>) - YYYY-MM-DD` under that phase's Result area.
+   Use the result commit supplied by the caller.
+3. Move completed tickets to the next status directory when all phases complete.
+4. Remove completed ready tickets from the `## Ticket Queue` section in `ai-docs/_index.md`.
 
 ## Doctrine
 

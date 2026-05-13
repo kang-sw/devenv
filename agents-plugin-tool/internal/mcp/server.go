@@ -1690,7 +1690,7 @@ func tools() []map[string]any {
 					"title":                 stringProperty("Single-line commit title."),
 					"description":           stringProperty("Optional commit message body before AI Context."),
 					"ai_context":            stringArrayProperty("Required AI Context bullets for the commit message."),
-					"updated_tickets":       stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result headings are detected."),
+					"updated_tickets":       stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
 					"updated_specs":         stringArrayProperty("Optional spec update summaries."),
 					"updated_mental_models": stringArrayProperty("Optional mental-model update summaries."),
 				},

@@ -129,8 +129,8 @@ Prefer:
 `ws/git.commit`
 
 Use `ws/git.commit` for workflow commits when available. It stages explicit
-paths, builds the `## AI Context` message, detects ticket moves and `### Result`
-headings, and avoids shell quoting drift.
+paths, builds the `## AI Context` message, detects ticket moves plus
+`### Result` and `#### Edition` headings, and avoids shell quoting drift.
 For ticket status moves, use native `git mv` between status directories and commit through `ws/git.commit`; `ready/` is the implementation queue and `todo/` is accepted backlog.
 
 Prefer:

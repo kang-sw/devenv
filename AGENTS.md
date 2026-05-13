@@ -179,7 +179,8 @@ ai-docs/tickets/.dropped/
 - `todo/` is accepted backlog; `ready/` is the spec-gated implementation queue.
 - Research tickets use freeform topic sections and no phases.
 - Actionable tickets use `## Phases` and stable `### Phase N: <title>`.
-- Do not edit a phase after it has a `### Result` section.
+- Do not edit phase plan text after it has a `### Result` section; append
+  `#### Edition (<short-hash>) - YYYY-MM-DD` for later implementation tweaks.
 - To check ticket completion or prior phase results, use
   `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
 - Check `## Ticket Queue` in `ai-docs/_index.md` before starting implementation; it lists `ready/` work only.
