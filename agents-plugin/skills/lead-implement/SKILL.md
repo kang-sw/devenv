@@ -27,9 +27,11 @@ Target: user request
 
 ### 2. Prepare
 
-1. Record `<current-branch>` and `<merge-target>`.
-2. If continuing on `implement/*` and the branch name no longer matches the selected scope, rename with `git branch -m implement/<scope>` before execution; stop if the target branch exists or upstream tracking is ambiguous.
-3. Create and maintain this task list:
+1. Record `<current-branch>`.
+2. Outside `implement/*`, set `<merge-target>` to `<current-branch>`.
+3. On `implement/*`, set `<merge-target>` from the caller or confirm it before execution.
+4. If continuing on `implement/*` and the branch name no longer matches the selected scope, rename with `git branch -m implement/<scope>` before execution; stop if the target branch exists or upstream tracking is ambiguous.
+5. Create and maintain this task list:
 
 ```text
 [ ] Confirm scope boundary - preserve caller-provided slice or whole-target scope
@@ -37,9 +39,10 @@ Target: user request
 [ ] Resolve skeleton need - invoke ws:lead-write-skeleton on the implementation branch when required
 [ ] Execute - invoke ws:lead-edit or ws:lead-write-code; capture commit range and result commit
 [ ] Doc pre-pass - update-spec then mental-model-updater; commit each
+[ ] Report to user - wait for accept or tweak
 [ ] Doc commit gate - refresh ai-docs/_index.md, ticket status, then commit docs
-[ ] Report to user - wait for merge, continue, tweak, or stop
-[ ] Final action - merge only when approved
+[ ] Final action gate - wait for merge, continue, or stop
+[ ] Merge - implementation-branch modes only and only when approved
 ```
 
 ### 3. Execute
@@ -65,38 +68,45 @@ Target: user request
 
 Run mental-model-updater after update-spec so it sees implemented-marker changes.
 
-### 5. Doc Commit Gate
-
-1. Call `ws/infra.read(name: "executor-wrapup")`.
-2. Refresh `ai-docs/_index.md` for new skills, agents, or major patterns.
-3. If ticket-driven, follow Ticket Update using `<result-commit>`.
-4. Follow Doc Commit Gate. Do not re-run Doc Pipeline.
-
-### 6. Report And Final Gate
+### 5. Report And Acceptance
 
 Report:
 
 - skeleton draft/final commit hashes and ticket-skeleton update status when skeleton ran;
 - implemented changes from edit/write-code output;
-- documentation updates and ticket Result hash;
+- documentation pre-pass updates;
 - review result from edit `Review:` or write-code reviewer summaries;
 - test status;
 - deviations or open items;
 - cycle-3 unresolved disputes, if any.
 
-Wait for merge, continue, tweak, or stop.
+Wait for accept or tweak.
 
 If tweaks requested:
 
 - Direct edit: fix directly and re-verify.
 - Delegated: call `ws/agents.call(name: "implementer", prompt: <block below>)`; re-review using write-code reviewer pattern.
 - Re-capture `<result-commit>`, re-run documentation updates for the new range, and commit each.
-- Re-report until approved.
+- Re-report until accepted.
 
-### 7. Merge
+### 6. Doc Commit Gate
 
-Merge only when the user approves. Merge `implement/<scope>` to `<merge-target>`
-with the repository merge helper or equivalent non-interactive git sequence.
+1. Call `ws/infra.read(name: "executor-wrapup")`.
+2. Refresh `ai-docs/_index.md` for new skills, agents, or major patterns.
+3. If ticket-driven, follow Ticket Update using `<result-commit>`.
+4. Follow Doc Commit Gate. Do not re-run Doc Pipeline.
+
+### 7. Final Action Gate
+
+Report documentation updates and ticket Result hash. Wait for merge, continue,
+or stop. Direct-current mode exits after docs because no implementation branch
+exists.
+
+### 8. Merge
+
+Implementation-branch modes only. Merge only when the user approves. Merge
+`implement/<scope>` to `<merge-target>` with the repository merge helper or
+equivalent non-interactive git sequence.
 
 Use squash for one commit; use `--no-ff` for two or more commits.
 Write the merge commit per CLAUDE.md.
