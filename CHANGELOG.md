@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.25.1 - 2026-05-13
+
+### Changed
+- Let `lead-implement` continue on existing `implement/*` branches, close docs
+  before the final merge/continue/stop gate, and keep follow-up work in a new
+  implementation slice or sprint after ticket Results are written.
+- Define ticket Result hashes as the commit that made the completed phase
+  reviewable on its current branch, preserving merge commits as the
+  already-merged case.
+- Capture hbsflow agentless plugin planning tickets for the first internal
+  derivative plugin work.
+
+### Fixed
+- Remove obsolete clerk wording from forge-spec workflow guidance.
+
 ## v0.25.0 - 2026-05-13
 
 ### Added
