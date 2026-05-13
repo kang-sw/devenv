@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.23.5 - 2026-05-13
+
+### Changed
+- Make `config.agents_tier` update the explicit or detected harness alias
+  mapping, so host-local agent tier overrides can target a different execution
+  backend without editing `config.json` directly.
+
 ## v0.23.4 - 2026-05-12
 
 ### Changed
