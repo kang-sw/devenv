@@ -18,6 +18,7 @@ related:
 - `agents-plugin/.mcp.json` is the plugin-managed MCP startup contract; `cwd: "."` makes `./bin/ws-mcp-launcher.py` resolve relative to the installed plugin cache. {#260505-plugin-local-mcp-server-config}
 - `agents-plugin/.claude-plugin/plugin.json` is a Claude-facing compatibility manifest for the Codex-first candidate and should start the same Python launcher path, not the POSIX shell wrapper, so native Windows does not require `/bin/sh`. {#260505-plugin-local-mcp-server-config}
 - `agents-plugin-wsflow/` is the scaffolded agentless derivative package; its `.mcp.json` selects `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=wsflow`, and `WS_MCP_SETUP_TOOL=setup`. {#260513-wsflow-agentless-plugin-package}
+- `.agents/plugins/marketplace.json` exposes separate local Codex marketplace entries for `ws` and `wsflow`; keep their source paths and product identities distinct. {#260513-wsflow-marketplace-install}
 - `agents-plugin/bin/ws-mcp-launcher.py` owns runtime lookup, compatibility checks, release download, checksum verification, local dev runtime repair, and final handoff. {#260505-runtime-launcher-repair-project-root}
 - `agents-plugin/runtime.json` is active compatibility data, not descriptive metadata. {#260505-runtime-contract-metadata}
 
@@ -48,6 +49,7 @@ related:
 - **Add a plugin skill**: add `agents-plugin/skills/<name>/SKILL.md`; keep the manifest pointing at `./skills` unless the bundle layout changes.
 - **Add a runtime requirement**: extend `runtime.json`, then add requirement-specific launcher checks; use `runtime.info` only for runtime metadata the binary can report.
 - **Change wsflow packaging**: keep `.mcp.json` env, exact `runtime.json`, and the package contract test aligned with no-agent `runtime.capabilities`.
+- **Change local plugin marketplace entries**: update `.agents/plugins/marketplace.json`, then check whether `install.sh` and `ai-docs/ship/ws.md` need matching ws/wsflow registration or validation changes. {#260513-wsflow-marketplace-install}
 - **Change copied plugin packaging or launcher behavior**: check whether `agents-plugin-wsflow/` carries the same file, mirror semantic changes when the wsflow package is affected, then run `python3 -m unittest discover agents-plugin-wsflow/tests`.
 - **Change runtime version**: run `agents-plugin-tool/scripts/bump-ws-version.sh`, then verify manifests, launcher compatibility glob, build script, workflow, and docs changed together.
 
