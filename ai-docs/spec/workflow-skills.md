@@ -76,9 +76,9 @@ selection and concrete provider names such as `gpt-5.5` or
 remains documented only as deprecated compatibility input.
 {#260508-workflow-model-alias-guidance}
 
-## 🚧 wsflow Agentless Skill Surface {#260513-wsflow-agentless-skill-surface}
+## wsflow Agentless Skill Surface {#260513-wsflow-agentless-skill-surface}
 
-The wsflow distribution will ship a curated subset of lead workflow skills
+The wsflow distribution ships a curated subset of lead workflow skills
 under `wsflow:lead-*` invocation names and `wsflow/<tool>` MCP notation.
 Shipped wsflow skills include planning, documentation, direct implementation,
 bootstrap, release, session handoff, verification, and reconstruction workflows:
@@ -91,9 +91,9 @@ bootstrap, release, session handoff, verification, and reconstruction workflows:
 The wsflow package excludes persistent multi-turn orchestration and upstream
 authoring helper skills: `lead-write-code`, `lead-write-skeleton`,
 `lead-sprint`, `lead-salvage`, and `lead-skill-authoring`. wsflow skill text
-does not instruct callers to use ws named-agent or subquery tools. Where broad
-investigation, verification, audit, or review is useful, wsflow guidance uses
-host-native one-shot subagents when available, with the lead retaining
+does not instruct callers to use managed named-agent or subquery tools. Where
+broad investigation, verification, audit, or review is useful, wsflow guidance
+uses host-native one-shot subagents when available, with the lead retaining
 ownership of edits, docs, tickets, specs, mental-model updates, and commits.
 
 ## Planning Workflow Skills {#260505-planning-workflow-skills}

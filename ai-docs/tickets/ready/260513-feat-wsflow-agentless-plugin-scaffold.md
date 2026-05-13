@@ -231,6 +231,26 @@ Acceptance criteria:
   wsflow MCP read/context tools where useful, and never describes a persistent
   wsflow-managed agent session.
 
+### Result (2c1d2b9) - 2026-05-13
+
+Created the curated `agents-plugin-wsflow/skills/` bundle with the approved
+15-skill inventory under the `wsflow:lead-*` namespace. The package excludes
+`lead-write-code`, `lead-write-skeleton`, `lead-sprint`, `lead-salvage`, and
+`lead-skill-authoring`.
+
+Rewrote orchestration-sensitive skills for the agentless runtime:
+`lead-workflow-manual` now documents wsflow MCP notation, available no-agent
+tools, and the absence of wsflow-managed named-agent sessions; `lead-implement`
+routes through direct `lead-edit`; `lead-edit` uses host-native one-shot
+read-only review when available; `lead-verify-discussion` and both forge
+workflows use direct exploration or self-contained host-native read-only
+workers.
+
+Included the bootstrap support templates required by `lead-bootstrap` and
+normalized them to wsflow wording. Added package tests that assert the shipped
+skill inventory and reject managed-agent, subquery, full-ws namespace, and
+excluded-skill references inside distributed wsflow skills.
+
 ### Phase 4: Documentation and drift guard
 
 Record the wsflow derivative-maintenance rule in the existing specs and project

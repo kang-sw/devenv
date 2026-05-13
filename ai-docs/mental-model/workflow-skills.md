@@ -3,6 +3,7 @@ domain: workflow-skills
 description: "Codex lead skills and workflow prompt orchestration."
 sources:
   - agents-plugin/skills/
+  - agents-plugin-wsflow/skills/
   - agents-plugin-tool/internal/wsprompt/
 related:
   documentation-system: "write-spec and write-ticket enforce documentation traceability before implementation."
@@ -14,6 +15,7 @@ related:
 ## Entry Points
 
 - `agents-plugin/skills/lead-*` is the Codex-facing workflow surface and uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
+- `agents-plugin-wsflow/skills/lead-*` is the curated agentless derivative surface and uses `wsflow:` skill names plus `wsflow/<tool>` MCP notation. {#260513-wsflow-agentless-skill-surface}
 - `lead-workflow-manual` is the notation and primitive boundary reference for shared skill text. {#260505-workflow-primitive-reference}
 
 ## Module Contracts
@@ -45,6 +47,7 @@ related:
 - `lead-edit` and `lead-write-code` are code-and-review primitives; `lead-implement` and `lead-sprint` own documentation pipeline timing. {#260505-implementation-workflow-skills}
 - `lead-write-code` uses brief-bounded implementation and file-based reviewer output; reviewer allocation is risk-scoped, reviewers return summaries, and implementers read finding files directly. {#260505-implementation-workflow-skills}
 - Sprint defers doc pipeline until wrap-up; per-task doc updates inside sprint create partial checkpoints that confuse wrap-up. {#260505-sprint-session-container}
+- wsflow excludes managed orchestration skills and keeps implementation lead-owned through `lead-implement` -> `lead-edit`; review and forge surveys use host-native one-shot read-only subagents only when available. {#260513-wsflow-agentless-skill-surface}
 
 ## Coupling
 
@@ -58,6 +61,7 @@ related:
 ## Extension Points & Change Recipes
 
 - **Add a Codex workflow skill**: create `agents-plugin/skills/lead-<name>/SKILL.md`, follow skill-authoring invariants, add OpenAI UI metadata only if needed, and update workflow specs.
+- **Change a full workflow skill included in wsflow**: update the corresponding `agents-plugin-wsflow/skills/lead-<name>/` surface in the same logical change or record a follow-up ticket; wsflow is curated, not text-identical.
 - **Add a delegate prompt to a workflow**: register by embedded stem through `ws/agents.register`, use portable `model` aliases for default selection, and omit `prompts` only for general-purpose delegates. Update runtime prompt bundle metadata and keep reviewer/implementer context boundaries explicit. {#260505-workflow-delegate-prompt-boundaries}
 
 ## Common Mistakes

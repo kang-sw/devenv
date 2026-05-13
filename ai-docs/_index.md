@@ -37,7 +37,7 @@ history.
   `ws:lead-write-ticket`, and `ws:lead-discuss`.
 - `agents-plugin-wsflow/` is a scaffolded agentless derivative package with
   Codex/Claude manifests, package-local no-agent MCP env, shared launcher
-  copies, and a reduced `runtime.json`; workflow skills are not copied yet.
+  copies, a reduced `runtime.json`, and a curated wsflow skill bundle.
 - Codex local plugin iteration has no known CLI refresh path; use UI
   uninstall/install or a fresh Codex session after editing the registered source.
 - `agents-plugin/.codex-plugin/plugin.json` references plugin-local `.mcp.json`

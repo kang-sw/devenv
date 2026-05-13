@@ -67,9 +67,9 @@ Excluded:
 
 ## Static Verification
 
-The wsflow distributed skill bundle should have a verification path that fails
-when shipped skill files contain forbidden full-ws references, excluded skills,
-or inventory drift.
+The wsflow distributed skill bundle has package tests that fail when shipped
+skill files contain forbidden full-ws references, excluded skills, or inventory
+drift.
 
 Forbidden distributed-skill references include:
 
