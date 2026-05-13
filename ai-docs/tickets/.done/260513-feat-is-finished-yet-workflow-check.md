@@ -56,6 +56,12 @@ Acceptance criteria:
 - The skill is documented in workflow skill inventory, specs, mental models,
   and wsflow mirroring guidance if applicable.
 
+### Result (2124519) - 2026-05-13
+
+Added `lead-is-finished-yet` to ws and wsflow as a compact checkpoint skill,
+updated the shipped skill inventories and wsflow drift test, and documented the
+new skill in workflow specs and mental models.
+
 ### Phase 2: Refresh related tickets before proceed
 
 Update `lead-proceed` so warm discussion state can refresh an existing related
@@ -71,3 +77,10 @@ Acceptance criteria:
   perform implementation planning.
 - After ticket refresh, `lead-proceed` re-reads the ticket and continues through
   the existing spec -> ticket -> implementation pipeline.
+
+### Result (2124519) - 2026-05-13
+
+Updated `lead-proceed` in both packages with a warm ticket freshness gate that
+refreshes missing settled conversation decisions through `lead-write-ticket`
+before implementation slice selection while preserving the route-only,
+no-source-inspection boundary.
