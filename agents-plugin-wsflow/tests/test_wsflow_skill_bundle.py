@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1]
+FULL_PLUGIN_SKILLS_DIR = PLUGIN_DIR.parent / "agents-plugin" / "skills"
 SKILLS_DIR = PLUGIN_DIR / "skills"
 
 EXPECTED_SKILLS = {
@@ -43,6 +44,16 @@ class WsflowSkillBundleTest(unittest.TestCase):
     def test_shipped_skill_inventory_is_curated(self):
         actual = {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()}
         self.assertEqual(actual, EXPECTED_SKILLS)
+
+    def test_full_skill_inventory_drift_is_visible(self):
+        full_skills = {path.name for path in FULL_PLUGIN_SKILLS_DIR.iterdir() if path.is_dir()}
+        missing_full_counterparts = sorted(EXPECTED_SKILLS - full_skills)
+        unexpected_wsflow_skills = sorted(
+            {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()} - EXPECTED_SKILLS
+        )
+
+        self.assertEqual(missing_full_counterparts, [])
+        self.assertEqual(unexpected_wsflow_skills, [])
 
     def test_skill_files_do_not_reference_managed_agent_surface(self):
         offenders = []

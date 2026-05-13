@@ -96,6 +96,15 @@ broad investigation, verification, audit, or review is useful, wsflow guidance
 uses host-native one-shot subagents when available, with the lead retaining
 ownership of edits, docs, tickets, specs, mental-model updates, and commits.
 
+wsflow skills are curated semantic rewrites, not generated copies. A change to
+a full `agents-plugin/skills/lead-*` skill that is shipped in wsflow must either
+update the corresponding wsflow skill in the same logical change or leave an
+explicit follow-up ticket. A change to a full skill excluded from wsflow must
+still check whether the wsflow workflow manual, exclusion rationale, or static
+verification rules drifted. The wsflow skill-bundle verification path checks
+inventory and forbidden managed-agent references, but it does not require text
+identity with the full ws skill.
+
 ## Planning Workflow Skills {#260505-planning-workflow-skills}
 
 Planning skills prepare caller-visible work before implementation.

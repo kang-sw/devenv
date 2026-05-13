@@ -71,6 +71,16 @@ The wsflow distributed skill bundle has package tests that fail when shipped
 skill files contain forbidden full-ws references, excluded skills, or inventory
 drift.
 
+Run:
+
+```bash
+python3 -m unittest discover agents-plugin-wsflow/tests
+```
+
+This command checks both the runtime contract and the distributed skill bundle.
+It makes drift visible; it does not require wsflow skills to be text-identical
+to full ws skills.
+
 Forbidden distributed-skill references include:
 
 - `ws/`
@@ -85,6 +95,7 @@ Forbidden distributed-skill references include:
 - `lead-write-skeleton`
 - `lead-sprint`
 - `lead-salvage`
+- `lead-skill-authoring`
 
 Allow exceptions only in repository maintenance documents, tests,
 compatibility comments, or hidden implementation details where the full ws name

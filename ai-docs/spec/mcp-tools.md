@@ -210,9 +210,12 @@ and matching CLI groups such as `agents`, `subquery`, and
 `config agents-tier`.
 
 `WS_MCP_NAMESPACE=wsflow` changes ordinary user-facing namespace text to
-`wsflow` without renaming generic MCP tool names. `WS_MCP_SETUP_TOOL=setup`
-advertises `setup` instead of `ws.setup`; `ws.setup` may remain available only
-as hidden compatibility dispatch.
+`wsflow` without renaming generic MCP tool names. If `WS_MCP_NAMESPACE` is
+unset or empty, the server keeps the default `ws` namespace and existing full
+plugin behavior. `WS_MCP_SETUP_TOOL=setup` advertises `setup` instead of
+`ws.setup`; when unset or empty, the canonical setup name remains `ws.setup`.
+`ws.setup` may remain available only as hidden compatibility dispatch when a
+different setup name is advertised.
 
 ## Named-Agent MCP Tools {#260505-named-agent-mcp-tools}
 

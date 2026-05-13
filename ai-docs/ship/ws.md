@@ -39,8 +39,12 @@ At ship time:
 ## Pre-flight
 
 - `git status --porcelain` - must be empty before release preparation starts.
+- `python3 -m unittest discover agents-plugin/tests`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
 - `cd agents-plugin-tool && go test ./...`
 - `cd agents-plugin-tool && scripts/smoke-ws-mcp.sh ..`
+- `claude plugin validate agents-plugin`
+- `claude plugin validate agents-plugin-wsflow`
 
 ## Changelog
 
@@ -82,6 +86,9 @@ Notes:
 - The build script refreshes `agents-plugin/runtime.json` prompt bundle metadata
   when the host binary can report it; commit any resulting metadata drift before
   tagging.
+- wsflow reuses the same runtime assets. Keep
+  `agents-plugin-wsflow/runtime.json` and package tests aligned with the
+  selected wsflow no-agent runtime surface before tagging.
 
 ## Tag
 

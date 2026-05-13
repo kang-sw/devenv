@@ -35,13 +35,20 @@ Claude-compatible plugin behavior uses `agents-plugin/.claude-plugin/plugin.json
 and the shared `agents-plugin/` package. Historical material is preserved only
 under `ai-docs/ref/` or git history.
 
-## 🚧 wsflow Claude-Compatible Package {#260513-wsflow-claude-compatible-package}
+## wsflow Claude-Compatible Package {#260513-wsflow-claude-compatible-package}
 
-The wsflow derivative package will carry its own package-local
-`.claude-plugin/plugin.json` metadata and use the same shared launcher pattern
+The wsflow derivative package carries its own package-local
+`.claude-plugin/plugin.json` metadata and uses the same shared launcher pattern
 as the active ws plugin package. Claude compatibility for wsflow must not
 reintroduce a live `claude-plugin/` source tree or fork workflow behavior away
 from the wsflow Codex manifest and runtime contract.
+
+Claude-compatible wsflow metadata remains package-local to
+`agents-plugin-wsflow/`, uses the `wsflow` MCP server key, and injects
+`WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=wsflow`, and
+`WS_MCP_SETUP_TOOL=setup`. Validation for changes that touch Claude plugin
+metadata should include the wsflow package when the derivative surface is
+affected.
 
 ## Downstream Claude Bootstrap Shim {#260505-downstream-claude-bootstrap-shim}
 

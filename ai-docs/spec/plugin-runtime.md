@@ -63,13 +63,12 @@ containment and test surfaces only. A wsflow runtime contract may set
 requires the reported tool and command sets to equal the package contract and
 does not fall back to weaker required-surface probes after a capability mismatch.
 
-## 🚧 wsflow Agentless Plugin Package {#260513-wsflow-agentless-plugin-package}
+## wsflow Agentless Plugin Package {#260513-wsflow-agentless-plugin-package}
 
-The repository will ship `agents-plugin-wsflow/` as a curated internal
-derivative plugin package named `wsflow`. Its Codex and Claude manifests expose
-the wsflow name, its MCP configuration registers the server under the `wsflow`
-key, and its package-local runtime contract requires the wsflow agentless
-surface.
+The repository ships `agents-plugin-wsflow/` as a curated internal derivative
+plugin package named `wsflow`. Its Codex and Claude manifests expose the
+wsflow name, its MCP configuration registers the server under the `wsflow` key,
+and its package-local runtime contract requires the wsflow agentless surface.
 
 The package reuses the shared `ws-mcp` binary and launcher. Distributed
 wsflow package text presents wsflow naming to users and does not describe the
@@ -77,6 +76,14 @@ package as a ws-lite or ws-compatible mode. Repository maintenance documents,
 tests, compatibility comments, and hidden implementation details may still name
 the shared ws implementation surface when that is the precise behavior under
 test.
+
+The wsflow package is not a generated mirror of `agents-plugin/`. Future full
+plugin packaging or runtime-contract changes that affect copied or
+caller-visible surfaces must evaluate wsflow drift, update the derivative in
+the same logical change when applicable, or record an explicit follow-up ticket.
+The local verification path includes `python3 -m unittest discover
+agents-plugin-wsflow/tests`, which checks the agentless runtime contract and
+the curated skill inventory without requiring text-identical skills.
 
 ## Runtime Launcher Repair And Project-Root Detection {#260505-runtime-launcher-repair-project-root}
 

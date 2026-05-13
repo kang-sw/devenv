@@ -48,6 +48,7 @@ related:
 - **Add a plugin skill**: add `agents-plugin/skills/<name>/SKILL.md`; keep the manifest pointing at `./skills` unless the bundle layout changes.
 - **Add a runtime requirement**: extend `runtime.json`, then add requirement-specific launcher checks; use `runtime.info` only for runtime metadata the binary can report.
 - **Change wsflow packaging**: keep `.mcp.json` env, exact `runtime.json`, and the package contract test aligned with no-agent `runtime.capabilities`.
+- **Change copied plugin packaging or launcher behavior**: check whether `agents-plugin-wsflow/` carries the same file, mirror semantic changes when the wsflow package is affected, then run `python3 -m unittest discover agents-plugin-wsflow/tests`.
 - **Change runtime version**: run `agents-plugin-tool/scripts/bump-ws-version.sh`, then verify manifests, launcher compatibility glob, build script, workflow, and docs changed together.
 
 ## Common Mistakes
@@ -58,6 +59,7 @@ related:
 - Adding a launcher-required CLI command only to `runtime.json.commands`; the capabilities fast path has a separate manually maintained command list.
 - Printing debug output to stdout from the launcher breaks MCP startup.
 - Assuming Windows plugin-managed startup works without `python3`; the shared launcher needs an installed Python 3 interpreter on native Windows. {#260505-windows-plugin-managed-startup}
+- Updating only `agents-plugin/` packaging when the copied wsflow manifest, launcher, runtime contract, or validation path should change with it.
 
 ## Technical Debt
 

@@ -38,12 +38,14 @@ related:
 ## Extension Points & Change Recipes
 
 - **Change Claude-compatible plugin metadata**: edit `agents-plugin/.claude-plugin/plugin.json`, then validate the plugin package.
+- **Change wsflow Claude metadata**: edit `agents-plugin-wsflow/.claude-plugin/plugin.json`, keep the no-agent MCP environment aligned with `.mcp.json`, and validate the wsflow package.
 - **Change home-level Claude guidance**: update root `AGENTS.md`; do not revive installer-managed global Claude instructions. {#260505-claude-global-home-instructions}
 
 ## Common Mistakes
 
 - Reintroducing a separate `claude-plugin/` source tree.
 - Mentioning `ws-*` shell helpers in shared Codex skill guidance instead of MCP primitives.
+- Updating only the full ws Claude manifest when copied launcher or no-agent metadata also affects `agents-plugin-wsflow/.claude-plugin/plugin.json`.
 
 ## Technical Debt
 

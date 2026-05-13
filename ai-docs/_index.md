@@ -37,7 +37,8 @@ history.
   `ws:lead-write-ticket`, and `ws:lead-discuss`.
 - `agents-plugin-wsflow/` is a scaffolded agentless derivative package with
   Codex/Claude manifests, package-local no-agent MCP env, shared launcher
-  copies, a reduced `runtime.json`, and a curated wsflow skill bundle.
+  copies, a reduced `runtime.json`, a curated wsflow skill bundle, and package
+  tests for runtime-contract plus skill-inventory drift.
 - Codex local plugin iteration has no known CLI refresh path; use UI
   uninstall/install or a fresh Codex session after editing the registered source.
 - `agents-plugin/.codex-plugin/plugin.json` references plugin-local `.mcp.json`
@@ -68,7 +69,9 @@ Before editing tickets/specs/mental models, read the matching convention through
 read `ai-docs/ref/skill-authoring.md`. Before editing full
 `agents-plugin/skills/lead-*` skills, plugin packaging, runtime contracts,
 launcher behavior, prompt guidance, or release validation that may affect
-wsflow, read `ai-docs/ref/wsflow-mirroring.md`.
+wsflow, read `ai-docs/ref/wsflow-mirroring.md` and run
+`python3 -m unittest discover agents-plugin-wsflow/tests` when the derivative
+surface may drift.
 
 ## Runtime Surfaces
 
