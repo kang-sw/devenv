@@ -968,7 +968,6 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git.diff","arguments":{"mode":"name_only","paths":["file.txt"]}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git.log","arguments":{"limit":1,"include_body":true}}}`,
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"git.merge_base","arguments":{"base":"HEAD","head":"HEAD"}}}`,
-		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -977,8 +976,8 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 7 {
-		t.Fatalf("expected 7 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 6 {
+		t.Fatalf("expected 6 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -1031,6 +1030,17 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		t.Fatalf("git.merge_base text response = %q", got)
 	}
 
+	out.Reset()
+	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(commitInput), &out); err != nil {
+		t.Fatalf("ServeStdio commit returned error: %v", err)
+	}
+	commitLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(commitLines) != 1 {
+		t.Fatalf("expected 1 commit response, got %d\n%s", len(commitLines), out.String())
+	}
+	commitByID := responseLinesByID(t, commitLines)
+
 	var commit struct {
 		Hash          string `json:"hash"`
 		Title         string `json:"title"`
@@ -1039,7 +1049,7 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 			ResultAdded bool   `json:"result_added"`
 		} `json:"ticket_changes"`
 	}
-	if err := json.Unmarshal([]byte(toolText(t, byID["7"])), &commit); err != nil {
+	if err := json.Unmarshal([]byte(toolText(t, commitByID["7"])), &commit); err != nil {
 		t.Fatal(err)
 	}
 	if commit.Hash == "" || commit.Title != "test: mcp commit" || len(commit.TicketChanges) != 1 || commit.TicketChanges[0].Stem != "260503-feat-demo" || !commit.TicketChanges[0].ResultAdded {
