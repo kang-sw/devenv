@@ -7,6 +7,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - documentation-system
+completed: 2026-05-13
 ---
 
 # Proceed phase-slice routing
@@ -70,3 +71,14 @@ Acceptance criteria:
   slice as hard scope.
 - Documentation and mental-model entries distinguish ticket decomposition from
   proceed's execution-slice selection.
+
+### Result (50971df) - 2026-05-13
+
+Implemented in workflow skill contracts and docs. `lead-proceed` now treats
+actionable `todo/` ticket paths as implementation intent, promotes them through
+`lead-write-ticket` when only ready-gate normalization is needed, escalates only
+for unresolved design blockers, selects an implementation slice after a non-epic
+`ready/` target exists, and passes that slice to `lead-implement` as hard scope.
+`lead-implement`, `lead-edit`, and `lead-write-code` now preserve
+caller-provided scope boundaries. Specs and mental models distinguish ticket
+decomposition from proceed's execution-slice selection.
