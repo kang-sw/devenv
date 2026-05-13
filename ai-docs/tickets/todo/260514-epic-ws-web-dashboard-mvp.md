@@ -103,9 +103,12 @@ The MVP should cover:
   project/worktree/instance
   rather than making the web daemon a global authority over ws runtime state.
 - Treat Git worktrees as first-class workspace entries. The left navigation
-  should be able to list server/workspace rows flat across servers while still
-  showing worktree lineage, for example a server badge plus workspace name with
-  child notation for `workspace:branch-or-hash(worktree)`.
+  should group entries by server, then show a flat list of workspaces and
+  worktree workspaces within each server group. Each server group should have an
+  action surface such as `[+]` for creating or adding workspaces on that server.
+  Workspace rows should support adding new instances within that workspace. The
+  exact row labels, grouping chrome, and worktree notation remain TBA because
+  the scenarios need more design discussion.
 - Prefer linked ws web daemons over host-specific scraping for cross-environment
   visibility. Native Windows may use WSL-exposed tools as a fallback or
   discovery aid, but WSL process and workspace control should primarily happen

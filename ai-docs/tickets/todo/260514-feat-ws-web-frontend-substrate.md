@@ -53,10 +53,12 @@ keys shaped around `serverId`, optional `workspaceId`, and optional
 
 ### Phase 5: Add server/workspace navigation
 
-Add a left navigation model that can list workspaces flat across servers while
-displaying each server's icon/color badge and each workspace name. Worktree
-workspaces should remain visible as worktree-specific entries with lineage
-context instead of being hidden behind a nested project-only tree.
+Add a left navigation model that groups by server and lists workspaces flat
+within each server group. Server groups should expose a creation/add action such
+as `[+]`, and workspace rows should expose actions for adding new instances in
+that workspace. Worktree workspaces should remain visible as worktree-specific
+entries with lineage context instead of being hidden behind a nested
+project-only tree. Exact row labels and grouping chrome are TBA.
 
 ### Phase 6: Add contribution examples
 

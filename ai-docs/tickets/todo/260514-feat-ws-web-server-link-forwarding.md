@@ -50,7 +50,7 @@ requiring feature panels to know whether a resource is local or linked.
 
 Represent linked servers in the frontend workspace model so panels can show
 local, WSL, and remote resources with clear provenance while preserving a
-seamless dashboard experience, shared resource keys, and flat cross-server
+seamless dashboard experience, shared resource keys, and server-grouped flat
 workspace navigation.
 
 ### Phase 4: Verify WSL and remote link behavior

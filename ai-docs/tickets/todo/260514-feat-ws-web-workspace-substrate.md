@@ -18,8 +18,8 @@ Workspace APIs should use opaque workspace ids under explicit server ids. Host
 paths remain daemon-owned metadata, not URL identifiers.
 
 Git worktrees should be first-class workspace records. The UI can render them
-flat across servers while still exposing their relationship to the common Git
-root and branch or short hash.
+as flat workspace entries within each server group while still exposing their
+relationship to the common Git root and branch or short hash.
 
 Detailed picker UX and persistence rules need follow-up discussion before this
 ticket is promoted to `ready/`.
@@ -46,8 +46,9 @@ across projects.
 ### Phase 4: Add flat workspace navigation model
 
 Expose navigation-ready workspace summaries that include `serverId`, server
-badge metadata, workspace name, workspace kind, worktree lineage, and display
-labels suitable for a flat cross-server left navigation.
+badge metadata, workspace name, workspace kind, worktree lineage, and enough
+metadata for a server-grouped flat workspace navigation. Exact display labels
+remain TBA pending additional navigation scenario design.
 
 ### Phase 5: Verify workspace boundary behavior
 
