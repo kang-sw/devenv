@@ -181,7 +181,11 @@ Implementation skills execute code changes and close the documentation loop.
 
 `lead-implement` is the implementation harness. It routes to direct editing or
 delegated code writing, then runs the shared post-implementation documentation
-pipeline before reporting completion.
+pipeline before reporting completion. Existing `implement/*` branches continue
+on the current branch; otherwise delegated implementation creates an
+`implement/<scope>` branch. After verification, `lead-implement` records the
+phase result commit, closes spec, mental-model, ticket, and index updates, then
+asks the user to merge, continue, tweak, or stop.
 
 `lead-edit` performs a narrow direct edit in the lead session. It honors
 existing skeleton artifacts and caller-provided scope boundaries, verifies the

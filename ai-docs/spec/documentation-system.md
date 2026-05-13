@@ -72,7 +72,9 @@ lists `ready/` work only.
 
 Ticket stems are stable and are referenced by stem rather than path. Actionable
 tickets use phase sections with `### Result` blocks that freeze completed phase
-content. Ticket frontmatter can connect work to specs, removed specs, parent
+content. A Result hash identifies the commit that first made the phase
+reviewable on its current branch; already-merged phase updates may use the merge
+commit. Ticket frontmatter can connect work to specs, removed specs, parent
 tickets, plans, skeletons, related mental models, and completion metadata.
 Workflow routing may implement unfinished phases one slice at a time without
 renaming or splitting the ticket; ticket authoring remains responsible for

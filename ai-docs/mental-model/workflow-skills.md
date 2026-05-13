@@ -29,6 +29,7 @@ related:
 - `lead-proceed` treats `todo/` ticket paths as implementation intent, promotes through `lead-write-ticket`, and escalates only for unresolved design or ready-gate blockers. {#260505-proceed-routing-pipeline}
 - `lead-proceed` does not rejudge ticket decomposition; default execution is the first unfinished phase, and selected slices are hard downstream scope. {#260505-proceed-routing-pipeline}
 - `lead-implement` owns skeleton decisions and execution inside the implementation branch lifecycle before edit/write-code runs. {#260512-skeleton-inside-implement-branch}
+- `lead-implement` continues on existing `implement/*` branches, may safely rename them before execution, closes docs before the final gate, and treats merge as one user-approved final action. {#260505-implementation-workflow-skills}
 - `lead-write-ticket` runs the spec gate only when non-`epic`, non-`research` work enters `ready/`; `todo/` is accepted backlog with optional spec recovery hints. {#260505-planning-workflow-skills}
 - `lead-write-ticket` invokes `lead-write-spec` autonomously when ready-ticket coverage is missing, then stops only if coverage still cannot be established. {#260505-planning-workflow-skills}
 - `lead-write-ticket` keeps epics at milestone-board scope and routes detailed discussion, implementation phases, and slice-specific decisions into child tickets. {#260508-write-ticket-epic-child-boundary}
