@@ -44,6 +44,13 @@ Acceptance criteria:
 - `lead-implement` final gate wording no longer says completed Results block all
   follow-up tweak capture.
 
+### Result (a6f0b58) - 2026-05-13
+
+Updated bundled ticket conventions, executor wrap-up guidance, root workflow
+context, and workflow skills so completed phase plan text and existing
+Result/Edition entries stay frozen while later implementation tweaks append
+`#### Edition` entries under the completed phase's Result area.
+
 ### Phase 2: Align tooling and detection
 
 Update workflow tooling that detects ticket result changes so edition additions
@@ -56,3 +63,9 @@ Acceptance criteria:
 - Documentation specs and mental models record the append-only Result edition
   rule.
 - Existing tickets with plain Result sections remain valid.
+
+### Result (a6f0b58) - 2026-05-13
+
+Extended `git.commit` ticket-change detection to recognize added
+`#### Edition` headings alongside `### Result` headings, added unit coverage,
+and updated MCP docs, specs, and mental models for Result/Edition summaries.

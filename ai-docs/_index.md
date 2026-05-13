@@ -213,7 +213,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |
 | `260513-feat-human-readable-tool-output` | todo | Backlog human-readable defaults for remaining MCP and CLI workflow tool outputs |
 | `260513-feat-tolerant-doc-find-queries` | todo | Make specs and mental-model find queries tolerant candidate discovery |
-| `260513-feat-ticket-result-editions` | ready | Capture post-Result tweak loops through append-only ticket Result editions |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -224,7 +223,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260513-feat-ticket-result-editions` - add append-only Result editions for post-completion tweak loops.
 
 ## Session Notes
 

@@ -36,8 +36,8 @@ This epic covers:
 
 - `260513-feat-is-finished-yet-workflow-check` - done; added the frequent
   spoken question skill and the proceed ticket-refresh gate.
-- `260513-feat-ticket-result-editions` - let completed ticket Result sections
-  receive append-only edition entries during tweak loops.
+- `260513-feat-ticket-result-editions` - done; completed ticket Result
+  sections receive append-only edition entries during tweak loops.
 - `260513-feat-human-readable-tool-output` - backlog the remaining JSON-default
   cleanup for MCP and CLI workflow tools.
 
