@@ -10,7 +10,7 @@ Target: user request
 ## Invariants
 
 - Call `ws/convention.read(name: "spec-conventions")` before any spec write - conventions are canonical there.
-- All survey queries start with `ws/subquery(deep_research: true, question: <focused prompt>)`; clerk starts with `ws/subquery(deep_research: false, question: <self-contained clerk prompt>)`.
+- All survey queries start with `ws/subquery(deep_research: true, question: <focused prompt>)`; ticket-association checks use `ws/subquery(deep_research: false, question: <self-contained prompt>)`.
 - Archive step (`git mv ai-docs/spec/*`) requires explicit user confirmation before executing.
 - No spec entry is written without user confirmation of caller-visible status and implemented/planned classification.
 - Call `ws/spec_stem.generate(slug: "<descriptive-slug>")` before every anchor insertion.
@@ -203,7 +203,7 @@ confirmed list before writing anything.
 ### 6. Associate stems with tickets
 
 1. From the step 2 survey output, collect all tickets in `ready/` status relevant to this domain. If none, commit the spec file changes through `ws/git.commit` and skip to step 7.
-2. Dispatch clerk covering all collected tickets in a single call, store the returned `subquery_key`, then wait for it:
+2. Dispatch one ticket-association check covering all collected tickets, store the returned `subquery_key`, then wait for it:
 
 Call `ws/subquery(deep_research: false, question: <block below>)`:
 
@@ -226,7 +226,7 @@ For each ticket:
 4. Do not commit; caller owns git.
 ```
 
-3. Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, then review the `## Clerk report`. Resolve any open questions with the user before committing.
+3. Call `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, then review the returned ticket-association report. Resolve any open questions with the user before committing.
 4. Commit all domain changes in one commit: spec file + ticket association updates.
 
 ### 7. Complete domain
