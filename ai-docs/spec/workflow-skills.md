@@ -28,6 +28,7 @@ lead-edit
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
+lead-is-finished-yet
 lead-proceed
 lead-review
 lead-salvage
@@ -85,7 +86,7 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
-`lead-sprint`, `lead-verify-discussion`, `lead-forge-spec`,
+`lead-sprint`, `lead-verify-discussion`, `lead-is-finished-yet`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
@@ -186,7 +187,7 @@ corrected assumptions, observations, reuse opportunities, and code-hygiene
 findings, then steers the discussion toward the best-supported direction.
 {#260512-discussion-verification-skill}
 
-### 🚧 Is Finished Yet Checkpoint {#260513-is-finished-yet-skill}
+### Is Finished Yet Checkpoint {#260513-is-finished-yet-skill}
 
 `lead-is-finished-yet` gives users a frequent spoken checkpoint for deciding
 whether a design discussion is ready to proceed. It does not edit files. It
@@ -289,13 +290,12 @@ targets go through `lead-write-ticket`, whose ready gate creates missing spec
 coverage through `lead-write-spec` when possible; exploratory targets stop and
 suggest `lead-discuss`.
 
-> [!note] Planned 🚧
-> Warm discussion state with an existing related ticket will gain a ticket
-> freshness gate. Before implementation routing, `lead-proceed` will compare
-> the active conversation and ticket artifact only; when settled decisions are
-> missing from the ticket, it will route through `lead-write-ticket` edit,
-> re-read the refreshed ticket, and then continue slice selection.
-> {#260513-proceed-ticket-freshness-gate}
+Warm discussion state with an existing related ticket uses a ticket freshness
+gate. Before implementation routing, `lead-proceed` compares the active
+conversation and ticket artifact only; when settled decisions are missing from
+the ticket, it routes through `lead-write-ticket` edit, re-reads the refreshed
+ticket, and then continues slice selection.
+{#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected slice as
 a hard scope boundary. `lead-proceed` does not rejudge ticket quality, demand

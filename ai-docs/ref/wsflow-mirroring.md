@@ -33,6 +33,7 @@ Included:
 - `lead-write-ticket`
 - `lead-proceed`
 - `lead-implement`
+- `lead-is-finished-yet`
 - `lead-edit`
 - `lead-update-spec`
 - `lead-bootstrap`

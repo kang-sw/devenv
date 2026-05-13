@@ -16,7 +16,7 @@ Target: user request
 - Execution slice defaults to one unfinished phase; include multiple phases only by user request or inseparable verification.
 - Do not rejudge ticket quality, demand ticket splitting, or mutate ticket structure.
 - Always route code-editing work through `wsflow:lead-implement`.
-- Existing non-epic `ready/` ticket path skips `wsflow:lead-write-ticket`, then selects an implementation slice.
+- Existing non-epic `ready/` ticket path skips `wsflow:lead-write-ticket` unless the freshness gate fires, then selects an implementation slice.
 - Existing `todo/` ticket path invokes `wsflow:lead-write-ticket` for autonomous ready promotion before slice selection.
 - Epic ticket paths are board artifacts, never implementation targets; stop and route to child ticket creation, promotion, or proceed.
 - Actionable inline target invokes `wsflow:lead-write-ticket`, captures `Ticket:`, then re-checks status; `todo/` output must promote to `ready/` before implementation.
@@ -36,6 +36,7 @@ Target: user request
 4. If inline: assess from description only.
 5. Classify warmth from conversation state.
 6. Classify exploratory vs actionable for `judge: needs-ticket`.
+7. If a current or captured ticket exists and warmth is warm, apply `judge: ticket-freshness`.
 
 ### 2. Route
 
@@ -50,9 +51,12 @@ Target: user request
 7. If the current or captured ticket status is `todo/`, invoke `wsflow:lead-write-ticket` for `todo/` -> `ready/` promotion and append:
    `Chained from wsflow:lead-proceed - treat this as implementation intent; promote autonomously when only spec coverage, frontmatter, or queue updates are needed; escalate only unresolved design blockers.`
    Capture the moved ticket path.
-8. Use only non-epic `ready/` ticket paths downstream.
-9. Apply `judge: implementation-slice`.
-10. Build pipeline: `wsflow:lead-implement`.
+8. If `judge: ticket-freshness` found missing settled decisions, invoke `wsflow:lead-write-ticket` edit and append:
+   `Chained from wsflow:lead-proceed - refresh this ticket from active conversation context only; capture settled decisions, constraints, and rejected alternatives that are missing from the ticket; do not inspect source code, read broad documentation, rejudge decomposition, or plan implementation.`
+   Capture the refreshed ticket path.
+9. Use only non-epic `ready/` ticket paths downstream.
+10. Apply `judge: implementation-slice`.
+11. Build pipeline: `wsflow:lead-implement`.
 
 ### 3. Announce
 
@@ -107,6 +111,13 @@ Do not ask for confirmation; the user can interrupt.
 | First unfinished phase | Ready target has unfinished phases and the user did not request a broader slice |
 | User-requested phase range | User explicitly named phases to implement |
 | Inseparable phase range | Adjacent phases cannot be verified separately from ticket artifacts |
+
+### judge: ticket-freshness
+
+| Decision | When |
+|----------|------|
+| Refresh ticket | Active conversation since ticket capture settled decisions, constraints, rejected alternatives, or scope boundaries that are absent from the ticket |
+| Continue | The ticket already captures the active conversation's settled implementation intent, or the conversation only adds autonomous hygiene or implementation-detail work |
 
 ## Doctrine
 

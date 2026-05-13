@@ -156,6 +156,7 @@ lead-edit
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
+lead-is-finished-yet
 lead-proceed
 lead-review
 lead-salvage
