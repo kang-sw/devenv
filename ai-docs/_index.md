@@ -210,6 +210,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
+| `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |
