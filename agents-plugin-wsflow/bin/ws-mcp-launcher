@@ -1,0 +1,376 @@
+#!/bin/sh
+set -eu
+
+fail() {
+  printf 'ws-mcp-launcher: %s\n' "$*" >&2
+  exit 1
+}
+
+note() {
+  if [ "${WS_MCP_LAUNCHER_DEBUG:-}" = "1" ]; then
+    printf 'ws-mcp-launcher: %s\n' "$*" >&2
+  fi
+}
+
+json_string_value() {
+  key=$1
+  sed -n 's/^[[:space:]]*"'$key'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$runtime_contract" | sed -n '1p'
+}
+
+runtime_tools() {
+  sed -n '/^[[:space:]]*"tools"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}/p' "$runtime_contract" |
+    sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*:.*/\1/p' |
+    sed '/^tools$/d'
+}
+
+runtime_commands() {
+  sed -n '/^[[:space:]]*"commands"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}/p' "$runtime_contract" |
+    sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*:.*/\1/p' |
+    sed '/^commands$/d'
+}
+
+runtime_prompt_bundle_sha256() {
+  sed -n '/^[[:space:]]*"prompt_bundle"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}/p' "$runtime_contract" |
+    sed -n 's/^[[:space:]]*"content_sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+    sed -n '1p'
+}
+
+resolve_link() {
+  target=$1
+  while [ -L "$target" ]; do
+    dir=$(CDPATH= cd -- "$(dirname -- "$target")" && pwd -P)
+    link=$(readlink "$target")
+    case "$link" in
+      /*) target=$link ;;
+      *) target=$dir/$link ;;
+    esac
+  done
+  printf '%s\n' "$target"
+}
+
+launcher_path=$(resolve_link "$0")
+launcher_dir=$(CDPATH= cd -- "$(dirname -- "$launcher_path")" && pwd -P)
+plugin_dir=$(CDPATH= cd -- "$launcher_dir/.." && pwd -P)
+runtime_contract=$plugin_dir/runtime.json
+
+[ -f "$runtime_contract" ] || fail "missing runtime contract: $runtime_contract"
+
+os=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m 2>/dev/null)
+case "$os" in
+  darwin) os=darwin ;;
+  linux) os=linux ;;
+  msys*|mingw*|cygwin*) os=windows ;;
+  *) fail "unsupported operating system: $os" ;;
+esac
+
+case "$arch" in
+  arm64|aarch64) arch=arm64 ;;
+  x86_64|amd64) arch=amd64 ;;
+  *) fail "unsupported architecture: $arch" ;;
+esac
+
+platform=$os-$arch
+runtime_dir=${WS_MCP_RUNTIME_DIR:-"$plugin_dir/.runtime/$platform"}
+binary_name=ws-mcp
+[ "$os" = "windows" ] && binary_name=ws-mcp.exe
+binary=$runtime_dir/$binary_name
+asset=ws-mcp-$platform
+[ "$os" = "windows" ] && asset=$asset.exe
+
+release_repository=${WS_MCP_RELEASE_REPOSITORY:-$(json_string_value release_repository)}
+release_tag=${WS_MCP_RELEASE_TAG:-$(json_string_value release_tag)}
+release_base_url=${WS_MCP_RELEASE_BASE_URL:-}
+if [ -z "$release_base_url" ] && [ -n "$release_repository" ] && [ -n "$release_tag" ]; then
+  release_base_url=https://github.com/$release_repository/releases/download/$release_tag
+fi
+
+mkdir -p "$runtime_dir"
+
+version_compatible() {
+  case "$1" in
+    0.25.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+sha256_file() {
+  file=$1
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+tools_compatible() {
+  compat_cache=$(mktemp -d "${TMPDIR:-/tmp}/ws-mcp-compat.XXXXXX" 2>/dev/null || printf '%s\n' "$runtime_dir/.compat-$$")
+  compat_root=$compat_cache/root
+  mkdir -p "$compat_root"
+  git -C "$compat_root" init >/dev/null 2>&1 || {
+    rm -rf "$compat_cache"
+    return 1
+  }
+  output=$(
+    printf '%s\n' \
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+      '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
+      WS_CACHE_HOME="$compat_cache" \
+      WS_MCP_TOOL_PROFILE=lead \
+      WS_MCP_ALLOWED_TOOLS= \
+      "$binary" serve --stdio --root "$compat_root" 2>/dev/null || true
+  )
+  rm -rf "$compat_cache"
+  [ -n "$output" ] || return 1
+  for tool in $(runtime_tools); do
+    case "$output" in
+      *"\"name\":\"$tool\""*) ;;
+      *) note "runtime missing required MCP tool: $tool"; return 1 ;;
+    esac
+  done
+  return 0
+}
+
+commands_compatible() {
+  for command in $(runtime_commands); do
+    case "$command" in
+      *.*.*)
+        group=${command%%.*}
+        rest=${command#*.}
+        parent=${rest%.*}
+        subcommand=${rest##*.}
+        output=$("$binary" "$group" "$parent" 2>&1 || true)
+        [ -n "$output" ] || return 1
+        case "$output" in
+          *"$subcommand"*) ;;
+          *) note "runtime missing required CLI command: $command"; return 1 ;;
+        esac
+        ;;
+      *.*)
+        group=${command%%.*}
+        subcommand=${command#*.}
+        output=$("$binary" "$group" 2>&1 || true)
+        [ -n "$output" ] || return 1
+        case "$output" in
+          *"$subcommand"*) ;;
+          *) note "runtime missing required CLI command: $command"; return 1 ;;
+        esac
+        ;;
+      *)
+        output=$("$binary" 2>&1 || true)
+        [ -n "$output" ] || return 1
+        case "$output" in
+          *"$command"*) ;;
+          *) note "runtime missing required CLI command: $command"; return 1 ;;
+        esac
+        ;;
+    esac
+  done
+  return 0
+}
+
+prompt_bundle_compatible() {
+  expected=$(runtime_prompt_bundle_sha256)
+  [ -n "$expected" ] || return 0
+  output=$("$binary" runtime info 2>/dev/null || true)
+  [ -n "$output" ] || return 1
+  case "$output" in
+    *"\"content_sha256\":\"$expected\""*) return 0 ;;
+    *) note "runtime prompt bundle hash mismatch"; return 1 ;;
+  esac
+}
+
+parent_env_value() {
+  key=$1
+  if [ -r "/proc/$PPID/environ" ]; then
+    tr '\000' '\n' < "/proc/$PPID/environ" |
+      sed -n 's/^'"$key"'=//p' |
+      sed -n '1p'
+    return 0
+  fi
+  if command -v ps >/dev/null 2>&1; then
+    ps eww -p "$PPID" 2>/dev/null |
+      tr ' ' '\n' |
+      sed -n 's/^'"$key"'=//p' |
+      sed -n '1p'
+  fi
+}
+
+detect_project_root() {
+  [ -z "${WS_MCP_PROJECT_ROOT:-}" ] || return 0
+
+  for candidate in \
+    "$(parent_env_value PWD)" \
+    "$(parent_env_value OLDPWD)" \
+    "${OLDPWD:-}" \
+    "$(pwd -P)"
+  do
+    [ -n "$candidate" ] || continue
+    root=$(git -C "$candidate" rev-parse --show-toplevel 2>/dev/null || true)
+    [ -n "$root" ] || continue
+    root=$(CDPATH= cd -- "$root" && pwd -P)
+    case "$root" in
+      "$plugin_dir"|"$plugin_dir"/*) continue ;;
+    esac
+    WS_MCP_PROJECT_ROOT=$root
+    export WS_MCP_PROJECT_ROOT
+    note "detected project root: $WS_MCP_PROJECT_ROOT"
+    return 0
+  done
+  return 0
+}
+
+download_runtime() {
+  [ -n "$release_base_url" ] || fail "missing runtime binary for $platform; set WS_MCP_BOOTSTRAP_BINARY, WS_MCP_BOOTSTRAP_URL, or release_repository/release_tag in runtime.json"
+  command -v curl >/dev/null 2>&1 || fail "curl is required to download $release_base_url/$asset"
+
+  tmp=$runtime_dir/$binary_name.download
+  sums_tmp=$runtime_dir/SHA256SUMS.download
+  rm -f "$tmp" "$sums_tmp"
+
+  curl -fsSL "$release_base_url/$asset" -o "$tmp" || fail "failed to download $release_base_url/$asset"
+  curl -fsSL "$release_base_url/SHA256SUMS" -o "$sums_tmp" || fail "failed to download $release_base_url/SHA256SUMS"
+
+  expected=$(awk -v asset="$asset" '$2 == asset {print $1}' "$sums_tmp" | sed -n '1p')
+  [ -n "$expected" ] || fail "missing checksum entry for $asset"
+  actual=$(sha256_file "$tmp") || fail "shasum or sha256sum is required to verify downloaded ws-mcp"
+  [ "$actual" = "$expected" ] || fail "checksum mismatch for downloaded $asset"
+
+  mv "$tmp" "$binary"
+  chmod 755 "$binary"
+  rm -f "$sums_tmp"
+  note "downloaded runtime binary into $binary"
+}
+
+install_local_devenv_runtime() {
+  case "$plugin_dir" in
+    "$HOME"/.codex/plugins/cache/kang-sw-devenv/ws/*) ;;
+    *) return 1 ;;
+  esac
+  [ -f "$plugin_dir/.local-devenv-runtime" ] || return 1
+  [ "$os" != "windows" ] || return 1
+  tmp=$runtime_dir/$binary_name.local
+
+  validate_tmp_runtime() {
+    old_binary=$binary
+    binary=$tmp
+    if version_compatible "$("$binary" version 2>/dev/null || true)" && tools_compatible && commands_compatible && prompt_bundle_compatible; then
+      binary=$old_binary
+      return 0
+    fi
+    binary=$old_binary
+    return 1
+  }
+
+  for candidate in \
+    "$HOME/devenv/agents-plugin-tool/dist/$asset" \
+    "$HOME/devenv/agents-plugin/.runtime/$platform/$binary_name"
+  do
+    if [ -x "$candidate" ]; then
+      cp "$candidate" "$tmp"
+      chmod 755 "$tmp"
+      if validate_tmp_runtime; then
+        mv "$tmp" "$binary"
+        chmod 755 "$binary"
+        note "installed local devenv runtime from $candidate"
+        return 0
+      fi
+      note "local devenv runtime candidate is incompatible: $candidate"
+      rm -f "$tmp"
+    fi
+  done
+  if [ -d "$HOME/devenv/agents-plugin-tool" ] && command -v go >/dev/null 2>&1; then
+    (
+      cd "$HOME/devenv/agents-plugin-tool"
+      go build -o "$tmp" ./cmd/ws-mcp
+    ) || return 1
+    chmod 755 "$tmp"
+    if validate_tmp_runtime; then
+      mv "$tmp" "$binary"
+      chmod 755 "$binary"
+      note "built local devenv runtime from $HOME/devenv/agents-plugin-tool"
+      return 0
+    fi
+    note "local devenv build produced incompatible runtime"
+    rm -f "$tmp"
+  fi
+  return 1
+}
+
+install_runtime() {
+  if [ -n "${WS_MCP_BOOTSTRAP_BINARY:-}" ]; then
+    [ -f "$WS_MCP_BOOTSTRAP_BINARY" ] || fail "bootstrap binary not found: $WS_MCP_BOOTSTRAP_BINARY"
+    cp "$WS_MCP_BOOTSTRAP_BINARY" "$binary"
+    chmod 755 "$binary"
+    note "installed bootstrap binary into $binary"
+  elif [ -n "${WS_MCP_BOOTSTRAP_URL:-}" ]; then
+    tmp=$runtime_dir/$binary_name.download
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$WS_MCP_BOOTSTRAP_URL" -o "$tmp" || fail "failed to download $WS_MCP_BOOTSTRAP_URL"
+    else
+      fail "curl is required to download $WS_MCP_BOOTSTRAP_URL"
+    fi
+    if [ -n "${WS_MCP_BOOTSTRAP_SHA256:-}" ]; then
+      actual=$(sha256_file "$tmp") || fail "shasum or sha256sum is required to verify downloaded ws-mcp"
+      [ "$actual" = "$WS_MCP_BOOTSTRAP_SHA256" ] || fail "checksum mismatch for downloaded ws-mcp"
+    fi
+    mv "$tmp" "$binary"
+    chmod 755 "$binary"
+    note "downloaded runtime binary into $binary"
+  elif install_local_devenv_runtime; then
+    :
+  else
+    download_runtime
+  fi
+}
+
+if [ ! -x "$binary" ]; then
+  install_runtime
+fi
+
+detect_project_root
+
+version=$("$binary" version 2>/dev/null || true)
+if ! version_compatible "$version"; then
+  note "replacing incompatible runtime version: ${version:-unknown}"
+  install_runtime
+  version=$("$binary" version 2>/dev/null || true)
+  version_compatible "$version" || fail "incompatible ws-mcp version after repair: ${version:-unknown}"
+fi
+
+if ! tools_compatible; then
+  note "replacing runtime with incompatible MCP tool surface"
+  install_runtime
+  version=$("$binary" version 2>/dev/null || true)
+  version_compatible "$version" || fail "incompatible ws-mcp version after tool-surface repair: ${version:-unknown}"
+  tools_compatible || fail "incompatible ws-mcp tool surface after repair"
+fi
+
+if ! commands_compatible; then
+  note "replacing runtime with incompatible CLI command surface"
+  install_runtime
+  version=$("$binary" version 2>/dev/null || true)
+  version_compatible "$version" || fail "incompatible ws-mcp version after command-surface repair: ${version:-unknown}"
+  tools_compatible || fail "incompatible ws-mcp tool surface after command-surface repair"
+  commands_compatible || fail "incompatible ws-mcp command surface after repair"
+fi
+
+if ! prompt_bundle_compatible; then
+  note "replacing runtime with incompatible prompt bundle"
+  install_runtime
+  version=$("$binary" version 2>/dev/null || true)
+  version_compatible "$version" || fail "incompatible ws-mcp version after prompt-bundle repair: ${version:-unknown}"
+  tools_compatible || fail "incompatible ws-mcp tool surface after prompt-bundle repair"
+  commands_compatible || fail "incompatible ws-mcp command surface after prompt-bundle repair"
+  prompt_bundle_compatible || fail "incompatible ws-mcp prompt bundle after repair"
+fi
+
+note "plugin_dir=$plugin_dir"
+note "runtime_dir=$runtime_dir"
+note "cwd=$(pwd -P)"
+note "project_root=${WS_MCP_PROJECT_ROOT:-}"
+
+export WS_MCP_RUNTIME_BINARY="$binary"
+exec "$binary" "$@"

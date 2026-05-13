@@ -1,0 +1,32 @@
+{
+  "name": "wsflow",
+  "version": "0.25.2",
+  "description": "Agentless workflow plugin for project context, tickets, specs, docs, and Git tools.",
+  "author": {
+    "name": "kang-sw"
+  },
+  "repository": "https://github.com/kang-sw/devenv",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "skills",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "wsflow",
+    "shortDescription": "Agentless workflow skills",
+    "longDescription": "A workflow plugin for project context, tickets, specs, docs, and Git tools without managed named-agent orchestration.",
+    "developerName": "kang-sw",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use $wsflow:lead-discuss to explore workflow direction before implementation.",
+      "Use $wsflow:lead-proceed to start from a ready ticket or actionable task."
+    ]
+  }
+}

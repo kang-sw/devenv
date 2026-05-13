@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "wsflow": {
+      "command": "python3",
+      "cwd": ".",
+      "args": ["./bin/ws-mcp-launcher.py", "serve", "--stdio"],
+      "env": {
+        "WS_MCP_NO_AGENT": "1",
+        "WS_MCP_NAMESPACE": "wsflow",
+        "WS_MCP_SETUP_TOOL": "setup"
+      },
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 600
+    }
+  }
+}
