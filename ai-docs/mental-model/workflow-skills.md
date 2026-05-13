@@ -15,7 +15,7 @@ related:
 ## Entry Points
 
 - `agents-plugin/skills/lead-*` is the Codex-facing workflow surface and uses `ws:` skill names plus `ws/<tool>` MCP notation. {#260505-lead-skill-namespace-surface}
-- `agents-plugin-wsflow/skills/lead-*` is the curated agentless derivative surface and uses `wsflow:` skill names plus `wsflow/<tool>` MCP notation. {#260513-wsflow-agentless-skill-surface}
+- `agents-plugin-wsflow/skills/lead-*` is the curated derivative surface and uses `wsflow:` skill names plus `wsflow/<tool>` MCP notation. {#260513-wsflow-agentless-skill-surface}
 - `lead-workflow-manual` is the notation and primitive boundary reference for shared skill text. {#260505-workflow-primitive-reference}
 
 ## Module Contracts
@@ -42,16 +42,17 @@ related:
 - `lead-salvage` is the reverse workflow for premise-collapse recovery: freeze evidence, survey blast radius through agents, confirm invalidated premises with the user, then capture a research report plus recovery epic or child tickets. {#260510-salvage-recovery-workflow-skill}
 - `lead-write-skeleton` makes the lead write low-resolution source drafts with language-neutral `CONTRACT:`, `HINT:`, and `HOLE:` comment markers; `skeleton-populator` turns those drafts into compile-clean stubs, and `skeleton-reviewer` checks them through a one-reviewer, one-amendment lightweight loop. The flow leaves a draft checkpoint commit plus a final populated skeleton commit on the current branch. {#260510-skeleton-contract-populator-flow}
 - `lead-bootstrap` has two template contracts: root context and `WORKFLOW.md`. Fresh and upgrade paths must install or preserve `ai-docs/WORKFLOW.md` as a plugin-less maintenance guide, but the guide cannot redefine ws runtime, MCP parser, or bundled convention semantics. {#260506-bootstrap-workflow-guide}
+- `lead-bootstrap` is mirrored between ws and wsflow, but downstream template version histories are package-local; wsflow starts its bootstrap baseline at `v0001` and does not replay the full ws migration backlog. {#260513-wsflow-agentless-skill-surface}
 - Orchestration-heavy skills load `lead-workflow-manual` when primitive context is not already active; skipping it causes notation drift and wrong agent-call forms. {#260505-workflow-primitive-reference}
 - Implementation skills honor existing skeleton artifacts but do not require missing skeletons; `lead-implement` owns optional skeleton execution before implementation edits. {#260505-implementation-workflow-skills}
 - `lead-edit` and `lead-write-code` are code-and-review primitives; `lead-implement` and `lead-sprint` own documentation pipeline timing. {#260505-implementation-workflow-skills}
 - `lead-write-code` uses brief-bounded implementation and file-based reviewer output; reviewer allocation is risk-scoped, reviewers return summaries, and implementers read finding files directly. {#260505-implementation-workflow-skills}
 - Sprint defers doc pipeline until wrap-up; per-task doc updates inside sprint create partial checkpoints that confuse wrap-up. {#260505-sprint-session-container}
-- wsflow includes sprint as an agentless branch container but keeps implementation lead-owned through `lead-implement` or `lead-sprint` -> `lead-edit`; review, forge surveys, and sprint surveys use host-native one-shot read-only subagents only when available. {#260513-wsflow-agentless-skill-surface} {#260513-wsflow-sprint-skill}
+- wsflow includes sprint as a branch container and routes source changes through `lead-edit`; scoped subagents may help exploration, implementation, verification, audit, or review while the lead keeps integration, final judgment, and commits explicit. {#260513-wsflow-agentless-skill-surface} {#260513-wsflow-sprint-skill}
 - `lead-review` loads `ai-docs/_review.local.md` for all environment-specific configuration (remote, phases, comment/merge/notification methods); when absent, it interviews the user and writes the config before the first review runs. {#260513-review-workflow-skill}
 - `lead-review` routes NEEDS FIX local-fix through `lead-discuss` with findings as context; re-review after fix is user-discretion, not automatic re-entry. {#260513-review-workflow-skill}
 - `lead-review` judge `follows-ws-workflow` auto-detects conventional commits and `## AI Context`; PARTIAL (some commits qualify) counts as NO (conservative); the `## Contributor Workflow` config setting can force YES or NO. {#260513-review-workflow-skill}
-- `lead-review` judge `is-large-diff` spawns host-native subagents for parallel alignment and risk phases when diff exceeds the configured threshold; both depth judges are independent and combinable. {#260513-review-workflow-skill}
+- `lead-review` judge `is-large-diff` uses subagents for parallel alignment and risk phases when diff exceeds the configured threshold; both depth judges are independent and combinable. {#260513-review-workflow-skill}
 
 ## Coupling
 
@@ -61,6 +62,7 @@ related:
 - Moving updater dispatch into `lead-edit` or `lead-write-code` can double-run `lead-implement` documentation updates or break sprint batching.
 - `lead-salvage` routes ticket writes through `lead-write-ticket`; direct ticket graph mutation inside salvage would bypass ticket conventions and commit handling.
 - Bootstrap guide semantics stay host-neutral; root `CLAUDE.md` only delegates to `AGENTS.md`.
+- Bootstrap template changes must check both ws and wsflow packages; matching behavior may use different template version numbers because each package owns its own downstream lineage.
 
 ## Extension Points & Change Recipes
 
@@ -68,6 +70,7 @@ related:
 - **Add a config-first review skill variant**: follow `lead-review` pattern — machine-local `ai-docs/_review.local.md` captures environment judgment, setup interview fires only when config is absent, judges gate subagent depth rather than hard-coding it.
 - **Change a full workflow skill included in wsflow**: update the corresponding `agents-plugin-wsflow/skills/lead-<name>/` surface in the same logical change or record a follow-up ticket; wsflow is curated, not text-identical.
 - **Change a full workflow skill excluded from wsflow**: check `ai-docs/ref/wsflow-mirroring.md` and update wsflow docs, workflow manual text, or exclusion rationale if the excluded skill's meaning changed.
+- **Change bootstrap baseline behavior**: update both `lead-bootstrap` packages when applicable, but bump each package's `AGENTS.template.md` version only inside that package's own lineage.
 - **Add a delegate prompt to a workflow**: register by embedded stem through `ws/agents.register`, use portable `model` aliases for default selection, and omit `prompts` only for general-purpose delegates. Update runtime prompt bundle metadata and keep reviewer/implementer context boundaries explicit. {#260505-workflow-delegate-prompt-boundaries}
 
 ## Common Mistakes
@@ -76,5 +79,5 @@ related:
 - Skipping `lead-workflow-manual` before executing or editing orchestration-heavy skills, which causes notation drift back to Claude shell helpers.
 - Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
-- Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve the workflow intent while removing managed named-agent, subquery, skeleton, recovery, and upstream authoring surfaces.
+- Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve workflow intent while using wsflow notation, scoped subagent guidance, and the curated skill inventory.
 - Relaying reviewer file contents instead of file paths, which breaks the write-code review protocol and inflates lead context.

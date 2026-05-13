@@ -76,7 +76,7 @@ selection and concrete provider names such as `gpt-5.5` or
 remains documented only as deprecated compatibility input.
 {#260508-workflow-model-alias-guidance}
 
-## wsflow Agentless Skill Surface {#260513-wsflow-agentless-skill-surface}
+## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
 
 The wsflow distribution ships a curated subset of lead workflow skills
 under `wsflow:lead-*` invocation names and `wsflow/<tool>` MCP notation.
@@ -89,19 +89,17 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
-preserves deferred documentation wrap-up without exposing managed named-agent,
-subquery, write-code, or skeleton orchestration. Sprint task execution remains
-lead-owned and routes through wsflow direct-edit workflow when source changes
-are needed. {#260513-wsflow-sprint-skill}
+preserves deferred documentation wrap-up and routes source changes through the
+wsflow edit workflow. `lead-edit` may use direct edits or scoped subagent
+implementation while the sprint wrap-up keeps documentation integration,
+verification, and commit ownership explicit. {#260513-wsflow-sprint-skill}
 
-The wsflow package excludes persistent implementation relays, skeleton flows,
+The wsflow package excludes full ws implementation relays, skeleton flows,
 recovery orchestration, and upstream authoring helper skills:
 `lead-write-code`, `lead-write-skeleton`, `lead-salvage`, and
-`lead-skill-authoring`. wsflow skill text does not instruct callers to use
-managed named-agent or subquery tools. Where broad investigation, verification,
-audit, or review is useful, wsflow guidance uses host-native one-shot subagents
-when available, with the lead retaining ownership of edits, docs, tickets,
-specs, mental-model updates, and commits.
+`lead-skill-authoring`. wsflow skill text uses scoped subagent guidance for
+exploration, implementation, verification, audit, or review and keeps lead
+responsibility focused on integration, verification, final judgment, and commits.
 
 wsflow skills are curated semantic rewrites, not generated copies. A change to
 a full `agents-plugin/skills/lead-*` skill that is shipped in wsflow must either
@@ -109,7 +107,7 @@ update the corresponding wsflow skill in the same logical change or leave an
 explicit follow-up ticket. A change to a full skill excluded from wsflow must
 still check whether the wsflow workflow manual, exclusion rationale, or static
 verification rules drifted. The wsflow skill-bundle verification path checks
-inventory and forbidden managed-agent references, but it does not require text
+inventory and forbidden full ws agent references, but it does not require text
 identity with the full ws skill.
 
 wsflow bootstrap uses package-local template version history. Its downstream
@@ -328,10 +326,10 @@ or NEEDS FIX.
 
 `lead-review` scales review depth automatically. When commits lack `## AI
 Context` and conventional commit format (`judge: follows-ws-workflow` does not
-fire), a host-native one-shot subagent infers intention before phases run. When
-diff size exceeds the configured threshold (`judge: is-large-diff`), host-native
-subagents run alignment and risk phases in parallel. The contributor workflow
-setting can force or suppress the subagent inference step.
+fire), subagent analysis infers intention before phases run. When diff size
+exceeds the configured threshold (`judge: is-large-diff`), subagents run
+alignment and risk phases in parallel. The contributor workflow setting can
+force or suppress the subagent inference step.
 {#260513-review-workflow-skill}
 
 ## Workflow Reconstruction Skills {#260505-workflow-reconstruction-skills}
