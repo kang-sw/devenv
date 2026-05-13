@@ -8,6 +8,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - plugin-runtime
+completed: 2026-05-13
 ---
 
 # wsflow sprint skill
@@ -68,3 +69,21 @@ Acceptance criteria:
   continue to reject forbidden managed-agent surfaces.
 - The workflow-skills spec and workflow-skills mental model describe wsflow
   sprint as included behavior.
+
+### Result (792595f) - 2026-05-13
+
+Added `agents-plugin-wsflow/skills/lead-sprint/SKILL.md` as an agentless
+sprint-branch session container. The skill creates or continues `sprint/`
+branches, routes source changes through `wsflow:lead-edit`, defers
+documentation until wrap-up, and keeps spec, mental-model, ticket, index,
+merge, and cleanup mutations lead-owned.
+
+Updated the wsflow skill-bundle test inventory, workflow-skills spec,
+workflow-skills mental model, and `ai-docs/ref/wsflow-mirroring.md` so
+`lead-sprint` is treated as an included wsflow skill while `lead-write-code`,
+`lead-write-skeleton`, `lead-salvage`, and `lead-skill-authoring` remain
+excluded.
+
+Verified `python3 -m unittest discover agents-plugin-wsflow/tests`,
+`claude plugin validate agents-plugin-wsflow`, forbidden-pattern scanning over
+`agents-plugin-wsflow/skills`, and `ws/spec_index.verify`.

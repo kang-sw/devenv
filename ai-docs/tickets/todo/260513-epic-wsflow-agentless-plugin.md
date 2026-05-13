@@ -51,7 +51,7 @@ guidance, and ordinary runtime output should speak in wsflow terms.
   regression coverage.
 - `260513-feat-wsflow-agentless-plugin-scaffold` - done package scaffold,
   runtime contract, skill normalization, documentation, and drift guards.
-- `260513-feat-wsflow-sprint-skill` - ready wsflow `lead-sprint` inclusion as
+- `260513-feat-wsflow-sprint-skill` - done wsflow `lead-sprint` inclusion as
   a midstream preference change after the initial scaffold intentionally
   excluded persistent multi-turn orchestration skills.
 - Planned: installer, marketplace, and release verification slice after the
