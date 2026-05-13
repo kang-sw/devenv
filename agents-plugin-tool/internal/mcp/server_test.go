@@ -708,6 +708,34 @@ func TestServeStdioFiltersToolsByProfile(t *testing.T) {
 	}
 }
 
+func TestServeStdioDelegateProfileRejectsSetupMutation(t *testing.T) {
+	t.Setenv("WS_MCP_ALLOWED_TOOLS", "")
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_MCP_TOOL_PROFILE", "delegate")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.setup","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.info","arguments":{}}}`,
+	}, "\n")
+
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if strings.Contains(byID["1"], "ws.setup") {
+		t.Fatalf("delegate tools/list exposed setup mutation tool: %s", byID["1"])
+	}
+	if !strings.Contains(byID["2"], "tool not available") {
+		t.Fatalf("delegate tools/call did not reject ws.setup: %s", byID["2"])
+	}
+	if !strings.Contains(byID["3"], "prompt_bundle") {
+		t.Fatalf("delegate tools/call rejected runtime.info: %s", byID["3"])
+	}
+}
+
 func TestExplicitAllowedToolsCannotBypassEffectiveRole(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
