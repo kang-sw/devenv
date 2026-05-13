@@ -4,6 +4,7 @@ parent: 260513-epic-hbsflow-agentless-plugin
 related:
   260513-feat-hbsflow-agentless-plugin-scaffold: provides the shared runtime mode required before packaging hbsflow
   260429-research-host-neutral-ws-plugin: host-neutral plugin architecture anchor
+completed: 2026-05-13
 spec:
   - 260513-hbsflow-agentless-runtime-mode
   - 260513-hbsflow-runtime-contract-mode
@@ -109,3 +110,18 @@ Acceptance criteria:
 - With hbsflow/no-agent environment active, ordinary user-facing runtime text
   does not present hbsflow as a ws variant or instruct users to call ws-named
   tools.
+
+### Result (6499533) - 2026-05-13
+
+Implemented environment-driven hbsflow no-agent runtime mode in the shared
+`ws-mcp` runtime. The default full ws surface remains unchanged when the new
+environment variables are unset. With `WS_MCP_NO_AGENT=1`, MCP tools/list,
+explicit tool dispatch, runtime capabilities, and CLI command gates hide or
+disable named-agent, subquery, agent-tier configuration, and agent-backed API
+documentation surfaces while keeping `api.list` visible. `WS_MCP_NAMESPACE`
+drives user-facing namespace text, and `WS_MCP_SETUP_TOOL=setup` advertises and
+dispatches the setup alias while preserving `ws.setup` compatibility.
+
+Verification covered `go test ./...`, default and no-agent runtime capability
+probes, disabled CLI command errors, and a no-agent stdio MCP tools/list plus
+hidden-tool call smoke.

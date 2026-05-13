@@ -48,13 +48,13 @@ The launcher and release checks use this metadata as the caller-visible
 compatibility contract. A runtime is considered stale when it cannot satisfy the
 declared version range, tool list, command list, or prompt bundle hash.
 
-## 🚧 hbsflow Runtime Contract Mode {#260513-hbsflow-runtime-contract-mode}
+## hbsflow Runtime Contract Mode {#260513-hbsflow-runtime-contract-mode}
 
-The shared runtime contract will support validating a reduced hbsflow surface.
-When hbsflow starts the shared launcher with `WS_MCP_NO_AGENT=1`,
-`WS_MCP_NAMESPACE=hbsflow`, and `WS_MCP_SETUP_TOOL=setup`, runtime capability
-checks compare against the agentless tool and command list rather than the full
-ws contract.
+The shared runtime capability probe supports validating a reduced hbsflow
+surface. When hbsflow starts the shared launcher with `WS_MCP_NO_AGENT=1`,
+`WS_MCP_NAMESPACE=hbsflow`, and `WS_MCP_SETUP_TOOL=setup`,
+`runtime capabilities` reports the agentless tool and command list rather than
+the full ws contract.
 
 Unset environment variables preserve the full ws contract. hbsflow contract
 validation does not treat tool profiles as product modes; profile filters remain
