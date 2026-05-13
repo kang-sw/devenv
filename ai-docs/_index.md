@@ -12,8 +12,8 @@ packaging, helper commands, MCP tooling, and dev-environment templates. Specs,
 tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
-Active plugin package: `agents-plugin/` (`ws@0.26.0`).
-Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.26.0`).
+Active plugin package: `agents-plugin/` (`ws@0.26.1`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.26.1`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Retired Claude source material: `ai-docs/ref/claude-home-legacy.md` and git
 history.

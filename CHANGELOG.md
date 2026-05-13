@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.26.1 - 2026-05-13
+
+### Fixed
+- Expose `wsflow` through the repository Claude marketplace metadata for manual
+  installation and include both Codex and Claude marketplace package lists in
+  release validation.
+
 ## v0.26.0 - 2026-05-13
 
 ### Added
