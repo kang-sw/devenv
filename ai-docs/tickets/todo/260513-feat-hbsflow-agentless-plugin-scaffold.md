@@ -2,6 +2,7 @@
 title: hbsflow agentless plugin scaffold
 parent: 260513-epic-hbsflow-agentless-plugin
 related:
+  260513-feat-hbsflow-agentless-runtime-mode: prerequisite shared runtime mode
   260429-research-host-neutral-ws-plugin: host-neutral plugin architecture anchor
 related-mental-model:
   - plugin-runtime
@@ -34,7 +35,7 @@ constraints in the existing specs.
   user-facing MCP notation stem.
 - Reuse the same `ws-mcp` binary and launcher rather than building a separate
   runtime.
-- Add environment-driven runtime behavior for hbsflow:
+- Depend on the shared runtime mode that supports:
   `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=hbsflow`, and
   `WS_MCP_SETUP_TOOL=setup`.
 - Keep actual MCP tool names stable where they are already generic, such as
@@ -49,9 +50,10 @@ constraints in the existing specs.
 
 ## Constraints
 
-- Do not expose `agents.*`, `subquery`, agent debug tools, agent CLI commands,
-  agent prompt requirements, or follow-up text that tells users to call ws
-  named-agent tools when `WS_MCP_NO_AGENT=1` is active.
+- Do not expose `agents.*`, `subquery`, `config.agents_tier`, agent-backed API
+  ask tools, agent debug tools, agent CLI commands, agent prompt requirements,
+  or follow-up text that tells users to call ws named-agent tools when
+  `WS_MCP_NO_AGENT=1` is active.
 - Do not use `WS_MCP_TOOL_PROFILE=leaf` as the product mechanism. Tool profiles
   are containment filters; hbsflow needs a distribution contract.
 - Runtime compatibility checks must compare against the hbsflow tool and command
@@ -65,13 +67,6 @@ constraints in the existing specs.
 
 ## Open Questions
 
-- `api.ask` and API async jobs currently use the named-agent runtime internally.
-  Decide whether hbsflow disables API documentation tools under
-  `WS_MCP_NO_AGENT=1` or keeps a reduced API-doc path that does not depend on
-  ws named-agent workers.
-- Decide whether `WS_MCP_SETUP_TOOL=setup` should be an explicit env var or a
-  derived default when `WS_MCP_NAMESPACE` is not `ws`. The current preference is
-  explicit env for easier test diagnostics.
 - Decide how much of the current full workflow skill set belongs in hbsflow
   after agent/subquery steps are removed. Some orchestration-heavy skills may
   need native-agent wording or may be omitted from the first package.
@@ -104,31 +99,26 @@ Acceptance criteria:
   surface.
 - Launcher capability validation can distinguish full ws and hbsflow contracts.
 
-### Phase 2: Runtime no-agent and namespace behavior
+### Phase 2: Package runtime contract integration
 
-Add runtime support for the hbsflow env contract while preserving the full ws
-default behavior.
+Wire the hbsflow package to the runtime mode delivered by
+`260513-feat-hbsflow-agentless-runtime-mode`.
 
 Suggested approach:
 
-- Gate MCP `tools/list`, `tools/call`, and `runtime.capabilities` with
-  `WS_MCP_NO_AGENT=1`.
-- Return a clear disabled error for hidden agent/subquery calls instead of
-  accidentally dispatching to `wsagent`.
-- Gate CLI `agents` and `subquery` commands under no-agent mode.
-- Update follow-up strings, setup guidance, and relevant descriptions through
-  the namespace value exposed by `WS_MCP_NAMESPACE`.
-- Advertise `setup` instead of `ws.setup` when `WS_MCP_SETUP_TOOL=setup`, while
-  deciding whether `ws.setup` remains hidden compatibility dispatch.
+- Verify hbsflow `runtime.json` matches no-agent `runtime.capabilities`.
+- Keep `api.list` if the runtime mode exposes it as read-only cache discovery.
+- Exclude `api.ask`, `api.ask_async`, `api.status`, `api.result`, and
+  `api.cancel` from the hbsflow runtime contract.
+- Keep the setup tool name aligned with `WS_MCP_SETUP_TOOL=setup`.
 
 Acceptance criteria:
 
-- Full ws still advertises the existing full tool surface.
-- hbsflow mode does not advertise or accept ordinary agent/subquery surfaces.
-- hbsflow mode reports a runtime capability surface compatible with hbsflow
-  `runtime.json`.
-- User-facing guidance and error text use `hbsflow` notation where the namespace
-  matters.
+- hbsflow package validation compares against the no-agent runtime surface, not
+  the full ws runtime surface.
+- hbsflow `runtime.json` excludes agent-backed tools and commands while keeping
+  non-agent workflow tools.
+- hbsflow startup does not require or advertise ws named-agent capabilities.
 
 ### Phase 3: hbsflow skill normalization
 

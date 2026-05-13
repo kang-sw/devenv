@@ -41,9 +41,11 @@ offers them, and direct local investigation when it does not.
 
 ## Child Tickets
 
-- `260513-feat-hbsflow-agentless-plugin-scaffold` - first implementation slice
-  for the package scaffold, namespace/runtime gates, skill normalization plan,
-  and cross-distribution maintenance rule.
+- `260513-feat-hbsflow-agentless-runtime-mode` - shared runtime slice for
+  `WS_MCP_NO_AGENT`, namespace text, setup alias behavior, and default full ws
+  regression coverage.
+- `260513-feat-hbsflow-agentless-plugin-scaffold` - package scaffold and
+  derivative distribution slice after the runtime mode is available.
 - Planned: installer, marketplace, and release verification slice after the
   scaffold establishes the hbsflow package and runtime contract.
 
