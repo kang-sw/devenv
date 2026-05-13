@@ -96,6 +96,13 @@ broad investigation, verification, audit, or review is useful, wsflow guidance
 uses host-native one-shot subagents when available, with the lead retaining
 ownership of edits, docs, tickets, specs, mental-model updates, and commits.
 
+> [!note] Planned 🚧
+> wsflow will include `lead-sprint` as a sprint-branch session container that
+> preserves deferred documentation wrap-up without exposing managed named-agent,
+> subquery, write-code, or skeleton orchestration. Sprint task execution remains
+> lead-owned and routes through wsflow direct-edit workflow when source changes
+> are needed. {#260513-wsflow-sprint-skill}
+
 wsflow skills are curated semantic rewrites, not generated copies. A change to
 a full `agents-plugin/skills/lead-*` skill that is shipped in wsflow must either
 update the corresponding wsflow skill in the same logical change or leave an

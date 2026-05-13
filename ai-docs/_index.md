@@ -203,6 +203,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
+| `260513-feat-wsflow-sprint-skill` | ready | Add wsflow lead-sprint as an agentless sprint-branch session container |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |
 | `260513-epic-wsflow-agentless-plugin` | todo | Create an internal wsflow agentless derivative plugin distribution |
@@ -216,6 +217,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+`260513-feat-wsflow-sprint-skill` - add wsflow lead-sprint as an agentless sprint-branch session container.
 
 ## Session Notes
 
