@@ -71,6 +71,13 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("Use subagents when a task benefits from scoped exploration", text)
         self.assertIn("The lead owns integration, verification, final judgment, and commits.", text)
 
+    def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
+        text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
+        self.assertIn("<!-- Template Version: v0001 -->", text)
+        self.assertIn("This template has package-local version history", text)
+        self.assertNotIn("<!-- Template Version: v0038 -->", text)
+        self.assertNotIn("- v0038:", text)
+
 
 if __name__ == "__main__":
     unittest.main()

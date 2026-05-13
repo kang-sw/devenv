@@ -15,6 +15,7 @@ Mode: user request
 - Never overwrite project-specific sections: Architecture Rules, custom Code Standards entries, custom Project Knowledge entries.
 - Merge surgically; flag unresolved conflicts inline with `<!-- CONFLICT: ... -->`.
 - Every migration item is idempotent; re-running on an already-migrated project produces no changes.
+- Template version history is package-local; apply only entries listed in this skill's `AGENTS.template.md`.
 - Commit each logical unit separately following the repository commit rules.
 - Retired Claude plugin artifacts are out of support for this skill; do not reintroduce `claude-plugin/`.
 
@@ -46,7 +47,7 @@ Mode: user request
 ## On: upgrade
 
 1. Parse current version from `AGENTS.md`.
-2. Walk migration checklist items where version > current, in order.
+2. Walk this package's migration checklist items where version > current, in order.
 3. Apply each item only when its condition is met.
 4. Update `AGENTS.md` template-managed sections from `AGENTS.template.md`.
 5. Ensure `ai-docs/WORKFLOW.md` exists from `WORKFLOW.md`; if a project-local guide already exists, preserve project additions and only merge missing bootstrap semantics.
@@ -57,8 +58,8 @@ Mode: user request
 
 ## On: adopt
 
-1. Audit v0001 through latest against current project state.
-2. Apply only missing migration items.
+1. Audit the current project against this package's baseline checklist.
+2. Apply only missing baseline items.
 3. Add the latest template version tag to `AGENTS.md`.
 4. Proceed to the upgrade handler.
 
@@ -66,7 +67,7 @@ Mode: user request
 
 1. Create `AGENTS.md` from existing `CLAUDE.md` content.
 2. Preserve project-specific sections and all existing template-version evidence.
-3. Apply the AGENTS migration checklist in order.
+3. Apply this package's baseline checklist.
 4. Replace `CLAUDE.md` body with `@AGENTS.md`.
 5. Preserve no separate Claude-only section unless explicitly requested.
 6. Commit.
@@ -99,7 +100,7 @@ Mode: user request
 
 ## Doctrine
 
-Bootstrap optimizes for **idempotent downstream migration**: preserve
-project-specific content, apply only missing versioned migrations, and keep
-Claude compatibility as a shim over host-neutral `AGENTS.md`. When ambiguous,
-preserve idempotency and downstream content.
+Bootstrap optimizes for **idempotent downstream baseline alignment**: preserve
+project-specific content, apply only this package's versioned migrations, and
+keep Claude compatibility as a shim over host-neutral `AGENTS.md`. When
+ambiguous, preserve idempotency and downstream content.

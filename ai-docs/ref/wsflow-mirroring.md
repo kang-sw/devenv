@@ -65,6 +65,17 @@ Excluded:
 - Keep workflow integration lead-owned: docs, ticket/spec changes, mental-model
   updates, commits, and final judgment stay with the lead.
 
+## Bootstrap Template Rules
+
+- Treat `lead-bootstrap` as a mirrored skill: behavior changes require checking
+  both `agents-plugin/skills/lead-bootstrap/` and
+  `agents-plugin-wsflow/skills/lead-bootstrap/`.
+- Keep bootstrap template version histories package-local; matching behavior
+  changes may use different version numbers in each package.
+- Do not copy the full bootstrap migration backlog into the wsflow template.
+- When a bootstrap baseline changes for both packages, update both templates in
+  one logical change or record why one package is not applicable.
+
 ## Static Verification
 
 The wsflow distributed skill bundle has package tests that fail when shipped

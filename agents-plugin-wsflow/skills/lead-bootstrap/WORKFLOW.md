@@ -1,10 +1,10 @@
 # wsflow Workflow Guide
 
 This guide is copied to `ai-docs/WORKFLOW.md` by bootstrap so a
-maintainer can preserve the project shape when wsflow skills or MCP tools are not
-available. It is an explanation and manual fallback only: editing this file does
-not change wsflow MCP parser behavior, plugin/runtime semantics, ticket status logic,
-spec indexing, or any other machine contract.
+maintainer can preserve the project shape during manual workflow maintenance.
+It is an explanation and manual fallback only: editing this file does not change
+wsflow MCP parser behavior, plugin/runtime semantics, ticket status logic, spec
+indexing, or any other machine contract.
 
 When this guide and installed wsflow tooling disagree, treat the installed plugin,
 runtime, and bundled conventions as canonical. Update the upstream bootstrap
@@ -81,14 +81,14 @@ template rather than relying on a project-local guide override.
   spec stems. If a spec anchor is renamed, record
   `renamed-spec: <old-stem> -> <new-stem>`.
 
-## Manual Fallback
+## Manual Maintenance
 
-When wsflow skills, MCP tools, or Claude compatibility commands are unavailable:
+When maintaining workflow docs manually:
 
 1. Read `AGENTS.md`, `_index.md`, this guide, and the relevant current docs.
 2. Use existing nearby tickets, specs, and mental models as formatting examples.
 3. Prefer conservative, append-only changes when parser behavior is uncertain.
 4. Keep generated AI docs and commit messages in English unless a human-facing
    product string requires another language.
-5. Verify with plain Git and shell commands, then re-run wsflow verification tools
-   when they become available.
+5. Verify with plain Git and shell commands, then run wsflow verification tools
+   when the workflow change reaches normal tooling.

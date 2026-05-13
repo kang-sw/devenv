@@ -121,48 +121,21 @@ Adapt structure to the project; this is a starting point, not a schema.
 <!-- MIGRATION CHECKLIST
      Template-internal. NEVER copy into a project AGENTS.md; only the Template
      Version tag belongs there. Read the tag at the bottom, apply items with
-     version > current in order, then update the tag. Skip obsoleted items.
+     version > current in order, then update the tag.
+     This template has package-local version history; apply only entries listed here.
      Preserve project-specific Architecture Rules and standards; merge
      surgically and mark conflicts instead of overwriting.
 
-- v0001: If `ai-docs/_memory.md` exists, merge useful content into `_index.md`, then delete it.
-- v0002: [obsoleted]
-- v0003: If tickets lack `plans:` frontmatter, add entries only for phases with existing plan docs. Keep discussion decisions in tickets; codebase-derived detail belongs in plans.
-- v0004: Remove `plans:` entries with `null`; absence means "not yet created".
-- v0005: Add `parent:` frontmatter for epic relationships where applicable. Epic tickets use category `epic`.
-- v0006: Rename old plan paths `YYMM/DD-HHMM.<name>.md` to `YYYY-MM/DD-hhmm.<name>.md` with `git mv`.
-- v0007: [obsoleted]
-- v0008: [obsoleted by v0014]
-- v0009: If Commit Rules lack `## Ticket Updates`, add it.
-- v0010: If the Inclusion test comment above is missing, add it and keep it permanently.
-- v0011: If no `<!-- Template Version: ... --\>` tag exists, review v0001-v0010, resolve applicable items, then add the tag to the managed context file.
-- v0012: [obsoleted by v0014]
-- v0013: Add the memory-policy comment to the top of `ai-docs/_index.md`; keep it permanently. Remove done/dropped ticket references.
-- v0014: Replace session-start lines with `## Project Memory`; add `ai-docs/_index.local.md` to `.gitignore`.
-- v0015: Move Project Summary, Tech Stack, and Workspace from CLAUDE.md to `_index.md`; keep CLAUDE.md behavioral.
-- v0016: Add the ticket completion check rule to Project Knowledge if missing.
-- v0017: Convert Project Knowledge paragraphs to bullets.
-- v0018: For GUI/TUI projects, add the headless-testable Architecture Rule if missing.
-- v0019: Replace per-file `ai-docs/*.local.md` ignores with `ai-docs/**/*.local.md`.
-- v0020: Convert ticket `related:` list format to map format across all ticket statuses.
-- v0021: If `ai-docs/mental-model/overview.md` exists, `git mv` it to `ai-docs/mental-model.md`; then use wsflow:lead-forge-mental-model or direct convention-guided edits to add required frontmatter to domain docs. If no `(mental-model-updated)` checkpoint exists, pass the initial commit as base. Commit with `(mental-model-updated)`.
-- v0022: If flat `ai-docs/spec/` has multi-doc areas, reorganize to `ai-docs/spec/<area>/index.md` plus children; run `wsflow:lead-write-spec` to rebuild `features:` frontmatter.
-- v0023: If Commit Rules lack `## Spec`, add it after `## Ticket Updates`; add `renamed-spec: <old-stem> -> <new-stem>`.
-- v0024: Replace `[!note] Constraints` in specs: permanent invariants -> body prose; known unscheduled gaps -> `[!note] Implementation Gap · <YYYY-MM-DD>`; planned ticketed features -> `### 🚧 <Feature Name>`.
-- v0025: Delete `ai-docs/_continue.local.md` if present; the removed exit-session consumer no longer reads it.
-- v0026: If specs exist but no `{#YYMMDD-slug}` anchor exists, suggest `wsflow:lead-forge-spec`; do not edit specs automatically.
-- v0027: If mental-model docs exist but embed no spec stem, suggest `wsflow:lead-forge-mental-model`; do not edit mental models automatically.
-- v0028: Reclassify domain-scoped rules from `## Architecture Rules` or `_index.md` into `ai-docs/mental-model/<domain>.md ## Domain Rules` via `wsflow:lead-add-rule`.
-- v0029: If `ai-docs/tickets/wip/` exists, `git mv` tickets to `todo/`, remove empty `wip/`, add `## Ticket Queue` if absent, then use `wsflow:lead-discuss` to agree order.
-- v0030: Rename archive dirs to dot-prefix via `git mv`: `tickets/done` -> `.done`, `tickets/dropped` -> `.dropped`, `ai-docs/plans` -> `.plans`; update references.
-- v0031: If `ai-docs/deps/` exists, archive it to `ai-docs/ref/deps-old`; it is superseded by project-local reference docs or `ai-docs/.deps/` when the runtime manages cached API documentation.
-- v0032: If `AGENTS.md` is absent and `CLAUDE.md` exists, create `AGENTS.md` from current `CLAUDE.md`.
-- v0033: Replace `CLAUDE.md` body with `@AGENTS.md`.
-- v0034: Treat `AGENTS.md` as the canonical managed template target.
-- v0035: Create `ai-docs/tickets/ready/` if absent. Move existing non-`epic`, non-`research` implementation-ready tickets from `todo/` to `ready/` with `git mv` when they have spec linkage; keep `epic`, `research`, missing-spec, and uncertain tickets in `todo/`; recreate/keep an empty `todo/` directory when needed; treat `ready/` as the implementation queue and `## Ticket Queue` source; promote scoped `idea/` tickets to `todo/` through `wsflow:lead-discuss`.
-- v0036: If `ai-docs/WORKFLOW.md` is absent, create it from the bootstrap workflow guide source. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override wsflow runtime or wsflow MCP parser behavior.
-- v0037: Add `ai-docs/.deps/` to `.gitignore` if absent; API documentation cache contents are runtime-managed local data, not project memory.
-- v0038: Create `ai-docs/.old/` as the tracked project archive for files kept only as possible future reference and hidden from default listings. Move legacy spec archives with `git mv`: `ai-docs/ref/old-spec` or `ai-docs/old-spec` -> `ai-docs/.old/spec`; move `ai-docs/old` -> `ai-docs/.old/misc` when present and not already project-specific.
+- v0001: Align `AGENTS.md` with the initial wsflow baseline: Project Memory,
+  Response Discipline, Workflow, Architecture Rules, Project Knowledge, the
+  inclusion-test comment, and the Template Version tag.
+- v0001: Ensure `CLAUDE.md` contains `@AGENTS.md`.
+- v0001: Ensure `ai-docs/WORKFLOW.md` exists from the bootstrap workflow guide.
+- v0001: Ensure `ai-docs/` has `_index.md`, `mental-model.md`,
+  `mental-model/`, `spec/`, `ref/`, `.old/`, and tickets status directories:
+  `idea/`, `todo/`, `ready/`, `.done/`, `.dropped/`.
+- v0001: Ensure `.gitignore` includes `ai-docs/**/*.local.md` and
+  `ai-docs/.deps/`.
 -->
 
-<!-- Template Version: v0038 -->
+<!-- Template Version: v0001 -->

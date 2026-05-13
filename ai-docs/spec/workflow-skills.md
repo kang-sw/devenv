@@ -112,6 +112,12 @@ verification rules drifted. The wsflow skill-bundle verification path checks
 inventory and forbidden managed-agent references, but it does not require text
 identity with the full ws skill.
 
+wsflow bootstrap uses package-local template version history. Its downstream
+`AGENTS.template.md` starts at `v0001` for the wsflow baseline and does not
+replay the full bootstrap migration backlog. Bootstrap behavior changes remain
+mirroring-sensitive: maintainers check both packages and bump each package's
+template version only when that package receives the behavior change.
+
 ## Planning Workflow Skills {#260505-planning-workflow-skills}
 
 Planning skills prepare caller-visible work before implementation.
