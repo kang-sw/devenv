@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// ws 워크플로우 세미나 슬라이드 생성 스크립트
+// wsflow 워크플로우 세미나 슬라이드 생성 스크립트
 // 실행: node make-seminar.js
-// 출력: ws-seminar.pptx
+// 출력: wsflow-seminar.pptx
 
 const PptxGenJS = require("pptxgenjs");
 const pptx = new PptxGenJS();
@@ -60,7 +60,7 @@ function footerBar(s) {
     fill: { color: C.navy },
     line: { color: C.navy },
   });
-  s.addText("ws 워크플로우 세미나  |  HB Solution", {
+  s.addText("wsflow 워크플로우 세미나  |  HB Solution", {
     x: 0.3, y: H - 0.28, w: W * 0.6, h: 0.28,
     fontSize: 7.5, color: C.gray, fontFace: "Malgun Gothic",
   });
@@ -160,7 +160,7 @@ function arrow(s, x, y) {
   });
 
   // 메인 타이틀
-  s.addText("ws 워크플로우", {
+  s.addText("wsflow 워크플로우", {
     x: 1.0, y: 1.8, w: 11.3, h: 1.2,
     fontSize: 48, bold: true, color: C.white,
     fontFace: "Malgun Gothic", align: "center",
@@ -202,11 +202,11 @@ function arrow(s, x, y) {
   footerBar(s);
 
   const sections = [
-    ["01", "ws란?",                   "AI 워크플로우 레이어의 필요성과 개념"],
+    ["01", "wsflow란?",                   "AI 워크플로우 레이어의 필요성과 개념"],
     ["02", "설치",                     "Claude Code / Codex 플러그인 설치"],
     ["03", "핵심 개념",               "Skill · Ticket · Spec · Mental Model · Git"],
     ["04", "실전",                     "discuss, proceed, /compact 습관"],
-    ["05", "ws에게 물어보기",          "셀프서비스 학습법"],
+    ["05", "wsflow에게 물어보기",          "셀프서비스 학습법"],
     ["06", "레거시 프로젝트 온보딩",  "bootstrap → forge-spec → forge-mental-model"],
     ["07", "치트시트",                 "커맨드 및 플로우 요약"],
   ];
@@ -238,12 +238,12 @@ function arrow(s, x, y) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 슬라이드 3: ws란? — 문제 정의
+// 슬라이드 3: wsflow란? — 문제 정의
 // ═══════════════════════════════════════════════════════════════
 {
   const s = addSlide({ dark: true });
   s.background = { color: C.navy };
-  header(s, "01  ws란?  —  왜 필요한가", { dark: true });
+  header(s, "01  wsflow란?  —  왜 필요한가", { dark: true });
   footerBar(s);
 
   s.addText("AI에게 매번 설명하는 반복 작업", {
@@ -274,14 +274,14 @@ function arrow(s, x, y) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 슬라이드 4: ws란? — 솔루션
+// 슬라이드 4: wsflow란? — 솔루션
 // ═══════════════════════════════════════════════════════════════
 {
   const s = addSlide();
-  header(s, "01  ws란?  —  솔루션 개념", { dark: false });
+  header(s, "01  wsflow란?  —  솔루션 개념", { dark: false });
   footerBar(s);
 
-  s.addText("ws = 프로젝트에 묶인 구조화된 메모리 + 워크플로우 파이프라인", {
+  s.addText("wsflow = 프로젝트에 묶인 구조화된 메모리 + 워크플로우 파이프라인", {
     x: 0.35, y: 0.88, w: W - 0.7, h: 0.45,
     fontSize: 13, bold: true, color: C.navy,
     fontFace: "Malgun Gothic",
@@ -314,17 +314,17 @@ function arrow(s, x, y) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 슬라이드 5: ws란? — 구조 다이어그램
+// 슬라이드 5: wsflow란? — 구조 다이어그램
 // ═══════════════════════════════════════════════════════════════
 {
   const s = addSlide();
-  header(s, "01  ws란?  —  구조", { dark: false });
+  header(s, "01  wsflow란?  —  구조", { dark: false });
   footerBar(s);
 
   // 레이어 박스들 (위에서 아래로)
   const layers = [
-    { label: "개발자 (You)", sub: "/ws:lead-discuss  /ws:lead-proceed  …", bg: C.sky, fg: C.white },
-    { label: "ws 플러그인", sub: "Skill 라우팅 · 파이프라인 · 프로젝트 메모리 (ai-docs/)", bg: C.navy, fg: C.white },
+    { label: "개발자 (You)", sub: "/wsflow:lead-discuss  /wsflow:lead-proceed  …", bg: C.sky, fg: C.white },
+    { label: "wsflow 플러그인", sub: "Skill 라우팅 · 파이프라인 · 프로젝트 메모리 (ai-docs/)", bg: C.navy, fg: C.white },
     { label: "Claude Code  /  Codex", sub: "AI 백엔드 (LLM 실행 환경)", bg: C.navyMid, fg: C.gray },
   ];
 
@@ -354,7 +354,7 @@ function arrow(s, x, y) {
     }
   });
 
-  s.addText("유저는 ws 스킬만 호출합니다. 내부 파이프라인은 ws가 처리합니다.", {
+  s.addText("유저는 wsflow 스킬만 호출합니다. 내부 파이프라인은 wsflow가 처리합니다.", {
     x: 0.35, y: 6.75, w: W - 0.7, h: 0.35,
     fontSize: 9.5, color: C.darkGray, align: "center",
     fontFace: "Malgun Gothic",
@@ -362,12 +362,12 @@ function arrow(s, x, y) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 슬라이드 6: ws란? — 가치 요약
+// 슬라이드 6: wsflow란? — 가치 요약
 // ═══════════════════════════════════════════════════════════════
 {
   const s = addSlide({ dark: true });
   s.background = { color: C.navy };
-  header(s, "01  ws란?  —  한 줄 요약", { dark: true });
+  header(s, "01  wsflow란?  —  한 줄 요약", { dark: true });
   footerBar(s);
 
   s.addText('"세션이 끊겨도 맥락이 남고,\n누가 써도 같은 품질이 나오는\nAI 개발 환경"', {
@@ -382,7 +382,7 @@ function arrow(s, x, y) {
     fill: { color: C.sky }, line: { color: C.sky },
   });
 
-  s.addText("ws는 Claude Code / Codex 위에 얹히는 플러그인입니다. AI 모델 자체는 그대로 사용합니다.", {
+  s.addText("wsflow는 Claude Code / Codex 위에 얹히는 플러그인입니다. AI 모델 자체는 그대로 사용합니다.", {
     x: 0.35, y: 4.85, w: W - 0.7, h: 0.38,
     fontSize: 10, color: C.gray, align: "center",
     fontFace: "Malgun Gothic",
@@ -410,17 +410,17 @@ function arrow(s, x, y) {
 
   // Step 2
   dividerLabel(s, "Step 2  —  플러그인 설치", 2.58);
-  codeBox(s, "claude plugin install ws@kang-sw-devenv", {
+  codeBox(s, "claude plugin install wsflow@kang-sw-devenv", {
     x: 0.35, y: 3.02, w: W - 0.7, h: 0.62,
   });
 
   // 업그레이드
   dividerLabel(s, "업그레이드 (신규 버전 배포 후)", 3.78);
-  codeBox(s, "claude plugin upgrade ws@kang-sw-devenv", {
+  codeBox(s, "claude plugin upgrade wsflow@kang-sw-devenv", {
     x: 0.35, y: 4.22, w: W - 0.7, h: 0.62,
   });
 
-  s.addText("설치 후 Claude Code를 재시작하면 /ws:lead-* 스킬이 활성화됩니다.", {
+  s.addText("설치 후 Claude Code를 재시작하면 /wsflow:lead-* 스킬이 활성화됩니다.", {
     x: 0.35, y: 5.0, w: W - 0.7, h: 0.35,
     fontSize: 9.5, color: C.darkGray, fontFace: "Malgun Gothic",
   });
@@ -450,7 +450,7 @@ function arrow(s, x, y) {
     fill: { color: C.offWhite }, line: { color: C.sky, pt: 1 }, arcSize: 4,
   });
   s.addText(
-    "Codex 실행  →  /plugins  →  마켓플레이스에서 kang-sw/devenv 검색  →  ws 설치",
+    "Codex 실행  →  /plugins  →  마켓플레이스에서 kang-sw/devenv 검색  →  wsflow 설치",
     {
       x: 0.55, y: 3.12, w: W - 0.9, h: 0.85,
       fontSize: 11, color: C.navy, fontFace: "Malgun Gothic", valign: "middle",
@@ -472,7 +472,7 @@ function arrow(s, x, y) {
   footerBar(s);
 
   const concepts = [
-    { icon: "⚡", name: "Skill",         desc: "AI에게 내리는 구조화된 명령 단위. /ws:lead-discuss 등" },
+    { icon: "⚡", name: "Skill",         desc: "AI에게 내리는 구조화된 명령 단위. /wsflow:lead-discuss 등" },
     { icon: "🎫", name: "Ticket",        desc: "작업 단위. 상태(idea→todo→ready→done)로 진행 관리" },
     { icon: "📋", name: "Spec",          desc: "기능의 외부 동작 계약서. 구현과 분리된 행동 기술" },
     { icon: "🧠", name: "Mental Model",  desc: "수정 시 알아야 할 모듈 계약·결합·주의사항" },
@@ -516,7 +516,7 @@ function arrow(s, x, y) {
 
   s.addText(
     "Skill은 AI에게 내리는 구조화된 명령 단위입니다.\n" +
-    "Claude Code에서 /ws:lead-<이름> 형식으로 호출합니다.",
+    "Claude Code에서 /wsflow:lead-<이름> 형식으로 호출합니다.",
     {
       x: 0.35, y: 0.88, w: W - 0.7, h: 0.62,
       fontSize: 11, color: C.navy, fontFace: "Malgun Gothic", lineSpacingMultiple: 1.4,
@@ -526,13 +526,12 @@ function arrow(s, x, y) {
   dividerLabel(s, "주요 스킬 목록", 1.6);
 
   const skills = [
-    ["ws:lead-discuss",            "방향 논의. 코드 변경 없이 설계·범위·리스크를 탐색"],
-    ["ws:lead-proceed",            "실행 진입. 파이프라인을 자동 체이닝하여 구현까지 진행"],
-    ["ws:lead-implement",          "실제 코드 구현 실행 (proceed가 자동 호출)"],
-    ["ws:lead-sprint",             "집중 실행 세션. sprint/ 브랜치에서 다수 작업 처리"],
-    ["ws:lead-bootstrap",          "신규/레거시 프로젝트에 ws 워크플로우 구조 초기 설정"],
-    ["ws:lead-forge-spec",         "코드베이스를 분석해 spec 문서 일괄 생성"],
-    ["ws:lead-forge-mental-model", "도메인별 mental model 문서 일괄 생성"],
+    ["wsflow:lead-discuss",            "방향 논의. 코드 변경 없이 설계·범위·리스크를 탐색"],
+    ["wsflow:lead-proceed",            "실행 진입. 파이프라인을 자동 체이닝하여 구현까지 진행"],
+    ["wsflow:lead-implement",          "실제 코드 구현 실행 (proceed가 자동 호출)"],
+    ["wsflow:lead-bootstrap",          "신규/레거시 프로젝트에 wsflow 워크플로우 구조 초기 설정"],
+    ["wsflow:lead-forge-spec",         "코드베이스를 분석해 spec 문서 일괄 생성"],
+    ["wsflow:lead-forge-mental-model", "도메인별 mental model 문서 일괄 생성"],
   ];
 
   skills.forEach(([name, desc], i) => {
@@ -603,7 +602,7 @@ function arrow(s, x, y) {
     { x: 0.35, y: 3.16, w: W - 0.7, h: 2.35, fontSize: 9.5 }
   );
 
-  s.addText("티켓은 ws:lead-discuss 종료 시 자동 생성/업데이트됩니다.", {
+  s.addText("티켓은 wsflow:lead-discuss 종료 시 자동 생성/업데이트됩니다.", {
     x: 0.35, y: 5.7, w: W - 0.7, h: 0.32,
     fontSize: 9.5, color: C.darkGray, fontFace: "Malgun Gothic",
   });
@@ -638,7 +637,7 @@ function arrow(s, x, y) {
   const rules = [
     ["{#날짜-slug}", "각 항목마다 안정적인 앵커 부여 — 티켓·커밋에서 참조"],
     ["🚧 마커",      "구현 예정 항목 표시. 완료되면 마커 제거"],
-    ["ai-docs/spec/", "모든 spec 파일의 위치. ws가 자동 인덱싱"],
+    ["ai-docs/spec/", "모든 spec 파일의 위치. wsflow가 자동 인덱싱"],
   ];
 
   rules.forEach(([term, desc], i) => {
@@ -713,7 +712,7 @@ function arrow(s, x, y) {
   header(s, "03  핵심 개념  —  ai-docs/ 구조", { dark: false });
   footerBar(s);
 
-  s.addText("프로젝트 루트의 ai-docs/ 폴더가 ws의 프로젝트 메모리입니다.", {
+  s.addText("프로젝트 루트의 ai-docs/ 폴더가 wsflow의 프로젝트 메모리입니다.", {
     x: 0.35, y: 0.88, w: W - 0.7, h: 0.38,
     fontSize: 11, color: C.navy, fontFace: "Malgun Gothic",
   });
@@ -726,7 +725,7 @@ function arrow(s, x, y) {
     "  spec/              ← 기능 계약서\n" +
     "  mental-model/      ← 도메인별 수정 가이드\n" +
     "  ref/               ← 정적 참고 자료\n" +
-    "  WORKFLOW.md        ← ws 가이드 (bootstrap이 자동 복사)",
+    "  WORKFLOW.md        ← wsflow 가이드 (bootstrap이 자동 복사)",
     { x: 0.35, y: 1.38, w: W - 0.7, h: 2.9, fontSize: 9.5 }
   );
 
@@ -739,7 +738,7 @@ function arrow(s, x, y) {
     x: 0.35, y: 5.1, w: W - 0.7, h: 0.52,
     fill: { color: C.offWhite }, line: { color: C.sky, pt: 1 }, arcSize: 4,
   });
-  s.addText("ws:lead-bootstrap 실행 시 이 폴더 구조가 자동으로 생성됩니다.", {
+  s.addText("wsflow:lead-bootstrap 실행 시 이 폴더 구조가 자동으로 생성됩니다.", {
     x: 0.55, y: 5.1, w: W - 1.0, h: 0.52,
     fontSize: 10, color: C.navy, fontFace: "Malgun Gothic", valign: "middle",
   });
@@ -754,7 +753,7 @@ function arrow(s, x, y) {
   footerBar(s);
 
   s.addText(
-    "ws는 작업 단위마다 커밋을 자동 생성합니다.\n커밋 메시지에 ## AI Context 섹션을 포함해 의사결정을 추적합니다.",
+    "wsflow는 작업 단위마다 커밋을 자동 생성합니다.\n커밋 메시지에 ## AI Context 섹션을 포함해 의사결정을 추적합니다.",
     {
       x: 0.35, y: 0.88, w: W - 0.7, h: 0.62,
       fontSize: 11, color: C.navy, fontFace: "Malgun Gothic", lineSpacingMultiple: 1.4,
@@ -801,16 +800,16 @@ function arrow(s, x, y) {
   });
 
   // 대화 + 프로세스 블록
-  // type: "user" | "ws" | "process"
+  // type: "user" | "wsflow" | "process"
   const conv = [
-    ["user", "/ws:lead-discuss  지금 모터 컨트롤러 제품을 바꾸려고 하는데 어느 부분을 건드려야 하나요?", null],
-    ["ws",   "motor_controller/의 VendorAdapter가 연결 지점입니다. 새 벤더 추가 vs. 인터페이스 교체 두 방향을 검토할 수 있습니다.", null],
+    ["user", "/wsflow:lead-discuss  지금 모터 컨트롤러 제품을 바꾸려고 하는데 어느 부분을 건드려야 하나요?", null],
+    ["wsflow",   "motor_controller/의 VendorAdapter가 연결 지점입니다. 새 벤더 추가 vs. 인터페이스 교체 두 방향을 검토할 수 있습니다.", null],
     ["user", "그러면 새 벤더보다 인터페이스를 새로 추가하자는 말인가요?", null],
-    ["ws",   "맞습니다. 인터페이스 분리 시 기존 코드 수정 없이 신규 벤더를 추가할 수 있습니다.", null],
-    ["user", "좋아요, 그러면 내용을 티켓으로 정리해 주세요.", "→ ws가 티켓 자동 작성"],
-    ["ws",   "티켓 생성 완료. /ws:lead-proceed로 구현을 시작할 수 있습니다.", null],
-    ["user", "/ws:lead-proceed  구현 시작해주세요", "→ 파이프라인 자동 실행"],
-    // proceed 이후 ws 내부 처리 흐름
+    ["wsflow",   "맞습니다. 인터페이스 분리 시 기존 코드 수정 없이 신규 벤더를 추가할 수 있습니다.", null],
+    ["user", "좋아요, 그러면 내용을 티켓으로 정리해 주세요.", "→ wsflow가 티켓 자동 작성"],
+    ["wsflow",   "티켓 생성 완료. /wsflow:lead-proceed로 구현을 시작할 수 있습니다.", null],
+    ["user", "/wsflow:lead-proceed  구현 시작해주세요", "→ 파이프라인 자동 실행"],
+    // proceed 이후 wsflow 내부 처리 흐름
     ["process", null, null],
     ["user", "Merge해도 좋습니다.", "→ 커밋 후 main 머지"],
   ];
@@ -968,7 +967,7 @@ function arrow(s, x, y) {
     });
   });
   const goodTextY = colY + colH - padB - 0.42;
-  s.addText("ws가 리스크·대안·연결 지점을 먼저 짚어줍니다.\n방향 확정 후 proceed로 넘깁니다.", {
+  s.addText("wsflow가 리스크·대안·연결 지점을 먼저 짚어줍니다.\n방향 확정 후 proceed로 넘깁니다.", {
     x: rx + padX, y: goodTextY, w: colW - padX * 2, h: 0.42,
     fontSize: 9.5, color: C.skyDim, fontFace: "Malgun Gothic",
     lineSpacingMultiple: 1.3,
@@ -1010,10 +1009,10 @@ function arrow(s, x, y) {
   dividerLabel(s, "자동 파이프라인", 1.6);
 
   // 파이프라인 다이어그램
-  const pipeline = ["write-spec", "write-ticket", "write-skeleton", "implement", "commit"];
-  const pipeX = [0.4, 2.85, 5.3, 7.75, 10.2];
+  const pipeline = ["write-spec", "write-ticket", "implement", "commit"];
+  const pipeX = [0.55, 3.3, 6.05, 8.8];
   pipeline.forEach((p, i) => {
-    const isKey = i === 3;
+    const isKey = i === 2;
     s.addShape(pptx.ShapeType.roundRect, {
       x: pipeX[i], y: 2.08, w: 2.3, h: 0.72,
       fill: { color: isKey ? C.sky : C.offWhite },
@@ -1043,9 +1042,9 @@ function arrow(s, x, y) {
   dividerLabel(s, "사용 예시", 3.3);
   codeBox(s,
     "# 티켓 경로 지정\n" +
-    "/ws:lead-proceed ai-docs/tickets/ready/260512-add-auth.md\n\n" +
+    "/wsflow:lead-proceed ai-docs/tickets/ready/260512-add-auth.md\n\n" +
     "# 인라인 설명 (티켓 없을 때)\n" +
-    "/ws:lead-proceed  JWT 검증 미들웨어를 추가해줘",
+    "/wsflow:lead-proceed  JWT 검증 미들웨어를 추가해줘",
     { x: 0.35, y: 3.74, w: W - 0.7, h: 1.7, fontSize: 9.5 }
   );
 
@@ -1083,8 +1082,8 @@ function arrow(s, x, y) {
      "/compact는 이를 핵심 요약으로 압축해 다음 작업에 깨끗한 컨텍스트를 제공합니다."],
     ["비용·속도 개선",
      "컨텍스트 크기가 작을수록 응답이 빠르고 토큰 비용이 줄어듭니다."],
-    ["ws와의 궁합",
-     "ws가 세션 시작마다 _index.md를 로드하므로, compact 후에도 프로젝트 맥락은 유지됩니다."],
+    ["wsflow와의 궁합",
+     "wsflow가 세션 시작마다 _index.md를 로드하므로, compact 후에도 프로젝트 맥락은 유지됩니다."],
   ];
 
   reasons.forEach(([title, desc], i) => {
@@ -1162,19 +1161,7 @@ function arrow(s, x, y) {
   });
   flowRow(["proceed <설명>", "implement", "commit", "/compact"], yB + labelH + 0.06, bh, 3);
 
-  // 패턴 C
-  const yC = yB + labelH + 0.06 + bh + gap;
-  s.addText("패턴 C  —  Sprint (복수 작업 집중 세션)", {
-    x: 0.35, y: yC, w: W - 0.7, h: labelH,
-    fontSize: 11, bold: true, color: C.sky, fontFace: "Malgun Gothic",
-  });
-  codeBox(s,
-    "/ws:lead-sprint  →  sprint/ 브랜치 생성  →  작업 반복\n" +
-    "→  '완료' 입력  →  자동 wrap-up (spec·mental model 업데이트)  →  main 머지",
-    { x: 0.35, y: yC + labelH + 0.06, w: W - 0.7, h: 0.78, fontSize: 9.5 }
-  );
-
-  const yNote = yC + labelH + 0.06 + 0.78 + 0.2;
+  const yNote = yB + labelH + 0.06 + bh + 0.2;
   s.addText("어느 패턴이든 proceed와 /compact 두 가지만 기억하면 됩니다.", {
     x: 0.35, y: yNote, w: W - 0.7, h: 0.32,
     fontSize: 10, color: C.gray, fontFace: "Malgun Gothic", align: "center",
@@ -1186,7 +1173,7 @@ function arrow(s, x, y) {
 // ═══════════════════════════════════════════════════════════════
 {
   const s = addSlide();
-  header(s, "05  ws에게 물어보기  —  ai-docs 사용 방식", { dark: false });
+  header(s, "05  wsflow에게 물어보기  —  ai-docs 사용 방식", { dark: false });
   footerBar(s);
 
   // 핵심 메시지
@@ -1262,7 +1249,7 @@ function arrow(s, x, y) {
     fill: { color: C.offWhite }, line: { color: C.sky, pt: 1 }, arcSize: 4,
   });
   const summary = [
-    ["✍  작성", "ws가 자동으로 담당 (forge-spec, forge-mental-model, sprint wrap-up 등)"],
+    ["✍  작성", "wsflow가 자동으로 담당 (forge-spec, forge-mental-model 등)"],
     ["🔍  조회", "AI에게 질문으로 위임  —  직접 파일을 열어 읽는 것은 authoring 시에만"],
   ];
   summary.forEach(([label, desc], i) => {
@@ -1279,15 +1266,15 @@ function arrow(s, x, y) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 슬라이드 21: ws에게 물어보기
+// 슬라이드 21: wsflow에게 물어보기
 // ═══════════════════════════════════════════════════════════════
 {
   const s = addSlide();
-  header(s, "05  ws에게 물어보기", { dark: false });
+  header(s, "05  wsflow에게 물어보기", { dark: false });
   footerBar(s);
 
   s.addText(
-    "어느 프로젝트에서든 AI에게 물어보면 ws 워크플로우를 설명받을 수 있습니다.",
+    "어느 프로젝트에서든 AI에게 물어보면 wsflow 워크플로우를 설명받을 수 있습니다.",
     {
       x: 0.35, y: 0.88, w: W - 0.7, h: 0.42,
       fontSize: 11, color: C.navy, fontFace: "Malgun Gothic",
@@ -1295,7 +1282,7 @@ function arrow(s, x, y) {
   );
 
   dividerLabel(s, "방법 1  —  전체 구조 파악 (처음 접할 때)", 1.42);
-  codeBox(s, '"ws workflow에 대해 설명해주세요"', {
+  codeBox(s, '"wsflow workflow에 대해 설명해주세요"', {
     x: 0.35, y: 1.86, w: W - 0.7, h: 0.62,
   });
   s.addText("→ AI가 ai-docs/WORKFLOW.md와 _index.md를 참고해 전체 구조를 설명합니다.", {
@@ -1319,7 +1306,7 @@ function arrow(s, x, y) {
     fill: { color: C.offWhite }, line: { color: C.sky, pt: 1 }, arcSize: 4,
   });
   s.addText(
-    "💡  모르면 그냥 물어보면 됩니다. ws 자체가 맥락을 들고 있습니다.",
+    "💡  모르면 그냥 물어보면 됩니다. wsflow 자체가 맥락을 들고 있습니다.",
     {
       x: 0.55, y: 5.88, w: W - 1.0, h: 0.48,
       fontSize: 11, bold: true, color: C.navy,
@@ -1337,24 +1324,24 @@ function arrow(s, x, y) {
   header(s, "06  레거시 프로젝트 온보딩  —  개요", { dark: true });
   footerBar(s);
 
-  s.addText("기존 프로젝트에 ws를 도입할 때의 3단계 흐름입니다.", {
+  s.addText("기존 프로젝트에 wsflow를 도입할 때의 3단계 흐름입니다.", {
     x: 0.35, y: 0.88, w: W - 0.7, h: 0.3,
     fontSize: 11, color: C.sky, fontFace: "Malgun Gothic",
   });
 
   const onb = [
     {
-      cmd: "ws:lead-bootstrap",
+      cmd: "wsflow:lead-bootstrap",
       title: "워크플로우 구조 초기화",
       desc: "AGENTS.md, ai-docs/ 폴더 구조, WORKFLOW.md를 생성합니다. 기존 CLAUDE.md가 있으면 자동으로 마이그레이션합니다.",
     },
     {
-      cmd: "ws:lead-forge-spec",
+      cmd: "wsflow:lead-forge-spec",
       title: "Spec 일괄 생성",
       desc: "코드베이스·티켓·커밋 히스토리를 분석해 도메인별 spec 문서를 작성합니다. 각 항목을 구현 완료 / 계획 중으로 분류합니다.",
     },
     {
-      cmd: "ws:lead-forge-mental-model",
+      cmd: "wsflow:lead-forge-mental-model",
       title: "Mental Model 일괄 생성",
       desc: "모듈 계약·결합 지점·주의사항을 도메인별로 정리해 mental-model 문서를 작성합니다. 작성 후 코드베이스와 대조 검증합니다.",
     },
@@ -1385,7 +1372,7 @@ function arrow(s, x, y) {
     });
 
     // 커맨드
-    s.addText(`/ws:lead-${o.cmd.replace("ws:lead-", "")}`, {
+    s.addText(`/wsflow:lead-${o.cmd.replace("wsflow:lead-", "")}`, {
       x: 1.2, y: y + 0.14, w: 5.5, h: 0.3,
       fontSize: 10, fontFace: "Cascadia Code", color: C.sky, valign: "middle",
     });
@@ -1431,7 +1418,7 @@ function arrow(s, x, y) {
     }
   );
 
-  codeBox(s, "/ws:lead-bootstrap", { x: 0.35, y: 1.6, w: 5.0, h: 0.62 });
+  codeBox(s, "/wsflow:lead-bootstrap", { x: 0.35, y: 1.6, w: 5.0, h: 0.62 });
 
   dividerLabel(s, "동작 감지 모드", 2.38);
 
@@ -1474,7 +1461,7 @@ function arrow(s, x, y) {
     x: 0.35, y: 0.88, w: W - 0.7, h: 0.38,
     fontSize: 12, bold: true, color: C.navy, fontFace: "Malgun Gothic",
   });
-  codeBox(s, "/ws:lead-forge-spec", { x: 0.35, y: 1.32, w: 5.5, h: 0.58 });
+  codeBox(s, "/wsflow:lead-forge-spec", { x: 0.35, y: 1.32, w: 5.5, h: 0.58 });
   s.addText(
     "코드베이스·티켓·커밋을 분석 → 도메인 후보 제안 → 사용자 확인 → spec 문서 작성\n" +
     "각 항목을 '구현 완료 / 계획 중'으로 분류합니다. 모호하면 사용자에게 확인을 구합니다.",
@@ -1495,7 +1482,7 @@ function arrow(s, x, y) {
     x: 0.35, y: 3.0, w: W - 0.7, h: 0.38,
     fontSize: 12, bold: true, color: C.navy, fontFace: "Malgun Gothic",
   });
-  codeBox(s, "/ws:lead-forge-mental-model", { x: 0.35, y: 3.44, w: 6.5, h: 0.58 });
+  codeBox(s, "/wsflow:lead-forge-mental-model", { x: 0.35, y: 3.44, w: 6.5, h: 0.58 });
   s.addText(
     "모듈 구조·결합 지점·취약 영역을 서베이 → 도메인 후보 확인 → 도메인별 문서 작성\n" +
     "작성 후 코드베이스와 대조해 자동 검증(오류·누락·구식 내용 표시)합니다.",
@@ -1533,16 +1520,14 @@ function arrow(s, x, y) {
 
   const cmds = [
     // [커맨드, 설명, 카테고리 색]
-    ["/ws:lead-discuss",            "방향 논의. 코드 미수정",                           C.navy],
-    ["/ws:lead-proceed <target>",   "파이프라인 자동 실행 (spec→ticket→implement→commit)", C.sky],
-    ["/ws:lead-sprint",             "sprint/ 브랜치 집중 세션",                          C.navy],
+    ["/wsflow:lead-discuss",            "방향 논의. 코드 미수정",                           C.navy],
+    ["/wsflow:lead-proceed <target>",   "파이프라인 자동 실행 (spec→ticket→implement→commit)", C.sky],
     ["/compact",                    "컨텍스트 압축. 작업 후 습관화",                     C.skyDim],
-    ["/ws:lead-bootstrap",          "프로젝트 ws 구조 초기화/업그레이드",                C.navy],
-    ["/ws:lead-forge-spec",         "코드베이스 분석 → spec 일괄 생성",                  C.navy],
-    ["/ws:lead-forge-mental-model", "코드베이스 분석 → mental model 일괄 생성",          C.navy],
-    ["/ws:lead-write-ticket",       "티켓 작성/업데이트",                                C.darkGray],
-    ["/ws:lead-update-spec",        "기존 spec 업데이트",                                C.darkGray],
-    ["/ws:lead-salvage",            "막혔을 때 복구 리서치",                             C.darkGray],
+    ["/wsflow:lead-bootstrap",          "프로젝트 wsflow 구조 초기화/업그레이드",            C.navy],
+    ["/wsflow:lead-forge-spec",         "코드베이스 분석 → spec 일괄 생성",                  C.navy],
+    ["/wsflow:lead-forge-mental-model", "코드베이스 분석 → mental model 일괄 생성",          C.navy],
+    ["/wsflow:lead-write-ticket",       "티켓 작성/업데이트",                                C.darkGray],
+    ["/wsflow:lead-update-spec",        "기존 spec 업데이트",                                C.darkGray],
   ];
 
   cmds.forEach(([cmd, desc, color], i) => {
@@ -1576,7 +1561,6 @@ function arrow(s, x, y) {
   const flows = [
     { label: "일반 작업",      flow: ["discuss", "proceed", "commit", "/compact"] },
     { label: "소규모 작업",    flow: ["proceed <설명>", "commit", "/compact"] },
-    { label: "복수 작업",      flow: ["sprint", "작업 반복", "wrap-up", "main 머지"] },
     { label: "레거시 온보딩",  flow: ["bootstrap", "forge-spec", "forge-mental-model"] },
   ];
 
@@ -1663,6 +1647,6 @@ function arrow(s, x, y) {
 }
 
 // ── 저장 ──────────────────────────────────────────────────────
-pptx.writeFile({ fileName: "ws-seminar.pptx" })
-  .then(() => console.log("생성 완료: ws-seminar.pptx"))
+pptx.writeFile({ fileName: "wsflow-seminar.pptx" })
+  .then(() => console.log("생성 완료: wsflow-seminar.pptx"))
   .catch(e => { console.error(e); process.exit(1); });
