@@ -225,10 +225,11 @@ Suggested approach:
   record an explicit follow-up ticket explaining why it cannot be mirrored.
   Editing a full skill excluded from hbsflow must still check whether hbsflow
   docs, workflow manual, or exclusion rationale drifted.
-- Update the upstream `agents-plugin/skills/lead-skill-authoring` skill to read
-  `ai-docs/ref/skill-authoring.md` at invocation before applying authoring
-  rules. The skill should stay upstream-only and must not be copied into the
-  hbsflow distributed skill set.
+- Keep `lead-skill-authoring` self-contained. Do not make it read
+  repository-local reference files at invocation; that would break downstream
+  plugin use. Mirror policy belongs in repository authoring guidance,
+  workflow-maintenance instructions, and static checks, not in distributed skill
+  execution.
 - Add a static hbsflow skill-bundle verification command and wire it into the
   relevant local or release verification path. The check should fail when
   distributed hbsflow skills contain forbidden full-ws references such as
@@ -251,9 +252,8 @@ Acceptance criteria:
 - No separate hbsflow spec corpus is introduced.
 - `ai-docs/ref/skill-authoring.md` tells future skill edits how to update or
   explicitly defer hbsflow mirrors.
-- Upstream `lead-skill-authoring` reads the repository skill-authoring reference
-  before applying authoring rules, so future mirror guidance is not duplicated
-  only in stale skill text.
+- `lead-skill-authoring` remains self-contained and does not depend on
+  `ai-docs/ref/skill-authoring.md` at invocation.
 - A static verification path checks the hbsflow distributed skill set for
   forbidden full-ws references and shipped-skill inventory drift.
 - The verification path distinguishes curated semantic rewrites from mechanical
