@@ -2,6 +2,9 @@
 title: ws.setup root session API
 related:
   260505-bug-plugin-managed-default-root-discovery: observed plugin-managed root discovery friction
+spec:
+  - 260505-mcp-session-default-root
+  - 260505-named-agent-mcp-tools
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
