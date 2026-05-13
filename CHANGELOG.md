@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.25.2 - 2026-05-13
+
+### Fixed
+- Stabilize `TestServeStdioGitToolCalls` by separating the state-mutating
+  `git.commit` request from read-only git tool calls that run concurrently
+  under stdio serving.
+
 ## v0.25.1 - 2026-05-13
 
 ### Changed
