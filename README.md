@@ -45,8 +45,9 @@ claude plugin install ws@kang-sw-devenv
 ```
 
 Codex installs use the repository marketplace entries under `.agents/plugins/`.
-The agentless wsflow package lives in `agents-plugin-wsflow/` for separate
-Codex marketplace installation; `install.sh` does not install it into Claude.
+Claude-compatible marketplace metadata lives under `.claude-plugin/`. The
+agentless wsflow package lives in `agents-plugin-wsflow/` for separate
+marketplace installation; `install.sh` does not install it into Claude.
 
 ## License
 

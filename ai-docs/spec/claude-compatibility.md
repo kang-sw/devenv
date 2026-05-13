@@ -49,6 +49,8 @@ Claude-compatible wsflow metadata remains package-local to
 `WS_MCP_SETUP_TOOL=setup`. Validation for changes that touch Claude plugin
 metadata should include the wsflow package when the derivative surface is
 affected.
+The repository Claude marketplace exposes wsflow as a manual installable
+package; `install.sh` still does not snapshot, enable, or install wsflow.
 
 ## Downstream Claude Bootstrap Shim {#260505-downstream-claude-bootstrap-shim}
 
@@ -113,8 +115,9 @@ the async API job tools `ws/api.ask_async`, `ws/api.status`, `ws/api.result`, an
 
 The active plugin package declares a Claude compatibility manifest under
 `agents-plugin/.claude-plugin/`. Installer-managed marketplace metadata exposes
-the local ws plugin to Claude Code, and validation can be run against plugin
-manifests before installation.
+the local ws plugin to Claude Code. Repository marketplace metadata exposes both
+`ws` and `wsflow` for manual Claude marketplace installation, and validation can
+be run against plugin manifests before installation.
 
 The Claude-compatible metadata is part of the active `agents-plugin/` package.
 It must not fork workflow behavior away from the Codex plugin manifest and

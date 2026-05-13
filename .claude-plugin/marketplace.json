@@ -8,6 +8,11 @@
       "name": "ws",
       "source": "./agents-plugin",
       "description": "Structured AI-assisted development workflow: ticket-driven, contract-first, multi-agent."
+    },
+    {
+      "name": "wsflow",
+      "source": "./agents-plugin-wsflow",
+      "description": "Agentless workflow plugin for project context, tickets, specs, docs, and Git tools."
     }
   ]
 }

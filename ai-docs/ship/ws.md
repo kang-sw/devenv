@@ -48,6 +48,8 @@ At ship time:
 - `bash -n install.sh`
 - Confirm `.agents/plugins/marketplace.json` contains both `ws` and `wsflow`
   local Codex plugin entries when packaging changed.
+- Confirm `.claude-plugin/marketplace.json` contains both `ws` and `wsflow`
+  local Claude marketplace entries when packaging changed.
 - Confirm `install.sh update` snapshots and installs only the `ws` Claude
   plugin, and does not enable or install `wsflow@kang-sw-devenv`.
 
@@ -117,6 +119,9 @@ Publish targets:
 - Codex GitHub plugin marketplace install from repository
   `.agents/plugins/marketplace.json` pointing at `./agents-plugin` for `ws`
   and `./agents-plugin-wsflow` for `wsflow`
+- Claude repository marketplace metadata under `.claude-plugin/marketplace.json`
+  pointing at `./agents-plugin` for `ws` and `./agents-plugin-wsflow` for
+  manual `wsflow` installation
 
 Publish command after explicit final approval:
 

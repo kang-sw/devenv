@@ -8,7 +8,9 @@ on:
     paths:
       - ".github/workflows/ws-mcp-release.yml"
       - ".agents/plugins/marketplace.json"
+      - ".claude-plugin/marketplace.json"
       - "agents-plugin/**"
+      - "agents-plugin-wsflow/**"
       - "agents-plugin-tool/**"
   workflow_dispatch:
     inputs:
@@ -48,6 +50,9 @@ jobs:
           jq . ../agents-plugin/.mcp.json >/dev/null
           jq . ../agents-plugin/runtime.json >/dev/null
           jq . ../.agents/plugins/marketplace.json >/dev/null
+          jq . ../.claude-plugin/marketplace.json >/dev/null
+          test "$(jq -r '.plugins[].name' ../.agents/plugins/marketplace.json | sort | tr '\n' ' ')" = "ws wsflow "
+          test "$(jq -r '.plugins[].name' ../.claude-plugin/marketplace.json | sort | tr '\n' ' ')" = "ws wsflow "
 
       - name: Build release assets
         run: |

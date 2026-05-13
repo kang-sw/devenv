@@ -86,9 +86,11 @@ agents-plugin-wsflow/tests`, which checks the agentless runtime contract and
 the curated skill inventory without requiring text-identical skills.
 
 The repository local Codex marketplace exposes wsflow as a separate installable
-plugin entry alongside the full ws plugin. Codex-facing metadata keeps distinct
-wsflow identity, display text, source path, and local install path.
-`install.sh` does not install wsflow into Claude. {#260513-wsflow-marketplace-install}
+plugin entry alongside the full ws plugin. The repository Claude marketplace
+also exposes wsflow as a manual installable package alongside `ws`. Marketplace
+metadata keeps distinct wsflow identity, display text, source path, and local
+install path. `install.sh` does not install wsflow into Claude.
+{#260513-wsflow-marketplace-install}
 
 ## Runtime Launcher Repair And Project-Root Detection {#260505-runtime-launcher-repair-project-root}
 

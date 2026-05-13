@@ -41,7 +41,9 @@ history.
   copies, a reduced `runtime.json`, a curated wsflow skill bundle, and package
   tests for runtime-contract plus skill-inventory drift.
 - `.agents/plugins/marketplace.json` exposes both `ws` and `wsflow` as local
-  Codex plugin entries.
+  Codex plugin entries; `.claude-plugin/marketplace.json` exposes both packages
+  for manual Claude marketplace installation while `install.sh` still installs
+  only `ws`.
 - Codex local plugin iteration has no known CLI refresh path; use UI
   uninstall/install or a fresh Codex session after editing the registered source.
 - `agents-plugin/.codex-plugin/plugin.json` references plugin-local `.mcp.json`
