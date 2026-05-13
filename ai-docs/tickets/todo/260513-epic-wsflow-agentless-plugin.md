@@ -49,8 +49,8 @@ guidance, and ordinary runtime output should speak in wsflow terms.
 - `260513-feat-wsflow-agentless-runtime-mode` - done shared runtime slice for
   `WS_MCP_NO_AGENT`, namespace text, setup alias behavior, and default full ws
   regression coverage.
-- `260513-feat-wsflow-agentless-plugin-scaffold` - ready package scaffold and
-  derivative distribution slice after the runtime mode is available.
+- `260513-feat-wsflow-agentless-plugin-scaffold` - done package scaffold,
+  runtime contract, skill normalization, documentation, and drift guards.
 - Planned: installer, marketplace, and release verification slice after the
   scaffold establishes the wsflow package and runtime contract.
 

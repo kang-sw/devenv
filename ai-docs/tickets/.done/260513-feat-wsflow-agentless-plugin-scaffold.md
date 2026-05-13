@@ -14,6 +14,7 @@ related-mental-model:
   - named-agent-runtime
   - workflow-skills
   - claude-compatibility
+completed: 2026-05-13
 ---
 
 # wsflow agentless plugin scaffold
@@ -312,3 +313,22 @@ Acceptance criteria:
 - The verification path distinguishes curated semantic rewrites from mechanical
   mirroring; it should not require wsflow skills to be text-identical to full
   ws skills.
+
+### Result (4b4eaad) - 2026-05-13
+
+Recorded wsflow derivative-maintenance rules in the existing plugin runtime,
+MCP tools, workflow skills, and Claude compatibility specs without creating a
+separate wsflow spec corpus. The planned wsflow package and Claude-compatible
+package entries were promoted to implemented behavior.
+
+Updated project memory, mental models, ship guidance, and
+`ai-docs/ref/wsflow-mirroring.md` so future full `agents-plugin/` changes must
+evaluate wsflow drift when copied, packaged, or caller-visible surfaces change.
+The mirroring reference keeps `lead-skill-authoring` out of distributed wsflow
+execution and documents `python3 -m unittest discover
+agents-plugin-wsflow/tests` as the package verification command.
+
+Extended the wsflow skill-bundle test to compare the shipped allowlist against
+the full plugin skill inventory, making missing included counterparts and
+unexpected wsflow skills fail during static verification while preserving the
+curated, non-text-identical rewrite contract.

@@ -206,7 +206,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |
 | `260513-epic-wsflow-agentless-plugin` | todo | Create an internal wsflow agentless derivative plugin distribution |
-| `260513-feat-wsflow-agentless-plugin-scaffold` | ready | Scaffold wsflow package, no-agent runtime contract, namespace behavior, and drift rules |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -217,7 +216,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260513-feat-wsflow-agentless-plugin-scaffold` - scaffold the wsflow derivative package now that the shared no-agent runtime mode exists.
 
 ## Session Notes
 
@@ -226,9 +224,8 @@ Workflow documentation compression is complete:
 bootstrap template, active `lead-*` skills, delegate prompts, and
 `ai-docs/ref/skill-authoring.md`.
 
-In-flight: `260513-feat-wsflow-agentless-runtime-mode` is implemented and
-closed. Next wsflow implementation target is
-`260513-feat-wsflow-agentless-plugin-scaffold`.
+wsflow runtime mode and package scaffold are implemented and closed. Remaining
+epic work, if pursued, is installer, marketplace, and rollout packaging polish.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
 `agents-plugin-tool/internal/mcp/server.go`,
