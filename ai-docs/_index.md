@@ -50,7 +50,7 @@ history.
 | File | Use |
 |------|-----|
 | `ai-docs/ref/skill-authoring.md` | Skill/agent/prompt/convention authoring rules |
-| `ai-docs/ref/hbsflow-mirroring.md` | Required before editing full ws skills or plugin surfaces that may need hbsflow mirrors |
+| `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills or plugin surfaces that may need wsflow mirrors |
 | `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
 | `ai-docs/ref/ws-mcp.md` | MCP process, tools, CLI fallbacks, verification levels |
 | `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
@@ -64,7 +64,7 @@ Before editing tickets/specs/mental models, read the matching convention through
 read `ai-docs/ref/skill-authoring.md`. Before editing full
 `agents-plugin/skills/lead-*` skills, plugin packaging, runtime contracts,
 launcher behavior, prompt guidance, or release validation that may affect
-hbsflow, read `ai-docs/ref/hbsflow-mirroring.md`.
+wsflow, read `ai-docs/ref/wsflow-mirroring.md`.
 
 ## Runtime Surfaces
 
@@ -198,8 +198,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |
-| `260513-epic-hbsflow-agentless-plugin` | todo | Create an internal hbsflow agentless derivative plugin distribution |
-| `260513-feat-hbsflow-agentless-plugin-scaffold` | ready | Scaffold hbsflow package, no-agent runtime contract, namespace behavior, and drift rules |
+| `260513-epic-wsflow-agentless-plugin` | todo | Create an internal wsflow agentless derivative plugin distribution |
+| `260513-feat-wsflow-agentless-plugin-scaffold` | ready | Scaffold wsflow package, no-agent runtime contract, namespace behavior, and drift rules |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -210,7 +210,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260513-feat-hbsflow-agentless-plugin-scaffold` - scaffold the hbsflow derivative package now that the shared no-agent runtime mode exists.
+`260513-feat-wsflow-agentless-plugin-scaffold` - scaffold the wsflow derivative package now that the shared no-agent runtime mode exists.
 
 ## Session Notes
 
@@ -219,9 +219,9 @@ Workflow documentation compression is complete:
 bootstrap template, active `lead-*` skills, delegate prompts, and
 `ai-docs/ref/skill-authoring.md`.
 
-In-flight: `260513-feat-hbsflow-agentless-runtime-mode` is implemented and
-closed. Next hbsflow implementation target is
-`260513-feat-hbsflow-agentless-plugin-scaffold`.
+In-flight: `260513-feat-wsflow-agentless-runtime-mode` is implemented and
+closed. Next wsflow implementation target is
+`260513-feat-wsflow-agentless-plugin-scaffold`.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
 `agents-plugin-tool/internal/mcp/server.go`,

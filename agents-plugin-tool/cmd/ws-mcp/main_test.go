@@ -97,7 +97,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin, "runtime", "capabilities")
-	cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=hbsflow", "WS_MCP_SETUP_TOOL=setup")
+	cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=wsflow", "WS_MCP_SETUP_TOOL=setup")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("ws-mcp runtime capabilities failed: %v", err)
@@ -141,13 +141,13 @@ func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "subquery", args: []string{"subquery", "question"}, want: "hbsflow agentless mode disables agent-backed command: subquery"},
-		{name: "agents", args: []string{"agents", "status", "--name", "impl"}, want: "hbsflow agentless mode disables agent-backed command: agents"},
-		{name: "config agents-tier", args: []string{"config", "agents-tier", "--tier", "core"}, want: "hbsflow agentless mode disables agent-backed command: config agents-tier"},
+		{name: "subquery", args: []string{"subquery", "question"}, want: "wsflow agentless mode disables agent-backed command: subquery"},
+		{name: "agents", args: []string{"agents", "status", "--name", "impl"}, want: "wsflow agentless mode disables agent-backed command: agents"},
+		{name: "config agents-tier", args: []string{"config", "agents-tier", "--tier", "core"}, want: "wsflow agentless mode disables agent-backed command: config agents-tier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(bin, tc.args...)
-			cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=hbsflow")
+			cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=wsflow")
 			out, err := cmd.CombinedOutput()
 			if err == nil {
 				t.Fatalf("ws-mcp %v unexpectedly succeeded: %s", tc.args, string(out))

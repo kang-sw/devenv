@@ -1,29 +1,29 @@
 ---
-title: hbsflow agentless runtime mode
-parent: 260513-epic-hbsflow-agentless-plugin
+title: wsflow agentless runtime mode
+parent: 260513-epic-wsflow-agentless-plugin
 related:
-  260513-feat-hbsflow-agentless-plugin-scaffold: provides the shared runtime mode required before packaging hbsflow
+  260513-feat-wsflow-agentless-plugin-scaffold: provides the shared runtime mode required before packaging wsflow
   260429-research-host-neutral-ws-plugin: host-neutral plugin architecture anchor
 completed: 2026-05-13
 spec:
-  - 260513-hbsflow-agentless-runtime-mode
-  - 260513-hbsflow-runtime-contract-mode
+  - 260513-wsflow-agentless-runtime-mode
+  - 260513-wsflow-runtime-contract-mode
 related-mental-model:
   - plugin-runtime
   - mcp-runtime
   - named-agent-runtime
 ---
 
-# hbsflow agentless runtime mode
+# wsflow agentless runtime mode
 
 ## Background
 
-The hbsflow plugin distribution should reuse the shared `ws-mcp` runtime while
+The wsflow plugin distribution should reuse the shared `ws-mcp` runtime while
 presenting an agentless surface. The riskiest part is not copying the plugin
-package; it is ensuring the shared runtime can expose a reduced hbsflow contract
+package; it is ensuring the shared runtime can expose a reduced wsflow contract
 without changing the default full `ws` behavior.
 
-This ticket isolates the runtime-only work before `agents-plugin-hbsflow/`
+This ticket isolates the runtime-only work before `agents-plugin-wsflow/`
 packaging. Its primary success condition is proving that the existing full ws
 tool surface, launcher capability contract, and CLI command surface remain
 unchanged when the new environment variables are unset.
@@ -40,13 +40,13 @@ unchanged when the new environment variables are unset.
   because it does not start a named-agent worker.
 - Hide matching agent-backed CLI commands in no-agent mode:
   `agents`, `subquery`, and `config agents-tier`.
-- Add `WS_MCP_NAMESPACE=hbsflow` for user-facing namespace text. Do not rename
+- Add `WS_MCP_NAMESPACE=wsflow` for user-facing namespace text. Do not rename
   generic MCP tool names such as `project_tree`, `git.status`, `tickets.list`,
-  or `specs.find`; the host MCP server key supplies the `hbsflow/<tool>`
+  or `specs.find`; the host MCP server key supplies the `wsflow/<tool>`
   namespace.
-- Add `WS_MCP_SETUP_TOOL=setup` so hbsflow can advertise `setup` instead of
+- Add `WS_MCP_SETUP_TOOL=setup` so wsflow can advertise `setup` instead of
   `ws.setup`. The default full ws behavior still advertises `ws.setup`.
-- In hbsflow mode, `setup` should be the advertised tool name. `ws.setup` may
+- In wsflow mode, `setup` should be the advertised tool name. `ws.setup` may
   remain as hidden compatibility dispatch if that reduces shared-runtime churn.
 
 ## Constraints
@@ -55,15 +55,15 @@ unchanged when the new environment variables are unset.
 - No-agent mode must not silently dispatch hidden agent-backed tools to
   `wsagent`; explicit calls should return clear disabled errors.
 - Runtime compatibility data must match the mode being validated. Full ws
-  `runtime.capabilities` stays full; hbsflow/no-agent capabilities omit hidden
+  `runtime.capabilities` stays full; wsflow/no-agent capabilities omit hidden
   tools and commands.
 - Namespace substitution is limited to user-facing guidance, errors, follow-up
   text, and runtime metadata where relevant. It must not rename the `ws-mcp`
   binary, Go packages, persisted ws state paths, or spec anchors.
-- In hbsflow/no-agent mode, ordinary user-facing runtime text should not require
+- In wsflow/no-agent mode, ordinary user-facing runtime text should not require
   ws awareness. Internal diagnostics may still name `ws-mcp`, Go packages, or
   hidden compatibility paths when that is the precise implementation surface.
-- Do not create `agents-plugin-hbsflow/` in this ticket except as a test fixture
+- Do not create `agents-plugin-wsflow/` in this ticket except as a test fixture
   if one is needed for runtime validation.
 
 ## Phases
@@ -105,15 +105,15 @@ Acceptance criteria:
   `config agents-tier` return clear disabled errors.
 - With `WS_MCP_SETUP_TOOL=setup`, `tools/list` advertises `setup`; default full
   ws still advertises `ws.setup`.
-- With `WS_MCP_NAMESPACE=hbsflow`, user-facing guidance and error text that name
-  the MCP namespace use `hbsflow` notation.
-- With hbsflow/no-agent environment active, ordinary user-facing runtime text
-  does not present hbsflow as a ws variant or instruct users to call ws-named
+- With `WS_MCP_NAMESPACE=wsflow`, user-facing guidance and error text that name
+  the MCP namespace use `wsflow` notation.
+- With wsflow/no-agent environment active, ordinary user-facing runtime text
+  does not present wsflow as a ws variant or instruct users to call ws-named
   tools.
 
 ### Result (6499533) - 2026-05-13
 
-Implemented environment-driven hbsflow no-agent runtime mode in the shared
+Implemented environment-driven wsflow no-agent runtime mode in the shared
 `ws-mcp` runtime. The default full ws surface remains unchanged when the new
 environment variables are unset. With `WS_MCP_NO_AGENT=1`, MCP tools/list,
 explicit tool dispatch, runtime capabilities, and CLI command gates hide or

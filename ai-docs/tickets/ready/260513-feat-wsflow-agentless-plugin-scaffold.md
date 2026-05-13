@@ -1,13 +1,13 @@
 ---
-title: hbsflow agentless plugin scaffold
-parent: 260513-epic-hbsflow-agentless-plugin
+title: wsflow agentless plugin scaffold
+parent: 260513-epic-wsflow-agentless-plugin
 related:
-  260513-feat-hbsflow-agentless-runtime-mode: prerequisite shared runtime mode
+  260513-feat-wsflow-agentless-runtime-mode: prerequisite shared runtime mode
   260429-research-host-neutral-ws-plugin: host-neutral plugin architecture anchor
 spec:
-  - 260513-hbsflow-agentless-plugin-package
-  - 260513-hbsflow-agentless-skill-surface
-  - 260513-hbsflow-claude-compatible-package
+  - 260513-wsflow-agentless-plugin-package
+  - 260513-wsflow-agentless-skill-surface
+  - 260513-wsflow-claude-compatible-package
 related-mental-model:
   - plugin-runtime
   - mcp-runtime
@@ -16,7 +16,7 @@ related-mental-model:
   - claude-compatibility
 ---
 
-# hbsflow agentless plugin scaffold
+# wsflow agentless plugin scaffold
 
 ## Background
 
@@ -25,54 +25,54 @@ metadata, a launcher-managed `ws-mcp` runtime, a runtime contract in
 `runtime.json`, and workflow skills that use `ws/<tool>` MCP notation plus
 `ws:lead-*` plugin skill invocations.
 
-Internal users need a separate lightweight distribution named `hbsflow` that
+Internal users need a separate lightweight distribution named `wsflow` that
 keeps the project workflow, documentation, Git, ticket, spec, and setup tools,
 but removes ws named-agent and subquery orchestration. The package should be a
 derivative copy rather than a separate product line: specs and workflow meaning
-remain anchored to the canonical ws runtime, while hbsflow records only variant
+remain anchored to the canonical ws runtime, while wsflow records only variant
 constraints in the existing specs.
 
 ## Decisions
 
-- Create the package under `agents-plugin-hbsflow/`.
-- Use `hbsflow` as the plugin name, MCP server key, skill namespace prefix, and
+- Create the package under `agents-plugin-wsflow/`.
+- Use `wsflow` as the plugin name, MCP server key, skill namespace prefix, and
   user-facing MCP notation stem.
 - Reuse the same `ws-mcp` binary and launcher rather than building a separate
   runtime.
 - Depend on the shared runtime mode that supports:
-  `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=hbsflow`, and
+  `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=wsflow`, and
   `WS_MCP_SETUP_TOOL=setup`.
 - Keep actual MCP tool names stable where they are already generic, such as
   `project_tree`, `git.status`, `tickets.list`, and `specs.find`. The host MCP
-  server key supplies the `hbsflow/<tool>` namespace.
-- Treat `ws.setup` as the special legacy name. hbsflow should advertise `setup`
+  server key supplies the `wsflow/<tool>` namespace.
+- Treat `ws.setup` as the special legacy name. wsflow should advertise `setup`
   and may keep `ws.setup` only as hidden compatibility dispatch if that keeps
   shared runtime reuse simple.
-- Keep `agents-plugin/` as the canonical full distribution. hbsflow follows the
+- Keep `agents-plugin/` as the canonical full distribution. wsflow follows the
   same semantic changes when copied or caller-visible surfaces are touched, but
-  hbsflow does not get an independent spec tree.
+  wsflow does not get an independent spec tree.
 - Treat the ws relationship as internal maintenance context only. Distributed
-  hbsflow manifests, skills, default prompts, and ordinary user-facing guidance
-  should present hbsflow as its own workflow plugin, not as a ws-aware or
+  wsflow manifests, skills, default prompts, and ordinary user-facing guidance
+  should present wsflow as its own workflow plugin, not as a ws-aware or
   ws-lite product.
 - Keep one-shot native subagent guidance where it improves investigation or
   review. Native subagents have been verified able to use MCP documentation and
-  discovery tools, so hbsflow skills may instruct them to use hbsflow read tools
-  such as `hbsflow/convention.read`, `hbsflow/infra.read`,
-  `hbsflow/project_tree`, `hbsflow/specs.*`, `hbsflow/tickets.*`,
-  `hbsflow/mental_models.*`, and `hbsflow/git.*`.
-- Include `lead-ship` in the shipped hbsflow skill set for workflow
+  discovery tools, so wsflow skills may instruct them to use wsflow read tools
+  such as `wsflow/convention.read`, `wsflow/infra.read`,
+  `wsflow/project_tree`, `wsflow/specs.*`, `wsflow/tickets.*`,
+  `wsflow/mental_models.*`, and `wsflow/git.*`.
+- Include `lead-ship` in the shipped wsflow skill set for workflow
   centralization and documentation completeness.
-- Include forge workflows in the shipped hbsflow skill set because legacy
+- Include forge workflows in the shipped wsflow skill set because legacy
   project bootstrap depends on spec and mental-model reconstruction. Rewrite
   their survey and validation steps around self-contained native subagents or
-  direct exploration instead of hbsflow-managed agent sessions.
+  direct exploration instead of wsflow-managed agent sessions.
 - Exclude persistent multi-turn orchestration skills and upstream-maintenance
-  authoring helpers from the shipped hbsflow skill set: `lead-write-code`,
+  authoring helpers from the shipped wsflow skill set: `lead-write-code`,
   `lead-write-skeleton`, `lead-sprint`, `lead-salvage`, and
   `lead-skill-authoring`.
 - Keep direct, documentation, bootstrap, and reconstruction workflows in the
-  shipped hbsflow skill set:
+  shipped wsflow skill set:
   `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
   `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
   `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
@@ -86,185 +86,185 @@ constraints in the existing specs.
   or follow-up text that tells users to call ws named-agent tools when
   `WS_MCP_NO_AGENT=1` is active.
 - Do not use `WS_MCP_TOOL_PROFILE=leaf` as the product mechanism. Tool profiles
-  are containment filters; hbsflow needs a distribution contract.
-- Runtime compatibility checks must compare against the hbsflow tool and command
+  are containment filters; wsflow needs a distribution contract.
+- Runtime compatibility checks must compare against the wsflow tool and command
   contract, not the full ws contract.
-- hbsflow skill text must not instruct users to call `ws/subquery`,
+- wsflow skill text must not instruct users to call `ws/subquery`,
   `ws/agents.*`, or `ws:lead-*`.
-- hbsflow user-facing package text must avoid requiring ws knowledge. Use
-  `hbsflow`, `hbsflow:lead-*`, and `hbsflow/<tool>` notation in distributed
-  hbsflow files; keep ws references only in repository maintenance docs,
+- wsflow user-facing package text must avoid requiring ws knowledge. Use
+  `wsflow`, `wsflow:lead-*`, and `wsflow/<tool>` notation in distributed
+  wsflow files; keep ws references only in repository maintenance docs,
   tests, compatibility comments, or hidden implementation details where they are
   unavoidable.
 - Claude compatibility must use a package-local `.claude-plugin/plugin.json`
   and the shared launcher pattern. Do not revive `claude-plugin/`.
-- If a copied hbsflow surface cannot be updated with a full ws change, create a
+- If a copied wsflow surface cannot be updated with a full ws change, create a
   follow-up ticket rather than leaving untracked drift.
 
 ## Phases
 
 ### Phase 1: Package and runtime contract scaffold
 
-Create `agents-plugin-hbsflow/` as a derivative package with Codex and Claude
-metadata, package-local MCP config, a hbsflow `runtime.json`, and launcher
-coverage for the hbsflow runtime contract.
+Create `agents-plugin-wsflow/` as a derivative package with Codex and Claude
+metadata, package-local MCP config, a wsflow `runtime.json`, and launcher
+coverage for the wsflow runtime contract.
 
 Suggested approach:
 
-- Copy the full plugin package structure only where hbsflow needs it.
-- Set the Codex plugin name and Claude manifest name to `hbsflow`.
-- Configure the MCP server key as `hbsflow`.
-- Inject `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=hbsflow`, and
-  `WS_MCP_SETUP_TOOL=setup` through hbsflow `.mcp.json`.
-- Remove `agents.*`, `subquery`, and agent CLI commands from the hbsflow
+- Copy the full plugin package structure only where wsflow needs it.
+- Set the Codex plugin name and Claude manifest name to `wsflow`.
+- Configure the MCP server key as `wsflow`.
+- Inject `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=wsflow`, and
+  `WS_MCP_SETUP_TOOL=setup` through wsflow `.mcp.json`.
+- Remove `agents.*`, `subquery`, and agent CLI commands from the wsflow
   `runtime.json` requirements.
 - Keep version and launcher compatibility aligned with the full ws release
   mechanism unless a later ticket intentionally separates them.
 
 Acceptance criteria:
 
-- Codex and Claude manifests exist under `agents-plugin-hbsflow/`.
-- hbsflow `.mcp.json` starts the shared launcher with the hbsflow env contract.
-- hbsflow `runtime.json` represents the agentless required tool and command
+- Codex and Claude manifests exist under `agents-plugin-wsflow/`.
+- wsflow `.mcp.json` starts the shared launcher with the wsflow env contract.
+- wsflow `runtime.json` represents the agentless required tool and command
   surface.
-- Launcher capability validation can distinguish full ws and hbsflow contracts.
+- Launcher capability validation can distinguish full ws and wsflow contracts.
 
 ### Phase 2: Package runtime contract integration
 
-Wire the hbsflow package to the runtime mode delivered by
-`260513-feat-hbsflow-agentless-runtime-mode`.
+Wire the wsflow package to the runtime mode delivered by
+`260513-feat-wsflow-agentless-runtime-mode`.
 
 Suggested approach:
 
-- Verify hbsflow `runtime.json` matches no-agent `runtime.capabilities`.
+- Verify wsflow `runtime.json` matches no-agent `runtime.capabilities`.
 - Keep `api.list` if the runtime mode exposes it as read-only cache discovery.
 - Exclude `api.ask`, `api.ask_async`, `api.status`, `api.result`, and
-  `api.cancel` from the hbsflow runtime contract.
+  `api.cancel` from the wsflow runtime contract.
 - Keep the setup tool name aligned with `WS_MCP_SETUP_TOOL=setup`.
 
 Acceptance criteria:
 
-- hbsflow package validation compares against the no-agent runtime surface, not
+- wsflow package validation compares against the no-agent runtime surface, not
   the full ws runtime surface.
-- hbsflow `runtime.json` excludes agent-backed tools and commands while keeping
+- wsflow `runtime.json` excludes agent-backed tools and commands while keeping
   non-agent workflow tools.
-- hbsflow startup does not require or advertise ws named-agent capabilities.
+- wsflow startup does not require or advertise ws named-agent capabilities.
 
-### Phase 3: hbsflow skill normalization
+### Phase 3: wsflow skill normalization
 
-Create or trim hbsflow skills so users see agentless workflow instructions under
-the `hbsflow:lead-*` namespace.
+Create or trim wsflow skills so users see agentless workflow instructions under
+the `wsflow:lead-*` namespace.
 
 Suggested approach:
 
-- Replace `ws/` MCP notation with `hbsflow/` in hbsflow skill text.
-- Replace `ws:lead-*` plugin-skill invocations with `hbsflow:lead-*`.
+- Replace `ws/` MCP notation with `wsflow/` in wsflow skill text.
+- Replace `ws:lead-*` plugin-skill invocations with `wsflow:lead-*`.
 - Remove instructions that require `ws/subquery` or `ws/agents.*`.
 - Prefer native host agent/subagent guidance for broad exploration or review
   when the host offers it, and direct local search/read/edit guidance when it
   does not.
-- In native subagent prompts, point workers at hbsflow read tools for project
-  context and conventions instead of assuming hbsflow-managed agent sessions.
+- In native subagent prompts, point workers at wsflow read tools for project
+  context and conventions instead of assuming wsflow-managed agent sessions.
 - Rewrite `lead-implement` as a direct-edit harness. Remove skeleton routing,
   delegated write-code routing, ws-managed mental-model updater calls, and
   delegated merge-path assumptions.
 - Rewrite `lead-edit` to use native subagent review when available, or a
   lead-only risk review with rationale for low-risk changes.
-- Keep `lead-ship` in the hbsflow package, but use hbsflow naming and package
-  configuration once hbsflow ship configuration exists.
-- Do not include `lead-skill-authoring` in the hbsflow package. It is an
+- Keep `lead-ship` in the wsflow package, but use wsflow naming and package
+  configuration once wsflow ship configuration exists.
+- Do not include `lead-skill-authoring` in the wsflow package. It is an
   upstream maintenance helper for authoring and auditing workflow skills, not a
-  downstream hbsflow workflow surface.
+  downstream wsflow workflow surface.
 - Rewrite `lead-forge-spec` and `lead-forge-mental-model` so survey fan-out,
   verification, and ticket-association checks use self-contained native
   subagents or direct exploration. The lead still owns conventions, anchor
   generation, document authorship, final judgment, and commits.
 - Keep detailed implementation decisions in child tickets and specs rather than
-  creating a separate hbsflow doctrine.
+  creating a separate wsflow doctrine.
 
 Acceptance criteria:
 
-- The shipped hbsflow skill set includes only:
+- The shipped wsflow skill set includes only:
   `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
   `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
   `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-exit-session`,
   `lead-ship`, `lead-verify-discussion`, `lead-forge-spec`, and
   `lead-forge-mental-model`.
-- The shipped hbsflow skill set excludes `lead-write-code`,
+- The shipped wsflow skill set excludes `lead-write-code`,
   `lead-write-skeleton`, `lead-sprint`, `lead-salvage`, and
   `lead-skill-authoring`.
-- hbsflow forge workflows use native self-contained survey or audit workers only
-  for read-only investigation. They do not refer to hbsflow-managed subquery
+- wsflow forge workflows use native self-contained survey or audit workers only
+  for read-only investigation. They do not refer to wsflow-managed subquery
   keys, persistent agents, or result collection through `agents.*`.
-- hbsflow skills do not mention ws named-agent or subquery MCP calls.
-- hbsflow workflow manual documents the hbsflow MCP notation and the absence of
-  hbsflow-managed named-agent primitives.
-- hbsflow skill descriptions and optional host metadata point to `hbsflow`
+- wsflow skills do not mention ws named-agent or subquery MCP calls.
+- wsflow workflow manual documents the wsflow MCP notation and the absence of
+  wsflow-managed named-agent primitives.
+- wsflow skill descriptions and optional host metadata point to `wsflow`
   invocations.
-- hbsflow distributed skill text and manifests do not describe the package as a
+- wsflow distributed skill text and manifests do not describe the package as a
   ws variant or require ws-aware user behavior.
 - Native subagent guidance is one-shot and host-native. It tells workers to use
-  hbsflow MCP read/context tools where useful, and never describes a persistent
-  hbsflow-managed agent session.
+  wsflow MCP read/context tools where useful, and never describes a persistent
+  wsflow-managed agent session.
 
 ### Phase 4: Documentation and drift guard
 
-Record the hbsflow derivative-maintenance rule in the existing specs and project
+Record the wsflow derivative-maintenance rule in the existing specs and project
 memory without creating a parallel spec set. The repository already has
-`ai-docs/ref/hbsflow-mirroring.md` and an index reminder to read it before
-hbsflow-relevant full ws edits; this phase keeps those rules current and adds
+`ai-docs/ref/wsflow-mirroring.md` and an index reminder to read it before
+wsflow-relevant full ws edits; this phase keeps those rules current and adds
 the remaining automated verification guards so future full `agents-plugin/`
-skill edits evaluate hbsflow drift automatically during normal workflow
+skill edits evaluate wsflow drift automatically during normal workflow
 hygiene.
 
 Suggested approach:
 
 - Update `plugin-runtime`, `mcp-tools`, `workflow-skills`, and
-  `claude-compatibility` specs with hbsflow variant constraints.
-- Update relevant mental models so future implementation changes check hbsflow
+  `claude-compatibility` specs with wsflow variant constraints.
+- Update relevant mental models so future implementation changes check wsflow
   when copied, packaged, or caller-visible surfaces change.
-- Update project memory to list `agents-plugin-hbsflow/` as an active derivative
+- Update project memory to list `agents-plugin-wsflow/` as an active derivative
   distribution after the package exists.
-- Keep `ai-docs/ref/hbsflow-mirroring.md` and the `ai-docs/_index.md`
-  read-before-editing reminder aligned with the final shipped hbsflow package.
+- Keep `ai-docs/ref/wsflow-mirroring.md` and the `ai-docs/_index.md`
+  read-before-editing reminder aligned with the final shipped wsflow package.
   Editing a full `agents-plugin/skills/lead-*` skill that is included in the
-  shipped hbsflow skill set must either update the corresponding
-  `agents-plugin-hbsflow/skills/lead-*` skill in the same logical change or
+  shipped wsflow skill set must either update the corresponding
+  `agents-plugin-wsflow/skills/lead-*` skill in the same logical change or
   record an explicit follow-up ticket explaining why it cannot be mirrored.
-  Editing a full skill excluded from hbsflow must still check whether hbsflow
+  Editing a full skill excluded from wsflow must still check whether wsflow
   docs, workflow manual, or exclusion rationale drifted.
 - Keep `lead-skill-authoring` self-contained. Do not make it read
   repository-local reference files at invocation; that would break downstream
   plugin use. Mirror policy belongs in repository authoring guidance,
   workflow-maintenance instructions, and static checks, not in distributed skill
   execution.
-- Add a static hbsflow skill-bundle verification command and wire it into the
+- Add a static wsflow skill-bundle verification command and wire it into the
   relevant local or release verification path. The check should fail when
-  distributed hbsflow skills contain forbidden full-ws references such as
+  distributed wsflow skills contain forbidden full-ws references such as
   `ws/`, `ws:`, `ws.`, `subquery`, `agents.register`, `agents.call`,
   `agents.result`, `mental-model-updater`, `lead-write-code`,
   `lead-write-skeleton`, `lead-sprint`, or `lead-salvage`, except for explicit
   internal-maintenance allowlist paths.
-- Add a drift inventory check for the shipped hbsflow skill set. The check
-  should report included full skills that have no hbsflow counterpart, hbsflow
+- Add a drift inventory check for the shipped wsflow skill set. The check
+  should report included full skills that have no wsflow counterpart, wsflow
   skills that are not in the shipped allowlist, and excluded full skills that
-  accidentally appear in `agents-plugin-hbsflow/skills/`.
-- Document that hbsflow is not a generated mirror. It is a curated derivative:
+  accidentally appear in `agents-plugin-wsflow/skills/`.
+- Document that wsflow is not a generated mirror. It is a curated derivative:
   automatic checks should force review and drift detection, while semantic
   rewrites remain lead-owned.
 
 Acceptance criteria:
 
-- Existing specs describe hbsflow as an internal derivative distribution.
-- Future full ws changes have a documented rule to evaluate hbsflow drift.
-- No separate hbsflow spec corpus is introduced.
-- `ai-docs/ref/hbsflow-mirroring.md` remains accurate for the final shipped
-  hbsflow skill inventory and tells future skill edits how to update or
-  explicitly defer hbsflow mirrors.
+- Existing specs describe wsflow as an internal derivative distribution.
+- Future full ws changes have a documented rule to evaluate wsflow drift.
+- No separate wsflow spec corpus is introduced.
+- `ai-docs/ref/wsflow-mirroring.md` remains accurate for the final shipped
+  wsflow skill inventory and tells future skill edits how to update or
+  explicitly defer wsflow mirrors.
 - `lead-skill-authoring` remains self-contained and does not depend on
   `ai-docs/ref/skill-authoring.md` at invocation.
-- A static verification path checks the hbsflow distributed skill set for
+- A static verification path checks the wsflow distributed skill set for
   forbidden full-ws references and shipped-skill inventory drift.
 - The verification path distinguishes curated semantic rewrites from mechanical
-  mirroring; it should not require hbsflow skills to be text-identical to full
+  mirroring; it should not require wsflow skills to be text-identical to full
   ws skills.

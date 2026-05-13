@@ -16,7 +16,7 @@
 - Define ticket Result hashes as the commit that made the completed phase
   reviewable on its current branch, preserving merge commits as the
   already-merged case.
-- Capture hbsflow agentless plugin planning tickets for the first internal
+- Capture wsflow agentless plugin planning tickets for the first internal
   derivative plugin work.
 
 ### Fixed

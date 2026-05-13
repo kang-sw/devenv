@@ -135,8 +135,8 @@ Current launcher inputs:
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_PROJECT_ROOT` | Project root used as the default when a tool or CLI command omits `root`; normally derived by the launcher from the parent Codex process. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions. When set to `1`, `true`, `yes`, or `on`, agent-backed MCP tools and CLI commands are hidden or disabled. Unset preserves the full ws surface. |
-| `WS_MCP_NAMESPACE` | User-facing MCP namespace text override. Empty or unset defaults to `ws`; hbsflow sets this to `hbsflow`. |
-| `WS_MCP_SETUP_TOOL` | Advertised setup tool name override. Empty or unset defaults to `ws.setup`; hbsflow sets this to `setup`. |
+| `WS_MCP_NAMESPACE` | User-facing MCP namespace text override. Empty or unset defaults to `ws`; wsflow sets this to `wsflow`. |
+| `WS_MCP_SETUP_TOOL` | Advertised setup tool name override. Empty or unset defaults to `ws.setup`; wsflow sets this to `setup`. |
 
 The plugin-managed MCP path is proven for `codex exec` when `.mcp.json` sets
 `cwd: "."`. Without that field, Codex registers the server but startup fails

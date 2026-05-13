@@ -403,7 +403,7 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_MCP_NO_AGENT", "1")
-	t.Setenv("WS_MCP_NAMESPACE", "hbsflow")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
 	t.Setenv("WS_MCP_SETUP_TOOL", "setup")
 
 	input := strings.Join([]string{
@@ -430,13 +430,13 @@ func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
 			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
 		}
 	}
-	if strings.Contains(list, "ws MCP") || !strings.Contains(list, "hbsflow MCP") {
+	if strings.Contains(list, "ws MCP") || !strings.Contains(list, "wsflow MCP") {
 		t.Fatalf("tools/list did not use namespace override in descriptions: %s", list)
 	}
 	if toolIsError(t, byID["2"]) {
 		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
 	}
-	if !strings.Contains(byID["3"], "hbsflow agentless mode disables agent-backed tool: agents.call") {
+	if !strings.Contains(byID["3"], "wsflow agentless mode disables agent-backed tool: agents.call") {
 		t.Fatalf("hidden tool did not return clear no-agent error: %s", byID["3"])
 	}
 	if !strings.Contains(toolText(t, byID["4"]), `"source":"setup"`) {
