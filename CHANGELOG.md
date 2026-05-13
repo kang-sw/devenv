@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.24.0 - 2026-05-13
+
+### Added
+- Add `ws-mcp smoke --root <repo>` as a single-process executable smoke command
+  for Windows release verification.
+
+### Changed
+- Route explicit discussion implementation intent through `lead-proceed`, while
+  keeping discussion-to-ticket persistence flows intact.
+- Let `lead-write-ticket` satisfy ready-ticket spec coverage by invoking
+  `lead-write-spec` before finalizing the ready queue entry.
+- Use symbolic bracket labels for `lead-discuss` Intent Frames so response prose
+  follows the user's active conversation language more reliably.
+
+### Fixed
+- Route discuss-driven ready promotion through `lead-write-ticket` so ready
+  spec-gate checks are not bypassed.
+- Stabilize MCP Git tests on Windows by disabling `core.autocrlf` in temporary
+  test repositories.
+
 ## v0.23.5 - 2026-05-13
 
 ### Changed
