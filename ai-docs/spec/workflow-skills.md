@@ -184,9 +184,10 @@ delegated code writing, then runs the shared post-implementation documentation
 pipeline before reporting completion. Existing `implement/*` branches continue
 on the current branch; otherwise delegated implementation creates an
 `implement/<scope>` branch. After verification, `lead-implement` records the
-phase result commit, runs the spec and mental-model pre-pass, waits for accept
-or tweak, closes ticket and index updates, then asks the user to merge,
-continue, or stop.
+phase result commit, closes spec, mental-model, ticket, and index updates, then
+asks the user to merge, continue, or stop. Follow-up changes after this gate
+route to another implementation slice or sprint because completed ticket Results
+are frozen.
 
 `lead-edit` performs a narrow direct edit in the lead session. It honors
 existing skeleton artifacts and caller-provided scope boundaries, verifies the
