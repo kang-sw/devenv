@@ -6,34 +6,40 @@
 # Colors match statusline.sh conventions
 
 dir="${1:-.}"
-# Skip git operations on WSL2 Windows mounts (/mnt/c/, /mnt/d/, etc.) — NTFS git is too slow
-[[ "$dir" =~ ^/mnt/[a-z]/ ]] && { echo "—"; exit 0; }
 cd "$dir" 2>/dev/null || { echo "—"; exit 0; }
-git rev-parse --git-dir >/dev/null 2>&1 || { echo "—"; exit 0; }
 
-branch=$(git branch --show-current 2>/dev/null)
-[ -z "$branch" ] && branch=$(git rev-parse --short HEAD 2>/dev/null || echo "???")
+# Use Git for Windows on WSL Windows mounts; Linux git is too slow on NTFS.
+git_bin="git"
+if [[ "$(pwd -P)" =~ ^/mnt/[[:alpha:]](/|$) ]]; then
+  command -v git.exe >/dev/null 2>&1 || { echo "—"; exit 0; }
+  git_bin="git.exe"
+fi
+
+"$git_bin" rev-parse --git-dir >/dev/null 2>&1 || { echo "—"; exit 0; }
+
+branch=$("$git_bin" branch --show-current 2>/dev/null)
+[ -z "$branch" ] && branch=$("$git_bin" rev-parse --short HEAD 2>/dev/null || echo "???")
 
 # Branch name — colour114 (GIT_BRANCH_FG)
 out="#[fg=colour114]${branch}"
 
 # Ahead / behind upstream — ahead=114(green), behind=214(yellow)
-if git rev-parse --verify "@{u}" >/dev/null 2>&1; then
-  ahead=$(git rev-list --count "@{u}..HEAD" 2>/dev/null)
-  behind=$(git rev-list --count "HEAD..@{u}" 2>/dev/null)
+if "$git_bin" rev-parse --verify "@{u}" >/dev/null 2>&1; then
+  ahead=$("$git_bin" rev-list --count "@{u}..HEAD" 2>/dev/null)
+  behind=$("$git_bin" rev-list --count "HEAD..@{u}" 2>/dev/null)
   [ "$ahead" -gt 0 ] 2>/dev/null && out+=" #[fg=colour114]↑${ahead}"
   [ "$behind" -gt 0 ] 2>/dev/null && out+=" #[fg=colour214]↓${behind}"
 fi
 
 # Line-level diff stats (added/deleted lines)
-diff_stat=$(git diff --numstat 2>/dev/null | awk '{a+=$1; d+=$2} END {printf "%d %d", a+0, d+0}')
+diff_stat=$("$git_bin" diff --numstat 2>/dev/null | awk '{a+=$1; d+=$2} END {printf "%d %d", a+0, d+0}')
 lines_added=$(echo "$diff_stat" | cut -d' ' -f1)
 lines_deleted=$(echo "$diff_stat" | cut -d' ' -f2)
 
 # File-level working tree changes
-staged=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
-modified=$(git diff --name-only 2>/dev/null | wc -l | tr -d ' ')
-untracked=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+staged=$("$git_bin" diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
+modified=$("$git_bin" diff --name-only 2>/dev/null | wc -l | tr -d ' ')
+untracked=$("$git_bin" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
 
 # Detail: same order & colors as statusline.sh
 #   +added(114/green) -deleted(203/red) ~modified(214/yellow) ?untracked(75/blue)
