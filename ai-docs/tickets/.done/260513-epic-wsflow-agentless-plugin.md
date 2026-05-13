@@ -8,6 +8,7 @@ related-mental-model:
   - named-agent-runtime
   - workflow-skills
   - claude-compatibility
+completed: 2026-05-13
 ---
 
 # wsflow agentless plugin distribution
@@ -54,7 +55,7 @@ guidance, and ordinary runtime output should speak in wsflow terms.
 - `260513-feat-wsflow-sprint-skill` - done wsflow `lead-sprint` inclusion as
   a midstream preference change after the initial scaffold intentionally
   excluded persistent multi-turn orchestration skills.
-- `260513-feat-wsflow-marketplace-install` - ready installer, marketplace, and
+- `260513-feat-wsflow-marketplace-install` - done installer, marketplace, and
   release validation slice after the scaffold established the wsflow package
   and runtime contract.
 

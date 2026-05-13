@@ -7,6 +7,7 @@ spec:
 related-mental-model:
   - plugin-runtime
   - claude-compatibility
+completed: 2026-05-13
 ---
 
 # wsflow marketplace and installer registration
@@ -50,3 +51,11 @@ Update release or ship verification guidance so normal validation includes the
 wsflow marketplace/install path in addition to package manifest validation and
 package tests. Prefer small shared installer helpers over duplicated shell
 blocks when the existing structure supports it.
+
+### Result (c0d07ec) - 2026-05-13
+
+Added wsflow to the Codex local marketplace, extended `install.sh update` to
+snapshot and install both ws and wsflow through the local Claude marketplace,
+and updated release and README guidance for separate wsflow installation.
+Verification covered syntax, temp-HOME update-mode install behavior, package
+tests, and Claude manifest validation for both plugin packages.

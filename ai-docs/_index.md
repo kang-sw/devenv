@@ -13,7 +13,7 @@ tickets, and mental models here describe the workflow system itself; downstream
 application material belongs in downstream projects.
 
 Active plugin package: `agents-plugin/` (`ws@0.25.2`).
-Agentless derivative package scaffold: `agents-plugin-wsflow/` (`wsflow@0.25.2`).
+Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.25.2`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Retired Claude source material: `ai-docs/ref/claude-home-legacy.md` and git
 history.
@@ -30,15 +30,17 @@ history.
   new machine.
 - Root `CLAUDE.md` is the only live Claude compatibility shim and points at
   `AGENTS.md`.
-- `install.sh` snapshots `agents-plugin/` for Claude-compatible plugin installs
-  when Claude Code is available.
+- `install.sh` snapshots `agents-plugin/` and `agents-plugin-wsflow/` for
+  Claude-compatible plugin installs when Claude Code is available.
 - `agents-plugin/` is registered through `.agents/plugins/marketplace.json`;
   Codex UI install has verified `ws:lead-skill-authoring`,
   `ws:lead-write-ticket`, and `ws:lead-discuss`.
-- `agents-plugin-wsflow/` is a scaffolded agentless derivative package with
+- `agents-plugin-wsflow/` is an agentless derivative package with
   Codex/Claude manifests, package-local no-agent MCP env, shared launcher
   copies, a reduced `runtime.json`, a curated wsflow skill bundle, and package
   tests for runtime-contract plus skill-inventory drift.
+- `.agents/plugins/marketplace.json` exposes both `ws` and `wsflow` as local
+  Codex plugin entries.
 - Codex local plugin iteration has no known CLI refresh path; use UI
   uninstall/install or a fresh Codex session after editing the registered source.
 - `agents-plugin/.codex-plugin/plugin.json` references plugin-local `.mcp.json`
@@ -205,9 +207,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |
-| `260513-epic-wsflow-agentless-plugin` | todo | Create an internal wsflow agentless derivative plugin distribution |
 | `260513-feat-tolerant-doc-find-queries` | todo | Make specs and mental-model find queries tolerant candidate discovery |
-| `260513-feat-wsflow-marketplace-install` | ready | Register wsflow in local marketplace/install paths and release validation |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
@@ -218,7 +218,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260513-feat-wsflow-marketplace-install` - register wsflow marketplace/install and validation path.
 
 ## Session Notes
 
@@ -227,8 +226,8 @@ Workflow documentation compression is complete:
 bootstrap template, active `lead-*` skills, delegate prompts, and
 `ai-docs/ref/skill-authoring.md`.
 
-wsflow runtime mode and package scaffold are implemented and closed. Remaining
-epic work, if pursued, is installer, marketplace, and rollout packaging polish.
+wsflow runtime mode, package scaffold, sprint inclusion, and local
+marketplace/install path are implemented and closed.
 
 Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
 `agents-plugin-tool/internal/mcp/server.go`,
