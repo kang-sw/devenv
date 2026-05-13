@@ -158,6 +158,7 @@ lead-forge-mental-model
 lead-forge-spec
 lead-implement
 lead-proceed
+lead-review
 lead-salvage
 lead-ship
 lead-skill-authoring
@@ -178,6 +179,7 @@ Full ceremony:  discuss -> proceed -> implement -> (write-skeleton? -> write-cod
 Direct:         implement <description>
 Auto-route:     proceed <ticket-path>
 Sprint:         sprint -> write-code | edit per task -> wrap-up
+Review:         review [branch] -> verdict -> (discuss -> fix | comment | merge)
 Recovery:       salvage -> research report -> recovery epic? -> child tickets
 ```
 
