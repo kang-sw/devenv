@@ -9,6 +9,7 @@ related-mental-model:
   - mcp-runtime
   - named-agent-runtime
   - plugin-runtime
+completed: 2026-05-13
 ---
 
 # ws.setup root session API
@@ -70,3 +71,16 @@ Acceptance criteria:
   ambiguity, invalid root failure, and compatibility expectations.
 - Specs, mental models, reference docs, and workflow skill examples no longer
   present `session.set_default_root` as the canonical setup path.
+
+### Result (f45ec71) - 2026-05-13
+
+Implemented through delegated branch `implement/ws-setup-root-session-api` and
+merged to `main`. The MCP runtime now advertises canonical `ws.setup(root?)`,
+stores setup root in volatile per-server state, keeps hidden `session.*`
+compatibility dispatch out of public tool metadata, updates root diagnostics to
+point at `ws.setup`, and hides `root` from public `agents.*` schemas while
+preserving explicit root compatibility. Delegate and leaf profiles reject
+`ws.setup`, including allowlist attempts. Runtime metadata, specs, mental
+models, `ws-mcp` reference docs, and project inventory now name `ws.setup`.
+`go test ./...` in `agents-plugin-tool` and `spec_index.verify` passed after
+merge.
