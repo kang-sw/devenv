@@ -70,6 +70,12 @@ const ProtocolVersion = "2025-03-26"
 
 const maxDebugEvents = 256
 
+const (
+	envNoAgent   = "WS_MCP_NO_AGENT"
+	envNamespace = "WS_MCP_NAMESPACE"
+	envSetupTool = "WS_MCP_SETUP_TOOL"
+)
+
 var debugEvents = struct {
 	sync.Mutex
 	events []map[string]any
@@ -259,6 +265,32 @@ func rawMessageString(raw json.RawMessage) string {
 	return string(raw)
 }
 
+func NoAgentMode() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(envNoAgent)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func RuntimeNamespace() string {
+	value := strings.TrimSpace(os.Getenv(envNamespace))
+	if value == "" {
+		return "ws"
+	}
+	return value
+}
+
+func setupToolName() string {
+	value := strings.TrimSpace(os.Getenv(envSetupTool))
+	if value == "" {
+		return "ws.setup"
+	}
+	return value
+}
+
 func (s *Server) callTool(ctx context.Context, req request) response {
 	var params struct {
 		Name      string         `json:"name"`
@@ -271,12 +303,19 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
+	requestedToolName := params.Name
 	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
+	if NoAgentMode() && noAgentHiddenTool(params.Name) {
+		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
+	}
 	if !s.toolAllowed(params.Name) {
-		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current ws MCP profile: %s", params.Name))
+		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
 	}
 	if !s.subqueryAgentAccessAllowed(params.Name, params.Arguments) {
-		return errorResponse(req.ID, -32601, fmt.Sprintf("tool available only for subquery-* agents in current ws MCP profile: %s", params.Name))
+		return errorResponse(req.ID, -32601, fmt.Sprintf("tool available only for subquery-* agents in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
+	}
+	if setupToolName() != "ws.setup" && params.Name == setupToolName() {
+		params.Name = "ws.setup"
 	}
 
 	switch params.Name {
@@ -302,7 +341,7 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			s.sessionRoot = canonical
 			s.rootMu.Unlock()
 		}
-		state := s.setupState("ws.setup")
+		state := s.setupState(requestedToolName)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, state, nil)
 		}
@@ -1296,14 +1335,14 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 		return canonicalGitRoot(workspaces[0])
 	}
 	if len(workspaces) > 1 {
-		return "", fmt.Errorf("multiple host workspaces are available; pass root explicitly or call ws.setup with root set to the current directory before using root-omitted ws tools")
+		return "", fmt.Errorf("multiple host workspaces are available; pass root explicitly or call %s with root set to the current directory before using root-omitted %s tools", setupToolName(), RuntimeNamespace())
 	}
 
 	serverRoot := strings.TrimSpace(s.root)
 	if serverRoot != "" && serverRoot != "." {
 		root, err := canonicalGitRoot(serverRoot)
 		if err != nil {
-			return "", fmt.Errorf("could not resolve the MCP server root; pass root explicitly or call ws.setup with root set to the current directory: %w", err)
+			return "", fmt.Errorf("could not resolve the MCP server root; pass root explicitly or call %s with root set to the current directory: %w", setupToolName(), err)
 		}
 		return root, nil
 	}
@@ -1314,7 +1353,7 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 
 	root, err := canonicalGitRoot(s.root)
 	if err != nil {
-		return "", fmt.Errorf("could not resolve a repository root from the MCP session; pass root explicitly or call ws.setup with root set to the current directory: %w", err)
+		return "", fmt.Errorf("could not resolve a repository root from the MCP session; pass root explicitly or call %s with root set to the current directory: %w", setupToolName(), err)
 	}
 	return root, nil
 }
@@ -2047,6 +2086,10 @@ func LeadToolNames() []string {
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
+		name = advertisedToolName(name)
+		if NoAgentMode() && noAgentHiddenTool(name) {
+			continue
+		}
 		if name != "" {
 			names = append(names, name)
 		}
@@ -2060,23 +2103,33 @@ func (s *Server) filteredTools() []map[string]any {
 	filtered := make([]map[string]any, 0, len(base))
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
+		name = advertisedToolName(name)
 		if s.toolAllowed(name) {
-			filtered = append(filtered, publicToolDefinition(tool))
+			filtered = append(filtered, publicToolDefinition(tool, name))
 		}
 	}
 	return filtered
 }
 
-func publicToolDefinition(tool map[string]any) map[string]any {
+func publicToolDefinition(tool map[string]any, advertisedName string) map[string]any {
 	name, _ := tool["name"].(string)
-	if !strings.HasPrefix(name, "agents.") {
-		return tool
-	}
 	clone := make(map[string]any, len(tool))
 	for key, value := range tool {
 		clone[key] = value
 	}
-	schema, ok := tool["inputSchema"].(map[string]any)
+	if advertisedName != "" {
+		clone["name"] = advertisedName
+	}
+	if description, _ := clone["description"].(string); description != "" {
+		clone["description"] = namespaceText(description)
+	}
+	if schema, ok := clone["inputSchema"].(map[string]any); ok {
+		clone["inputSchema"] = namespaceValue(schema)
+	}
+	if !strings.HasPrefix(name, "agents.") {
+		return clone
+	}
+	schema, ok := clone["inputSchema"].(map[string]any)
 	if !ok {
 		return clone
 	}
@@ -2099,6 +2152,9 @@ func publicToolDefinition(tool map[string]any) map[string]any {
 }
 
 func (s *Server) toolAllowed(name string) bool {
+	if NoAgentMode() && noAgentHiddenTool(name) {
+		return false
+	}
 	if !roleAllowsTool(s.role, name) {
 		return false
 	}
@@ -2126,7 +2182,7 @@ func roleAllowsTool(role toolRole, name string) bool {
 	case roleLead:
 		return true
 	case roleDelegate:
-		if strings.HasPrefix(name, "session.") || name == "ws.setup" {
+		if strings.HasPrefix(name, "session.") || name == "ws.setup" || name == setupToolName() {
 			return false
 		}
 		if isSubqueryAgentTool(name) {
@@ -2134,7 +2190,79 @@ func roleAllowsTool(role toolRole, name string) bool {
 		}
 		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.")
 	case roleLeaf:
-		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "ws.setup" && name != "subquery" && name != "git.commit"
+		return !strings.HasPrefix(name, "agents.") && !strings.HasPrefix(name, "config.") && !strings.HasPrefix(name, "session.") && !strings.HasPrefix(name, "api.") && name != "ws.setup" && name != setupToolName() && name != "subquery" && name != "git.commit"
+	default:
+		return false
+	}
+}
+
+func advertisedToolName(name string) string {
+	if name == "ws.setup" {
+		return setupToolName()
+	}
+	return name
+}
+
+func namespaceText(text string) string {
+	namespace := RuntimeNamespace()
+	if namespace == "ws" {
+		return text
+	}
+	replacer := strings.NewReplacer(
+		"ws MCP", namespace+" MCP",
+		"ws/", namespace+"/",
+		"ws:", namespace+":",
+		"ws project", namespace+" project",
+		"ws runtime", namespace+" runtime",
+		"ws workflow", namespace+" workflow",
+		"ws user", namespace+" user",
+		"ws agent", namespace+" agent",
+		"ws agents", namespace+" agents",
+		"ws ", namespace+" ",
+	)
+	return replacer.Replace(text)
+}
+
+func namespaceValue(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return namespaceText(typed)
+	case map[string]any:
+		clone := make(map[string]any, len(typed))
+		for key, child := range typed {
+			clone[key] = namespaceValue(child)
+		}
+		return clone
+	case map[string]string:
+		clone := make(map[string]string, len(typed))
+		for key, child := range typed {
+			clone[key] = namespaceText(child)
+		}
+		return clone
+	case []any:
+		clone := make([]any, len(typed))
+		for i, child := range typed {
+			clone[i] = namespaceValue(child)
+		}
+		return clone
+	case []string:
+		clone := make([]string, len(typed))
+		for i, child := range typed {
+			clone[i] = namespaceText(child)
+		}
+		return clone
+	default:
+		return value
+	}
+}
+
+func noAgentHiddenTool(name string) bool {
+	if strings.HasPrefix(name, "agents.") {
+		return true
+	}
+	switch name {
+	case "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel":
+		return true
 	default:
 		return false
 	}

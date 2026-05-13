@@ -89,6 +89,76 @@ func TestRuntimeCapabilitiesCommandReportsLauncherContractSurface(t *testing.T) 
 	}
 }
 
+func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	cmd := exec.Command(bin, "runtime", "capabilities")
+	cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=hbsflow", "WS_MCP_SETUP_TOOL=setup")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("ws-mcp runtime capabilities failed: %v", err)
+	}
+	var got struct {
+		Tools    []string `json:"tools"`
+		Commands []string `json:"commands"`
+	}
+	mustUnmarshalCLIJSON(t, out, &got)
+	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup"} {
+		if slices.Contains(got.Tools, hidden) {
+			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
+		}
+	}
+	for _, visible := range []string{"api.list", "config.show", "tickets.list", "setup"} {
+		if !slices.Contains(got.Tools, visible) {
+			t.Fatalf("no-agent capabilities missing visible tool %s in %v", visible, got.Tools)
+		}
+	}
+	for _, hidden := range []string{"agents.call", "agents.cancel", "agents.run-current", "subquery", "config.agents-tier"} {
+		if slices.Contains(got.Commands, hidden) {
+			t.Fatalf("no-agent capabilities exposed hidden command %s in %v", hidden, got.Commands)
+		}
+	}
+	for _, visible := range []string{"config.show", "tickets.list", "runtime.capabilities"} {
+		if !slices.Contains(got.Commands, visible) {
+			t.Fatalf("no-agent capabilities missing visible command %s in %v", visible, got.Commands)
+		}
+	}
+}
+
+func TestNoAgentCLICommandsReturnDisabledErrors(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "subquery", args: []string{"subquery", "question"}, want: "hbsflow agentless mode disables agent-backed command: subquery"},
+		{name: "agents", args: []string{"agents", "status", "--name", "impl"}, want: "hbsflow agentless mode disables agent-backed command: agents"},
+		{name: "config agents-tier", args: []string{"config", "agents-tier", "--tier", "core"}, want: "hbsflow agentless mode disables agent-backed command: config agents-tier"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.args...)
+			cmd.Env = append(os.Environ(), "WS_MCP_NO_AGENT=1", "WS_MCP_NAMESPACE=hbsflow")
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("ws-mcp %v unexpectedly succeeded: %s", tc.args, string(out))
+			}
+			if !strings.Contains(string(out), tc.want) {
+				t.Fatalf("ws-mcp %v error missing %q:\n%s", tc.args, tc.want, string(out))
+			}
+		})
+	}
+}
+
 func TestSmokeCommandRunsExecutableChecksInOneProcess(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")

@@ -396,6 +396,66 @@ func TestServeStdioDefaultsToLeadToolsWithoutRootAuthorityDetection(t *testing.T
 	}
 }
 
+func TestServeStdioNoAgentModeHidesAgentBackedTools(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "hbsflow")
+	t.Setenv("WS_MCP_SETUP_TOOL", "setup")
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api.list","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.call","arguments":{"name":"impl","prompt":"work"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"setup","arguments":{"format":"json"}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	list := byID["1"]
+	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup"} {
+		if strings.Contains(list, hidden) {
+			t.Fatalf("tools/list exposed hidden no-agent tool %s: %s", hidden, list)
+		}
+	}
+	for _, visible := range []string{"api.list", "config.show", "tickets.list", "setup"} {
+		if !strings.Contains(list, visible) {
+			t.Fatalf("tools/list missing no-agent visible tool %s: %s", visible, list)
+		}
+	}
+	if strings.Contains(list, "ws MCP") || !strings.Contains(list, "hbsflow MCP") {
+		t.Fatalf("tools/list did not use namespace override in descriptions: %s", list)
+	}
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("api.list should remain callable in no-agent mode: %s", byID["2"])
+	}
+	if !strings.Contains(byID["3"], "hbsflow agentless mode disables agent-backed tool: agents.call") {
+		t.Fatalf("hidden tool did not return clear no-agent error: %s", byID["3"])
+	}
+	if !strings.Contains(toolText(t, byID["4"]), `"source":"setup"`) {
+		t.Fatalf("setup alias did not dispatch to setup state: %s", byID["4"])
+	}
+
+	var badRootOut bytes.Buffer
+	badRootServer := NewServer(filepath.Join(t.TempDir(), "missing"), "test")
+	if err := badRootServer.ServeStdio(context.Background(), strings.NewReader(
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"tickets.list","arguments":{}}}`+"\n",
+	), &badRootOut); err != nil {
+		t.Fatalf("bad root ServeStdio returned error: %v", err)
+	}
+	badRootByID := responseLinesByID(t, strings.Split(strings.TrimSpace(badRootOut.String()), "\n"))
+	if !strings.Contains(toolText(t, badRootByID["5"]), "call setup with root") {
+		t.Fatalf("root guidance did not use setup alias: %s", badRootByID["5"])
+	}
+}
+
 func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	useLeadProfile(t)
 	rootA := initTicketRepo(t, "260505-feat-alpha")

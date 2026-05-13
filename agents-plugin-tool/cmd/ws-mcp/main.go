@@ -41,12 +41,14 @@ func main() {
 	case "smoke":
 		smoke(os.Args[2:])
 	case "subquery":
+		fatalIfNoAgentCommand("subquery")
 		subquery(os.Args[2:])
 	case "config":
 		configCommand(os.Args[2:])
 	case "path":
 		path(os.Args[2:])
 	case "agents":
+		fatalIfNoAgentCommand("agents")
 		agents(os.Args[2:])
 	case "git":
 		gitCommand(os.Args[2:])
@@ -65,6 +67,10 @@ func main() {
 }
 
 func usage() {
+	if mcp.NoAgentMode() {
+		fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|specs|mental-models|references>")
+		return
+	}
 	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|subquery|config|path|agents|git|tickets|specs|mental-models|references>")
 }
 
@@ -250,8 +256,29 @@ func runtimeCapabilityCommandNames() []string {
 		"tickets.list",
 		"tickets.status",
 	}
+	if mcp.NoAgentMode() {
+		commands = filterNoAgentCommands(commands)
+	}
 	sort.Strings(commands)
 	return commands
+}
+
+func filterNoAgentCommands(commands []string) []string {
+	out := make([]string, 0, len(commands))
+	for _, command := range commands {
+		if strings.HasPrefix(command, "agents.") || command == "subquery" || command == "config.agents-tier" {
+			continue
+		}
+		out = append(out, command)
+	}
+	return out
+}
+
+func fatalIfNoAgentCommand(command string) {
+	if !mcp.NoAgentMode() {
+		return
+	}
+	fatal(command, fmt.Errorf("%s agentless mode disables agent-backed command: %s", mcp.RuntimeNamespace(), command))
 }
 
 func subquery(args []string) {
@@ -287,6 +314,7 @@ func configCommand(args []string) {
 	case "show":
 		configShow(args[1:])
 	case "agents-tier":
+		fatalIfNoAgentCommand("config agents-tier")
 		configAgentsTier(args[1:])
 	default:
 		configUsage()
