@@ -44,6 +44,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 ## General
 
 - Phases with a `### Result` section are frozen — never edit them. Unimplemented phases remain editable.
+- `### Result (<short-hash>)` uses the commit that first made the completed phase reviewable on its current branch. If the phase was already merged before the ticket update, use the merge commit.
 - All ticket content must be in English regardless of conversation language.
 
 ## Templates

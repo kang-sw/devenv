@@ -1,7 +1,7 @@
 # Executor Wrapup
 
-Shared wrapup procedure for executor-series skills. Load and follow after the
-implementation commit is made and any merge step is done.
+Shared wrapup procedure for executor-series skills. Load and follow after a
+completed implementation phase has a reviewable result commit.
 
 ## Invariants
 
@@ -36,6 +36,7 @@ git status --porcelain ai-docs/
 Ticket-driven only:
 
 1. Append `### Result (<short-hash>) - YYYY-MM-DD` to each completed phase.
+   Use the result commit supplied by the caller.
 2. Move completed tickets to the next status directory when all phases complete.
 3. Remove completed ready tickets from the `## Ticket Queue` section in `ai-docs/_index.md`.
 
