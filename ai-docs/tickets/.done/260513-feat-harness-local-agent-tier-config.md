@@ -4,6 +4,7 @@ spec:
   - 260513-harness-local-agent-tier-config
 related-mental-model:
   - named-agent-runtime
+completed: 2026-05-13
 ---
 
 # Harness-local agent tier configuration
@@ -49,3 +50,12 @@ Acceptance checks:
   Claude alias entry.
 - A CLI call without `--harness` still updates the default alias mapping.
 - Existing explicit-backend registration protections remain intact.
+
+### Result (08f44bb) - 2026-05-13
+
+Implemented `config.agents_tier` harness targeting across wsconfig, MCP, and
+CLI surfaces. MCP calls now use explicit `harness`, then detected session
+harness, then `default`; CLI calls can pass `--harness` and otherwise update
+`default`. Added coverage for Claude-harness `core` resolving to
+`codex/gpt-5.4`, CLI harness writes, default fallback behavior, and
+explicit-backend mismatch protection.
