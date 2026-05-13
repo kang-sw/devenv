@@ -24,6 +24,8 @@ daemons through an authenticated forwarding relationship.
 The forwarding model should preserve the same resource shape used by local
 state: `/api/servers/:serverId/workspaces/:workspaceId/...` resolves locally
 for the local server and forwards to a linked daemon for linked server ids.
+Running terminal, editor, agent, and task resources under a workspace are
+instances, not sessions.
 
 This ticket needs further design discussion before promotion to `ready`,
 especially around trust, routing, and which actions are forwarded versus kept
@@ -48,7 +50,8 @@ requiring feature panels to know whether a resource is local or linked.
 
 Represent linked servers in the frontend workspace model so panels can show
 local, WSL, and remote resources with clear provenance while preserving a
-seamless dashboard experience and shared resource keys.
+seamless dashboard experience, shared resource keys, and flat cross-server
+workspace navigation.
 
 ### Phase 4: Verify WSL and remote link behavior
 

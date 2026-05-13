@@ -12,10 +12,14 @@ related-mental-model:
 
 The dashboard needs a stable workspace model before terminals, agents, and
 editors can share context. The workspace layer should discover host folders and
-Git worktrees while preserving server/project/worktree/session boundaries.
+Git worktrees while preserving server/project/worktree/instance boundaries.
 
 Workspace APIs should use opaque workspace ids under explicit server ids. Host
 paths remain daemon-owned metadata, not URL identifiers.
+
+Git worktrees should be first-class workspace records. The UI can render them
+flat across servers while still exposing their relationship to the common Git
+root and branch or short hash.
 
 Detailed picker UX and persistence rules need follow-up discussion before this
 ticket is promoted to `ready/`.
@@ -30,7 +34,8 @@ root without giving the browser direct filesystem authority.
 ### Phase 2: Add Git root and worktree discovery
 
 Detect Git repository roots, common roots, linked worktrees, worktree labels,
-and invalid-root errors in a form the frontend can render.
+branch or short-hash labels, and invalid-root errors in a form the frontend can
+render.
 
 ### Phase 3: Add workspace state model
 
@@ -38,7 +43,13 @@ Persist recent workspaces, selected workspace state, opaque workspace ids, and
 per-workspace UI state keys without leaking ws runtime root or harness state
 across projects.
 
-### Phase 4: Verify workspace boundary behavior
+### Phase 4: Add flat workspace navigation model
+
+Expose navigation-ready workspace summaries that include `serverId`, server
+badge metadata, workspace name, workspace kind, worktree lineage, and display
+labels suitable for a flat cross-server left navigation.
+
+### Phase 5: Verify workspace boundary behavior
 
 Add tests or smoke checks for non-Git folders, linked worktrees, moved folders,
 permission errors, and multiple open workspaces.

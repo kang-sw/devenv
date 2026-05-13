@@ -49,11 +49,11 @@ The MVP should cover:
   WebSocket auth, and local/tunnel/public bind-mode guards. First substrate.
 - `260514-feat-ws-web-frontend-substrate` - extension-ready React shell, panel
   and command registries, dock layout, design primitives, and mock/live data
-  boundary. Depends on daemon serving shape and server/workspace/session scope;
+  boundary. Depends on daemon serving shape and server/workspace/instance scope;
   UI work uses `model: "opus"` for delegated ws agents.
 - `260514-feat-ws-web-workspace-substrate` - host folder selection, Git
   root/worktree discovery, recent workspace state, opaque workspace ids, and
-  workspace boundary model.
+  workspace boundary model, including flat navigation entries for worktrees.
 - `260514-feat-ws-web-terminal-substrate` - PTY session manager, xterm.js
   WebSocket bridge, and terminal panel contribution.
 - `260514-feat-ws-web-agent-dashboard-substrate` - wsstate-backed agent status,
@@ -71,7 +71,7 @@ The MVP should cover:
 ## Cross-Child Decisions
 
 - Treat the product as a personal control plane: authentication is conservative,
-  while an authenticated owner session has broad host-control authority.
+  while an authenticated owner auth session has broad host-control authority.
 - Require authentication for localhost as well as remote access. Preserve
   convenience through a `ws-web open` style command that creates a one-time
   pairing URL and then installs a normal session cookie.
@@ -86,15 +86,26 @@ The MVP should cover:
   editor path because Windows PTY behavior is a known stability concern.
 - The daemon exposes stable view-model APIs over wsstate and wsagent behavior.
   The browser must not treat the cache layout itself as the public contract.
-- Model dashboard resources from the start as `server -> workspace -> session`.
-  Treat the local daemon as one server, linked WSL/remote daemons as additional
-  servers, and route APIs through explicit server/workspace/session identifiers
-  such as `/api/servers/:serverId/workspaces/:workspaceId/...`.
+- Model dashboard resources from the start as `server -> workspace -> instance`.
+  A server is a physical or logical host environment such as local machine, WSL
+  distro, or remote host. A workspace is a project root or Git worktree root on
+  a server. An instance is a running program or task identified within a
+  workspace, such as a terminal, editor, agent, or task.
+- Reserve `session` for auth/browser sessions and external protocol sessions
+  such as MCP or model backend sessions. Do not use `session` for dashboard
+  terminal/editor/agent resources.
+- Route APIs through explicit server/workspace/instance identifiers such as
+  `/api/servers/:serverId/workspaces/:workspaceId/instances/:instanceId`.
 - Use opaque ids in API paths. Do not expose host paths as workspace ids; keep
   root paths, Git roots, worktree keys, and link details in daemon-owned state
   and view models.
-- Keep MCP root, harness, and session state scoped by project/worktree/session
+- Keep MCP root, harness, and protocol session state scoped by
+  project/worktree/instance
   rather than making the web daemon a global authority over ws runtime state.
+- Treat Git worktrees as first-class workspace entries. The left navigation
+  should be able to list server/workspace rows flat across servers while still
+  showing worktree lineage, for example a server badge plus workspace name with
+  child notation for `workspace:branch-or-hash(worktree)`.
 - Prefer linked ws web daemons over host-specific scraping for cross-environment
   visibility. Native Windows may use WSL-exposed tools as a fallback or
   discovery aid, but WSL process and workspace control should primarily happen

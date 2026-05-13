@@ -24,7 +24,7 @@ workspace, frontend, terminal, agent, editor, and linked-server substrates exist
 
 Verify loopback daemon access through SSH port forwarding or equivalent tunnel
 usage, including pairing, session cookies, WebSockets, reconnect behavior, and
-server/workspace/session-scoped API routing.
+server/workspace/instance-scoped API routing.
 
 ### Phase 2: Verify WSL behavior
 
