@@ -21,3 +21,5 @@ ai-docs/presentation/node_modules/
 ai-docs/presentation/package.json
 ai-docs/presentation/package-lock.json
 ai-docs/presentation/*.pptx
+ai-docs/presentation/*.pdf
+ai-docs/presentation/slides/

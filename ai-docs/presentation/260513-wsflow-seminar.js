@@ -209,10 +209,11 @@ function arrow(s, x, y) {
     ["05", "wsflow에게 물어보기",          "셀프서비스 학습법"],
     ["06", "레거시 프로젝트 온보딩",  "bootstrap → forge-spec → forge-mental-model"],
     ["07", "치트시트",                 "커맨드 및 플로우 요약"],
+    ["08", "팀 협업",                  "GitLab MR 협업 루프 · wsflow:lead-review"],
   ];
 
   sections.forEach(([num, title, desc], i) => {
-    const y = 0.95 + i * 0.78;
+    const y = 0.95 + i * 0.67;
     // 번호 pill
     pill(s, num, 0.35, y, 0.5, { h: 0.38, fontSize: 10, bg: C.navy });
     // 섹션 제목
@@ -783,6 +784,15 @@ function arrow(s, x, y) {
       fontSize: 10, color: C.darkGray, fontFace: "Malgun Gothic",
     });
   });
+
+  s.addShape(pptx.ShapeType.roundRect, {
+    x: 0.35, y: 5.95, w: W - 0.7, h: 0.52,
+    fill: { color: C.offWhite }, line: { color: C.sky, pt: 1 }, arcSize: 4,
+  });
+  s.addText("💡  AI Context 섹션이 MR 리뷰어에게 의도를 전달하는 재료입니다.  wsflow로 작업하면 협업 인프라가 자동으로 쌓입니다.", {
+    x: 0.55, y: 5.95, w: W - 1.0, h: 0.52,
+    fontSize: 10, color: C.navy, fontFace: "Malgun Gothic", valign: "middle",
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1161,8 +1171,16 @@ function arrow(s, x, y) {
   });
   flowRow(["proceed <설명>", "implement", "commit", "/compact"], yB + labelH + 0.06, bh, 3);
 
-  const yNote = yB + labelH + 0.06 + bh + 0.2;
-  s.addText("어느 패턴이든 proceed와 /compact 두 가지만 기억하면 됩니다.", {
+  // 패턴 C
+  const yC = yB + labelH + 0.06 + bh + 0.2;
+  s.addText("패턴 C  —  MR 리뷰 (메인테이너)", {
+    x: 0.35, y: yC, w: W - 0.7, h: labelH,
+    fontSize: 11, bold: true, color: C.sky, fontFace: "Malgun Gothic",
+  });
+  flowRow(["lead-review <브랜치>", "LGTM / FIX / OPEN", "머지 (LGTM 시)"], yC + labelH + 0.06, bh, 1);
+
+  const yNote = yC + labelH + 0.06 + bh + 0.2;
+  s.addText("개인 작업은 proceed · /compact, MR 리뷰는 lead-review 하나로 진행합니다.", {
     x: 0.35, y: yNote, w: W - 0.7, h: 0.32,
     fontSize: 10, color: C.gray, fontFace: "Malgun Gothic", align: "center",
   });
@@ -1522,7 +1540,8 @@ function arrow(s, x, y) {
     // [커맨드, 설명, 카테고리 색]
     ["/wsflow:lead-discuss",            "방향 논의. 코드 미수정",                           C.navy],
     ["/wsflow:lead-proceed <target>",   "파이프라인 자동 실행 (spec→ticket→implement→commit)", C.sky],
-    ["/compact",                    "컨텍스트 압축. 작업 후 습관화",                     C.skyDim],
+    ["/compact",                        "컨텍스트 압축. 작업 후 습관화",                     C.skyDim],
+    ["/wsflow:lead-review [브랜치]",    "MR/PR 리뷰 → LGTM / NEEDS FIX / OPEN 판정",        C.sky],
     ["/wsflow:lead-bootstrap",          "프로젝트 wsflow 구조 초기화/업그레이드",            C.navy],
     ["/wsflow:lead-forge-spec",         "코드베이스 분석 → spec 일괄 생성",                  C.navy],
     ["/wsflow:lead-forge-mental-model", "코드베이스 분석 → mental model 일괄 생성",          C.navy],
@@ -1606,7 +1625,184 @@ function arrow(s, x, y) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 슬라이드 26: 마무리
+// 슬라이드 26: 팀 협업 — 역할과 루프
+// ═══════════════════════════════════════════════════════════════
+{
+  const s = addSlide({ dark: true });
+  s.background = { color: C.navy };
+  header(s, "08  팀 협업  —  역할과 협업 루프", { dark: true });
+  footerBar(s);
+
+  s.addText("wsflow 개인 작업 규율이 팀 협업 인프라가 됩니다.  AI Context 커밋이 MR 리뷰의 재료입니다.", {
+    x: 0.35, y: 0.88, w: W - 0.7, h: 0.35,
+    fontSize: 10.5, color: C.sky, fontFace: "Malgun Gothic",
+  });
+
+  const roles = [
+    {
+      title: "컨트리뷰터",
+      icon: "👩‍💻",
+      steps: [
+        "브랜치 생성",
+        "wsflow:lead-discuss  →  proceed 로 구현",
+        "AI Context 커밋 자동 포함",
+        "MR 생성 (커밋이 리뷰 재료)",
+      ],
+    },
+    {
+      title: "메인테이너",
+      icon: "🔍",
+      steps: [
+        "wsflow:lead-review 실행",
+        "브랜치 fetch + 의도 파악 + 정합성 검토",
+        "LGTM → 머지",
+        "NEEDS FIX → 로컬 수정 또는 코멘트",
+      ],
+    },
+  ];
+
+  const cW = (W - 1.05) / 2;
+  roles.forEach((r, ri) => {
+    const x = 0.35 + ri * (cW + 0.35);
+    s.addShape(pptx.ShapeType.roundRect, {
+      x, y: 1.32, w: cW, h: 5.0,
+      fill: { color: C.navyMid }, line: { color: C.sky, pt: 1 }, arcSize: 4,
+    });
+    s.addText(r.icon, {
+      x, y: 1.44, w: cW, h: 0.55,
+      fontSize: 20, align: "center", fontFace: "Segoe UI Emoji",
+    });
+    s.addText(r.title, {
+      x: x + 0.2, y: 2.0, w: cW - 0.4, h: 0.38,
+      fontSize: 13, bold: true, color: C.white,
+      fontFace: "Malgun Gothic", align: "center",
+    });
+    r.steps.forEach((step, si) => {
+      s.addShape(pptx.ShapeType.roundRect, {
+        x: x + 0.2, y: 2.48 + si * 0.86, w: cW - 0.4, h: 0.72,
+        fill: { color: C.codeBg }, line: { color: C.navyMid }, arcSize: 4,
+      });
+      s.addText(step, {
+        x: x + 0.35, y: 2.48 + si * 0.86, w: cW - 0.7, h: 0.72,
+        fontSize: 9.5, color: C.white, fontFace: "Malgun Gothic",
+        valign: "middle", lineSpacingMultiple: 1.2,
+      });
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 슬라이드 27: 팀 협업 — 컨트리뷰터 플로우
+// ═══════════════════════════════════════════════════════════════
+{
+  const s = addSlide();
+  header(s, "08  팀 협업  —  컨트리뷰터 플로우", { dark: false });
+  footerBar(s);
+
+  s.addText("브랜치를 따서 wsflow로 작업하면 MR 리뷰 재료가 자동으로 만들어집니다.", {
+    x: 0.35, y: 0.88, w: W - 0.7, h: 0.35,
+    fontSize: 11, color: C.navy, fontFace: "Malgun Gothic",
+  });
+
+  const steps = [
+    { num: "1", title: "브랜치 생성",       cmd: "git checkout -b feat/my-feature",              desc: null },
+    { num: "2", title: "wsflow로 구현",     cmd: "/wsflow:lead-discuss  →  /wsflow:lead-proceed", desc: "커밋마다 AI Context 섹션 자동 포함" },
+    { num: "3", title: "MR 생성",           cmd: "glab mr create  또는  GitLab Web UI",           desc: "AI Context 커밋들이 리뷰어의 의도 파악 재료가 됩니다" },
+    { num: "4", title: "FIX 수신 시 수정", cmd: "/wsflow:lead-discuss  →  /wsflow:lead-implement", desc: "피드백을 컨텍스트로 전달해 수정" },
+  ];
+
+  steps.forEach((st, i) => {
+    const y = 1.32 + i * 1.32;
+    s.addShape(pptx.ShapeType.ellipse, {
+      x: 0.35, y: y + 0.2, w: 0.46, h: 0.46,
+      fill: { color: C.sky }, line: { color: C.sky },
+    });
+    s.addText(st.num, {
+      x: 0.35, y: y + 0.2, w: 0.46, h: 0.46,
+      fontSize: 12, bold: true, color: C.white,
+      fontFace: "Malgun Gothic", align: "center", valign: "middle",
+    });
+    s.addShape(pptx.ShapeType.roundRect, {
+      x: 0.98, y, w: W - 1.33, h: 1.14,
+      fill: { color: C.offWhite }, line: { color: C.sky, pt: 1 }, arcSize: 4,
+    });
+    s.addText(st.title, {
+      x: 1.14, y: y + 0.08, w: W - 1.6, h: 0.28,
+      fontSize: 11, bold: true, color: C.navy, fontFace: "Malgun Gothic",
+    });
+    s.addText(st.cmd, {
+      x: 1.14, y: y + 0.40, w: W - 1.6, h: 0.28,
+      fontSize: 9.5, fontFace: "Cascadia Code", color: C.skyDim,
+    });
+    if (st.desc) {
+      s.addText(`→  ${st.desc}`, {
+        x: 1.14, y: y + 0.74, w: W - 1.6, h: 0.28,
+        fontSize: 9, color: C.darkGray, fontFace: "Malgun Gothic",
+      });
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 슬라이드 28: 팀 협업 — 메인테이너 플로우
+// ═══════════════════════════════════════════════════════════════
+{
+  const s = addSlide();
+  header(s, "08  팀 협업  —  메인테이너 플로우 (wsflow:lead-review)", { dark: false });
+  footerBar(s);
+
+  s.addText("wsflow:lead-review 하나로 MR 리뷰 전 과정을 진행합니다.", {
+    x: 0.35, y: 0.88, w: W - 0.7, h: 0.35,
+    fontSize: 11, color: C.navy, fontFace: "Malgun Gothic",
+  });
+
+  dividerLabel(s, "실행", 1.32);
+  codeBox(s, "/wsflow:lead-review [브랜치명]  —  최초 실행 시 _review.local.md 환경 설정 인터뷰 (1회)", {
+    x: 0.35, y: 1.76, w: W - 0.7, h: 0.62,
+  });
+
+  dividerLabel(s, "판정 결과", 2.52);
+
+  const verdicts = [
+    { label: "LGTM",       color: C.sky,    desc: "머지 진행 (설정에 따라 자동 또는 수동 승인)" },
+    { label: "NEEDS FIX",  color: C.skyDim, desc: "로컬 수정: wsflow:lead-discuss 로 피드백 컨텍스트 유지\n또는 컨트리뷰터에게 코멘트 전달 (설정된 코멘트 방식 사용)" },
+    { label: "OPEN",       color: "8A6FBF", desc: "추가 논의 필요 — wsflow:lead-discuss 로 진입해 방향 결정" },
+  ];
+
+  verdicts.forEach((v, i) => {
+    const y = 2.96 + i * 1.1;
+    s.addShape(pptx.ShapeType.roundRect, {
+      x: 0.35, y, w: 1.55, h: 0.88,
+      fill: { color: v.color }, line: { color: v.color }, arcSize: 8,
+    });
+    s.addText(v.label, {
+      x: 0.35, y, w: 1.55, h: 0.88,
+      fontSize: 9.5, bold: true, color: C.white,
+      fontFace: "Malgun Gothic", align: "center", valign: "middle",
+    });
+    s.addShape(pptx.ShapeType.roundRect, {
+      x: 2.1, y: y + 0.08, w: W - 2.45, h: 0.72,
+      fill: { color: C.offWhite }, line: { color: C.offWhite }, arcSize: 4,
+    });
+    s.addText(v.desc, {
+      x: 2.25, y: y + 0.08, w: W - 2.75, h: 0.72,
+      fontSize: 10, color: C.darkGray, fontFace: "Malgun Gothic",
+      valign: "middle", lineSpacingMultiple: 1.3,
+    });
+  });
+
+  s.addShape(pptx.ShapeType.roundRect, {
+    x: 0.35, y: 6.3, w: W - 0.7, h: 0.42,
+    fill: { color: C.navy }, line: { color: C.navy }, arcSize: 4,
+  });
+  s.addText("원격 접근 방법(glab, API token, git fetch 등)은 _review.local.md 에 저장됩니다.  팀별 환경에 맞게 1회 설정.", {
+    x: 0.55, y: 6.3, w: W - 1.0, h: 0.42,
+    fontSize: 9.5, color: C.gray, fontFace: "Malgun Gothic", valign: "middle",
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 슬라이드 29: 마무리
 // ═══════════════════════════════════════════════════════════════
 {
   const s = pptx.addSlide();
