@@ -12,7 +12,10 @@ related-mental-model:
 
 The dashboard needs a stable workspace model before terminals, agents, and
 editors can share context. The workspace layer should discover host folders and
-Git worktrees while preserving project/worktree/session boundaries.
+Git worktrees while preserving server/project/worktree/session boundaries.
+
+Workspace APIs should use opaque workspace ids under explicit server ids. Host
+paths remain daemon-owned metadata, not URL identifiers.
 
 Detailed picker UX and persistence rules need follow-up discussion before this
 ticket is promoted to `ready/`.
@@ -31,8 +34,9 @@ and invalid-root errors in a form the frontend can render.
 
 ### Phase 3: Add workspace state model
 
-Persist recent workspaces, selected workspace state, and per-workspace UI state
-keys without leaking ws runtime root or harness state across projects.
+Persist recent workspaces, selected workspace state, opaque workspace ids, and
+per-workspace UI state keys without leaking ws runtime root or harness state
+across projects.
 
 ### Phase 4: Verify workspace boundary behavior
 

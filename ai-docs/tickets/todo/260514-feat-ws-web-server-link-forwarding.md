@@ -21,6 +21,10 @@ state, but treating that as the primary integration path would be brittle. The
 preferred direction is to run a ws web daemon in each environment and link
 daemons through an authenticated forwarding relationship.
 
+The forwarding model should preserve the same resource shape used by local
+state: `/api/servers/:serverId/workspaces/:workspaceId/...` resolves locally
+for the local server and forwards to a linked daemon for linked server ids.
+
 This ticket needs further design discussion before promotion to `ready`,
 especially around trust, routing, and which actions are forwarded versus kept
 local.
@@ -30,20 +34,21 @@ local.
 ### Phase 1: Define linked-server identity and pairing
 
 Define how one daemon registers another daemon, how owner authentication applies
-across the link, how linked servers are named, and how stale or revoked links
-are handled.
+across the link, how linked servers get stable opaque ids, and how stale or
+revoked links are handled.
 
 ### Phase 2: Add forwarding transport
 
 Add a transport for forwarding selected API calls, event streams, and terminal
 or agent views from a child daemon to a parent dashboard without exposing the
-child daemon publicly.
+child daemon publicly. The parent should route by `serverId` rather than
+requiring feature panels to know whether a resource is local or linked.
 
 ### Phase 3: Add multi-server frontend model
 
 Represent linked servers in the frontend workspace model so panels can show
 local, WSL, and remote resources with clear provenance while preserving a
-seamless dashboard experience.
+seamless dashboard experience and shared resource keys.
 
 ### Phase 4: Verify WSL and remote link behavior
 

@@ -49,10 +49,11 @@ The MVP should cover:
   WebSocket auth, and local/tunnel/public bind-mode guards. First substrate.
 - `260514-feat-ws-web-frontend-substrate` - extension-ready React shell, panel
   and command registries, dock layout, design primitives, and mock/live data
-  boundary. Depends on daemon serving shape; UI work uses `model: "opus"` for
-  delegated ws agents.
+  boundary. Depends on daemon serving shape and server/workspace/session scope;
+  UI work uses `model: "opus"` for delegated ws agents.
 - `260514-feat-ws-web-workspace-substrate` - host folder selection, Git
-  root/worktree discovery, recent workspace state, and workspace boundary model.
+  root/worktree discovery, recent workspace state, opaque workspace ids, and
+  workspace boundary model.
 - `260514-feat-ws-web-terminal-substrate` - PTY session manager, xterm.js
   WebSocket bridge, and terminal panel contribution.
 - `260514-feat-ws-web-agent-dashboard-substrate` - wsstate-backed agent status,
@@ -85,12 +86,22 @@ The MVP should cover:
   editor path because Windows PTY behavior is a known stability concern.
 - The daemon exposes stable view-model APIs over wsstate and wsagent behavior.
   The browser must not treat the cache layout itself as the public contract.
+- Model dashboard resources from the start as `server -> workspace -> session`.
+  Treat the local daemon as one server, linked WSL/remote daemons as additional
+  servers, and route APIs through explicit server/workspace/session identifiers
+  such as `/api/servers/:serverId/workspaces/:workspaceId/...`.
+- Use opaque ids in API paths. Do not expose host paths as workspace ids; keep
+  root paths, Git roots, worktree keys, and link details in daemon-owned state
+  and view models.
 - Keep MCP root, harness, and session state scoped by project/worktree/session
   rather than making the web daemon a global authority over ws runtime state.
 - Prefer linked ws web daemons over host-specific scraping for cross-environment
   visibility. Native Windows may use WSL-exposed tools as a fallback or
   discovery aid, but WSL process and workspace control should primarily happen
   inside a daemon running in WSL.
+- Forwarding should preserve the same API and frontend resource shape: local
+  requests are handled in-process, while linked-server requests are routed to
+  the target daemon behind the same `serverId` namespace.
 - Treat `ai-docs/ref/design.md` as the initial visual system reference for the
   web UI. Preserve its restrained, square-corner, hairline-driven operational
   style while adapting density and component choices for dashboard use rather

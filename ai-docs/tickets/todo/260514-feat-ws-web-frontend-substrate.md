@@ -13,6 +13,9 @@ The dashboard should grow by adding panels, commands, data sources, and event
 streams as the user discovers useful workflows. The first frontend slice should
 therefore build an extension-ready shell rather than a fixed mock page.
 
+The shell should be server/workspace/session-aware from the start so local,
+WSL, and remote resources can share the same UI model.
+
 Frontend UI implementation delegated through ws named agents should use
 `model: "opus"` unless the user overrides that choice for this ticket.
 
@@ -26,8 +29,9 @@ density and components for dashboard work rather than marketing-page structure.
 
 ### Phase 1: Add app shell and registries
 
-Create the React/Vite shell with a panel registry, command registry, route or
-workspace context, toolbar/menu contribution points, and typed panel metadata.
+Create the React/Vite shell with a panel registry, command registry,
+server/workspace/session scope context, toolbar/menu contribution points, and
+typed panel metadata.
 
 ### Phase 2: Add dock layout and persisted UI state
 
@@ -43,7 +47,8 @@ surfaces.
 ### Phase 4: Add mock/live data boundary
 
 Create a typed client API boundary with mock providers for fast UI iteration,
-live providers for daemon APIs, and a common event-stream abstraction.
+live providers for daemon APIs, a common event-stream abstraction, and resource
+keys shaped around `serverId`, optional `workspaceId`, and optional `sessionId`.
 
 ### Phase 5: Add contribution examples
 

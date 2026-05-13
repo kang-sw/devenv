@@ -23,13 +23,15 @@ workspace, frontend, terminal, agent, editor, and linked-server substrates exist
 ### Phase 1: Verify tunnel mode
 
 Verify loopback daemon access through SSH port forwarding or equivalent tunnel
-usage, including pairing, session cookies, WebSockets, and reconnect behavior.
+usage, including pairing, session cookies, WebSockets, reconnect behavior, and
+server/workspace/session-scoped API routing.
 
 ### Phase 2: Verify WSL behavior
 
 Check WSL folder paths, browser access from the Windows host, Git worktree
 discovery, terminal behavior, browser-native editor behavior, and the preferred
-linked-daemon path for WSL process visibility.
+linked-daemon path for WSL process visibility. Verify that WSL resources appear
+under a linked `serverId` rather than through native Windows path scraping.
 
 ### Phase 3: Verify public-mode failure cases
 
