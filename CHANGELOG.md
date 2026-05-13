@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.25.0 - 2026-05-13
+
+### Added
+- Add `ws.setup` as the canonical volatile root setup MCP tool, replacing the
+  advertised session root compatibility tools.
+
+### Changed
+- Route `lead-proceed` by ready-ticket phase slices, including autonomous
+  `todo/` to `ready/` promotion before selecting the implementation slice.
+- Teach `lead-verify-discussion` to look for already implemented items that can
+  be reused or merged before creating duplicate structures.
+- Keep the `lead-edit` documentation pipeline owned by callers so
+  implementation wrappers can decide when document updates run.
+
+### Fixed
+- Hide `ws.setup` outside lead profile surfaces and add delegate-profile
+  coverage for setup gating.
+- Use Git for Windows for tmux Git status checks on WSL-mounted Windows paths.
+
 ## v0.24.0 - 2026-05-13
 
 ### Added
