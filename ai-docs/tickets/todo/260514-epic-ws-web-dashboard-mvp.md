@@ -4,6 +4,7 @@ related:
   260427-chore-claude-dash-windows: prior PTY dashboard surface and Windows stability motivation
   260513-research-streamable-http-mcp-transport: adjacent long-running daemon and remote transport research
   260513-feat-async-exec-output-reader: adjacent persisted process output and reader-agent pattern
+  260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
 related-mental-model:
   - developer-environment-tools
   - named-agent-runtime
@@ -47,26 +48,11 @@ The MVP should cover:
 
 - `260514-feat-ws-web-daemon-foundation` - daemon shell, owner auth,
   WebSocket auth, and local/tunnel/public bind-mode guards. First substrate.
-- `260514-feat-ws-web-frontend-substrate` - extension-ready React shell, panel
-  and command registries, dock layout, design primitives, and mock/live data
-  boundary. Depends on daemon serving shape and server/workspace/instance scope;
-  UI work uses `model: "opus"` for delegated ws agents.
-- `260514-feat-ws-web-workspace-substrate` - host folder selection, Git
-  root/worktree discovery, recent workspace state, opaque workspace ids, and
-  workspace boundary model, including flat navigation entries for worktrees.
-- `260514-feat-ws-web-terminal-substrate` - PTY session manager, xterm.js
-  WebSocket bridge, and terminal panel contribution.
-- `260514-feat-ws-web-agent-dashboard-substrate` - wsstate-backed agent status,
-  current-call, event, and diagnostic view-model APIs plus panels.
-- `260514-feat-ws-web-editor-substrate` - CodeMirror 6 browser-native editor
-  substrate with Vim-like modal editing and future editor extension hooks. UI
-  work uses `model: "opus"` for delegated ws agents.
-- `260514-feat-ws-web-server-link-forwarding` - authenticated daemon-to-daemon
-  linking and forwarding so local, WSL, or remote ws web servers can appear in
-  one dashboard without making native Windows process scraping the primary
-  integration path.
-- `260514-feat-ws-web-remote-wsl-hardening` - remote tunnel, WSL, and public
-  bind verification after the core substrates and linked-server behavior exist.
+- `260514-research-ws-web-dashboard-direction` - research holding the absorbed
+  provisional child backlog, refined resource model, document viewer ideas,
+  keyboard/navigation direction, and future harness-library split points.
+  Recreate implementation children from that research only when the boundaries
+  are ready.
 
 ## Cross-Child Decisions
 
@@ -86,29 +72,29 @@ The MVP should cover:
   editor path because Windows PTY behavior is a known stability concern.
 - The daemon exposes stable view-model APIs over wsstate and wsagent behavior.
   The browser must not treat the cache layout itself as the public contract.
-- Model dashboard resources from the start as `server -> workspace -> instance`.
+- Model dashboard resources around one main user interaction point per
+  worktree: `server -> workspace -> worktree -> mainInstance -> subInstance`.
   A server is a physical or logical host environment such as local machine, WSL
-  distro, or remote host. A workspace is a project root or Git worktree root on
-  a server. An instance is a running program or task identified within a
-  workspace, such as a terminal, editor, agent, or task.
+  distro, or remote host. A workspace is a project or repository family. A
+  worktree is a concrete project root and can be online, offline, moved, or
+  inaccessible. A main instance is the user-facing conversation or control
+  point; sub instances are delegated or auxiliary work such as ws agents, exec
+  jobs, document viewers, translation tasks, diagnostics, or subprocesses.
 - Reserve `session` for auth/browser sessions and external protocol sessions
   such as MCP or model backend sessions. Do not use `session` for dashboard
   terminal/editor/agent resources.
-- Route APIs through explicit server/workspace/instance identifiers such as
-  `/api/servers/:serverId/workspaces/:workspaceId/instances/:instanceId`.
+- Route APIs through explicit server/workspace/worktree/instance identifiers.
 - Use opaque ids in API paths. Do not expose host paths as workspace ids; keep
   root paths, Git roots, worktree keys, and link details in daemon-owned state
   and view models.
 - Keep MCP root, harness, and protocol session state scoped by
   project/worktree/instance
   rather than making the web daemon a global authority over ws runtime state.
-- Treat Git worktrees as first-class workspace entries. The left navigation
-  should group entries by server, then show a flat list of workspaces and
-  worktree workspaces within each server group. Each server group should have an
-  action surface such as `[+]` for creating or adding workspaces on that server.
-  Workspace rows should support adding new instances within that workspace. The
-  exact row labels, grouping chrome, and worktree notation remain TBA because
-  the scenarios need more design discussion.
+- Treat Git worktrees as first-class worktree entries under workspaces. The left
+  navigation should group by server, then workspace, then concrete worktree
+  entries without hiding offline or inaccessible worktrees that remain useful
+  recent context. Exact row labels, grouping chrome, and worktree notation
+  remain TBA because the scenarios need more design discussion.
 - Prefer linked ws web daemons over host-specific scraping for cross-environment
   visibility. Native Windows may use WSL-exposed tools as a fallback or
   discovery aid, but WSL process and workspace control should primarily happen
@@ -120,6 +106,9 @@ The MVP should cover:
   web UI. Preserve its restrained, square-corner, hairline-driven operational
   style while adapting density and component choices for dashboard use rather
   than marketing-page composition.
+- Put future dashboard specs under `ai-docs/spec/ws-web-dashboard/`. Add
+  `ai-docs/mental-model/ws-web-dashboard/` only after implementation creates
+  real dashboard subdomains; do not prefill speculative mental-model material.
 - For frontend UI implementation delegated through ws named agents, register the
   implementer and reviewer with `model: "opus"` unless the user overrides that
   choice for a specific child ticket.
