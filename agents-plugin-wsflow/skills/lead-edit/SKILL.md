@@ -9,15 +9,24 @@ Target: user request
 
 ## Invariants
 
+Scope
 - Lead owns edit routing, integration, verification, and commits.
+- Honor caller-provided scope or phase slices as hard edit boundaries.
+
+Context
 - Load `wsflow/infra.read(name: "impl-playbook")` before editing.
 - Use `wsflow/mental_models.find` or `wsflow/mental_models.status`; read returned paths.
 - Ancestor loading: read `mental-model/<domain>/index.md` before `mental-model/<domain>/<sub>.md`.
-- Honor caller-provided scope or phase slices as hard edit boundaries.
+
+Commit
 - Commit logical units per repository commit rules; include `## AI Context`.
-- Review once after verification; use subagent review when useful.
+
+Review
+- Review after verification; use subagent review when useful.
 - Lead fixes correctness, security, contract, and regression findings.
 - Lead may reject style-only or scope-expanding findings with reasons.
+
+Output
 - Output the completion report format exactly.
 
 ## On: invoke
@@ -33,10 +42,10 @@ Target: user request
 
 ### 2. Edit
 
-Implement per target and impl-playbook. Use direct edits or scoped subagent
-implementation when it improves throughput. For subagent implementation, state
-scope, writable paths or modules, verification expectations, and required
-changed-file summary. Commit logical checkpoints with repository commit rules.
+1. Implement per target and impl-playbook.
+2. Use direct edits or scoped subagent implementation when it improves throughput.
+3. For subagent implementation, state scope, writable paths or modules, verification expectations, and required changed-file summary.
+4. Commit logical checkpoints with repository commit rules.
 
 ### 3. Verify
 
@@ -47,9 +56,9 @@ changed-file summary. Commit logical checkpoints with repository commit rules.
 
 ### 4. Review
 
-Apply `judge: review-scope`.
+1. Apply `judge: review-scope`.
 
-If subagent review is useful, ask one read-only reviewer:
+2. If subagent review is selected, ask one read-only reviewer:
 
 ```text
 Review diff range: <start-commit>..HEAD
@@ -62,16 +71,15 @@ Return:
 - findings: file/path references, severity, and concise rationale
 ```
 
-If native subagents are unavailable or the change is mechanical and low-risk,
-perform a lead-only review and record the rationale.
+3. Otherwise, perform a lead-only review and record the rationale.
 
-Classify findings:
-- Fix: correctness, security, contract, regression.
-- Reject: style-only conflict with local patterns.
-- Reject: scope expansion beyond brief.
+4. Classify findings:
+   - Fix: correctness, security, contract, regression.
+   - Reject: style-only conflict with local patterns.
+   - Reject: scope expansion beyond brief.
 
-Apply fixes, re-run verification, and perform one focused re-review of fixed
-areas. Stop after one re-review cycle and report any remaining open issues.
+5. Apply fixes, re-run verification, and perform one focused re-review of fixed areas.
+6. Stop after one re-review cycle and report any remaining open issues.
 
 ### 5. Report
 

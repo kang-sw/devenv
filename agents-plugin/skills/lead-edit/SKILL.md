@@ -9,18 +9,27 @@ Target: user request
 
 ## Invariants
 
+Scope
 - Lead edits directly; do not delegate implementation.
+- Honor existing skeleton contracts and integration tests as acceptance criteria.
+- Honor caller-provided scope or phase slices as hard edit boundaries.
+- Escalate to `ws:lead-write-code` if scope becomes multi-file with new public API or cross-module new pattern.
+
+Context
 - Load `ws/infra.read(name: "impl-playbook")` before editing.
 - Use `ws/mental_models.find` or `ws/mental_models.status`; read returned paths.
 - Ancestor loading: read `mental-model/<domain>/index.md` before `mental-model/<domain>/<sub>.md`.
-- Honor existing skeleton contracts and integration tests as acceptance criteria.
-- Honor caller-provided scope or phase slices as hard edit boundaries.
-- Commit logical units per CLAUDE.md; include `## AI Context`.
+
+Commit
+- Commit logical units per repository commit rules; include `## AI Context`.
+
+Review
 - Relay cap is 2 review cycles; clean up and return after the cap.
 - Lead fixes correctness, security, contract, and regression findings.
 - Lead may reject style-only or scope-expanding findings with reasons.
-- Escalate to `ws:lead-write-code` if scope becomes multi-file with new public API or cross-module new pattern.
-- Delete review path before returning.
+- Delete review path before returning when one exists.
+
+Output
 - Output the completion report format exactly.
 
 ## On: invoke
@@ -37,8 +46,8 @@ Target: user request
 
 ### 2. Edit
 
-Edit directly per target and impl-playbook. Commit logical checkpoints with
-CLAUDE.md commit rules.
+1. Edit directly per target and impl-playbook.
+2. Commit logical checkpoints with repository commit rules.
 
 ### 3. Verify
 
@@ -49,13 +58,13 @@ CLAUDE.md commit rules.
 
 ### 4. Review
 
-Apply `judge: review-scope`. If lead-only review is selected, record the rationale and proceed to cleanup.
-
-1. Register reviewer:
+1. Apply `judge: review-scope`.
+2. If lead-only review is selected, record the rationale and proceed to cleanup.
+3. Register reviewer:
    `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`.
-2. Generate path:
+4. Generate path:
    `ws/path.generate(kind: "review", stems: ["direct"])`; store `<review-path>`.
-3. Call reviewer:
+5. Call reviewer:
 
 ```text
 Diff range: <start-commit>..HEAD
@@ -69,14 +78,14 @@ Write full findings to: <review-path>
 Return only: [clean|non-clean]: <one-line summary>
 ```
 
-4. Read `ws/agents.result(name: "reviewer", timeout_seconds: 600)` only if async result lacks usable summary.
-5. If `[clean]`, proceed to cleanup.
-6. If `[non-clean]`, read `<review-path>` and classify findings:
+6. Read `ws/agents.result(name: "reviewer", timeout_seconds: 600)` only if async result lacks usable summary.
+7. If `[clean]`, proceed to cleanup.
+8. If `[non-clean]`, read `<review-path>` and classify findings:
    - Fix: correctness, security, contract, regression.
    - Reject: style-only conflict with local patterns.
    - Reject: scope expansion beyond brief.
-7. Apply fixes, keep rejected list with reasons, re-verify.
-8. Re-call reviewer:
+9. Apply fixes, keep rejected list with reasons, re-verify.
+10. Re-call reviewer:
 
 ```text
 Re-review. Updated diff: <start-commit>..HEAD
@@ -85,11 +94,11 @@ Focus only on prior findings and touched follow-up changes.
 For each rejected finding: respond [accepted] or [maintained: <brief reason>].
 ```
 
-9. Repeat until `[clean]` or 2 cycles; then proceed to cleanup.
+11. Repeat until `[clean]` or 2 cycles; then proceed to cleanup.
 
 ### 5. Cleanup
 
-Delete `<review-path>`.
+Delete `<review-path>` when one exists.
 
 ### 6. Report
 
