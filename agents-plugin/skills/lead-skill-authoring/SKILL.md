@@ -26,6 +26,9 @@ These apply to both skill and agent documents.
 - Prefer command-shaped fragments over explanatory paragraphs.
 - For dense routing or rule lists, prefer short sections, named groups, fixed lookup tables, and command-shaped lists over long flat lists.
 - Do not invent a pseudo-code DSL when Markdown structure can express the route.
+- Skill-to-skill transitions are context handoffs, not API calls; say what context to carry, not which arguments to pass.
+- Prefer `Continue through <skill>; carry context: ...` for workflow handoffs.
+- Reserve "arguments" for MCP tools, CLI commands, and structured templates.
 - Use examples only when they prevent repeated wrong execution.
 - Preserve full grammar when compression could change order, ownership, or safety.
 
