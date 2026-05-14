@@ -9,22 +9,37 @@ Target: user request
 
 ## Invariants
 
+Scope
 - Route only; do not implement, plan, or write skeletons here.
 - Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Assess from conversation state and artifacts only; do not read source code.
-- Pipeline order is fixed: spec -> ticket -> implementation.
-- Execution slice defaults to one unfinished phase; include multiple phases only by user request or inseparable verification.
 - Do not rejudge ticket quality, demand ticket splitting, or mutate ticket structure.
+
+Pipeline
+- Pipeline order is fixed: spec -> ticket -> implementation.
 - Always route code-editing work through `ws:lead-implement`, including skeleton work.
-- Existing non-epic `ready/` ticket path skips `ws:lead-write-ticket` unless the freshness gate fires, then selects an implementation slice.
-- Existing `todo/` ticket path invokes `ws:lead-write-ticket` for autonomous ready promotion before slice selection.
-- Epic ticket paths are board artifacts, never implementation targets; stop and route to child ticket creation, promotion, or proceed.
-- Actionable inline target invokes `ws:lead-write-ticket`, captures `Ticket:`, then re-checks status; `todo/` output must promote to `ready/` before implementation.
-- Exploratory target stops and suggests `ws:lead-discuss`.
-- Escalate to `ws:lead-discuss` only for unresolved design choices that block ready promotion or implementation scope.
+
+Execution
 - Announce routing before execution; chain stages without pausing for confirmation.
 - Prefix stages receive gate-suppression context in arguments.
 - Warmth is current-session context, not target identity.
+
+## Route Rules
+
+Ticket Paths
+- Existing non-epic `ready/` ticket path skips `ws:lead-write-ticket` unless the freshness gate fires, then selects an implementation slice.
+- Existing `todo/` ticket path invokes `ws:lead-write-ticket` for autonomous ready promotion before slice selection.
+- Epic ticket paths are board artifacts, never implementation targets; stop and route to child ticket creation, promotion, or proceed.
+
+Inline Targets
+- Actionable inline target invokes `ws:lead-write-ticket`, captures `Ticket:`, then re-checks status; `todo/` output must promote to `ready/` before implementation.
+- Exploratory target stops and suggests `ws:lead-discuss`.
+
+Escalation
+- Escalate to `ws:lead-discuss` only for unresolved design choices that block ready promotion or implementation scope.
+
+Slice
+- Execution slice defaults to one unfinished phase; include multiple phases only by user request or inseparable verification.
 
 ## On: invoke
 

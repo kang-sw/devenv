@@ -37,6 +37,18 @@ Check every invariant or constraint after drafting. Every answer is yes/no.
 - **Universal?** - Is it a constraint that holds in all situations, not a step at a specific point?
 - **Derivable?** - Can it be regenerated from the Doctrine paragraph?
 
+Grouped invariant lists are allowed when a skill has many hard rules:
+
+```text
+Group Name
+- <invariant>
+- <invariant>
+```
+
+Group names classify invariants only; they are not rules. Do not nest groups or
+bullets. Do not put handler steps, branch policy, or rationale in invariant
+groups.
+
 ### Doctrine format
 
 Doctrine has two jobs: name the finite resource, then add the generator clause.
