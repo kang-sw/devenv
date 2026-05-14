@@ -9,13 +9,18 @@ Topic: user request
 
 ## Invariants
 
+Scope
 - No source edits. Only documentation writes, only in the capture step.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phase plan text before a `### Result` is frozen after completion; append a `#### Edition` for later implementation tweaks.
+
+Evidence
 - Read mental-model docs on-demand as topics emerge.
 - Read spec docs in `ai-docs/spec/` on-demand as topics emerge; the project map lists available specs.
 - Use `ws/subquery` for focused implementation-detail questions beyond mental-model docs; read the result before responding.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
+
+Conversation
 - Evaluate each claim independently - call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
 - Use the user's active conversation language for discussion responses.
 - Intent frames summarize decision rationale; they do not expose raw hidden reasoning.
@@ -31,16 +36,27 @@ Topic: user request
 
 ## On: user message
 
-1. Apply **judge: needs-survey** to every named component, skill, agent, spec, or ticket.
+### 1. Gather Context
+
+1. Apply `judge: needs-survey` to every named component, skill, agent, spec, or ticket.
    For each unloaded doc, run `project-survey` and incorporate its returned reference list before responding.
 2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery` for focused implementation details.
    For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
-3. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`; carry the current target and settled discussion context.
-4. Apply **judge: needs-intent-frame**. If it fires, emit an **Intent Frame** before advice.
-5. Apply **judge: needs-interview**. If it fires, enter **Interview Workflow** before proposing a settled direction.
-6. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
-7. When discussion changes unimplemented ticket phases, update them in place with user agreement.
-8. Continue until the user signals done.
+
+### 2. Route Intent
+
+1. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`; carry the current target and settled discussion context.
+2. Apply `judge: needs-intent-frame`; if it fires, emit an Intent Frame before advice.
+3. Apply `judge: needs-interview`; if it fires, enter Interview Workflow before proposing a settled direction.
+
+### 3. Respond
+
+1. Brainstorm iteratively: suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
+2. Continue until the user signals done.
+
+### 4. Capture
+
+1. When discussion changes unimplemented ticket phases, update them in place with user agreement.
 
 ## On: Interview Workflow
 
@@ -79,7 +95,7 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 4. Apply **judge: needs-integration-tests** to ticket writes.
 5. Write only what the user approves. No artifact needed for exploratory discussions.
 
-## Handoff Context
+## Context To Carry
 
 Discussion outputs feed downstream skills:
 - Continue through `ws:lead-write-spec`; carry approach direction.
