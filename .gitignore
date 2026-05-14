@@ -8,6 +8,8 @@ debug
 .repro
 foo.*
 *.log
+__pycache__/
+*.py[cod]
 data
 *.docx
 *Zone.Identifier
