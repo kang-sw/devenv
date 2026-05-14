@@ -25,7 +25,8 @@ related:
 - Shared workflow examples use `model: light|core|deep` as portable delegate aliases; `tier` is legacy compatibility language and concrete provider model names are reserved for intentional overrides. {#260508-workflow-model-alias-guidance}
 - Skill descriptions are the runtime trigger surface: keep top-level entries strong, derived primitives lighter, and conditional utilities explicit. {#260508-skill-description-attention-policy}
 - `lead-add-rule` requires explicit persistence intent such as save, remember, persist, or add a durable rule; prescriptive task wording alone must not trigger it. {#260508-add-rule-explicit-persistence-trigger}
-- Skill-to-skill transitions are workflow handoffs with carried context, not API calls with argument passing; reserve argument language for MCP tools, CLIs, and templates.
+- Skill-to-skill transitions are workflow handoffs with carried context, not API calls with argument passing; reserve argument language for MCP tools, CLIs, and templates. {#260514-skill-authoring-carried-context}
+- Dense skill routing should use Markdown hierarchy, grouped invariants, fixed lookup tables, and command-shaped lists before pseudo-code-like notation; pseudo-code obscures carry-context handoffs under attention pressure. {#260514-skill-authoring-carried-context}
 - `lead-proceed` routes through handoff stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
 - `lead-proceed` must stop on epic ticket paths because epics are board artifacts; implementation routes through child tickets. {#260505-proceed-routing-pipeline}
 - `lead-proceed` routes implementation-ready work to `lead-implement`; it selects an implementation slice but does not decide skeleton need or invoke code-editing skeleton work directly. {#260505-proceed-routing-pipeline} {#260512-skeleton-inside-implement-branch}
