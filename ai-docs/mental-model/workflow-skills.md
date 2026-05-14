@@ -25,10 +25,12 @@ related:
 - Shared workflow examples use `model: light|core|deep` as portable delegate aliases; `tier` is legacy compatibility language and concrete provider model names are reserved for intentional overrides. {#260508-workflow-model-alias-guidance}
 - Skill descriptions are the runtime trigger surface: keep top-level entries strong, derived primitives lighter, and conditional utilities explicit. {#260508-skill-description-attention-policy}
 - `lead-add-rule` requires explicit persistence intent such as save, remember, persist, or add a durable rule; prescriptive task wording alone must not trigger it. {#260508-add-rule-explicit-persistence-trigger}
-- `lead-proceed` routes through prefix stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
+- Skill-to-skill transitions are workflow handoffs with carried context, not API calls with argument passing; reserve argument language for MCP tools, CLIs, and templates.
+- `lead-proceed` routes through handoff stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
 - `lead-proceed` must stop on epic ticket paths because epics are board artifacts; implementation routes through child tickets. {#260505-proceed-routing-pipeline}
 - `lead-proceed` routes implementation-ready work to `lead-implement`; it selects an implementation slice but does not decide skeleton need or invoke code-editing skeleton work directly. {#260505-proceed-routing-pipeline} {#260512-skeleton-inside-implement-branch}
 - `lead-proceed` treats `todo/` ticket paths as implementation intent, promotes through `lead-write-ticket`, and escalates only for unresolved design or ready-gate blockers. {#260505-proceed-routing-pipeline}
+- `lead-proceed` can route narrow, routine, fully scoped inline implementation directly to `lead-implement` when no durable ticket is needed and commit `AI Context` is enough traceability. {#260505-proceed-routing-pipeline}
 - `lead-proceed` does not rejudge ticket decomposition; default execution is the first unfinished phase, and selected slices are hard downstream scope. {#260505-proceed-routing-pipeline}
 - Warm `lead-proceed` runs a ticket freshness gate for an existing related ticket: compare active conversation against the ticket only, refresh through `lead-write-ticket` when settled decisions are missing, then re-read before slice selection. {#260513-proceed-ticket-freshness-gate}
 - `lead-implement` owns skeleton decisions and execution inside the implementation branch lifecycle before edit/write-code runs. {#260512-skeleton-inside-implement-branch}

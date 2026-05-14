@@ -16,62 +16,56 @@ Scope
 - Do not rejudge ticket quality, demand ticket splitting, or mutate ticket structure.
 
 Pipeline
-- Pipeline order is fixed: spec -> ticket -> implementation.
+- Handoff stage order is fixed when stages fire: spec -> ticket -> implementation.
 - Always route code-editing work through `wsflow:lead-implement`.
+- Proceed assumes implementation intent; stop only when the target is not actionable or user-blocking discussion remains.
 
 Execution
 - Announce routing before execution; chain stages without pausing for confirmation.
-- Prefix stages receive gate-suppression context in arguments.
+- Handoff stages receive carried gate-suppression context.
 - Warmth is current-session context, not target identity.
 
 ## Route Rules
 
-Ticket Paths
-- Existing non-epic `ready/` ticket path skips `wsflow:lead-write-ticket` unless the freshness gate fires, then selects an implementation slice.
-- Existing `todo/` ticket path invokes `wsflow:lead-write-ticket` for autonomous ready promotion before slice selection.
-- Epic ticket paths are board artifacts, never implementation targets; stop and route to child ticket creation, promotion, or proceed.
+Route Context
+- `has-ticket` is artifact state; do not treat it as a judgment.
+- `discussion-needed` blocks every implementation route.
+- `needs-ticket` applies only to actionable inline targets without a ticket.
+- `ticket-freshness` applies only when `has-ticket=yes` and warmth is warm.
 
-Inline Targets
-- Actionable inline target invokes `wsflow:lead-write-ticket`, captures `Ticket:`, then re-checks status; `todo/` output must promote to `ready/` before implementation.
-- Exploratory target stops and suggests `wsflow:lead-discuss`.
-
-Escalation
-- Escalate to `wsflow:lead-discuss` only for unresolved design choices that block ready promotion or implementation scope.
-
-Slice
+Routing
+- Use the first matching route row.
+- Captured `Ticket:` paths re-enter route context before implementation.
 - Execution slice defaults to one unfinished phase; include multiple phases only by user request or inseparable verification.
 
 ## On: invoke
 
-### 1. Assess
+### 1. Build Route Context
 
 1. Parse target: ticket path or inline description.
-2. If ticket path: read ticket; extract status, category, scope, phases, phase results, open questions, and `plans:`.
-3. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs or tests.
-4. If inline: assess from description only.
-5. Classify warmth from conversation state.
-6. Classify exploratory vs actionable for `judge: needs-ticket`.
-7. If a current or captured ticket exists and warmth is warm, apply `judge: ticket-freshness`.
+2. Set `target-kind`: `ticket-path` or `inline`.
+3. Set `has-ticket=yes` for an existing ticket path or captured `Ticket:` path.
+4. If `has-ticket=yes`: read ticket; extract status, category, scope, phases, phase results, open questions, and `plans:`.
+5. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs or tests.
+6. If `target-kind=ticket-path`: set `actionable=yes`.
+7. If `target-kind=inline`: apply `judge: actionable`.
+8. Apply `judge: discussion-needed`.
+9. If `target-kind=inline` and `actionable=yes`: apply `judge: needs-ticket`.
+10. Classify warmth from conversation state.
+11. If `has-ticket=yes` and warmth is warm: apply `judge: ticket-freshness`.
 
-### 2. Route
+### 2. Select Route
 
-1. Invoke `wsflow:lead-write-spec` with:
-   `Chained from wsflow:lead-proceed - write any planned entries without asking; the session reminder will still emit.`
-2. Apply `judge: needs-ticket`.
-3. If invoking `wsflow:lead-write-ticket`, append:
-   `Chained from wsflow:lead-proceed - re-check spec coverage before invoking wsflow:lead-write-spec again; do not pause for approval when coverage can be created autonomously.`
-4. If the current or captured ticket category is `epic`, stop implementation routing; suggest `wsflow:lead-write-ticket` for a child ticket, `wsflow:lead-discuss` to promote an existing child, or `wsflow:lead-proceed` on a ready child ticket.
-5. If the current or captured ticket status is `todo/`, apply `judge: escalation-needed`.
-6. If escalation is needed, stop and invoke `wsflow:lead-discuss` with the blocker.
-7. If the current or captured ticket status is `todo/`, invoke `wsflow:lead-write-ticket` for `todo/` -> `ready/` promotion and append:
-   `Chained from wsflow:lead-proceed - treat this as implementation intent; promote autonomously when only spec coverage, frontmatter, or queue updates are needed; escalate only unresolved design blockers.`
-   Capture the moved ticket path.
-8. If `judge: ticket-freshness` found missing settled decisions, invoke `wsflow:lead-write-ticket` edit and append:
-   `Chained from wsflow:lead-proceed - refresh this ticket from active conversation context only; capture settled decisions, constraints, and rejected alternatives that are missing from the ticket; do not inspect source code, read broad documentation, rejudge decomposition, or plan implementation.`
-   Capture the refreshed ticket path.
-9. Use only non-epic `ready/` ticket paths downstream.
-10. Apply `judge: implementation-slice`.
-11. Build pipeline: `wsflow:lead-implement`.
+| When | Route |
+|------|-------|
+| `target-kind=inline` and `actionable=no` | Continue through `wsflow:lead-discuss`; carry the blocker; stop. |
+| `has-ticket=yes` and category is `epic` | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
+| `discussion-needed=yes` | Continue through `wsflow:lead-discuss`; carry the blocker; stop. |
+| `has-ticket=yes` and status is `todo/` | Continue through `wsflow:lead-write-spec`, then `wsflow:lead-write-ticket`; carry `promote-context`; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and freshness is missing settled decisions | Continue through `wsflow:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and status is `ready/` | Apply `judge: implementation-slice`; continue through `wsflow:lead-implement`; carry scope: implement `<slice>` only. |
+| `has-ticket=no` and `needs-ticket=yes` | Continue through `wsflow:lead-write-spec`, then `wsflow:lead-write-ticket`; carry `create-context`; capture `Ticket:` and re-route. |
+| `has-ticket=no` and `needs-ticket=no` | Continue through `wsflow:lead-implement`; carry inline target and no-ticket scope. |
 
 ### 3. Announce
 
@@ -80,43 +74,75 @@ Slice
 
 - **Target**: <ticket path or brief summary>
 - **Warmth**: <warm | cold> - <evidence from conversation state>
+- **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
+- **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | Phase N-M[: title summary] | whole target - no phases>
 - **Execution**: wsflow:lead-implement - owns direct execution, documentation, and final reporting
-- **Gate suppression**: prefix stages receive override context.
+- **Handoff context**: downstream stages receive carried route constraints.
 
 Proceeding.
 ```
 
-Include prefix stages in the pipeline line when they fire.
+Include handoff stages in the pipeline line when they fire.
 Do not ask for confirmation; the user can interrupt.
 
 ### 4. Execute
 
-1. Invoke stages sequentially with the current target.
+1. Invoke the selected route.
 2. After each stage, verify completion from committed artifacts or stage output.
 3. Stop on failure or user interruption.
-4. If `wsflow:lead-write-ticket` ran, capture its `Ticket:` path before any downstream stage.
-5. If the captured path stem category is `epic`, stop; do not invoke implementation on the epic path. Route to child ticket creation, child ready promotion, or proceed on a ready child ticket.
-6. If the captured path remains under `ai-docs/tickets/todo/`, stop and report the ready-promotion blocker; do not invoke implementation.
-7. Re-read the ready ticket after promotion and select the implementation slice.
-8. Invoke `wsflow:lead-implement` with the target and `Scope: implement <slice> only`.
+4. If `wsflow:lead-write-ticket` ran, capture its `Ticket:` path before downstream routing.
+5. If the captured path remains under `ai-docs/tickets/todo/`, stop and report the ready-promotion blocker.
+6. If a ticket path was captured, rebuild route context from that path and re-enter `Select Route`.
+
+## Handoff Context
+
+`spec-context`:
+`Chained from wsflow:lead-proceed - write any planned entries without asking; the session reminder will still emit.`
+
+`gate-suppression-context`:
+Carry: this is an autonomous proceed chain; downstream stages do not pause for approvals that this route already grants.
+
+`create-context`:
+Carry `spec-context` and `gate-suppression-context`, then continue through `wsflow:lead-write-ticket`.
+Carry: re-check spec coverage before returning to `wsflow:lead-write-spec`; create autonomous coverage when possible.
+
+`promote-context`:
+Carry `spec-context` and `gate-suppression-context`, then continue through `wsflow:lead-write-ticket`.
+Carry: implementation intent; autonomous promotion for spec coverage, frontmatter, or queue updates; escalate unresolved design blockers.
+
+`freshness-context`:
+Continue through `wsflow:lead-write-ticket`.
+Carry: refresh from active conversation only; capture missing settled decisions, constraints, and rejected alternatives; do not inspect source, broad docs, decomposition, or implementation plan.
 
 ## Judgments
+
+### judge: actionable
+
+| Decision | When |
+|----------|------|
+| No | Target does not name a concrete change, observable outcome, or accepted implementation direction |
+| Yes | Target gives enough implementation intent to route without another design turn |
+
+Proceed assumes implementation intent, but this judge catches malformed or still-open targets.
+
+### judge: discussion-needed
+
+| Decision | When |
+|----------|------|
+| Yes | User-blocking design choice, scope boundary, acceptance criterion, trade-off, or delegation decision remains open |
+| Yes | Ticket promotion or implementation scope cannot be completed autonomously |
+| No | Missing spec coverage, frontmatter, queue hygiene, tests, or local implementation details can be resolved autonomously |
 
 ### judge: needs-ticket
 
 | Decision | When |
 |----------|------|
-| Stop, suggest `wsflow:lead-discuss` | Target is exploratory; user is weighing approaches |
-| Proceed | Target is an existing ticket path |
-| Invoke `wsflow:lead-write-ticket` | Target is an actionable inline description |
-
-### judge: escalation-needed
-
-| Decision | When |
-|----------|------|
-| Escalate to `wsflow:lead-discuss` | Ticket has unresolved design decisions, unclear completion criteria, unresolved user trade-offs, or cannot gain spec coverage |
-| Continue autonomously | Promotion needs only spec coverage, frontmatter, queue entry, or routine ready-gate normalization |
+| Yes | Inline target changes workflow semantics, public contracts, cross-skill routing, queue behavior, branch behavior, or documentation pipeline behavior |
+| Yes | Inline target needs phases, acceptance criteria, explicit traceability, or durable discussion capture |
+| Yes | Caller-visible behavior may need spec coverage before implementation |
+| No | Inline target is narrow, routine, fully scoped, and commit `AI Context` is enough traceability |
+| No | Work is internal hygiene with no useful phase tracking and no unresolved user decision |
 
 ### judge: implementation-slice
 

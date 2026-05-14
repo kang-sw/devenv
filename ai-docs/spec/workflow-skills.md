@@ -260,12 +260,12 @@ handles removed spec stems, verifies the spec index, and commits the spec pass.
 ## Proceed Routing Pipeline {#260505-proceed-routing-pipeline}
 
 `lead-proceed` is the first step for implementation tasks. It is route-only: it
-reads conversation state and existing workflow artifacts, then chains the needed
-pipeline stages without reading source code or performing implementation work.
-When workflow primitive context is not already active, it loads
-`lead-workflow-manual` before routing.
+reads conversation state and existing workflow artifacts, then continues through
+the needed pipeline stages without reading source code or performing
+implementation work. When workflow primitive context is not already active, it
+loads `lead-workflow-manual` before routing.
 
-The pipeline order is fixed:
+When handoff stages are needed, their order is fixed:
 
 ```text
 spec -> ticket -> implementation
@@ -281,14 +281,20 @@ separately.
 Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
 child ready promotion, or proceeding a ready child ticket. Existing `todo/`
-ticket paths are treated as implementation intent: `lead-proceed` invokes
-`lead-write-ticket` for autonomous `todo/` -> `ready/` promotion before slice
-selection, and escalates to `lead-discuss` only when promotion or implementation
-scope exposes unresolved design decisions, unclear completion criteria, user
-trade-offs, or missing spec coverage that cannot be created. Actionable inline
-targets go through `lead-write-ticket`, whose ready gate creates missing spec
-coverage through `lead-write-spec` when possible; exploratory targets stop and
-suggest `lead-discuss`.
+ticket paths are treated as implementation intent: `lead-proceed` continues
+through `lead-write-ticket` with carried context for autonomous `todo/` ->
+`ready/` promotion before slice selection, and escalates to `lead-discuss` only
+when promotion or implementation scope exposes unresolved design decisions,
+unclear completion criteria, user trade-offs, or missing spec coverage that
+cannot be created.
+
+Inline targets are classified before routing. Non-actionable inline targets
+stop and route to `lead-discuss`. Actionable inline targets route to
+`lead-discuss` when user-blocking decisions remain, route through
+`lead-write-ticket` when durable workflow traceability, phases, acceptance
+criteria, or spec-visible behavior need capture before implementation, and may
+route directly to `lead-implement` when the target is narrow, routine, fully
+scoped, and commit `AI Context` is enough traceability.
 
 Warm discussion state with an existing related ticket uses a ticket freshness
 gate. Before implementation routing, `lead-proceed` compares the active
