@@ -60,7 +60,7 @@ Output
 
 1. Apply `judge: review-scope`.
 2. If lead-only review is selected, record the rationale and proceed to cleanup.
-3. Register reviewer:
+3. Otherwise, register reviewer:
    `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`.
 4. Generate path:
    `ws/path.generate(kind: "review", stems: ["direct"])`; store `<review-path>`.

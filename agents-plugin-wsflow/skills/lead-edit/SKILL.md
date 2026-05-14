@@ -23,6 +23,7 @@ Commit
 
 Review
 - Review after verification; use subagent review when useful.
+- Re-review cap is one focused cycle; report remaining issues after the cap.
 - Lead fixes correctness, security, contract, and regression findings.
 - Lead may reject style-only or scope-expanding findings with reasons.
 
