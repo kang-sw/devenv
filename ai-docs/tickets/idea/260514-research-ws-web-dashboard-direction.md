@@ -130,10 +130,17 @@ backend execution, model aliasing, and MCP/session state stay in ws runtime
 contracts. Dashboard/library UI can expose harness status, configuration, and
 control views as consumers of those contracts.
 
+The harness/runtime layer should eventually include automatic API-key and
+secret filtering. The filter should protect prompts, model transcripts, logs,
+diagnostic streams, document viewers, translation jobs, and API-backed model
+calls from accidentally exposing credentials. Treat this as a defense-in-depth
+runtime feature, not an authorization boundary: host authentication, model API
+configuration, and secret storage still need separate controls.
+
 Likely future split:
 
 - a runtime/library epic for local harness capability, API-backed model access,
-  and host-harness compatibility;
+  secret filtering, and host-harness compatibility;
 - dashboard children that render and control harness view models once the
   runtime contracts exist.
 
