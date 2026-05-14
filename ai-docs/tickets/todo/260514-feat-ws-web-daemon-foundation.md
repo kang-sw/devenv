@@ -18,6 +18,12 @@ This ticket is intentionally a substrate ticket. Detailed endpoint names,
 storage paths, and packaging choices need follow-up discussion before promotion
 to `ready/`.
 
+The initial `ws-dashboard/` scaffold already exists with `core`,
+`harness-core`, `harness-cli`, `daemon`, and `frontend` slots. That scaffold
+preserves the planned source layout but does not complete Phase 1; the daemon
+still needs a real Axum entrypoint, serving modes, health surface, logging, and
+lifecycle behavior.
+
 ## Phases
 
 ### Phase 1: Add daemon shell and serving modes

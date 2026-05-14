@@ -53,11 +53,13 @@ If the dashboard becomes an independently released product, has a separate
 release cadence, or its frontend/build churn interferes with workflow runtime
 work, split it into a separate repository or package.
 
-Use `ws-dashboard/` as the root project directory when implementation starts.
-The name is deliberately descriptive because the dashboard is usually started
-once and reached through a browser URL. Avoid `tools/` for the main source tree:
-this surface is a daemon, frontend, and runtime-facing product area rather than
-a small helper utility. `wsdash` can remain a short command alias later, but the
+The root project directory is `ws-dashboard/`. The scaffold currently contains
+Rust workspace slots for core resource primitives, harness-core abstractions,
+a harness CLI wrapper, a daemon binary, and a frontend placeholder. The name is
+deliberately descriptive because the dashboard is usually started once and
+reached through a browser URL. Avoid `tools/` for the main source tree: this
+surface is a daemon, frontend, and runtime-facing product area rather than a
+small helper utility. `wsdash` can remain a short command alias later, but the
 source directory should favor discoverability.
 
 To control documentation bloat:

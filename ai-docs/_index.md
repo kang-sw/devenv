@@ -15,6 +15,8 @@ application material belongs in downstream projects.
 Active plugin package: `agents-plugin/` (`ws@0.26.2`).
 Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.26.2`).
 Native MCP/tooling source: `agents-plugin-tool/`.
+Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
+harness-cli, daemon, and frontend placeholder).
 Retired Claude source material: `ai-docs/ref/claude-home-legacy.md` and git
 history.
 
@@ -211,7 +213,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260514-feat-ws-web-daemon-foundation` | todo | Build the web dashboard daemon, owner auth, and bind-mode foundation |
+| `260514-feat-ws-web-daemon-foundation` | todo | Build daemon foundation on the existing `ws-dashboard/` scaffold |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |

@@ -66,9 +66,9 @@ The MVP should cover:
 - Use Rust, Axum, Tokio, WebSockets, and a cross-platform PTY layer for the
   daemon. Use React, TypeScript, Vite, and xterm.js for the browser UI unless a
   later child ticket records a stronger reason to change stacks.
-- Use `ws-dashboard/` as the root project directory when implementation starts.
-  Reserve short names such as `wsdash` for command aliases rather than the
-  source tree.
+- Use `ws-dashboard/` as the root project directory. The current scaffold
+  contains core, harness-core, harness-cli, daemon, and frontend slots; reserve
+  short names such as `wsdash` for command aliases rather than the source tree.
 - Use CodeMirror 6 as the initial browser-native editor base, with Vim-like
   modal editing through an extension or custom ws modal layer. Keep terminal
   nvim available as an optional PTY workflow, but do not make it the primary
