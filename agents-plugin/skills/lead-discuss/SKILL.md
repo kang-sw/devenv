@@ -7,17 +7,13 @@ description: Use before code changes when the user wants to explore workflow des
 
 Topic: user request
 
-## Project Map
-
-Call `ws/project_tree()` to load the current project map.
-
 ## Invariants
 
 - No source edits. Only documentation writes, only in the capture step.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phase plan text before a `### Result` is frozen after completion; append a `#### Edition` for later implementation tweaks.
 - Read mental-model docs on-demand as topics emerge.
-- Read spec docs in `ai-docs/spec/` on-demand as topics emerge; Project Map lists available specs.
-- Use `ws/subquery(question: "<focused implementation-detail question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, for implementation details beyond mental-model docs.
+- Read spec docs in `ai-docs/spec/` on-demand as topics emerge; the project map lists available specs.
+- Use `ws/subquery` for focused implementation-detail questions beyond mental-model docs; read the result before responding.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
 - Evaluate each claim independently - call out unaddressed risks with reasoning; do not parrot back risks already discussed and resolved.
@@ -28,18 +24,18 @@ Call `ws/project_tree()` to load the current project map.
 ## On: invoke
 
 1. Invoke `ws:lead-workflow-manual` via Skill tool (loads orchestration primitives reference).
-2. Call `ws/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - `ws:lead-sprint` provides session continuity."
-3. If `user request` references a ticket, read it.
-4. Enter user-message handling.
+2. Call `ws/project_tree()` to load the current project map.
+3. Call `ws/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - `ws:lead-sprint` provides session continuity."
+4. If `user request` references a ticket, read it.
+5. Enter user-message handling.
 
 ## On: user message
 
 1. Apply **judge: needs-survey** to every named component, skill, agent, spec, or ticket.
-   For each unloaded doc, call `ws/agents.register(name: "project-survey", prompts: ["project-survey"])`, then `ws/agents.call(name: "project-survey", prompt: "<topic brief>")`.
-   Incorporate the returned reference list before responding.
-2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery(question: "<focused implementation-detail question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, for implementation details.
+   For each unloaded doc, run `project-survey` and incorporate its returned reference list before responding.
+2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use `ws/subquery` for focused implementation details.
    For mental-model staleness, use native path-filtered Git history until ws exposes a path-history primitive.
-3. If the user explicitly wants implementation to start, invoke `ws:lead-proceed` with the current target; do not route directly to `ws:lead-implement`.
+3. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`; carry the current target and settled discussion context.
 4. Apply **judge: needs-intent-frame**. If it fires, emit an **Intent Frame** before advice.
 5. Apply **judge: needs-interview**. If it fires, enter **Interview Workflow** before proposing a settled direction.
 6. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
@@ -71,11 +67,11 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    b. No other ticket references this stem -> invoke `ws:lead-write-spec` to remove the `🚧` entry.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
    d. Perform native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
-4. Commit through `ws/git.commit`.
+5. Commit through `ws/git.commit`.
 
 ## On: user signals done
 
-1. If the user wants implementation to start, invoke `ws:lead-proceed` with the current target and exit this handler.
+1. If the user wants implementation to start, continue through `ws:lead-proceed`; carry the current target and settled discussion context.
 2. For persistence without implementation, always suggest `ws:lead-write-spec` as the next step - write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
 3. Then offer ticket persistence:
    - **New ticket** - invoke `ws:lead-write-ticket`.
@@ -83,15 +79,14 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 4. Apply **judge: needs-integration-tests** to ticket writes.
 5. Write only what the user approves. No artifact needed for exploratory discussions.
 
-## Workflow Context
+## Handoff Context
 
 Discussion outputs feed downstream skills:
-- Approach direction -> `ws:lead-write-spec` (always next; its judge handles no-op)
-- Scope, phases, acceptance criteria -> `ws:lead-write-ticket`
-- Implementation intent -> `ws:lead-proceed`, which routes to `ws:lead-implement`
-- Type shapes, module boundaries, public API -> implementation notes consumed through `ws:lead-proceed`
+- Continue through `ws:lead-write-spec`; carry approach direction.
+- Continue through `ws:lead-write-ticket`; carry scope, phases, and acceptance criteria.
+- Continue through `ws:lead-proceed`; carry implementation intent and settled discussion context.
+- Carry type shapes, module boundaries, and public API notes into implementation routing.
 
-Canonical chain: `ws:lead-discuss` -> `ws:lead-write-spec` -> `ws:lead-write-ticket` -> `ws:lead-proceed` -> `ws:lead-implement`.
 Frame conclusions as directives the downstream consumer can execute.
 
 ## Judgments

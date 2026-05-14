@@ -7,16 +7,12 @@ description: Use before code changes when the user wants to explore workflow des
 
 Topic: user request
 
-## Project Map
-
-Call `wsflow/project_tree()` to load the current project map.
-
 ## Invariants
 
 - No source edits. Only documentation writes, only in the capture step.
 - Exception: unimplemented ticket phases may be edited mid-discussion to keep the ticket accurate. Phase plan text before a `### Result` is frozen after completion; append a `#### Edition` for later implementation tweaks.
 - Read mental-model docs on-demand as topics emerge.
-- Read spec docs in `ai-docs/spec/` on-demand as topics emerge; Project Map lists available specs.
+- Read spec docs in `ai-docs/spec/` on-demand as topics emerge; the project map lists available specs.
 - Use direct project search or subagent exploration for implementation details beyond mental-model docs.
 - When docs are stale or insufficient, say so - do not speculate.
 - Before proposing new abstractions, surface existing patterns or components that already solve part of the problem.
@@ -28,18 +24,18 @@ Call `wsflow/project_tree()` to load the current project map.
 ## On: invoke
 
 1. Invoke `wsflow:lead-workflow-manual` via Skill tool (loads orchestration primitives reference).
-2. Call `wsflow/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - route sprint-scoped implementation through `wsflow:lead-sprint` or ask for an explicit non-sprint target branch."
-3. If `user request` references a ticket, read it.
-4. Enter user-message handling.
+2. Call `wsflow/project_tree()` to load the current project map.
+3. Call `wsflow/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - route sprint-scoped implementation through `wsflow:lead-sprint` or ask for an explicit non-sprint target branch."
+4. If `user request` references a ticket, read it.
+5. Enter user-message handling.
 
 ## On: user message
 
 1. Apply **judge: needs-survey** to every named component, skill, spec, or ticket.
-   For each unloaded doc, use `wsflow/project_tree`, `wsflow/specs.*`, `wsflow/tickets.*`, `wsflow/mental_models.*`, direct file reads, or subagent exploration to collect references.
-   Incorporate the returned reference list before responding.
+   For each unloaded doc, run a bounded survey and incorporate its returned reference list before responding.
 2. Read mental-model docs for touched domains; read spec docs for external-visible behavior; use direct project search or subagent exploration for implementation details.
    For mental-model staleness, use native path-filtered Git history when no wsflow path-history primitive exists.
-3. If the user explicitly wants implementation to start, invoke `wsflow:lead-proceed` with the current target; do not route directly to `wsflow:lead-implement`.
+3. If the user explicitly wants implementation to start, continue through `wsflow:lead-proceed`; carry the current target and settled discussion context.
 4. Apply **judge: needs-intent-frame**. If it fires, emit an **Intent Frame** before advice.
 5. Apply **judge: needs-interview**. If it fires, enter **Interview Workflow** before proposing a settled direction.
 6. Brainstorm iteratively - suggest approaches, point out analogies, sketch concrete shapes for vague ideas.
@@ -71,11 +67,11 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    b. No other ticket references this stem -> invoke `wsflow:lead-write-spec` to remove the `🚧` entry.
    c. Other tickets also reference this stem, or coverage is ambiguous -> ask the user before removing.
    d. Perform native `git mv ai-docs/tickets/<status>/<stem>.md ai-docs/tickets/.dropped/<stem>.md`.
-4. Commit through `wsflow/git.commit`.
+5. Commit through `wsflow/git.commit`.
 
 ## On: user signals done
 
-1. If the user wants implementation to start, invoke `wsflow:lead-proceed` with the current target and exit this handler.
+1. If the user wants implementation to start, continue through `wsflow:lead-proceed`; carry the current target and settled discussion context.
 2. For persistence without implementation, always suggest `wsflow:lead-write-spec` as the next step - write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
 3. Then offer ticket persistence:
    - **New ticket** - invoke `wsflow:lead-write-ticket`.
@@ -83,15 +79,14 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 4. Apply **judge: needs-integration-tests** to ticket writes.
 5. Write only what the user approves. No artifact needed for exploratory discussions.
 
-## Workflow Context
+## Handoff Context
 
 Discussion outputs feed downstream skills:
-- Approach direction -> `wsflow:lead-write-spec` (always next; its judge handles no-op)
-- Scope, phases, acceptance criteria -> `wsflow:lead-write-ticket`
-- Implementation intent -> `wsflow:lead-proceed`, which routes to `wsflow:lead-implement`
-- Type shapes, module boundaries, public API -> implementation notes consumed through `wsflow:lead-proceed`
+- Continue through `wsflow:lead-write-spec`; carry approach direction.
+- Continue through `wsflow:lead-write-ticket`; carry scope, phases, and acceptance criteria.
+- Continue through `wsflow:lead-proceed`; carry implementation intent and settled discussion context.
+- Carry type shapes, module boundaries, and public API notes into implementation routing.
 
-Canonical chain: `wsflow:lead-discuss` -> `wsflow:lead-write-spec` -> `wsflow:lead-write-ticket` -> `wsflow:lead-proceed` -> `wsflow:lead-implement`.
 Frame conclusions as directives the downstream consumer can execute.
 
 ## Judgments
