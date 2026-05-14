@@ -102,6 +102,9 @@ CLAUDE.md compatibility shim:
 _index.md should cover project summary, stack, workspace, conventions,
 build/test commands, operational pitfalls, current queue, and 2-5 lines of
 session notes. Do not list `.done/` or `.dropped/` tickets; use git history.
+Deep source narratives, behavior inventories, extension recipes, dependency
+notes, and completed history are scope-drift candidates; keep only compact
+pointers here and route semantic extraction through the owning workflow.
 
 _index.md must start with:
 
@@ -136,6 +139,11 @@ Adapt structure to the project; this is a starting point, not a schema.
   `idea/`, `todo/`, `ready/`, `.done/`, `.dropped/`.
 - v0001: Ensure `.gitignore` includes `ai-docs/**/*.local.md` and
   `ai-docs/.deps/`.
+- v0002: If `ai-docs/_index.md` looks like an old all-in-one
+  architecture digest, report an index health note only. Do not move semantic
+  content into specs or mental models from bootstrap; compact `_index.md` only
+  after user approval and only when an owning document already preserves the
+  meaning.
 -->
 
-<!-- Template Version: v0001 -->
+<!-- Template Version: v0002 -->

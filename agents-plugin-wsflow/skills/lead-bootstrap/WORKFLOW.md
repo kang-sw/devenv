@@ -23,6 +23,9 @@ template rather than relying on a project-local guide override.
 
 - `_index.md` is the session-start memory and active queue. Prune aggressively:
   completed work belongs in Git history, not the index.
+- `_index.md` should keep compact orientation: summary, stack, workspace,
+  conventions, build/test commands, operational pitfalls, current queue, and
+  short session notes.
 - `_index.local.md` is machine-local memory and should be ignored by Git.
 - `tickets/` stores work by status directory: `idea/`, `todo/`, `ready/`,
   `.done/`, and `.dropped/`.
@@ -71,6 +74,42 @@ template rather than relying on a project-local guide override.
   document so inherited domain rules are visible.
 - Include relevant spec stems in mental-model prose so future agents can trace
   operational guidance back to caller-visible behavior.
+
+## Index Health
+
+Bootstrap may report `_index.md` scope-drift candidates as an advisory health
+note. The first pass reads `_index.md` only; it does not load the full spec or
+mental-model corpus and does not move semantic content.
+
+Common drift candidates:
+
+- deep source trees, file-by-file roles, type listings, or implementation inventory;
+- long behavior inventories that belong in specs or a linked "what works" doc;
+- data-flow narratives, lifecycle descriptions, extension recipes, common
+  mistakes, audit rules, or logging rules that belong in mental models;
+- dependency API notes, archived design excerpts, or external-reference summaries;
+- done/dropped ticket history, completed milestones, or stale session chronology;
+- long duplicated spec, mental-model, module, or ticket indexes.
+
+When a maintainer approves `_index.md` cleanup:
+
+1. Preserve the memory-policy comment.
+2. Keep project summary, stack, top-level workspace, build/test commands,
+   read-before-edit pointers, active inventory, `ready/` queue, and compact
+   session notes.
+3. Compact deep sections into links only when a clear owning document already
+   exists.
+4. Keep unique project direction, active priorities, and unresolved operational
+   caveats in `_index.md`.
+5. Do not author or semantically update specs, mental models, tickets, or refs
+   during index cleanup.
+6. Compact source-derived detail to source pointers, static material to
+   `ai-docs/ref/` or API-doc pointers, work history to Git or ticket archives,
+   and duplicated maps to start-here pointers.
+7. Route deeper semantic work through the owning workflow: behavior to
+   `wsflow:lead-forge-spec` or `wsflow:lead-write-spec`, modification knowledge
+   to `wsflow:lead-forge-mental-model`, queue ordering to
+   `wsflow:lead-write-ticket`, and ambiguous direction to `wsflow:lead-discuss`.
 
 ## Commit Traceability
 

@@ -16,6 +16,8 @@ Mode: user request
 - Merge surgically; flag unresolved conflicts inline with `<!-- CONFLICT: ... -->`.
 - Every migration item is idempotent; re-running on an already-migrated project produces no changes.
 - Template version history is package-local; apply only entries listed in this skill's `AGENTS.template.md`.
+- Index health checks are advisory; first pass reads `_index.md` only.
+- Index cleanup writes only `ai-docs/_index.md`; semantic migration routes through owning workflow skills.
 - Commit each logical unit separately following the repository commit rules.
 - Retired Claude plugin artifacts are out of support for this skill; do not reintroduce `claude-plugin/`.
 
@@ -30,6 +32,7 @@ Mode: user request
    - **adopt** - `AGENTS.md` exists without a version tag.
    - **claude-migrate** - `CLAUDE.md` exists and `AGENTS.md` does not.
 5. Execute the matching handler.
+6. Run the index health check when `ai-docs/_index.md` exists.
 
 ## On: fresh
 
@@ -72,6 +75,36 @@ Mode: user request
 5. Preserve no separate Claude-only section unless explicitly requested.
 6. Commit.
 
+## On: index health check
+
+1. Read `ai-docs/_index.md`.
+2. Apply **judge: index-scope-drift** as a cheap first pass.
+3. Do not read the full spec or mental-model corpus for this pass.
+4. Do not move semantic content into specs, mental models, tickets, or refs.
+5. Emit a concise health note when drift candidates exist.
+6. Route user-approved second passes by the table below.
+
+| Finding | Route |
+|---------|-------|
+| Source-derived detail | Compact to source pointers; use `wsflow:lead-discuss` if meaning is unclear |
+| Behavior coverage | `wsflow:lead-forge-spec` or `wsflow:lead-write-spec` |
+| Modification knowledge | `wsflow:lead-forge-mental-model` |
+| Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
+| Queue or ticket ordering | `wsflow:lead-write-ticket` |
+| Work history | Compact to Git history, ticket archives, or roadmap pointers |
+| Duplicated doc map | Compact to start-here pointers |
+| Ambiguous project direction | `wsflow:lead-discuss` |
+
+## On: user approves index cleanup
+
+1. Re-read `ai-docs/_index.md`.
+2. Preserve the memory-policy comment.
+3. Keep summary, stack, workspace, build/test commands, read-before-edit pointers, active inventory, `ready/` queue, and compact notes.
+4. Compact deep sections into links only when a clear owning document already exists.
+5. Leave unique project direction, active priorities, and unresolved operational caveats in place.
+6. Do not author or semantically update specs, mental models, tickets, or refs.
+7. Report each compacted section with its replacement path or retained-note reason.
+
 ## Judgments
 
 ### judge: section-merge
@@ -89,6 +122,19 @@ Mode: user request
 | Skip | No matching files or no project state exists for the condition |
 | Apply subset | Some matching files need the migration and others already satisfy it |
 | Apply all | The condition is met across the affected project state |
+
+### judge: index-scope-drift
+
+Cheap `_index.md` scan only; report candidates, not confirmed defects.
+
+| Candidate | Signal |
+|-----------|--------|
+| Source-derived detail | Deep source tree, file-by-file roles, type listings, or implementation inventory |
+| Behavior inventory | Long "what works" lists, player-visible behavior descriptions, or feature semantics |
+| Modification knowledge | Data flows, lifecycle narratives, extension recipes, common mistakes, audit/logging rules |
+| Static reference material | Dependency API notes, archived design excerpts, or long external-reference summaries |
+| Work history | Done/dropped tickets, completed milestones, or stale session chronology |
+| Duplicated doc map | Long spec, mental-model, module, or ticket indexes beyond start-here pointers |
 
 ## Templates
 

@@ -102,6 +102,9 @@ CLAUDE.md compatibility shim:
 _index.md should cover project summary, stack, workspace, conventions,
 build/test commands, operational pitfalls, current queue, and 2-5 lines of
 session notes. Do not list `.done/` or `.dropped/` tickets; use git history.
+Deep source narratives, behavior inventories, extension recipes, dependency
+notes, and completed history are scope-drift candidates; keep only compact
+pointers here and route semantic extraction through the owning workflow.
 
 _index.md must start with:
 
@@ -163,6 +166,11 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0036: If `ai-docs/WORKFLOW.md` is absent, create it from the bootstrap workflow guide source. If `AGENTS.md` lacks the workflow-guide Project Knowledge bullet, add it without expanding root context into convention detail. The guide is explanatory only and does not override ws runtime or MCP parser behavior.
 - v0037: Add `ai-docs/.deps/` to `.gitignore` if absent; API documentation cache contents are runtime-managed local data, not project memory.
 - v0038: Create `ai-docs/.old/` as the tracked project archive for files kept only as possible future reference and hidden from default listings. Move legacy spec archives with `git mv`: `ai-docs/ref/old-spec` or `ai-docs/old-spec` -> `ai-docs/.old/spec`; move `ai-docs/old` -> `ai-docs/.old/misc` when present and not already project-specific.
+- v0039: If `ai-docs/_index.md` looks like an old all-in-one
+  architecture digest, report an index health note only. Do not move semantic
+  content into specs or mental models from bootstrap; compact `_index.md` only
+  after user approval and only when an owning document already preserves the
+  meaning.
 -->
 
-<!-- Template Version: v0038 -->
+<!-- Template Version: v0039 -->

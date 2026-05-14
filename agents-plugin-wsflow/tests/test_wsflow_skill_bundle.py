@@ -74,7 +74,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
         text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
-        self.assertIn("<!-- Template Version: v0001 -->", text)
+        self.assertIn("<!-- Template Version: v0002 -->", text)
         self.assertIn("This template has package-local version history", text)
         self.assertNotIn("<!-- Template Version: v0038 -->", text)
         self.assertNotIn("- v0038:", text)
