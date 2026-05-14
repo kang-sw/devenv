@@ -31,7 +31,7 @@ marketplaces and fails for `source_type = "local"`.
 
 Iterative local plugin testing uses UI uninstall/install or a fresh Codex session
 after editing the registered local source. Verified after UI uninstall/install:
-`$ws:skill-authoring`, `$ws:write-ticket`, and `$ws:discuss` are visible.
+`$ws:lead-skill-authoring`, `$ws:lead-write-ticket`, and `$ws:lead-discuss` are visible.
 
 Skill invocation is namespaced as `$<plugin-name>:<skill-name>`; for this repo's
 candidate plugin the form is `$ws:<skill-name>`.

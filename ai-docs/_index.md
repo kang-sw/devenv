@@ -59,7 +59,7 @@ history.
 
 | File | Use |
 |------|-----|
-| `ai-docs/ref/skill-authoring.md` | Skill/agent/prompt/convention authoring rules |
+| `agents-plugin/skills/lead-skill-authoring/SKILL.md` | Skill/agent/prompt/convention authoring rules |
 | `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills or plugin surfaces that may need wsflow mirrors |
 | `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
 | `ai-docs/ref/ws-mcp.md` | MCP process, tools, CLI fallbacks, verification levels |
@@ -71,7 +71,7 @@ history.
 
 Before editing tickets/specs/mental models, read the matching convention through
 `ws/convention.read`. Before editing skill, agent, prompt, or convention text,
-read `ai-docs/ref/skill-authoring.md`. Before editing full
+read `agents-plugin/skills/lead-skill-authoring/SKILL.md`. Before editing full
 `agents-plugin/skills/lead-*` skills, plugin packaging, runtime contracts,
 launcher behavior, prompt guidance, or release validation that may affect
 wsflow, read `ai-docs/ref/wsflow-mirroring.md` and run
@@ -244,7 +244,7 @@ dropped tickets live in hidden archive dirs and git history.
 Workflow documentation compression is complete:
 `260504-chore-compress-workflow-docs` is closed after compressing root context,
 bootstrap template, active `lead-*` skills, delegate prompts, and
-`ai-docs/ref/skill-authoring.md`.
+`agents-plugin/skills/lead-skill-authoring/SKILL.md`.
 
 wsflow runtime mode, package scaffold, sprint inclusion, and local
 marketplace/install path are implemented and closed.

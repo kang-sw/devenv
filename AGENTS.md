@@ -71,8 +71,9 @@ files for this migration unless a ticket changes the layout.
 4. **Testability.** Prefer explicit dependencies, minimal hidden state, and pure
    logic over side effects.
 5. **Skill/agent authoring.** Before editing skills, agents, prompts, or
-   convention docs, read `ai-docs/ref/skill-authoring.md` and apply its invariant
-   checklist to every changed Invariants/Constraints line.
+   convention docs, read `agents-plugin/skills/lead-skill-authoring/SKILL.md`
+   and apply its invariant checklist to every changed Invariants/Constraints
+   line.
 
 ## Workflow
 
@@ -146,14 +147,14 @@ not stage it unless explicitly requested.
 - Specs: `ai-docs/spec/`
 - Mental models: `ai-docs/mental-model/`
 - Static references: `ai-docs/ref/`
-- Skill/agent authoring: `ai-docs/ref/skill-authoring.md`
+- Skill/agent authoring: `agents-plugin/skills/lead-skill-authoring/SKILL.md`
 - Codex behavior notes: `ai-docs/ref/codex-integration.md`
 - MCP runtime contract: `ai-docs/ref/ws-mcp.md`
 
 Before editing:
 
 - Skills, agents, prompts, or convention docs: read
-  `ai-docs/ref/skill-authoring.md`.
+  `agents-plugin/skills/lead-skill-authoring/SKILL.md`.
 - Tickets: read ticket conventions through `ws/convention.read` or the
   bundled convention fallback.
 - Specs: read spec conventions through `ws/convention.read` or the compatibility

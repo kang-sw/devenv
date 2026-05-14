@@ -5,6 +5,7 @@ description: Author or audit ws workflow skills and agent prompts using the repo
 
 # Skill Authoring
 
+Canonical repository reference for skill and agent authoring.
 Use this reference when authoring or auditing ws skills and agent prompts.
 Apply rules directly; add local procedure only when the target needs it.
 
