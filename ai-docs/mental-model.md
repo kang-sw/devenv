@@ -4,8 +4,9 @@ Cross-domain operational knowledge for modifying the devenv workflow system.
 
 ## Project Reading Map
 
-Use this map for first-pass context routing only. It is not an implementation
-status inventory; use specs, tickets, source, and tests for behavioral truth.
+This repo has enough workflow docs that common tasks benefit from repeatable
+first-pass routing. Use this map to choose initial context; use specs, tickets,
+source, and tests for behavioral truth.
 
 | Task / topic | Read first | Then read |
 |--------------|------------|-----------|

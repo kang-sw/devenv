@@ -19,9 +19,6 @@ Record a fact only when **both** conditions hold:
 **Never record:** type/struct field listings, function signatures, API route enumerations,
 source-paraphrasing descriptions, information already in `_index.md`.
 
-Exception: the root mental-model index may include a project reading map as
-described below.
-
 ## Structure
 
 - Index: `ai-docs/mental-model.md` — cross-domain patterns, crate graph, shared conventions. No frontmatter.
@@ -31,24 +28,22 @@ described below.
 
 ## Project Reading Map
 
-The root `ai-docs/mental-model.md` may include a compact project-level reading
-map for routing common task or discussion topics to canonical documentation.
+`ai-docs/mental-model.md` may include a compact reading map when a project has
+enough specs or mental-model docs that common tasks need repeatable routing.
 
-Allowed:
+Use it to answer: "For this task or discussion topic, which canonical docs
+should I read first?"
+
+A reading-map entry contains only routing information:
 
 - topic/task -> read-first spec document
 - topic/task -> relevant mental-model documents
 - topic/task -> stable reference documents
 - lookup guidance for related tickets or references
 
-Forbidden:
-
-- current build inventory
-- implementation status summaries
-- duplicated feature descriptions
-- active ticket queue mirrors
-- behavioral claims owned by specs
-- source paraphrases
+Do not use the map to record current behavior, implementation status, feature
+lists, source summaries, or active queue state. Those belong in specs, tickets,
+source/tests, generated surveys, or `_index.md`.
 
 ## Directory Hierarchy
 
