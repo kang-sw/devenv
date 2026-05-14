@@ -16,7 +16,7 @@ match how the workflow is used during active design sessions.
 
 This epic covers:
 
-- a short, frequently callable spoken-question skill for "are we finished yet?"
+- a short, frequently callable spoken-question skill for "can we proceed?"
   style design checks;
 - a `lead-proceed` freshness gate that captures settled discussion into an
   existing related ticket before implementation starts;
@@ -35,7 +35,8 @@ This epic covers:
 ## Child Tickets
 
 - `260513-feat-is-finished-yet-workflow-check` - done; added the frequent
-  spoken question skill and the proceed ticket-refresh gate.
+  spoken question skill, now named `lead-can-we-proceed`, and the proceed
+  ticket-refresh gate.
 - `260513-feat-ticket-result-editions` - done; completed ticket Result
   sections receive append-only edition entries during tweak loops.
 - `260513-feat-human-readable-tool-output` - backlog the remaining JSON-default
@@ -45,9 +46,8 @@ This epic covers:
 
 - Frequent checkpoint skills should stay as short as `lead-verify-discussion`:
   state when to use the skill, what evidence to consider, and what to report.
-- The new spoken-question skill should use a verb-like or oral name, with
-  `lead-is-finished-yet` as the working candidate unless a better spoken form is
-  chosen during ready promotion.
+- The spoken-question skill uses `lead-can-we-proceed`; it should stay verb-like
+  and oral rather than status-like.
 - The skill should separate user-blocking design questions from autonomous code
   hygiene, implementation detail, and cleanup work.
 - `lead-proceed` should fill missing ticket intent from the active conversation

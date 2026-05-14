@@ -15,7 +15,7 @@ EXPECTED_SKILLS = {
     "lead-forge-mental-model",
     "lead-forge-spec",
     "lead-implement",
-    "lead-is-finished-yet",
+    "lead-can-we-proceed",
     "lead-proceed",
     "lead-review",
     "lead-ship",
