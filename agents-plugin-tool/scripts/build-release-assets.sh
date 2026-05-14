@@ -9,7 +9,7 @@ if [ -z "$version" ]; then
   if git -C "$tool_dir" describe --tags --exact-match >/dev/null 2>&1; then
     version=$(git -C "$tool_dir" describe --tags --exact-match)
   else
-    version=0.26.1-dev
+    version=0.26.2-dev
   fi
 fi
 version=${version#v}
