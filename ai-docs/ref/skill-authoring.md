@@ -12,8 +12,11 @@ These apply to both skill and agent documents.
 - Mechanical rules and soft judgments do not mix. Soft decision points must be separated and stated explicitly.
 - After restructuring, spawn a fresh delegate to audit: contradictions, duplication, orphan references, closure gaps.
 - At every authoring turn's end, re-read additions and cut.
+- Use Markdown hierarchy to route attention before adding prose.
 - Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
 - Prefer command-shaped fragments over explanatory paragraphs.
+- For dense routing or rule lists, prefer short sections, named groups, fixed lookup tables, and command-shaped lists over long flat lists.
+- Do not invent a pseudo-code DSL when Markdown structure can express the route.
 - Use examples only when they prevent repeated wrong execution.
 - Preserve full grammar when compression could change order, ownership, or safety.
 
@@ -50,6 +53,7 @@ Test: invariants should re-derive from the named resource.
 ## Skill Layout
 
 Top-to-bottom order. Simpler skills use the subset they need.
+Hierarchy clarifies responsibility; handlers preserve required order.
 
 1. **Invariants** — unambiguous imperatives, zero interpretation cost, skimmable.
 2. **Event handlers** (`On: X`) — numbered step lists per entry point. Consistent sub-structure across siblings.
