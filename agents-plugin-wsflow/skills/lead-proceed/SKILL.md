@@ -78,12 +78,12 @@ Routing
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | Phase N-M[: title summary] | whole target - no phases>
 - **Execution**: wsflow:lead-implement - owns direct execution, documentation, and final reporting
-- **Handoff context**: downstream stages receive carried route constraints.
+- **Carried context**: downstream stages receive route constraints.
 
 Proceeding.
 ```
 
-Include handoff stages in the pipeline line when they fire.
+Include chained stages in the pipeline line when they fire.
 Do not ask for confirmation; the user can interrupt.
 
 ### 4. Execute
@@ -95,7 +95,7 @@ Do not ask for confirmation; the user can interrupt.
 5. If the captured path remains under `ai-docs/tickets/todo/`, stop and report the ready-promotion blocker.
 6. If a ticket path was captured, rebuild route context from that path and re-enter `Select Route`.
 
-## Handoff Context
+## Carried Context
 
 `spec-context`:
 `Chained from wsflow:lead-proceed - write any planned entries without asking; the session reminder will still emit.`
