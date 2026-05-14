@@ -1,0 +1,12 @@
+[package]
+name = "ws-dashboard-harness-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ws-dashboard-harness"
+path = "src/main.rs"
+
+[dependencies]
+ws-dashboard-harness-core.workspace = true

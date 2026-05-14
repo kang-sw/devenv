@@ -1,0 +1,13 @@
+[package]
+name = "ws-dashboard-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ws-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+ws-dashboard-core.workspace = true
+ws-dashboard-harness-core.workspace = true
