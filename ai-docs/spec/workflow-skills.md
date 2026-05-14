@@ -191,7 +191,9 @@ validation checkpoint during discussion. It checks the current assumptions or
 structure choices through scoped `ws/subquery` calls, searches for already
 implemented items that can be reused or merged to avoid duplication, synthesizes
 corrected assumptions, observations, reuse opportunities, and code-hygiene
-findings, then steers the discussion toward the best-supported direction.
+findings, checks for over-alignment signals such as weak premise handling or
+missing countercases, then steers the discussion toward the best-supported
+direction.
 {#260512-discussion-verification-skill}
 
 ### Can We Proceed Checkpoint {#260513-can-we-proceed-skill}
@@ -395,6 +397,14 @@ contract for plugin-less maintainers: it explains the document layers, ticket
 lifecycle, spec stems, mental models, commit traceability, and manual fallback
 expectations without becoming a project-local override for runtime semantics.
 {#260506-bootstrap-workflow-guide}
+
+Bootstrap runs an advisory `_index.md` health check when the index exists. The
+first pass reads only `_index.md`, reports likely scope-drift candidates such as
+source-derived detail, behavior inventories, modification knowledge, static
+reference material, work history, duplicated maps, or stable reading maps, and
+routes user-approved follow-up work through the owning workflow. Bootstrap
+cleanup itself only compacts `_index.md`; it does not author or semantically
+update specs, mental models, tickets, or references.
 
 Bootstrap ensures downstream `.gitignore` covers local workflow state and
 runtime-managed API documentation cache data: `ai-docs/**/*.local.md` and
