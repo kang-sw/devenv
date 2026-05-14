@@ -27,12 +27,14 @@ related:
 - Ready-ticket convention keeps spec linkage mandatory; `lead-write-ticket` may create missing planned coverage through `lead-write-spec` before finalizing the queue entry. {#260505-documentation-authoring-workflows}
 - Epic tickets are lightweight milestone boards for scope, child-ticket decomposition, cross-child decisions, and completion criteria; child tickets carry implementation detail and phases. `lead-proceed` may execute unfinished phases as slices without changing ticket decomposition. {#260508-lightweight-epic-ticket-conventions} {#260505-proceed-routing-pipeline}
 - Mental-model hierarchy is path-derived; subdomain callers must load parent `index.md` before child docs. {#260505-mental-model-document-system}
+- The root `ai-docs/mental-model.md` may carry a compact project reading map for task/topic routing; it does not own behavior, status, queue, or source-derived claims. {#260505-mental-model-document-system}
 - Infra and convention docs are embedded in the Go runtime; retired legacy copies do not affect `ws/infra.read` or `ws/convention.read`.
 - `ai-docs/WORKFLOW.md` is bootstrap-installed explanatory documentation for plugin-less maintenance; wsdoc parsers and MCP tools do not treat it as convention, spec, ticket, or runtime input. {#260506-bootstrap-workflow-guide}
 
 ## Coupling
 
 - `references.trace` composes ticket, spec, and mental-model discovery. Changes to any parser change trace completeness. {#260505-documentation-reference-tracing}
+- A project reading map points to specs, mental-model docs, references, or lookup guidance; those target documents remain the owners for behavioral and implementation facts.
 - Ticket/spec linking has two directions: ticket `spec:` frontmatter and spec body/frontmatter ticket refs. Both matter to trace output.
 - Mental-model/spec linking is one-way from mental-model text to spec stems; when a spec stem is renamed, mental-model references must change in the same commit.
 - `ProjectTree` still has compatibility behavior around old `features:` frontmatter; active spec truth is body anchors and markers.
@@ -50,6 +52,7 @@ related:
 - Using full YAML features in frontmatter; the parser is deliberately minimal.
 - Changing workflow semantics in the downstream workflow guide instead of the canonical plugin/runtime, bundled conventions, or bootstrap templates.
 - Loading mental-model child docs without ancestors and missing inherited Domain Rules.
+- Moving current feature inventory or implementation status from `_index.md` into the project reading map instead of specs, tickets, source, or tests.
 
 ## Technical Debt
 

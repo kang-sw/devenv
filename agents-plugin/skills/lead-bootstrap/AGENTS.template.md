@@ -87,7 +87,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 ai-docs/
   _index.md          - session-start context and queue
   _index.local.md    - local memory, .gitignored
-  mental-model.md    - overall mental-model index
+  mental-model.md    - overall mental-model index and optional project reading map
   mental-model/      - contracts, coupling, architecture narrative
   spec/              - external-perspective specs
   .old/              - tracked project archive hidden from default listings
@@ -103,8 +103,9 @@ _index.md should cover project summary, stack, workspace, conventions,
 build/test commands, operational pitfalls, current queue, and 2-5 lines of
 session notes. Do not list `.done/` or `.dropped/` tickets; use git history.
 Deep source narratives, behavior inventories, extension recipes, dependency
-notes, and completed history are scope-drift candidates; keep only compact
-pointers here and route semantic extraction through the owning workflow.
+notes, stable project reading maps, and completed history are scope-drift
+candidates; keep only compact pointers here and route semantic extraction
+through the owning workflow.
 
 _index.md must start with:
 
@@ -171,6 +172,10 @@ Adapt structure to the project; this is a starting point, not a schema.
   content into specs or mental models from bootstrap; compact `_index.md` only
   after user approval and only when an owning document already preserves the
   meaning.
+- v0040: Treat stable task/topic -> document routing maps as candidates for
+  `ai-docs/mental-model.md ## Project Reading Map` during later
+  mental-model work. Bootstrap may report the drift, but must not move mixed
+  status or feature inventory automatically.
 -->
 
-<!-- Template Version: v0039 -->
+<!-- Template Version: v0040 -->

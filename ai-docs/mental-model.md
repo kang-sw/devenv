@@ -2,6 +2,21 @@
 
 Cross-domain operational knowledge for modifying the devenv workflow system.
 
+## Project Reading Map
+
+Use this map for first-pass context routing only. It is not an implementation
+status inventory; use specs, tickets, source, and tests for behavioral truth.
+
+| Task / topic | Read first | Then read |
+|--------------|------------|-----------|
+| Plugin packaging, install, runtime metadata, launcher repair | `spec/plugin-runtime.md` | `mental-model/plugin-runtime.md`, `mental-model/claude-compatibility.md` |
+| MCP tools, wsdoc discovery, convention access, CLI mirrors | `spec/mcp-tools.md` | `mental-model/mcp-runtime.md`, `mental-model/documentation-system.md` |
+| Workflow skills, routing, sprint/review/proceed behavior | `spec/workflow-skills.md` | `mental-model/workflow-skills.md`, `ref/wsflow-mirroring.md` when wsflow mirrors may change |
+| Specs, tickets, mental models, project memory, references | `spec/documentation-system.md` | `mental-model/documentation-system.md` |
+| Named agents, subqueries, backend behavior | `spec/named-agent-runtime.md` | `mental-model/named-agent-runtime.md`, `ref/ws-agent-runtime.md` |
+| API documentation cache and manager sessions | `spec/api-documentation-cache.md` | `mental-model/api-documentation-cache.md` |
+| Personal shell/editor/tmux/Claude dashboard tooling | `spec/developer-environment-tools.md` | `mental-model/developer-environment-tools.md` |
+
 ## Domains
 
 | Domain | File | Scope |

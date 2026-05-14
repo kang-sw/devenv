@@ -89,6 +89,7 @@ Mode: user request
 | Behavior coverage | `ws:lead-forge-spec` or `ws:lead-write-spec` |
 | Modification knowledge | `ws:lead-forge-mental-model` |
 | Static reference material | Compact to `ai-docs/ref/` or API-doc pointers |
+| Project reading map | `ws:lead-forge-mental-model` or `ws:lead-discuss` when mixed with status claims |
 | Queue or ticket ordering | `ws:lead-write-ticket` |
 | Work history | Compact to Git history, ticket archives, or roadmap pointers |
 | Duplicated doc map | Compact to start-here pointers |
@@ -132,6 +133,7 @@ Cheap `_index.md` scan only; report candidates, not confirmed defects.
 | Behavior inventory | Long "what works" lists, player-visible behavior descriptions, or feature semantics |
 | Modification knowledge | Data flows, lifecycle narratives, extension recipes, common mistakes, audit/logging rules |
 | Static reference material | Dependency API notes, archived design excerpts, or long external-reference summaries |
+| Project reading map | Stable task/topic -> docs routing maps mixed into `_index.md`; feature or status claims remain behavior inventory |
 | Work history | Done/dropped tickets, completed milestones, or stale session chronology |
 | Duplicated doc map | Long spec, mental-model, module, or ticket indexes beyond start-here pointers |
 

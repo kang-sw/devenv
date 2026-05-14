@@ -101,6 +101,13 @@ agents changing the workflow system. They live under `ai-docs/mental-model/`,
 carry source and relationship metadata, and may be flat files or hierarchical
 domain directories.
 
+The root `ai-docs/mental-model.md` may include a compact project reading map
+that routes common task or discussion topics to relevant specs, mental-model
+documents, stable references, or lookup guidance. The map is routing metadata,
+not project truth: it must not duplicate feature descriptions, active ticket
+queues, implementation status, source paraphrases, or behavioral claims owned by
+specs.
+
 Domain documents may include `## Domain Rules`, which are persistent
 user-authored prescriptions scoped to that domain. When a sub-domain document is
 loaded, ancestor index documents are loaded first so inherited domain rules are

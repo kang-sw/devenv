@@ -30,8 +30,9 @@ template rather than relying on a project-local guide override.
 - `tickets/` stores work by status directory: `idea/`, `todo/`, `ready/`,
   `.done/`, and `.dropped/`.
 - `spec/` stores caller-visible behavior specs with stable stem anchors.
-- `mental-model.md` and `mental-model/` store modification-relevant operational
-  knowledge and domain rules.
+- `mental-model.md` stores the mental-model index and optional project reading
+  map; `mental-model/` stores modification-relevant operational knowledge and
+  domain rules.
 - `ref/` stores static references that are not active workflow state.
 - `.old/` stores tracked project archive material kept only as possible future
   reference and hidden from default listings.
@@ -68,6 +69,9 @@ template rather than relying on a project-local guide override.
 
 - Mental models capture knowledge needed to safely modify the project: module
   contracts, coupling, extension recipes, common mistakes, and technical debt.
+- The root `mental-model.md` may include a compact project reading map that
+  routes task/topic intents to specs, mental-model docs, references, or lookup
+  guidance. It must not become a current build inventory.
 - Domain-scoped user rules belong in `## Domain Rules` inside the matching
   mental-model document, not in root `AGENTS.md`.
 - If a domain has nested documents, read the parent `index.md` before any child
@@ -89,6 +93,7 @@ Common drift candidates:
   mistakes, audit rules, or logging rules that belong in mental models;
 - dependency API notes, archived design excerpts, or external-reference summaries;
 - done/dropped ticket history, completed milestones, or stale session chronology;
+- stable task/topic reading maps mixed into `_index.md`;
 - long duplicated spec, mental-model, module, or ticket indexes.
 
 When a maintainer approves `_index.md` cleanup:

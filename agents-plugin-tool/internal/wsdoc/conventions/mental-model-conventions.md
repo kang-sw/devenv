@@ -19,12 +19,36 @@ Record a fact only when **both** conditions hold:
 **Never record:** type/struct field listings, function signatures, API route enumerations,
 source-paraphrasing descriptions, information already in `_index.md`.
 
+Exception: the root mental-model index may include a project reading map as
+described below.
+
 ## Structure
 
 - Index: `ai-docs/mental-model.md` — cross-domain patterns, crate graph, shared conventions. No frontmatter.
 - Domain docs: `ai-docs/mental-model/<domain>.md` — flat file for a single-concern domain.
 - Sub-domain docs: `ai-docs/mental-model/<domain>/index.md` + `ai-docs/mental-model/<domain>/<sub>.md` — directory layout for a domain covering multiple sub-concerns.
 - Target 60–120 lines per domain. Split past 150; merge thin documents that are always read together.
+
+## Project Reading Map
+
+The root `ai-docs/mental-model.md` may include a compact project-level reading
+map for routing common task or discussion topics to canonical documentation.
+
+Allowed:
+
+- topic/task -> read-first spec document
+- topic/task -> relevant mental-model documents
+- topic/task -> stable reference documents
+- lookup guidance for related tickets or references
+
+Forbidden:
+
+- current build inventory
+- implementation status summaries
+- duplicated feature descriptions
+- active ticket queue mirrors
+- behavioral claims owned by specs
+- source paraphrases
 
 ## Directory Hierarchy
 
