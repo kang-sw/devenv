@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod cli;
 pub mod config;
+pub mod discovery;
 pub mod logging;
 pub mod mock;
 pub mod resources;

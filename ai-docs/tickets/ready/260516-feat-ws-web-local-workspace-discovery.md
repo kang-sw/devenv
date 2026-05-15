@@ -57,6 +57,27 @@ Success criteria:
 - Manual and opportunistic refresh paths update kind/status without requiring a
   broad watcher.
 
+### Result (6a4f990) - 2026-05-16
+
+Implemented the live local discovery provider substrate behind the existing
+`DashboardResourcesProvider` seam. The daemon now has a
+`LocalDashboardResourcesProvider` that maps candidate paths into the shared
+resource view model, classifies plain directories, Git primary roots, and
+linked Git worktrees, and reports online, moved, offline, and inaccessible
+workRoot states without exposing host paths as public ids.
+
+The implementation keeps `/api/dashboard/resources` mock-backed until the root
+picker/open state can select live candidates. Discovery recomputes from the
+candidate list on each provider call, so later manual and opportunistic refresh
+entrypoints can reuse the provider without adding a broad watcher. WorkRoot ids
+are derived from the remembered candidate path rather than the canonical target,
+preserving identity when a symlink target disappears or a root changes status.
+
+Verification: `cargo test -p ws-dashboard-daemon discovery` and
+`cargo test --workspace` passed. Review found unstable identity for canonical
+symlink targets and weak inaccessible-directory detection; the final commit
+fixes both with regression tests.
+
 ### Phase 2: Root picker and add-empty-folder affordance
 
 Add the backend support needed for a cross-platform root picker that lists
