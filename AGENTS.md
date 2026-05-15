@@ -42,6 +42,9 @@ Read at every session start, before other action:
 - **Dogfood surprises become fix proposals.** When a ws tool behaves contrary to
   reasonable caller expectations during dogfooding, name the surprise and propose
   a fix instead of silently routing around it.
+- **Dogfood surprises get tickets immediately.** When a dogfooding surprise
+  implies a bug, feature, or research follow-up, create a short `idea/` ticket
+  before continuing the workflow.
 - **Actions over words.** Prefer "Fixed. [what changed]" or the diff. Skip
   filler.
 
