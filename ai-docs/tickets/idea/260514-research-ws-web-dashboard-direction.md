@@ -3,6 +3,8 @@ title: ws web dashboard direction research
 related:
   260514-epic-ws-web-dashboard-mvp: parent dashboard MVP board
   260514-feat-ws-web-daemon-foundation: first retained implementation child
+  260515-epic-ws-web-dashboard-first-visible-substrate: closed first visible substrate milestone board
+  260516-feat-ws-web-resource-view-model-contract: recreated first visible substrate child
   260427-chore-claude-dash-windows: prior PTY dashboard surface and Windows stability motivation
   260513-research-streamable-http-mcp-transport: adjacent daemon and remote transport research
   260513-feat-async-exec-output-reader: adjacent persisted process output and reader-agent pattern
@@ -19,7 +21,7 @@ related-mental-model:
 
 The ws web dashboard is closer to a next-generation personal devenv UI than a
 separate multi-user product. Keeping the MVP in this repository remains useful
-while its core risks are wsstate, named-agent lifecycle, worktree scoping,
+while its core risks are wsstate, named-agent lifecycle, workRoot scoping,
 harness behavior, and local/WSL/remote daemon boundaries.
 
 The dashboard ticket set was previously split into several provisional
@@ -236,20 +238,39 @@ Deferred viewer ideas:
 Translation should be a viewer feature over immutable content hashes, not a
 mutation of source documentation.
 
+## First Visible Substrate Closure
+
+The first visible substrate discussion is closed as an implementation milestone.
+The recreated child tickets are:
+
+- `260516-feat-ws-web-resource-view-model-contract` - first child and
+  implementation-order blocker for workRoot vocabulary, authenticated resource
+  APIs, mock provider, and golden fixtures.
+- `260516-feat-ws-web-minimal-frontend-shell` - first inspectable browser shell
+  over the shared API contract.
+- `260516-feat-ws-web-local-workspace-discovery` - live local discovery and
+  root-picker support after the resource contract exists.
+- `260516-feat-ws-web-instance-event-stream` - shared authenticated stream
+  envelope and fixture-backed reconnect/backfill scaffold.
+
+These tickets replace the earlier provisional frontend/workspace/terminal/agent
+substrate split for the first visible milestone. The rest of this research
+ticket remains idea-level direction for later epics and children.
+
 ## Deferred Substrates
 
 Future child tickets can be recreated from this research once their boundaries
 are ready:
 
-- frontend shell and design primitives;
-- workspace, workRoot, and Git worktree discovery;
 - browser terminal and PTY bridge;
 - named-agent dashboard view models;
 - browser-native editor and modal editing;
 - document viewer, translation, stem popup, and mention substrate;
 - linked daemon/server forwarding for local, WSL, and remote environments;
 - remote, WSL, and public-bind hardening;
-- runtime/library harness capability.
+- runtime/library harness capability;
+- bookmarks and saved workRoot pointers;
+- broad filesystem watcher behavior.
 
-The first implementation slice should stay focused on daemon foundation unless
-a later discussion explicitly promotes a narrower UI or runtime child.
+The next implementation-order blocker for the dashboard is the resource
+view-model contract child, not another broad research split.

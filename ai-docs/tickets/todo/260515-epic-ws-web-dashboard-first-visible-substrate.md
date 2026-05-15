@@ -42,23 +42,20 @@ reopening the basic dashboard frame.
 
 ## Child Tickets
 
-- Planned: resource and view-model API substrate - define the server,
-  workspace, workRoot, main-instance, and sub-instance JSON shapes, opaque-id
-  rules, workRoot kind metadata, route map, error/loading/stale fields, and
-  golden fixtures.
-- Planned: mock provider and contract test substrate - let the daemon serve
-  deterministic dashboard data without live wsstate, PTY, or harness coupling,
-  and verify fixtures plus protected API routes.
-- Planned: minimal authenticated frontend shell - attach React/Vite to the
-  daemon and render the first inspectable navigation tree plus detail pane from
-  the same mock/live view-model contract.
-- Planned: local workspace discovery substrate - connect the view model to real
-  local project, plain-directory, Git-primary-root, and Git-linked-worktree
-  discovery while preserving opaque ids and offline, moved, or inaccessible
-  workRoot states.
-- Planned: event stream substrate - define the shared instance event envelope,
-  reconnect/backfill behavior, and transcript fixture shape for later PTY,
-  named-agent, exec, and diagnostic streams.
+- `260516-feat-ws-web-resource-view-model-contract` - todo; first child and
+  implementation blocker for the rest of this epic. Defines the
+  server/workspace/workRoot/main-instance/sub-instance view-model contract,
+  workRoot vocabulary, protected API routes, mock provider, and golden
+  fixtures.
+- `260516-feat-ws-web-minimal-frontend-shell` - todo; attaches the real
+  React/Vite shell to the daemon and renders the first inspectable navigation
+  and detail surface from the shared view-model API.
+- `260516-feat-ws-web-local-workspace-discovery` - todo; connects the
+  view-model contract to local plain-directory, Git-primary-root, and
+  Git-linked-worktree discovery, including manual and opportunistic refresh.
+- `260516-feat-ws-web-instance-event-stream` - todo; defines the authenticated
+  instance event envelope, transcript fixtures, and reconnect/backfill scaffold
+  for later PTY, named-agent, exec, diagnostic, viewer, and translation streams.
 
 ## Cross-Child Decisions
 
@@ -108,6 +105,10 @@ reopening the basic dashboard frame.
 - Keep PTY terminal implementation out until resource identity, shell layout,
   and stream envelope decisions are stable enough to avoid making terminal panes
   the accidental root of the UI model.
+- Treat the first child as the only remaining implementation-order blocker:
+  resource/view-model API and mock fixtures should land before frontend,
+  discovery, or stream work. After that child, the other child tickets can be
+  implemented independently when their spec coverage is ready.
 
 ## Completion Criteria
 

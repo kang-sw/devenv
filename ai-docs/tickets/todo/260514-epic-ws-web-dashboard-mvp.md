@@ -6,6 +6,7 @@ related:
   260513-feat-async-exec-output-reader: adjacent persisted process output and reader-agent pattern
   260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
   260515-epic-ws-web-dashboard-first-visible-substrate: first visible dashboard substrate milestone
+  260516-feat-ws-web-resource-view-model-contract: first child of the visible substrate milestone
 related-mental-model:
   - developer-environment-tools
   - named-agent-runtime
@@ -25,8 +26,9 @@ The MVP should cover:
 
 - A Rust Axum daemon that serves the web UI and owns host process lifecycle.
 - Browser-based terminal panes backed by server-managed PTY processes.
-- Host folder and Git worktree discovery so the owner can open a repo and start
-  an agent-oriented workspace from the web UI.
+- Host workRoot discovery so the owner can open a plain directory, Git primary
+  root, or linked Git worktree and start an agent-oriented workspace from the
+  web UI.
 - Read-only ws runtime state views backed by the existing wsstate layout under
   `~/.cache/ws@kang-sw-devenv/`, including named-agent status, current calls,
   recent events, and diagnostic tails where available.
@@ -59,6 +61,17 @@ The MVP should cover:
   hybrid milestone for resource/view-model APIs, mock/live data boundaries, a
   minimal authenticated frontend shell, local workspace discovery, and event
   stream substrate.
+- `260516-feat-ws-web-resource-view-model-contract` - todo; first child of the
+  first visible substrate and next implementation-order blocker for stable
+  dashboard resource APIs, mock fixtures, and workRoot vocabulary.
+- `260516-feat-ws-web-minimal-frontend-shell` - todo; child of the first
+  visible substrate for the first inspectable authenticated browser shell.
+- `260516-feat-ws-web-local-workspace-discovery` - todo; child of the first
+  visible substrate for live local plain-directory, Git-primary-root, and
+  Git-linked-worktree discovery.
+- `260516-feat-ws-web-instance-event-stream` - todo; child of the first visible
+  substrate for a shared authenticated instance event envelope and
+  fixture-backed stream scaffold.
 
 ## Cross-Child Decisions
 
@@ -82,28 +95,30 @@ The MVP should cover:
 - The daemon exposes stable view-model APIs over wsstate and wsagent behavior.
   The browser must not treat the cache layout itself as the public contract.
 - Model dashboard resources around one main user interaction point per
-  worktree: `server -> workspace -> worktree -> mainInstance -> subInstance`.
-  A server is a physical or logical host environment such as local machine, WSL
-  distro, or remote host. A workspace is a project or repository family. A
-  worktree is a concrete project root and can be online, offline, moved, or
-  inaccessible. A main instance is the user-facing conversation or control
-  point; sub instances are delegated or auxiliary work such as ws agents, exec
-  jobs, document viewers, translation tasks, diagnostics, or subprocesses.
+  workRoot:
+  `server -> workspace -> workRoot -> mainInstance -> subInstance`. A server is
+  a physical or logical host environment such as local machine, WSL distro, or
+  remote host. A workspace is a daemon-discovered project group, not a
+  user-created category. A workRoot is the concrete physical open, spawn, and
+  run directory and can be online, offline, moved, or inaccessible. A main
+  instance is the user-facing conversation or control point; sub instances are
+  delegated or auxiliary work such as ws agents, exec jobs, document viewers,
+  translation tasks, diagnostics, or subprocesses.
 - Reserve `session` for auth/browser sessions and external protocol sessions
   such as MCP or model backend sessions. Do not use `session` for dashboard
   terminal/editor/agent resources.
-- Route APIs through explicit server/workspace/worktree/instance identifiers.
+- Route APIs through explicit server/workspace/workRoot/instance identifiers.
 - Use opaque ids in API paths. Do not expose host paths as workspace ids; keep
-  root paths, Git roots, worktree keys, and link details in daemon-owned state
+  root paths, Git roots, workRoot keys, and link details in daemon-owned state
   and view models.
 - Keep MCP root, harness, and protocol session state scoped by
-  project/worktree/instance
+  project/workRoot/instance
   rather than making the web daemon a global authority over ws runtime state.
-- Treat Git worktrees as first-class worktree entries under workspaces. The left
-  navigation should group by server, then workspace, then concrete worktree
-  entries without hiding offline or inaccessible worktrees that remain useful
-  recent context. Exact row labels, grouping chrome, and worktree notation
-  remain TBA because the scenarios need more design discussion.
+- Treat Git primary roots and linked Git worktrees as additive workRoot kinds
+  under workspaces. The left navigation should group by server, then workspace,
+  then concrete workRoot entries without hiding offline or inaccessible
+  workRoots that remain useful recent context. Singleton chains may render as
+  compact rows, but the API model remains fully hierarchical.
 - Prefer linked ws web daemons over host-specific scraping for cross-environment
   visibility. Native Windows may use WSL-exposed tools as a fallback or
   discovery aid, but WSL process and workspace control should primarily happen
