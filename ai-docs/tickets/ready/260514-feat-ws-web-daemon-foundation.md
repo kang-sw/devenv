@@ -6,6 +6,7 @@ spec:
 skeletons:
   phase-1: 882ded7
   phase-2: b0a846b
+  phase-3: 5ad6d25
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
