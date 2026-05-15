@@ -1364,7 +1364,9 @@ Expected direction:
 - plugin documents carry a small runtime contract file
 - the plugin-local launcher reads that file before starting `ws-mcp`
 - `ws-mcp doctor` can also read that file for direct diagnostics
-- major/minor compatibility is strict, patch compatibility can be flexible
+- runtime cache reuse is strict to the plugin patch version; development
+  binaries such as `X.Y.Z-dev` satisfy plugin `X.Y.Z`, but older or newer patch
+  releases are stale
 - missing or incompatible binaries can trigger automatic first-run download when
   network access is available
 - contracts can opt into exact runtime capability matching with

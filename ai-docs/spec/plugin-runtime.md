@@ -46,7 +46,9 @@ the required MCP tool and CLI command surfaces.
 
 The launcher and release checks use this metadata as the caller-visible
 compatibility contract. A runtime is considered stale when it cannot satisfy the
-declared version range, tool list, command list, or prompt bundle hash.
+declared plugin patch version, tool list, command list, or prompt bundle hash.
+Development binaries such as `X.Y.Z-dev` are compatible with plugin version
+`X.Y.Z`; older or newer patch releases are not reused from cache.
 
 ## wsflow Runtime Contract Mode {#260513-wsflow-runtime-contract-mode}
 
