@@ -124,14 +124,14 @@ entrypoints that later dashboard slices can reuse. The first shell remains
 narrow: it does not implement PTY, editor, document viewer, live workspace
 discovery, event streams, named-agent controls, or root picker behavior.
 
-## 🚧 Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
+## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
-The first browser shell will render the resource view-model contract from the
-daemon API. It will show server, workspace, workRoot, main-instance, and
+The first browser shell renders the resource view-model contract from the
+daemon API. It shows server, workspace, workRoot, main-instance, and
 sub-instance state; loading, empty, stale, and error states; compact singleton
 rows; and a reserved right-side viewer region without implementing the deferred
 viewer feature.
 
-Mouse-triggered navigation actions will route through command ids so later
-keyboard bindings can call the same commands. The shell will reserve `^b` to
+Mouse-triggered navigation actions route through command ids so later keyboard
+bindings can call the same commands. The shell reserves `^b` to
 mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
