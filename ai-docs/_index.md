@@ -151,7 +151,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260515-epic-ws-web-dashboard-first-visible-substrate` | todo | Coordinate the first inspectable dashboard substrate across view-model APIs, fixtures, frontend shell, workspace discovery, and event streams |
-| `260516-feat-ws-web-local-workspace-discovery` | todo | Connect local plain-directory, Git-primary-root, and Git-linked-worktree discovery to the view-model contract |
+| `260516-feat-ws-web-local-workspace-discovery` | ready | Connect local plain-directory, Git-primary-root, and Git-linked-worktree discovery to the view-model contract |
 | `260516-feat-ws-web-instance-event-stream` | todo | Define the authenticated instance event envelope and fixture-backed stream scaffold |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
@@ -173,6 +173,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+`260516-feat-ws-web-local-workspace-discovery` - connect local plain-directory, Git-primary-root, and Git-linked-worktree discovery to the dashboard view-model contract.
 
 ## Session Notes
 

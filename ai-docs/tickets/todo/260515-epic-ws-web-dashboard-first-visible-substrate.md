@@ -50,7 +50,7 @@ reopening the basic dashboard frame.
 - `260516-feat-ws-web-minimal-frontend-shell` - done; attaches the real
   React/Vite shell to the daemon and renders the first inspectable navigation
   and detail surface from the shared view-model API.
-- `260516-feat-ws-web-local-workspace-discovery` - todo; connects the
+- `260516-feat-ws-web-local-workspace-discovery` - ready; connects the
   view-model contract to local plain-directory, Git-primary-root, and
   Git-linked-worktree discovery, including manual and opportunistic refresh.
 - `260516-feat-ws-web-instance-event-stream` - todo; defines the authenticated

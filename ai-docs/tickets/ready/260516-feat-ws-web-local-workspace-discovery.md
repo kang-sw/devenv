@@ -6,6 +6,9 @@ related:
   260515-epic-ws-web-dashboard-first-visible-substrate: coordinating first visible substrate epic
   260516-feat-ws-web-resource-view-model-contract: required view-model and workRoot contract
   260514-research-ws-web-dashboard-direction: source research for discovery and root picker boundaries
+spec:
+  - 260516-ws-web-dashboard-local-workroot-discovery-provider
+  - 260516-ws-web-dashboard-root-picker-empty-directory-creation
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
