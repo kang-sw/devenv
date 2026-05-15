@@ -11,6 +11,7 @@ spec:
   - 260516-ws-web-dashboard-mock-view-model-fixtures
 skeletons:
   phase-1: 8e249ef
+  phase-2: ae44dad
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
