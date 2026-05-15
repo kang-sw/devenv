@@ -333,6 +333,40 @@ func TestCommitStagesDeletedTicketMoveWhenOldStatusDirectoryIsGone(t *testing.T)
 	}
 }
 
+func TestCommitStagesRenamedDirectoryWithoutAddingMissingOldRoot(t *testing.T) {
+	preStatus := ParseStatus([]byte("2 RM N... 100644 100644 100644 aaa bbb R100 agents-plugin/skills/lead-check-blockers/SKILL.md\tagents-plugin/skills/lead-can-we-proceed/SKILL.md\n"))
+	got := stagingCommandsForCommit([]string{"agents-plugin/skills/lead-can-we-proceed", "agents-plugin/skills/lead-check-blockers"}, preStatus)
+	want := [][]string{
+		{"add", "-A", "--", "agents-plugin/skills/lead-check-blockers"},
+		{"rm", "--cached", "--ignore-unmatch", "--", "agents-plugin/skills/lead-can-we-proceed/SKILL.md"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("staging commands = %#v, want %#v", got, want)
+	}
+}
+
+func TestCommitStagesDeletedDirectoryRootByConcreteChildren(t *testing.T) {
+	preStatus := ParseStatus([]byte("1 D. N... 100644 000000 000000 aaa 0000000000000000000000000000000000000000 old/file.txt\n"))
+	got := stagingCommandsForCommit([]string{"old"}, preStatus)
+	want := [][]string{
+		{"rm", "--cached", "--ignore-unmatch", "--", "old/file.txt"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("staging commands = %#v, want %#v", got, want)
+	}
+}
+
+func TestCommitStillAddsRootWithLiveChangesAndDeletedChildren(t *testing.T) {
+	preStatus := ParseStatus([]byte("1 .D N... 100644 100644 100644 aaa bbb src/old.go\n1 .M N... 100644 100644 100644 aaa bbb src/live.go\n"))
+	got := stagingCommandsForCommit([]string{"src"}, preStatus)
+	want := [][]string{
+		{"add", "-A", "--", "src"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("staging commands = %#v, want %#v", got, want)
+	}
+}
+
 func TestCommitRequiresAIContextAndRelativePaths(t *testing.T) {
 	_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x"})
 	if err == nil || !strings.Contains(err.Error(), "ai_context") {
