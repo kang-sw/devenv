@@ -236,9 +236,81 @@ async fn dashboard_resources_api_is_owner_authenticated() {
 async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
     // CONTRACT: paired owners receive deterministic JSON with server,
     // workspaces, workRoots, mainInstances, subInstances, state, compactable,
-    // and action hint fields. HINT: parse with serde_json and assert contract
-    // field names rather than depending on private Rust structs.
-    todo!("pair owner, call /api/dashboard/resources, and assert mock hierarchy JSON");
+    // and action hint fields. Parse with serde_json and assert contract field
+    // names rather than depending on private Rust structs.
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated dashboard resources request"),
+        )
+        .await
+        .expect("authenticated dashboard resources response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("dashboard resources body bytes");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("dashboard resources JSON body");
+
+    assert!(value.get("server").is_some());
+    assert_eq!(value["server"]["id"], "server-local");
+    assert_eq!(value["server"]["state"]["loading"], false);
+    assert_eq!(value["server"]["state"]["stale"], false);
+    assert_eq!(value["server"]["actions"][0]["id"], "refresh");
+
+    let workspaces = value["workspaces"].as_array().expect("workspaces array");
+    assert_eq!(workspaces.len(), 2);
+    assert!(value.get("work_roots").is_none());
+
+    let devenv = &workspaces[0];
+    assert_eq!(devenv["id"], "workspace-devenv");
+    assert_eq!(devenv["compactable"], false);
+    assert!(devenv.get("workRoots").is_some());
+    assert!(devenv.get("work_roots").is_none());
+
+    let work_roots = devenv["workRoots"].as_array().expect("workRoots array");
+    assert_eq!(work_roots.len(), 3);
+    assert_eq!(work_roots[0]["kind"], "gitPrimaryRoot");
+    assert_eq!(work_roots[1]["kind"], "gitLinkedWorktree");
+    assert_eq!(work_roots[2]["kind"], "plainDirectory");
+    assert_eq!(work_roots[2]["status"], "offline");
+    assert_eq!(work_roots[2]["state"]["error"], "workRoot is offline");
+
+    let main_instance = &work_roots[0]["mainInstances"][0];
+    assert_eq!(main_instance["role"], "main");
+    assert_eq!(
+        main_instance["resourcePath"]["workRootId"],
+        "root-devenv-primary"
+    );
+    assert!(main_instance.get("main_instances").is_none());
+    assert!(main_instance.get("subInstances").is_some());
+    assert!(main_instance.get("sub_instances").is_none());
+    assert_eq!(main_instance["actions"][0]["label"], "Open");
+
+    let sub_instance = &main_instance["subInstances"][0];
+    assert_eq!(sub_instance["role"], "sub");
+    assert_eq!(sub_instance["interactionMode"], "delegated");
+    assert_eq!(sub_instance["state"]["stale"], true);
+
+    let singleton = &workspaces[1];
+    assert_eq!(singleton["id"], "workspace-notes");
+    assert_eq!(singleton["compactable"], true);
+    assert_eq!(singleton["workRoots"][0]["kind"], "plainDirectory");
+    assert_eq!(singleton["workRoots"][0]["status"], "inaccessible");
+    assert_eq!(singleton["workRoots"][0]["compactable"], true);
+    assert_eq!(
+        singleton["workRoots"][0]["mainInstances"][0]["kind"],
+        "viewer"
+    );
 }
 
 #[tokio::test]

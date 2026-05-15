@@ -81,17 +81,171 @@ pub struct ActionHint {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::{
+        InstanceKind, InstanceRole, InteractionMode, OpaqueId, ResourcePath, WorkRootKind,
+        WorkRootStatus,
+    };
+
     #[test]
     fn dashboard_resources_view_preserves_full_hierarchy_shape() {
         // CONTRACT: serialized JSON must expose server, workspaces, workRoots,
         // mainInstances, and subInstances using camelCase dashboard API names.
-        todo!("assert DashboardResourcesView JSON shape for full hierarchy");
+        let value = serde_json::to_value(sample_view()).expect("serialize dashboard resources");
+
+        assert!(value.get("server").is_some());
+        assert!(value.get("workspaces").is_some());
+        assert!(value.get("work_roots").is_none());
+        assert!(value.get("main_instances").is_none());
+        assert!(value.get("sub_instances").is_none());
+
+        let workspace = &value["workspaces"][0];
+        assert!(workspace.get("workRoots").is_some());
+        assert!(workspace.get("work_roots").is_none());
+        assert_eq!(
+            workspace["workRoots"][0]["resourcePath"]["workRootId"],
+            "root-primary"
+        );
+
+        let main_instance = &workspace["workRoots"][0]["mainInstances"][0];
+        assert_eq!(main_instance["role"], "main");
+        assert!(main_instance.get("subInstances").is_some());
+        assert!(main_instance.get("main_instances").is_none());
+        assert!(main_instance.get("sub_instances").is_none());
+        assert_eq!(main_instance["subInstances"][0]["role"], "sub");
     }
 
     #[test]
     fn view_rows_include_state_and_action_hints() {
         // CONTRACT: rows expose status/loading/stale/error state and action
         // hints so frontend empty/error/loading/action UI can use one shape.
-        todo!("assert row state and actions serialize consistently");
+        let value = serde_json::to_value(sample_view()).expect("serialize dashboard resources");
+
+        assert_eq!(
+            value["server"]["state"],
+            serde_json::json!({
+                "status": "online",
+                "loading": false,
+                "stale": false,
+                "error": null
+            })
+        );
+        assert_eq!(value["server"]["actions"][0]["id"], "refresh");
+        assert_eq!(value["server"]["actions"][0]["enabled"], true);
+        assert_eq!(value["workspaces"][0]["compactable"], false);
+        assert_eq!(value["workspaces"][0]["workRoots"][0]["compactable"], true);
+        assert_eq!(
+            value["workspaces"][0]["workRoots"][0]["mainInstances"][0]["actions"][0]["label"],
+            "Open"
+        );
+    }
+
+    fn sample_view() -> DashboardResourcesView {
+        DashboardResourcesView {
+            server: ServerView {
+                id: OpaqueId::from("server-local"),
+                label: "Local".to_owned(),
+                state: ViewState {
+                    status: "online".to_owned(),
+                    loading: false,
+                    stale: false,
+                    error: None,
+                },
+                actions: vec![ActionHint {
+                    id: "refresh".to_owned(),
+                    label: "Refresh".to_owned(),
+                    enabled: true,
+                }],
+            },
+            workspaces: vec![WorkspaceView {
+                id: OpaqueId::from("workspace-devenv"),
+                label: "devenv".to_owned(),
+                state: ViewState {
+                    status: "ready".to_owned(),
+                    loading: false,
+                    stale: false,
+                    error: None,
+                },
+                compactable: false,
+                work_roots: vec![WorkRootView {
+                    id: OpaqueId::from("root-primary"),
+                    resource_path: ResourcePath {
+                        server_id: OpaqueId::from("server-local"),
+                        workspace_id: OpaqueId::from("workspace-devenv"),
+                        work_root_id: OpaqueId::from("root-primary"),
+                        instance_id: None,
+                    },
+                    label: "Primary root".to_owned(),
+                    kind: WorkRootKind::GitPrimaryRoot,
+                    status: WorkRootStatus::Online,
+                    state: ViewState {
+                        status: "ready".to_owned(),
+                        loading: false,
+                        stale: false,
+                        error: None,
+                    },
+                    compactable: true,
+                    main_instances: vec![InstanceView {
+                        id: OpaqueId::from("instance-main"),
+                        resource_path: ResourcePath {
+                            server_id: OpaqueId::from("server-local"),
+                            workspace_id: OpaqueId::from("workspace-devenv"),
+                            work_root_id: OpaqueId::from("root-primary"),
+                            instance_id: Some(OpaqueId::from("instance-main")),
+                        },
+                        role: InstanceRole::Main,
+                        kind: InstanceKind::Harness,
+                        interaction_mode: InteractionMode::Direct,
+                        label: "Main".to_owned(),
+                        state: ViewState {
+                            status: "ready".to_owned(),
+                            loading: false,
+                            stale: false,
+                            error: None,
+                        },
+                        sub_instances: vec![InstanceView {
+                            id: OpaqueId::from("instance-sub"),
+                            resource_path: ResourcePath {
+                                server_id: OpaqueId::from("server-local"),
+                                workspace_id: OpaqueId::from("workspace-devenv"),
+                                work_root_id: OpaqueId::from("root-primary"),
+                                instance_id: Some(OpaqueId::from("instance-sub")),
+                            },
+                            role: InstanceRole::Sub,
+                            kind: InstanceKind::Agent,
+                            interaction_mode: InteractionMode::Delegated,
+                            label: "Sub".to_owned(),
+                            state: ViewState {
+                                status: "idle".to_owned(),
+                                loading: false,
+                                stale: false,
+                                error: None,
+                            },
+                            sub_instances: vec![],
+                            actions: vec![ActionHint {
+                                id: "inspect".to_owned(),
+                                label: "Inspect".to_owned(),
+                                enabled: true,
+                            }],
+                        }],
+                        actions: vec![ActionHint {
+                            id: "open".to_owned(),
+                            label: "Open".to_owned(),
+                            enabled: true,
+                        }],
+                    }],
+                    actions: vec![ActionHint {
+                        id: "openRoot".to_owned(),
+                        label: "Open root".to_owned(),
+                        enabled: true,
+                    }],
+                }],
+                actions: vec![ActionHint {
+                    id: "openWorkspace".to_owned(),
+                    label: "Open workspace".to_owned(),
+                    enabled: true,
+                }],
+            }],
+        }
     }
 }
