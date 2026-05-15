@@ -67,7 +67,7 @@ The MVP should cover:
   dashboard resource APIs, mock fixtures, and workRoot vocabulary.
 - `260516-feat-ws-web-minimal-frontend-shell` - done; child of the first
   visible substrate for the first inspectable authenticated browser shell.
-- `260516-feat-ws-web-local-workspace-discovery` - ready; child of the first
+- `260516-feat-ws-web-local-workspace-discovery` - done; child of the first
   visible substrate for live local plain-directory, Git-primary-root, and
   Git-linked-worktree discovery.
 - `260516-feat-ws-web-instance-event-stream` - todo; child of the first visible
