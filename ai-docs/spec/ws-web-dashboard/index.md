@@ -111,19 +111,18 @@ instances, sub instances, stale/error/loading states, and visible action hints.
 Protected API route tests verify that fixture-backed dashboard data remains
 behind the owner-auth boundary.
 
-## 🚧 Protected Frontend Shell {#260516-ws-web-dashboard-protected-frontend-shell}
+## Protected Frontend Shell {#260516-ws-web-dashboard-protected-frontend-shell}
 
-The dashboard daemon will serve the first React/TypeScript/Vite browser shell
+The dashboard daemon serves the first React/TypeScript/Vite browser shell
 behind the same owner-auth boundary as other protected dashboard routes. Static
-asset serving will not add another unauthenticated top-level route beside
-`/pair`; unauthenticated browser requests for the dashboard shell will be
-rejected before assets or fallback UI are served.
+asset serving does not add another unauthenticated top-level route beside
+`/pair`; unauthenticated browser requests for the dashboard shell are rejected
+before assets or fallback UI are served.
 
-The frontend package will provide documented local development and production
-build entrypoints that later dashboard slices can reuse. The first shell will
-remain narrow: it will not implement PTY, editor, document viewer, live
-workspace discovery, event streams, named-agent controls, or root picker
-behavior.
+The frontend package provides documented local development and production build
+entrypoints that later dashboard slices can reuse. The first shell remains
+narrow: it does not implement PTY, editor, document viewer, live workspace
+discovery, event streams, named-agent controls, or root picker behavior.
 
 ## 🚧 Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
