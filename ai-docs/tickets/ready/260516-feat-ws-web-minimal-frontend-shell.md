@@ -60,6 +60,24 @@ Success criteria:
   dashboard slices to run the shell locally.
 - Static serving does not create an unauthenticated route beside `/pair`.
 
+### Result (48c8a0c) - 2026-05-16
+
+Implemented the protected frontend shell foundation. The repository now has a
+React, TypeScript, and Vite package under `ws-dashboard/frontend/` with
+`dev`, `build`, and `preview` scripts, lockfile-pinned dependencies, and a
+minimal buildable shell. The daemon serves `ServeConfig.static_dir/index.html`
+at `/` and `ServeConfig.static_dir/assets/*` at `/assets/*`, both under the
+existing owner-auth protected router.
+
+Static serving preserves `/pair` as the only unauthenticated browser route and
+keeps the no-static-dir placeholder route for daemon development. Route tests
+cover unauthenticated rejection and paired-cookie success for the built shell
+fixture. Phase 2 navigation/detail/resource rendering remains unimplemented.
+
+Verification: `npm run build`, `cargo test -p ws-dashboard-daemon --test
+routes`, and `cargo test --workspace` passed. Correctness, fit, and test
+reviews were clean.
+
 ### Phase 2: Inspectable navigation and detail shell
 
 Render the first dashboard shell from the resource view-model API. The shell
