@@ -129,6 +129,21 @@ Success criteria:
 - Host and Origin checks reject clearly invalid browser entrypoints without
   weakening local developer usage.
 
+### Result (d78b6a9) - 2026-05-15
+
+Implemented the Phase 2 owner-auth hardening in
+`ws-dashboard/crates/daemon`: pairing tokens now use explicit TTL policy,
+missing/invalid/reused/expired pairing failures avoid session cookies,
+browser sessions continue to use the HTTP-only owner cookie, and a narrow bearer
+auth path supports CLI/smoke callers on protected routes. Protected browser
+requests now reject clearly invalid Host and Origin values while preserving
+ordinary loopback development usage, and WebSocket-like upgrade requests pass
+through the owner-auth gate before any endpoint behavior exists.
+
+Review cycle 1 found missing positive loopback Host/Origin coverage and invalid
+bearer rejection coverage. Commit `d78b6a9` added those tests. Verification
+passed with `cargo test -p ws-dashboard-daemon` and `cargo test --workspace`.
+
 ### Phase 3: Add bind-mode guards
 
 Support local, tunnel, and public bind-mode configuration without changing the
