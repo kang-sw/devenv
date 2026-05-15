@@ -1,5 +1,7 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
+
+use anyhow::{bail, Context};
 
 use crate::cli::ServeArgs;
 
@@ -13,15 +15,31 @@ pub struct ServeConfig {
 
 impl ServeConfig {
     pub fn default_loopback() -> Self {
-        // HINT: Use port 0 for tests and caller-selected ephemeral startup; CLI
-        // may keep the same default until a dedicated port decision is made.
-        todo!("construct 127.0.0.1:0")
+        Self {
+            bind_addr: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+            static_dir: None,
+        }
     }
 
     pub fn from_args(args: ServeArgs) -> anyhow::Result<Self> {
-        // HOLE: Parse host/port with clear errors and reject unsupported public
-        // bind behavior until Phase 3 guardrails exist.
-        let _ = args;
-        todo!("parse serve args into ServeConfig")
+        let ip = parse_phase_one_host(&args.host)
+            .with_context(|| format!("invalid --host value {:?}", args.host))?;
+        if !ip.is_loopback() {
+            bail!("unsupported public bind address {ip}; Phase 1 only supports loopback hosts");
+        }
+
+        Ok(Self {
+            bind_addr: SocketAddr::new(ip, args.port),
+            static_dir: args.static_dir,
+        })
     }
+}
+
+fn parse_phase_one_host(host: &str) -> anyhow::Result<IpAddr> {
+    if host.eq_ignore_ascii_case("localhost") {
+        return Ok(IpAddr::V4(Ipv4Addr::LOCALHOST));
+    }
+
+    host.parse::<IpAddr>()
+        .with_context(|| "expected an IP address or localhost")
 }

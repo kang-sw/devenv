@@ -1,6 +1,12 @@
+use std::collections::HashMap;
+
+use axum::extract::{Query, State};
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::get;
 use axum::Router;
 
-use crate::auth::OwnerAuthState;
+use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 
 #[derive(Clone)]
@@ -13,8 +19,48 @@ pub fn build_router(state: AppState) -> Router {
     // CONTRACT: `/pair` is the only unauthenticated browser route.
     // CONTRACT: `/healthz`, `/`, static UI, and future WebSocket upgrade routes
     // are nested behind owner-session authentication.
-    // HINT: Prefer Axum middleware/layer composition that route tests can call
-    // directly without binding a socket.
-    let _ = state;
-    todo!("build auth-gated dashboard router")
+    Router::new()
+        .route("/pair", get(pair))
+        .route("/healthz", get(healthz))
+        .route("/", get(index))
+        .with_state(state)
+}
+
+async fn pair(
+    State(state): State<AppState>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let Some(token) = query.get("token") else {
+        return (StatusCode::BAD_REQUEST, "missing pairing token\n").into_response();
+    };
+
+    match state.auth.consume_pairing_token(token) {
+        PairingOutcome::Paired => {
+            let cookie = state.auth.issue_session_cookie().as_set_cookie_header();
+            ([(header::SET_COOKIE, cookie)], "paired\n").into_response()
+        }
+        PairingOutcome::Invalid => {
+            (StatusCode::UNAUTHORIZED, "invalid pairing token\n").into_response()
+        }
+        PairingOutcome::AlreadyUsed => {
+            (StatusCode::GONE, "pairing token already used\n").into_response()
+        }
+    }
+}
+
+async fn healthz(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(status) = state.auth.authenticate_headers(&headers) {
+        return status.into_response();
+    }
+
+    (StatusCode::OK, "ok\n").into_response()
+}
+
+async fn index(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(status) = state.auth.authenticate_headers(&headers) {
+        return status.into_response();
+    }
+
+    Html("<!doctype html><title>ws dashboard</title><main>ws dashboard daemon</main>\n")
+        .into_response()
 }

@@ -1,7 +1,12 @@
-use std::net::SocketAddr;
+use std::future::Future;
+use std::net::{IpAddr, SocketAddr};
+
+use tokio::net::TcpListener;
+use tracing::info;
 
 use crate::auth::OwnerAuthState;
 use crate::config::ServeConfig;
+use crate::router::{build_router, AppState};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StartupInfo {
@@ -10,16 +15,55 @@ pub struct StartupInfo {
 }
 
 pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
+    run_with_shutdown(config, shutdown_signal())
+        .await
+        .map(|_| ())
+}
+
+pub async fn run_with_shutdown<F>(config: ServeConfig, shutdown: F) -> anyhow::Result<StartupInfo>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
     // CONTRACT: Server startup prints or otherwise exposes exactly one owner
     // pairing URL once the bound address is known.
     // CONTRACT: Graceful shutdown is part of the daemon shell; request logging
     // must avoid leaking pairing query strings.
-    let _ = config;
-    todo!("bind listener, emit startup info, serve router, and await shutdown")
+    let auth = OwnerAuthState::new_ephemeral();
+    let listener = TcpListener::bind(config.bind_addr).await?;
+    let bound_addr = listener.local_addr()?;
+    let info = startup_info(bound_addr, &auth);
+
+    eprintln!("ws-dashboard owner pairing URL: {}", info.pairing_url);
+    info!(bound_addr = %info.bound_addr, "ws-dashboard daemon listening");
+
+    let app = build_router(AppState { config, auth });
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await?;
+
+    Ok(info)
 }
 
 pub fn startup_info(bound_addr: SocketAddr, auth: &OwnerAuthState) -> StartupInfo {
-    // HINT: Keep URL construction testable without opening a socket.
-    let _ = (bound_addr, auth);
-    todo!("construct owner pairing URL")
+    StartupInfo {
+        bound_addr,
+        pairing_url: format!(
+            "http://{}/pair?token={}",
+            display_addr(bound_addr),
+            auth.pairing_token().expose_for_owner_url()
+        ),
+    }
+}
+
+async fn shutdown_signal() {
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::warn!(%error, "failed to install ctrl-c shutdown signal");
+    }
+}
+
+fn display_addr(addr: SocketAddr) -> String {
+    match addr.ip() {
+        IpAddr::V4(_) => addr.to_string(),
+        IpAddr::V6(ip) => format!("[{ip}]:{}", addr.port()),
+    }
 }
