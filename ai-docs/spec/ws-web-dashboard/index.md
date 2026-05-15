@@ -159,3 +159,26 @@ directories or Git-backed directories into the dashboard model.
 The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
+
+## 🚧 Instance Event Envelope Fixtures {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
+
+The dashboard will define a shared event envelope for instance-scoped streams.
+Events will reference opaque server, workspace, workRoot, and instance ids from
+the resource view-model contract, carry ordered cursor or sequence data,
+timestamps, event categories, payload values, and explicit error or end markers.
+
+Deterministic transcript fixtures will cover ordinary output, status
+transitions, errors, reconnect/backfill, and empty streams so later PTY,
+named-agent, exec, diagnostic, viewer, and translation features can reuse one
+stream shape.
+
+## 🚧 Authenticated Instance Event Stream Scaffold {#260516-ws-web-dashboard-authenticated-instance-event-stream-scaffold}
+
+The dashboard will expose an authenticated stream route scaffold that serves
+fixture-backed instance events before live PTY, named-agent, exec, diagnostic,
+viewer, or translation sources exist. Unauthenticated callers will be rejected
+before stream acceptance or WebSocket upgrade behavior.
+
+Authenticated callers will be able to request events after a cursor and receive
+deterministic fixture events without making the dashboard daemon the ws MCP or
+named-agent session authority.
