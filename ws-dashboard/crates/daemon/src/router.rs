@@ -51,6 +51,9 @@ async fn pair(
         PairingOutcome::AlreadyUsed => {
             (StatusCode::GONE, "pairing token already used\n").into_response()
         }
+        PairingOutcome::Expired => {
+            (StatusCode::UNAUTHORIZED, "pairing token expired\n").into_response()
+        }
     }
 }
 
