@@ -6,6 +6,9 @@ related:
   260515-epic-ws-web-dashboard-first-visible-substrate: coordinating first visible substrate epic
   260514-research-ws-web-dashboard-direction: source research for resource model and shell boundaries
   260514-feat-ws-web-daemon-foundation: authenticated daemon foundation this API extends
+spec:
+  - 260516-ws-web-dashboard-resource-view-model-contract
+  - 260516-ws-web-dashboard-mock-view-model-fixtures
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime

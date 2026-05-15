@@ -61,7 +61,7 @@ The MVP should cover:
   hybrid milestone for resource/view-model APIs, mock/live data boundaries, a
   minimal authenticated frontend shell, local workspace discovery, and event
   stream substrate.
-- `260516-feat-ws-web-resource-view-model-contract` - todo; first child of the
+- `260516-feat-ws-web-resource-view-model-contract` - ready; first child of the
   first visible substrate and next implementation-order blocker for stable
   dashboard resource APIs, mock fixtures, and workRoot vocabulary.
 - `260516-feat-ws-web-minimal-frontend-shell` - todo; child of the first
