@@ -3,6 +3,8 @@ title: ws web daemon foundation
 parent: 260514-epic-ws-web-dashboard-mvp
 spec:
   - 260515-ws-web-daemon-foundation
+skeletons:
+  phase-1: 882ded7
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
