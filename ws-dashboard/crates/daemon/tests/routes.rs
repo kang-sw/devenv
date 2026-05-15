@@ -214,6 +214,56 @@ async fn health_and_static_ui_succeed_with_owner_session_cookie() {
 }
 
 #[tokio::test]
+async fn browser_auth_accepts_loopback_host_and_origin_with_owner_cookie() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let loopback_host = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::HOST, "127.0.0.1:3000")
+                .body(Body::empty())
+                .expect("loopback host request"),
+        )
+        .await
+        .expect("loopback host response");
+    assert_eq!(loopback_host.status(), StatusCode::OK);
+
+    let loopback_origin = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::ORIGIN, "http://localhost:3000")
+                .body(Body::empty())
+                .expect("loopback origin request"),
+        )
+        .await
+        .expect("loopback origin response");
+    assert_eq!(loopback_origin.status(), StatusCode::OK);
+
+    let loopback_host_and_origin = app
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::HOST, "localhost:3000")
+                .header(header::ORIGIN, "http://127.0.0.1:3000")
+                .body(Body::empty())
+                .expect("loopback host and origin request"),
+        )
+        .await
+        .expect("loopback host and origin response");
+    assert_eq!(loopback_host_and_origin.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn browser_auth_rejects_invalid_host_and_origin_with_owner_cookie() {
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
@@ -259,6 +309,25 @@ async fn bearer_auth_can_access_http_smoke_routes_without_cookie() {
         .expect("bearer health response");
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn invalid_bearer_auth_cannot_access_http_smoke_routes_without_cookie() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .header(header::AUTHORIZATION, "Bearer not-the-owner-token")
+                .body(Body::empty())
+                .expect("invalid bearer health request"),
+        )
+        .await
+        .expect("invalid bearer health response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(response.headers().get(header::SET_COOKIE).is_none());
 }
 
 #[tokio::test]
