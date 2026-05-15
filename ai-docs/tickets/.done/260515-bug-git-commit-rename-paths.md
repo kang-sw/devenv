@@ -1,5 +1,6 @@
 ---
 title: git.commit rename and deleted path handling
+completed: 2026-05-15
 ---
 
 # git.commit rename and deleted path handling
@@ -40,3 +41,12 @@ Acceptance criteria:
 - A missing path that is not tracked or changed still fails with a clear error.
 - The staging operation remains limited to the requested path set.
 - Tests cover rename, deletion, and unrelated missing-path behavior.
+
+### Result (b72128b) - 2026-05-15
+
+Implemented status-aware explicit-path staging for rename and deletion roots.
+`git.commit` now derives concrete removed paths from pre-commit Git status and
+uses those paths for removal staging when a requested root no longer exists,
+while keeping live requested roots on the normal explicit add path. Tests cover
+renamed directory roots, deleted directory roots, mixed live/deleted roots, and
+the existing missing-path validation behavior.
