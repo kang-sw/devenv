@@ -1,9 +1,9 @@
 # ws-dashboard
 
-`ws-dashboard/` is the planned product surface for the personal ws-aware web
-dashboard. It is intentionally scaffold-only for now: the directory establishes
-the long-lived project shape without committing to daemon APIs, frontend
-packages, or stable harness protocols.
+`ws-dashboard/` is the product surface for the personal ws-aware web dashboard.
+The current implementation provides the first protected browser entrypoint,
+fixture-backed resource shell, local root-picker backend substrate, and
+fixture-backed instance event stream scaffold. No public API is stable yet.
 
 Current layout:
 
@@ -15,4 +15,21 @@ Current layout:
 - `crates/daemon/` - future local dashboard daemon.
 - `frontend/` - future browser UI package.
 
-No public API is stable yet.
+## Development
+
+Use the wrapper script from this directory:
+
+```bash
+./dev.sh run
+```
+
+`run` builds the frontend production assets and starts the protected local
+daemon with those assets. Open the owner pairing URL printed by the daemon.
+
+Other commands:
+
+```bash
+./dev.sh build
+./dev.sh test
+./dev.sh frontend-dev
+```
