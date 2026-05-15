@@ -28,7 +28,7 @@ lead-edit
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
-lead-can-we-proceed
+lead-check-blockers
 lead-proceed
 lead-review
 lead-salvage
@@ -93,7 +93,7 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
 `lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
-`lead-sprint`, `lead-verify-discussion`, `lead-can-we-proceed`, `lead-forge-spec`,
+`lead-sprint`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
@@ -196,10 +196,10 @@ missing countercases, then steers the discussion toward the best-supported
 direction.
 {#260512-discussion-verification-skill}
 
-### Can We Proceed Checkpoint {#260513-can-we-proceed-skill}
+### Check Blockers Checkpoint {#260513-check-blockers-skill}
 
-`lead-can-we-proceed` gives users a frequent spoken checkpoint for deciding
-whether a design discussion can proceed. It does not edit files. It
+`lead-check-blockers` gives users a frequent spoken checkpoint for deciding
+whether a design discussion still has user-blocking blockers. It does not edit files. It
 classifies remaining work into user-blocking design questions, ticket or spec
 capture gaps, autonomous code-hygiene items, and proceed readiness.
 

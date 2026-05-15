@@ -160,7 +160,7 @@ lead-edit
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
-lead-can-we-proceed
+lead-check-blockers
 lead-proceed
 lead-review
 lead-salvage
