@@ -161,6 +161,20 @@ Success criteria:
 - Bind-mode decisions are covered by tests that do not require public network
   exposure.
 
+### Result (7235af6) - 2026-05-15
+
+Implemented the Phase 3 bind-mode guard in `ws-dashboard/crates/daemon`:
+`ws-dashboard serve` now exposes explicit local, tunnel, and public bind-mode
+intent, keeps local and tunnel mode loopback-oriented by default, rejects
+accidental non-loopback hosts unless public mode is selected, and rejects public
+mode if owner authentication is disabled. Explicit public mode can normalize
+non-loopback hosts without changing the browser owner-auth, Host/Origin, or
+WebSocket pre-upgrade auth gates.
+
+Review partitions for correctness, fit, and tests all returned clean.
+Verification passed with `cargo test -p ws-dashboard-daemon` and
+`cargo test --workspace`.
+
 ### Phase 4: Verify daemon security smoke
 
 Add end-to-end smoke coverage around the foundation boundary.
