@@ -202,6 +202,7 @@ auto-chaining through the pipeline.
 | `ai-docs/spec/api-documentation-cache.md` | API Documentation Cache | Host-neutral API documentation lookup through cached domain docs and manager sessions |
 | `ai-docs/spec/claude-compatibility.md` | Claude Compatibility | Root Claude shim, agents-plugin compatibility metadata, installer behavior, and retired legacy boundaries |
 | `ai-docs/spec/developer-environment-tools.md` | Developer Environment Tools | Personal bootstrap, shell/terminal/editor config, tmux helpers, statusline, and Claude TUIs |
+| `ai-docs/spec/ws-web-dashboard/index.md` | ws Web Dashboard | Personal ws-aware web dashboard daemon, browser UI, and host-control behavior |
 
 ## Tickets
 
@@ -213,7 +214,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260514-feat-ws-web-daemon-foundation` | todo | Build daemon foundation on the existing `ws-dashboard/` scaffold |
+| `260514-feat-ws-web-daemon-foundation` | ready | Build auth-gated daemon foundation on the existing `ws-dashboard/` scaffold |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -233,6 +234,9 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+
+`260514-feat-ws-web-daemon-foundation` - build the auth-gated Axum daemon shell,
+owner pairing/session bootstrap, and bind-mode guardrails for the dashboard.
 
 ## Session Notes
 
