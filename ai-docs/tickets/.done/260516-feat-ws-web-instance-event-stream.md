@@ -14,6 +14,7 @@ related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
   - mcp-runtime
+completed: 2026-05-16
 ---
 
 # ws web dashboard instance event stream
@@ -84,3 +85,21 @@ Success criteria:
 - Authenticated fixture-backed streams can be consumed by the frontend shell.
 - The scaffold does not make the dashboard daemon the ws MCP or named-agent
   session authority.
+
+### Result (f10e1b8) - 2026-05-16
+
+Implemented the authenticated fixture-backed instance event route scaffold. The
+daemon now exposes `GET /api/dashboard/instance-events/{stream_id}` inside the
+existing owner-auth protected router. Authenticated callers can fetch all
+fixture events or pass an `after` cursor for deterministic backfill; missing
+streams return `404`, and unknown cursors return an empty event set rather than
+replaying the transcript.
+
+The route remains finite JSON and fixture-backed. It does not bind to live PTY,
+named-agent, exec, diagnostic, viewer, or translation sources and does not make
+the dashboard daemon ws MCP or named-agent session authority.
+
+Verification: `cargo test -p ws-dashboard-daemon --test routes
+instance_event_stream` and `cargo test --workspace` passed. Review found no
+issues; residual transport depth such as SSE or WebSocket streaming remains
+later work.
