@@ -106,3 +106,27 @@ async fn shutdown_hook_can_terminate_server_task() {
 
     assert_eq!(info.bound_addr.ip(), Ipv4Addr::LOCALHOST);
 }
+
+#[tokio::test]
+async fn daemon_security_smoke_covers_loopback_startup_and_public_guards() {
+    let info = run_with_shutdown(ServeConfig::default_loopback(), async {})
+        .await
+        .expect("loopback startup succeeds");
+    assert_eq!(info.bound_addr.ip(), Ipv4Addr::LOCALHOST);
+
+    let accidental_public = ServeConfig::from_args(ServeArgs {
+        host: "0.0.0.0".to_owned(),
+        bind_mode: BindMode::Local,
+        port: 0,
+        static_dir: None,
+    })
+    .expect_err("accidental public bind");
+    assert!(accidental_public.to_string().contains("--bind-mode public"));
+
+    let disabled_owner_auth =
+        validate_bind_guard(BindMode::Public, IpAddr::V4(Ipv4Addr::UNSPECIFIED), false)
+            .expect_err("public bind without owner auth");
+    assert!(disabled_owner_auth
+        .to_string()
+        .contains("owner authentication"));
+}

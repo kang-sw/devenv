@@ -393,3 +393,103 @@ async fn health_output_stays_minimal() {
         assert!(!body.contains(forbidden));
     }
 }
+
+#[tokio::test]
+async fn daemon_security_smoke_covers_auth_and_health_boundary() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+
+    let unauthenticated_http = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .body(Body::empty())
+                .expect("unauthenticated health request"),
+        )
+        .await
+        .expect("unauthenticated health response");
+    assert_eq!(unauthenticated_http.status(), StatusCode::UNAUTHORIZED);
+
+    let unauthenticated_websocket = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/ws")
+                .header(header::UPGRADE, "websocket")
+                .header(header::CONNECTION, "upgrade")
+                .header(header::HOST, "127.0.0.1")
+                .body(Body::empty())
+                .expect("unauthenticated websocket request"),
+        )
+        .await
+        .expect("unauthenticated websocket response");
+    assert_eq!(unauthenticated_websocket.status(), StatusCode::UNAUTHORIZED);
+
+    let pair = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/pair?token={token}"))
+                .body(Body::empty())
+                .expect("pair request"),
+        )
+        .await
+        .expect("pair response");
+    assert_eq!(pair.status(), StatusCode::OK);
+    let cookie = pair
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("owner session cookie")
+        .to_str()
+        .expect("cookie header is ASCII")
+        .split(';')
+        .next()
+        .expect("cookie pair")
+        .to_owned();
+
+    let reused_pair = pair_response(app.clone(), Some(&token)).await;
+    assert_eq!(reused_pair.status(), StatusCode::GONE);
+    assert!(reused_pair.headers().get(header::SET_COOKIE).is_none());
+
+    let health = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated health request"),
+        )
+        .await
+        .expect("authenticated health response");
+    assert_eq!(health.status(), StatusCode::OK);
+    let health_body = axum::body::to_bytes(health.into_body(), 1024)
+        .await
+        .expect("health body bytes");
+    let health_body = std::str::from_utf8(&health_body).expect("health body utf8");
+    assert_eq!(health_body, "ok\n");
+    for forbidden in [
+        token.as_str(),
+        "wsstate",
+        "target",
+        "cache",
+        "git",
+        "diagnostic",
+    ] {
+        assert!(!health_body.contains(forbidden));
+    }
+
+    let ui = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated UI request"),
+        )
+        .await
+        .expect("authenticated UI response");
+    assert_eq!(ui.status(), StatusCode::OK);
+}
