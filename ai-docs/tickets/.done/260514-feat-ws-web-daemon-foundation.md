@@ -10,6 +10,7 @@ skeletons:
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
+completed: 2026-05-15
 ---
 
 # ws web daemon foundation
@@ -187,3 +188,14 @@ Success criteria:
 - Local bind startup succeeds on loopback.
 - Public-mode guard failures are tested.
 - Health output remains minimal and does not leak host-control internals.
+
+### Result (bb0d823) - 2026-05-15
+
+Added Phase 4 smoke coverage for the daemon foundation boundary. The smoke
+tests cover unauthenticated HTTP and WebSocket rejection, one-time pairing and
+reuse rejection, session reuse for health and UI routes, loopback startup,
+public-mode guard failures, and the minimal secret-free health body.
+
+The change was test-only and did not alter daemon behavior. Direct-edit review
+returned clean. Verification passed with `cargo test -p ws-dashboard-daemon`
+and `cargo test --workspace`.

@@ -46,8 +46,9 @@ The MVP should cover:
 
 ## Child Tickets
 
-- `260514-feat-ws-web-daemon-foundation` - daemon shell, owner auth,
-  WebSocket auth, and local/tunnel/public bind-mode guards. First substrate.
+- `260514-feat-ws-web-daemon-foundation` - done; daemon shell, owner auth,
+  WebSocket auth, local/tunnel/public bind-mode guards, and foundation security
+  smoke. First substrate.
 - `260514-research-ws-web-dashboard-direction` - research holding the absorbed
   provisional child backlog, refined resource model, document viewer ideas,
   keyboard/navigation direction, and future harness-library split points.
