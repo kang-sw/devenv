@@ -1,11 +1,13 @@
 use std::collections::HashMap;
+use std::path::{Component, PathBuf};
 
-use axum::extract::{Query, Request, State};
+use axum::extract::{Path as AxumPath, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use tokio::fs;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
@@ -24,6 +26,7 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/dashboard/resources", get(dashboard_resources))
+        .route("/assets/{*asset_path}", get(static_asset))
         .route("/", get(index))
         .fallback(not_found)
         .layer(from_fn_with_state(state.clone(), require_owner_auth));
@@ -86,11 +89,62 @@ async fn healthz() -> Response {
     (StatusCode::OK, "ok\n").into_response()
 }
 
-async fn index() -> Response {
+async fn index(State(state): State<AppState>) -> Response {
+    if let Some(static_dir) = state.config.static_dir.as_deref() {
+        return serve_static_file(static_dir.join("index.html"), "text/html; charset=utf-8").await;
+    }
+
     Html("<!doctype html><title>ws dashboard</title><main>ws dashboard daemon</main>\n")
         .into_response()
 }
 
+async fn static_asset(
+    State(state): State<AppState>,
+    AxumPath(asset_path): AxumPath<String>,
+) -> Response {
+    let Some(static_dir) = state.config.static_dir.as_deref() else {
+        return not_found().await;
+    };
+
+    let Some(asset_path) = safe_relative_path(&asset_path) else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+
+    serve_static_file(
+        static_dir.join("assets").join(&asset_path),
+        content_type_for_asset(&asset_path),
+    )
+    .await
+}
+
 async fn not_found() -> Response {
     StatusCode::NOT_FOUND.into_response()
+}
+
+async fn serve_static_file(path: PathBuf, content_type: &'static str) -> Response {
+    match fs::read(path).await {
+        Ok(body) => ([(header::CONTENT_TYPE, content_type)], body).into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+fn safe_relative_path(path: &str) -> Option<PathBuf> {
+    let mut safe = PathBuf::new();
+    for component in PathBuf::from(path).components() {
+        match component {
+            Component::Normal(part) => safe.push(part),
+            _ => return None,
+        }
+    }
+
+    (!safe.as_os_str().is_empty()).then_some(safe)
+}
+
+fn content_type_for_asset(path: &PathBuf) -> &'static str {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") => "application/javascript; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
 }

@@ -19,7 +19,9 @@
 // - `/api/dashboard/resources` is protected and returns the same deterministic
 //   dashboard hierarchy contract that frontend work will consume.
 
-use std::time::Duration;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -33,6 +35,37 @@ fn app_state() -> AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
     }
+}
+
+fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
+    AppState {
+        config: ServeConfig {
+            static_dir: Some(static_dir),
+            ..ServeConfig::default_loopback()
+        },
+        auth: OwnerAuthState::new_ephemeral(),
+    }
+}
+
+fn write_static_fixture() -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("ws-dashboard-static-{unique}"));
+    fs::create_dir_all(root.join("assets")).expect("create static fixture assets dir");
+    fs::write(
+        root.join("index.html"),
+        "<!doctype html><title>fixture dashboard</title><div id=\"root\"></div>",
+    )
+    .expect("write static fixture index");
+    fs::write(root.join("assets/app.js"), "console.log('fixture dashboard');")
+        .expect("write static fixture asset");
+    root
+}
+
+fn remove_static_fixture(path: &Path) {
+    let _ = fs::remove_dir_all(path);
 }
 
 async fn pair_and_cookie(app: axum::Router, token: &str) -> String {
@@ -213,6 +246,81 @@ async fn health_and_static_ui_succeed_with_owner_session_cookie() {
 
         assert_eq!(response.status(), StatusCode::OK);
     }
+}
+
+#[tokio::test]
+async fn static_dashboard_assets_stay_owner_authenticated() {
+    let static_dir = write_static_fixture();
+    let app = build_router(app_state_with_static_dir(static_dir.clone()));
+
+    for uri in ["/", "/assets/app.js"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .body(Body::empty())
+                    .expect("unauthenticated static request"),
+            )
+            .await
+            .expect("unauthenticated static response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+
+    remove_static_fixture(&static_dir);
+}
+
+#[tokio::test]
+async fn static_dashboard_assets_succeed_with_owner_session_cookie() {
+    let static_dir = write_static_fixture();
+    let state = app_state_with_static_dir(static_dir.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let index = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated static index request"),
+        )
+        .await
+        .expect("authenticated static index response");
+    assert_eq!(index.status(), StatusCode::OK);
+    let index_body = axum::body::to_bytes(index.into_body(), 4096)
+        .await
+        .expect("static index body bytes");
+    let index_body = std::str::from_utf8(&index_body).expect("static index body utf8");
+    assert!(index_body.contains("fixture dashboard"));
+
+    let asset = app
+        .oneshot(
+            Request::builder()
+                .uri("/assets/app.js")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated static asset request"),
+        )
+        .await
+        .expect("authenticated static asset response");
+    assert_eq!(asset.status(), StatusCode::OK);
+    assert_eq!(
+        asset.headers().get(header::CONTENT_TYPE),
+        Some(&header::HeaderValue::from_static(
+            "application/javascript; charset=utf-8"
+        ))
+    );
+    let asset_body = axum::body::to_bytes(asset.into_body(), 4096)
+        .await
+        .expect("static asset body bytes");
+    let asset_body = std::str::from_utf8(&asset_body).expect("static asset body utf8");
+    assert!(asset_body.contains("fixture dashboard"));
+
+    remove_static_fixture(&static_dir);
 }
 
 #[tokio::test]
