@@ -5,6 +5,7 @@ related:
   260513-research-streamable-http-mcp-transport: adjacent long-running daemon and remote transport research
   260513-feat-async-exec-output-reader: adjacent persisted process output and reader-agent pattern
   260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
+  260515-epic-ws-web-dashboard-first-visible-substrate: first visible dashboard substrate milestone
 related-mental-model:
   - developer-environment-tools
   - named-agent-runtime
@@ -54,6 +55,10 @@ The MVP should cover:
   keyboard/navigation direction, and future harness-library split points.
   Recreate implementation children from that research only when the boundaries
   are ready.
+- `260515-epic-ws-web-dashboard-first-visible-substrate` - todo; first
+  hybrid milestone for resource/view-model APIs, mock/live data boundaries, a
+  minimal authenticated frontend shell, local workspace discovery, and event
+  stream substrate.
 
 ## Cross-Child Decisions
 
