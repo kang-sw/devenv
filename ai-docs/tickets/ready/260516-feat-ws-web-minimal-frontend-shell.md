@@ -6,6 +6,9 @@ related:
   260515-epic-ws-web-dashboard-first-visible-substrate: coordinating first visible substrate epic
   260516-feat-ws-web-resource-view-model-contract: required API and fixture contract
   260514-research-ws-web-dashboard-direction: source research for shell and navigation boundaries
+spec:
+  - 260516-ws-web-dashboard-protected-frontend-shell
+  - 260516-ws-web-dashboard-inspectable-navigation-shell
 related-mental-model:
   - ws-web-dashboard
   - developer-environment-tools
