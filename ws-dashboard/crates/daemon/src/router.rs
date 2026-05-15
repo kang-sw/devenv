@@ -5,13 +5,14 @@ use axum::extract::{Path as AxumPath, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use tokio::fs;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::resources::dashboard_resources;
+use crate::root_picker::{create_empty_directory, list_root_picker, open_work_root};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -26,6 +27,12 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/dashboard/resources", get(dashboard_resources))
+        .route("/api/dashboard/root-picker", get(list_root_picker))
+        .route(
+            "/api/dashboard/root-picker/directories",
+            post(create_empty_directory),
+        )
+        .route("/api/dashboard/work-roots/open", post(open_work_root))
         .route("/assets/{*asset_path}", get(static_asset))
         .route("/", get(index))
         .fallback(not_found)

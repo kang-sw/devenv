@@ -5,5 +5,6 @@ pub mod discovery;
 pub mod logging;
 pub mod mock;
 pub mod resources;
+pub mod root_picker;
 pub mod router;
 pub mod server;
