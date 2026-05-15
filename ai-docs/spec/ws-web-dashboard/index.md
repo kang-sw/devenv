@@ -160,17 +160,16 @@ The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
 
-## 🚧 Instance Event Envelope Fixtures {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
+## Instance Event Envelope Fixtures {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 
-The dashboard will define a shared event envelope for instance-scoped streams.
-Events will reference opaque server, workspace, workRoot, and instance ids from
-the resource view-model contract, carry ordered cursor or sequence data,
+The dashboard defines a shared event envelope for instance-scoped streams.
+Events reference opaque server, workspace, workRoot, and instance ids from the
+resource view-model contract, carry ordered cursor and sequence data,
 timestamps, event categories, payload values, and explicit error or end markers.
 
-Deterministic transcript fixtures will cover ordinary output, status
-transitions, errors, reconnect/backfill, and empty streams so later PTY,
-named-agent, exec, diagnostic, viewer, and translation features can reuse one
-stream shape.
+Deterministic transcript fixtures cover ordinary output, status transitions,
+errors, reconnect/backfill, and empty streams so later PTY, named-agent, exec,
+diagnostic, viewer, and translation features can reuse one stream shape.
 
 ## 🚧 Authenticated Instance Event Stream Scaffold {#260516-ws-web-dashboard-authenticated-instance-event-stream-scaffold}
 
