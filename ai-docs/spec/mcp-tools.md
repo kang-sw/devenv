@@ -91,6 +91,11 @@ the detected MCP session harness when available, and otherwise the default
 alias mapping. This makes `backend` mean the execution backend rather than the
 alias-table key. {#260513-harness-local-agent-tier-config}
 
+> [!note] Planned 🚧
+> `config.agents_tier` will accept an optional portable effort value on alias
+> mappings. Empty effort and `none` will mean no forced backend effort; supported
+> non-empty values will be visible through configuration output.
+
 Configuration exposes harness-aware model alias mappings. `light`, `core`, and
 `deep` map to backend/model defaults per harness, existing tier-shaped config is
 migrated or wrapped for compatibility, and new documentation speaks in terms of
