@@ -58,7 +58,7 @@ The MVP should cover:
   keyboard/navigation direction, and future harness-library split points.
   Recreate implementation children from that research only when the boundaries
   are ready.
-- `260515-epic-ws-web-dashboard-first-visible-substrate` - todo; first
+- `260515-epic-ws-web-dashboard-first-visible-substrate` - done; first
   hybrid milestone for resource/view-model APIs, mock/live data boundaries, a
   minimal authenticated frontend shell, local workspace discovery, and event
   stream substrate.

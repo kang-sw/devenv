@@ -11,6 +11,7 @@ related-mental-model:
   - named-agent-runtime
   - mcp-runtime
   - developer-environment-tools
+completed: 2026-05-16
 ---
 
 # ws web dashboard first visible substrate
