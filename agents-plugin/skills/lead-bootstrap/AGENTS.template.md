@@ -168,10 +168,10 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0037: Add `ai-docs/.deps/` to `.gitignore` if absent; API documentation cache contents are runtime-managed local data, not project memory.
 - v0038: Create `ai-docs/.old/` as the tracked project archive for files kept only as possible future reference and hidden from default listings. Move legacy spec archives with `git mv`: `ai-docs/ref/old-spec` or `ai-docs/old-spec` -> `ai-docs/.old/spec`; move `ai-docs/old` -> `ai-docs/.old/misc` when present and not already project-specific.
 - v0039: If `ai-docs/_index.md` looks like an old all-in-one
-  architecture digest, report an index health note only. Do not move semantic
-  content into specs or mental models from bootstrap; compact `_index.md` only
-  after user approval and only when an owning document already preserves the
-  meaning.
+  architecture digest, report an index health note and ask whether to clean up
+  `_index.md`. Do not move semantic content into specs or mental models from
+  bootstrap; compact `_index.md` only after user approval and only when an
+  owning document already preserves the meaning.
 - v0040: Treat stable task/topic -> document routing maps as candidates for
   `ai-docs/mental-model.md ## Project Reading Map` during later
   mental-model work. Bootstrap may report the drift, but must not move mixed

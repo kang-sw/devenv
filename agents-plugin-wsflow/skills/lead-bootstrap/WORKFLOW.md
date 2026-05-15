@@ -81,9 +81,10 @@ template rather than relying on a project-local guide override.
 
 ## Index Health
 
-Bootstrap may report `_index.md` scope-drift candidates as an advisory health
-note. The first pass reads `_index.md` only; it does not load the full spec or
-mental-model corpus and does not move semantic content.
+When candidates exist, bootstrap reports `_index.md` scope-drift candidates as
+an advisory health note and asks whether to clean up now, defer cleanup, or
+route semantic follow-up. The first pass reads `_index.md` only; it does not
+load the full spec or mental-model corpus and does not move semantic content.
 
 Common drift candidates:
 

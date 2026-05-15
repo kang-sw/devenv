@@ -399,12 +399,13 @@ expectations without becoming a project-local override for runtime semantics.
 {#260506-bootstrap-workflow-guide}
 
 Bootstrap runs an advisory `_index.md` health check when the index exists. The
-first pass reads only `_index.md`, reports likely scope-drift candidates such as
-source-derived detail, behavior inventories, modification knowledge, static
-reference material, work history, duplicated maps, or stable reading maps, and
-routes user-approved follow-up work through the owning workflow. Bootstrap
-cleanup itself only compacts `_index.md`; it does not author or semantically
-update specs, mental models, tickets, or references.
+first pass reads only `_index.md`; when candidates exist, it reports likely
+scope drift such as source-derived detail, behavior inventories, modification
+knowledge, static reference material, work history, duplicated maps, or stable
+reading maps, and asks whether to clean up `_index.md` now, defer cleanup, or
+route semantic follow-up work through the owning workflow. Bootstrap cleanup
+itself only compacts `_index.md`; it does not author or semantically update
+specs, mental models, tickets, or references.
 
 Bootstrap ensures downstream `.gitignore` covers local workflow state and
 runtime-managed API documentation cache data: `ai-docs/**/*.local.md` and
