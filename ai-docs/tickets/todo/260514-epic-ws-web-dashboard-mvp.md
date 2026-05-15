@@ -70,7 +70,7 @@ The MVP should cover:
 - `260516-feat-ws-web-local-workspace-discovery` - done; child of the first
   visible substrate for live local plain-directory, Git-primary-root, and
   Git-linked-worktree discovery.
-- `260516-feat-ws-web-instance-event-stream` - todo; child of the first visible
+- `260516-feat-ws-web-instance-event-stream` - ready; child of the first visible
   substrate for a shared authenticated instance event envelope and
   fixture-backed stream scaffold.
 

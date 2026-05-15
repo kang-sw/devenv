@@ -53,7 +53,7 @@ reopening the basic dashboard frame.
 - `260516-feat-ws-web-local-workspace-discovery` - done; connects the
   view-model contract to local plain-directory, Git-primary-root, and
   Git-linked-worktree discovery, including manual and opportunistic refresh.
-- `260516-feat-ws-web-instance-event-stream` - todo; defines the authenticated
+- `260516-feat-ws-web-instance-event-stream` - ready; defines the authenticated
   instance event envelope, transcript fixtures, and reconnect/backfill scaffold
   for later PTY, named-agent, exec, diagnostic, viewer, and translation streams.
 

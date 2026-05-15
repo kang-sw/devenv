@@ -7,6 +7,9 @@ related:
   260516-feat-ws-web-resource-view-model-contract: resource ids and instance model this stream references
   260513-feat-async-exec-output-reader: adjacent persisted output and reader-agent pattern
   260514-research-ws-web-dashboard-direction: source research for later PTY, agent, and diagnostic streams
+spec:
+  - 260516-ws-web-dashboard-instance-event-envelope-fixtures
+  - 260516-ws-web-dashboard-authenticated-instance-event-stream-scaffold
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
