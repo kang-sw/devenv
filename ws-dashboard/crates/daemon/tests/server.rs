@@ -2,14 +2,17 @@
 //
 // Required behavior targets:
 // - default serving config binds to `127.0.0.1`.
+// - public bind attempts require explicit public mode.
+// - public bind mode cannot start without owner authentication enabled.
 // - startup info builds a local owner pairing URL after the listener address is
 //   known.
 // - shutdown hooks can terminate the server without leaving a background task.
 
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use ws_dashboard_daemon::auth::OwnerAuthState;
-use ws_dashboard_daemon::config::ServeConfig;
+use ws_dashboard_daemon::cli::{BindMode, ServeArgs};
+use ws_dashboard_daemon::config::{validate_bind_guard, ServeConfig};
 use ws_dashboard_daemon::server::{run_with_shutdown, startup_info};
 
 #[test]
@@ -17,6 +20,47 @@ fn default_serving_config_binds_to_loopback() {
     let config = ServeConfig::default_loopback();
 
     assert_eq!(config.bind_addr.ip(), Ipv4Addr::LOCALHOST);
+    assert_eq!(config.bind_mode, BindMode::Local);
+    assert!(config.owner_auth_enabled);
+}
+
+#[test]
+#[ignore = "Phase 3 skeleton contract; bind-mode guard behavior is intentionally unimplemented"]
+fn accidental_public_bind_requires_explicit_public_mode() {
+    let err = ServeConfig::from_args(ServeArgs {
+        host: "0.0.0.0".to_owned(),
+        bind_mode: BindMode::Local,
+        port: 0,
+        static_dir: None,
+    })
+    .expect_err("local mode must reject public bind address");
+
+    assert!(err.to_string().contains("--bind-mode public"));
+}
+
+#[test]
+#[ignore = "Phase 3 skeleton contract; bind-mode guard behavior is intentionally unimplemented"]
+fn explicit_public_bind_mode_accepts_public_host_with_owner_auth() {
+    let config = ServeConfig::from_args(ServeArgs {
+        host: "0.0.0.0".to_owned(),
+        bind_mode: BindMode::Public,
+        port: 0,
+        static_dir: None,
+    })
+    .expect("public mode with owner auth");
+
+    assert_eq!(config.bind_addr.ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    assert_eq!(config.bind_mode, BindMode::Public);
+    assert!(config.owner_auth_enabled);
+}
+
+#[test]
+#[ignore = "Phase 3 skeleton contract; bind-mode guard behavior is intentionally unimplemented"]
+fn public_bind_mode_requires_owner_auth() {
+    let err = validate_bind_guard(BindMode::Public, IpAddr::V4(Ipv4Addr::UNSPECIFIED), false)
+        .expect_err("public bind mode without owner auth");
+
+    assert!(err.to_string().contains("owner authentication"));
 }
 
 #[test]

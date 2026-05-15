@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::config::ServeConfig;
 
@@ -24,6 +24,12 @@ pub struct ServeArgs {
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 
+    // CONTRACT: Bind mode is explicit before non-loopback serving is allowed.
+    // Local and tunnel modes prefer loopback; public mode is the only mode that
+    // may accept public interface binding after guard validation.
+    #[arg(long, value_enum, default_value_t = BindMode::Local)]
+    pub bind_mode: BindMode,
+
     #[arg(long, default_value_t = 0)]
     pub port: u16,
 
@@ -31,6 +37,13 @@ pub struct ServeArgs {
     // a placeholder or absent frontend build directory.
     #[arg(long)]
     pub static_dir: Option<std::path::PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum BindMode {
+    Local,
+    Tunnel,
+    Public,
 }
 
 impl Cli {
