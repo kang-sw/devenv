@@ -42,7 +42,7 @@ reopening the basic dashboard frame.
 
 ## Child Tickets
 
-- `260516-feat-ws-web-resource-view-model-contract` - ready; first child and
+- `260516-feat-ws-web-resource-view-model-contract` - done; first child and
   implementation blocker for the rest of this epic. Defines the
   server/workspace/workRoot/main-instance/sub-instance view-model contract,
   workRoot vocabulary, protected API routes, mock provider, and golden
