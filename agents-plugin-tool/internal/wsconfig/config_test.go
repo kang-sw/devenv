@@ -155,6 +155,78 @@ func TestSetAgentsTierForHarnessTargetsHarnessAlias(t *testing.T) {
 	}
 }
 
+func TestSetAgentsTierForHarnessStoresEffortWithoutModelChange(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "", "", "codex", "medium")
+	if err != nil {
+		t.Fatalf("SetAgentsTierForHarness returned error: %v", err)
+	}
+	mapping := cfg.Agents.ModelAliases["core"]["codex"]
+	if mapping.Backend != "codex" || mapping.Model != "gpt-5.5" || mapping.Effort != "medium" {
+		t.Fatalf("codex core alias mapping = %#v", mapping)
+	}
+	if legacy := cfg.Agents.Tiers["core"]; legacy.Effort != "" {
+		t.Fatalf("default tier effort was overwritten = %#v", legacy)
+	}
+
+	backend, model, effort, err := ResolveAgentForHarnessConfig(Options{CacheHome: cache}, "core", "", "", "codex")
+	if err != nil {
+		t.Fatalf("ResolveAgentForHarnessConfig returned error: %v", err)
+	}
+	if backend != "codex" || model != "gpt-5.5" || effort != "medium" {
+		t.Fatalf("resolved backend/model/effort = %q/%q/%q", backend, model, effort)
+	}
+}
+
+func TestSetAgentsTierForHarnessClearsNoneEffort(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "deep", "", "", "codex", "high"); err != nil {
+		t.Fatalf("SetAgentsTierForHarness high returned error: %v", err)
+	}
+	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "deep", "", "", "codex", "none")
+	if err != nil {
+		t.Fatalf("SetAgentsTierForHarness none returned error: %v", err)
+	}
+	if mapping := cfg.Agents.ModelAliases["deep"]["codex"]; mapping.Effort != "" {
+		t.Fatalf("effort was not cleared = %#v", mapping)
+	}
+}
+
+func TestSetAgentsTierForHarnessClearsEffortWhenOmittedFromMappingUpdate(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "", "", "codex", "medium"); err != nil {
+		t.Fatalf("SetAgentsTierForHarness effort returned error: %v", err)
+	}
+	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "codex")
+	if err != nil {
+		t.Fatalf("SetAgentsTierForHarness model returned error: %v", err)
+	}
+	if mapping := cfg.Agents.ModelAliases["core"]["codex"]; mapping.Backend != "codex" || mapping.Model != "gpt-5.4" || mapping.Effort != "" {
+		t.Fatalf("effort was not cleared = %#v", mapping)
+	}
+}
+
+func TestSetAgentsTierForHarnessClearsEffortWhenOnlyTierProvided(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "", "", "codex", "medium"); err != nil {
+		t.Fatalf("SetAgentsTierForHarness effort returned error: %v", err)
+	}
+	cfg, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "", "", "codex")
+	if err != nil {
+		t.Fatalf("SetAgentsTierForHarness tier-only returned error: %v", err)
+	}
+	if mapping := cfg.Agents.ModelAliases["core"]["codex"]; mapping.Backend != "codex" || mapping.Model != "gpt-5.5" || mapping.Effort != "" {
+		t.Fatalf("tier-only update did not preserve model while clearing effort = %#v", mapping)
+	}
+}
+
+func TestSetAgentsTierForHarnessRejectsInvalidEffort(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "", "", "codex", "max"); err == nil {
+		t.Fatal("SetAgentsTierForHarness accepted invalid effort")
+	}
+}
+
 func TestSetAgentsTierForHarnessRejectsUnknownHarness(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	if _, err := SetAgentsTierForHarness(Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "unknown"); err == nil {

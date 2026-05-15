@@ -34,6 +34,7 @@ type View struct {
 type AgentTier struct {
 	Backend string `json:"backend,omitempty"`
 	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
 }
 
 func Load(opts Options) (Config, error) {
@@ -78,17 +79,23 @@ func Show(opts Options) (View, error) {
 	return View{Path: path, Config: cfg}, nil
 }
 
-func SetAgentsTier(opts Options, tier, backend, model string) (Config, error) {
-	return SetAgentsTierForHarness(opts, tier, backend, model, "")
+func SetAgentsTier(opts Options, tier, backend, model string, effortValues ...string) (Config, error) {
+	return SetAgentsTierForHarness(opts, tier, backend, model, "", effortValues...)
 }
 
-func SetAgentsTierForHarness(opts Options, tier, backend, model, harness string) (Config, error) {
+func SetAgentsTierForHarness(opts Options, tier, backend, model, harness string, effortValues ...string) (Config, error) {
 	tier = normalizedTier(tier)
 	if tier == "" {
 		return Config{}, fmt.Errorf("tier must be light, core, or deep")
 	}
 	backend = strings.TrimSpace(backend)
 	model = strings.TrimSpace(model)
+	hasBackendInput := backend != ""
+	hasModelInput := model != ""
+	effort, hasEffort, err := normalizeOptionalEffort(effortValues...)
+	if err != nil {
+		return Config{}, err
+	}
 	if backend == "" {
 		backend = InferBackend(model)
 	}
@@ -102,10 +109,33 @@ func SetAgentsTierForHarness(opts Options, tier, backend, model, harness string)
 	if cfg.Agents.ModelAliases[tier] == nil {
 		cfg.Agents.ModelAliases[tier] = map[string]AgentTier{}
 	}
-	mapping := AgentTier{Backend: backend, Model: model}
 	key, err := aliasTargetKey(harness)
 	if err != nil {
 		return Config{}, err
+	}
+	existing := cfg.Agents.ModelAliases[tier][key]
+	if fallback, ok := cfg.Agents.Tiers[tier]; ok {
+		if strings.TrimSpace(existing.Backend) == "" && strings.TrimSpace(existing.Model) == "" {
+			existing = fallback
+		}
+	}
+	mapping := AgentTier{}
+	if !hasBackendInput && !hasModelInput {
+		mapping = existing
+	}
+	if backend != "" {
+		mapping.Backend = backend
+	}
+	if model != "" {
+		mapping.Model = model
+		if backend == "" {
+			mapping.Backend = InferBackend(model)
+		}
+	}
+	if hasEffort {
+		mapping.Effort = effort
+	} else {
+		mapping.Effort = ""
 	}
 	cfg.Agents.ModelAliases[tier][key] = mapping
 	if key == "default" {
@@ -119,6 +149,11 @@ func ResolveAgent(opts Options, tier, backend, model string) (string, string, er
 }
 
 func ResolveAgentForHarness(opts Options, tier, backend, model, harness string) (string, string, error) {
+	backend, model, _, err := ResolveAgentForHarnessConfig(opts, tier, backend, model, harness)
+	return backend, model, err
+}
+
+func ResolveAgentForHarnessConfig(opts Options, tier, backend, model, harness string) (string, string, string, error) {
 	tier = normalizedTier(tier)
 	backend = strings.TrimSpace(backend)
 	model = strings.TrimSpace(model)
@@ -136,12 +171,13 @@ func ResolveAgentForHarness(opts Options, tier, backend, model, harness string) 
 		if backend == "" {
 			backend = "codex"
 		}
-		return backend, model, nil
+		return backend, model, "", nil
 	}
 	cfg, err := Load(opts)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
+	effort := ""
 	if mapping, ok := resolveAliasMapping(cfg, tier, backend, harness); ok {
 		if useAliasMappingForBackend(backend, mapping) {
 			if model == "" {
@@ -153,12 +189,13 @@ func ResolveAgentForHarness(opts Options, tier, backend, model, harness string) 
 			if backend == "" {
 				backend = InferBackend(model)
 			}
+			effort = strings.TrimSpace(mapping.Effort)
 		}
 	}
 	if backend == "" {
 		backend = "codex"
 	}
-	return backend, model, nil
+	return backend, model, effort, nil
 }
 
 func ModelAlias(value string) string {
@@ -324,6 +361,21 @@ func aliasTargetKey(harness string) (string, error) {
 		return key, nil
 	}
 	return "", fmt.Errorf("harness must be codex, claude, gemini, or default")
+}
+
+func normalizeOptionalEffort(values ...string) (string, bool, error) {
+	if len(values) == 0 {
+		return "", false, nil
+	}
+	value := strings.ToLower(strings.TrimSpace(values[0]))
+	switch value {
+	case "", "none":
+		return "", true, nil
+	case "low", "medium", "high", "xhigh":
+		return value, true, nil
+	default:
+		return "", true, fmt.Errorf("effort must be none, low, medium, high, or xhigh")
+	}
 }
 
 func useAliasMappingForBackend(explicitBackend string, mapping AgentTier) bool {

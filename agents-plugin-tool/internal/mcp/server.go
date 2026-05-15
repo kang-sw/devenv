@@ -434,7 +434,13 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if strings.TrimSpace(harness) == "" {
 			harness = s.currentHarness()
 		}
-		cfg, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
+		var cfg wsconfig.Config
+		var err error
+		if effort, ok := params.Arguments["effort"].(string); ok {
+			cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness, effort)
+		} else {
+			cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, tier, backend, model, harness)
+		}
 		return toolJSONResponse(req.ID, cfg, err)
 
 	case "git.status":
@@ -1020,7 +1026,11 @@ func formatConfigView(view wsconfig.View) string {
 		fmt.Fprintf(&b, "  %s:\n", alias)
 		for _, key := range keys {
 			tier := byHarness[key]
-			fmt.Fprintf(&b, "    %s: %s/%s\n", key, displayOrDash(tier.Backend), displayOrDash(tier.Model))
+			fmt.Fprintf(&b, "    %s: %s/%s", key, displayOrDash(tier.Backend), displayOrDash(tier.Model))
+			if tier.Effort != "" {
+				fmt.Fprintf(&b, " effort=%s", tier.Effort)
+			}
+			b.WriteString("\n")
 		}
 	}
 	return b.String()
@@ -1621,6 +1631,7 @@ func tools() []map[string]any {
 					"tier":    enumStringProperty("Model alias to configure.", []string{"light", "core", "deep"}),
 					"backend": stringProperty("Optional backend name. When omitted, ws infers it from the model when possible."),
 					"model":   stringProperty("Concrete model for this alias."),
+					"effort":  enumStringProperty("Optional portable reasoning effort for this alias. Empty, omitted, or none leaves backend effort unset.", []string{"", "none", "low", "medium", "high", "xhigh"}),
 					"harness": stringProperty("Optional harness alias key to configure. When omitted, ws uses the detected MCP session harness, or default when none is known."),
 				},
 				"required": []string{"tier"},

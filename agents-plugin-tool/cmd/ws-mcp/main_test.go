@@ -356,10 +356,12 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 				Tiers map[string]struct {
 					Backend string `json:"backend"`
 					Model   string `json:"model"`
+					Effort  string `json:"effort"`
 				} `json:"tiers"`
 				ModelAliases map[string]map[string]struct {
 					Backend string `json:"backend"`
 					Model   string `json:"model"`
+					Effort  string `json:"effort"`
 				} `json:"model_aliases"`
 			} `json:"agents"`
 		} `json:"config"`
@@ -390,10 +392,12 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 				Tiers map[string]struct {
 					Backend string `json:"backend"`
 					Model   string `json:"model"`
+					Effort  string `json:"effort"`
 				} `json:"tiers"`
 				ModelAliases map[string]map[string]struct {
 					Backend string `json:"backend"`
 					Model   string `json:"model"`
+					Effort  string `json:"effort"`
 				} `json:"model_aliases"`
 			} `json:"agents"`
 		} `json:"config"`
@@ -404,21 +408,29 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
 	}
 
-	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.4")
+	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.4", "--effort", "medium")
 	var harnessAfter struct {
 		Config struct {
 			Agents struct {
 				ModelAliases map[string]map[string]struct {
 					Backend string `json:"backend"`
 					Model   string `json:"model"`
+					Effort  string `json:"effort"`
 				} `json:"model_aliases"`
 			} `json:"agents"`
 		} `json:"config"`
 	}
 	mustUnmarshalCLIJSON(t, show("config", "show"), &harnessAfter)
 	claudeCore := harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
-	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.4" {
+	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.4" || claudeCore.Effort != "medium" {
 		t.Fatalf("claude core alias = %#v", claudeCore)
+	}
+
+	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.5")
+	mustUnmarshalCLIJSON(t, show("config", "show"), &harnessAfter)
+	claudeCore = harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
+	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.5" || claudeCore.Effort != "" {
+		t.Fatalf("claude core alias after omitted effort update = %#v", claudeCore)
 	}
 }
 
