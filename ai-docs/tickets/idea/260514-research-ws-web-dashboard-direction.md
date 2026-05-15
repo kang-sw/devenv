@@ -73,23 +73,49 @@ To control documentation bloat:
 
 ## Resource Model
 
-The dashboard resource model should emphasize one main user interaction point
-per worktree. A refined shape is:
+The dashboard resource model should preserve an honest hierarchy while letting
+the UI compress singleton chains:
 
 ```text
 server
   workspace
-    worktree [online | offline | moved | inaccessible]
+    workRoot [online | offline | moved | inaccessible]
       mainInstance
         subInstance
         subInstance
 ```
 
 `server` is a physical or logical host environment such as the local machine, a
-WSL distro, or a remote host. `workspace` is a project or repository family.
-`worktree` is the concrete root where processes and UI state run. A worktree can
-be offline, moved, or inaccessible without disappearing from the user's recent
-context.
+WSL distro, or a remote host. `workspace` is a daemon-discovered project group,
+not a user-created category. A workspace groups one or more workRoots and is
+usually inferred from a Git repository group or from a single plain directory.
+
+`workRoot` is the physical directory where processes and UI state run. A
+workRoot can be offline, moved, or inaccessible without disappearing from the
+user's recent context. A workRoot identity should survive kind changes such as a
+plain directory becoming Git-backed or a Git-backed directory losing Git
+metadata.
+
+The workRoot kind should stay additive:
+
+```text
+workRoot.kind: plainDirectory | gitPrimaryRoot | gitLinkedWorktree
+```
+
+`plainDirectory` can still be opened, inspected, and used as a terminal,
+editor, or instance-spawn target. `gitPrimaryRoot` and `gitLinkedWorktree`
+share the same core workRoot UI and Git-aware affordances, but their metadata
+should preserve the difference between a repository's primary root directory
+and a linked worktree. That distinction matters for labels, grouping,
+branch/lifecycle context, and destructive actions.
+
+The UI may compact singleton chains without changing the data model:
+
+```text
+workspace has one workRoot -> render workspace/workRoot as one row
+workRoot has one mainInstance -> render workRoot/mainInstance as one row
+all three are singletons -> render workspace/workRoot/mainInstance as one row
+```
 
 `mainInstance` is the user-facing conversation or control point, analogous to
 the primary interaction with an AI assistant in the current workflow.
@@ -97,8 +123,8 @@ the primary interaction with an AI assistant in the current workflow.
 exec jobs, translation jobs, document viewers, diagnostics, subprocesses, or
 side tasks.
 
-The data model can implement this as parented instances, but dashboard language
-should preserve the main/sub distinction:
+The data model can implement instances as parented entities, but dashboard
+language should preserve the main/sub distinction:
 
 - main instances have no parent and receive direct user interaction;
 - sub instances have a parent main instance and are delegated, passive, or
@@ -118,37 +144,30 @@ Use opaque ids at every level. Host paths, Git roots, link details, and runtime
 session identifiers remain daemon-owned state exposed through view models, not
 URL identity.
 
-The concrete openable project target needs to support non-Git directories as
-well as Git working trees. Treat the shared UI component as a root-like item
-with additive capabilities rather than as a file-manager folder:
-
-```text
-rootKind: plainDirectory | gitRootDir | gitWorktree
-```
-
-`plainDirectory` can still be opened, inspected, and used as a terminal,
-editor, or instance-spawn target. `gitRootDir` and `gitWorktree` share the same
-core root UI and Git-aware affordances, but their metadata should preserve the
-difference between a repository's primary root directory and a linked worktree.
-That distinction matters for labels, grouping, branch/lifecycle context, and
-destructive actions.
-
 The dashboard should never expose generic recursive folder deletion. If it
-offers destructive root lifecycle actions, keep them Git-aware and explicit:
-linked worktrees may later support a guarded `git worktree remove` action, while
-plain directories and Git root directories should not show a delete-folder
-action.
+offers destructive workRoot lifecycle actions, keep them Git-aware and
+explicit: linked worktrees may later support a guarded `git worktree remove`
+action, while plain directories and Git primary roots should not show a
+delete-folder action.
 
 Discovery needs both automatic and user-directed entry points. Automatic
-discovery can propose recent roots, known ws roots, daemon working directories,
-configured search roots, and Git worktrees. User-directed discovery should feel
-like a lightweight explorer that lets the owner navigate server filesystem roots
-and open a directory even when it is not a Git repository.
+discovery can propose recent workRoots, known ws roots, daemon working
+directories, configured search roots, and Git worktrees. User-directed
+discovery should feel like a lightweight explorer that lets the owner navigate
+server filesystem roots and open a directory even when it is not a Git
+repository. The explorer may support `Create empty folder` as a narrow
+new-workRoot affordance, but it should not become a generic file manager with
+delete, rename, move, or copy operations.
+
+A workRoot kind should be re-detected through manual refresh plus opportunistic
+refresh when selecting, opening, or spawning from a workRoot. Broad filesystem
+watcher behavior should wait until the visible substrate proves the model and
+can constrain watching to opened or visible roots.
 
 Bookmarks are a useful navigation idea, but they should stay research-level
 until the first visible substrate stabilizes. Model space should remain open for
 future saved pointers such as discovered, recent, bookmarked, or manually opened
-roots without making bookmark CRUD part of the first implementation child.
+workRoots without making bookmark CRUD part of the first implementation child.
 
 ## Harness And Runtime Library Direction
 
@@ -184,7 +203,7 @@ The frontend shell should remain extension-ready rather than a fixed mock page.
 Useful deferred substrate ideas include:
 
 - panel and command registries;
-- server/workspace/worktree/main-instance/sub-instance scope context;
+- server/workspace/workRoot/main-instance/sub-instance scope context;
 - dock layout, tabbed panels, persisted layout state, reset affordances, and
   duplicate-dashboard affordances;
 - a typed mock/live data boundary for daemon APIs and event streams;
@@ -223,7 +242,7 @@ Future child tickets can be recreated from this research once their boundaries
 are ready:
 
 - frontend shell and design primitives;
-- workspace and Git worktree discovery;
+- workspace, workRoot, and Git worktree discovery;
 - browser terminal and PTY bridge;
 - named-agent dashboard view models;
 - browser-native editor and modal editing;

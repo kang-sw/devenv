@@ -20,7 +20,7 @@ related-mental-model:
 Create the first dashboard milestone that is both backend-contract heavy and
 visually inspectable. This epic should turn the authenticated daemon foundation
 into a narrow dashboard shell where the owner can see the server, workspace,
-root/worktree, main-instance, and sub-instance model through stable daemon-owned view
+workRoot, main-instance, and sub-instance model through stable daemon-owned view
 models.
 
 The milestone should make future child tickets non-blocked on unresolved
@@ -43,9 +43,9 @@ reopening the basic dashboard frame.
 ## Child Tickets
 
 - Planned: resource and view-model API substrate - define the server,
-  workspace, root, main-instance, and sub-instance JSON shapes, opaque-id rules,
-  root-kind metadata, route map, error/loading/stale fields, and golden
-  fixtures.
+  workspace, workRoot, main-instance, and sub-instance JSON shapes, opaque-id
+  rules, workRoot kind metadata, route map, error/loading/stale fields, and
+  golden fixtures.
 - Planned: mock provider and contract test substrate - let the daemon serve
   deterministic dashboard data without live wsstate, PTY, or harness coupling,
   and verify fixtures plus protected API routes.
@@ -53,8 +53,9 @@ reopening the basic dashboard frame.
   daemon and render the first inspectable navigation tree plus detail pane from
   the same mock/live view-model contract.
 - Planned: local workspace discovery substrate - connect the view model to real
-  local project, plain-directory, Git-root, and Git-worktree discovery while
-  preserving opaque ids and offline, moved, or inaccessible root states.
+  local project, plain-directory, Git-primary-root, and Git-linked-worktree
+  discovery while preserving opaque ids and offline, moved, or inaccessible
+  workRoot states.
 - Planned: event stream substrate - define the shared instance event envelope,
   reconnect/backfill behavior, and transcript fixture shape for later PTY,
   named-agent, exec, and diagnostic streams.
@@ -65,21 +66,32 @@ reopening the basic dashboard frame.
   dashboard. Child tickets should not block on basic navigation, resource
   vocabulary, empty/loading/error treatment, or mock/live data boundaries.
 - Preserve the resource hierarchy as
-  `server -> workspace -> root/worktree -> mainInstance -> subInstance` while
-  the first child ticket settles final API vocabulary. Reserve `session` for
-  auth/browser and external protocol sessions.
-- Treat the concrete openable project target as a shared root component with
-  additive capabilities for `plainDirectory`, `gitRootDir`, and `gitWorktree`.
-  Git root directories and linked Git worktrees should share core UI and
-  spawning behavior while preserving metadata that lets the UI distinguish their
-  lifecycle and repository role.
-- Use opaque ids in API paths. Host paths, Git roots, worktree keys, and wsstate
+  `server -> workspace -> workRoot -> mainInstance -> subInstance`.
+  Reserve `session` for auth/browser and external protocol sessions.
+- Define `workspace` as a daemon-discovered project group, not a user-created
+  category. A workspace groups one or more workRoots and is usually inferred
+  from a Git repository group or a single plain directory.
+- Define `workRoot` as the physical directory used as an open, spawn, and run
+  target. Each workRoot has additive capabilities for `plainDirectory`,
+  `gitPrimaryRoot`, and `gitLinkedWorktree`; Git primary roots and linked Git
+  worktrees should share core UI and spawning behavior while preserving metadata
+  that lets the UI distinguish their lifecycle and repository role.
+- Use opaque ids in API paths. Host paths, Git roots, workRoot keys, and wsstate
   storage details stay daemon-owned and appear only through authenticated view
   models.
-- Do not offer generic folder deletion from the dashboard. Destructive root
+- Keep UI compaction as a presentation policy, not the resource model:
+  singleton `workspace -> workRoot -> mainInstance` chains may render as one
+  compact row, while APIs and fixtures preserve the full hierarchy.
+- Do not offer generic folder deletion from the dashboard. Destructive workRoot
   lifecycle actions may be exposed only as explicit Git-aware worktree actions
   for linked worktrees, with dirty/untracked safeguards left to the implementing
   child ticket.
+- Keep the explorer as a root picker rather than a file manager. It may expose a
+  narrow `Create empty folder` action for creating a new workRoot candidate, but
+  generic delete, rename, move, and copy actions stay out of scope.
+- Re-detect workRoot kind through manual refresh and opportunistic refresh when
+  selecting, opening, or spawning from a workRoot. Broad filesystem watcher
+  behavior is deferred.
 - Keep mock and live providers behind the same daemon API contract so frontend
   work can start before live integrations are complete and tests can verify
   behavior without host-specific state.
@@ -88,6 +100,9 @@ reopening the basic dashboard frame.
 - Make frontend verification visual but narrow: the shell must expose enough
   real layout, density, status, and selection behavior for human steering, not
   a marketing page or a static mock.
+- Route mouse actions and keyboard actions through command ids so the shell can
+  later support tmux-style leader navigation. Reserve `^b` to mean ctrl plus
+  lowercase `b`; do not treat it as `Ctrl+Shift+b`.
 - Use the restrained operational visual system from `ai-docs/ref/design.md`:
   square geometry, hairline separators, practical density, and clear hierarchy.
 - Keep PTY terminal implementation out until resource identity, shell layout,
