@@ -56,6 +56,20 @@ authentication. Health output is the exact minimal body `ok\n`; host paths,
 cache paths, Git roots, pairing tokens, session values, diagnostics, and wsstate
 internals are not URL identity and are not exposed by the health surface.
 
+## Core Resource Vocabulary {#260516-ws-web-dashboard-core-resource-vocabulary}
+
+The dashboard core crate exposes opaque ids and resource path vocabulary for
+the first visible hierarchy without exposing host paths as identity. Core
+resource paths carry `serverId`, `workspaceId`, `workRootId`, and optional
+`instanceId` fields when serialized for dashboard consumers.
+
+The physical directory target is named `workRoot` in the public dashboard core
+vocabulary. WorkRoot metadata distinguishes `plainDirectory`, `gitPrimaryRoot`,
+and `gitLinkedWorktree`; status values describe whether the remembered root is
+online, offline, moved, or inaccessible. Main/sub instance role, instance kind,
+and interaction mode values serialize with the same dashboard camelCase naming
+contract.
+
 ## 🚧 Resource View-Model Contract {#260516-ws-web-dashboard-resource-view-model-contract}
 
 The dashboard will expose authenticated HTTP view-model APIs for the first
