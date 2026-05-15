@@ -3,9 +3,12 @@ title: Agent tier effort configuration
 spec:
   - 260513-harness-local-agent-tier-config
   - 260508-model-alias-config-tools
+  - 260508-agents-register-model-alias-field
   - 260508-harness-aware-model-aliases
   - 260505-codex-agent-session-jsonl-handling
   - 260505-claude-agent-runner
+plans:
+  phase-2: 2026-05/15-260513-feat-agent-tier-effort-config
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime
@@ -102,6 +105,15 @@ Acceptance criteria:
 - Claude-backed calls with resolved effort pass `--effort`.
 - Calls with no resolved effort do not pass any effort override.
 - Runner tests cover Codex, Claude, and no-override behavior.
+
+### Result (8cc0c5e) - 2026-05-15
+
+Implemented runner application for resolved alias effort. Registered agent
+effort now flows into `RunnerRequest`; Codex-backed calls add
+`model_reasoning_effort=<effort>` through Codex configuration only when effort
+is non-empty, and Claude-backed calls pass `--effort <effort>` only when effort
+is non-empty. Manager handoff, Codex invocation, Claude invocation, and
+no-override behavior are covered by `go test ./internal/wsagent`.
 
 ### Phase 3: Update workflow docs and release metadata
 

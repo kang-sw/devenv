@@ -234,7 +234,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260513-feat-agent-tier-effort-config` - continue named-agent effort through harness-aware model aliases; next slice is Phase 2 runner application.
+`260513-feat-agent-tier-effort-config` - continue named-agent effort through harness-aware model aliases; next slice is Phase 3 workflow docs and release metadata.
 
 ## Session Notes
 
