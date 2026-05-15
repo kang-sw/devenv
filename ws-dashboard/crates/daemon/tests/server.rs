@@ -6,8 +6,6 @@
 //   intent.
 // - public bind attempts require explicit public mode.
 // - public bind mode cannot start without owner authentication enabled.
-// - non-loopback serving remains fail-closed until Phase 3 guard logic is
-//   implemented.
 // - startup info builds a local owner pairing URL after the listener address is
 //   known.
 // - shutdown hooks can terminate the server without leaving a background task.
@@ -51,20 +49,6 @@ fn tunnel_mode_without_host_keeps_loopback_binding() {
 }
 
 #[test]
-fn public_mode_with_public_host_remains_fail_closed_until_guard_implementation() {
-    let err = ServeConfig::from_args(ServeArgs {
-        host: "0.0.0.0".to_owned(),
-        bind_mode: BindMode::Public,
-        port: 0,
-        static_dir: None,
-    })
-    .expect_err("public serving remains disabled in the skeleton");
-
-    assert!(err.to_string().contains("not implemented"));
-}
-
-#[test]
-#[ignore = "Phase 3 skeleton contract; bind-mode guard behavior is intentionally unimplemented"]
 fn accidental_public_bind_requires_explicit_public_mode() {
     let err = ServeConfig::from_args(ServeArgs {
         host: "0.0.0.0".to_owned(),
@@ -78,7 +62,6 @@ fn accidental_public_bind_requires_explicit_public_mode() {
 }
 
 #[test]
-#[ignore = "Phase 3 skeleton contract; bind-mode guard behavior is intentionally unimplemented"]
 fn explicit_public_bind_mode_accepts_public_host_with_owner_auth() {
     let config = ServeConfig::from_args(ServeArgs {
         host: "0.0.0.0".to_owned(),
@@ -94,7 +77,6 @@ fn explicit_public_bind_mode_accepts_public_host_with_owner_auth() {
 }
 
 #[test]
-#[ignore = "Phase 3 skeleton contract; bind-mode guard behavior is intentionally unimplemented"]
 fn public_bind_mode_requires_owner_auth() {
     let err = validate_bind_guard(BindMode::Public, IpAddr::V4(Ipv4Addr::UNSPECIFIED), false)
         .expect_err("public bind mode without owner auth");

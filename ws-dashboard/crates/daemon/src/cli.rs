@@ -19,8 +19,8 @@ pub enum Command {
 
 #[derive(Debug, Parser)]
 pub struct ServeArgs {
-    // CONTRACT: Loopback is the default serving target. Public bind flags are
-    // Phase 3 work and must fail closed if introduced before guard logic exists.
+    // CONTRACT: Loopback is the default serving target. Public bind flags stay
+    // behind explicit bind-mode and owner-auth guard validation.
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 

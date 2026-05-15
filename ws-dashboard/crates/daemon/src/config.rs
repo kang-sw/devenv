@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
-use anyhow::{bail, ensure, Context};
+use anyhow::{ensure, Context};
 
 use crate::cli::{BindMode, ServeArgs};
 
@@ -65,7 +65,7 @@ pub fn validate_bind_guard(
         "public bind address {ip} requires --bind-mode public"
     );
 
-    bail!("public bind mode is not implemented yet; non-loopback serving remains disabled");
+    Ok(())
 }
 
 fn parse_bind_host(host: &str) -> anyhow::Result<IpAddr> {
