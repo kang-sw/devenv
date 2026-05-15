@@ -16,6 +16,7 @@ related:
 - `ws-dashboard/crates/daemon/src/router.rs` and `auth.rs` own the browser route boundary, one-time pairing expiry, bearer-auth exception, Host/Origin entrypoint checks, and owner session cookie checks. {#260515-ws-web-daemon-foundation}
 - `ws-dashboard/crates/core/src/ids.rs` and `resources.rs` own the public dashboard resource vocabulary shared by later API, frontend, discovery, and event-stream work. {#260516-ws-web-dashboard-core-resource-vocabulary}
 - `ws-dashboard/crates/core/src/view_model.rs`, `daemon/src/resources.rs`, and `daemon/src/mock.rs` own the first authenticated resource hierarchy API and fixture-backed provider seam. {#260516-ws-web-dashboard-resource-view-model-contract} {#260516-ws-web-dashboard-mock-view-model-fixtures}
+- `ws-dashboard/frontend/` owns the React/Vite browser shell that is served by the daemon when `--static-dir` points at its production build output. {#260516-ws-web-dashboard-protected-frontend-shell}
 
 ## Module Contracts
 
@@ -31,27 +32,30 @@ related:
 - The resource view-model API preserves `server -> workspace -> workRoot -> mainInstance -> subInstance` as data even when rows are compactable; compaction is a browser presentation hint, not a route identity or daemon-side pre-collapse. {#260516-ws-web-dashboard-resource-view-model-contract}
 - The daemon resource route belongs inside the protected router and returns the public core view-model shape through a provider seam; adding live discovery later must swap/extend the provider without changing fixture/frontend-facing JSON vocabulary. {#260516-ws-web-dashboard-resource-view-model-contract}
 - `daemon/tests/fixtures/dashboard_resources.json` is the shared golden mock artifact; Rust mock data and route tests must consume that fixture instead of maintaining a second in-code sample. {#260516-ws-web-dashboard-mock-view-model-fixtures}
+- Static dashboard serving is configuration-gated: `/` serves `static_dir/index.html`, `/assets/{*asset_path}` serves only safe relative paths below `static_dir/assets`, and both stay inside the owner-auth protected router. Without `static_dir`, the daemon keeps the minimal fallback HTML and asset requests 404. {#260516-ws-web-dashboard-protected-frontend-shell}
 
 ## Coupling
 
 - `server.rs` creates the auth state used by the router; route tests that build `AppState` directly must stay aligned with the server startup path.
-- `static_dir` is accepted in config before static serving exists. When assets are wired, they must be added under the protected router/layer, not as another top-level unauthenticated route.
+- `static_dir` couples CLI config, `router.rs`, route tests, and frontend build output: production UI availability depends on passing the built `frontend/dist` directory, while auth behavior is enforced by router placement rather than frontend code.
 - Startup output intentionally prints the pairing URL for the local owner, while structured logs should avoid query-string/token material; request logging changes must preserve that split.
 - Dashboard resource JSON couples `core/src/view_model.rs`, the daemon provider trait, the protected route tests, and the golden fixture; field or hierarchy changes must update all four in one logical change.
 
 ## Extension Points & Change Recipes
 
-- **Add an authenticated HTTP route or static asset serving**: add it inside the protected router, then add both unauthenticated rejection and paired-cookie success tests.
+- **Add an authenticated HTTP route or static asset family**: add it inside the protected router, then add both unauthenticated rejection and paired-cookie success tests; static file serving must keep traversal rejection before filesystem reads.
 - **Change pairing, session, or bearer behavior**: update `auth.rs`, `/pair` status/cookie handling, and route tests together; preserve one-time consumption, expiry failure without cookie installation, no pre-pair session-cookie authentication, and the narrow bearer path for protected HTTP smoke callers.
 - **Change bind-mode guardrails**: update CLI vocabulary, config validation, and server tests together; preserve local/tunnel rejection for non-loopback hosts, public-mode owner-auth requirement, and the separation from browser Host/Origin authorization.
 - **Expose diagnostics**: add an authenticated route; do not expand `/healthz` beyond the minimal body contract.
 - **Change core resource vocabulary**: update `ids.rs`, `resources.rs`, public re-exports, and serde contract tests together; keep `workRoot` naming stable unless the dashboard spec and dependent API/fixture tickets are intentionally revised.
 - **Change resource view-model shape**: update `core/src/view_model.rs`, the golden JSON fixture, mock provider assumptions, and authenticated route tests together; preserve full hierarchy unless the spec intentionally changes compaction semantics.
 - **Replace mock resources with live discovery**: implement a provider behind the daemon seam, keep the mock fixture for deterministic frontend/contract tests, and do not pull ws MCP session authority, PTY streams, named-agent ownership, or filesystem-discovery policy into the core structs.
+- **Extend the browser shell toward inspectable navigation (planned)**: keep build/package changes in `frontend/`, consume the protected resource API instead of duplicating fixture shape in React state, and do not treat the current three-panel placeholders as implemented navigation, detail, or resource rendering. {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 ## Common Mistakes
 
 - Adding a new route to the top-level router beside `/pair`, which bypasses owner auth.
+- Serving frontend assets through a separate unauthenticated static-file service or fallback route; the frontend is not an auth boundary and must rely on daemon owner auth.
 - Reintroducing `WorktreeId`, `worktreeId`, or `worktree_id` at the public dashboard core/API boundary; linked Git worktrees are a `WorkRootKind`, not the identity vocabulary.
 - Pre-collapsing singleton workspace/workRoot/mainInstance chains in the daemon and breaking stable row identity for later URLs and refresh updates.
 - Editing Rust mock constructors without updating `dashboard_resources.json`; the fixture is the source of truth for deterministic mock responses.
@@ -62,4 +66,3 @@ related:
 ## Technical Debt
 
 - Pairing, bearer, and session secrets are process-memory only and have no persistence yet.
-- `static_dir` is parsed but not served in the foundation shell.
