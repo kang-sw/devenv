@@ -9,6 +9,8 @@ related:
 spec:
   - 260516-ws-web-dashboard-resource-view-model-contract
   - 260516-ws-web-dashboard-mock-view-model-fixtures
+skeletons:
+  phase-1: 8e249ef
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
