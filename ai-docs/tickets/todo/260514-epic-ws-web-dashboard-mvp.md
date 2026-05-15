@@ -73,6 +73,10 @@ The MVP should cover:
 - `260516-feat-ws-web-instance-event-stream` - done; child of the first visible
   substrate for a shared authenticated instance event envelope and
   fixture-backed stream scaffold.
+- Planned: next dashboard epic should start with a dark-first frontend visual
+  system step that turns `ai-docs/ref/design.md` into a dashboard-specific
+  `DESIGN.md`-style theme guideline under `ws-dashboard/frontend/` before
+  deeper UI feature work.
 
 ## Cross-Child Decisions
 
@@ -131,6 +135,9 @@ The MVP should cover:
   web UI. Preserve its restrained, square-corner, hairline-driven operational
   style while adapting density and component choices for dashboard use rather
   than marketing-page composition.
+- Do not apply `ai-docs/ref/design.md` as a light-mode palette by default.
+  Dashboard frontend work should derive a dark-first, Carbon-inspired product
+  theme with semantic tokens before additional large UI surfaces are built.
 - Put future dashboard specs under `ai-docs/spec/ws-web-dashboard/`. Add
   `ai-docs/mental-model/ws-web-dashboard/` only after implementation creates
   real dashboard subdomains; do not prefill speculative mental-model material.
