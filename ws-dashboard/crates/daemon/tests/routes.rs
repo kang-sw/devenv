@@ -626,6 +626,113 @@ async fn root_picker_can_open_existing_directory_into_dashboard_model() {
 }
 
 #[tokio::test]
+async fn instance_event_stream_route_is_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/stream-devenv-main")
+                .body(Body::empty())
+                .expect("unauthenticated event stream request"),
+        )
+        .await
+        .expect("unauthenticated event stream response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn instance_event_stream_route_returns_fixture_events_with_backfill() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/stream-devenv-main")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated event stream request"),
+        )
+        .await
+        .expect("authenticated event stream response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("event stream body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("event stream JSON");
+    assert_eq!(value["streamId"], "stream-devenv-main");
+    assert_eq!(value["events"].as_array().expect("events array").len(), 5);
+    assert_eq!(
+        value["events"][0]["resourcePath"]["workRootId"],
+        "root-devenv-primary"
+    );
+    assert_eq!(value["events"][0]["streamId"], "stream-devenv-main");
+
+    let backfill = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/stream-devenv-main?after=0000000002")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated backfill request"),
+        )
+        .await
+        .expect("authenticated backfill response");
+    assert_eq!(backfill.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(backfill.into_body(), 64 * 1024)
+        .await
+        .expect("backfill body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("backfill JSON");
+    assert_eq!(value["events"].as_array().expect("events array").len(), 3);
+    assert_eq!(value["events"][0]["cursor"], "0000000003");
+
+    let unknown_cursor = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/stream-devenv-main?after=missing")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated unknown cursor request"),
+        )
+        .await
+        .expect("authenticated unknown cursor response");
+    assert_eq!(unknown_cursor.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(unknown_cursor.into_body(), 64 * 1024)
+        .await
+        .expect("unknown cursor body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown cursor JSON");
+    assert!(value["events"].as_array().expect("events array").is_empty());
+}
+
+#[tokio::test]
+async fn instance_event_stream_route_reports_missing_stream() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/missing")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated missing event stream request"),
+        )
+        .await
+        .expect("authenticated missing event stream response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn browser_auth_accepts_loopback_host_and_origin_with_owner_cookie() {
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();

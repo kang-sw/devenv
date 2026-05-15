@@ -1,4 +1,24 @@
+use std::collections::HashMap;
+
+use axum::extract::{Path, Query};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::Serialize;
 use ws_dashboard_core::{InstanceEvent, InstanceEventFixtures, InstanceEventTranscript};
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceEventStreamResponse {
+    pub stream_id: String,
+    pub events: Vec<InstanceEvent>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstanceEventStreamError {
+    error: String,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct MockInstanceEventTranscriptProvider;
@@ -42,6 +62,25 @@ impl MockInstanceEventTranscriptProvider {
                 .collect(),
         )
     }
+}
+
+pub async fn instance_events(
+    Path(stream_id): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let provider = MockInstanceEventTranscriptProvider;
+    let after = query.get("after").map(String::as_str);
+    let Some(events) = provider.events_after(&stream_id, after) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(InstanceEventStreamError {
+                error: "stream not found".to_owned(),
+            }),
+        )
+            .into_response();
+    };
+
+    Json(InstanceEventStreamResponse { stream_id, events }).into_response()
 }
 
 #[cfg(test)]
