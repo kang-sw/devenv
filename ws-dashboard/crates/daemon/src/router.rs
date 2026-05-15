@@ -11,6 +11,7 @@ use tokio::fs;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
+use crate::events::instance_events;
 use crate::resources::dashboard_resources;
 use crate::root_picker::{create_empty_directory, list_root_picker, open_work_root};
 
@@ -27,6 +28,10 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/dashboard/resources", get(dashboard_resources))
+        .route(
+            "/api/dashboard/instance-events/{stream_id}",
+            get(instance_events),
+        )
         .route("/api/dashboard/root-picker", get(list_root_picker))
         .route(
             "/api/dashboard/root-picker/directories",
