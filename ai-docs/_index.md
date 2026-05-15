@@ -22,7 +22,8 @@ history.
 
 ## Current Branch Rules
 
-- Branch: `main`.
+- Verify the current branch with `git status`; do not rely on `_index.md` for a
+  live branch name.
 - No branch-specific spec or mental-model freeze is active.
 - Keep `.codex` untracked unless the user explicitly asks to stage it.
 
@@ -82,52 +83,17 @@ surface may drift.
 
 ## Runtime Surfaces
 
-MCP contract: `ai-docs/ref/ws-mcp.md`.
-
-Implemented MCP tools:
-
-- Context/docs: `ws/project_tree`, `ws/infra.read`, `ws/convention.read`,
-  `ws/mental_models.list`, `ws/mental_models.find`,
-  `ws/mental_models.status`
-- Setup: `ws/ws.setup`
-- Specs: `ws/spec_stem.generate`, `ws/spec_index.verify`, `ws/specs.list`,
-  `ws/specs.find`, `ws/specs.status`
-- Runtime: `ws/runtime.info`
-- Delegation: `ws/subquery`, `ws/path.generate`
-- References: `ws/references.trace`
-- Tickets: `ws/tickets.list`, `ws/tickets.find`, `ws/tickets.status`
-- Git: `ws/git.status`, `ws/git.diff`, `ws/git.log`, `ws/git.merge_base`,
-  `ws/git.commit`
-- Agents: `ws/agents.register`, `ws/agents.call`, `ws/agents.wait`,
-  `ws/agents.result`, `ws/agents.status`, `ws/agents.tail`,
-  `ws/agents.cancel`, `ws/agents.recall`, `ws/agents.print`,
-  `ws/agents.erase`
-- API docs: `ws/api.list`, `ws/api.ask`, `ws/api.ask_async`,
-  `ws/api.status`, `ws/api.result`, `ws/api.cancel`
-
-Shared `agents-plugin` skill text uses MCP names, not repo-local paths. Infra
-and convention text are bundled into the runtime and read through
+MCP contract and current tool inventory live in `ai-docs/ref/ws-mcp.md`; use
+`ws/runtime.info` and `ws/project_tree` for runtime state instead of copying the
+tool list here. Shared `agents-plugin` skill text uses MCP names, not repo-local
+paths. Infra and convention text are bundled into the runtime and read through
 `ws/infra.read` and `ws/convention.read`.
 
 ## MCP Runtime Notes
 
-`agents-plugin-tool/cmd/ws-mcp` provides stdio MCP, `version`, and `doctor`.
-Runtime binaries are plugin cache-local under
-`agents-plugin/.runtime/<os>-<arch>/ws-mcp[.exe]`.
-Downstream simulation smoke: create a temp Git root with only `ai-docs/_index.md`,
-run `WS_MCP_PROJECT_ROOT=<tmp> go run ./cmd/ws-mcp serve --stdio` from
-`agents-plugin-tool/`, and call `infra.read("executor-wrapup")`; it must succeed
-without any `claude-plugin/` directory.
-
-The Python launcher `agents-plugin/bin/ws-mcp-launcher.py`:
-
-- runs from the installed Codex plugin cache with `.mcp.json` `cwd: "."`;
-- derives `WS_MCP_PROJECT_ROOT` from the parent Codex process `PWD`;
-- downloads release assets named `ws-mcp-<os>-<arch>[.exe]`;
-- verifies `SHA256SUMS`;
-- repairs missing, incompatible, or tool-surface-stale cache binaries;
-- for this machine's local install only, can use dev binaries or build from
-  `~/devenv/agents-plugin-tool` when `.local-devenv-runtime` exists.
+Runtime and launcher contracts are maintained in `ai-docs/ref/ws-mcp.md`,
+`ai-docs/spec/plugin-runtime.md`, and the source under `agents-plugin-tool/` and
+`agents-plugin/bin/`.
 
 Windows plugin-managed startup uses the same Python launcher. Native Windows
 needs a working `python3` command; if the Windows Store alias is present without
@@ -136,45 +102,14 @@ rechecking `codex mcp list`.
 
 ## Prompt And Agent Inventory
 
-Active workflows use the embedded runtime prompt bundle.
-
-Key prompts: `code-reviewer`, `code-review-correctness`, `code-review-fit`,
-`code-review-test`, `mental-model-updater`, `project-survey`, `sprint-survey`,
-`implementer`, `skeleton-populator`, `skeleton-reviewer`, `api-doc-manager`,
-and `pre-router`.
-
-Embedded runtime prompt bundle currently includes reviewer, implementer,
-skeleton, subquery, API docs, and delegate-orientation material. Prompt bundle
-hash is recorded in `agents-plugin/runtime.json`; update it after embedded
-prompt changes.
+Active workflows use the embedded runtime prompt bundle. For prompt inventory
+and hash behavior, read `ai-docs/mental-model/prompt-bundle.md`,
+`agents-plugin/runtime.json`, and the embedded prompt sources.
 
 ## Skill Inventory
 
-Codex-first `agents-plugin/skills/` currently uses `lead-*` names:
-
-```text
-lead-add-rule
-lead-bootstrap
-lead-discuss
-lead-edit
-lead-forge-mental-model
-lead-forge-spec
-lead-implement
-lead-check-blockers
-lead-proceed
-lead-review
-lead-salvage
-lead-ship
-lead-skill-authoring
-lead-sprint
-lead-update-spec
-lead-verify-discussion
-lead-workflow-manual
-lead-write-code
-lead-write-skeleton
-lead-write-spec
-lead-write-ticket
-```
+Codex-first skills live under `agents-plugin/skills/` and use `lead-*` names.
+Use the source tree and plugin manifest/tests for the current inventory.
 
 ## Canonical Flows
 
@@ -240,19 +175,6 @@ dropped tickets live in hidden archive dirs and git history.
 authentication hardening after the Phase 1 auth-gated daemon shell.
 
 ## Session Notes
-
-Workflow documentation compression is complete:
-`260504-chore-compress-workflow-docs` is closed after compressing root context,
-bootstrap template, active `lead-*` skills, delegate prompts, and
-`agents-plugin/skills/lead-skill-authoring/SKILL.md`.
-
-wsflow runtime mode, package scaffold, sprint inclusion, and local
-marketplace/install path are implemented and closed.
-
-Key artifacts: `agents-plugin-tool/internal/wsagent/agent.go`,
-`agents-plugin-tool/internal/mcp/server.go`,
-`agents-plugin-tool/internal/wsprompt/infra/delegate-orientation.md`,
-`ai-docs/ref/ws-agent-runtime.md`.
 
 Open: verify Codex hook feedback semantics on macOS/later CLI; durable leaf role
 assignment remains deferred.
