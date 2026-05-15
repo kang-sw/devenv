@@ -66,29 +66,33 @@ async fn pair_is_the_only_unauthenticated_browser_route() {
 }
 
 #[tokio::test]
-async fn health_rejects_before_pairing() {
+async fn non_pair_browser_routes_reject_before_pairing() {
     let app = build_router(app_state());
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/healthz")
-                .body(Body::empty())
-                .expect("health request"),
-        )
-        .await
-        .expect("health response");
+    for uri in ["/healthz", "/", "/favicon.ico"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .body(Body::empty())
+                    .expect("unauthenticated request"),
+            )
+            .await
+            .expect("unauthenticated response");
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
 }
 
 #[tokio::test]
-async fn valid_pairing_installs_http_only_owner_session_cookie() {
+async fn valid_pairing_installs_http_only_owner_session_cookie_once() {
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri(format!("/pair?token={token}"))
@@ -105,6 +109,19 @@ async fn valid_pairing_installs_http_only_owner_session_cookie() {
     let set_cookie = set_cookie.to_str().expect("cookie header is ASCII");
     assert!(set_cookie.contains("ws-dashboard-owner="));
     assert!(set_cookie.contains("HttpOnly"));
+
+    let reused = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/pair?token={token}"))
+                .body(Body::empty())
+                .expect("reused pair request"),
+        )
+        .await
+        .expect("reused pair response");
+
+    assert_eq!(reused.status(), StatusCode::GONE);
+    assert!(reused.headers().get(header::SET_COOKIE).is_none());
 }
 
 #[tokio::test]
@@ -138,6 +155,12 @@ async fn health_output_stays_minimal() {
     let app = build_router(state);
     let cookie = pair_and_cookie(app.clone(), &token).await;
 
+    let session_value = cookie
+        .split_once('=')
+        .expect("cookie name and value")
+        .1
+        .to_owned();
+
     let response = app
         .oneshot(
             Request::builder()
@@ -155,7 +178,16 @@ async fn health_output_stays_minimal() {
         .expect("health body bytes");
     let body = std::str::from_utf8(&body).expect("health body utf8");
 
-    for forbidden in [token.as_str(), "wsstate", "target", "cache", "git"] {
+    assert_eq!(body, "ok\n");
+    for forbidden in [
+        token.as_str(),
+        session_value.as_str(),
+        "wsstate",
+        "target",
+        "cache",
+        "git",
+        "diagnostic",
+    ] {
         assert!(!body.contains(forbidden));
     }
 }
