@@ -36,6 +36,16 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             "commands": ["runtime.info"],
         }
 
+    def test_version_compatibility_requires_exact_plugin_patch(self):
+        launcher = load_launcher()
+        contract = self.capability_contract()
+
+        self.assertTrue(launcher.version_compatible("0.18.1", contract))
+        self.assertTrue(launcher.version_compatible("0.18.1-dev", contract))
+        self.assertFalse(launcher.version_compatible("0.18.0", contract))
+        self.assertFalse(launcher.version_compatible("0.18.2", contract))
+        self.assertFalse(launcher.version_compatible("0.19.0", contract))
+
     def test_capabilities_probe_validates_full_contract_from_one_response(self):
         launcher = load_launcher()
         binary = Path("/tmp/ws-mcp")
@@ -60,6 +70,7 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
         cases = {
             "version": lambda payload: payload.update({"version": "0.17.9"}),
+            "patch_version": lambda payload: payload.update({"version": "0.18.0"}),
             "protocol": lambda payload: payload.update({"mcp_protocol": "2024-11-05"}),
             "prompt_bundle": lambda payload: payload.update({"prompt_bundle": {"content_sha256": "wrong"}}),
             "tools": lambda payload: payload.update({"tools": []}),
