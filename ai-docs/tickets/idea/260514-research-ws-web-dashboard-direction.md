@@ -118,6 +118,38 @@ Use opaque ids at every level. Host paths, Git roots, link details, and runtime
 session identifiers remain daemon-owned state exposed through view models, not
 URL identity.
 
+The concrete openable project target needs to support non-Git directories as
+well as Git working trees. Treat the shared UI component as a root-like item
+with additive capabilities rather than as a file-manager folder:
+
+```text
+rootKind: plainDirectory | gitRootDir | gitWorktree
+```
+
+`plainDirectory` can still be opened, inspected, and used as a terminal,
+editor, or instance-spawn target. `gitRootDir` and `gitWorktree` share the same
+core root UI and Git-aware affordances, but their metadata should preserve the
+difference between a repository's primary root directory and a linked worktree.
+That distinction matters for labels, grouping, branch/lifecycle context, and
+destructive actions.
+
+The dashboard should never expose generic recursive folder deletion. If it
+offers destructive root lifecycle actions, keep them Git-aware and explicit:
+linked worktrees may later support a guarded `git worktree remove` action, while
+plain directories and Git root directories should not show a delete-folder
+action.
+
+Discovery needs both automatic and user-directed entry points. Automatic
+discovery can propose recent roots, known ws roots, daemon working directories,
+configured search roots, and Git worktrees. User-directed discovery should feel
+like a lightweight explorer that lets the owner navigate server filesystem roots
+and open a directory even when it is not a Git repository.
+
+Bookmarks are a useful navigation idea, but they should stay research-level
+until the first visible substrate stabilizes. Model space should remain open for
+future saved pointers such as discovered, recent, bookmarked, or manually opened
+roots without making bookmark CRUD part of the first implementation child.
+
 ## Harness And Runtime Library Direction
 
 A self-contained agent harness library is a larger runtime direction, not a

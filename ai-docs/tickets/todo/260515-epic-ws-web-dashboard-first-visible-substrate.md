@@ -20,7 +20,7 @@ related-mental-model:
 Create the first dashboard milestone that is both backend-contract heavy and
 visually inspectable. This epic should turn the authenticated daemon foundation
 into a narrow dashboard shell where the owner can see the server, workspace,
-worktree, main-instance, and sub-instance model through stable daemon-owned view
+root/worktree, main-instance, and sub-instance model through stable daemon-owned view
 models.
 
 The milestone should make future child tickets non-blocked on unresolved
@@ -43,8 +43,9 @@ reopening the basic dashboard frame.
 ## Child Tickets
 
 - Planned: resource and view-model API substrate - define the server,
-  workspace, worktree, main-instance, and sub-instance JSON shapes, opaque-id
-  rules, route map, error/loading/stale fields, and golden fixtures.
+  workspace, root, main-instance, and sub-instance JSON shapes, opaque-id rules,
+  root-kind metadata, route map, error/loading/stale fields, and golden
+  fixtures.
 - Planned: mock provider and contract test substrate - let the daemon serve
   deterministic dashboard data without live wsstate, PTY, or harness coupling,
   and verify fixtures plus protected API routes.
@@ -52,8 +53,8 @@ reopening the basic dashboard frame.
   daemon and render the first inspectable navigation tree plus detail pane from
   the same mock/live view-model contract.
 - Planned: local workspace discovery substrate - connect the view model to real
-  local project and Git worktree discovery while preserving opaque ids and
-  offline, moved, or inaccessible worktree states.
+  local project, plain-directory, Git-root, and Git-worktree discovery while
+  preserving opaque ids and offline, moved, or inaccessible root states.
 - Planned: event stream substrate - define the shared instance event envelope,
   reconnect/backfill behavior, and transcript fixture shape for later PTY,
   named-agent, exec, and diagnostic streams.
@@ -63,12 +64,22 @@ reopening the basic dashboard frame.
 - Treat this epic as the UX contract-setting pass for the first visible
   dashboard. Child tickets should not block on basic navigation, resource
   vocabulary, empty/loading/error treatment, or mock/live data boundaries.
-- Preserve the resource language:
-  `server -> workspace -> worktree -> mainInstance -> subInstance`.
-  Reserve `session` for auth/browser and external protocol sessions.
+- Preserve the resource hierarchy as
+  `server -> workspace -> root/worktree -> mainInstance -> subInstance` while
+  the first child ticket settles final API vocabulary. Reserve `session` for
+  auth/browser and external protocol sessions.
+- Treat the concrete openable project target as a shared root component with
+  additive capabilities for `plainDirectory`, `gitRootDir`, and `gitWorktree`.
+  Git root directories and linked Git worktrees should share core UI and
+  spawning behavior while preserving metadata that lets the UI distinguish their
+  lifecycle and repository role.
 - Use opaque ids in API paths. Host paths, Git roots, worktree keys, and wsstate
   storage details stay daemon-owned and appear only through authenticated view
   models.
+- Do not offer generic folder deletion from the dashboard. Destructive root
+  lifecycle actions may be exposed only as explicit Git-aware worktree actions
+  for linked worktrees, with dirty/untracked safeguards left to the implementing
+  child ticket.
 - Keep mock and live providers behind the same daemon API contract so frontend
   work can start before live integrations are complete and tests can verify
   behavior without host-specific state.
