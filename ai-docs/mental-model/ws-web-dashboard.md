@@ -15,7 +15,9 @@ related:
 - `ws-dashboard/crates/daemon/src/server.rs` owns listener binding, startup auth state creation, pairing URL emission, and graceful shutdown.
 - `ws-dashboard/crates/daemon/src/router.rs` and `auth.rs` own the browser route boundary, one-time pairing expiry, bearer-auth exception, Host/Origin entrypoint checks, and owner session cookie checks. {#260515-ws-web-daemon-foundation}
 - `ws-dashboard/crates/core/src/ids.rs` and `resources.rs` own the public dashboard resource vocabulary shared by later API, frontend, discovery, and event-stream work. {#260516-ws-web-dashboard-core-resource-vocabulary}
+- `ws-dashboard/crates/core/src/events.rs` owns the public instance event envelope shared by later PTY, named-agent, exec, diagnostic, viewer, and translation streams. {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 - `ws-dashboard/crates/core/src/view_model.rs`, `daemon/src/resources.rs`, and `daemon/src/mock.rs` own the first authenticated resource hierarchy API and fixture-backed provider seam. {#260516-ws-web-dashboard-resource-view-model-contract} {#260516-ws-web-dashboard-mock-view-model-fixtures}
+- `ws-dashboard/crates/daemon/src/events.rs` owns deterministic fixture-backed instance transcripts and cursor backfill behavior until live stream sources exist. {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 - `ws-dashboard/crates/daemon/src/discovery.rs` owns live local workRoot discovery and maps remembered/opened paths into the same resource view-model provider contract. {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 - `ws-dashboard/crates/daemon/src/root_picker.rs` owns the authenticated backend root picker, empty-directory creation, and open-workRoot route handlers. {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
 - `ws-dashboard/frontend/` owns the React/Vite browser shell that is served by the daemon when `--static-dir` points at its production build output and renders the first inspectable resource hierarchy. {#260516-ws-web-dashboard-protected-frontend-shell} {#260516-ws-web-dashboard-inspectable-navigation-shell}
@@ -41,6 +43,8 @@ related:
 - Static dashboard serving is configuration-gated: `/` serves `static_dir/index.html`, `/assets/{*asset_path}` serves only safe relative paths below `static_dir/assets`, and both stay inside the owner-auth protected router. Without `static_dir`, the daemon keeps the minimal fallback HTML and asset requests 404. {#260516-ws-web-dashboard-protected-frontend-shell}
 - The browser shell consumes `/api/dashboard/resources` as its source of truth, not a copied frontend fixture; refresh failures after a successful load must stay visible while stale rows remain inspectable. {#260516-ws-web-dashboard-inspectable-navigation-shell}
 - Frontend mouse actions carry `data-command-id` command identities so later keyboard bindings can dispatch the same command layer instead of forking interaction behavior. {#260516-ws-web-dashboard-inspectable-navigation-shell}
+- Instance events carry stream and resource identity on each event, not only on an outer transcript, so future streaming routes can emit individual events without an out-of-band identity envelope. {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
+- Unknown cursors do not replay a full transcript; fixture backfill returns an empty event set for unrecognized cursors and reserves missing-stream behavior for unknown stream ids. {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 
 ## Coupling
 
@@ -51,6 +55,7 @@ related:
 - Live discovery is intentionally behind the provider seam while `/api/dashboard/resources` remains mock-backed; switching routes to live data must preserve the mock fixture path for deterministic frontend and contract tests.
 - Root picker open routes couple `root_picker.rs` to `discovery.rs`: opening an existing directory returns the same dashboard resource view-model shape as the provider, so provider field changes ripple into route tests.
 - The frontend resource shell couples `frontend/src/App.tsx` to the core JSON contract by TypeScript shape only; changing API field names requires updating Rust serde tests, golden fixture, route tests, and the React view together.
+- Instance event JSON couples `core/src/events.rs`, daemon fixture transcripts, and future stream routes; changing cursor, category, payload, or resource identity fields must keep fixture and serialization tests aligned.
 
 ## Extension Points & Change Recipes
 
@@ -62,6 +67,7 @@ related:
 - **Change resource view-model shape**: update `core/src/view_model.rs`, the golden JSON fixture, mock provider assumptions, and authenticated route tests together; preserve full hierarchy unless the spec intentionally changes compaction semantics.
 - **Replace mock resources with live discovery**: switch routing/config to select the live provider, keep the mock fixture for deterministic frontend/contract tests, and do not pull ws MCP session authority, PTY streams, named-agent ownership, or filesystem-discovery policy into the core structs.
 - **Extend root picker operations**: add only explicit owner-authenticated operations with route tests for unauthenticated rejection and success; destructive or broad file-manager verbs require a new ticket and should not be piggybacked onto picker listing/open behavior.
+- **Add live instance stream sources**: produce the shared event envelope from PTY, named-agent, exec, diagnostic, viewer, or translation sources; do not define feature-specific stream identity or cursor formats outside `core/src/events.rs`.
 - **Extend the browser shell beyond inspectable navigation**: keep feature depth layered on top of the existing resource shell, route visible actions through command ids, and preserve the reserved viewer region until a later viewer ticket implements real document/editor/terminal behavior. {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 ## Common Mistakes

@@ -53,6 +53,23 @@ Success criteria:
   reuse the same envelope without redefining stream identity.
 - Fixtures are stable enough for frontend rendering and reconnect tests.
 
+### Result (5e3e530) - 2026-05-16
+
+Implemented the shared instance event envelope and deterministic transcript
+fixtures. The core crate now exposes event fixture, transcript, event,
+category, and payload types that serialize with the dashboard camelCase
+contract and carry stream plus resource identity on each individual event.
+
+The daemon now has a fixture-backed transcript provider using
+`daemon/tests/fixtures/instance_events.json`. The fixture covers ordinary
+output, status transitions, error, terminal end markers, an empty stream, and
+cursor backfill behavior. Unknown cursors return an empty backfill rather than
+replaying the whole transcript, while unknown stream ids remain missing.
+
+Verification: `cargo test --workspace` passed. Review found missing per-event
+stream/resource identity and unknown-cursor full replay; the final commit fixes
+both with serialization and backfill regression coverage.
+
 ### Phase 2: Authenticated stream route scaffold
 
 Expose a minimal authenticated stream route that can serve fixture-backed
