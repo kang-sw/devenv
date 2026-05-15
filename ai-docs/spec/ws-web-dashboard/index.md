@@ -55,3 +55,44 @@ The initial UI route serves a minimal placeholder surface behind owner
 authentication. Health output is the exact minimal body `ok\n`; host paths,
 cache paths, Git roots, pairing tokens, session values, diagnostics, and wsstate
 internals are not URL identity and are not exposed by the health surface.
+
+## 🚧 Resource View-Model Contract {#260516-ws-web-dashboard-resource-view-model-contract}
+
+The dashboard will expose authenticated HTTP view-model APIs for the first
+visible resource hierarchy:
+
+```text
+server -> workspace -> workRoot -> mainInstance -> subInstance
+```
+
+Callers will address API resources through opaque ids rather than host paths,
+Git roots, wsstate paths, workRoot keys, or runtime session identifiers. The
+daemon will own those private identifiers and expose only authenticated
+view-model fields that the browser needs to render navigation, selection,
+status, stale/error/loading state, and available actions.
+
+`workspace` will mean a daemon-discovered project group, not a user-created
+category. `workRoot` will mean the physical directory used as an open, spawn,
+and run target. WorkRoots will report additive kind metadata for
+`plainDirectory`, `gitPrimaryRoot`, or `gitLinkedWorktree`, plus status such as
+online, offline, moved, or inaccessible. Primary roots and linked Git worktrees
+will share the same core workRoot API shape while preserving enough metadata
+for the UI to distinguish their repository role and lifecycle affordances.
+
+The API shape will preserve the full hierarchy even when the browser later
+renders singleton `workspace -> workRoot -> mainInstance` chains as compact
+rows. Authenticated callers may observe compactability hints, but compaction is
+a presentation policy and not URL identity.
+
+## 🚧 Mock View-Model Fixtures {#260516-ws-web-dashboard-mock-view-model-fixtures}
+
+The dashboard daemon will provide deterministic fixture-backed resource data
+that uses the same view-model API contract as live providers. Frontend and
+contract tests will be able to render the first visible shell without live
+wsstate, PTY, named-agent, harness, or filesystem discovery dependencies.
+
+Fixtures will cover singleton chains, multi-root workspaces, plain directories,
+Git primary roots, linked Git worktrees, offline or inaccessible workRoots,
+main instances, sub instances, stale/error/loading states, and visible action
+hints. Protected API route tests will verify that fixture-backed dashboard data
+remains behind the owner-auth boundary.
