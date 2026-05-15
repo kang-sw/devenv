@@ -11,10 +11,12 @@ spec:
   - 260516-ws-web-dashboard-mock-view-model-fixtures
 skeletons:
   phase-1: 8e249ef
+  phase-2: ae44dad
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-16
 ---
 
 # ws web dashboard resource view-model contract
@@ -105,3 +107,24 @@ Success criteria:
   discovery exists.
 - Golden fixtures preserve the full hierarchy and include compactable cases.
 - Unauthenticated callers cannot access dashboard view-model API routes.
+
+### Result (909cb9e) - 2026-05-16
+
+Implemented the authenticated dashboard resource view-model API and
+fixture-backed mock provider. The daemon now exposes
+`GET /api/dashboard/resources` inside the existing owner-auth protected router,
+returning the full `server -> workspace -> workRoot -> mainInstance ->
+subInstance` hierarchy through the shared core view-model contract.
+
+Added deterministic mock resource data backed by
+`ws-dashboard/crates/daemon/tests/fixtures/dashboard_resources.json`, with
+route tests proving unauthenticated callers are rejected and authenticated
+owners receive JSON matching the shared golden fixture. The fixture covers
+multi-root and singleton workspaces, `plainDirectory`, `gitPrimaryRoot`,
+`gitLinkedWorktree`, offline/inaccessible states, main/sub instances,
+loading/stale/error state fields, compactable hints, and action hints.
+
+Verification: `cargo test -p ws-dashboard-core --lib`,
+`cargo test -p ws-dashboard-daemon --test routes`, and `cargo test --workspace`
+passed. Correctness, fit, and test reviews were clean after the golden fixture
+follow-up.
