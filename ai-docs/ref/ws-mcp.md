@@ -1099,18 +1099,26 @@ Input fields:
 - `harness` is optional and accepts `codex`, `claude`, `gemini`, or `default`.
   When omitted, MCP calls use the detected session harness when one is known;
   callers without a detected harness update `default`.
+- `effort` is optional and accepts `low`, `medium`, `high`, or `xhigh`. Empty,
+  omitted, or `none` means no backend effort override for this alias.
 
 Behavior:
 
 - Configuration is written to `~/.cache/ws@kang-sw-devenv/config.json`, or to
   `$WS_CACHE_HOME/config.json` when `WS_CACHE_HOME` is set.
 - The stored alias entry is `model_aliases.<tier>.<target>`, where `<target>` is
-  the explicit harness, detected MCP session harness, or `default`.
+  the explicit harness, detected MCP session harness, or `default`. A non-empty
+  effort is stored on that alias entry with the resolved backend and model.
 - Missing alias mappings in an existing config are backfilled from default Codex
   and Claude alias mappings without overwriting user-provided entries.
+- Updating an alias with empty, omitted, or `none` effort clears any previously
+  stored effort, preserving the no-override behavior.
 - `agents.register` applies alias mapping after explicit model selection and
   prompt frontmatter resolution. Concrete model names bypass alias mapping while
-  still allowing backend inference when `backend` is omitted.
+  still allowing backend inference when `backend` is omitted. Resolved alias
+  effort is stored with the agent and applied by backend runners only when
+  non-empty; Codex uses `model_reasoning_effort=<value>` and Claude uses
+  `--effort <value>`.
 
 Public `agents.*` schemas intentionally omit `root`; establish the current
 worktree with `ws/ws.setup` before normal calls. Explicit `root` arguments may
@@ -1131,6 +1139,9 @@ Important input fields:
   backend model override. Concrete model names take precedence over aliases.
 - `tier` is a deprecated compatibility alias selector used only when `model` is
   absent.
+- There is no direct `effort` input. Named-agent effort is configured only on
+  model aliases through `ws/config.agents_tier` or the CLI mirror
+  `ws-mcp config agents-tier --effort`.
 - `prompts` is the canonical prompt chain field.
 - `prompt_refs` is a migration alias for older callers.
 - `system_prompt_text` appends materialized system instructions after resolved

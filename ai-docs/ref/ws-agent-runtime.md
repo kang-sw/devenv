@@ -258,6 +258,18 @@ override alias mapping for one registration. When
 `haiku`/`sonnet`/`opus`/`claude` → `claude`) and otherwise falls back to
 `codex`.
 
+Model aliases are also the only user-facing route for named-agent reasoning
+effort selection. Configure effort on an alias with `config.agents_tier` or the
+CLI mirror `ws-mcp config agents-tier`; do not pass effort directly to
+`agents.register`, `subquery`, prompt frontmatter, or workflow skill calls.
+Portable effort values are `low`, `medium`, `high`, and `xhigh`. Empty, omitted,
+or `none` effort means no backend effort override is stored or sent; updating an
+alias without `effort` clears any previously stored effort for that alias. When a
+named agent resolves a configured alias, the runtime stores the resolved effort
+in `agent.json` and the backend runner applies it if supported: Codex receives
+`model_reasoning_effort=<value>`, Claude receives `--effort <value>`, and an
+empty effort produces no backend effort argument.
+
 ## Tool Surface
 
 MCP tools use server `ws` and the following tool names:
@@ -307,7 +319,7 @@ ws-mcp agents cancel --root <repo> --name <name>
 ws-mcp agents print --root <repo> --name <name>
 ws-mcp agents erase --root <repo> --name <name>
 ws-mcp config show
-ws-mcp config agents-tier --tier <light|core|deep> [--harness <harness|default>] [--backend <backend>] [--model <concrete-model>]
+ws-mcp config agents-tier --tier <light|core|deep> [--harness <harness|default>] [--backend <backend>] [--model <concrete-model>] [--effort none|low|medium|high|xhigh]
 ws-mcp path generate --root <repo> --kind review <stem> [<stem> ...]
 ws-mcp runtime info
 ```
@@ -425,6 +437,8 @@ Backends are responsible for:
 - creating or resuming a host session from `session_id`
 - applying the materialized system prompt or equivalent instruction file
 - sending the new prompt plus pending inbox messages
+- applying a resolved alias effort only when the stored value is non-empty and
+  supported by the backend
 - updating `session_id` as soon as the host assigns one on first call
 - writing the plain-text response to `output.md`
 - appending lifecycle entries to `events.jsonl`
