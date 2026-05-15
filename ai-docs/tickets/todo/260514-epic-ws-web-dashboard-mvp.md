@@ -7,6 +7,7 @@ related:
   260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
   260515-epic-ws-web-dashboard-first-visible-substrate: first visible dashboard substrate milestone
   260516-feat-ws-web-resource-view-model-contract: first child of the visible substrate milestone
+  260516-feat-ws-web-minimal-frontend-shell: inspectable frontend child of the visible substrate milestone
 related-mental-model:
   - developer-environment-tools
   - named-agent-runtime
@@ -64,7 +65,7 @@ The MVP should cover:
 - `260516-feat-ws-web-resource-view-model-contract` - done; first child of the
   first visible substrate and next implementation-order blocker for stable
   dashboard resource APIs, mock fixtures, and workRoot vocabulary.
-- `260516-feat-ws-web-minimal-frontend-shell` - ready; child of the first
+- `260516-feat-ws-web-minimal-frontend-shell` - done; child of the first
   visible substrate for the first inspectable authenticated browser shell.
 - `260516-feat-ws-web-local-workspace-discovery` - todo; child of the first
   visible substrate for live local plain-directory, Git-primary-root, and

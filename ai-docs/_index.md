@@ -16,7 +16,8 @@ Active plugin package: `agents-plugin/` (`ws@0.26.3`).
 Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.26.3`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
-harness-cli, bind-guarded daemon shell, and frontend placeholder).
+harness-cli, bind-guarded daemon shell, resource API fixtures, and a React/Vite
+inspectable frontend shell).
 Retired Claude source material: `ai-docs/ref/claude-home-legacy.md` and git
 history.
 
@@ -150,7 +151,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260515-epic-ws-web-dashboard-first-visible-substrate` | todo | Coordinate the first inspectable dashboard substrate across view-model APIs, fixtures, frontend shell, workspace discovery, and event streams |
-| `260516-feat-ws-web-minimal-frontend-shell` | ready | Build the first authenticated inspectable browser shell over the dashboard view-model API |
 | `260516-feat-ws-web-local-workspace-discovery` | todo | Connect local plain-directory, Git-primary-root, and Git-linked-worktree discovery to the view-model contract |
 | `260516-feat-ws-web-instance-event-stream` | todo | Define the authenticated instance event envelope and fixture-backed stream scaffold |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
@@ -173,7 +173,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260516-feat-ws-web-minimal-frontend-shell` - implement the first protected React/Vite dashboard shell and inspectable navigation/detail surface over the resource view-model API.
 
 ## Session Notes
 

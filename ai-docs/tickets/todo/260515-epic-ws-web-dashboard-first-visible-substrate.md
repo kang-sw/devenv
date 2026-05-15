@@ -47,7 +47,7 @@ reopening the basic dashboard frame.
   server/workspace/workRoot/main-instance/sub-instance view-model contract,
   workRoot vocabulary, protected API routes, mock provider, and golden
   fixtures.
-- `260516-feat-ws-web-minimal-frontend-shell` - ready; attaches the real
+- `260516-feat-ws-web-minimal-frontend-shell` - done; attaches the real
   React/Vite shell to the daemon and renders the first inspectable navigation
   and detail surface from the shared view-model API.
 - `260516-feat-ws-web-local-workspace-discovery` - todo; connects the

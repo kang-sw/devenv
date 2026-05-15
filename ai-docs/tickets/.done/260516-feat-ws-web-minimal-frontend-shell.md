@@ -14,6 +14,7 @@ skeletons:
 related-mental-model:
   - ws-web-dashboard
   - developer-environment-tools
+completed: 2026-05-16
 ---
 
 # ws web dashboard minimal frontend shell
@@ -94,3 +95,23 @@ Success criteria:
 - UI text and controls fit at desktop and narrow browser sizes.
 - Mouse actions use command ids so future keyboard bindings can call the same
   actions.
+
+### Result (f550788) - 2026-05-16
+
+Implemented the first inspectable dashboard browser shell over the authenticated
+resource API. The React app now fetches `/api/dashboard/resources`, renders the
+full `server -> workspace -> workRoot -> mainInstance -> subInstance`
+hierarchy in the left navigation, displays selected resource detail in the
+center panel, and reserves a right viewer panel without implementing viewer
+feature depth.
+
+The shell renders loading, empty, stale, error, compact singleton, selected,
+disabled-action, and post-load refresh-failure states. Mouse-triggered row and
+action controls carry command ids so a future keyboard layer can dispatch the
+same command path instead of duplicating interaction behavior.
+
+Verification: `npm run build`, `cargo test --workspace`, authenticated daemon
+smoke checks for `/` and `/api/dashboard/resources`, and Playwright desktop and
+mobile screenshots passed. Review found a post-load refresh failure visibility
+bug; the final commit fixes it with an inline refresh-failure notice while
+keeping stale data visible.
