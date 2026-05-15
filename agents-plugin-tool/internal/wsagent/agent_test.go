@@ -525,6 +525,36 @@ func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 	}
 }
 
+func TestCallThreadsAgentEffortToRunner(t *testing.T) {
+	repo := initRepo(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "codex", "high"); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{}
+	manager := NewManager(Options{
+		CacheHome: cache,
+		Now:       func() time.Time { return testNow },
+		Runner:    runner,
+	})
+	if _, _, err := manager.Register(RegisterOptions{
+		Root:    repo,
+		Name:    "impl",
+		Harness: "codex",
+		Model:   "core",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := manager.syncCall(syncCallOptions{Root: repo, Name: "impl", Prompt: "work"}); err != nil {
+		t.Fatalf("syncCall returned error: %v", err)
+	}
+
+	if len(runner.calls) != 1 || runner.calls[0].Model != "gpt-5.4" || runner.calls[0].Effort != "high" {
+		t.Fatalf("runner model/effort mismatch: %+v", runner.calls)
+	}
+}
+
 func TestCallCreatesAndResumesSession(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
@@ -698,6 +728,28 @@ func TestClaudeRunnerResumesWithSystemPromptModelAndHook(t *testing.T) {
 	}
 }
 
+func TestClaudeArgsAddsEffortWhenPresent(t *testing.T) {
+	args, err := claudeArgs(RunnerRequest{Effort: " xhigh "}, "session-123", true, "prompt")
+	if err != nil {
+		t.Fatalf("claudeArgs returned error: %v", err)
+	}
+	joined := strings.Join(args, "\x00")
+	if !strings.Contains(joined, "--effort\x00xhigh") {
+		t.Fatalf("claude args missing effort: %+v", args)
+	}
+}
+
+func TestClaudeArgsOmitsEffortWhenEmpty(t *testing.T) {
+	args, err := claudeArgs(RunnerRequest{Effort: "   "}, "session-123", true, "prompt")
+	if err != nil {
+		t.Fatalf("claudeArgs returned error: %v", err)
+	}
+	joined := strings.Join(args, "\x00")
+	if strings.Contains(joined, "--effort") {
+		t.Fatalf("claude args unexpectedly included effort: %+v", args)
+	}
+}
+
 func TestClaudeRunnerNonZeroExitPreservesStderr(t *testing.T) {
 	repo := initRepo(t)
 	binDir := t.TempDir()
@@ -743,8 +795,24 @@ func TestBuildCodexInvocationUsesStdinPromptForFirstCall(t *testing.T) {
 			t.Fatalf("codex args missing %q: %+v", want, invocation.Args)
 		}
 	}
-	if strings.Contains(joined, "sentinel line") || strings.Contains(joined, "resume") {
-		t.Fatalf("prompt leaked into argv or unexpected resume: %+v", invocation.Args)
+	for _, notWant := range []string{"sentinel line", "resume", "model_reasoning_effort"} {
+		if strings.Contains(joined, notWant) {
+			t.Fatalf("codex args contained %q: %+v", notWant, invocation.Args)
+		}
+	}
+}
+
+func TestBuildCodexInvocationAddsEffortOverrideWhenPresent(t *testing.T) {
+	invocation, err := buildCodexInvocation(RunnerRequest{
+		Prompt: "effort prompt",
+		Effort: " high ",
+	})
+	if err != nil {
+		t.Fatalf("buildCodexInvocation returned error: %v", err)
+	}
+	joined := strings.Join(invocation.Args, "\x00")
+	if !strings.Contains(joined, "-c\x00model_reasoning_effort=high") {
+		t.Fatalf("codex args missing effort override: %+v", invocation.Args)
 	}
 }
 

@@ -59,6 +59,9 @@ func claudeArgs(req RunnerRequest, sessionID string, firstCall bool, prompt stri
 	if model := strings.TrimSpace(req.Model); model != "" && !isBackendShorthand(model) {
 		args = append(args, "--model", model)
 	}
+	if effort := strings.TrimSpace(req.Effort); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	if req.SystemPromptPath != "" {
 		systemPrompt, err := os.ReadFile(req.SystemPromptPath)
 		if err != nil {
