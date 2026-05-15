@@ -110,3 +110,29 @@ primary roots, linked Git worktrees, offline or inaccessible workRoots, main
 instances, sub instances, stale/error/loading states, and visible action hints.
 Protected API route tests verify that fixture-backed dashboard data remains
 behind the owner-auth boundary.
+
+## 🚧 Protected Frontend Shell {#260516-ws-web-dashboard-protected-frontend-shell}
+
+The dashboard daemon will serve the first React/TypeScript/Vite browser shell
+behind the same owner-auth boundary as other protected dashboard routes. Static
+asset serving will not add another unauthenticated top-level route beside
+`/pair`; unauthenticated browser requests for the dashboard shell will be
+rejected before assets or fallback UI are served.
+
+The frontend package will provide documented local development and production
+build entrypoints that later dashboard slices can reuse. The first shell will
+remain narrow: it will not implement PTY, editor, document viewer, live
+workspace discovery, event streams, named-agent controls, or root picker
+behavior.
+
+## 🚧 Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
+
+The first browser shell will render the resource view-model contract from the
+daemon API. It will show server, workspace, workRoot, main-instance, and
+sub-instance state; loading, empty, stale, and error states; compact singleton
+rows; and a reserved right-side viewer region without implementing the deferred
+viewer feature.
+
+Mouse-triggered navigation actions will route through command ids so later
+keyboard bindings can call the same commands. The shell will reserve `^b` to
+mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
