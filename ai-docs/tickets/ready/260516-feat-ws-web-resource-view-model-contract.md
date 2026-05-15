@@ -69,6 +69,23 @@ Success criteria:
 - Resource paths and serialized field names use `workRoot`, not `worktree`.
 - Existing daemon foundation tests continue to pass.
 
+### Result (8e249ef) - 2026-05-16
+
+Implemented the dashboard core resource vocabulary contract. The core crate now
+exports `WorkRootId`, `WorkRootStatus`, `WorkRootKind`, and
+`ResourcePath.work_root_id`, and no longer exports the previous worktree-named
+core aliases at the public dashboard boundary.
+
+Added serde-backed contract tests proving that `ResourcePath` serializes with
+`workRootId` and without `worktreeId` or `worktree_id`, and that
+`WorkRootKind` serializes as `plainDirectory`, `gitPrimaryRoot`, and
+`gitLinkedWorktree`. The implementation stayed within Phase 1: it did not add
+dashboard HTTP routes, mock providers, golden fixtures, discovery, frontend, or
+stream behavior.
+
+Verification: `cargo test -p ws-dashboard-core` and `cargo test --workspace`
+passed.
+
 ### Phase 2: Authenticated view-model API and mock fixtures
 
 Add protected daemon API routes that return deterministic dashboard view models
