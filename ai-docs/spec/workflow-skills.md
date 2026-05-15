@@ -283,9 +283,14 @@ spec -> ticket -> implementation
 Existing non-epic `ready/` ticket paths skip ticket creation and become
 implementation targets after `lead-proceed` selects an implementation slice.
 The default slice is the first unfinished phase; targets without phase sections
-use the whole target. Multiple phases are selected only when the user explicitly
-requests them or the ticket artifacts show the phases cannot be verified
-separately.
+use the whole target. Multiple phases are selected when the user explicitly
+requests them, when the user grants `auto-slice` permission and adjacent
+unfinished phases form one cohesive implementation and review slice, or when
+the ticket artifacts show the phases cannot be verified separately.
+`auto-slice` is permission rather than a mandate: `lead-proceed` may group
+adjacent phases, especially when a later phase only verifies the immediately
+preceding implementation, while keeping unrelated public contracts, independent
+skeleton needs, or separately reviewable security boundaries split.
 
 Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
