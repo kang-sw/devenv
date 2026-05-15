@@ -9,6 +9,7 @@ use axum::Router;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
+use crate::resources::dashboard_resources;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,6 +23,7 @@ pub fn build_router(state: AppState) -> Router {
     // are nested behind owner-session authentication.
     let protected = Router::new()
         .route("/healthz", get(healthz))
+        .route("/api/dashboard/resources", get(dashboard_resources))
         .route("/", get(index))
         .fallback(not_found)
         .layer(from_fn_with_state(state.clone(), require_owner_auth));

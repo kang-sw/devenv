@@ -16,6 +16,8 @@
 //   endpoint behavior is considered.
 // - health output stays minimal and does not expose token, host paths, cache
 //   paths, Git roots, wsstate internals, or diagnostics.
+// - `/api/dashboard/resources` is protected and returns the same deterministic
+//   dashboard hierarchy contract that frontend work will consume.
 
 use std::time::Duration;
 
@@ -211,6 +213,32 @@ async fn health_and_static_ui_succeed_with_owner_session_cookie() {
 
         assert_eq!(response.status(), StatusCode::OK);
     }
+}
+
+#[tokio::test]
+async fn dashboard_resources_api_is_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .body(Body::empty())
+                .expect("unauthenticated dashboard resources request"),
+        )
+        .await
+        .expect("unauthenticated dashboard resources response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
+    // CONTRACT: paired owners receive deterministic JSON with server,
+    // workspaces, workRoots, mainInstances, subInstances, state, compactable,
+    // and action hint fields. HINT: parse with serde_json and assert contract
+    // field names rather than depending on private Rust structs.
+    todo!("pair owner, call /api/dashboard/resources, and assert mock hierarchy JSON");
 }
 
 #[tokio::test]
