@@ -21,6 +21,7 @@ type RunnerRequest struct {
 	Root                 string
 	Prompt               string
 	Model                string
+	Effort               string
 	SessionID            string
 	SystemPromptPath     string
 	InterruptHookCommand string
@@ -155,6 +156,9 @@ func buildCodexInvocation(req RunnerRequest) (codexInvocation, error) {
 	}
 	if req.SystemPromptPath != "" {
 		args = append(args, "-c", fmt.Sprintf("model_instructions_file=%q", req.SystemPromptPath))
+	}
+	if effort := strings.TrimSpace(req.Effort); effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+effort)
 	}
 	if req.InterruptHookCommand != "" {
 		hookCommand, err := json.Marshal(req.InterruptHookCommand)

@@ -66,7 +66,7 @@ def version_compatible(version: str, contract: dict) -> bool:
     plugin = version_tuple(str(contract.get("plugin_version", "")))
     if actual is None or plugin is None:
         return False
-    return actual[:2] == plugin[:2]
+    return actual == plugin
 
 
 def sha256_file(path: Path) -> str:
@@ -243,6 +243,7 @@ def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Pat
         "contract_sha256": sha256_file(contract_path),
         "plugin_version": str(contract.get("plugin_version", "")),
         "required_mcp": str(contract.get("required_mcp", "")),
+        "accepted_runtime_version": str(contract.get("plugin_version", "")),
         "binary_path": str(binary.resolve()),
         "binary_size": stat.st_size,
         "binary_mtime_ns": stat.st_mtime_ns,

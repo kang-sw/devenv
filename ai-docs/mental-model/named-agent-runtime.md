@@ -32,12 +32,12 @@ related:
 - Codex JSONL parsing treats non-JSON stdout as fatal until both session id and final agent message are available; trailing process-control noise after completion is ignored. {#260505-codex-jsonl-trailing-noise-tolerance}
 - CodexRunner sends user prompts through stdin with Codex CLI `-` instead of positional argv so multiline and Windows prompts survive first-call and resume paths. {#260508-codex-stdin-prompt-delivery}
 - Codex prompt-delivery diagnostics log bounded metadata such as prompt byte size, delivery path, backend version, resume state, and final event shape, not prompt contents. {#260508-codex-prompt-delivery-diagnostics}
-- Backend adapters must fit `RunnerRequest` and `RunnerResult`; keep backend-specific session and output parsing inside the runner instead of branching the manager lifecycle. {#260505-claude-agent-runner}
+- Backend adapters must fit `RunnerRequest` and `RunnerResult`; keep backend-specific session, output parsing, and backend flag spelling inside the runner instead of branching the manager lifecycle. Resolved alias effort rides the shared request but is enforced only where a runner translates it. {#260505-claude-agent-runner}
 - Claude `terminal_reason: hook_stopped` is an intermediate adapter state: resume the same session so hook-delivered lead messages produce a final output instead of an empty completed result. {#260505-claude-agent-runner}
 - Gemini invocation is stdin-only: shorthand aliases such as `gemini` stay out of argv, concrete models are passed with `-m`, stored sessions resume with `--resume`, and resolved system prompts are prepended inside stdin with an explicit system/user boundary. {#260512-gemini-agent-runner}
 - Gemini parsing is intentionally more tolerant than Codex parsing: stdout notices can be diagnostics, nested or top-level message/result shapes are accepted, and tool-use/tool-result content is ignored, but completion still requires terminal success, a session id, and accumulated assistant text. {#260512-gemini-agent-runner}
 - Gemini session persistence happens as soon as the first init/session id appears; if that callback fails, the runner cancels the child process before returning so failed state writes do not leave a sleeping backend call behind.
-- Model selection treats `light`/`core`/`deep` as portable aliases on the `model` field; concrete model names win, legacy `tier` is compatibility-only when `model` is absent, and alias resolution can branch by MCP harness. Alias mappings may carry optional effort metadata, but concrete model registration resolves no effort override and `agents.register` has no direct effort input. {#260508-harness-aware-model-aliases} {#260508-mcp-harness-detection}
+- Model selection treats `light`/`core`/`deep` as portable aliases on the `model` field; concrete model names win, legacy `tier` is compatibility-only when `model` is absent, and alias resolution can branch by MCP harness. Alias mappings are the single route for named-agent effort: concrete model registration resolves no effort override, and `agents.register` has no direct effort input. {#260508-harness-aware-model-aliases} {#260508-mcp-harness-detection}
 - Alias override persistence updates the explicit harness key, detected MCP session harness key, or default key; `backend` remains the execution backend in the stored mapping. Effort is stored on the selected alias mapping only; omitting effort during an alias update clears any prior effort, while explicit `none`/empty also stores the no-override state. Explicit backend registrations reject alias mappings whose backend/model imply a different backend, leaving the concrete model empty rather than constructing a mismatched pair. {#260512-backend-model-resolution-consistency} {#260513-harness-local-agent-tier-config}
 
 ## Coupling
@@ -48,6 +48,7 @@ related:
 - Worktree scoping is shared by agents, generated review paths, and orchestrator locks; changing cache layout affects all three.
 - Prompt registration is static: `system.md` is written at registration time and existing agents do not automatically pick up edited embedded prompts. {#260505-agent-prompt-registration-tier-resolution}
 - Agent status includes the detected harness when one influenced registration plus the resolved effort when an alias mapping supplied one; backend error diagnostics include the harness to make alias misrouting visible.
+- Registered effort is applied at call time through `RunnerRequest`: Codex emits `model_reasoning_effort`, Claude emits `--effort`, and empty/no-override effort emits no backend option. New backends must opt into their own mapping instead of assuming the manager path is sufficient. {#260505-codex-agent-session-jsonl-handling} {#260505-claude-agent-runner}
 
 ## Extension Points & Change Recipes
 
@@ -67,7 +68,6 @@ related:
 
 ## Technical Debt
 
-- Effort currently stops at configuration, registration metadata, and status visibility; Codex and Claude runner flag application remains deferred, so adapter changes must not assume `Agent.Effort` is already enforced.
 - Malformed lock files without parseable PIDs are not treated as stale, so manual cleanup may be required.
 - Windows process liveness is weaker than Unix and can keep dead calls active until better probing exists.
 - `OutboxDir`, `Agent.Capabilities`, and some session directories are scaffolded for future use.

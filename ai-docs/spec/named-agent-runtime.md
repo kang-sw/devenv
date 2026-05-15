@@ -143,12 +143,9 @@ on the same registered agent.
 The Codex backend starts sessions with `codex exec --json` and resumes sessions
 with `codex exec resume --json <thread-id>`. The adapter sets the subprocess
 working directory for resumed calls and applies the resolved system prompt
-through Codex configuration.
-
-> [!note] Planned 🚧
-> Codex-backed calls with a resolved non-empty alias effort will pass it as the
-> Codex `model_reasoning_effort` configuration override. Calls without resolved
-> effort will not pass an effort override.
+through Codex configuration. Codex-backed calls with a resolved non-empty alias
+effort pass it as the Codex `model_reasoning_effort` configuration override.
+Calls without resolved effort do not pass an effort override.
 
 Codex-backed named-agent calls deliver the user prompt through stdin with the
 Codex CLI `-` prompt marker for both first-call and resumed sessions. This keeps
@@ -184,10 +181,9 @@ incorporated into a final result instead of completing with empty output.
 Claude process failures will continue through the shared backend invocation
 diagnostics path, preserving raw backend errors and reconfiguration hints.
 
-> [!note] Planned 🚧
-> Claude-backed calls with a resolved non-empty alias effort will pass it through
-> the Claude `--effort` option. Calls without resolved effort will not pass an
-> effort option.
+Claude-backed calls with a resolved non-empty alias effort pass it through the
+Claude `--effort` option. Calls without resolved effort do not pass an effort
+option.
 
 Portable model aliases resolve through the detected MCP harness. A `core`
 registration from a Codex MCP session resolves through Codex alias defaults,

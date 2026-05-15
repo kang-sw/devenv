@@ -3,12 +3,17 @@ title: Agent tier effort configuration
 spec:
   - 260513-harness-local-agent-tier-config
   - 260508-model-alias-config-tools
+  - 260508-agents-register-model-alias-field
   - 260508-harness-aware-model-aliases
   - 260505-codex-agent-session-jsonl-handling
   - 260505-claude-agent-runner
+plans:
+  phase-2: 2026-05/15-260513-feat-agent-tier-effort-config
+  phase-3: 2026-05/15-260513-feat-agent-tier-effort-config-phase-3
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime
+completed: 2026-05-15
 ---
 
 # Agent tier effort configuration
@@ -103,6 +108,15 @@ Acceptance criteria:
 - Calls with no resolved effort do not pass any effort override.
 - Runner tests cover Codex, Claude, and no-override behavior.
 
+### Result (8cc0c5e) - 2026-05-15
+
+Implemented runner application for resolved alias effort. Registered agent
+effort now flows into `RunnerRequest`; Codex-backed calls add
+`model_reasoning_effort=<effort>` through Codex configuration only when effort
+is non-empty, and Claude-backed calls pass `--effort <effort>` only when effort
+is non-empty. Manager handoff, Codex invocation, Claude invocation, and
+no-override behavior are covered by `go test ./internal/wsagent`.
+
 ### Phase 3: Update workflow docs and release metadata
 
 Update specs, mental models, runtime metadata, and any relevant user-facing
@@ -116,3 +130,14 @@ Acceptance criteria:
 - Mental models record the single-entry-point rule and the default no-override
   behavior.
 - Runtime metadata and tests remain aligned with the public MCP schema.
+
+### Result (5c6b91b) - 2026-05-15
+
+Updated durable user-facing runtime references for named-agent effort
+configuration. `ws-agent-runtime` and `ws-mcp` now describe alias-only effort
+selection, portable effort values, no-override clearing, Codex
+`model_reasoning_effort`, Claude `--effort`, and the absence of direct
+`agents.register` effort input. Runtime contract alignment was verified for the
+full ws and wsflow plugin packages; `agents-plugin/runtime.json` and
+`agents-plugin-wsflow/runtime.json` required no changes because the public tool
+and command names did not drift.

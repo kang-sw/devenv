@@ -648,6 +648,7 @@ func (m Manager) executeCall(layout Layout, agent Agent, opts executeCallOptions
 		Root:                 layout.Root,
 		Prompt:               prompt,
 		Model:                agent.Model,
+		Effort:               agent.Effort,
 		SessionID:            agent.SessionID,
 		SystemPromptPath:     absOptional(layout.AgentDir, agent.SystemPromptPath),
 		InterruptHookCommand: hookCommand,

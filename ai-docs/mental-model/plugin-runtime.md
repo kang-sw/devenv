@@ -26,10 +26,10 @@ related:
 
 - The launcher writes diagnostics to stderr only; any stdout before `exec "$binary" "$@"` corrupts stdio MCP JSON-RPC.
 - `.mcp.json` cwd is the plugin cache, so repo root defaults must flow through `WS_MCP_PROJECT_ROOT`, not process cwd.
-- `runtime.json` tool names, command names, and prompt bundle metadata are compared against the binary by the launcher; stale names or prompt metadata can make a working binary get replaced or rejected.
+- `runtime.json` plugin patch version, tool names, command names, and prompt bundle metadata are compared against the binary by the launcher; stale patch versions, names, or prompt metadata can make a working binary get replaced or rejected.
 - The launcher tries `ws-mcp runtime capabilities` as the single-process fast path and accepts only a complete JSON payload matching version, MCP protocol, prompt bundle hash, required lead tools, and required CLI commands. Contracts can opt into `runtime_capabilities.match: exact`; exact contracts reject extra tools or commands and do not use weaker fallback validation after a capability mismatch. Missing, invalid, or partial capability output falls through to bounded legacy validation only for non-exact contracts. {#260506-runtime-capabilities-single-probe}
 - Runtime capability output is mode-sensitive only for explicit product modes such as wsflow no-agent; tool-profile and allowed-tool filters remain ignored for the full ws launcher contract. {#260513-wsflow-runtime-contract-mode}
-- The launcher's `.compatibility.json` stamp is a hot-path optimization, not a new trust boundary: only an exact stamp keyed to `runtime.json` content plus resolved binary path, size, and mtime can skip full validation; unreadable, missing, or mismatched stamps fail closed into `runtime_fully_compatible`. {#260506-launcher-hot-path-compatibility-cache}
+- The launcher's `.compatibility.json` stamp is a hot-path optimization, not a new trust boundary: only an exact stamp keyed to `runtime.json` content, the accepted runtime patch version, resolved binary path, size, and mtime can skip full validation; unreadable, missing, or mismatched stamps fail closed into `runtime_fully_compatible`. {#260506-launcher-hot-path-compatibility-cache}
 - Release repair requires matching binary asset names and `SHA256SUMS`; local dev repair is gated to the local installed plugin cache, `.local-devenv-runtime`, and non-Windows platforms. {#260505-release-asset-build-checksum-pipeline}
 - Windows release smoke should run the built executable once through `smoke --root <repo>` so local AV tools and CI both exercise one runtime process. {#260505-release-asset-build-checksum-pipeline}
 - Install and repair paths still clear stale compatibility stamps and run full validation before handoff, then write a fresh stamp only after success. {#260506-launcher-hot-path-compatibility-cache}
@@ -66,4 +66,4 @@ related:
 ## Technical Debt
 
 - Launcher JSON parsing is Python stdlib based; changing `runtime.json` structure can still break launcher compatibility checks without Go compiler coverage.
-- Version compatibility is declared in `runtime.json.required_mcp` and enforced by the launcher against the plugin major/minor version.
+- Version compatibility is enforced against the plugin patch version. Development binaries such as `X.Y.Z-dev` satisfy plugin `X.Y.Z`, but older or newer patch binaries do not.
