@@ -9,9 +9,11 @@ spec:
   - 260505-claude-agent-runner
 plans:
   phase-2: 2026-05/15-260513-feat-agent-tier-effort-config
+  phase-3: 2026-05/15-260513-feat-agent-tier-effort-config-phase-3
 related-mental-model:
   - named-agent-runtime
   - mcp-runtime
+completed: 2026-05-15
 ---
 
 # Agent tier effort configuration
@@ -128,3 +130,14 @@ Acceptance criteria:
 - Mental models record the single-entry-point rule and the default no-override
   behavior.
 - Runtime metadata and tests remain aligned with the public MCP schema.
+
+### Result (5c6b91b) - 2026-05-15
+
+Updated durable user-facing runtime references for named-agent effort
+configuration. `ws-agent-runtime` and `ws-mcp` now describe alias-only effort
+selection, portable effort values, no-override clearing, Codex
+`model_reasoning_effort`, Claude `--effort`, and the absence of direct
+`agents.register` effort input. Runtime contract alignment was verified for the
+full ws and wsflow plugin packages; `agents-plugin/runtime.json` and
+`agents-plugin-wsflow/runtime.json` required no changes because the public tool
+and command names did not drift.
