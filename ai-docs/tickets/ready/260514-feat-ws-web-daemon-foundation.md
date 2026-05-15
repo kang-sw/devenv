@@ -93,6 +93,21 @@ Success criteria:
 - Server startup, shutdown, and request logging are covered by focused tests or
   smoke checks.
 
+### Result (3f47f95) - 2026-05-15
+
+Implemented the Phase 1 daemon shell in `ws-dashboard/crates/daemon`: the
+`ws-dashboard serve` command now delegates to a Rust/Axum daemon library, binds
+to loopback by default, generates an in-memory one-time owner pairing token,
+prints a pairing URL after binding, installs an HTTP-only owner session cookie,
+and gates `/healthz`, `/`, and fallback routes behind owner auth. The health
+surface returns only `ok\n`, non-loopback host values fail closed for this
+phase, and graceful shutdown is wired through the server entrypoint.
+
+Review cycle 1 found that fallback/static-like paths initially bypassed owner
+auth and that tests were missing unauthenticated `/`, pairing reuse, and strict
+minimal-health assertions. Commit `3f47f95` fixed those issues. Verification
+passed with `cargo test -p ws-dashboard-daemon` and `cargo test --workspace`.
+
 ### Phase 2: Complete owner session authentication
 
 Finish the conservative owner-auth path around the Phase 1 skeleton. Pairing

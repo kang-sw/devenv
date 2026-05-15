@@ -16,7 +16,7 @@ Active plugin package: `agents-plugin/` (`ws@0.26.3`).
 Agentless derivative package: `agents-plugin-wsflow/` (`wsflow@0.26.3`).
 Native MCP/tooling source: `agents-plugin-tool/`.
 Dashboard scaffold: `ws-dashboard/` (Rust workspace with core, harness-core,
-harness-cli, daemon, and frontend placeholder).
+harness-cli, auth-gated daemon shell, and frontend placeholder).
 Retired Claude source material: `ai-docs/ref/claude-home-legacy.md` and git
 history.
 
@@ -235,8 +235,8 @@ dropped tickets live in hidden archive dirs and git history.
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
 
-`260514-feat-ws-web-daemon-foundation` - build the auth-gated Axum daemon shell,
-owner pairing/session bootstrap, and bind-mode guardrails for the dashboard.
+`260514-feat-ws-web-daemon-foundation` - continue with Phase 2 owner session
+authentication hardening after the Phase 1 auth-gated daemon shell.
 
 ## Session Notes
 
