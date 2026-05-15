@@ -42,15 +42,16 @@ preserving ordinary loopback development usage. Future WebSocket upgrade
 requests enter the owner-auth gate before any upgrade acceptance; the foundation
 does not yet expose WebSocket endpoint behavior.
 
-The daemon rejects non-loopback serving hosts in this foundation shell rather
-than partially enabling public bind behavior. Binding to a public interface such
-as `0.0.0.0` remains unavailable until explicit public-bind guardrails exist.
+Serving configuration supports explicit `local`, `tunnel`, and `public` bind
+modes. Local mode remains the default and binds to loopback unless the caller
+changes the host. Tunnel mode preserves loopback-oriented serving intent for
+external tunnel frontends. Non-loopback hosts such as `0.0.0.0` are rejected
+unless the caller explicitly selects public mode. Public mode can accept a
+non-loopback host only while owner authentication is enabled; bind-mode
+acceptance does not relax browser cookie auth, bearer auth, Host/Origin checks,
+or WebSocket pre-upgrade auth.
 
 The initial UI route serves a minimal placeholder surface behind owner
 authentication. Health output is the exact minimal body `ok\n`; host paths,
 cache paths, Git roots, pairing tokens, session values, diagnostics, and wsstate
 internals are not URL identity and are not exposed by the health surface.
-
-> [!note] Planned 🚧
-> Future daemon foundation phases will add explicit local/tunnel/public
-> bind-mode guardrails.
