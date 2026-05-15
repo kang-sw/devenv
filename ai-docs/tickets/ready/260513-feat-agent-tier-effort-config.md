@@ -72,6 +72,9 @@ Acceptance criteria:
 
 - `config.agents_tier(tier: "core", effort: "high")` stores effort on the
   selected harness alias mapping without requiring a model change.
+- `config.agents_tier(tier: "core", model: "gpt-5.5", effort: "medium")` and
+  `config.agents_tier(tier: "deep", model: "gpt-5.5", effort: "high")` support
+  the user's current Codex alias override setup.
 - `config.show` and `agents.status` make the resolved effort visible enough to
   diagnose alias routing.
 - Existing config files without effort continue loading with no behavior change.
