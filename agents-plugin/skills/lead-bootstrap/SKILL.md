@@ -81,7 +81,8 @@ Mode: user request
 3. Do not read the full spec or mental-model corpus for this pass.
 4. Do not move semantic content into specs, mental models, tickets, or refs.
 5. Emit a concise health note when drift candidates exist.
-6. Route user-approved second passes by the table below.
+6. When candidates exist, ask whether to clean up `_index.md` now, defer cleanup, or route semantic follow-up.
+7. Route user-approved second passes by the table below.
 
 | Finding | Route |
 |---------|-------|

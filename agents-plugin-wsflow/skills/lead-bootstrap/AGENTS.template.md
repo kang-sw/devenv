@@ -141,10 +141,10 @@ Adapt structure to the project; this is a starting point, not a schema.
 - v0001: Ensure `.gitignore` includes `ai-docs/**/*.local.md` and
   `ai-docs/.deps/`.
 - v0002: If `ai-docs/_index.md` looks like an old all-in-one
-  architecture digest, report an index health note only. Do not move semantic
-  content into specs or mental models from bootstrap; compact `_index.md` only
-  after user approval and only when an owning document already preserves the
-  meaning.
+  architecture digest, report an index health note and ask whether to clean up
+  `_index.md`. Do not move semantic content into specs or mental models from
+  bootstrap; compact `_index.md` only after user approval and only when an
+  owning document already preserves the meaning.
 - v0003: Treat stable task/topic -> document routing maps as candidates for
   `ai-docs/mental-model.md ## Project Reading Map` during later
   mental-model work. Bootstrap may report the drift, but must not move mixed

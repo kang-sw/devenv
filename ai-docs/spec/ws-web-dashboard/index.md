@@ -9,36 +9,49 @@ The ws web dashboard provides a personal browser-accessible control plane for a
 host machine. It serves dashboard UI, gates host-control actions behind owner
 authentication, and consumes ws runtime state through daemon-owned view models.
 
-## 🚧 Daemon Foundation {#260515-ws-web-daemon-foundation}
+## Daemon Foundation {#260515-ws-web-daemon-foundation}
 
-The dashboard daemon starts as a Rust/Axum HTTP server with explicit serving
-configuration, structured logging, graceful shutdown, and a minimal health
-surface. The default bind target is loopback. The daemon does not treat
-loopback access as authorization.
+The dashboard daemon starts through the `ws-dashboard serve` command as a
+Rust/Axum HTTP server with explicit serving configuration, structured startup
+logging, graceful shutdown, and a minimal health surface. The default bind
+target is `127.0.0.1`. The daemon does not treat loopback access as
+authorization.
 
-On startup, the daemon creates a high-entropy one-time pairing token and exposes
-the corresponding pairing URL to the local owner through startup output or a
-future open command. The pairing route is the only unauthenticated browser
-entrypoint. A successful pairing exchange consumes the token, installs an
-owner session cookie, and lets the browser access authenticated routes.
+On startup, the daemon creates an in-memory high-entropy one-time pairing token
+with an explicit expiry policy and exposes the corresponding pairing URL to the
+local owner through startup output. The pairing route is the only
+unauthenticated browser entrypoint. A successful pairing exchange consumes the
+token, installs an HTTP-only owner session cookie with `SameSite=Lax`, and lets
+the browser access authenticated routes. Missing, invalid, reused, or expired
+pairing tokens fail without installing a session cookie.
 
 Authenticated owner sessions have broad host-control authority for dashboard
 features, but the daemon remains separate from ws MCP stdio session authority.
 The daemon must not make itself the canonical ws MCP root, harness, model
 backend, or named-agent session owner.
 
-HTTP routes other than pairing reject unauthenticated requests. WebSocket
-upgrades also require an authenticated owner session before the connection is
-accepted. Browser-facing authentication uses a normal HTTP-only session cookie;
-bearer-style credentials may exist for CLI or smoke-test callers but do not
-replace the browser session cookie.
+HTTP routes other than pairing reject unauthenticated requests before handler
+execution, including the health route, the placeholder UI route, and fallback
+paths. Browser-facing authentication uses a normal HTTP-only session cookie.
+The daemon also accepts a narrow bearer authentication path for CLI and smoke
+callers against protected HTTP routes; bearer auth supplements browser cookie
+navigation and does not replace it.
 
-The daemon validates request host and origin information for browser entrypoints
-before granting owner access. Local and tunnel modes prefer `127.0.0.1`.
-Binding to a public interface such as `0.0.0.0` requires explicit opt-in and
-fails closed unless owner authentication is enabled.
+Browser entrypoints reject clearly invalid Host and Origin values while
+preserving ordinary loopback development usage. Future WebSocket upgrade
+requests enter the owner-auth gate before any upgrade acceptance; the foundation
+does not yet expose WebSocket endpoint behavior.
 
-The initial static UI serving path may serve built frontend assets or a minimal
-placeholder surface, but it remains behind owner authentication. Host paths,
-cache paths, Git roots, and wsstate internals are not URL identity and are not
-exposed by the health surface.
+Serving configuration supports explicit `local`, `tunnel`, and `public` bind
+modes. Local mode remains the default and binds to loopback unless the caller
+changes the host. Tunnel mode preserves loopback-oriented serving intent for
+external tunnel frontends. Non-loopback hosts such as `0.0.0.0` are rejected
+unless the caller explicitly selects public mode. Public mode can accept a
+non-loopback host only while owner authentication is enabled; bind-mode
+acceptance does not relax browser cookie auth, bearer auth, Host/Origin checks,
+or WebSocket pre-upgrade auth.
+
+The initial UI route serves a minimal placeholder surface behind owner
+authentication. Health output is the exact minimal body `ok\n`; host paths,
+cache paths, Git roots, pairing tokens, session values, diagnostics, and wsstate
+internals are not URL identity and are not exposed by the health surface.

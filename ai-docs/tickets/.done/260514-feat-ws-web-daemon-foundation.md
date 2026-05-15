@@ -3,9 +3,14 @@ title: ws web daemon foundation
 parent: 260514-epic-ws-web-dashboard-mvp
 spec:
   - 260515-ws-web-daemon-foundation
+skeletons:
+  phase-1: 882ded7
+  phase-2: b0a846b
+  phase-3: 5ad6d25
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
+completed: 2026-05-15
 ---
 
 # ws web daemon foundation
@@ -91,6 +96,21 @@ Success criteria:
 - Server startup, shutdown, and request logging are covered by focused tests or
   smoke checks.
 
+### Result (3f47f95) - 2026-05-15
+
+Implemented the Phase 1 daemon shell in `ws-dashboard/crates/daemon`: the
+`ws-dashboard serve` command now delegates to a Rust/Axum daemon library, binds
+to loopback by default, generates an in-memory one-time owner pairing token,
+prints a pairing URL after binding, installs an HTTP-only owner session cookie,
+and gates `/healthz`, `/`, and fallback routes behind owner auth. The health
+surface returns only `ok\n`, non-loopback host values fail closed for this
+phase, and graceful shutdown is wired through the server entrypoint.
+
+Review cycle 1 found that fallback/static-like paths initially bypassed owner
+auth and that tests were missing unauthenticated `/`, pairing reuse, and strict
+minimal-health assertions. Commit `3f47f95` fixed those issues. Verification
+passed with `cargo test -p ws-dashboard-daemon` and `cargo test --workspace`.
+
 ### Phase 2: Complete owner session authentication
 
 Finish the conservative owner-auth path around the Phase 1 skeleton. Pairing
@@ -111,6 +131,21 @@ Success criteria:
 - Host and Origin checks reject clearly invalid browser entrypoints without
   weakening local developer usage.
 
+### Result (d78b6a9) - 2026-05-15
+
+Implemented the Phase 2 owner-auth hardening in
+`ws-dashboard/crates/daemon`: pairing tokens now use explicit TTL policy,
+missing/invalid/reused/expired pairing failures avoid session cookies,
+browser sessions continue to use the HTTP-only owner cookie, and a narrow bearer
+auth path supports CLI/smoke callers on protected routes. Protected browser
+requests now reject clearly invalid Host and Origin values while preserving
+ordinary loopback development usage, and WebSocket-like upgrade requests pass
+through the owner-auth gate before any endpoint behavior exists.
+
+Review cycle 1 found missing positive loopback Host/Origin coverage and invalid
+bearer rejection coverage. Commit `d78b6a9` added those tests. Verification
+passed with `cargo test -p ws-dashboard-daemon` and `cargo test --workspace`.
+
 ### Phase 3: Add bind-mode guards
 
 Support local, tunnel, and public bind-mode configuration without changing the
@@ -127,6 +162,20 @@ Success criteria:
 - Bind-mode decisions are covered by tests that do not require public network
   exposure.
 
+### Result (7235af6) - 2026-05-15
+
+Implemented the Phase 3 bind-mode guard in `ws-dashboard/crates/daemon`:
+`ws-dashboard serve` now exposes explicit local, tunnel, and public bind-mode
+intent, keeps local and tunnel mode loopback-oriented by default, rejects
+accidental non-loopback hosts unless public mode is selected, and rejects public
+mode if owner authentication is disabled. Explicit public mode can normalize
+non-loopback hosts without changing the browser owner-auth, Host/Origin, or
+WebSocket pre-upgrade auth gates.
+
+Review partitions for correctness, fit, and tests all returned clean.
+Verification passed with `cargo test -p ws-dashboard-daemon` and
+`cargo test --workspace`.
+
 ### Phase 4: Verify daemon security smoke
 
 Add end-to-end smoke coverage around the foundation boundary.
@@ -139,3 +188,14 @@ Success criteria:
 - Local bind startup succeeds on loopback.
 - Public-mode guard failures are tested.
 - Health output remains minimal and does not leak host-control internals.
+
+### Result (bb0d823) - 2026-05-15
+
+Added Phase 4 smoke coverage for the daemon foundation boundary. The smoke
+tests cover unauthenticated HTTP and WebSocket rejection, one-time pairing and
+reuse rejection, session reuse for health and UI routes, loopback startup,
+public-mode guard failures, and the minimal secret-free health body.
+
+The change was test-only and did not alter daemon behavior. Direct-edit review
+returned clean. Verification passed with `cargo test -p ws-dashboard-daemon`
+and `cargo test --workspace`.

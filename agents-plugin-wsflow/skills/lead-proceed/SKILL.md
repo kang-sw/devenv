@@ -36,7 +36,8 @@ Route Context
 Routing
 - Use the first matching route row.
 - Captured `Ticket:` paths re-enter route context before implementation.
-- Execution slice defaults to one unfinished phase; include multiple phases only by user request or inseparable verification.
+- Treat `--auto-slice`, `auto-slice`, and equivalent autonomous phase-grouping phrasing as broader-slice permission.
+- Execution slice defaults to one unfinished phase unless user-requested, auto-selected, or inseparable.
 
 ## On: invoke
 
@@ -53,6 +54,7 @@ Routing
 9. If `target-kind=inline` and `actionable=yes`: apply `judge: needs-ticket`.
 10. Classify warmth from conversation state.
 11. If `has-ticket=yes` and warmth is warm: apply `judge: ticket-freshness`.
+12. Detect explicit `auto-slice` permission from flags or autonomous phase-grouping phrasing.
 
 ### 2. Select Route
 
@@ -150,8 +152,14 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 |----------|------|
 | Whole target | Ready target has no phase sections |
 | First unfinished phase | Ready target has unfinished phases and the user did not request a broader slice |
+| Auto-selected phase range | User granted `auto-slice` permission and adjacent unfinished phases form one cohesive implementation/review slice |
 | User-requested phase range | User explicitly named phases to implement |
 | Inseparable phase range | Adjacent phases cannot be verified separately from ticket artifacts |
+
+`auto-slice` is permission, not a mandate. Prefer grouping adjacent phases when
+a later phase only verifies the immediately preceding implementation. Keep
+unrelated public contracts, independent setup needs, or separately reviewable
+security boundaries split.
 
 ### judge: ticket-freshness
 
