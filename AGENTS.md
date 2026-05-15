@@ -194,6 +194,9 @@ ai-docs/tickets/.dropped/
 
 - **Language:** AI-authored docs, plans, commits, tickets, and code comments are
   English. Human-facing UI strings are exempt.
+- Workflow shape and plugin-less maintenance guidance live in
+  `ai-docs/WORKFLOW.md`; it is explanatory and does not override ws runtime or
+  MCP parser behavior.
 - Current priority is making the project and ticket system usable from
   Agents/Codex while retiring the legacy Claude tree behind explicit tickets.
 - Research anchor: `260429-research-host-neutral-ws-plugin`. Promote or split it
@@ -208,4 +211,4 @@ ai-docs/tickets/.dropped/
      `ai-docs/mental-model/<domain>.md ## Domain Rules` via `ws:lead-add-rule`.
      Context goes in `_index.md`; process goes in skills. -->
 
-<!-- Template Version: v0035 -->
+<!-- Template Version: v0040 -->
