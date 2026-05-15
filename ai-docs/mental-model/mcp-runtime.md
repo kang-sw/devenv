@@ -47,7 +47,7 @@ related:
 - Tool additions, removals, or intentionally hidden compatibility paths require both `callTool` and `tools()` review; role/profile filtering and runtime metadata must also be reviewed. `runtime.capabilities` derives MCP tool names from `tools()`, but `runtime.json` still must be updated. {#260505-tool-profile-gating}
 - CLI mirrors are separate adapters. MCP behavior changes do not update `cmd/ws-mcp` handlers automatically, and public launcher-required CLI commands must also be kept in `runtimeCapabilityCommandNames` plus `runtime.json.commands`. {#260505-cli-mirror-coverage}
 - `api.ask`, async API jobs, and `subquery` use named-agent runtime semantics; changes to agent result/wait/cancel behavior must keep MCP tool descriptions, async job reconciliation, and follow-up text coherent. {#260505-workflow-state-delegation-tools}
-- Config tools read/write user-local config through `wsconfig`; compatibility tier names, model aliases, and harness-aware defaults must match agent registration behavior. {#260505-config-tools} {#260508-model-alias-config-tools}
+- Config tools read/write user-local config through `wsconfig`; compatibility tier names, model aliases, optional effort metadata, and harness-aware defaults must match agent registration behavior and readable `config.show` output. {#260505-config-tools} {#260508-model-alias-config-tools}
 
 ## Extension Points & Change Recipes
 
