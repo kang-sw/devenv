@@ -5,6 +5,7 @@ spec:
   - 260515-ws-web-daemon-foundation
 skeletons:
   phase-1: 882ded7
+  phase-2: b0a846b
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
