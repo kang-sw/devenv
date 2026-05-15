@@ -93,6 +93,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["2"], "config.agents_tier") {
 		t.Fatalf("tools/list missing config.agents_tier: %s", byID["2"])
 	}
+	if !strings.Contains(byID["2"], `"effort"`) || !strings.Contains(byID["2"], `""`) || !strings.Contains(byID["2"], `"xhigh"`) {
+		t.Fatalf("tools/list missing config.agents_tier effort schema values: %s", byID["2"])
+	}
 	if !strings.Contains(byID["2"], "config.show") {
 		t.Fatalf("tools/list missing config.show: %s", byID["2"])
 	}
@@ -269,7 +272,7 @@ func TestServeStdioConfigShow(t *testing.T) {
 		t.Fatalf("config.show json response mismatch: %s", byID["1"])
 	}
 
-	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{}, "light", "", "gemini-3-1-pro"); err != nil {
+	if _, err := wsconfig.SetAgentsTier(wsconfig.Options{}, "light", "", "gemini-3-1-pro", "low"); err != nil {
 		t.Fatalf("SetAgentsTier returned error: %v", err)
 	}
 	out.Reset()
@@ -280,8 +283,19 @@ func TestServeStdioConfigShow(t *testing.T) {
 	}
 	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	showAfter := toolText(t, byID["2"])
-	if !strings.Contains(showAfter, `"backend":"gemini"`) || !strings.Contains(showAfter, `"model":"gemini-3-1-pro"`) {
+	if !strings.Contains(showAfter, `"backend":"gemini"`) || !strings.Contains(showAfter, `"model":"gemini-3-1-pro"`) || !strings.Contains(showAfter, `"effort":"low"`) {
 		t.Fatalf("config.show response missing tier mapping: %s", byID["2"])
+	}
+
+	out.Reset()
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"config.show","arguments":{}}}`+"\n",
+	), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if readable := toolText(t, byID["3"]); !strings.Contains(readable, "effort=low") {
+		t.Fatalf("readable config.show missing effort: %s", readable)
 	}
 }
 
@@ -343,13 +357,13 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	}
 
 	out.Reset()
-	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","backend":"codex","model":"gpt-5.4"}}}`
+	configInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","backend":"codex","model":"gpt-5.4","effort":"medium"}}}`
 	if err := server.ServeStdio(context.Background(), strings.NewReader(configInput), &out); err != nil {
 		t.Fatalf("ServeStdio config returned error: %v", err)
 	}
 	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
 	configText := toolText(t, byID["2"])
-	if !strings.Contains(configText, `"claude":{"backend":"codex","model":"gpt-5.4"}`) {
+	if !strings.Contains(configText, `"claude":{"backend":"codex","model":"gpt-5.4","effort":"medium"}`) {
 		t.Fatalf("config response missing claude harness mapping: %s", byID["2"])
 	}
 
@@ -362,8 +376,35 @@ func TestServeStdioConfigAgentsTierUsesDetectedHarness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(status, "harness: claude") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.4") {
+	if !strings.Contains(status, "harness: claude") || !strings.Contains(status, "backend: codex") || !strings.Contains(status, "model: gpt-5.4") || !strings.Contains(status, "effort: medium") {
 		t.Fatalf("registered status missing configured claude harness mapping:\n%s", status)
+	}
+}
+
+func TestServeStdioConfigAgentsTierOmittedEffortClearsExistingEffort(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260513-feat-agent-tier-effort-config")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	var out bytes.Buffer
+	server := NewServer(root, "test")
+	inputs := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","harness":"codex","model":"gpt-5.5","effort":"medium"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"config.agents_tier","arguments":{"tier":"core","harness":"codex","model":"gpt-5.4"}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"reviewer","model":"core"},"_meta":{"x-codex-turn-metadata":{"workspaces":{%q:{}}}}}}`, root, root),
+	}
+	for _, input := range inputs {
+		out.Reset()
+		if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+			t.Fatalf("ServeStdio returned error: %v", err)
+		}
+	}
+	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status, "model: gpt-5.4") || strings.Contains(status, "effort: medium") {
+		t.Fatalf("registered status did not clear effort after model update:\n%s", status)
 	}
 }
 

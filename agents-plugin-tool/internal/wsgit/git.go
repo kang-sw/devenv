@@ -498,15 +498,17 @@ func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 }
 
 func stagingCommandsForCommit(paths []string, status StatusResult) [][]string {
-	deleted := deletedPathSet(status)
 	addPaths := []string{}
 	rmPaths := []string{}
 	seen := map[string]bool{}
 	for _, path := range paths {
-		if deleted[filepath.ToSlash(filepath.Clean(path))] {
-			if !seen["rm:"+path] {
-				rmPaths = append(rmPaths, path)
-				seen["rm:"+path] = true
+		deletedPaths := deletedPathsUnderCommitRoot(status, path)
+		if len(deletedPaths) > 0 && !commitRootHasAddableStatus(status, path) {
+			for _, deletedPath := range deletedPaths {
+				if !seen["rm:"+deletedPath] {
+					rmPaths = append(rmPaths, deletedPath)
+					seen["rm:"+deletedPath] = true
+				}
 			}
 			continue
 		}
@@ -525,17 +527,44 @@ func stagingCommandsForCommit(paths []string, status StatusResult) [][]string {
 	return commands
 }
 
-func deletedPathSet(status StatusResult) map[string]bool {
-	deleted := map[string]bool{}
+func deletedPathsUnderCommitRoot(status StatusResult, root string) []string {
+	root = filepath.ToSlash(filepath.Clean(root))
+	seen := map[string]bool{}
+	var deleted []string
 	for _, file := range status.ChangedFiles {
 		if file.WorktreeStatus == "D" || file.IndexStatus == "D" {
-			deleted[filepath.ToSlash(filepath.Clean(file.Path))] = true
+			path := filepath.ToSlash(filepath.Clean(file.Path))
+			if pathInCommitSet(path, []string{root}) && !seen[path] {
+				deleted = append(deleted, path)
+				seen[path] = true
+			}
 		}
 		if file.OldPath != "" && (file.WorktreeStatus == "D" || file.IndexStatus == "D" || strings.HasPrefix(file.Status, "R")) {
-			deleted[filepath.ToSlash(filepath.Clean(file.OldPath))] = true
+			path := filepath.ToSlash(filepath.Clean(file.OldPath))
+			if pathInCommitSet(path, []string{root}) && !seen[path] {
+				deleted = append(deleted, path)
+				seen[path] = true
+			}
 		}
 	}
 	return deleted
+}
+
+func commitRootHasAddableStatus(status StatusResult, root string) bool {
+	root = filepath.ToSlash(filepath.Clean(root))
+	for _, file := range status.ChangedFiles {
+		path := filepath.ToSlash(filepath.Clean(file.Path))
+		if !pathInCommitSet(path, []string{root}) {
+			continue
+		}
+		if file.Status == "?" || file.Status == "!" {
+			return true
+		}
+		if file.WorktreeStatus != "D" && file.IndexStatus != "D" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateCommitPath(path string) error {

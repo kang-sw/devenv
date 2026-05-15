@@ -160,7 +160,7 @@ lead-edit
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
-lead-can-we-proceed
+lead-check-blockers
 lead-proceed
 lead-review
 lead-salvage
@@ -216,7 +216,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260514-feat-ws-web-daemon-foundation` | todo | Build daemon foundation on the existing `ws-dashboard/` scaffold |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
-| `260513-feat-agent-tier-effort-config` | todo | Configure named-agent reasoning effort through harness-aware model aliases |
+| `260513-feat-agent-tier-effort-config` | ready | Configure named-agent reasoning effort through harness-aware model aliases |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-human-readable-tool-output` | todo | Backlog human-readable defaults for remaining MCP and CLI workflow tool outputs |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
@@ -234,6 +234,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+`260513-feat-agent-tier-effort-config` - continue named-agent effort through harness-aware model aliases; next slice is Phase 2 runner application.
 
 ## Session Notes
 

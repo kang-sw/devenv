@@ -496,7 +496,7 @@ func TestRegisterModelAliasUsesHarness(t *testing.T) {
 func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 	repo := initRepo(t)
 	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "claude"); err != nil {
+	if _, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{CacheHome: cache}, "core", "codex", "gpt-5.4", "claude", "high"); err != nil {
 		t.Fatal(err)
 	}
 	manager := NewManager(Options{
@@ -513,8 +513,15 @@ func TestRegisterModelAliasUsesConfiguredHarnessMapping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
-	if agent.Harness != "claude" || agent.Tier != "core" || agent.Backend != "codex" || agent.Model != "gpt-5.4" {
-		t.Fatalf("harness/tier/backend/model = %q/%q/%q/%q", agent.Harness, agent.Tier, agent.Backend, agent.Model)
+	if agent.Harness != "claude" || agent.Tier != "core" || agent.Backend != "codex" || agent.Model != "gpt-5.4" || agent.Effort != "high" {
+		t.Fatalf("harness/tier/backend/model/effort = %q/%q/%q/%q/%q", agent.Harness, agent.Tier, agent.Backend, agent.Model, agent.Effort)
+	}
+	status, err := manager.Status(repo, "reviewer")
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if !strings.Contains(status, "effort: high") {
+		t.Fatalf("status missing effort:\n%s", status)
 	}
 }
 

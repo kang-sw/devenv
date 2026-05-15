@@ -327,6 +327,7 @@ type Agent struct {
 	Harness          string          `json:"harness,omitempty"`
 	Tier             string          `json:"tier"`
 	Model            string          `json:"model"`
+	Effort           string          `json:"effort,omitempty"`
 	SessionID        string          `json:"session_id"`
 	Status           string          `json:"status"`
 	CreatedAt        string          `json:"created_at"`
@@ -428,10 +429,12 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 	if strings.TrimSpace(opts.Tier) == "" {
 		opts.Tier = "core"
 	}
-	opts.Backend, opts.Model, err = wsconfig.ResolveAgentForHarness(wsconfig.Options{CacheHome: m.opts.CacheHome}, opts.Tier, explicitBackend, opts.Model, opts.Harness)
+	resolvedBackend, resolvedModel, resolvedEffort, err := wsconfig.ResolveAgentForHarnessConfig(wsconfig.Options{CacheHome: m.opts.CacheHome}, opts.Tier, explicitBackend, opts.Model, opts.Harness)
 	if err != nil {
 		return Agent{}, Layout{}, err
 	}
+	opts.Backend = resolvedBackend
+	opts.Model = resolvedModel
 	existingLayout, err := m.layout(opts.Root, name, false)
 	if err != nil {
 		return Agent{}, Layout{}, err
@@ -459,6 +462,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		Harness:          opts.Harness,
 		Tier:             opts.Tier,
 		Model:            opts.Model,
+		Effort:           resolvedEffort,
 		Status:           StatusIdle,
 		CreatedAt:        now,
 		LastSeenAt:       now,
@@ -485,6 +489,7 @@ func (m Manager) Register(opts RegisterOptions) (Agent, Layout, error) {
 		"backend": agent.Backend,
 		"tier":    agent.Tier,
 		"model":   agent.Model,
+		"effort":  agent.Effort,
 	}); err != nil {
 		return Agent{}, Layout{}, err
 	}
@@ -1283,6 +1288,9 @@ func (m Manager) Status(root, name string) (string, error) {
 	fmt.Fprintf(&b, "tier: %s\n", agent.Tier)
 	if agent.Model != "" {
 		fmt.Fprintf(&b, "model: %s\n", agent.Model)
+	}
+	if agent.Effort != "" {
+		fmt.Fprintf(&b, "effort: %s\n", agent.Effort)
 	}
 	if agent.SessionID != "" {
 		fmt.Fprintf(&b, "session_id: %s\n", agent.SessionID)

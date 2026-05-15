@@ -339,10 +339,23 @@ func configAgentsTier(args []string) {
 	tier := fs.String("tier", "", "model alias: light, core, or deep")
 	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
 	model := fs.String("model", "", "concrete model for this alias")
+	effort := fs.String("effort", "", "portable reasoning effort for this alias: none, low, medium, high, or xhigh")
 	harness := fs.String("harness", "", "harness alias key to configure: codex, claude, gemini, or default")
 	_ = fs.Parse(args)
 
-	cfg, err := wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, *tier, *backend, *model, *harness)
+	var effortProvided bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "effort" {
+			effortProvided = true
+		}
+	})
+	var cfg wsconfig.Config
+	var err error
+	if effortProvided {
+		cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, *tier, *backend, *model, *harness, *effort)
+	} else {
+		cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, *tier, *backend, *model, *harness)
+	}
 	printJSONOrFatal("config agents-tier", cfg, err)
 }
 
