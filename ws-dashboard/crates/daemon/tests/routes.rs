@@ -21,14 +21,17 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{header, Method, Request, StatusCode};
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::router::{build_router, AppState};
+
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn app_state() -> AppState {
     AppState {
@@ -48,11 +51,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
 }
 
 fn write_static_fixture() -> PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time after epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("ws-dashboard-static-{unique}"));
+    let root = temp_fixture_path("static");
     fs::create_dir_all(root.join("assets")).expect("create static fixture assets dir");
     fs::write(
         root.join("index.html"),
@@ -65,6 +64,22 @@ fn write_static_fixture() -> PathBuf {
     )
     .expect("write static fixture asset");
     root
+}
+
+fn write_root_picker_fixture() -> PathBuf {
+    let root = temp_fixture_path("picker");
+    fs::create_dir_all(root.join("zeta")).expect("create zeta dir");
+    fs::create_dir_all(root.join("alpha")).expect("create alpha dir");
+    fs::write(root.join("not-a-directory.txt"), "ignored\n").expect("write ignored file");
+    root
+}
+
+fn temp_fixture_path(name: &str) -> PathBuf {
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "ws-dashboard-{name}-{}-{unique}",
+        std::process::id()
+    ))
 }
 
 fn remove_static_fixture(path: &Path) {
@@ -426,6 +441,188 @@ async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
         singleton["workRoots"][0]["mainInstances"][0]["kind"],
         "viewer"
     );
+}
+
+#[tokio::test]
+async fn root_picker_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let requests = [
+        Request::builder()
+            .uri("/api/dashboard/root-picker")
+            .body(Body::empty())
+            .expect("root picker request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/root-picker/directories")
+            .body(Body::empty())
+            .expect("create directory request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/work-roots/open")
+            .body(Body::empty())
+            .expect("open workRoot request"),
+    ];
+
+    for request in requests {
+        let response = app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("unauthenticated root picker response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
+async fn root_picker_lists_directory_candidates_with_owner_cookie() {
+    let root = write_root_picker_fixture();
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/root-picker?path={}",
+                    root.display()
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated root picker request"),
+        )
+        .await
+        .expect("authenticated root picker response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("root picker body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("root picker JSON");
+    assert_eq!(
+        value["currentPath"],
+        root.canonicalize()
+            .expect("canonical root picker path")
+            .display()
+            .to_string()
+    );
+    let entries = value["entries"].as_array().expect("entries array");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["name"], "alpha");
+    assert_eq!(entries[0]["entryType"], "directory");
+    assert_eq!(entries[0]["selectable"], true);
+    assert_eq!(entries[1]["name"], "zeta");
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn root_picker_can_create_empty_directory_candidate() {
+    let root = write_root_picker_fixture();
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/root-picker/directories")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "parentPath": root.display().to_string(),
+                        "name": "new-root"
+                    })
+                    .to_string(),
+                ))
+                .expect("create empty directory request"),
+        )
+        .await
+        .expect("create empty directory response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(root.join("new-root").is_dir());
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("created entry body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("created entry JSON");
+    assert_eq!(value["name"], "new-root");
+    assert_eq!(value["entryType"], "directory");
+    assert_eq!(value["selectable"], true);
+
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/root-picker/directories")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "parentPath": root.display().to_string(),
+                        "name": "../bad"
+                    })
+                    .to_string(),
+                ))
+                .expect("invalid create empty directory request"),
+        )
+        .await
+        .expect("invalid create empty directory response");
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn root_picker_can_open_existing_directory_into_dashboard_model() {
+    let root = write_root_picker_fixture();
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": root.display().to_string()
+                    })
+                    .to_string(),
+                ))
+                .expect("open workRoot request"),
+        )
+        .await
+        .expect("open workRoot response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("open workRoot body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("workRoot JSON");
+    assert_eq!(value["server"]["id"], "server-local");
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["kind"],
+        "plainDirectory"
+    );
+    assert_eq!(value["workspaces"][0]["workRoots"][0]["status"], "online");
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["actions"][0]["id"],
+        "openRoot"
+    );
+
+    remove_static_fixture(&root);
 }
 
 #[tokio::test]

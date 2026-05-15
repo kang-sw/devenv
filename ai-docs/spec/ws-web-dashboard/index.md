@@ -136,26 +136,26 @@ Mouse-triggered navigation actions route through command ids so later keyboard
 bindings can call the same commands. The shell reserves `^b` to
 mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
 
-## 🚧 Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
+## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
-The dashboard daemon will provide a live local discovery provider that maps
-remembered or opened physical directories into the resource view-model
-contract. The provider will classify workRoots as `plainDirectory`,
-`gitPrimaryRoot`, or `gitLinkedWorktree`, report online, offline, moved, and
-inaccessible states, and preserve stable daemon-owned identity when a
-workRoot's discovered kind changes.
+The dashboard daemon provides a live local discovery provider that maps opened
+physical directories into the resource view-model contract. The provider
+classifies workRoots as `plainDirectory`, `gitPrimaryRoot`, or
+`gitLinkedWorktree`, reports online, offline, moved, and inaccessible states,
+and preserves stable daemon-owned identity when a workRoot's discovered kind
+changes.
 
-Discovery will refresh through explicit owner actions and narrow opportunistic
-checks when selecting, opening, or spawning from a workRoot. Broad filesystem
+Discovery refreshes through explicit owner actions that invoke the provider,
+including opening a workRoot through the root picker backend. Broad filesystem
 watching remains out of scope for the first visible substrate.
 
-## 🚧 Root Picker Empty Directory Creation {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
+## Root Picker Empty Directory Creation {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
 
-The dashboard will expose backend support for a cross-platform root picker that
+The dashboard exposes backend support for a cross-platform root picker that
 lists filesystem locations as workRoot candidates without turning the browser
-into a general file manager. Authenticated owners will be able to open existing
-plain directories or Git-backed directories into the dashboard model.
+into a general file manager. Authenticated owners can open existing plain
+directories or Git-backed directories into the dashboard model.
 
-The picker will include only a narrow `Create empty folder` operation for
-creating a new workRoot candidate. Generic delete, rename, move, copy, and
-recursive folder deletion operations remain unavailable.
+The picker includes only a narrow `Create empty folder` operation for creating
+a new workRoot candidate. Generic delete, rename, move, copy, and recursive
+folder deletion operations remain unavailable.

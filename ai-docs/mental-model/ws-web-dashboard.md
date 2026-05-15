@@ -17,6 +17,7 @@ related:
 - `ws-dashboard/crates/core/src/ids.rs` and `resources.rs` own the public dashboard resource vocabulary shared by later API, frontend, discovery, and event-stream work. {#260516-ws-web-dashboard-core-resource-vocabulary}
 - `ws-dashboard/crates/core/src/view_model.rs`, `daemon/src/resources.rs`, and `daemon/src/mock.rs` own the first authenticated resource hierarchy API and fixture-backed provider seam. {#260516-ws-web-dashboard-resource-view-model-contract} {#260516-ws-web-dashboard-mock-view-model-fixtures}
 - `ws-dashboard/crates/daemon/src/discovery.rs` owns live local workRoot discovery and maps remembered/opened paths into the same resource view-model provider contract. {#260516-ws-web-dashboard-local-workroot-discovery-provider}
+- `ws-dashboard/crates/daemon/src/root_picker.rs` owns the authenticated backend root picker, empty-directory creation, and open-workRoot route handlers. {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
 - `ws-dashboard/frontend/` owns the React/Vite browser shell that is served by the daemon when `--static-dir` points at its production build output and renders the first inspectable resource hierarchy. {#260516-ws-web-dashboard-protected-frontend-shell} {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 ## Module Contracts
@@ -35,6 +36,8 @@ related:
 - `daemon/tests/fixtures/dashboard_resources.json` is the shared golden mock artifact; Rust mock data and route tests must consume that fixture instead of maintaining a second in-code sample. {#260516-ws-web-dashboard-mock-view-model-fixtures}
 - Local discovery preserves workRoot identity from the remembered candidate path, not the canonical symlink target, so status or kind changes do not churn `resourcePath.workRootId`. {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 - Existing directories must be readable before they are classified as online Git/plain roots; metadata success alone is not enough because unreadable directories must surface as inaccessible. {#260516-ws-web-dashboard-local-workroot-discovery-provider}
+- Root picker routes belong inside the same owner-auth protected router as other dashboard APIs; they may expose host paths only as authenticated picker/open request data, never as public resource ids. {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
+- The only filesystem mutation in the first root picker backend is single-segment empty-directory creation; generic delete, rename, move, copy, and recursive folder operations stay absent. {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
 - Static dashboard serving is configuration-gated: `/` serves `static_dir/index.html`, `/assets/{*asset_path}` serves only safe relative paths below `static_dir/assets`, and both stay inside the owner-auth protected router. Without `static_dir`, the daemon keeps the minimal fallback HTML and asset requests 404. {#260516-ws-web-dashboard-protected-frontend-shell}
 - The browser shell consumes `/api/dashboard/resources` as its source of truth, not a copied frontend fixture; refresh failures after a successful load must stay visible while stale rows remain inspectable. {#260516-ws-web-dashboard-inspectable-navigation-shell}
 - Frontend mouse actions carry `data-command-id` command identities so later keyboard bindings can dispatch the same command layer instead of forking interaction behavior. {#260516-ws-web-dashboard-inspectable-navigation-shell}
@@ -46,6 +49,7 @@ related:
 - Startup output intentionally prints the pairing URL for the local owner, while structured logs should avoid query-string/token material; request logging changes must preserve that split.
 - Dashboard resource JSON couples `core/src/view_model.rs`, the daemon provider trait, the protected route tests, and the golden fixture; field or hierarchy changes must update all four in one logical change.
 - Live discovery is intentionally behind the provider seam while `/api/dashboard/resources` remains mock-backed; switching routes to live data must preserve the mock fixture path for deterministic frontend and contract tests.
+- Root picker open routes couple `root_picker.rs` to `discovery.rs`: opening an existing directory returns the same dashboard resource view-model shape as the provider, so provider field changes ripple into route tests.
 - The frontend resource shell couples `frontend/src/App.tsx` to the core JSON contract by TypeScript shape only; changing API field names requires updating Rust serde tests, golden fixture, route tests, and the React view together.
 
 ## Extension Points & Change Recipes
@@ -57,6 +61,7 @@ related:
 - **Change core resource vocabulary**: update `ids.rs`, `resources.rs`, public re-exports, and serde contract tests together; keep `workRoot` naming stable unless the dashboard spec and dependent API/fixture tickets are intentionally revised.
 - **Change resource view-model shape**: update `core/src/view_model.rs`, the golden JSON fixture, mock provider assumptions, and authenticated route tests together; preserve full hierarchy unless the spec intentionally changes compaction semantics.
 - **Replace mock resources with live discovery**: switch routing/config to select the live provider, keep the mock fixture for deterministic frontend/contract tests, and do not pull ws MCP session authority, PTY streams, named-agent ownership, or filesystem-discovery policy into the core structs.
+- **Extend root picker operations**: add only explicit owner-authenticated operations with route tests for unauthenticated rejection and success; destructive or broad file-manager verbs require a new ticket and should not be piggybacked onto picker listing/open behavior.
 - **Extend the browser shell beyond inspectable navigation**: keep feature depth layered on top of the existing resource shell, route visible actions through command ids, and preserve the reserved viewer region until a later viewer ticket implements real document/editor/terminal behavior. {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 ## Common Mistakes

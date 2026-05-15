@@ -12,6 +12,7 @@ spec:
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
+completed: 2026-05-16
 ---
 
 # ws web dashboard local workspace discovery
@@ -91,3 +92,21 @@ Success criteria:
   the dashboard model.
 - The owner can create an empty folder candidate through the picker.
 - Destructive or broad file-manager operations remain unavailable.
+
+### Result (0183cf7) - 2026-05-16
+
+Implemented the authenticated backend root picker slice. The daemon now exposes
+owner-authenticated routes to list directory candidates, create a single empty
+child directory candidate, and open an existing directory into the dashboard
+resource model through the live local discovery provider.
+
+The implementation intentionally does not add delete, rename, move, copy, or
+recursive folder operations. Opening a directory returns the same
+`DashboardResourcesView` shape used by the resource API, while the main
+`/api/dashboard/resources` route remains mock-backed for deterministic frontend
+and contract tests until a later route-selection pass.
+
+Verification: `cargo test -p ws-dashboard-daemon --test routes root_picker`
+and `cargo test --workspace` passed. Review found only a parallel-test fixture
+collision risk; the final commit fixes fixture uniqueness with process id plus
+an atomic counter and rechecks route tests.
