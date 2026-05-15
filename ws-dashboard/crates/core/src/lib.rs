@@ -1,7 +1,12 @@
+pub mod events;
 pub mod ids;
 pub mod resources;
 pub mod view_model;
 
+pub use events::{
+    InstanceEvent, InstanceEventCategory, InstanceEventFixtures, InstanceEventPayload,
+    InstanceEventTranscript,
+};
 pub use ids::{InstanceId, OpaqueId, ServerId, WorkRootId, WorkspaceId};
 pub use resources::{
     InstanceKind, InstanceRole, InteractionMode, ResourcePath, WorkRootKind, WorkRootStatus,

@@ -1,0 +1,120 @@
+{
+  "transcripts": [
+    {
+      "streamId": "stream-devenv-main",
+      "resourcePath": {
+        "serverId": "server-local",
+        "workspaceId": "workspace-devenv",
+        "workRootId": "root-devenv-primary",
+        "instanceId": "instance-devenv-main"
+      },
+      "events": [
+        {
+          "streamId": "stream-devenv-main",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-devenv",
+            "workRootId": "root-devenv-primary",
+            "instanceId": "instance-devenv-main"
+          },
+          "cursor": "0000000001",
+          "sequence": 1,
+          "timestamp": "2026-05-16T00:00:00Z",
+          "category": "status",
+          "payload": {
+            "text": null,
+            "status": "started",
+            "message": null
+          },
+          "terminal": false
+        },
+        {
+          "streamId": "stream-devenv-main",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-devenv",
+            "workRootId": "root-devenv-primary",
+            "instanceId": "instance-devenv-main"
+          },
+          "cursor": "0000000002",
+          "sequence": 2,
+          "timestamp": "2026-05-16T00:00:01Z",
+          "category": "output",
+          "payload": {
+            "text": "running dashboard task\n",
+            "status": null,
+            "message": null
+          },
+          "terminal": false
+        },
+        {
+          "streamId": "stream-devenv-main",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-devenv",
+            "workRootId": "root-devenv-primary",
+            "instanceId": "instance-devenv-main"
+          },
+          "cursor": "0000000003",
+          "sequence": 3,
+          "timestamp": "2026-05-16T00:00:02Z",
+          "category": "error",
+          "payload": {
+            "text": null,
+            "status": null,
+            "message": "fixture warning"
+          },
+          "terminal": false
+        },
+        {
+          "streamId": "stream-devenv-main",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-devenv",
+            "workRootId": "root-devenv-primary",
+            "instanceId": "instance-devenv-main"
+          },
+          "cursor": "0000000004",
+          "sequence": 4,
+          "timestamp": "2026-05-16T00:00:03Z",
+          "category": "status",
+          "payload": {
+            "text": null,
+            "status": "recovering",
+            "message": null
+          },
+          "terminal": false
+        },
+        {
+          "streamId": "stream-devenv-main",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-devenv",
+            "workRootId": "root-devenv-primary",
+            "instanceId": "instance-devenv-main"
+          },
+          "cursor": "0000000005",
+          "sequence": 5,
+          "timestamp": "2026-05-16T00:00:04Z",
+          "category": "end",
+          "payload": {
+            "text": null,
+            "status": "ended",
+            "message": null
+          },
+          "terminal": true
+        }
+      ]
+    },
+    {
+      "streamId": "stream-empty",
+      "resourcePath": {
+        "serverId": "server-local",
+        "workspaceId": "workspace-devenv",
+        "workRootId": "root-devenv-linked",
+        "instanceId": "instance-linked-main"
+      },
+      "events": []
+    }
+  ]
+}
