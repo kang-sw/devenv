@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.26.3 - 2026-05-15
+
+### Added
+- Add the `ws-dashboard/` Rust workspace scaffold for future ws-aware dashboard
+  work.
+- Add harness-aware named-agent effort configuration through
+  `config.agents_tier`, including Codex `model_reasoning_effort` and Claude
+  `--effort` runner application.
+
+### Changed
+- Rename the blocker checkpoint workflow skill from `lead-can-we-proceed` to
+  `lead-check-blockers` across ws and wsflow.
+- Require cached plugin runtime binaries to match the plugin patch version,
+  while still accepting matching `X.Y.Z-dev` development binaries.
+
+### Fixed
+- Stage explicit `git.commit` path roots that refer to renamed or deleted
+  files without passing missing pathspecs to `git add`.
+- Prevent plugin reinstall from reusing a stale older patch `ws-mcp` binary
+  through a loose compatibility stamp.
+
 ## v0.26.2 - 2026-05-14
 
 ### Changed
