@@ -59,8 +59,11 @@ fn write_static_fixture() -> PathBuf {
         "<!doctype html><title>fixture dashboard</title><div id=\"root\"></div>",
     )
     .expect("write static fixture index");
-    fs::write(root.join("assets/app.js"), "console.log('fixture dashboard');")
-        .expect("write static fixture asset");
+    fs::write(
+        root.join("assets/app.js"),
+        "console.log('fixture dashboard');",
+    )
+    .expect("write static fixture asset");
     root
 }
 
