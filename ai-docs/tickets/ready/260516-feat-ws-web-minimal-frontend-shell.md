@@ -9,6 +9,8 @@ related:
 spec:
   - 260516-ws-web-dashboard-protected-frontend-shell
   - 260516-ws-web-dashboard-inspectable-navigation-shell
+skeletons:
+  phase-1: 83e6e23
 related-mental-model:
   - ws-web-dashboard
   - developer-environment-tools
