@@ -260,6 +260,10 @@ async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
         .expect("dashboard resources body bytes");
     let value: serde_json::Value =
         serde_json::from_slice(&body).expect("dashboard resources JSON body");
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/dashboard_resources.json"))
+            .expect("dashboard resources fixture JSON");
+    assert_eq!(value, fixture);
 
     assert!(value.get("server").is_some());
     assert_eq!(value["server"]["id"], "server-local");
