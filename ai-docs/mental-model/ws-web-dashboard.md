@@ -13,15 +13,17 @@ related:
 
 - `ws-dashboard/crates/daemon/src/main.rs`, `cli.rs`, and `config.rs` keep `ws-dashboard serve` as a thin command adapter over normalized serving config.
 - `ws-dashboard/crates/daemon/src/server.rs` owns listener binding, startup auth state creation, pairing URL emission, and graceful shutdown.
-- `ws-dashboard/crates/daemon/src/router.rs` and `auth.rs` own the browser route boundary, one-time pairing, and owner session cookie checks. {#260515-ws-web-daemon-foundation}
+- `ws-dashboard/crates/daemon/src/router.rs` and `auth.rs` own the browser route boundary, one-time pairing expiry, bearer-auth exception, Host/Origin entrypoint checks, and owner session cookie checks. {#260515-ws-web-daemon-foundation}
 
 ## Module Contracts
 
 - Loopback is only a reachability default, not authorization: every browser route except `/pair` must pass owner-session auth before handler execution, including fallback paths. {#260515-ws-web-daemon-foundation}
 - The pairing URL is constructed after the listener is bound so port `0` resolves to the actual socket; changing startup reporting must preserve a single owner-visible pairing URL without leaking it through request diagnostics.
-- `OwnerAuthState` is cloned into Axum state, so auth storage changes must preserve shared one-time pairing consumption and reject session cookies before pairing succeeds.
+- `OwnerAuthState` is cloned into Axum state, so auth storage changes must preserve shared one-time pairing consumption, pairing TTL enforcement before consumption, and rejection of session cookies before pairing succeeds.
+- Bearer auth is a daemon-local protected-route exception for CLI/smoke callers; it authenticates before cookie pairing state is considered, so browser cookie flow changes must not accidentally remove or broaden that non-browser path.
+- Authenticated browser requests and WebSocket upgrade requests pass conservative Host/Origin checks; missing headers are tolerated for ordinary clients, but clearly non-loopback hosts/origins fail before handler or upgrade behavior.
 - Health output is deliberately exact and minimal (`ok\n`); host paths, cache paths, Git roots, wsstate data, diagnostics, pairing tokens, and session values belong only in authenticated diagnostic surfaces.
-- Public or tunnel binding must fail closed until explicit bind-mode, Host/Origin, and WebSocket-auth guardrails exist; do not enable it by simply relaxing the loopback check.
+- Public or tunnel binding must fail closed until explicit local/tunnel/public bind-mode guardrails exist; do not enable it by simply relaxing the loopback bind check or Host/Origin parser.
 - The daemon is not ws MCP authority. Future wsstate or named-agent views should be daemon-owned projections rather than adopting the caller's MCP root, harness, model backend, or agent session ownership.
 
 ## Coupling
@@ -33,19 +35,19 @@ related:
 ## Extension Points & Change Recipes
 
 - **Add an authenticated HTTP route or static asset serving**: add it inside the protected router, then add both unauthenticated rejection and paired-cookie success tests.
-- **Change pairing or session behavior**: update `auth.rs`, `/pair` status/cookie handling, and route tests together; preserve one-time consumption and no pre-pair session authentication.
-- **Enable non-loopback serving**: update config parsing with an explicit bind mode, add Host/Origin and WebSocket-auth checks before accepting browser access, and keep public bind failures closed by default.
+- **Change pairing, session, or bearer behavior**: update `auth.rs`, `/pair` status/cookie handling, and route tests together; preserve one-time consumption, expiry failure without cookie installation, no pre-pair session-cookie authentication, and the narrow bearer path for protected HTTP smoke callers.
+- **Enable non-loopback serving**: update config parsing with an explicit bind mode and bind-mode-specific guards before accepting browser access, and keep public bind failures closed by default.
 - **Expose diagnostics**: add an authenticated route; do not expand `/healthz` beyond the minimal body contract.
 
 ## Common Mistakes
 
 - Adding a new route to the top-level router beside `/pair`, which bypasses owner auth.
-- Treating `localhost` or `127.0.0.1` as sufficient authorization for host-control features.
+- Treating `localhost`, `127.0.0.1`, or passing Host/Origin checks as sufficient authorization for host-control features.
 - Logging full request URIs or health payloads that include pairing tokens, session cookies, wsstate internals, paths, or Git roots.
 - Building startup URLs before binding the listener and accidentally exposing `:0` to the owner.
 
 ## Technical Debt
 
-- Pairing and session secrets are process-memory only and have no TTL or persistence yet.
-- `static_dir` is parsed but not served in the Phase 1 shell.
-- Complete Host/Origin validation and WebSocket authentication remain planned before tunnel or public bind modes.
+- Pairing, bearer, and session secrets are process-memory only and have no persistence yet.
+- `static_dir` is parsed but not served in the foundation shell.
+- Explicit local/tunnel/public bind-mode guardrails remain planned before tunnel or public bind modes.
