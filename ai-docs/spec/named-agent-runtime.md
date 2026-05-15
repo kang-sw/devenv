@@ -36,13 +36,11 @@ order, and writes the resolved text to the agent's `system.md`. `light`,
 aliases or a concrete backend model; concrete model names override alias and
 harness defaults. Legacy `tier` inputs remain accepted as compatibility alias
 selectors when `model` is absent. Resolved agent metadata reports the alias in
-the compatibility `tier` field, plus the resolved backend and concrete model.
+the compatibility `tier` field, plus the resolved backend, concrete model, and
+optional resolved effort from the selected harness-aware alias mapping.
+Registration does not accept a separate effort input; model aliases remain the
+single public selection route for named-agent effort.
 {#260508-harness-aware-model-aliases}
-
-> [!note] Planned 🚧
-> Alias resolution will carry an optional resolved effort value from the selected
-> harness-aware alias mapping into agent metadata. Registration will not accept a
-> separate effort input; model aliases remain the single public selection route.
 
 When registration supplies an explicit backend with only alias-based model
 selection, resolution prefers a mapping keyed to that backend and never fills a

@@ -83,18 +83,15 @@ configuration without modifying it. The default response is compact labeled
 text, and structured JSON remains available for callers that need stable fields.
 
 `config.agents_tier` is the compatibility surface for updating the
-backend/model mapping for a model alias. Callers provide `tier` as the alias
-name and may provide a backend, a concrete model, a harness selector, or all
-three. When backend is omitted, ws infers it from the model family where
-possible. The update applies to the explicit harness when provided, otherwise
-the detected MCP session harness when available, and otherwise the default
-alias mapping. This makes `backend` mean the execution backend rather than the
-alias-table key. {#260513-harness-local-agent-tier-config}
-
-> [!note] Planned 🚧
-> `config.agents_tier` will accept an optional portable effort value on alias
-> mappings. Empty effort and `none` will mean no forced backend effort; supported
-> non-empty values will be visible through configuration output.
+backend/model/effort mapping for a model alias. Callers provide `tier` as the
+alias name and may provide a backend, a concrete model, a portable effort, a
+harness selector, or any combination of those fields. When backend is omitted,
+ws infers it from the model family where possible. Empty effort, omitted effort,
+and `none` store the no-override state; supported non-empty effort values are
+visible through configuration output. The update applies to the explicit harness
+when provided, otherwise the detected MCP session harness when available, and
+otherwise the default alias mapping. This makes `backend` mean the execution
+backend rather than the alias-table key. {#260513-harness-local-agent-tier-config}
 
 Configuration exposes harness-aware model alias mappings. `light`, `core`, and
 `deep` map to backend/model defaults per harness, existing tier-shaped config is
@@ -190,6 +187,10 @@ with required AI Context and optional ticket, spec, or mental-model update
 sections. Ticket update detection recognizes added `### Result` headings and
 added `#### Edition` headings so commit summaries can report first completion
 records and later append-only tweak records.
+When an explicit commit path names an old root from a rename or a deleted root,
+`git.commit` stages the concrete removed paths reported by Git status rather
+than passing the missing root to `git add`; requested roots with live changes
+still stage through the explicit add path.
 {#260513-git-commit-result-edition-detection}
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
