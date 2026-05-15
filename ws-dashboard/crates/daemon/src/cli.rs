@@ -39,10 +39,14 @@ pub struct ServeArgs {
     pub static_dir: Option<std::path::PathBuf>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum BindMode {
+    /// Local browser access; defaults to loopback reachability.
+    #[default]
     Local,
+    /// Caller intends to place a separate tunnel in front of loopback serving.
     Tunnel,
+    /// Caller explicitly intends non-loopback/public interface serving.
     Public,
 }
 
@@ -52,8 +56,6 @@ impl Cli {
     }
 
     pub fn into_serve_config(self) -> anyhow::Result<ServeConfig> {
-        // HINT: Normalize through `ServeConfig` so tests can assert default
-        // loopback behavior without invoking clap.
         match self.command {
             Command::Serve(args) => ServeConfig::from_args(args),
         }

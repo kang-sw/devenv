@@ -1,17 +1,22 @@
-// CONTRACT: Server smoke tests for Phase 1 live here.
+// CONTRACT: Server config and startup smoke tests live here.
 //
 // Required behavior targets:
 // - default serving config binds to `127.0.0.1`.
+// - bind-mode CLI vocabulary records local, tunnel, and public reachability
+//   intent.
 // - public bind attempts require explicit public mode.
 // - public bind mode cannot start without owner authentication enabled.
+// - non-loopback serving remains fail-closed until Phase 3 guard logic is
+//   implemented.
 // - startup info builds a local owner pairing URL after the listener address is
 //   known.
 // - shutdown hooks can terminate the server without leaving a background task.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+use clap::Parser;
 use ws_dashboard_daemon::auth::OwnerAuthState;
-use ws_dashboard_daemon::cli::{BindMode, ServeArgs};
+use ws_dashboard_daemon::cli::{BindMode, Cli, ServeArgs};
 use ws_dashboard_daemon::config::{validate_bind_guard, ServeConfig};
 use ws_dashboard_daemon::server::{run_with_shutdown, startup_info};
 
@@ -22,6 +27,40 @@ fn default_serving_config_binds_to_loopback() {
     assert_eq!(config.bind_addr.ip(), Ipv4Addr::LOCALHOST);
     assert_eq!(config.bind_mode, BindMode::Local);
     assert!(config.owner_auth_enabled);
+}
+
+#[test]
+fn serve_cli_defaults_to_local_loopback_config() {
+    let config = Cli::parse_from(["ws-dashboard", "serve"])
+        .into_serve_config()
+        .expect("default serve config");
+
+    assert_eq!(config.bind_addr, SocketAddr::from((Ipv4Addr::LOCALHOST, 0)));
+    assert_eq!(config.bind_mode, BindMode::Local);
+    assert!(config.owner_auth_enabled);
+}
+
+#[test]
+fn tunnel_mode_without_host_keeps_loopback_binding() {
+    let config = Cli::parse_from(["ws-dashboard", "serve", "--bind-mode", "tunnel"])
+        .into_serve_config()
+        .expect("tunnel mode config");
+
+    assert_eq!(config.bind_addr.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    assert_eq!(config.bind_mode, BindMode::Tunnel);
+}
+
+#[test]
+fn public_mode_with_public_host_remains_fail_closed_until_guard_implementation() {
+    let err = ServeConfig::from_args(ServeArgs {
+        host: "0.0.0.0".to_owned(),
+        bind_mode: BindMode::Public,
+        port: 0,
+        static_dir: None,
+    })
+    .expect_err("public serving remains disabled in the skeleton");
+
+    assert!(err.to_string().contains("not implemented"));
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
-use anyhow::{bail, Context};
+use anyhow::{bail, ensure, Context};
 
 use crate::cli::{BindMode, ServeArgs};
 
@@ -51,18 +51,21 @@ pub fn validate_bind_guard(
 ) -> anyhow::Result<()> {
     // CONTRACT: Accidental public interface exposure fails unless public mode is
     // explicit and owner authentication is enabled.
-    // HINT: Keep this pure so Phase 3 tests do not require public network
-    // exposure.
-    if mode == BindMode::Public && !owner_auth_enabled {
-        bail!("public bind mode requires owner authentication");
+    ensure!(
+        mode != BindMode::Public || owner_auth_enabled,
+        "public bind mode requires owner authentication"
+    );
+
+    if ip.is_loopback() {
+        return Ok(());
     }
-    if !ip.is_loopback() && mode != BindMode::Public {
-        bail!("public bind address {ip} requires --bind-mode public");
-    }
-    if !ip.is_loopback() {
-        bail!("public bind mode requires Phase 3 guard implementation");
-    }
-    Ok(())
+
+    ensure!(
+        mode == BindMode::Public,
+        "public bind address {ip} requires --bind-mode public"
+    );
+
+    bail!("public bind mode is not implemented yet; non-loopback serving remains disabled");
 }
 
 fn parse_bind_host(host: &str) -> anyhow::Result<IpAddr> {
