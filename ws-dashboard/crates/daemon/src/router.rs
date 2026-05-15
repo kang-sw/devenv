@@ -63,8 +63,18 @@ async fn require_owner_auth(
     request: Request,
     next: Next,
 ) -> Response {
-    if let Err(status) = state.auth.authenticate_headers(&headers) {
-        return status.into_response();
+    let auth_result = match headers
+        .get(header::UPGRADE)
+        .and_then(|value| value.to_str().ok())
+    {
+        Some(value) if value.eq_ignore_ascii_case("websocket") => {
+            state.auth.authenticate_websocket_upgrade(&headers)
+        }
+        _ => state.auth.authenticate_browser_entrypoint(&headers),
+    };
+
+    if let Err(rejection) = auth_result {
+        return rejection.status_code().into_response();
     }
 
     next.run(request).await

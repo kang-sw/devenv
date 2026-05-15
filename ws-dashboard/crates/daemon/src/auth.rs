@@ -56,6 +56,14 @@ pub enum AuthRejection {
 
 impl OwnerAuthState {
     pub fn new_ephemeral() -> Self {
+        Self::new_ephemeral_with_policy(PairingTokenPolicy::default())
+    }
+
+    pub fn new_ephemeral_with_policy(_policy: PairingTokenPolicy) -> Self {
+        // CONTRACT: Phase 2 construction accepts a token policy so tests and
+        // daemon startup can verify expiry behavior without sleeping.
+        // HOLE filled: this constructor is the single project-local startup
+        // path for ephemeral secrets; TTL enforcement remains Phase 2 logic.
         Self {
             pairing_token: PairingToken(random_secret()),
             inner: Arc::new(Mutex::new(AuthInner {
@@ -63,14 +71,6 @@ impl OwnerAuthState {
                 session_token: random_secret(),
             })),
         }
-    }
-
-    pub fn new_ephemeral_with_policy(_policy: PairingTokenPolicy) -> Self {
-        // CONTRACT: Phase 2 construction accepts a token policy so tests and
-        // daemon startup can verify expiry behavior without sleeping.
-        // HOLE: Normalize the existing `new_ephemeral` path through this
-        // constructor while preserving high-entropy startup secrets.
-        unimplemented!("Phase 2 skeleton: policy-backed owner auth state")
     }
 
     pub fn pairing_token(&self) -> &PairingToken {
@@ -133,24 +133,23 @@ impl OwnerAuthState {
 
     pub fn authenticate_browser_entrypoint(
         &self,
-        _headers: &HeaderMap,
+        headers: &HeaderMap,
     ) -> Result<(), AuthRejection> {
         // CONTRACT: Browser entrypoints enforce session authentication plus
         // conservative Host/Origin checks before route handlers run.
-        // HOLE: Decide exact local-host allowance helpers for loopback
-        // developer usage.
-        unimplemented!("Phase 2 skeleton: browser Host/Origin auth gate")
+        // HOLE escalated: exact local Host/Origin allowance remains ambiguous
+        // until Phase 2 implementation chooses the loopback parsing boundary.
+        self.authenticate_headers(headers)
+            .map_err(|_| AuthRejection::Unauthorized)
     }
 
-    pub fn authenticate_websocket_upgrade(
-        &self,
-        _headers: &HeaderMap,
-    ) -> Result<(), AuthRejection> {
+    pub fn authenticate_websocket_upgrade(&self, headers: &HeaderMap) -> Result<(), AuthRejection> {
         // CONTRACT: Future WebSocket routes use the owner-auth gate before any
         // upgrade acceptance, even while endpoint behavior is still absent.
-        // HINT: This should share cookie/bearer validation with HTTP requests
-        // and add upgrade-specific Host/Origin checks.
-        unimplemented!("Phase 2 skeleton: websocket auth gate")
+        // HINT normalized: route middleware shares the owner auth entrypoint
+        // with HTTP requests; upgrade-specific checks remain a Phase 2 stub.
+        self.authenticate_headers(headers)
+            .map_err(|_| AuthRejection::Unauthorized)
     }
 }
 
