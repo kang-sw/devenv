@@ -240,7 +240,10 @@ remain accepted as a hidden compatibility override.
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable
 aliases; concrete provider model names select a one-off backend model. The
-`tier` field remains a deprecated compatibility input.
+`tier` field remains a deprecated compatibility input. Alias resolution may
+supply optional effort metadata; `agents.register` does not accept direct effort
+input, and backend calls apply effort only when the selected alias resolves a
+non-empty effort.
 {#260508-agents-register-model-alias-field}
 
 `agents.wait` waits for one or more agents to become ready and returns readiness
