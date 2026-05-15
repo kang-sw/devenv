@@ -11,6 +11,7 @@ related-mental-model:
   - named-agent-runtime
   - mcp-runtime
   - developer-environment-tools
+completed: 2026-05-16
 ---
 
 # ws web dashboard first visible substrate
@@ -42,18 +43,18 @@ reopening the basic dashboard frame.
 
 ## Child Tickets
 
-- `260516-feat-ws-web-resource-view-model-contract` - todo; first child and
+- `260516-feat-ws-web-resource-view-model-contract` - done; first child and
   implementation blocker for the rest of this epic. Defines the
   server/workspace/workRoot/main-instance/sub-instance view-model contract,
   workRoot vocabulary, protected API routes, mock provider, and golden
   fixtures.
-- `260516-feat-ws-web-minimal-frontend-shell` - todo; attaches the real
+- `260516-feat-ws-web-minimal-frontend-shell` - done; attaches the real
   React/Vite shell to the daemon and renders the first inspectable navigation
   and detail surface from the shared view-model API.
-- `260516-feat-ws-web-local-workspace-discovery` - todo; connects the
+- `260516-feat-ws-web-local-workspace-discovery` - done; connects the
   view-model contract to local plain-directory, Git-primary-root, and
   Git-linked-worktree discovery, including manual and opportunistic refresh.
-- `260516-feat-ws-web-instance-event-stream` - todo; defines the authenticated
+- `260516-feat-ws-web-instance-event-stream` - done; defines the authenticated
   instance event envelope, transcript fixtures, and reconnect/backfill scaffold
   for later PTY, named-agent, exec, diagnostic, viewer, and translation streams.
 

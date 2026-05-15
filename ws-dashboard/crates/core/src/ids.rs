@@ -1,4 +1,6 @@
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct OpaqueId(String);
 
 impl OpaqueId {
@@ -25,5 +27,8 @@ impl From<String> for OpaqueId {
 
 pub type ServerId = OpaqueId;
 pub type WorkspaceId = OpaqueId;
-pub type WorktreeId = OpaqueId;
+// CONTRACT: WorkRootId is the public dashboard id for the physical directory
+// used as an open, spawn, and run target. Do not expose WorktreeId in dashboard
+// APIs.
+pub type WorkRootId = OpaqueId;
 pub type InstanceId = OpaqueId;

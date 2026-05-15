@@ -6,10 +6,17 @@ related:
   260515-epic-ws-web-dashboard-first-visible-substrate: coordinating first visible substrate epic
   260514-research-ws-web-dashboard-direction: source research for resource model and shell boundaries
   260514-feat-ws-web-daemon-foundation: authenticated daemon foundation this API extends
+spec:
+  - 260516-ws-web-dashboard-resource-view-model-contract
+  - 260516-ws-web-dashboard-mock-view-model-fixtures
+skeletons:
+  phase-1: 8e249ef
+  phase-2: ae44dad
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-16
 ---
 
 # ws web dashboard resource view-model contract
@@ -64,6 +71,23 @@ Success criteria:
 - Resource paths and serialized field names use `workRoot`, not `worktree`.
 - Existing daemon foundation tests continue to pass.
 
+### Result (8e249ef) - 2026-05-16
+
+Implemented the dashboard core resource vocabulary contract. The core crate now
+exports `WorkRootId`, `WorkRootStatus`, `WorkRootKind`, and
+`ResourcePath.work_root_id`, and no longer exports the previous worktree-named
+core aliases at the public dashboard boundary.
+
+Added serde-backed contract tests proving that `ResourcePath` serializes with
+`workRootId` and without `worktreeId` or `worktree_id`, and that
+`WorkRootKind` serializes as `plainDirectory`, `gitPrimaryRoot`, and
+`gitLinkedWorktree`. The implementation stayed within Phase 1: it did not add
+dashboard HTTP routes, mock providers, golden fixtures, discovery, frontend, or
+stream behavior.
+
+Verification: `cargo test -p ws-dashboard-core` and `cargo test --workspace`
+passed.
+
 ### Phase 2: Authenticated view-model API and mock fixtures
 
 Add protected daemon API routes that return deterministic dashboard view models
@@ -83,3 +107,24 @@ Success criteria:
   discovery exists.
 - Golden fixtures preserve the full hierarchy and include compactable cases.
 - Unauthenticated callers cannot access dashboard view-model API routes.
+
+### Result (909cb9e) - 2026-05-16
+
+Implemented the authenticated dashboard resource view-model API and
+fixture-backed mock provider. The daemon now exposes
+`GET /api/dashboard/resources` inside the existing owner-auth protected router,
+returning the full `server -> workspace -> workRoot -> mainInstance ->
+subInstance` hierarchy through the shared core view-model contract.
+
+Added deterministic mock resource data backed by
+`ws-dashboard/crates/daemon/tests/fixtures/dashboard_resources.json`, with
+route tests proving unauthenticated callers are rejected and authenticated
+owners receive JSON matching the shared golden fixture. The fixture covers
+multi-root and singleton workspaces, `plainDirectory`, `gitPrimaryRoot`,
+`gitLinkedWorktree`, offline/inaccessible states, main/sub instances,
+loading/stale/error state fields, compactable hints, and action hints.
+
+Verification: `cargo test -p ws-dashboard-core --lib`,
+`cargo test -p ws-dashboard-daemon --test routes`, and `cargo test --workspace`
+passed. Correctness, fit, and test reviews were clean after the golden fixture
+follow-up.

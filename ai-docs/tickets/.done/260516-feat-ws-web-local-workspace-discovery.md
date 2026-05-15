@@ -6,9 +6,13 @@ related:
   260515-epic-ws-web-dashboard-first-visible-substrate: coordinating first visible substrate epic
   260516-feat-ws-web-resource-view-model-contract: required view-model and workRoot contract
   260514-research-ws-web-dashboard-direction: source research for discovery and root picker boundaries
+spec:
+  - 260516-ws-web-dashboard-local-workroot-discovery-provider
+  - 260516-ws-web-dashboard-root-picker-empty-directory-creation
 related-mental-model:
   - ws-web-dashboard
   - mcp-runtime
+completed: 2026-05-16
 ---
 
 # ws web dashboard local workspace discovery
@@ -54,6 +58,27 @@ Success criteria:
 - Manual and opportunistic refresh paths update kind/status without requiring a
   broad watcher.
 
+### Result (6a4f990) - 2026-05-16
+
+Implemented the live local discovery provider substrate behind the existing
+`DashboardResourcesProvider` seam. The daemon now has a
+`LocalDashboardResourcesProvider` that maps candidate paths into the shared
+resource view model, classifies plain directories, Git primary roots, and
+linked Git worktrees, and reports online, moved, offline, and inaccessible
+workRoot states without exposing host paths as public ids.
+
+The implementation keeps `/api/dashboard/resources` mock-backed until the root
+picker/open state can select live candidates. Discovery recomputes from the
+candidate list on each provider call, so later manual and opportunistic refresh
+entrypoints can reuse the provider without adding a broad watcher. WorkRoot ids
+are derived from the remembered candidate path rather than the canonical target,
+preserving identity when a symlink target disappears or a root changes status.
+
+Verification: `cargo test -p ws-dashboard-daemon discovery` and
+`cargo test --workspace` passed. Review found unstable identity for canonical
+symlink targets and weak inaccessible-directory detection; the final commit
+fixes both with regression tests.
+
 ### Phase 2: Root picker and add-empty-folder affordance
 
 Add the backend support needed for a cross-platform root picker that lists
@@ -67,3 +92,21 @@ Success criteria:
   the dashboard model.
 - The owner can create an empty folder candidate through the picker.
 - Destructive or broad file-manager operations remain unavailable.
+
+### Result (0183cf7) - 2026-05-16
+
+Implemented the authenticated backend root picker slice. The daemon now exposes
+owner-authenticated routes to list directory candidates, create a single empty
+child directory candidate, and open an existing directory into the dashboard
+resource model through the live local discovery provider.
+
+The implementation intentionally does not add delete, rename, move, copy, or
+recursive folder operations. Opening a directory returns the same
+`DashboardResourcesView` shape used by the resource API, while the main
+`/api/dashboard/resources` route remains mock-backed for deterministic frontend
+and contract tests until a later route-selection pass.
+
+Verification: `cargo test -p ws-dashboard-daemon --test routes root_picker`
+and `cargo test --workspace` passed. Review found only a parallel-test fixture
+collision risk; the final commit fixes fixture uniqueness with process id plus
+an atomic counter and rechecks route tests.

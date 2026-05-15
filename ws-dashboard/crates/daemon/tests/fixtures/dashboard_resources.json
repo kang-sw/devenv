@@ -1,0 +1,281 @@
+{
+  "server": {
+    "id": "server-local",
+    "label": "Local ws dashboard",
+    "state": {
+      "status": "online",
+      "loading": false,
+      "stale": false,
+      "error": null
+    },
+    "actions": [
+      {
+        "id": "refresh",
+        "label": "Refresh",
+        "enabled": true
+      }
+    ]
+  },
+  "workspaces": [
+    {
+      "id": "workspace-devenv",
+      "label": "devenv",
+      "state": {
+        "status": "ready",
+        "loading": false,
+        "stale": false,
+        "error": null
+      },
+      "compactable": false,
+      "workRoots": [
+        {
+          "id": "root-devenv-primary",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-devenv",
+            "workRootId": "root-devenv-primary",
+            "instanceId": null
+          },
+          "label": "devenv primary",
+          "kind": "gitPrimaryRoot",
+          "status": "online",
+          "state": {
+            "status": "ready",
+            "loading": false,
+            "stale": false,
+            "error": null
+          },
+          "compactable": false,
+          "mainInstances": [
+            {
+              "id": "instance-devenv-main",
+              "resourcePath": {
+                "serverId": "server-local",
+                "workspaceId": "workspace-devenv",
+                "workRootId": "root-devenv-primary",
+                "instanceId": "instance-devenv-main"
+              },
+              "role": "main",
+              "kind": "harness",
+              "interactionMode": "direct",
+              "label": "Main harness",
+              "state": {
+                "status": "active",
+                "loading": false,
+                "stale": false,
+                "error": null
+              },
+              "subInstances": [
+                {
+                  "id": "instance-devenv-subagent",
+                  "resourcePath": {
+                    "serverId": "server-local",
+                    "workspaceId": "workspace-devenv",
+                    "workRootId": "root-devenv-primary",
+                    "instanceId": "instance-devenv-subagent"
+                  },
+                  "role": "sub",
+                  "kind": "agent",
+                  "interactionMode": "delegated",
+                  "label": "Review agent",
+                  "state": {
+                    "status": "idle",
+                    "loading": false,
+                    "stale": true,
+                    "error": null
+                  },
+                  "subInstances": [],
+                  "actions": [
+                    {
+                      "id": "inspect",
+                      "label": "Inspect",
+                      "enabled": true
+                    }
+                  ]
+                }
+              ],
+              "actions": [
+                {
+                  "id": "open",
+                  "label": "Open",
+                  "enabled": true
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "id": "openRoot",
+              "label": "Open root",
+              "enabled": true
+            }
+          ]
+        },
+        {
+          "id": "root-devenv-linked",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-devenv",
+            "workRootId": "root-devenv-linked",
+            "instanceId": null
+          },
+          "label": "devenv linked worktree",
+          "kind": "gitLinkedWorktree",
+          "status": "online",
+          "state": {
+            "status": "syncing",
+            "loading": true,
+            "stale": false,
+            "error": null
+          },
+          "compactable": false,
+          "mainInstances": [
+            {
+              "id": "instance-linked-main",
+              "resourcePath": {
+                "serverId": "server-local",
+                "workspaceId": "workspace-devenv",
+                "workRootId": "root-devenv-linked",
+                "instanceId": "instance-linked-main"
+              },
+              "role": "main",
+              "kind": "terminal",
+              "interactionMode": "direct",
+              "label": "Linked shell",
+              "state": {
+                "status": "loading",
+                "loading": true,
+                "stale": false,
+                "error": null
+              },
+              "subInstances": [],
+              "actions": [
+                {
+                  "id": "open",
+                  "label": "Open",
+                  "enabled": false
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "id": "focusRoot",
+              "label": "Focus root",
+              "enabled": true
+            }
+          ]
+        },
+        {
+          "id": "root-devenv-offline",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-devenv",
+            "workRootId": "root-devenv-offline",
+            "instanceId": null
+          },
+          "label": "offline archive",
+          "kind": "plainDirectory",
+          "status": "offline",
+          "state": {
+            "status": "offline",
+            "loading": false,
+            "stale": true,
+            "error": "workRoot is offline"
+          },
+          "compactable": false,
+          "mainInstances": [],
+          "actions": [
+            {
+              "id": "reconnect",
+              "label": "Reconnect",
+              "enabled": false
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "openWorkspace",
+          "label": "Open workspace",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "workspace-notes",
+      "label": "notes",
+      "state": {
+        "status": "degraded",
+        "loading": false,
+        "stale": true,
+        "error": "one workRoot is inaccessible"
+      },
+      "compactable": true,
+      "workRoots": [
+        {
+          "id": "root-notes",
+          "resourcePath": {
+            "serverId": "server-local",
+            "workspaceId": "workspace-notes",
+            "workRootId": "root-notes",
+            "instanceId": null
+          },
+          "label": "notes",
+          "kind": "plainDirectory",
+          "status": "inaccessible",
+          "state": {
+            "status": "inaccessible",
+            "loading": false,
+            "stale": true,
+            "error": "permission denied"
+          },
+          "compactable": true,
+          "mainInstances": [
+            {
+              "id": "instance-notes-main",
+              "resourcePath": {
+                "serverId": "server-local",
+                "workspaceId": "workspace-notes",
+                "workRootId": "root-notes",
+                "instanceId": "instance-notes-main"
+              },
+              "role": "main",
+              "kind": "viewer",
+              "interactionMode": "passive",
+              "label": "Notes viewer",
+              "state": {
+                "status": "blocked",
+                "loading": false,
+                "stale": true,
+                "error": "waiting for access"
+              },
+              "subInstances": [],
+              "actions": [
+                {
+                  "id": "inspect",
+                  "label": "Inspect",
+                  "enabled": true
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "id": "reveal",
+              "label": "Reveal",
+              "enabled": false
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "refreshWorkspace",
+          "label": "Refresh workspace",
+          "enabled": true
+        }
+      ]
+    }
+  ]
+}

@@ -16,21 +16,74 @@
 //   endpoint behavior is considered.
 // - health output stays minimal and does not expose token, host paths, cache
 //   paths, Git roots, wsstate internals, or diagnostics.
+// - `/api/dashboard/resources` is protected and returns the same deterministic
+//   dashboard hierarchy contract that frontend work will consume.
 
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{header, Method, Request, StatusCode};
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::router::{build_router, AppState};
+
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn app_state() -> AppState {
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
     }
+}
+
+fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
+    AppState {
+        config: ServeConfig {
+            static_dir: Some(static_dir),
+            ..ServeConfig::default_loopback()
+        },
+        auth: OwnerAuthState::new_ephemeral(),
+    }
+}
+
+fn write_static_fixture() -> PathBuf {
+    let root = temp_fixture_path("static");
+    fs::create_dir_all(root.join("assets")).expect("create static fixture assets dir");
+    fs::write(
+        root.join("index.html"),
+        "<!doctype html><title>fixture dashboard</title><div id=\"root\"></div>",
+    )
+    .expect("write static fixture index");
+    fs::write(
+        root.join("assets/app.js"),
+        "console.log('fixture dashboard');",
+    )
+    .expect("write static fixture asset");
+    root
+}
+
+fn write_root_picker_fixture() -> PathBuf {
+    let root = temp_fixture_path("picker");
+    fs::create_dir_all(root.join("zeta")).expect("create zeta dir");
+    fs::create_dir_all(root.join("alpha")).expect("create alpha dir");
+    fs::write(root.join("not-a-directory.txt"), "ignored\n").expect("write ignored file");
+    root
+}
+
+fn temp_fixture_path(name: &str) -> PathBuf {
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "ws-dashboard-{name}-{}-{unique}",
+        std::process::id()
+    ))
+}
+
+fn remove_static_fixture(path: &Path) {
+    let _ = fs::remove_dir_all(path);
 }
 
 async fn pair_and_cookie(app: axum::Router, token: &str) -> String {
@@ -211,6 +264,472 @@ async fn health_and_static_ui_succeed_with_owner_session_cookie() {
 
         assert_eq!(response.status(), StatusCode::OK);
     }
+}
+
+#[tokio::test]
+async fn static_dashboard_assets_stay_owner_authenticated() {
+    let static_dir = write_static_fixture();
+    let app = build_router(app_state_with_static_dir(static_dir.clone()));
+
+    for uri in ["/", "/assets/app.js"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .body(Body::empty())
+                    .expect("unauthenticated static request"),
+            )
+            .await
+            .expect("unauthenticated static response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+
+    remove_static_fixture(&static_dir);
+}
+
+#[tokio::test]
+async fn static_dashboard_assets_succeed_with_owner_session_cookie() {
+    let static_dir = write_static_fixture();
+    let state = app_state_with_static_dir(static_dir.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let index = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated static index request"),
+        )
+        .await
+        .expect("authenticated static index response");
+    assert_eq!(index.status(), StatusCode::OK);
+    let index_body = axum::body::to_bytes(index.into_body(), 4096)
+        .await
+        .expect("static index body bytes");
+    let index_body = std::str::from_utf8(&index_body).expect("static index body utf8");
+    assert!(index_body.contains("fixture dashboard"));
+
+    let asset = app
+        .oneshot(
+            Request::builder()
+                .uri("/assets/app.js")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated static asset request"),
+        )
+        .await
+        .expect("authenticated static asset response");
+    assert_eq!(asset.status(), StatusCode::OK);
+    assert_eq!(
+        asset.headers().get(header::CONTENT_TYPE),
+        Some(&header::HeaderValue::from_static(
+            "application/javascript; charset=utf-8"
+        ))
+    );
+    let asset_body = axum::body::to_bytes(asset.into_body(), 4096)
+        .await
+        .expect("static asset body bytes");
+    let asset_body = std::str::from_utf8(&asset_body).expect("static asset body utf8");
+    assert!(asset_body.contains("fixture dashboard"));
+
+    remove_static_fixture(&static_dir);
+}
+
+#[tokio::test]
+async fn dashboard_resources_api_is_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .body(Body::empty())
+                .expect("unauthenticated dashboard resources request"),
+        )
+        .await
+        .expect("unauthenticated dashboard resources response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
+    // CONTRACT: paired owners receive deterministic JSON with server,
+    // workspaces, workRoots, mainInstances, subInstances, state, compactable,
+    // and action hint fields. Parse with serde_json and assert contract field
+    // names rather than depending on private Rust structs.
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated dashboard resources request"),
+        )
+        .await
+        .expect("authenticated dashboard resources response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("dashboard resources body bytes");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("dashboard resources JSON body");
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/dashboard_resources.json"))
+            .expect("dashboard resources fixture JSON");
+    assert_eq!(value, fixture);
+
+    assert!(value.get("server").is_some());
+    assert_eq!(value["server"]["id"], "server-local");
+    assert_eq!(value["server"]["state"]["loading"], false);
+    assert_eq!(value["server"]["state"]["stale"], false);
+    assert_eq!(value["server"]["actions"][0]["id"], "refresh");
+
+    let workspaces = value["workspaces"].as_array().expect("workspaces array");
+    assert_eq!(workspaces.len(), 2);
+    assert!(value.get("work_roots").is_none());
+
+    let devenv = &workspaces[0];
+    assert_eq!(devenv["id"], "workspace-devenv");
+    assert_eq!(devenv["compactable"], false);
+    assert!(devenv.get("workRoots").is_some());
+    assert!(devenv.get("work_roots").is_none());
+
+    let work_roots = devenv["workRoots"].as_array().expect("workRoots array");
+    assert_eq!(work_roots.len(), 3);
+    assert_eq!(work_roots[0]["kind"], "gitPrimaryRoot");
+    assert_eq!(work_roots[1]["kind"], "gitLinkedWorktree");
+    assert_eq!(work_roots[2]["kind"], "plainDirectory");
+    assert_eq!(work_roots[2]["status"], "offline");
+    assert_eq!(work_roots[2]["state"]["error"], "workRoot is offline");
+
+    let main_instance = &work_roots[0]["mainInstances"][0];
+    assert_eq!(main_instance["role"], "main");
+    assert_eq!(
+        main_instance["resourcePath"]["workRootId"],
+        "root-devenv-primary"
+    );
+    assert!(main_instance.get("main_instances").is_none());
+    assert!(main_instance.get("subInstances").is_some());
+    assert!(main_instance.get("sub_instances").is_none());
+    assert_eq!(main_instance["actions"][0]["label"], "Open");
+
+    let sub_instance = &main_instance["subInstances"][0];
+    assert_eq!(sub_instance["role"], "sub");
+    assert_eq!(sub_instance["interactionMode"], "delegated");
+    assert_eq!(sub_instance["state"]["stale"], true);
+
+    let singleton = &workspaces[1];
+    assert_eq!(singleton["id"], "workspace-notes");
+    assert_eq!(singleton["compactable"], true);
+    assert_eq!(singleton["workRoots"][0]["kind"], "plainDirectory");
+    assert_eq!(singleton["workRoots"][0]["status"], "inaccessible");
+    assert_eq!(singleton["workRoots"][0]["compactable"], true);
+    assert_eq!(
+        singleton["workRoots"][0]["mainInstances"][0]["kind"],
+        "viewer"
+    );
+}
+
+#[tokio::test]
+async fn root_picker_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let requests = [
+        Request::builder()
+            .uri("/api/dashboard/root-picker")
+            .body(Body::empty())
+            .expect("root picker request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/root-picker/directories")
+            .body(Body::empty())
+            .expect("create directory request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/work-roots/open")
+            .body(Body::empty())
+            .expect("open workRoot request"),
+    ];
+
+    for request in requests {
+        let response = app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("unauthenticated root picker response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
+async fn root_picker_lists_directory_candidates_with_owner_cookie() {
+    let root = write_root_picker_fixture();
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/root-picker?path={}",
+                    root.display()
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated root picker request"),
+        )
+        .await
+        .expect("authenticated root picker response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("root picker body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("root picker JSON");
+    assert_eq!(
+        value["currentPath"],
+        root.canonicalize()
+            .expect("canonical root picker path")
+            .display()
+            .to_string()
+    );
+    let entries = value["entries"].as_array().expect("entries array");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["name"], "alpha");
+    assert_eq!(entries[0]["entryType"], "directory");
+    assert_eq!(entries[0]["selectable"], true);
+    assert_eq!(entries[1]["name"], "zeta");
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn root_picker_can_create_empty_directory_candidate() {
+    let root = write_root_picker_fixture();
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/root-picker/directories")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "parentPath": root.display().to_string(),
+                        "name": "new-root"
+                    })
+                    .to_string(),
+                ))
+                .expect("create empty directory request"),
+        )
+        .await
+        .expect("create empty directory response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(root.join("new-root").is_dir());
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("created entry body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("created entry JSON");
+    assert_eq!(value["name"], "new-root");
+    assert_eq!(value["entryType"], "directory");
+    assert_eq!(value["selectable"], true);
+
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/root-picker/directories")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "parentPath": root.display().to_string(),
+                        "name": "../bad"
+                    })
+                    .to_string(),
+                ))
+                .expect("invalid create empty directory request"),
+        )
+        .await
+        .expect("invalid create empty directory response");
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn root_picker_can_open_existing_directory_into_dashboard_model() {
+    let root = write_root_picker_fixture();
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": root.display().to_string()
+                    })
+                    .to_string(),
+                ))
+                .expect("open workRoot request"),
+        )
+        .await
+        .expect("open workRoot response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("open workRoot body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("workRoot JSON");
+    assert_eq!(value["server"]["id"], "server-local");
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["kind"],
+        "plainDirectory"
+    );
+    assert_eq!(value["workspaces"][0]["workRoots"][0]["status"], "online");
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["actions"][0]["id"],
+        "openRoot"
+    );
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn instance_event_stream_route_is_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/stream-devenv-main")
+                .body(Body::empty())
+                .expect("unauthenticated event stream request"),
+        )
+        .await
+        .expect("unauthenticated event stream response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn instance_event_stream_route_returns_fixture_events_with_backfill() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/stream-devenv-main")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated event stream request"),
+        )
+        .await
+        .expect("authenticated event stream response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("event stream body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("event stream JSON");
+    assert_eq!(value["streamId"], "stream-devenv-main");
+    assert_eq!(value["events"].as_array().expect("events array").len(), 5);
+    assert_eq!(
+        value["events"][0]["resourcePath"]["workRootId"],
+        "root-devenv-primary"
+    );
+    assert_eq!(value["events"][0]["streamId"], "stream-devenv-main");
+
+    let backfill = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/stream-devenv-main?after=0000000002")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("authenticated backfill request"),
+        )
+        .await
+        .expect("authenticated backfill response");
+    assert_eq!(backfill.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(backfill.into_body(), 64 * 1024)
+        .await
+        .expect("backfill body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("backfill JSON");
+    assert_eq!(value["events"].as_array().expect("events array").len(), 3);
+    assert_eq!(value["events"][0]["cursor"], "0000000003");
+
+    let unknown_cursor = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/stream-devenv-main?after=missing")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated unknown cursor request"),
+        )
+        .await
+        .expect("authenticated unknown cursor response");
+    assert_eq!(unknown_cursor.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(unknown_cursor.into_body(), 64 * 1024)
+        .await
+        .expect("unknown cursor body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown cursor JSON");
+    assert!(value["events"].as_array().expect("events array").is_empty());
+}
+
+#[tokio::test]
+async fn instance_event_stream_route_reports_missing_stream() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/instance-events/missing")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated missing event stream request"),
+        )
+        .await
+        .expect("authenticated missing event stream response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

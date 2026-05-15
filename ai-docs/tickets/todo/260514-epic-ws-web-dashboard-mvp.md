@@ -7,6 +7,7 @@ related:
   260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
   260515-epic-ws-web-dashboard-first-visible-substrate: first visible dashboard substrate milestone
   260516-feat-ws-web-resource-view-model-contract: first child of the visible substrate milestone
+  260516-feat-ws-web-minimal-frontend-shell: inspectable frontend child of the visible substrate milestone
 related-mental-model:
   - developer-environment-tools
   - named-agent-runtime
@@ -57,19 +58,19 @@ The MVP should cover:
   keyboard/navigation direction, and future harness-library split points.
   Recreate implementation children from that research only when the boundaries
   are ready.
-- `260515-epic-ws-web-dashboard-first-visible-substrate` - todo; first
+- `260515-epic-ws-web-dashboard-first-visible-substrate` - done; first
   hybrid milestone for resource/view-model APIs, mock/live data boundaries, a
   minimal authenticated frontend shell, local workspace discovery, and event
   stream substrate.
-- `260516-feat-ws-web-resource-view-model-contract` - todo; first child of the
+- `260516-feat-ws-web-resource-view-model-contract` - done; first child of the
   first visible substrate and next implementation-order blocker for stable
   dashboard resource APIs, mock fixtures, and workRoot vocabulary.
-- `260516-feat-ws-web-minimal-frontend-shell` - todo; child of the first
+- `260516-feat-ws-web-minimal-frontend-shell` - done; child of the first
   visible substrate for the first inspectable authenticated browser shell.
-- `260516-feat-ws-web-local-workspace-discovery` - todo; child of the first
+- `260516-feat-ws-web-local-workspace-discovery` - done; child of the first
   visible substrate for live local plain-directory, Git-primary-root, and
   Git-linked-worktree discovery.
-- `260516-feat-ws-web-instance-event-stream` - todo; child of the first visible
+- `260516-feat-ws-web-instance-event-stream` - done; child of the first visible
   substrate for a shared authenticated instance event envelope and
   fixture-backed stream scaffold.
 

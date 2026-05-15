@@ -832,6 +832,10 @@ dependencies = [
 [[package]]
 name = "ws-dashboard-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "ws-dashboard-daemon"
@@ -842,6 +846,7 @@ dependencies = [
  "clap",
  "rand",
  "serde",
+ "serde_json",
  "tokio",
  "tower",
  "tower-http",

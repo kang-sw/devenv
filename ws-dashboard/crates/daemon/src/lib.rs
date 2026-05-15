@@ -1,6 +1,11 @@
 pub mod auth;
 pub mod cli;
 pub mod config;
+pub mod discovery;
+pub mod events;
 pub mod logging;
+pub mod mock;
+pub mod resources;
+pub mod root_picker;
 pub mod router;
 pub mod server;
