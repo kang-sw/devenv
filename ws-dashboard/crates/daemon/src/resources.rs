@@ -20,7 +20,13 @@ pub trait DashboardResourcesProvider {
 // static mock fixture. Before any workRoot is opened it returns an honest
 // empty live view (server present, `workspaces: []`).
 pub async fn dashboard_resources(State(state): State<AppState>) -> Json<DashboardResourcesView> {
-    Json(live_dashboard_resources(&state.opened_work_roots))
+    // Live discovery runs synchronous filesystem and `git` subprocess work, so
+    // keep it off the async worker threads.
+    let opened = state.opened_work_roots.clone();
+    let view = tokio::task::spawn_blocking(move || live_dashboard_resources(&opened))
+        .await
+        .expect("dashboard resources discovery task panicked");
+    Json(view)
 }
 
 /// Build the live dashboard resource view from the daemon's opened workRoots.

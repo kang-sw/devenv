@@ -477,7 +477,6 @@ async fn dashboard_resources_api_returns_empty_live_view_before_open() {
     assert_eq!(value["server"]["id"], "server-local");
     assert_eq!(value["server"]["state"]["loading"], false);
     assert_eq!(value["server"]["state"]["stale"], false);
-    assert!(value.get("work_roots").is_none());
 
     let workspaces = value["workspaces"].as_array().expect("workspaces array");
     assert!(
@@ -523,7 +522,6 @@ async fn dashboard_resources_api_includes_opened_work_root() {
         serde_json::from_slice(&body).expect("dashboard resources JSON body");
 
     assert_eq!(value["server"]["id"], "server-local");
-    assert!(value.get("work_roots").is_none());
     assert!(
         work_root_ids(&value).iter().any(|id| id == &work_root_id),
         "opened workRoot {work_root_id} must appear in the live resources view"
@@ -531,6 +529,17 @@ async fn dashboard_resources_api_includes_opened_work_root() {
     assert!(
         !body_contains_workspace(&value, "workspace-devenv"),
         "live route must not return the mock fixture workspace"
+    );
+
+    // CONTRACT: workRoots stay camelCase in the serialized view-model.
+    let workspace = &value["workspaces"][0];
+    assert!(
+        workspace.get("workRoots").is_some(),
+        "workspace exposes camelCase workRoots"
+    );
+    assert!(
+        workspace.get("work_roots").is_none(),
+        "workspace must not leak snake_case work_roots"
     );
 
     remove_static_fixture(&root);
