@@ -148,7 +148,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260516-bug-ws-web-terminal-cross-platform-portability` | todo | Make dashboard terminal shell selection, PTY commands, browser harness behavior, and evidence cross-platform or explicitly OS-scoped |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
@@ -170,7 +169,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-`260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+No ready tickets.
 
 
 ## Session Notes

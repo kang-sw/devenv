@@ -46,7 +46,8 @@ related:
 - Editing installed dotfiles or plugin cache directly instead of repo sources.
 - Adding tmux helpers outside `shell/scripts` and breaking hardcoded tmux paths.
 - Changing `claude-watch` list layout without updating mouse hit-test math.
-- Treating native Windows `claude-dash` behavior as verified; it remains planned. {#260505-claude-dash-windows-verification}
+- Treating native Windows `claude-dash` behavior as verified; it remains
+  unverified and is no longer active development scope.
 
 ## Technical Debt
 

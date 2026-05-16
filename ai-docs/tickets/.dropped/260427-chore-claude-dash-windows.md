@@ -1,7 +1,5 @@
 ---
 title: claude-dash — Windows native build verification
-spec:
-  - 260505-claude-dash-windows-verification
 ---
 
 # claude-dash — Windows native build verification
@@ -18,3 +16,9 @@ spec:
 - [ ] Verify `git worktree list --porcelain` output on Windows (path separators in `"worktree "` lines).
 - [ ] Verify mouse events work in Windows Terminal.
 - [ ] Fix any issues found.
+
+## Dropped
+
+Dropped on 2026-05-16 because `claude-dash` is no longer expected to receive
+active development. The earlier planned Windows verification spec entry was
+removed with the drop so the ready queue reflects current work.

@@ -127,14 +127,3 @@ slots, and owns subprocess lifecycle controls such as restart and close flows.
 The dashboard polls Git worktrees, exposes provisional worktree tabs, renders
 interactive terminal output through a virtual terminal screen, and supports
 mouse/key navigation for its dashboard regions.
-
-## 🚧 Claude Dash Windows Verification {#260505-claude-dash-windows-verification}
-
-`claude-dash` is intended to run natively on Windows as an executable that
-spawns `claude.exe`, reads Windows worktree paths, handles session directory
-escaping, and works with Windows Terminal mouse events.
-
-Native Windows build and runtime verification remains planned until the active
-Windows verification ticket confirms startup, PTY subprocess behavior, path
-escaping, worktree parsing, mouse handling, and any fixes found during that
-verification.
