@@ -115,6 +115,15 @@ already-running fixed endpoint, waits for a real readiness signal before
 assertions, and emits clear diagnostics for port conflicts, missing pairing
 URLs, unreachable forwarded endpoints, and daemon early exit.
 
+### Result (ddd47673) - 2026-05-17
+
+Implemented spawned and external daemon harness modes with deterministic host,
+bind mode, port, daemon binary, static directory, readiness timeout, base URL,
+and pairing URL configuration. The browser harness now verifies readiness after
+pairing, supports external forwarded endpoints, preserves the existing product
+CLI contract, and redacts private endpoint and token details from readiness and
+startup diagnostics.
+
 ### Phase 2: Make shell selection explicit and testable
 
 Extract or expose the dashboard terminal shell-selection behavior enough for
@@ -125,6 +134,12 @@ used for spawned terminals.
 Success means the code and tests make it clear which shell is selected on
 Unix/macOS/Linux and Windows, and failures produce recoverable diagnostics
 rather than opaque PTY spawn behavior.
+
+### Result (ddd47673) - 2026-05-17
+
+Implemented testable terminal shell selection for Unix and Windows profiles.
+The daemon covers `$SHELL`, `%COMSPEC%`, and fallback behavior without requiring
+the test host to match the target platform.
 
 ### Phase 3: Replace POSIX-only terminal test commands
 
@@ -144,6 +159,14 @@ hardcoding POSIX-only syntax in shared acceptance paths. Any behavior that
 remains POSIX-only must be labeled with an explicit OS or shell guard and must
 not be presented as native-Windows evidence.
 
+### Result (ddd47673) - 2026-05-17
+
+Replaced shared POSIX command strings in backend route tests and browser
+acceptance paths with platform-aware command helpers for Unix shell, `cmd.exe`,
+and PowerShell profiles. Browser acceptance now binds command generation to the
+target shell profile rather than the local Playwright host when running against
+an external daemon.
+
 ### Phase 4: Harden browser harness platform behavior
 
 Review daemon-served Playwright harness startup and shutdown behavior for
@@ -162,6 +185,13 @@ the platform under test or fails/skips with an explicit reason that does not
 masquerade as product behavior. A remote forwarded endpoint failure should name
 the failing layer instead of only reporting a generic browser timeout.
 
+### Result (ddd47673) - 2026-05-17
+
+Hardened the Playwright daemon harness for Windows executable naming, external
+endpoint attachment, post-pairing readiness, spawned-child cleanup on readiness
+failure, and bounded diagnostic output. Added executable harness coverage and
+wired it into `npm run test:terminals`.
+
 ### Phase 5: Record cross-platform terminal evidence
 
 Run and record terminal portability evidence for the supported local
@@ -179,3 +209,13 @@ evidence gap rather than silently treating the local POSIX gate as portable.
 
 Success means future dashboard terminal work has a durable reference for what
 is known portable, what is WSL-only, and what remains native-Windows risk.
+
+### Result (ddd47673) - 2026-05-17
+
+Recorded local POSIX browser-gate evidence as passing with a spawned daemon,
+`unix-sh` command profile, pairing URL scrape, and `/healthz` readiness.
+Attempted native-Windows fixed-endpoint evidence through the machine-local SSH
+host; SSH and remote frontend build succeeded, but native daemon build was
+blocked by an outdated remote Cargo toolchain. The Windows result is recorded
+as an explicit evidence gap without private endpoint, user, host, path, token,
+or screenshot details.
