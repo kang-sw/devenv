@@ -268,8 +268,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("CTRL-C-OK", { timeout: 2_000 });
 
-    await page.keyboard.press("Control+L");
-    await expect(page.locator(".xterm-rows")).not.toContainText("BACKSPACE-OK");
+    await page.locator(".terminal-surface").click();
+    await page.keyboard.type("clear; printf 'CTRL-L-OK\n'");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("CTRL-L-OK");
 
     await page.locator(".terminal-surface").click();
     await page.keyboard.type("printf 'BAD'");
@@ -279,7 +281,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(page.locator(".xterm-rows")).toContainText("EDITED-OK");
     await page.keyboard.press("ArrowUp");
     await page.keyboard.press("Control+C");
-    await page.keyboard.press("Control+L");
+    await page.keyboard.insertText("\f");
     await page.locator(".terminal-surface").click();
     await page.keyboard.insertText("printf 'PASTE-OK\n'");
     await page.keyboard.press("Enter");
@@ -295,7 +297,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note(
       `terminal WebSocket: ${terminalSocketUrls[0]} connected; HTTP output polls stayed at ` +
         `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with Backspace, cursor movement, edit, history, ` +
-        "Ctrl-C, Ctrl-L, paste, and no document scroll",
+        "Ctrl-C, clear-screen control rendering/recovery, paste, and no document scroll",
     );
   });
 

@@ -288,6 +288,10 @@ export function shouldPollTerminalOutput(pane: TerminalPaneState) {
   );
 }
 
+export function canApplyTerminalOutputPoll(pane: TerminalPaneState, requestedAfter: number) {
+  return shouldPollTerminalOutput(pane) && pane.nextSequence === requestedAfter;
+}
+
 /**
  * Decide whether a successful terminal output poll changed anything worth a
  * React state update. A truly idle poll - no new chunks, unchanged status, no

@@ -1,6 +1,7 @@
 import {
   appendTerminalOutput,
   appendTerminalWebSocketMessage,
+  canApplyTerminalOutputPoll,
   clampTerminalSize,
   markTerminalPaneCloseError,
   markTerminalSocketStatus,
@@ -64,6 +65,8 @@ assertEqual(pane.socketStatus, "disconnected", "new pane starts without a socket
 assertEqual(shouldPollTerminalOutput(pane), true, "disconnected running panes remain eligible for HTTP fallback polling");
 assertEqual(shouldPollTerminalOutput(markTerminalSocketStatus(pane, "connecting")), false, "connecting websocket panes suppress live HTTP output polling");
 assertEqual(shouldPollTerminalOutput(markTerminalSocketStatus(pane, "connected")), false, "connected websocket panes suppress live HTTP output polling");
+assertEqual(canApplyTerminalOutputPoll(pane, 0), true, "poll response can apply when pane cursor and polling state still match");
+assertEqual(canApplyTerminalOutputPoll(markTerminalSocketStatus(pane, "connecting"), 0), false, "in-flight poll response is discarded once a socket starts connecting");
 const merged = mergeListedTerminalSessions({}, [session]);
 assertEqual(Boolean(merged[pane.logicalKey]), true, "listed live session reconstructs pane state");
 assertDeepEqual(
@@ -86,6 +89,7 @@ assertEqual(
 const withOutput = appendTerminalOutput(pane, { terminalId: "term_abc", status: "running", nextSequence: 3, chunks: [{ sequence: 1, data: "hi", stream: "pty" }] });
 assertEqual(withOutput.output, "hi", "output appends chunk data");
 assertEqual(withOutput.nextSequence, 3, "output advances cursor");
+assertEqual(canApplyTerminalOutputPoll(withOutput, 0), false, "stale in-flight poll response is discarded after cursor advancement");
 const withSocketOutput = appendTerminalWebSocketMessage(markTerminalSocketStatus(pane, "connected"), { type: "output", terminalId: "term_abc", chunk: { sequence: 4, data: " socket", stream: "pty" } });
 assertEqual(withSocketOutput.output, " socket", "websocket output appends chunk data");
 assertEqual(withSocketOutput.nextSequence, 5, "websocket output advances cursor past chunk sequence");

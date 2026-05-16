@@ -40,6 +40,7 @@ import {
 import {
   appendTerminalOutput,
   appendTerminalWebSocketMessage,
+  canApplyTerminalOutputPoll,
   clampTerminalSize,
   closeTerminal,
   createTerminal,
@@ -936,6 +937,9 @@ function WorkbenchShell({
               // React does not re-render the whole workbench tree every cycle
               // while terminals are quiet. A stale error still counts as a
               // change so a successful poll clears it.
+              if (!canApplyTerminalOutputPoll(existing, pane.nextSequence)) {
+                return current;
+              }
               if (!terminalOutputPollChangedState(existing, output)) {
                 return current;
               }
