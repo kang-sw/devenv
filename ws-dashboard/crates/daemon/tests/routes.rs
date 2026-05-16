@@ -1604,7 +1604,7 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
                 .header(header::COOKIE, cookie.as_str())
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "data": "printf ws-terminal-test\\n; exit\\n" })
+                    serde_json::json!({ "data": terminal_test_commands_for_current_platform("ws-terminal-test").echo_and_exit })
                         .to_string(),
                 ))
                 .expect("input terminal request"),
@@ -1777,7 +1777,7 @@ async fn terminal_websocket_attaches_for_owner_and_forwards_io_and_resize() {
 
     socket
         .send(TungsteniteMessage::Text(
-            serde_json::json!({ "type": "input", "data": "printf WS-SOCKET-TEST\n; exit\n" })
+            serde_json::json!({ "type": "input", "data": terminal_test_commands_for_current_platform("WS-SOCKET-TEST").echo_and_exit })
                 .to_string()
                 .into(),
         ))

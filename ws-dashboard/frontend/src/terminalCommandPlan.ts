@@ -4,6 +4,7 @@ export type TerminalCommandPlatform = "win32" | "darwin" | "linux" | string;
 
 export type TerminalCommandPlan = {
   profile: TerminalShellProfile;
+  limitations: string[];
   echo(marker: string): string;
   ansiGreen(marker: string): string;
   scrollLines(prefix: string, count: number): string;
@@ -22,6 +23,13 @@ function quotePowerShellSingle(value: string): string {
 
 function cmdLiteral(value: string): string {
   return value.replace(/[&<>|^%]/g, "^$&");
+}
+
+function boundedCount(count: number): number {
+  if (!Number.isInteger(count) || count < 1 || count > 500) {
+    throw new Error(`terminal command count must be an integer from 1 to 500, got ${count}`);
+  }
+  return count;
 }
 
 function runtimePlatform(): TerminalCommandPlatform {
@@ -55,9 +63,10 @@ export function terminalCommandPlanForPlatform(
   if (profile === "powershell") {
     return {
       profile,
+      limitations: ["PowerShell alternate-screen fixture uses a deterministic line output substitute."],
       echo: (marker) => `Write-Output ${quotePowerShellSingle(marker)}`,
-      ansiGreen: (marker) => `Write-Host "` + "`e" + `[32m${marker}` + "`e" + `[0m"`,
-      scrollLines: (prefix, count) => `1..${count} | ForEach-Object { Write-Output ${quotePowerShellSingle(prefix)}$_ }`,
+      ansiGreen: (marker) => `Write-Host ("` + "`e" + `[32m" + ${quotePowerShellSingle(marker)} + "` + "`e" + `[0m")`,
+      scrollLines: (prefix, count) => `1..${boundedCount(count)} | ForEach-Object { Write-Output ${quotePowerShellSingle(prefix)}$_ }`,
       alternateScreenBottomRow: (marker) => `Write-Output ${quotePowerShellSingle(marker)}`,
       clearAndEcho: (marker) => `Clear-Host; Write-Output ${quotePowerShellSingle(marker)}`,
       longRunningCommand: () => "Start-Sleep -Seconds 30",
@@ -67,9 +76,13 @@ export function terminalCommandPlanForPlatform(
   if (profile === "cmd-exe") {
     return {
       profile,
+      limitations: [
+        "cmd.exe ANSI fixture asserts visible text only because SGR color support depends on host console settings.",
+        "cmd.exe alternate-screen fixture uses a deterministic line output substitute.",
+      ],
       echo: (marker) => `echo ${cmdLiteral(marker)}`,
       ansiGreen: (marker) => `echo ${cmdLiteral(marker)}`,
-      scrollLines: (prefix, count) => `for /L %i in (1,1,${count}) do @echo ${cmdLiteral(prefix)}%i`,
+      scrollLines: (prefix, count) => `for /L %i in (1,1,${boundedCount(count)}) do @echo ${cmdLiteral(prefix)}%i`,
       alternateScreenBottomRow: (marker) => `echo ${cmdLiteral(marker)}`,
       clearAndEcho: (marker) => `cls & echo ${cmdLiteral(marker)}`,
       longRunningCommand: () => "ping -n 30 127.0.0.1 > nul",
@@ -78,9 +91,10 @@ export function terminalCommandPlanForPlatform(
 
   return {
     profile,
+    limitations: [],
     echo: (marker) => `printf '%s\\n' ${quoteSingle(marker)}`,
     ansiGreen: (marker) => `printf '\\033[32m%s\\033[0m\\n' ${quoteSingle(marker)}`,
-    scrollLines: (prefix, count) => `i=1; while [ $i -le ${count} ]; do printf '%s%s\\n' ${quoteSingle(prefix)} "$i"; i=$((i+1)); done`,
+    scrollLines: (prefix, count) => `i=1; while [ $i -le ${boundedCount(count)} ]; do printf '%s%s\\n' ${quoteSingle(prefix)} "$i"; i=$((i+1)); done`,
     alternateScreenBottomRow: (marker) => `printf '%s\\n' ${quoteSingle(marker)}`,
     clearAndEcho: (marker) => `clear; printf '%s\\n' ${quoteSingle(marker)}`,
     longRunningCommand: () => "sleep 30",

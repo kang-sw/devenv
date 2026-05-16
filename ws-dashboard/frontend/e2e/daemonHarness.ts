@@ -32,16 +32,29 @@ export type DaemonHandle = {
   child?: ChildProcess;
   baseUrl: string;
   pairingUrl: string;
+  command?: string[];
+  readinessSignal: "pairing-url" | "http";
   stop: () => Promise<void>;
 };
 
-function optionalPositiveInteger(name: string, value: string | undefined): number | undefined {
+function optionalPort(name: string, value: string | undefined): number | undefined {
   if (value === undefined || value === "") {
     return undefined;
   }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65_535) {
-    throw new Error(`${name} must be an integer port/timeout value between 0 and 65535`);
+    throw new Error(`${name} must be an integer port value between 0 and 65535`);
+  }
+  return parsed;
+}
+
+function optionalTimeout(name: string, value: string | undefined): number | undefined {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 600_000) {
+    throw new Error(`${name} must be an integer timeout value between 1 and 600000`);
   }
   return parsed;
 }
@@ -60,7 +73,7 @@ export function parseDaemonHarnessConfig(env: NodeJS.ProcessEnv = process.env): 
   // CONTRACT: Environment parsing must expose fixed host/port/bind-mode,
   // daemon binary, static dir, readiness timeout, and external base/pairing URL.
   // HINT: Keep existing no-env behavior equivalent to locally spawned port 0.
-  const readinessTimeoutMs = optionalPositiveInteger(
+  const readinessTimeoutMs = optionalTimeout(
     "WS_DASHBOARD_DAEMON_READINESS_TIMEOUT_MS",
     env.WS_DASHBOARD_DAEMON_READINESS_TIMEOUT_MS,
   );
@@ -82,7 +95,7 @@ export function parseDaemonHarnessConfig(env: NodeJS.ProcessEnv = process.env): 
   return {
     mode: "spawn",
     host: env.WS_DASHBOARD_DAEMON_HOST,
-    port: optionalPositiveInteger("WS_DASHBOARD_DAEMON_PORT", env.WS_DASHBOARD_DAEMON_PORT),
+    port: optionalPort("WS_DASHBOARD_DAEMON_PORT", env.WS_DASHBOARD_DAEMON_PORT),
     bindMode: optionalBindMode(env.WS_DASHBOARD_DAEMON_BIND_MODE),
     daemonBin: env.WS_DASHBOARD_DAEMON_BIN,
     staticDir: env.WS_DASHBOARD_STATIC_DIR,
@@ -163,13 +176,28 @@ export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarne
   const readinessTimeoutMs = config.readinessTimeoutMs ?? 60_000;
 
   if (config.mode === "external") {
-    const pairingUrl = config.pairingUrl ?? config.baseUrl;
-    if (!pairingUrl) {
-      throw new Error("external daemon mode requires WS_DASHBOARD_DAEMON_PAIRING_URL or WS_DASHBOARD_DAEMON_BASE_URL");
+    let pairingUrl = config.pairingUrl;
+    let baseUrl: string;
+    try {
+      if (pairingUrl) {
+        baseUrl = config.baseUrl ?? new URL(pairingUrl).origin;
+      } else if (config.baseUrl && new URL(config.baseUrl).pathname.startsWith("/pair")) {
+        pairingUrl = config.baseUrl;
+        baseUrl = new URL(config.baseUrl).origin;
+      } else {
+        throw new Error("external daemon mode requires WS_DASHBOARD_DAEMON_PAIRING_URL unless WS_DASHBOARD_DAEMON_BASE_URL is itself a /pair URL");
+      }
+      new URL(baseUrl);
+      new URL(pairingUrl);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("external daemon mode requires")) {
+        throw error;
+      }
+      const detail = error instanceof Error ? `: ${error.message}` : "";
+      throw new Error(`external daemon mode received an invalid WS_DASHBOARD_DAEMON_BASE_URL or WS_DASHBOARD_DAEMON_PAIRING_URL${detail}`);
     }
-    const baseUrl = config.baseUrl ?? new URL(pairingUrl).origin;
     await waitForHttpReadiness(baseUrl, readinessTimeoutMs);
-    return { mode: "external", baseUrl, pairingUrl, stop: async () => {} };
+    return { mode: "external", baseUrl, pairingUrl, readinessSignal: "http", stop: async () => {} };
   }
 
   const daemonBin = config.daemonBin ?? resolveDaemonBinary(repoRoot);
@@ -185,16 +213,22 @@ export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarne
     args.push("--port", String(config.port));
   }
 
+  const command = [daemonBin, ...args];
   const child = spawn(daemonBin, args, {
     cwd: repoRoot,
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
 
   let startupBuffer = "";
   let scrape: ((chunk: Buffer) => void) | null = null;
   const pairingUrl = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`daemon did not report a pairing URL within ${readinessTimeoutMs}ms`));
+      reject(
+        new Error(
+          `daemon startup timed out waiting for owner pairing URL within ${readinessTimeoutMs}ms; command=${command.join(" ")}; startup=${startupBuffer.slice(-4000)}`,
+        ),
+      );
     }, readinessTimeoutMs);
 
     scrape = (chunk: Buffer) => {
@@ -210,9 +244,13 @@ export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarne
 
     child.stderr?.on("data", scrape);
     child.stdout?.on("data", scrape);
-    child.once("exit", (code) => {
+    child.once("exit", (code, signal) => {
       clearTimeout(timer);
-      reject(new Error(`daemon exited before pairing (code ${code})`));
+      reject(
+        new Error(
+          `daemon exited before pairing (code ${code}, signal ${signal}); command=${command.join(" ")}; startup=${startupBuffer.slice(-4000)}`,
+        ),
+      );
     });
     child.once("error", (error) => {
       clearTimeout(timer);
@@ -230,8 +268,9 @@ export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarne
   child.stdout?.on("data", () => {});
 
   const baseUrl = new URL(pairingUrl).origin;
+  await waitForHttpReadiness(baseUrl, readinessTimeoutMs);
 
   const stop = () => stopDaemonProcess(child);
 
-  return { mode: "spawned", child, baseUrl, pairingUrl, stop };
+  return { mode: "spawned", child, baseUrl, pairingUrl, command, readinessSignal: "pairing-url", stop };
 }

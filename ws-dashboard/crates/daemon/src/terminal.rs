@@ -777,12 +777,34 @@ mod terminal_portability_skeleton_tests {
         );
 
         assert_eq!(
-            select_terminal_shell(TerminalPlatform::Unix, |_| None).program,
-            PathBuf::from("/bin/sh")
+            select_terminal_shell(TerminalPlatform::Unix, |_| None),
+            TerminalShellSelection {
+                platform: TerminalPlatform::Unix,
+                program: PathBuf::from("/bin/sh"),
+                source: TerminalShellSource::Fallback,
+            }
         );
         assert_eq!(
-            select_terminal_shell(TerminalPlatform::Windows, |_| None).program,
-            PathBuf::from("cmd.exe")
+            select_terminal_shell(TerminalPlatform::Windows, |_| None),
+            TerminalShellSelection {
+                platform: TerminalPlatform::Windows,
+                program: PathBuf::from("cmd.exe"),
+                source: TerminalShellSource::Fallback,
+            }
+        );
+        assert_eq!(
+            select_terminal_shell(TerminalPlatform::Unix, |key| {
+                (key == "SHELL").then(std::ffi::OsString::new)
+            })
+            .source,
+            TerminalShellSource::Fallback
+        );
+        assert_eq!(
+            select_terminal_shell(TerminalPlatform::Windows, |key| {
+                (key == "COMSPEC").then(std::ffi::OsString::new)
+            })
+            .source,
+            TerminalShellSource::Fallback
         );
     }
 }
