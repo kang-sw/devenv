@@ -9,6 +9,7 @@ import {
   commitWorkbenchPaneMove,
   deriveWorkbenchPaneOrder,
   moveWorkbenchPane,
+  partitionWorkbenchPanesByCategory,
   reconcileActiveWorkbenchPanes,
   resolveWorkbenchPaneDrop,
   selectWorkbenchPane,
@@ -208,6 +209,27 @@ const editorGroups = [
     panes: [{ id: "editor" }, { id: "tasks" }, { id: "diagnostics" }],
   },
 ] as const;
+
+
+assertDeepEqual(
+  partitionWorkbenchPanesByCategory([
+    { id: "main-agent", category: "pinned" },
+    { id: "persistent-terminal", category: "pinned" },
+    { id: "selected-viewer", category: "opened" },
+    { id: "diagnostics", category: "opened" },
+  ]),
+  {
+    pinned: [
+      { id: "main-agent", category: "pinned" },
+      { id: "persistent-terminal", category: "pinned" },
+    ],
+    opened: [
+      { id: "selected-viewer", category: "opened" },
+      { id: "diagnostics", category: "opened" },
+    ],
+  },
+  "visible workbench header preserves compact pinned and opened pane categories",
+);
 
 const reorderedEditorGroups = moveWorkbenchPane(editorGroups, {
   paneId: "viewer",

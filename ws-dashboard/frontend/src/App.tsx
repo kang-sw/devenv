@@ -7,10 +7,12 @@ import {
   defaultSurfaceRegistry,
   applyWorkbenchPaneOrder,
   commitWorkbenchPaneMove,
+  partitionWorkbenchPanesByCategory,
   resolveWorkbenchPaneDrop,
   selectWorkbenchPane,
   workbenchPaneDragMimeType,
   type SurfaceKind,
+  type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
 } from "./workbench";
 
@@ -560,6 +562,7 @@ function toolbarActions(root: WorkRootView, selectedEntity: ResourceEntity | nul
 type WorkbenchPane = {
   readonly id: string;
   readonly kind: SurfaceKind;
+  readonly category: WorkbenchPaneCategory;
   readonly title: string;
   readonly detail: string;
   readonly state: ViewState;
@@ -587,6 +590,7 @@ function buildWorkbenchEditorGroups(
         {
           id: "main-agent",
           kind: "agent",
+          category: "pinned",
           title: mainInstance?.label ?? "Main agent",
           detail: mainInstance ? instanceSummary(mainInstance) : "Waiting for a main instance.",
           state: mainInstance?.state ?? root.state,
@@ -597,6 +601,7 @@ function buildWorkbenchEditorGroups(
         {
           id: "persistent-terminal",
           kind: "persistentTerminal",
+          category: "pinned",
           title: "Terminal",
           detail: `${root.label} command surface reserved.`,
           state: root.state,
@@ -605,6 +610,7 @@ function buildWorkbenchEditorGroups(
         {
           id: "selected-viewer",
           kind: "viewer",
+          category: "opened",
           title: selectedInstance?.label ?? root.label,
           detail: "Selected resource projection.",
           state: selectedInstance?.state ?? root.state,
@@ -620,6 +626,7 @@ function buildWorkbenchEditorGroups(
         {
           id: "editor-detail",
           kind: "editor",
+          category: "opened",
           title: "Editor / detail",
           detail: supportEntity ? `${supportEntity.type}: ${supportEntity.label}` : "No selection.",
           state: supportEntity?.state ?? root.state,
@@ -629,6 +636,7 @@ function buildWorkbenchEditorGroups(
         {
           id: "task-view",
           kind: "taskView",
+          category: "opened",
           title: "Tasks",
           detail: "WorkRoot-scoped task surface reserved.",
           state: root.state,
@@ -637,6 +645,7 @@ function buildWorkbenchEditorGroups(
         {
           id: "diagnostics-events",
           kind: "diagnostics",
+          category: "opened",
           title: "Diagnostics",
           detail: root.state.error ?? "Resource and command events.",
           state: root.state,
@@ -645,6 +654,7 @@ function buildWorkbenchEditorGroups(
         {
           id: "inspector",
           kind: "inspector",
+          category: "opened",
           title: "Inspector",
           detail: "Dashboard-owned metadata surface.",
           state: supportEntity?.state ?? root.state,
@@ -673,32 +683,35 @@ function WorkbenchEditorGroup({
   onSelectPane: (paneId: string) => void;
 }) {
   const activePane = group.panes.find((pane) => pane.id === activePaneId) ?? group.panes[0];
+  const panesByCategory = partitionWorkbenchPanesByCategory(group.panes);
 
   if (!activePane) {
     return (
       <section className="workbench-group" aria-label={`${group.label} editor group`}>
-        <div
-          className="workbench-tab-strip workbench-tab-strip-empty"
-          role="tablist"
-          aria-label={group.label}
-          onDragOver={(event) => {
-            if (draggedPaneId) {
-              event.preventDefault();
-            }
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            const move = resolveWorkbenchPaneDrop({
-              dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-              fallbackPaneId: draggedPaneId,
-              targetGroupId: group.id,
-            });
-            if (move) {
-              onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-            }
-            onDragEnd();
-          }}
-        />
+        <div className="workbench-tab-header workbench-tab-header-empty" aria-label={group.label}>
+          <WorkbenchTabLane
+            activePaneId={undefined}
+            category="pinned"
+            draggedPaneId={draggedPaneId}
+            groupId={group.id}
+            panes={panesByCategory.pinned}
+            onDragEnd={onDragEnd}
+            onDragStart={onDragStart}
+            onMovePane={onMovePane}
+            onSelectPane={onSelectPane}
+          />
+          <WorkbenchTabLane
+            activePaneId={undefined}
+            category="opened"
+            draggedPaneId={draggedPaneId}
+            groupId={group.id}
+            panes={panesByCategory.opened}
+            onDragEnd={onDragEnd}
+            onDragStart={onDragStart}
+            onMovePane={onMovePane}
+            onSelectPane={onSelectPane}
+          />
+        </div>
         <article
           className="workbench-pane workbench-pane-empty-state"
           role="status"
@@ -732,76 +745,29 @@ function WorkbenchEditorGroup({
 
   return (
     <section className="workbench-group" aria-label={`${group.label} editor group`}>
-      <div
-        className="workbench-tab-strip"
-        role="tablist"
-        aria-label={group.label}
-        onDragOver={(event) => {
-          if (draggedPaneId) {
-            event.preventDefault();
-          }
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          const move = resolveWorkbenchPaneDrop({
-            dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-            fallbackPaneId: draggedPaneId,
-            targetGroupId: group.id,
-          });
-          if (move) {
-            onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-          }
-          onDragEnd();
-        }}
-      >
-        {group.panes.map((pane) => {
-          const selected = pane.id === activePane.id;
-          const registry = defaultSurfaceRegistry()[pane.kind];
-
-          return (
-            <button
-              aria-controls={`pane-${group.id}-${pane.id}`}
-              aria-selected={selected}
-              className={`workbench-tab ${selected ? "workbench-tab-active" : ""} ${
-                draggedPaneId === pane.id ? "workbench-tab-dragging" : ""
-              }`}
-              draggable
-              key={pane.id}
-              role="tab"
-              title="Drag to reorder or move to another split"
-              type="button"
-              onClick={() => onSelectPane(pane.id)}
-              onDragEnd={onDragEnd}
-              onDragOver={(event) => {
-                if (draggedPaneId && draggedPaneId !== pane.id) {
-                  event.preventDefault();
-                }
-              }}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData(workbenchPaneDragMimeType, pane.id);
-                onDragStart(pane.id);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                const move = resolveWorkbenchPaneDrop({
-                  dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-                  fallbackPaneId: draggedPaneId,
-                  targetGroupId: group.id,
-                  beforePaneId: pane.id,
-                });
-                if (move) {
-                  onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-                }
-                onDragEnd();
-              }}
-            >
-              <span className="workbench-tab-kind">{registry.label}</span>
-              <span className="workbench-tab-title">{pane.title}</span>
-            </button>
-          );
-        })}
+      <div className="workbench-tab-header" aria-label={group.label}>
+        <WorkbenchTabLane
+          activePaneId={activePane.id}
+          category="pinned"
+          draggedPaneId={draggedPaneId}
+          groupId={group.id}
+          panes={panesByCategory.pinned}
+          onDragEnd={onDragEnd}
+          onDragStart={onDragStart}
+          onMovePane={onMovePane}
+          onSelectPane={onSelectPane}
+        />
+        <WorkbenchTabLane
+          activePaneId={activePane.id}
+          category="opened"
+          draggedPaneId={draggedPaneId}
+          groupId={group.id}
+          panes={panesByCategory.opened}
+          onDragEnd={onDragEnd}
+          onDragStart={onDragStart}
+          onMovePane={onMovePane}
+          onSelectPane={onSelectPane}
+        />
       </div>
       <article
         aria-labelledby={`pane-title-${group.id}-${activePane.id}`}
@@ -829,6 +795,108 @@ function WorkbenchEditorGroup({
         </footer>
       </article>
     </section>
+  );
+}
+
+function WorkbenchTabLane({
+  activePaneId,
+  category,
+  draggedPaneId,
+  groupId,
+  panes,
+  onDragEnd,
+  onDragStart,
+  onMovePane,
+  onSelectPane,
+}: {
+  activePaneId: string | undefined;
+  category: WorkbenchPaneCategory;
+  draggedPaneId: string | null;
+  groupId: string;
+  panes: readonly WorkbenchPane[];
+  onDragEnd: () => void;
+  onDragStart: (paneId: string) => void;
+  onMovePane: (paneId: string, targetGroupId: string, beforePaneId?: string) => void;
+  onSelectPane: (paneId: string) => void;
+}) {
+  const label = category === "pinned" ? "pinned" : "opened";
+
+  return (
+    <div className={`workbench-tab-lane workbench-tab-lane-${category}`}>
+      <span className="workbench-tab-lane-label">{label}</span>
+      <div
+        className={`workbench-tab-strip ${panes.length === 0 ? "workbench-tab-strip-empty" : ""}`}
+        role="tablist"
+        aria-label={`${label} panes`}
+        onDragOver={(event) => {
+          if (draggedPaneId) {
+            event.preventDefault();
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const move = resolveWorkbenchPaneDrop({
+            dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
+            fallbackPaneId: draggedPaneId,
+            targetGroupId: groupId,
+          });
+          if (move) {
+            onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
+          }
+          onDragEnd();
+        }}
+      >
+        {panes.length === 0 ? <span className="workbench-tab-drop-hint">drop</span> : null}
+        {panes.map((pane) => {
+          const selected = pane.id === activePaneId;
+          const registry = defaultSurfaceRegistry()[pane.kind];
+
+          return (
+            <button
+              aria-controls={`pane-${groupId}-${pane.id}`}
+              aria-selected={selected}
+              className={`workbench-tab ${selected ? "workbench-tab-active" : ""} ${
+                draggedPaneId === pane.id ? "workbench-tab-dragging" : ""
+              }`}
+              draggable
+              key={pane.id}
+              role="tab"
+              title="Drag to reorder or move to another split"
+              type="button"
+              onClick={() => onSelectPane(pane.id)}
+              onDragEnd={onDragEnd}
+              onDragOver={(event) => {
+                if (draggedPaneId && draggedPaneId !== pane.id) {
+                  event.preventDefault();
+                }
+              }}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData(workbenchPaneDragMimeType, pane.id);
+                onDragStart(pane.id);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const move = resolveWorkbenchPaneDrop({
+                  dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
+                  fallbackPaneId: draggedPaneId,
+                  targetGroupId: groupId,
+                  beforePaneId: pane.id,
+                });
+                if (move) {
+                  onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
+                }
+                onDragEnd();
+              }}
+            >
+              <span className="workbench-tab-kind">{registry.label}</span>
+              <span className="workbench-tab-title">{pane.title}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

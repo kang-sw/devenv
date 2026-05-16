@@ -1,7 +1,13 @@
 export const workbenchPaneDragMimeType = "application/x-ws-workbench-pane";
 
+export type WorkbenchPaneCategory = "pinned" | "opened";
+
 export type WorkbenchEditorPaneRef = {
   readonly id: string;
+};
+
+export type WorkbenchCategorizedPaneRef = WorkbenchEditorPaneRef & {
+  readonly category: WorkbenchPaneCategory;
 };
 
 export type WorkbenchEditorGroupRef<TPane extends WorkbenchEditorPaneRef = WorkbenchEditorPaneRef> = {
@@ -23,6 +29,16 @@ export type WorkbenchPaneMoveResult<TGroup extends WorkbenchEditorGroupRef = Wor
   readonly paneOrderByGroup: WorkbenchPaneOrder;
   readonly activePaneByGroup: WorkbenchActivePaneState;
 };
+
+
+export function partitionWorkbenchPanesByCategory<TPane extends WorkbenchCategorizedPaneRef>(
+  panes: readonly TPane[],
+): Record<WorkbenchPaneCategory, TPane[]> {
+  return {
+    pinned: panes.filter((pane) => pane.category === "pinned"),
+    opened: panes.filter((pane) => pane.category === "opened"),
+  };
+}
 
 export function applyWorkbenchPaneOrder<TGroup extends WorkbenchEditorGroupRef>(
   groups: readonly TGroup[],
