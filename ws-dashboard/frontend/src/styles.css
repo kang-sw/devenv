@@ -662,6 +662,10 @@ button {
   color: var(--ws-color-text-primary);
 }
 
+.workbench-tab-dragging {
+  opacity: 0.55;
+}
+
 .workbench-tab-kind {
   flex: 0 0 auto;
   color: var(--ws-color-text-tertiary);

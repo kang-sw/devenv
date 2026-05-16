@@ -5,6 +5,12 @@ import {
 } from "./dockviewBridge.js";
 import { defaultSurfaceKinds, defaultSurfaceRegistry } from "./surfaceRegistry.js";
 import {
+  applyWorkbenchPaneOrder,
+  deriveWorkbenchPaneOrder,
+  moveWorkbenchPane,
+  reconcileActiveWorkbenchPanes,
+} from "./editorGroupModel.js";
+import {
   attachmentId,
   daemonResourceId,
   serializeWorkbenchLayout,
@@ -185,6 +191,71 @@ assertDeepEqual(
 assert(
   !("disableDnd" in dockviewBridgeOptions),
   "bridge does not hard-disable Dockview tab drag/reorder behavior",
+);
+
+
+const editorGroups = [
+  {
+    id: "primary",
+    panes: [{ id: "agent" }, { id: "terminal" }, { id: "viewer" }],
+  },
+  {
+    id: "support",
+    panes: [{ id: "editor" }, { id: "tasks" }, { id: "diagnostics" }],
+  },
+] as const;
+
+const reorderedEditorGroups = moveWorkbenchPane(editorGroups, {
+  paneId: "viewer",
+  targetGroupId: "primary",
+  beforePaneId: "agent",
+});
+assertDeepEqual(
+  deriveWorkbenchPaneOrder(reorderedEditorGroups),
+  {
+    primary: ["viewer", "agent", "terminal"],
+    support: ["editor", "tasks", "diagnostics"],
+  },
+  "visible workbench movement model reorders tabs inside a split group",
+);
+
+const crossSplitEditorGroups = moveWorkbenchPane(reorderedEditorGroups, {
+  paneId: "terminal",
+  targetGroupId: "support",
+  beforePaneId: "diagnostics",
+});
+assertDeepEqual(
+  deriveWorkbenchPaneOrder(crossSplitEditorGroups),
+  {
+    primary: ["viewer", "agent"],
+    support: ["editor", "tasks", "terminal", "diagnostics"],
+  },
+  "visible workbench movement model moves tabs across split groups",
+);
+
+assertDeepEqual(
+  applyWorkbenchPaneOrder(editorGroups, {
+    primary: ["terminal", "missing"],
+    support: ["diagnostics"],
+  }).map((group) => ({ id: group.id, panes: group.panes.map((pane) => pane.id) })),
+  [
+    { id: "primary", panes: ["terminal", "agent", "viewer"] },
+    { id: "support", panes: ["diagnostics", "editor", "tasks"] },
+  ],
+  "visible workbench movement model reapplies saved tab order without dropping new panes",
+);
+
+assertDeepEqual(
+  reconcileActiveWorkbenchPanes(
+    crossSplitEditorGroups,
+    { primary: "terminal", support: "editor" },
+    { support: "terminal" },
+  ),
+  {
+    primary: "viewer",
+    support: "terminal",
+  },
+  "visible workbench active state follows moved panes and falls back per group",
 );
 
 const addedPanels: unknown[] = [];

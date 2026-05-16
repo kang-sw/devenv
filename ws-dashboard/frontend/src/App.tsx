@@ -5,7 +5,12 @@ import {
   decideSurfaceClose,
   defaultPtyLogicalSize,
   defaultSurfaceRegistry,
+  applyWorkbenchPaneOrder,
+  deriveWorkbenchPaneOrder,
+  moveWorkbenchPane,
+  reconcileActiveWorkbenchPanes,
   type SurfaceKind,
+  type WorkbenchPaneOrder,
 } from "./workbench";
 
 type ViewState = {
@@ -405,6 +410,8 @@ function WorkbenchShell({
   onCommand: (commandId: string, payload: CommandPayload) => void;
 }) {
   const [activePaneByGroup, setActivePaneByGroup] = useState<Record<string, string>>({});
+  const [paneOrderByGroup, setPaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
+  const [draggedPaneId, setDraggedPaneId] = useState<string | null>(null);
 
   if (loading && !resources) {
     return <StatusPane title="Loading" detail="workbench resources" />;
@@ -420,7 +427,18 @@ function WorkbenchShell({
 
   const { workspace, root, mainInstance, selectedInstance } = selection;
   const supportEntity = selectedEntity ?? resourceEntityForWorkRoot(root);
-  const editorGroups = buildWorkbenchEditorGroups(root, mainInstance, selectedInstance, supportEntity);
+  const editorGroups = applyWorkbenchPaneOrder(
+    buildWorkbenchEditorGroups(root, mainInstance, selectedInstance, supportEntity),
+    paneOrderByGroup,
+  );
+
+  const movePane = (paneId: string, targetGroupId: string, beforePaneId?: string) => {
+    const movedGroups = moveWorkbenchPane(editorGroups, { paneId, targetGroupId, beforePaneId });
+    setPaneOrderByGroup(deriveWorkbenchPaneOrder(movedGroups));
+    setActivePaneByGroup((current) =>
+      reconcileActiveWorkbenchPanes(movedGroups, current, { [targetGroupId]: paneId }),
+    );
+  };
 
   return (
     <div className="workbench-shell">
@@ -438,8 +456,12 @@ function WorkbenchShell({
         {editorGroups.map((group) => (
           <WorkbenchEditorGroup
             activePaneId={activePaneByGroup[group.id]}
+            draggedPaneId={draggedPaneId}
             group={group}
             key={group.id}
+            onDragEnd={() => setDraggedPaneId(null)}
+            onDragStart={(paneId) => setDraggedPaneId(paneId)}
+            onMovePane={movePane}
             onSelectPane={(paneId) =>
               setActivePaneByGroup((current) => ({
                 ...current,
@@ -640,10 +662,18 @@ function buildWorkbenchEditorGroups(
 function WorkbenchEditorGroup({
   group,
   activePaneId,
+  draggedPaneId,
+  onDragEnd,
+  onDragStart,
+  onMovePane,
   onSelectPane,
 }: {
   group: WorkbenchEditorGroupModel;
   activePaneId: string | undefined;
+  draggedPaneId: string | null;
+  onDragEnd: () => void;
+  onDragStart: (paneId: string) => void;
+  onMovePane: (paneId: string, targetGroupId: string, beforePaneId?: string) => void;
   onSelectPane: (paneId: string) => void;
 }) {
   const activePane = group.panes.find((pane) => pane.id === activePaneId) ?? group.panes[0];
@@ -651,7 +681,24 @@ function WorkbenchEditorGroup({
 
   return (
     <section className="workbench-group" aria-label={`${group.label} editor group`}>
-      <div className="workbench-tab-strip" role="tablist" aria-label={group.label}>
+      <div
+        className="workbench-tab-strip"
+        role="tablist"
+        aria-label={group.label}
+        onDragOver={(event) => {
+          if (draggedPaneId) {
+            event.preventDefault();
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const paneId = event.dataTransfer.getData("application/x-ws-workbench-pane") || draggedPaneId;
+          if (paneId) {
+            onMovePane(paneId, group.id);
+          }
+          onDragEnd();
+        }}
+      >
         {group.panes.map((pane) => {
           const selected = pane.id === activePane.id;
           const registry = defaultSurfaceRegistry()[pane.kind];
@@ -660,11 +707,35 @@ function WorkbenchEditorGroup({
             <button
               aria-controls={`pane-${group.id}-${pane.id}`}
               aria-selected={selected}
-              className={`workbench-tab ${selected ? "workbench-tab-active" : ""}`}
+              className={`workbench-tab ${selected ? "workbench-tab-active" : ""} ${
+                draggedPaneId === pane.id ? "workbench-tab-dragging" : ""
+              }`}
+              draggable
               key={pane.id}
               role="tab"
+              title="Drag to reorder or move to another split"
               type="button"
               onClick={() => onSelectPane(pane.id)}
+              onDragEnd={onDragEnd}
+              onDragOver={(event) => {
+                if (draggedPaneId && draggedPaneId !== pane.id) {
+                  event.preventDefault();
+                }
+              }}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("application/x-ws-workbench-pane", pane.id);
+                onDragStart(pane.id);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const paneId = event.dataTransfer.getData("application/x-ws-workbench-pane") || draggedPaneId;
+                if (paneId && paneId !== pane.id) {
+                  onMovePane(paneId, group.id, pane.id);
+                }
+                onDragEnd();
+              }}
             >
               <span className="workbench-tab-kind">{registry.label}</span>
               <span className="workbench-tab-title">{pane.title}</span>
