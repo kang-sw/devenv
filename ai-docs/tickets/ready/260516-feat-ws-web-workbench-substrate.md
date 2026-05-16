@@ -8,6 +8,8 @@ related:
   260514-research-ws-web-dashboard-direction: workbench IA research
 spec:
   - 260516-ws-web-dashboard-workroot-workbench-substrate
+plans:
+  phase-1: 2026-05/16-260516-feat-ws-web-workbench-substrate-phase-1.brief
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -58,6 +60,23 @@ Introduce a dashboard-owned adapter over the selected layout library and a
 surface registry that records allowed surface kinds, default placement, durable
 versus transient behavior, and layout attachment identity. Keep resource
 identity authoritative in daemon APIs and browser routes, not in layout JSON.
+
+### Result (eeaf2cc) - 2026-05-16
+
+Added the Dockview dependency, a dashboard-owned workbench surface registry,
+branded attachment/resource ids, sanitized workbench layout serialization, and
+the initial Dockview bridge boundary. The serialized workbench layout records
+only attachment ids, arrangement, and active attachment identity; daemon
+resource ids, surface kinds, and registry-derived row policy stay outside the
+layout JSON. The bridge returns dashboard-owned handles instead of raw Dockview
+panel/group handles so future placement and lifecycle behavior can remain behind
+the adapter.
+
+Review caught and fixed two boundary issues before close: row policy was
+initially serialized with layout state, and raw Dockview handles were initially
+returned by the bridge. Focused frontend tests now cover registry defaults,
+identity separation, serialization sanitization, and the non-raw bridge handle
+contract.
 
 ### Phase 2: Split-Group Shell
 

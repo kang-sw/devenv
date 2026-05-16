@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:routes": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/routeBasis.test.js"
+    "test:routes": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/routeBasis.test.js",
+    "test:workbench": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workbench/workbenchModel.test.js"
   },
   "dependencies": {
+    "dockview": "^6.2.2",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
