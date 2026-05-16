@@ -1,4 +1,4 @@
-import { surfaceRegistryEntry, type SurfaceKind, type WorkbenchRowPolicy } from "./surfaceRegistry.js";
+import type { SurfaceKind } from "./surfaceRegistry.js";
 
 export type AttachmentId = string & { readonly __attachmentId: unique symbol };
 export type DaemonResourceId = string & { readonly __daemonResourceId: unique symbol };
@@ -34,12 +34,6 @@ export type WorkbenchLayoutState = {
   readonly activeAttachmentId?: AttachmentId;
 };
 
-export type SerializedWorkbenchAttachment = {
-  readonly attachmentId: string;
-  readonly surfaceKind: SurfaceKind;
-  readonly rowPolicy: WorkbenchRowPolicy;
-};
-
 export type SerializedWorkbenchArrangementNode =
   | {
       readonly type: "attachment";
@@ -53,7 +47,7 @@ export type SerializedWorkbenchArrangementNode =
 
 export type SerializedWorkbenchLayout = {
   readonly version: 1;
-  readonly attachments: readonly SerializedWorkbenchAttachment[];
+  readonly attachmentIds: readonly string[];
   readonly arrangement: SerializedWorkbenchArrangementNode | null;
   readonly activeAttachmentId?: string;
 };
@@ -70,19 +64,13 @@ export function daemonResourceId(value: string): DaemonResourceId {
 
 export function serializeWorkbenchLayout(layout: WorkbenchLayoutState): SerializedWorkbenchLayout {
   const attachmentIds = new Set<string>();
-  const attachments = layout.attachments.map((attachment) => {
+  const serializedAttachmentIds = layout.attachments.map((attachment) => {
     const id = attachment.attachmentId;
     if (attachmentIds.has(id)) {
       throw new Error(`duplicate attachmentId: ${id}`);
     }
     attachmentIds.add(id);
-
-    const registryEntry = surfaceRegistryEntry(attachment.surfaceKind);
-    return {
-      attachmentId: id,
-      surfaceKind: attachment.surfaceKind,
-      rowPolicy: registryEntry.rowPolicy,
-    };
+    return id;
   });
 
   if (layout.activeAttachmentId && !attachmentIds.has(layout.activeAttachmentId)) {
@@ -91,7 +79,7 @@ export function serializeWorkbenchLayout(layout: WorkbenchLayoutState): Serializ
 
   return {
     version: 1,
-    attachments,
+    attachmentIds: serializedAttachmentIds,
     arrangement: serializeArrangement(layout.arrangement, attachmentIds),
     ...(layout.activeAttachmentId ? { activeAttachmentId: layout.activeAttachmentId } : {}),
   };
@@ -115,7 +103,9 @@ function serializeArrangement(
   return {
     type: "group",
     orientation: node.orientation,
-    children: node.children.map((child) => serializeArrangement(child, attachmentIds)).filter(isArrangementNode),
+    children: node.children
+      .map((child) => serializeArrangement(child, attachmentIds))
+      .filter(isArrangementNode),
   };
 }
 

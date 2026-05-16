@@ -1,4 +1,8 @@
-import { dockviewBridgeOptions } from "./dockviewBridge.js";
+import {
+  createWorkbenchDockviewBridge,
+  dockviewBridgeOptions,
+  type DockviewBridgePort,
+} from "./dockviewBridge.js";
 import { defaultSurfaceKinds, defaultSurfaceRegistry } from "./surfaceRegistry.js";
 import {
   attachmentId,
@@ -113,10 +117,7 @@ assertDeepEqual(
   serialized,
   {
     version: 1,
-    attachments: [
-      { attachmentId: "att-agent-main", surfaceKind: "agent", rowPolicy: "pinned" },
-      { attachmentId: "att-editor-1", surfaceKind: "editor", rowPolicy: "opened" },
-    ],
+    attachmentIds: ["att-agent-main", "att-editor-1"],
     arrangement: {
       type: "group",
       orientation: "horizontal",
@@ -127,10 +128,12 @@ assertDeepEqual(
     },
     activeAttachmentId: "att-editor-1",
   },
-  "serialized layout contains arrangement, attachment ids, surface kinds, and row policy only",
+  "serialized layout contains arrangement and attachment ids only",
 );
 
 const serializedJson = JSON.stringify(serialized);
+assert(!serializedJson.includes("surfaceKind"), "serialized layout omits surface kind metadata");
+assert(!serializedJson.includes("rowPolicy"), "serialized layout omits registry-derived row policy");
 assert(!serializedJson.includes("server-local"), "serialized layout omits daemon server identity");
 assert(
   !serializedJson.includes("workspace-devenv"),
@@ -169,4 +172,76 @@ assertDeepEqual(
     disableFloatingGroups: true,
   },
   "bridge defaults disable raw Dockview drag/drop and floating group controls",
+);
+
+const addedPanels: unknown[] = [];
+let addedGroupCount = 0;
+let focusNextCount = 0;
+let focusPreviousCount = 0;
+const rawPanel = { id: "raw-panel", api: { close: () => undefined }, focus: () => undefined };
+const rawGroup = { id: "raw-group", moveTo: () => undefined, maximize: () => undefined };
+const fakePort = {
+  addPanel(options: unknown) {
+    addedPanels.push(options);
+    return rawPanel;
+  },
+  addGroup() {
+    addedGroupCount += 1;
+    return rawGroup;
+  },
+  getPanel() {
+    return undefined;
+  },
+  getGroup() {
+    return undefined;
+  },
+  moveToNext() {
+    focusNextCount += 1;
+  },
+  moveToPrevious() {
+    focusPreviousCount += 1;
+  },
+} as unknown as DockviewBridgePort;
+
+const bridge = createWorkbenchDockviewBridge(fakePort);
+const panelHandle = bridge.addAttachment(layout.attachments[0]);
+const groupHandle = bridge.addGroup();
+bridge.focusNext();
+bridge.focusPrevious();
+
+assertEqual(addedPanels.length, 1, "bridge adds one Dockview panel through the port");
+assertDeepEqual(
+  addedPanels[0],
+  {
+    id: "att-agent-main",
+    component: "agent",
+    title: "Agent",
+    params: { attachmentId: "att-agent-main", surfaceKind: "agent" },
+  },
+  "bridge maps dashboard attachment metadata to Dockview panel parameters internally",
+);
+assertEqual(addedGroupCount, 1, "bridge adds one Dockview group through the port");
+assertEqual(focusNextCount, 1, "bridge forwards focus-next through the adapter");
+assertEqual(focusPreviousCount, 1, "bridge forwards focus-previous through the adapter");
+
+assert(panelHandle !== (rawPanel as unknown), "panel handle is dashboard-owned, not the raw Dockview panel");
+assert(groupHandle !== (rawGroup as unknown), "group handle is dashboard-owned, not the raw Dockview group");
+assertDeepEqual(
+  Object.keys(panelHandle),
+  ["type", "attachmentId"],
+  "panel handle exposes only dashboard-owned handle fields",
+);
+assertDeepEqual(
+  Object.keys(groupHandle),
+  ["type", "groupHandleId"],
+  "group handle exposes only dashboard-owned handle fields",
+);
+assert(!("api" in panelHandle), "panel handle does not expose Dockview panel api");
+assert(!("focus" in panelHandle), "panel handle does not expose Dockview panel focus lifecycle");
+assert(!("moveTo" in groupHandle), "group handle does not expose Dockview group movement");
+assert(!("maximize" in groupHandle), "group handle does not expose Dockview group maximize lifecycle");
+assertDeepEqual(
+  bridge.serialize(layout),
+  serialized,
+  "bridge serialization returns the sanitized dashboard workbench layout",
 );

@@ -1,5 +1,10 @@
-import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from "dockview";
-import type { WorkbenchLayoutState, SerializedWorkbenchLayout, WorkbenchAttachment } from "./layoutSerialization.js";
+import type { DockviewApi } from "dockview";
+import type {
+  AttachmentId,
+  SerializedWorkbenchLayout,
+  WorkbenchAttachment,
+  WorkbenchLayoutState,
+} from "./layoutSerialization.js";
 import { serializeWorkbenchLayout } from "./layoutSerialization.js";
 
 export type DockviewBridgeOptions = {
@@ -27,8 +32,17 @@ export type DockviewBridgeEvents = Pick<
   "onWillDrop" | "onWillDragPanel" | "onWillDragGroup" | "onWillShowOverlay"
 >;
 
-export type DockviewPanelHandle = IDockviewPanel;
-export type DockviewGroupHandle = DockviewGroupPanel;
+export type WorkbenchPanelHandle = {
+  readonly type: "workbenchPanel";
+  readonly attachmentId: AttachmentId;
+};
+
+export type WorkbenchGroupHandleId = string & { readonly __workbenchGroupHandleId: unique symbol };
+
+export type WorkbenchGroupHandle = {
+  readonly type: "workbenchGroup";
+  readonly groupHandleId: WorkbenchGroupHandleId;
+};
 
 export type WorkbenchDockviewPanelParams = {
   readonly attachmentId: string;
@@ -37,18 +51,20 @@ export type WorkbenchDockviewPanelParams = {
 
 export type WorkbenchDockviewBridge = {
   readonly options: DockviewBridgeOptions;
-  addAttachment(attachment: WorkbenchAttachment): DockviewPanelHandle;
-  addGroup(): DockviewGroupHandle;
+  addAttachment(attachment: WorkbenchAttachment): WorkbenchPanelHandle;
+  addGroup(): WorkbenchGroupHandle;
   focusNext(): void;
   focusPrevious(): void;
   serialize(layout: WorkbenchLayoutState): SerializedWorkbenchLayout;
 };
 
 export function createWorkbenchDockviewBridge(port: DockviewBridgePort): WorkbenchDockviewBridge {
+  let nextGroupHandle = 1;
+
   return {
     options: dockviewBridgeOptions,
     addAttachment(attachment) {
-      return port.addPanel<WorkbenchDockviewPanelParams>({
+      port.addPanel<WorkbenchDockviewPanelParams>({
         id: attachment.attachmentId,
         component: attachment.surfaceKind,
         title: attachment.title,
@@ -57,9 +73,19 @@ export function createWorkbenchDockviewBridge(port: DockviewBridgePort): Workben
           surfaceKind: attachment.surfaceKind,
         },
       });
+
+      return Object.freeze({
+        type: "workbenchPanel",
+        attachmentId: attachment.attachmentId,
+      });
     },
     addGroup() {
-      return port.addGroup();
+      port.addGroup();
+
+      return Object.freeze({
+        type: "workbenchGroup",
+        groupHandleId: `workbench-group-${nextGroupHandle++}` as WorkbenchGroupHandleId,
+      });
     },
     focusNext() {
       port.moveToNext();
