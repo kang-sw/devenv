@@ -1058,7 +1058,29 @@ async fn work_root_file_read_routes_report_missing_directory_binary_and_oversize
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
 
+    let no_path_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("read no path request"),
+        )
+        .await
+        .expect("read no path response");
+    assert_eq!(no_path_response.status(), StatusCode::BAD_REQUEST);
+    let no_path_body = axum::body::to_bytes(no_path_response.into_body(), 4096)
+        .await
+        .expect("no path body bytes");
+    let no_path_value: serde_json::Value =
+        serde_json::from_slice(&no_path_body).expect("no path JSON");
+    assert_eq!(no_path_value["error"], "file path is required");
+
     for (path, status, error) in [
+        ("", StatusCode::BAD_REQUEST, "file path is required"),
         ("missing.txt", StatusCode::NOT_FOUND, "file not found"),
         ("src", StatusCode::BAD_REQUEST, "path is a directory"),
         (

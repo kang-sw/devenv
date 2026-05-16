@@ -185,6 +185,24 @@ try {
     )) as typeof fetch;
   const textFile = await fetchWorkRootTextFile("root-local-abc", "README.md");
   assertEqual(textFile.content, "hello\n", "read helper returns text content");
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: "unsupported text file" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+  await assertRejects(
+    () => fetchWorkRootTextFile("root-local-abc", "binary.bin"),
+    /unsupported text file/,
+    "read helper surfaces bounded backend JSON errors",
+  );
+
+  globalThis.fetch = (async () => new Response("not json", { status: 413 })) as typeof fetch;
+  await assertRejects(
+    () => fetchWorkRootTextFile("root-local-abc", "large.txt"),
+    /HTTP 413/,
+    "read helper falls back to bounded HTTP status when error JSON is unavailable",
+  );
 } finally {
   globalThis.fetch = errorFetch;
 }

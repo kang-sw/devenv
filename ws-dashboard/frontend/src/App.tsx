@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { normalizeServerRouteLocation } from "./routeBasis";
 import {
   decideSurfaceClose,
+  decideSurfaceOpen,
   defaultPtyLogicalSize,
   defaultSurfaceRegistry,
   applyWorkbenchPaneOrder,
@@ -11,9 +12,12 @@ import {
   resolveWorkbenchPaneDrop,
   selectWorkbenchPane,
   workbenchPaneDragMimeType,
+  surfaceLogicalKey,
+  workbenchGroupId,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
+  type WorkbenchPlacementState,
 } from "./workbench";
 import {
   applyReadOnlyFilePaneContent,
@@ -184,6 +188,7 @@ export function App() {
     paneId: string;
     sequence: number;
   } | null>(null);
+  const [readOnlyFilePaneOrderByGroup, setReadOnlyFilePaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
 
@@ -243,6 +248,10 @@ export function App() {
   const openReadOnlyFile = useCallback(
     (workRoot: WorkRootView, entry: WorkRootFileEntryView) => {
       const pane = createLoadingReadOnlyFilePane(workRoot.id, entry.path);
+      const placement = decideSurfaceOpen(readOnlyFilePlacementState(readOnlyFilePanes), {
+        surfaceKind: "editor",
+        logicalKey: surfaceLogicalKey("editor", workRoot.id, entry.path),
+      });
       const focusPane = () =>
         setActiveReadOnlyFilePaneRequest({
           paneId: pane.id,
@@ -258,6 +267,12 @@ export function App() {
         ...current,
         [pane.logicalKey]: pane,
       }));
+      if (placement.type === "openNew") {
+        setReadOnlyFilePaneOrderByGroup((current) => ({
+          ...current,
+          [placement.groupId]: [...(current[placement.groupId] ?? []), pane.id],
+        }));
+      }
       focusPane();
 
       void fetchWorkRootTextFile(workRoot.id, entry.path)
@@ -341,6 +356,7 @@ export function App() {
             selection={workbenchSelection}
             onCommand={executeCommand}
             readOnlyFilePanes={Object.values(readOnlyFilePanes)}
+            readOnlyFilePaneOrderByGroup={readOnlyFilePaneOrderByGroup}
             activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
           />
         </section>
@@ -766,6 +782,7 @@ function WorkbenchShell({
   error,
   onCommand,
   readOnlyFilePanes,
+  readOnlyFilePaneOrderByGroup,
   activeReadOnlyFilePaneRequest,
 }: {
   resources: DashboardResourcesView | null;
@@ -776,6 +793,7 @@ function WorkbenchShell({
   error: string | null;
   onCommand: (commandId: string, payload: CommandPayload) => void;
   readOnlyFilePanes: ReadOnlyFilePane[];
+  readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder;
   activeReadOnlyFilePaneRequest: { paneId: string; sequence: number } | null;
 }) {
   const [activePaneByGroup, setActivePaneByGroup] = useState<Record<string, string>>({});
@@ -788,7 +806,14 @@ function WorkbenchShell({
         const { workspace, root, mainInstance, selectedInstance } = selection;
         const supportEntity = selectedEntity ?? resourceEntityForWorkRoot(root);
         const editorGroups = applyWorkbenchPaneOrder(
-          buildWorkbenchEditorGroups(root, mainInstance, selectedInstance, supportEntity, readOnlyFilePanes),
+          buildWorkbenchEditorGroups(
+            root,
+            mainInstance,
+            selectedInstance,
+            supportEntity,
+            readOnlyFilePanes,
+            readOnlyFilePaneOrderByGroup,
+          ),
           paneOrderByGroup,
         );
         return { workspace, root, mainInstance, selectedInstance, editorGroups };
@@ -978,7 +1003,9 @@ function buildWorkbenchEditorGroups(
   selectedInstance: InstanceView | null,
   supportEntity: ResourceEntity | null,
   readOnlyFilePanes: ReadOnlyFilePane[],
+  readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
 ): WorkbenchEditorGroupModel[] {
+  const readOnlyPanesByGroup = readOnlyWorkbenchPanesByGroup(root, readOnlyFilePanes, readOnlyFilePaneOrderByGroup);
   return [
     {
       id: "primary",
@@ -1014,6 +1041,7 @@ function buildWorkbenchEditorGroups(
           meta: [selectedInstance?.role ?? "workRoot", selectedInstance?.kind ?? root.status],
           body: <SubInstancePane mainInstance={mainInstance} />,
         },
+        ...(readOnlyPanesByGroup.primary ?? []),
       ],
     },
     {
@@ -1057,12 +1085,57 @@ function buildWorkbenchEditorGroups(
           state: supportEntity?.state ?? root.state,
           meta: [supportEntity?.type ?? "workRoot"],
         },
-        ...readOnlyFilePanes.map((pane) => readOnlyWorkbenchPane(root, pane)),
+        ...(readOnlyPanesByGroup.support ?? []),
       ],
     },
   ];
 }
 
+
+function readOnlyFilePlacementState(
+  panesByLogicalKey: Record<string, ReadOnlyFilePane>,
+): WorkbenchPlacementState {
+  return {
+    groups: [{ groupId: workbenchGroupId("primary") }, { groupId: workbenchGroupId("support") }],
+    attachments: Object.values(panesByLogicalKey).map((pane) => ({
+      attachmentId: pane.id as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+      groupId: workbenchGroupId("support"),
+      surfaceKind: "editor",
+      logicalKey: surfaceLogicalKey("editor", pane.workRootId, pane.path),
+    })),
+  };
+}
+
+function readOnlyWorkbenchPanesByGroup(
+  root: WorkRootView,
+  readOnlyFilePanes: ReadOnlyFilePane[],
+  readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
+): Record<string, WorkbenchPane[]> {
+  const panes = readOnlyFilePanes
+    .filter((pane) => pane.workRootId === root.id)
+    .map((pane) => readOnlyWorkbenchPane(root, pane));
+  const paneById = new Map(panes.map((pane) => [pane.id, pane]));
+  const consumed = new Set<string>();
+  const byGroup: Record<string, WorkbenchPane[]> = { primary: [], support: [] };
+
+  for (const groupId of ["primary", "support"]) {
+    for (const paneId of readOnlyFilePaneOrderByGroup[groupId] ?? []) {
+      const pane = paneById.get(paneId);
+      if (pane && !consumed.has(paneId)) {
+        byGroup[groupId].push(pane);
+        consumed.add(paneId);
+      }
+    }
+  }
+
+  for (const pane of panes) {
+    if (!consumed.has(pane.id)) {
+      byGroup.support.push(pane);
+    }
+  }
+
+  return byGroup;
+}
 
 function readOnlyWorkbenchPane(root: WorkRootView, pane: ReadOnlyFilePane): WorkbenchPane {
   const state: ViewState = {

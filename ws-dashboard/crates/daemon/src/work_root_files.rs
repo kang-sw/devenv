@@ -251,6 +251,9 @@ async fn read_text_file(
     }
 
     let bytes = fs::read(&target).await.map_err(map_read_io_error)?;
+    if bytes.len() as u64 > MAX_READ_ONLY_TEXT_BYTES {
+        return Err(ReadError::Oversized);
+    }
     if bytes.contains(&0) {
         return Err(ReadError::Unsupported);
     }
