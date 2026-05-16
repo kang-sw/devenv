@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { normalizeServerRouteLocation } from "./routeBasis";
+import { defaultSurfaceRegistry, type SurfaceKind } from "./workbench";
 
 type ViewState = {
   status: string;
@@ -128,6 +129,13 @@ type CommandEntry = {
   label: string;
 };
 
+type WorkbenchSelection = {
+  workspace: WorkspaceView;
+  root: WorkRootView;
+  mainInstance: InstanceView | null;
+  selectedInstance: InstanceView | null;
+};
+
 const resourceEndpoint = "/api/dashboard/resources";
 
 export function App() {
@@ -185,6 +193,10 @@ export function App() {
 
   const selectedEntity =
     entities.find((entity) => entity.id === selectedId) ?? entities[0] ?? null;
+  const workbenchSelection = useMemo(
+    () => resolveWorkbenchSelection(resources, selectedId),
+    [resources, selectedId],
+  );
 
   const executeCommand = useCallback(
     (commandId: string, payload: CommandPayload) => {
@@ -217,7 +229,7 @@ export function App() {
 
   return (
     <main className="app-shell" aria-label="ws dashboard">
-      <div className="shell-grid">
+      <div className="shell-grid shell-grid-workbench">
         <aside className="shell-panel shell-panel-nav" aria-label="Resources">
           <PanelHeader
             title={resources?.server.label ?? "ws dashboard"}
@@ -235,21 +247,17 @@ export function App() {
           />
         </aside>
 
-        <section className="shell-panel shell-panel-main" aria-label="Detail">
-          <PanelHeader
-            title="Resource"
-            state={selectedEntity?.state}
-            actions={selectedEntity?.actions ?? []}
-            entityId={selectedEntity?.id ?? "selection"}
+        <section className="shell-panel shell-panel-workbench" aria-label="WorkRoot workbench">
+          <WorkbenchShell
+            commandLog={commandLog}
+            error={error}
+            loading={loading}
+            resources={resources}
+            selectedEntity={selectedEntity}
+            selection={workbenchSelection}
             onCommand={executeCommand}
           />
-          <ResourceDetail entity={selectedEntity} loading={loading} error={error} />
         </section>
-
-        <aside className="shell-panel shell-panel-viewer" aria-label="Viewer">
-          <PanelHeader title="Viewer" />
-          <ViewerReserve entity={selectedEntity} commandLog={commandLog} />
-        </aside>
       </div>
     </main>
   );
@@ -374,6 +382,322 @@ function InlineNotice({
   );
 }
 
+function WorkbenchShell({
+  resources,
+  selection,
+  selectedEntity,
+  commandLog,
+  loading,
+  error,
+  onCommand,
+}: {
+  resources: DashboardResourcesView | null;
+  selection: WorkbenchSelection | null;
+  selectedEntity: ResourceEntity | null;
+  commandLog: CommandEntry[];
+  loading: boolean;
+  error: string | null;
+  onCommand: (commandId: string, payload: CommandPayload) => void;
+}) {
+  if (loading && !resources) {
+    return <StatusPane title="Loading" detail="workbench resources" />;
+  }
+
+  if (error && !resources) {
+    return <StatusPane title="Workbench unavailable" detail={error} />;
+  }
+
+  if (!resources || !selection) {
+    return <StatusPane title="No workRoot" detail="select a workRoot or main instance" />;
+  }
+
+  const { workspace, root, mainInstance, selectedInstance } = selection;
+  const supportEntity = selectedEntity ?? resourceEntityForWorkRoot(root);
+
+  return (
+    <div className="workbench-shell">
+      <WorkbenchToolbar
+        commandLog={commandLog}
+        root={root}
+        selectedEntity={selectedEntity}
+        server={resources.server}
+        workspace={workspace}
+        onCommand={onCommand}
+      />
+      {error ? <InlineNotice tone="error" title="Refresh failed" detail={error} /> : null}
+      {loading ? <InlineNotice tone="info" title="Refreshing" detail="resources" /> : null}
+      <div className="workbench-splits" aria-label="Default two-split workbench preset">
+        <WorkbenchSplitGroup title="Primary" description="durable workRoot surfaces">
+          <SurfaceRow title="Pinned row">
+            <SurfaceTile
+              kind="agent"
+              title={mainInstance?.label ?? "No main agent"}
+              detail={mainInstance ? instanceSummary(mainInstance) : "waiting for main instance"}
+              state={mainInstance?.state ?? root.state}
+              meta={mainInstance ? [mainInstance.kind, mainInstance.interactionMode] : [kindLabel(root.kind)]}
+            />
+            <SurfaceTile
+              kind="persistentTerminal"
+              title="Persistent terminal"
+              detail={`${root.label} command surface reserved`}
+              state={root.state}
+              meta={[root.status, kindLabel(root.kind)]}
+            />
+          </SurfaceRow>
+          <SurfaceRow title="Opened row">
+            <SurfaceTile
+              kind="viewer"
+              title={selectedInstance?.label ?? root.label}
+              detail="selected resource projection"
+              state={selectedInstance?.state ?? root.state}
+              meta={[selectedInstance?.role ?? "workRoot", selectedInstance?.kind ?? root.status]}
+            />
+            <SubInstanceStrip mainInstance={mainInstance} />
+          </SurfaceRow>
+        </WorkbenchSplitGroup>
+
+        <WorkbenchSplitGroup title="Support" description="opened inspection surfaces">
+          <SurfaceRow title="Pinned row">
+            <SurfaceTile
+              kind="persistentTerminal"
+              title="Support pinned reserve"
+              detail="durable support slot reserved for later focused groups"
+              state={root.state}
+              meta={["reserved"]}
+            />
+          </SurfaceRow>
+          <SurfaceRow title="Opened row">
+            <SurfaceTile
+              kind="editor"
+              title="Editor / detail"
+              detail={supportEntity ? `${supportEntity.type}: ${supportEntity.label}` : "no selection"}
+              state={supportEntity?.state ?? root.state}
+              meta={["fixture data"]}
+            >
+              {supportEntity ? <ResourceSummary entity={supportEntity} /> : null}
+            </SurfaceTile>
+            <SurfaceTile
+              kind="taskView"
+              title="Task view"
+              detail="workRoot-scoped task surface reserved"
+              state={root.state}
+              meta={[`${root.mainInstances.length} main`]}
+            />
+            <SurfaceTile
+              kind="diagnostics"
+              title="Diagnostics / events"
+              detail={root.state.error ?? "resource and command events"}
+              state={root.state}
+              meta={[root.state.stale ? "stale" : "current"]}
+            />
+            <SurfaceTile
+              kind="inspector"
+              title="Inspector"
+              detail="dashboard-owned metadata surface"
+              state={supportEntity?.state ?? root.state}
+              meta={[supportEntity?.type ?? "workRoot"]}
+            />
+          </SurfaceRow>
+        </WorkbenchSplitGroup>
+      </div>
+    </div>
+  );
+}
+
+function WorkbenchToolbar({
+  server,
+  workspace,
+  root,
+  selectedEntity,
+  commandLog,
+  onCommand,
+}: {
+  server: ServerView;
+  workspace: WorkspaceView;
+  root: WorkRootView;
+  selectedEntity: ResourceEntity | null;
+  commandLog: CommandEntry[];
+  onCommand: (commandId: string, payload: CommandPayload) => void;
+}) {
+  const toggles = ["viewer", "task", "diagnostics", "events", "layout"] as const;
+
+  return (
+    <div className="workbench-toolbar">
+      <div className="workbench-breadcrumb" aria-label="Workbench breadcrumb">
+        <span>{server.label}</span>
+        <span>{workspace.label}</span>
+        <strong>{root.label}</strong>
+      </div>
+      <div className="workbench-toolbar-meta">
+        <StateBadge state={root.state} />
+        <span className="meta-chip">{kindLabel(root.kind)}</span>
+        <span className="meta-chip">{root.status}</span>
+        {commandLog[0] ? <span className="meta-chip">last: {commandLog[0].commandId}</span> : null}
+      </div>
+      <div className="workbench-toolbar-actions" aria-label="Workbench toggles and actions">
+        {toolbarActions(root, selectedEntity).map(({ action, entityId }) => (
+          <button
+            className="action-button"
+            data-command-id={`resource.action.${action.id}`}
+            disabled={!action.enabled}
+            key={`${entityId}:${action.id}`}
+            type="button"
+            onClick={() =>
+              onCommand(`resource.action.${action.id}`, {
+                type: action.id === "refresh" ? "refresh" : "action",
+                label: action.label,
+                entityId,
+              })
+            }
+          >
+            {action.label}
+          </button>
+        ))}
+        {toggles.map((toggle) => (
+          <button
+            className="action-button workbench-toggle"
+            data-command-id={`workbench.toggle.${toggle}`}
+            key={toggle}
+            type="button"
+            onClick={() =>
+              onCommand(`workbench.toggle.${toggle}`, {
+                type: "action",
+                label: toggle,
+                entityId: root.id,
+              })
+            }
+          >
+            {toggle}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function toolbarActions(root: WorkRootView, selectedEntity: ResourceEntity | null) {
+  const actions = root.actions.map((action) => ({ action, entityId: root.id }));
+
+  if (selectedEntity && selectedEntity.id !== root.id) {
+    actions.push(
+      ...selectedEntity.actions.map((action) => ({
+        action,
+        entityId: selectedEntity.id,
+      })),
+    );
+  }
+
+  return actions;
+}
+
+function WorkbenchSplitGroup({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="workbench-group" aria-label={`${title} split group`}>
+      <div className="workbench-group-header">
+        <div>
+          <div className="section-label">split group</div>
+          <h2>{title}</h2>
+        </div>
+        <span>{description}</span>
+      </div>
+      <div className="workbench-group-rows">{children}</div>
+    </section>
+  );
+}
+
+function SurfaceRow({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="surface-row">
+      <div className="surface-row-label">{title}</div>
+      <div className="surface-row-items">{children}</div>
+    </div>
+  );
+}
+
+function SurfaceTile({
+  kind,
+  title,
+  detail,
+  state,
+  meta,
+  children,
+}: {
+  kind: SurfaceKind;
+  title: string;
+  detail: string;
+  state: ViewState;
+  meta: string[];
+  children?: ReactNode;
+}) {
+  const registry = defaultSurfaceRegistry()[kind];
+
+  return (
+    <article className="surface-tile" data-surface-kind={kind}>
+      <div className="surface-tile-header">
+        <div>
+          <div className="surface-kind">{registry.label}</div>
+          <h3>{title}</h3>
+        </div>
+        <StateBadge state={state} />
+      </div>
+      <p>{detail}</p>
+      <div className="surface-meta">
+        <span className="meta-chip">{registry.rowPolicy}</span>
+        {meta.map((value) => (
+          <span className="meta-chip" key={value}>
+            {value}
+          </span>
+        ))}
+      </div>
+      {children ? <div className="surface-body">{children}</div> : null}
+    </article>
+  );
+}
+
+function SubInstanceStrip({ mainInstance }: { mainInstance: InstanceView | null }) {
+  if (!mainInstance || mainInstance.subInstances.length === 0) {
+    return (
+      <div className="surface-tile surface-tile-muted">
+        <div className="surface-kind">Sub projections</div>
+        <p>No sub instances attached to this main surface.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="surface-tile surface-tile-muted">
+      <div className="surface-kind">Sub projections</div>
+      <div className="subinstance-list">
+        {mainInstance.subInstances.map((instance) => (
+          <div className="subinstance-pill" key={instance.id}>
+            <span>{instance.label}</span>
+            <StateBadge state={instance.state} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ResourceSummary({ entity }: { entity: ResourceEntity }) {
+  return (
+    <dl className="resource-summary">
+      <DetailItem label="id" value={entity.id} />
+      <DetailItem label="status" value={entity.state.status} />
+      {entity.type === "workRoot" ? <DetailItem label="workRoot" value={entity.path.workRootId} /> : null}
+      {entity.type === "instance" ? <DetailItem label="instance" value={entity.path.instanceId ?? ""} /> : null}
+    </dl>
+  );
+}
+
 function WorkspaceRows({
   workspace,
   selectedId,
@@ -389,13 +713,13 @@ function WorkspaceRows({
     return (
       <div className="resource-group">
         <ResourceRow
-          id={compactMain.id}
-          title={`${workspace.label} / ${compactMain.root.label} / ${compactMain.instance.label}`}
-          eyebrow="compact"
-          state={compactMain.instance.state}
+          id={compactMain.root.id}
+          title={`${workspace.label} / ${compactMain.root.label}`}
+          eyebrow="compact workRoot"
+          state={compactMain.root.state}
           depth={0}
-          selected={selectedId === compactMain.id}
-          meta={[kindLabel(compactMain.root.kind), compactMain.instance.kind]}
+          selected={selectedId === compactMain.root.id}
+          meta={[kindLabel(compactMain.root.kind), compactMain.root.status, compactMain.instance.kind]}
           onCommand={onCommand}
         />
       </div>
@@ -426,54 +750,14 @@ function WorkspaceRows({
             meta={[kindLabel(root.kind), root.status]}
             onCommand={onCommand}
           />
-          {root.mainInstances.map((instance) => (
-            <InstanceRows
-              depth={2}
-              instance={instance}
-              key={instance.id}
-              selectedId={selectedId}
-              onCommand={onCommand}
-            />
-          ))}
+          {root.mainInstances.length > 0 ? (
+            <div className="nav-secondary-context">
+              {root.mainInstances.length} pinned main surface{root.mainInstances.length === 1 ? "" : "s"}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>
-  );
-}
-
-function InstanceRows({
-  instance,
-  selectedId,
-  depth,
-  onCommand,
-}: {
-  instance: InstanceView;
-  selectedId: string | null;
-  depth: number;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
-}) {
-  return (
-    <>
-      <ResourceRow
-        id={instance.id}
-        title={instance.label}
-        eyebrow={instance.role === "main" ? "mainInstance" : "subInstance"}
-        state={instance.state}
-        depth={depth}
-        selected={selectedId === instance.id}
-        meta={[instance.kind, instance.interactionMode]}
-        onCommand={onCommand}
-      />
-      {instance.subInstances.map((subInstance) => (
-        <InstanceRows
-          depth={depth + 1}
-          instance={subInstance}
-          key={subInstance.id}
-          selectedId={selectedId}
-          onCommand={onCommand}
-        />
-      ))}
-    </>
   );
 }
 
@@ -724,32 +1008,11 @@ function flattenEntities(resources: DashboardResourcesView | null): ResourceEnti
         instanceCount: root.mainInstances.length,
       });
 
-      for (const instance of root.mainInstances) {
-        appendInstanceEntities(entities, instance);
-      }
+      // Main and sub instances are workbench surfaces/projections, not default left-nav rows.
     }
   }
 
   return entities;
-}
-
-function appendInstanceEntities(entities: ResourceEntity[], instance: InstanceView) {
-  entities.push({
-    id: instance.id,
-    type: "instance",
-    label: instance.label,
-    state: instance.state,
-    actions: instance.actions,
-    path: instance.resourcePath,
-    role: instance.role,
-    kind: instance.kind,
-    interactionMode: instance.interactionMode,
-    subInstanceCount: instance.subInstances.length,
-  });
-
-  for (const subInstance of instance.subInstances) {
-    appendInstanceEntities(entities, subInstance);
-  }
 }
 
 function normalizeServerRoute(serverId: string) {
@@ -763,12 +1026,78 @@ function normalizeServerRoute(serverId: string) {
   }
 }
 
+function resolveWorkbenchSelection(
+  resources: DashboardResourcesView | null,
+  selectedId: string | null,
+): WorkbenchSelection | null {
+  if (!resources) {
+    return null;
+  }
+
+  let fallback: WorkbenchSelection | null = null;
+
+  for (const workspace of resources.workspaces) {
+    for (const root of workspace.workRoots) {
+      const mainInstance = root.mainInstances[0] ?? null;
+      const rootSelection = { workspace, root, mainInstance, selectedInstance: mainInstance };
+      fallback ??= rootSelection;
+
+      if (selectedId === workspace.id || selectedId === root.id) {
+        return rootSelection;
+      }
+
+      for (const main of root.mainInstances) {
+        const selectedInstance = findInstanceById(main, selectedId);
+        if (selectedInstance) {
+          return { workspace, root, mainInstance: main, selectedInstance };
+        }
+      }
+    }
+  }
+
+  return fallback;
+}
+
+function findInstanceById(instance: InstanceView, selectedId: string | null): InstanceView | null {
+  if (!selectedId) {
+    return null;
+  }
+
+  if (instance.id === selectedId) {
+    return instance;
+  }
+
+  for (const subInstance of instance.subInstances) {
+    const nested = findInstanceById(subInstance, selectedId);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function resourceEntityForWorkRoot(root: WorkRootView): ResourceEntity {
+  return {
+    id: root.id,
+    type: "workRoot",
+    label: root.label,
+    state: root.state,
+    actions: root.actions,
+    compactable: root.compactable,
+    path: root.resourcePath,
+    kind: root.kind,
+    status: root.status,
+    instanceCount: root.mainInstances.length,
+  };
+}
+
+function instanceSummary(instance: InstanceView) {
+  return `${instance.role} ${instance.kind} · ${instance.interactionMode}`;
+}
+
 function preferredSelection(entities: ResourceEntity[]) {
-  return (
-    entities.find(
-      (entity) => entity.type === "instance" && entity.role === "main",
-    )?.id ?? entities[0]?.id
-  );
+  return entities.find((entity) => entity.type === "workRoot")?.id ?? entities[0]?.id;
 }
 
 function compactMainInstance(workspace: WorkspaceView) {
