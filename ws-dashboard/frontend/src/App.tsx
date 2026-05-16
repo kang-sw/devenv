@@ -20,6 +20,9 @@ import {
   flattenWorkRootFileTree,
   idleDirectoryLoadState,
   toggleExpandedPath,
+  workRootExplorerInitialLoadPath,
+  workRootExplorerRefreshPaths,
+  workRootExplorerShouldLoadOnExpand,
   type DirectoryLoadState,
   type WorkRootFileEntryView,
 } from "./workRootFiles";
@@ -467,9 +470,9 @@ function WorkRootFileExplorer({
       return;
     }
 
-    const rootState = snapshots[workRoot.id]?.directories[""];
-    if (!rootState || rootState.status === "idle") {
-      void loadDirectory(workRoot.id, "");
+    const initialPath = workRootExplorerInitialLoadPath(snapshots[workRoot.id]);
+    if (initialPath !== null) {
+      void loadDirectory(workRoot.id, initialPath);
     }
   }, [loadDirectory, snapshots, workRoot]);
 
@@ -517,8 +520,7 @@ function WorkRootFileExplorer({
       entityId: workRoot.id,
     });
 
-    const directoryState = snapshot?.directories[entry.path];
-    if (!isExpanded && (!directoryState || directoryState.status === "idle")) {
+    if (workRootExplorerShouldLoadOnExpand(snapshot, entry.path, isExpanded)) {
       void loadDirectory(workRoot.id, entry.path);
     }
   };
@@ -529,8 +531,8 @@ function WorkRootFileExplorer({
       label: "Refresh files",
       entityId: workRoot.id,
     });
-    const paths = Array.from(snapshot?.expandedPaths ?? new Set([""]));
-    for (const path of paths.length > 0 ? paths : [""]) {
+    const paths = workRootExplorerRefreshPaths(snapshot?.expandedPaths ?? new Set([""]));
+    for (const path of paths) {
       void loadDirectory(workRoot.id, path);
     }
   };

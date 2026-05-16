@@ -70,6 +70,31 @@ export async function fetchWorkRootFiles(
   return (await response.json()) as WorkRootFileListView;
 }
 
+export function workRootExplorerInitialLoadPath(
+  snapshot: { directories: Record<string, DirectoryLoadState> } | null | undefined,
+) {
+  const rootState = snapshot?.directories[""];
+  return !rootState || rootState.status === "idle" ? "" : null;
+}
+
+export function workRootExplorerShouldLoadOnExpand(
+  snapshot: { directories: Record<string, DirectoryLoadState> } | null | undefined,
+  path: string,
+  wasExpanded: boolean,
+) {
+  if (wasExpanded) {
+    return false;
+  }
+
+  const directoryState = snapshot?.directories[path];
+  return !directoryState || directoryState.status === "idle";
+}
+
+export function workRootExplorerRefreshPaths(expandedPaths: ReadonlySet<string>) {
+  const paths = Array.from(expandedPaths);
+  return paths.length > 0 ? paths : [""];
+}
+
 export function toggleExpandedPath(expandedPaths: ReadonlySet<string>, path: string) {
   const next = new Set(expandedPaths);
   if (next.has(path)) {

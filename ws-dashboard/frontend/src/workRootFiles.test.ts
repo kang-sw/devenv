@@ -1,6 +1,10 @@
 import {
+  fetchWorkRootFiles,
   flattenWorkRootFileTree,
   toggleExpandedPath,
+  workRootExplorerInitialLoadPath,
+  workRootExplorerRefreshPaths,
+  workRootExplorerShouldLoadOnExpand,
   workRootFilesEndpoint,
   type DirectoryLoadState,
 } from "./workRootFiles.js";
@@ -9,6 +13,20 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
     throw new Error(`${label}: expected ${String(expected)}, got ${String(actual)}`);
   }
+}
+
+async function assertRejects(action: () => Promise<unknown>, pattern: RegExp, label: string) {
+  try {
+    await action();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!pattern.test(message)) {
+      throw new Error(`${label}: error ${message} did not match ${pattern}`);
+    }
+    return;
+  }
+
+  throw new Error(`${label}: expected rejection`);
 }
 
 function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
@@ -89,3 +107,75 @@ const emptyRows = flattenWorkRootFileTree({
   directories: { "": loaded([]) },
 });
 assertEqual(emptyRows[0]?.type === "state" && emptyRows[0].status, "empty", "empty root surfaces state row");
+
+const errorFetch = globalThis.fetch;
+try {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: "unknown workRoot" }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+  await assertRejects(
+    () => fetchWorkRootFiles("root-local-missing", ""),
+    /unknown workRoot/,
+    "fetch surfaces bounded backend JSON errors",
+  );
+
+  globalThis.fetch = (async () => new Response("not json", { status: 418 })) as typeof fetch;
+  await assertRejects(
+    () => fetchWorkRootFiles("root-local-teapot", "src"),
+    /HTTP 418/,
+    "fetch falls back to bounded HTTP status when error JSON is unavailable",
+  );
+} finally {
+  globalThis.fetch = errorFetch;
+}
+
+assertEqual(
+  workRootExplorerInitialLoadPath(undefined),
+  "",
+  "missing selected workRoot snapshot requests initial root listing",
+);
+assertEqual(
+  workRootExplorerInitialLoadPath({
+    directories: { "": { status: "loading", entries: [], error: null } },
+  }),
+  null,
+  "loading root listing is not requested again",
+);
+assertEqual(
+  workRootExplorerShouldLoadOnExpand(undefined, "src", false),
+  true,
+  "expanding an unloaded directory requests that relative path",
+);
+assertEqual(
+  workRootExplorerShouldLoadOnExpand({ directories: { src: loaded([]) } }, "src", false),
+  false,
+  "expanding a loaded directory does not request it again",
+);
+assertEqual(
+  workRootExplorerShouldLoadOnExpand(undefined, "src", true),
+  false,
+  "collapsing a directory does not request it",
+);
+assertDeepEqual(
+  workRootExplorerRefreshPaths(new Set(["", "src"])),
+  ["", "src"],
+  "refresh reloads expanded root and child directories",
+);
+assertDeepEqual(
+  workRootExplorerRefreshPaths(new Set()),
+  [""],
+  "refresh falls back to root when expansion state is empty",
+);
+
+const errorRows = flattenWorkRootFileTree({
+  expandedPaths: new Set([""]),
+  selectedPath: null,
+  directories: { "": { status: "error", entries: [], error: "unknown workRoot" } },
+});
+assertEqual(
+  errorRows[0]?.type === "state" && errorRows[0].status,
+  "error",
+  "error snapshot renders an error state row",
+);
