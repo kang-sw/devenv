@@ -149,9 +149,9 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
+| `260516-feat-ws-web-dark-visual-system` | ready | Add dark-first dashboard visual guide, tokens, and shell reskin |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260516-epic-ws-web-dashboard-workbench-substrate` | todo | Coordinate dark-first stable-entry constrained workbench substrate |
-| `260516-feat-ws-web-dark-visual-system` | todo | Add dark-first dashboard visual guide, tokens, and shell reskin |
 | `260516-feat-ws-web-stable-pairing-routes` | todo | Make pairing redirect token-free and reserve server-scoped browser routes |
 | `260516-research-ws-web-workbench-layout-spike` | todo | Decide Dockview/FlexLayout workbench adapter fit for split-group IA |
 | `260516-feat-ws-web-workbench-substrate` | todo | Implement the workRoot-scoped split-group workbench substrate |
@@ -175,6 +175,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+`260516-feat-ws-web-dark-visual-system` - implement the dark-first dashboard frontend guide, semantic tokens, shell reskin, and screenshot verification.
 
 ## Session Notes
 

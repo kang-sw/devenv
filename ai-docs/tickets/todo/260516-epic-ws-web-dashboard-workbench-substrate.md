@@ -65,7 +65,7 @@ The milestone should establish:
 
 ## Child Tickets
 
-- `260516-feat-ws-web-dark-visual-system` - create
+- `260516-feat-ws-web-dark-visual-system` - ready; create
   `ws-dashboard/frontend/DESIGN.md`, define semantic theme tokens, convert the
   existing shell away from hardcoded light colors, and verify desktop/mobile
   screenshots.

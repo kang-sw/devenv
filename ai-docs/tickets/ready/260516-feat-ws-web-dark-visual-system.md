@@ -5,6 +5,8 @@ related:
   260514-epic-ws-web-dashboard-mvp: parent dashboard MVP board
   260516-epic-ws-web-dashboard-workbench-substrate: containing workbench substrate epic
   260514-research-ws-web-dashboard-direction: visual direction and dashboard UX research
+spec:
+  - 260516-ws-web-dashboard-dark-visual-system
 related-mental-model:
   - ws-web-dashboard
 ---
