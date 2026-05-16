@@ -78,7 +78,7 @@ The MVP should cover:
   system step that turns `ai-docs/ref/design.md` into a dashboard-specific
   `DESIGN.md`-style theme guideline under `ws-dashboard/frontend/` before
   deeper UI feature work.
-- `260516-epic-ws-web-dashboard-workbench-substrate` - next frontend milestone
+- `260516-epic-ws-web-dashboard-workbench-substrate` - done; frontend milestone
   for dark-first theme setup, token-free stable browser entry after pairing,
   server-scoped route identity, and a constrained VS Code-inspired workbench
   substrate.
