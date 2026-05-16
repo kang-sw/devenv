@@ -9,6 +9,8 @@ spec:
   - 260516-ws-web-dashboard-terminal-websocket-transport
   - 260516-ws-web-dashboard-terminal-websocket-input-fidelity
   - 260516-ws-web-dashboard-terminal-websocket-browser-gate
+skeletons:
+  phase-1: 93a725f
 related-mental-model:
   - ws-web-dashboard
 ---
