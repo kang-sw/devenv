@@ -200,7 +200,7 @@ geometry, hairline, and component reference rather than as a default light
 palette. Desktop and narrow viewport screenshot checks make the resulting
 shell inspectable before larger workbench surfaces depend on it.
 
-## 🚧 Browser UI Acceptance Gate {#260516-ws-web-dashboard-browser-ui-acceptance-gate}
+## Browser UI Acceptance Gate {#260516-ws-web-dashboard-browser-ui-acceptance-gate}
 
 Dashboard frontend changes that affect visible browser behavior provide a
 browser-level acceptance gate against the daemon-served production frontend
@@ -208,6 +208,11 @@ after owner pairing. The gate exercises the workRoot UI as a user sees it:
 opening a real workRoot, browsing files, creating terminals, switching terminal
 tabs, sending terminal input, observing terminal output, and checking pane
 layout at recorded viewport sizes.
+
+The frontend package exposes this gate through `npm run test:browser`. The gate
+builds the production frontend, serves it through the dashboard daemon, pairs
+as owner through the startup pairing URL, and records textual evidence plus
+regenerable screenshot artifacts outside tracked source.
 
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
@@ -272,12 +277,11 @@ operations. Readable file open actions may hand off to read-only text pane
 behavior when that later surface exists; until then, the explorer does not imply
 write-back editing.
 
-> [!note] Planned 🚧
-> The explorer will present conventional tree/list affordances that visibly
-> distinguish files from directories, make expansion and refresh controls
-> recognizable, keep the selected workRoot identity visible, and avoid hidden
-> or nonstandard interactions while staying read-only.
-> {#260516-ws-web-dashboard-file-explorer-conventional-affordance}
+The explorer presents conventional tree/list affordances that visibly
+distinguish files from directories, make expansion and refresh controls
+recognizable, keep the selected workRoot identity visible, and avoid hidden or
+nonstandard interactions while staying read-only.
+{#260516-ws-web-dashboard-file-explorer-conventional-affordance}
 
 ## Read-Only File API {#260516-ws-web-dashboard-readonly-file-api}
 
@@ -337,15 +341,14 @@ state plus browser arrangement where available.
 The terminal pane is a shell terminal substrate only; it does not hardcode
 Codex, Claude, or other agent presets.
 
-> [!note] Planned 🚧
-> Terminal tab labels will behave as selectable workbench tabs for every visible
-> terminal session. Opening a real workRoot will show an explicit empty
-> workbench state or a live daemon terminal surface, never a mock or placeholder
-> terminal. Selecting a terminal focuses only that session, and terminal input
-> and output do not cross between sessions.
-> {#260516-ws-web-dashboard-terminal-tab-selection-and-empty-initial-state}
+Terminal tab labels behave as selectable workbench tabs for every visible
+terminal session. Opening a real workRoot shows an explicit empty workbench
+state or a live daemon terminal surface, never a mock or placeholder terminal.
+Selecting a terminal focuses only that session, and terminal input and output
+do not cross between sessions.
+{#260516-ws-web-dashboard-terminal-tab-selection-and-empty-initial-state}
 
-## 🚧 Browser Terminal Emulator Behavior {#260516-ws-web-dashboard-browser-terminal-emulator-behavior}
+## Browser Terminal Emulator Behavior {#260516-ws-web-dashboard-browser-terminal-emulator-behavior}
 
 The browser terminal pane behaves as a real terminal emulator surface for a
 daemon-owned PTY. PTY output is delivered into the terminal emulator so ANSI
@@ -354,8 +357,9 @@ Keyboard input originates from the focused emulator surface and reaches the
 corresponding daemon terminal session.
 
 The terminal fills the available workbench pane and fits or resizes from
-measured container dimensions. Resize forwarding remains bounded; visual split
-dragging does not continuously rewrite logical PTY dimensions.
+measured container dimensions while staying within the daemon PTY size
+contract. Resize forwarding remains bounded; visual split dragging does not
+continuously rewrite logical PTY dimensions.
 
 ## Terminal Close Terminates Session {#260516-ws-web-dashboard-terminal-close-termination}
 
@@ -394,14 +398,12 @@ tree, file navigation, read-only text pane, and terminal session all operate
 against that real workRoot rather than mock fixtures.
 {#260516-ws-web-dashboard-live-resource-dogfood-verification}
 
-> [!note] Planned 🚧
-> WorkRoot IO dogfood will include browser-level evidence from the
-> daemon-served production frontend after owner pairing. The artifact records
-> the daemon command, browser automation or manual browser steps, viewport
-> sizes, terminal commands used to verify color/control handling, generated
-> screenshot or trace paths when present, and explicit pass/fail checks for the
-> known UI failures.
-> {#260516-ws-web-dashboard-browser-workroot-io-dogfood-evidence}
+WorkRoot IO dogfood includes browser-level evidence from the daemon-served
+production frontend after owner pairing. The artifact records the daemon
+command, browser automation or manual browser steps, viewport sizes, terminal
+commands used to verify color/control handling, generated screenshot or trace
+paths when present, and explicit pass/fail checks for the known UI failures.
+{#260516-ws-web-dashboard-browser-workroot-io-dogfood-evidence}
 
 ## Instance Event Envelope Fixtures {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 
