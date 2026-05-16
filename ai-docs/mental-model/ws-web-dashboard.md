@@ -1,6 +1,6 @@
 ---
 domain: ws-web-dashboard
-description: "Personal ws dashboard daemon, owner-auth boundary, UI serving, frontend visual system, resource view-model API/fixtures, and host-control separation."
+description: "Personal ws dashboard daemon, owner-auth boundary, UI serving/route basis, frontend visual system, resource view-model API/fixtures, and host-control separation."
 sources:
   - ws-dashboard/
 related:
@@ -21,6 +21,7 @@ related:
 - `ws-dashboard/crates/daemon/src/discovery.rs` owns live local workRoot discovery and maps remembered/opened paths into the same resource view-model provider contract. {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 - `ws-dashboard/crates/daemon/src/root_picker.rs` owns the authenticated backend root picker, empty-directory creation, and open-workRoot route handlers. {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
 - `ws-dashboard/frontend/` owns the React/Vite browser shell that is served by the daemon when `--static-dir` points at its production build output and renders the first inspectable resource hierarchy. {#260516-ws-web-dashboard-protected-frontend-shell} {#260516-ws-web-dashboard-inspectable-navigation-shell}
+- `ws-dashboard/frontend/src/routeBasis.ts` owns browser-path normalization to the daemon-reported server id; it is route chrome, not resource authority. {#260516-ws-web-dashboard-server-scoped-browser-routes}
 - `ws-dashboard/frontend/DESIGN.md` and `frontend/src/styles.css` own the dashboard-local dark visual vocabulary for browser UI work. {#260516-ws-web-dashboard-dark-visual-system}
 
 ## Module Contracts
@@ -42,8 +43,8 @@ related:
 - Existing directories must be readable before they are classified as online Git/plain roots; metadata success alone is not enough because unreadable directories must surface as inaccessible. {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 - Root picker routes belong inside the same owner-auth protected router as other dashboard APIs; they may expose host paths only as authenticated picker/open request data, never as public resource ids. {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
 - The only filesystem mutation in the first root picker backend is single-segment empty-directory creation; generic delete, rename, move, copy, and recursive folder operations stay absent. {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
-- Static dashboard serving is configuration-gated: `/` serves `static_dir/index.html`, `/assets/{*asset_path}` serves only safe relative paths below `static_dir/assets`, and both stay inside the owner-auth protected router. Without `static_dir`, the daemon keeps the minimal fallback HTML and asset requests 404. {#260516-ws-web-dashboard-protected-frontend-shell}
-- The browser shell consumes `/api/dashboard/resources` as its source of truth, not a copied frontend fixture; refresh failures after a successful load must stay visible while stale rows remain inspectable. {#260516-ws-web-dashboard-inspectable-navigation-shell}
+- Static dashboard serving is configuration-gated: `/`, `/servers`, and `/servers/{*app_path}` serve `static_dir/index.html`, `/assets/{*asset_path}` serves only safe relative paths below `static_dir/assets`, and all stay inside the owner-auth protected router. Without `static_dir`, the daemon keeps the minimal fallback HTML and asset requests 404. {#260516-ws-web-dashboard-protected-frontend-shell} {#260516-ws-web-dashboard-server-scoped-browser-routes}
+- The browser shell consumes `/api/dashboard/resources` as its source of truth, not a copied frontend fixture or browser route params; refresh failures after a successful load must stay visible while stale rows remain inspectable. After resources load, the frontend may replace `/`, `/servers`, or mismatched `/servers/:serverId...` with the daemon-reported server route while preserving query/hash, but this normalization must not make the browser path authoritative over resource ids. {#260516-ws-web-dashboard-inspectable-navigation-shell} {#260516-ws-web-dashboard-server-scoped-browser-routes}
 - Frontend mouse actions carry `data-command-id` command identities so later keyboard bindings can dispatch the same command layer instead of forking interaction behavior. {#260516-ws-web-dashboard-inspectable-navigation-shell}
 - Dashboard frontend components use the local semantic token layer in `styles.css`; visual work should remap or extend tokens instead of hardcoding raw light-theme colors, rounded cards, shadows, or gradients into feature components. {#260516-ws-web-dashboard-dark-visual-system}
 - Instance events carry stream and resource identity on each event, not only on an outer transcript, so future streaming routes can emit individual events without an out-of-band identity envelope. {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
@@ -53,7 +54,7 @@ related:
 ## Coupling
 
 - `server.rs` creates the auth state used by the router; route tests that build `AppState` directly must stay aligned with the server startup path.
-- `static_dir` couples CLI config, `router.rs`, route tests, and frontend build output: production UI availability depends on passing the built `frontend/dist` directory, while auth behavior is enforced by router placement rather than frontend code.
+- `static_dir` couples CLI config, `router.rs`, route tests, and frontend build output: production UI availability depends on passing the built `frontend/dist` directory, while auth behavior for `/`, `/servers...`, and assets is enforced by router placement rather than frontend code.
 - Startup output intentionally prints the pairing URL for the local owner, while structured logs should avoid query-string/token material; request logging changes must preserve that split.
 - Dashboard resource JSON couples `core/src/view_model.rs`, the daemon provider trait, the protected route tests, and the golden fixture; field or hierarchy changes must update all four in one logical change.
 - Live discovery is intentionally behind the provider seam while `/api/dashboard/resources` remains mock-backed; switching routes to live data must preserve the mock fixture path for deterministic frontend and contract tests.
@@ -85,7 +86,7 @@ related:
 - Pre-collapsing singleton workspace/workRoot/mainInstance chains in the daemon and breaking stable row identity for later URLs and refresh updates.
 - Editing Rust mock constructors without updating `dashboard_resources.json`; the fixture is the source of truth for deterministic mock responses.
 - Hashing canonical paths for remembered workRoot ids; symlink targets and missing paths can change while the dashboard must keep the same remembered workRoot identity.
-- Duplicating dashboard resource fixtures in React state or hiding post-load refresh errors; both make the browser disagree with the daemon-owned resource view.
+- Duplicating dashboard resource fixtures in React state, hiding post-load refresh errors, or trusting `/servers/:serverId` over `/api/dashboard/resources`; all make the browser disagree with the daemon-owned resource view.
 - Adding new dashboard UI with raw light palette values, rounded cards, decorative shadows, or gradients instead of the semantic dark tokens and square operational style.
 - Treating `localhost`, `127.0.0.1`, explicit public bind mode, or passing Host/Origin checks as sufficient authorization for host-control features.
 - Logging full request URIs or health payloads that include pairing tokens, session cookies, wsstate internals, paths, or Git roots.
