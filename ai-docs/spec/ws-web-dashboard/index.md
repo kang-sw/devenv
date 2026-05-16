@@ -152,13 +152,15 @@ left navigation selects server, workspace, and concrete workRoot locations,
 while each opened workRoot owns a constrained workbench area backed by a
 dashboard-owned adapter over the selected layout library.
 
-The workbench uses sibling split groups with group-local pinned and opened
-rows. Pinned rows represent durable surfaces such as agent and persistent
-terminal views; opened rows represent transient or support surfaces such as
+The workbench uses sibling split groups with compact editor-like tab strips and
+dominant pane bodies. Pinned and opened concepts remain dashboard model
+concepts: durable surfaces such as agent and persistent terminal views appear as
+compact workbench tabs or chips, while transient or support surfaces such as
 editor, viewer, diff, diagnostics, logs/events, task view, and inspector
-surfaces. Main instances are durable workRoot-local surfaces. Sub instances are
-view-only projections attached to a main instance through badges, popovers,
-cards, or drawers rather than independent top-level navigation rows.
+surfaces appear as ordinary workbench tabs. Main instances are durable
+workRoot-local surfaces. Sub instances are view-only projections attached to a
+main instance through badges, popovers, cards, or drawers rather than
+independent top-level navigation rows.
 
 Layout attachment identity stays separate from daemon resource identity. Layout
 state records arrangement only; daemon APIs and `/servers/:serverId/...`
@@ -172,17 +174,11 @@ surface keys focus their existing attachment, opened/support surfaces prefer the
 second or later split group, and durable agent or persistent terminal surfaces
 prefer the focused group before falling back to the first group.
 
-> [!note] Planned 🚧
-> The visible workbench chrome will be corrected into compact editor-like split
-> groups where thin tab strips sit above dominant pane bodies. Pinned and
-> opened concepts remain dashboard model concepts, but callers should see
-> workbench tabs or compact chips rather than large explanatory rows. Visible
-> tabs select the active pane and, where practical, support frontend-only
-> Dockview movement such as reordering within a split group and moving to
-> another split group. That movement changes browser arrangement state only:
-> floating/popout groups stay disabled, daemon-backed lifecycle stays separate,
-> and PTY/TUI logical dimensions do not continuously follow visual drag
-> resizing.
+Visible tabs select the active pane and support frontend-only movement such as
+reordering within a split group and moving to another split group. Tab movement
+changes browser arrangement state only: floating/popout groups stay disabled,
+daemon-backed lifecycle stays separate, and PTY/TUI logical dimensions do not
+continuously follow visual drag resizing.
 
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
