@@ -1555,6 +1555,9 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       if (capped.columns !== terminal.cols || capped.rows !== terminal.rows) {
         terminal.resize(capped.columns, capped.rows);
       }
+      while (terminal.rows > 1 && !terminalScreenFitsVisibleBox(container)) {
+        terminal.resize(terminal.cols, terminal.rows - 1);
+      }
     };
 
     const forwardSize = () => {
@@ -1689,6 +1692,17 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       </div>
     </div>
   );
+}
+
+
+function terminalScreenFitsVisibleBox(container: HTMLElement) {
+  const screen = container.querySelector<HTMLElement>(".xterm-screen");
+  if (!screen) {
+    return true;
+  }
+  const containerBox = container.getBoundingClientRect();
+  const screenBox = screen.getBoundingClientRect();
+  return screenBox.bottom <= containerBox.bottom + 0.5;
 }
 
 function readOnlyFilePlacementState(

@@ -340,6 +340,29 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note("terminal scroll: SCROLL-LINE-80 active bottom row stayed fully inside .terminal-surface");
   });
 
+  // --- Alternate-screen terminal apps fit inside the visible surface -------
+  await test.step("terminal alternate-screen bottom row remains visible", async () => {
+    await runInTerminal(
+      page,
+      String.raw`rows=$(stty size | awk '{print $1}'); printf '\033[?1049h\033[H'; i=1; while [ $i -le $rows ]; do if [ $i -eq $rows ]; then printf 'TUIBOTTOM-%03d' $i; else printf 'TUIROW-%03d\r\n' $i; fi; i=$((i+1)); done; sleep 1; printf '\033[?1049l'`,
+    );
+    await expect(page.locator(".xterm-rows")).toContainText("TUIBOTTOM");
+
+    const bottomRowVisible = await page.evaluate(() => {
+      const surface = document.querySelector(".terminal-surface");
+      const rows = Array.from(document.querySelectorAll(".xterm-rows > div"));
+      const row = rows.find((element) =>
+        (element.textContent ?? "").includes("TUIBOTTOM"),
+      );
+      if (!surface || !row) return false;
+      const surfaceBox = surface.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
+      return rowBox.bottom <= surfaceBox.bottom && rowBox.top >= surfaceBox.top;
+    });
+    expect(bottomRowVisible).toBe(true);
+    note("terminal alternate-screen: synthetic TUI bottom row stayed fully inside .terminal-surface");
+  });
+
   // --- Terminal fills the pane --------------------------------------------
   await test.step("terminal fills the pane", async () => {
     // Compare the emulator surface against the height of its actual containing
