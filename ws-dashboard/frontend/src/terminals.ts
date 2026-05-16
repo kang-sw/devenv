@@ -31,6 +31,7 @@ export type TerminalPaneState = {
   nextSequence: number;
   inputDraft: string;
   error: string | null;
+  localCreatedAtMs: number;
 };
 
 export function workRootTerminalsEndpoint(workRootId: string) {
@@ -138,6 +139,7 @@ export function terminalPaneFromSession(session: TerminalSessionView): TerminalP
     nextSequence: 0,
     inputDraft: "",
     error: null,
+    localCreatedAtMs: Date.now(),
   };
 }
 
@@ -145,13 +147,17 @@ export function reconcileListedTerminalSessions(
   current: Record<string, TerminalPaneState>,
   workRootId: string,
   sessions: TerminalSessionView[],
+  pruneStartedAtMs = Number.POSITIVE_INFINITY,
 ) {
   const liveKeys = new Set(
     sessions.map((session) => terminalPaneLogicalKey(session.workRootId, session.terminalId)),
   );
   const retained = Object.fromEntries(
     Object.entries(current).filter(
-      ([key, pane]) => pane.session.workRootId !== workRootId || liveKeys.has(key),
+      ([key, pane]) =>
+        pane.session.workRootId !== workRootId ||
+        liveKeys.has(key) ||
+        pane.localCreatedAtMs > pruneStartedAtMs,
     ),
   );
   return mergeListedTerminalSessions(retained, sessions);
@@ -178,6 +184,7 @@ export function appendTerminalOutput(pane: TerminalPaneState, output: TerminalOu
     output: pane.output + output.chunks.map((chunk) => chunk.data).join(""),
     nextSequence: output.nextSequence,
     error: null,
+    localCreatedAtMs: Date.now(),
   };
 }
 

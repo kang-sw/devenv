@@ -852,9 +852,12 @@ function WorkbenchShell({
     if (!workbenchModel) {
       return;
     }
+    const listStartedAtMs = Date.now();
     void listTerminals(workbenchModel.root.id)
       .then((sessions) => {
-        setTerminalPanes((current) => reconcileListedTerminalSessions(current, workbenchModel.root.id, sessions));
+        setTerminalPanes((current) =>
+          reconcileListedTerminalSessions(current, workbenchModel.root.id, sessions, listStartedAtMs),
+        );
         setTerminalPaneOrderByGroup((current) => placeTerminalSessions(current, terminalPanes, sessions));
       })
       .catch(() => undefined);

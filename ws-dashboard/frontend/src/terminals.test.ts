@@ -56,6 +56,18 @@ assertDeepEqual(
   {},
   "absent listed sessions for a workRoot are removed from pane state",
 );
+assertEqual(
+  Boolean(
+    reconcileListedTerminalSessions(
+      { [pane.logicalKey]: { ...pane, localCreatedAtMs: 20 } },
+      "root-local-abc",
+      [],
+      10,
+    )[pane.logicalKey],
+  ),
+  true,
+  "stale list responses preserve panes created after the list started",
+);
 const withOutput = appendTerminalOutput(pane, { terminalId: "term_abc", status: "running", nextSequence: 3, chunks: [{ sequence: 1, data: "hi", stream: "pty" }] });
 assertEqual(withOutput.output, "hi", "output appends chunk data");
 assertEqual(withOutput.nextSequence, 3, "output advances cursor");
