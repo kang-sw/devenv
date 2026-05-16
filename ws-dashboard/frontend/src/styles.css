@@ -813,3 +813,11 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+.nav-secondary-context {
+  border-left: var(--ws-border-width-state-rail) solid transparent;
+  color: var(--ws-color-text-tertiary);
+  padding: 0 8px 7px 28px;
+  font-size: var(--ws-font-size-01);
+  line-height: var(--ws-line-height-01);
+}

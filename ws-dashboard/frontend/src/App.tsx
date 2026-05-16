@@ -713,13 +713,13 @@ function WorkspaceRows({
     return (
       <div className="resource-group">
         <ResourceRow
-          id={compactMain.id}
-          title={`${workspace.label} / ${compactMain.root.label} / ${compactMain.instance.label}`}
-          eyebrow="compact"
-          state={compactMain.instance.state}
+          id={compactMain.root.id}
+          title={`${workspace.label} / ${compactMain.root.label}`}
+          eyebrow="compact workRoot"
+          state={compactMain.root.state}
           depth={0}
-          selected={selectedId === compactMain.id}
-          meta={[kindLabel(compactMain.root.kind), compactMain.instance.kind]}
+          selected={selectedId === compactMain.root.id}
+          meta={[kindLabel(compactMain.root.kind), compactMain.root.status, compactMain.instance.kind]}
           onCommand={onCommand}
         />
       </div>
@@ -750,54 +750,14 @@ function WorkspaceRows({
             meta={[kindLabel(root.kind), root.status]}
             onCommand={onCommand}
           />
-          {root.mainInstances.map((instance) => (
-            <InstanceRows
-              depth={2}
-              instance={instance}
-              key={instance.id}
-              selectedId={selectedId}
-              onCommand={onCommand}
-            />
-          ))}
+          {root.mainInstances.length > 0 ? (
+            <div className="nav-secondary-context">
+              {root.mainInstances.length} pinned main surface{root.mainInstances.length === 1 ? "" : "s"}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>
-  );
-}
-
-function InstanceRows({
-  instance,
-  selectedId,
-  depth,
-  onCommand,
-}: {
-  instance: InstanceView;
-  selectedId: string | null;
-  depth: number;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
-}) {
-  return (
-    <>
-      <ResourceRow
-        id={instance.id}
-        title={instance.label}
-        eyebrow={instance.role === "main" ? "mainInstance" : "subInstance"}
-        state={instance.state}
-        depth={depth}
-        selected={selectedId === instance.id}
-        meta={[instance.kind, instance.interactionMode]}
-        onCommand={onCommand}
-      />
-      {instance.subInstances.map((subInstance) => (
-        <InstanceRows
-          depth={depth + 1}
-          instance={subInstance}
-          key={subInstance.id}
-          selectedId={selectedId}
-          onCommand={onCommand}
-        />
-      ))}
-    </>
   );
 }
 
@@ -1048,32 +1008,11 @@ function flattenEntities(resources: DashboardResourcesView | null): ResourceEnti
         instanceCount: root.mainInstances.length,
       });
 
-      for (const instance of root.mainInstances) {
-        appendInstanceEntities(entities, instance);
-      }
+      // Main and sub instances are workbench surfaces/projections, not default left-nav rows.
     }
   }
 
   return entities;
-}
-
-function appendInstanceEntities(entities: ResourceEntity[], instance: InstanceView) {
-  entities.push({
-    id: instance.id,
-    type: "instance",
-    label: instance.label,
-    state: instance.state,
-    actions: instance.actions,
-    path: instance.resourcePath,
-    role: instance.role,
-    kind: instance.kind,
-    interactionMode: instance.interactionMode,
-    subInstanceCount: instance.subInstances.length,
-  });
-
-  for (const subInstance of instance.subInstances) {
-    appendInstanceEntities(entities, subInstance);
-  }
 }
 
 function normalizeServerRoute(serverId: string) {
@@ -1158,11 +1097,7 @@ function instanceSummary(instance: InstanceView) {
 }
 
 function preferredSelection(entities: ResourceEntity[]) {
-  return (
-    entities.find(
-      (entity) => entity.type === "instance" && entity.role === "main",
-    )?.id ?? entities[0]?.id
-  );
+  return entities.find((entity) => entity.type === "workRoot")?.id ?? entities[0]?.id;
 }
 
 function compactMainInstance(workspace: WorkspaceView) {
