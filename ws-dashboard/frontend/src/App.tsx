@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { normalizeServerRouteLocation } from "./routeBasis";
 
 type ViewState = {
   status: string;
@@ -128,7 +129,6 @@ type CommandEntry = {
 };
 
 const resourceEndpoint = "/api/dashboard/resources";
-const serverRoutePrefix = "/servers";
 
 export function App() {
   const [resources, setResources] = useState<DashboardResourcesView | null>(null);
@@ -757,28 +757,10 @@ function normalizeServerRoute(serverId: string) {
     return;
   }
 
-  const targetPath = serverRoutePath(serverId);
-  const currentPath = window.location.pathname;
-
-  if (currentPath === targetPath || currentPath.startsWith(`${targetPath}/`)) {
-    return;
+  const normalizedPath = normalizeServerRouteLocation(window.location, serverId);
+  if (normalizedPath) {
+    window.history.replaceState(null, "", normalizedPath);
   }
-
-  if (
-    currentPath === "/" ||
-    currentPath === serverRoutePrefix ||
-    currentPath.startsWith(`${serverRoutePrefix}/`)
-  ) {
-    window.history.replaceState(
-      null,
-      "",
-      `${targetPath}${window.location.search}${window.location.hash}`,
-    );
-  }
-}
-
-function serverRoutePath(serverId: string) {
-  return `${serverRoutePrefix}/${encodeURIComponent(serverId)}`;
 }
 
 function preferredSelection(entities: ResourceEntity[]) {

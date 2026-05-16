@@ -380,6 +380,7 @@ async fn server_scoped_dashboard_routes_refresh_to_protected_shell() {
     let cookie = pair_and_cookie(app.clone(), &token).await;
 
     for uri in [
+        "/servers",
         "/servers/server-local",
         "/servers/server-local/workspaces/workspace-devenv",
     ] {
