@@ -10,6 +10,7 @@
   },
   "include": [
     "src/routeBasis.ts",
-    "src/routeBasis.test.ts"
+    "src/routeBasis.test.ts",
+    "src/workbench/**/*.ts"
   ]
 }
