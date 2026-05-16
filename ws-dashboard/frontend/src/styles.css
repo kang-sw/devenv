@@ -849,8 +849,13 @@ button {
   }
 
   .workbench-group {
+    min-height: 360px;
     border-right: 0;
     border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  }
+
+  .workbench-pane-body {
+    min-height: 180px;
   }
 
   .workbench-toolbar {
