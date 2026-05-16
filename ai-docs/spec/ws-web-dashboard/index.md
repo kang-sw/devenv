@@ -113,6 +113,13 @@ instances, sub instances, stale/error/loading states, and visible action hints.
 Protected API route tests verify that fixture-backed dashboard data remains
 behind the owner-auth boundary.
 
+> [!note] Planned 🚧
+> Normal daemon operation will use live opened workRoot state as the primary
+> resource authority for authenticated dashboard resource loads. Fixture-backed
+> resources will remain available only for explicit fixture or development
+> contexts and must not be indistinguishable from production resource state.
+> {#260516-ws-web-dashboard-live-resource-authority}
+
 ## Protected Frontend Shell {#260516-ws-web-dashboard-protected-frontend-shell}
 
 The dashboard daemon serves the first React/TypeScript/Vite browser shell
@@ -217,6 +224,14 @@ directories or Git-backed directories into the dashboard model.
 The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
+
+> [!note] Planned 🚧
+> After an authenticated owner opens a workRoot, the browser-visible resource
+> tree will refresh from the canonical dashboard resources endpoint and select
+> the real opened workRoot instead of continuing to present mock workspace
+> state. Open-workRoot responses may update the view immediately, but the
+> resources endpoint remains the canonical source for subsequent refreshes.
+> {#260516-ws-web-dashboard-open-workroot-resource-refresh}
 
 ## WorkRoot File Listing API {#260516-ws-web-dashboard-workroot-file-listing-api}
 
@@ -332,6 +347,13 @@ frontend: open/select a workRoot, browse files, open a read-only text pane,
 create and use a terminal, refresh without losing the terminal, close the
 terminal, and inspect desktop and narrow layouts. Verification records exact
 tooling blockers when a check cannot run.
+
+> [!note] Planned 🚧
+> WorkRoot IO acceptance verification will start from the default dashboard
+> resource load, open or select a real workRoot, and prove the browser-visible
+> resource tree, file navigation, read-only text pane, and terminal session are
+> all operating against that real workRoot rather than mock fixtures.
+> {#260516-ws-web-dashboard-live-resource-dogfood-verification}
 
 ## Instance Event Envelope Fixtures {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 
