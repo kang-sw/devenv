@@ -136,6 +136,19 @@ Mouse-triggered navigation actions route through command ids so later keyboard
 bindings can call the same commands. The shell reserves `^b` to
 mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
 
+## 🚧 Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
+
+The dashboard frontend provides a dark-first visual baseline for the protected
+browser shell. Callers see a dashboard-specific `DESIGN.md` guide under the
+frontend package, semantic theme tokens instead of scattered literal colors,
+and a shell reskin that preserves existing resource, loading, stale, error, and
+command behavior while presenting a consistent dark operational interface.
+
+The visual system uses `ai-docs/ref/design.md` as a Carbon-inspired density,
+geometry, hairline, and component reference rather than as a default light
+palette. Desktop and narrow viewport screenshot checks make the resulting
+shell inspectable before larger workbench surfaces depend on it.
+
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
 The dashboard daemon provides a live local discovery provider that maps opened
