@@ -59,6 +59,7 @@ Target: user request
 6. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `wsflow:lead-proceed`.
 7. For any selected target entering `ready/`, run Spec-stem check before commit.
 8. Run Intent review across the edited set and commit one logical documentation unit when the edits are one decision propagation.
+9. Report edited ticket paths; if exactly one implementation child is the natural next target, emit its `Ticket:` line.
 
 ## Judgments
 

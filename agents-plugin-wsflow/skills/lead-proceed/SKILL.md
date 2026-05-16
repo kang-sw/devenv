@@ -153,9 +153,9 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 |----------|------|
 | Whole target | Ready target has no phase sections |
 | User-requested phase range | User explicitly named phases to implement |
+| Inseparable phase range | Adjacent phases cannot be verified separately from ticket artifacts |
 | Default phase range | User did not name phases and adjacent unfinished phases form one cohesive implementation/review slice |
 | First unfinished phase | The first unfinished phase is the only cohesive implementation/review slice |
-| Inseparable phase range | Adjacent phases cannot be verified separately from ticket artifacts |
 
 Autonomous slice selection is the default when the user does not name phases.
 Prefer grouping adjacent phases when they share one implementation/review surface
