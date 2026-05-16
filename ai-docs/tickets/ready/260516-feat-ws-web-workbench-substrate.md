@@ -11,6 +11,7 @@ spec:
 plans:
   phase-1: 2026-05/16-260516-feat-ws-web-workbench-substrate-phase-1.brief
   phase-2: 2026-05/16-260516-feat-ws-web-workbench-substrate-phase-2.brief
+  phase-3: 2026-05/16-260516-feat-ws-web-workbench-substrate-phase-3.brief
 related-mental-model:
   - ws-web-dashboard
 ---
