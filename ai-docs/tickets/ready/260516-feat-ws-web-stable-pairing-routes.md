@@ -5,6 +5,9 @@ related:
   260514-epic-ws-web-dashboard-mvp: parent dashboard MVP board
   260516-epic-ws-web-dashboard-workbench-substrate: containing workbench substrate epic
   260514-research-ws-web-dashboard-direction: route identity and pairing direction
+spec:
+  - 260516-ws-web-dashboard-token-free-pairing-landing
+  - 260516-ws-web-dashboard-server-scoped-browser-routes
 related-mental-model:
   - ws-web-dashboard
 ---
