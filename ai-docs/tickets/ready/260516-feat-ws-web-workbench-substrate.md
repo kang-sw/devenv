@@ -86,6 +86,30 @@ model. Provide the default two-split preset, group-local pinned/opened rows,
 and workRoot-level combined bar for breadcrumbs/status plus viewer, task view,
 diagnostics/events, and layout toggles.
 
+### Result (23c145a) - 2026-05-16
+
+Rendered the first visible `left nav | workRoot workbench` shell. The browser
+now keeps the left nav at workspace/workRoot identity while showing main
+instances as pinned durable workbench surfaces and sub instances as secondary
+workbench projections. The workbench includes a workRoot toolbar with
+breadcrumb/status/action/toggle affordances, the default Primary/Support
+two-split preset, group-local pinned/opened rows, and fixture-backed placeholder
+surfaces for agent, persistent terminal, editor/detail, viewer, task view,
+diagnostics/events, and inspector concepts.
+
+Review initially found that the left nav still rendered main/sub instance rows
+and defaulted selection to a main instance. Follow-up commit `23c145a` fixed the
+nav identity boundary so compact singleton rows and default selection target the
+workRoot. Phase 3 placement, close/detach, persistence, drag/drop, live backend,
+and keyboard navigation behavior remains deferred.
+
+Verification passed with frontend route tests, workbench model tests, and
+frontend production build. Delegated visual checks captured real paired desktop
+and narrow viewport screenshots:
+
+- `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/workbench-phase-2-desktop.png`
+- `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/workbench-phase-2-narrow-real.png`
+
 ### Phase 3: Placement And Lifecycle Semantics
 
 Implement initial placement behavior: file/editor opens prefer the second or
