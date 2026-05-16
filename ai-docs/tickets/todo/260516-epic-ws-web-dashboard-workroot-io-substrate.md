@@ -51,7 +51,7 @@ The milestone should establish:
 
 ## Child Tickets
 
-- `260516-feat-ws-web-workroot-file-navigation` - todo; authenticated
+- `260516-feat-ws-web-workroot-file-navigation` - done; authenticated
   workRoot file listing and a left-nav file explorer draft.
 - `260516-feat-ws-web-readonly-text-pane` - todo; authenticated read-only text
   file open path and workbench text pane placement.

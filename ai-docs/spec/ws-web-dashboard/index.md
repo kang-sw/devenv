@@ -231,7 +231,7 @@ missing paths, files requested as directories, and inaccessible locations return
 bounded unavailable or error states without exposing host paths as browser route
 identity.
 
-## 🚧 WorkRoot File Explorer {#260516-ws-web-dashboard-workroot-file-explorer}
+## WorkRoot File Explorer {#260516-ws-web-dashboard-workroot-file-explorer}
 
 The dashboard browser shell renders a selected-workRoot file explorer in the
 lower portion of the left navigation area. The explorer supports directory

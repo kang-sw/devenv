@@ -151,7 +151,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260516-epic-ws-web-dashboard-workroot-io-substrate` | todo | Coordinate the workRoot filesystem and terminal substrate milestone |
-| `260516-feat-ws-web-workroot-file-navigation` | ready | Add authenticated workRoot file listing and a left-nav file explorer draft |
 | `260516-feat-ws-web-readonly-text-pane` | todo | Add read-only text file panes and file-open placement |
 | `260516-feat-ws-web-terminal-session-substrate` | todo | Add daemon-owned PTY terminal sessions with refresh persistence and close termination |
 | `260516-feat-ws-web-workroot-io-workbench-integration` | todo | Integrate workRoot file and terminal surfaces with workbench restore and verification |
@@ -175,7 +174,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260516-feat-ws-web-workroot-file-navigation` - add authenticated workRoot directory listing and a lower-left file explorer draft for the workRoot IO substrate.
 
 ## Session Notes
 

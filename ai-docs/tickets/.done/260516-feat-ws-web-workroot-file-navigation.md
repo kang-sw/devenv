@@ -10,8 +10,10 @@ spec:
   - 260516-ws-web-dashboard-workroot-file-explorer
 plans:
   phase-1: 2026-05/16-260516-feat-ws-web-workroot-file-navigation
+  phase-2: 2026-05/16-260516-feat-ws-web-workroot-file-navigation-phase-2
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web dashboard workRoot file navigation
@@ -70,3 +72,15 @@ being usable for common project browsing.
 Clicking a readable text file may call into the read-only text pane ticket once
 that route exists. Until then, the explorer may expose a disabled or stubbed
 open command without pretending editing works.
+
+### Result (a9936895) - 2026-05-16
+
+Implemented the lower-left selected-workRoot file explorer draft in the
+frontend. The explorer consumes the Phase 1 listing API by opaque `workRootId`
+and relative path, keeps server/workspace/workRoot identity above it, supports
+root loading, expand/collapse, refresh, loading/error/empty states, and exposes
+pending disabled file-open affordances without adding editing behavior.
+
+Verification covered frontend route/workbench/workRoot-files tests, production
+build, delegated correctness/fit/test review, and a follow-up test-coverage
+fix for listing error handling plus explorer load-decision helpers.
