@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Path as AxumPath, Query, State};
+use axum::extract::{ws::WebSocketUpgrade, Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -154,7 +154,7 @@ pub enum TerminalWebSocketClientMessage {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TerminalStatus {
+pub enum TerminalStatus {
     Running,
     Exited,
     Terminated,
@@ -286,18 +286,25 @@ pub async fn terminal_resize(
 pub async fn terminal_websocket(
     State(state): State<AppState>,
     AxumPath(terminal_id): AxumPath<String>,
+    _upgrade: WebSocketUpgrade,
 ) -> Response {
     // CONTRACT: This route is nested behind the owner auth and Host/Origin
     // pre-upgrade gate in router.rs. Implementation must reject unknown or
     // closed opaque terminal ids before accepting the WebSocket attachment.
-    // HINT: Normalize this stub to Axum's WebSocketUpgrade extractor and route
-    // through TerminalRegistry::get plus TerminalSession read/write helpers.
+    // HINT: Stub is normalized to Axum's WebSocketUpgrade extractor and routes
+    // through TerminalRegistry::get before any on_upgrade acceptance.
     // HOLE: WebSocket task wiring, output wakeup/backfill strategy, and close
     // propagation belong to the implementation pass.
-    if state.terminals.get(&terminal_id).is_none() {
+    let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
+    };
+    if !session.is_live() {
+        return terminal_error(StatusCode::GONE, "terminal is closed");
     }
-    terminal_error(StatusCode::NOT_IMPLEMENTED, "terminal WebSocket not implemented")
+    terminal_error(
+        StatusCode::NOT_IMPLEMENTED,
+        "terminal WebSocket not implemented",
+    )
 }
 
 pub async fn close_terminal(
