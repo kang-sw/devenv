@@ -19,6 +19,7 @@ const artifactsDir = path.join(here, ".artifacts");
 
 let daemon: DaemonHandle;
 let workRoot: string;
+let ownsWorkRoot = false;
 let commandPlan: TerminalCommandPlan;
 let portabilityEvidence: TerminalPortabilityEvidence | undefined;
 
@@ -32,22 +33,28 @@ test.describe.configure({ mode: "serial" });
 test.beforeAll(async () => {
   mkdirSync(artifactsDir, { recursive: true });
 
-  // A deterministic temporary workRoot keeps explorer assertions stable.
-  workRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-gate-"));
-  writeFileSync(
-    path.join(workRoot, "gate-readme.txt"),
-    "ws-dashboard browser gate fixture\nsecond fixture line\n",
-  );
-  mkdirSync(path.join(workRoot, "gate-subdir"));
-  writeFileSync(path.join(workRoot, "gate-subdir", "nested.txt"), "nested gate file\n");
-
-  // Many root files make the explorer tree far taller than its pane so the
-  // viewport-containment assertion below is meaningful.
-  for (let index = 0; index < 80; index += 1) {
+  const externalWorkRoot = process.env.WS_DASHBOARD_TEST_WORKROOT;
+  if (externalWorkRoot) {
+    workRoot = externalWorkRoot;
+  } else {
+    // A deterministic temporary workRoot keeps explorer assertions stable.
+    workRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-gate-"));
+    ownsWorkRoot = true;
     writeFileSync(
-      path.join(workRoot, `gate-bulk-${String(index).padStart(3, "0")}.txt`),
-      `bulk gate fixture ${index}\n`,
+      path.join(workRoot, "gate-readme.txt"),
+      "ws-dashboard browser gate fixture\nsecond fixture line\n",
     );
+    mkdirSync(path.join(workRoot, "gate-subdir"));
+    writeFileSync(path.join(workRoot, "gate-subdir", "nested.txt"), "nested gate file\n");
+
+    // Many root files make the explorer tree far taller than its pane so the
+    // viewport-containment assertion below is meaningful.
+    for (let index = 0; index < 80; index += 1) {
+      writeFileSync(
+        path.join(workRoot, `gate-bulk-${String(index).padStart(3, "0")}.txt`),
+        `bulk gate fixture ${index}\n`,
+      );
+    }
   }
 
   daemon = await startDaemon();
@@ -88,7 +95,7 @@ test.beforeAll(async () => {
   };
   note(`daemon base URL: ${daemon.baseUrl}`);
   note(`terminal command profile: ${commandPlan.profile}`);
-  note(`temp workRoot: ${path.basename(workRoot)}`);
+  note(`test workRoot: ${workRootDisplayName(workRoot)}`);
 });
 
 test.afterEach(async ({}, testInfo) => {
@@ -101,7 +108,7 @@ test.afterAll(async () => {
   if (daemon) {
     await daemon.stop();
   }
-  if (workRoot) {
+  if (workRoot && ownsWorkRoot) {
     rmSync(workRoot, { recursive: true, force: true });
   }
   if (portabilityEvidence) {
@@ -118,6 +125,12 @@ async function terminalSurface(page: Page) {
   await expect(surface).toBeVisible();
   await expect(surface.locator(".xterm")).toBeVisible();
   return surface;
+}
+
+function workRootDisplayName(rootPath: string) {
+  const normalized = rootPath.replace(/[\\/]+$/, "");
+  const match = normalized.match(/[^\\/]+$/);
+  return match ? match[0] : normalized;
 }
 
 async function runInTerminal(page: Page, command: string) {
@@ -184,9 +197,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.locator("#open-work-root-path").fill(workRoot);
     await page.locator('[data-command-id="workRoot.open"]').click();
 
-    await expect(page.locator(".file-explorer-title")).toContainText(
-      path.basename(workRoot),
-    );
+    await expect(page.locator(".file-explorer-title")).toContainText(workRootDisplayName(workRoot));
     note("open workRoot: live opened workRoot is selected and shown in the explorer");
   });
 
@@ -319,7 +330,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     await page.keyboard.type(commandPlan.longRunningCommand());
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(commandPlan.profile === "cmd-exe" ? 1_000 : 200);
     await page.keyboard.press("Control+C");
     await page.keyboard.type(commandPlan.echo("CTRL-C-OK"));
     await page.keyboard.press("Enter");
@@ -478,7 +489,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   await test.step("refresh without mock surfaces", async () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.locator(".app-shell")).toBeVisible();
-    await expect(page.locator(".file-explorer-title")).toContainText(path.basename(workRoot));
+    await expect(page.locator(".file-explorer-title")).toContainText(workRootDisplayName(workRoot));
     // The daemon owns the terminal lifecycle, so the surviving session is
     // reconstructed as a selectable tab after reload.
     await expect(terminalTabs(page)).toHaveCount(1);
