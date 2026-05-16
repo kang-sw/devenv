@@ -1,5 +1,6 @@
 import {
   appendTerminalOutput,
+  clampTerminalSize,
   markTerminalPaneCloseError,
   mergeListedTerminalSessions,
   reconcileListedTerminalSessions,
@@ -80,3 +81,9 @@ assertEqual(
 assertDeepEqual(validateTerminalSize(100, 30), { columns: 100, rows: 30 }, "valid resize accepted");
 assertThrows(() => validateTerminalSize(0, 30), /invalid terminal size/, "non-positive columns rejected");
 assertThrows(() => validateTerminalSize(1000, 30), /invalid terminal size/, "oversized columns rejected");
+
+assertDeepEqual(clampTerminalSize(0, 0), { columns: 1, rows: 1 }, "clamp raises below-min columns and rows to the minimum");
+assertDeepEqual(clampTerminalSize(1000, 30), { columns: 300, rows: 30 }, "clamp caps oversized columns at the max");
+assertDeepEqual(clampTerminalSize(80, 1000), { columns: 80, rows: 120 }, "clamp caps oversized rows at the max");
+assertDeepEqual(clampTerminalSize(120.9, 40.7), { columns: 120, rows: 40 }, "clamp truncates fractional dimensions toward zero");
+assertDeepEqual(clampTerminalSize(100, 30), { columns: 100, rows: 30 }, "clamp passes an in-bounds size through unchanged");
