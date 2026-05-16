@@ -8,6 +8,8 @@ related:
 spec:
   - 260516-ws-web-dashboard-workroot-file-listing-api
   - 260516-ws-web-dashboard-workroot-file-explorer
+plans:
+  phase-1: 2026-05/16-260516-feat-ws-web-workroot-file-navigation
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -45,6 +47,17 @@ or read eligibility where cheap. The API must stay rooted below the workRoot,
 reject traversal, and surface inaccessible or unreadable paths honestly.
 
 This phase should keep filesystem mutation out of scope.
+
+### Result (b8801c1d) - 2026-05-16
+
+Implemented an owner-authenticated daemon listing API for opened workRoots. The
+route lists one directory level by opaque `workRootId`, resolves host paths only
+through daemon-owned opened-workRoot state, rejects traversal and unknown roots,
+and keeps listing read-only without exposing absolute host paths in the response
+contract.
+
+Verification covered formatting, focused route tests, the full daemon crate test
+suite, workspace check, and delegated correctness/fit/test review.
 
 ### Phase 2: Left-Nav File Explorer Draft
 

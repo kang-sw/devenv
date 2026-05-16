@@ -218,7 +218,7 @@ The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
 
-## 🚧 WorkRoot File Listing API {#260516-ws-web-dashboard-workroot-file-listing-api}
+## WorkRoot File Listing API {#260516-ws-web-dashboard-workroot-file-listing-api}
 
 The dashboard exposes an authenticated API for listing directories below a
 selected workRoot. Responses identify children by daemon-owned workRoot-relative
