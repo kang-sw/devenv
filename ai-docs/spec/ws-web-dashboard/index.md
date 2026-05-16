@@ -169,6 +169,11 @@ instances are durable workRoot-local surfaces. Sub instances are view-only
 projections attached to a main instance through badges, popovers, cards, or
 drawers rather than independent top-level navigation rows.
 
+Workbench panes do not add a second generic title/status chrome below the
+pinned/opened tab rows. The tab rows provide visible surface identity and
+selection, while pane-local content or controls provide any useful
+surface-specific status.
+
 Layout attachment identity stays separate from daemon resource identity. Layout
 state records arrangement only; daemon APIs and `/servers/:serverId/...`
 browser routes keep authoritative server, workspace, workRoot, and instance
@@ -218,14 +223,13 @@ The gate includes viewport containment checks for long file explorer content:
 expanding a large tree must not make the top-level document scroll or push the
 dashboard footer out of view, and overflow must stay inside the explorer region.
 
-> [!note] Planned 🚧
-> The browser gate will prove the live terminal path uses an owner-authenticated
-> WebSocket connection instead of periodic output polling while connected. It
-> will cover owner pairing, WebSocket connection, input fidelity, ANSI/control
-> rendering, resize behavior, close-as-terminate, reconnect or reload
-> reconstruction, and timing evidence showing local keystroke echo is no longer
-> bounded by the former polling interval.
-> {#260516-ws-web-dashboard-terminal-websocket-browser-gate}
+The browser gate proves the live terminal path uses an owner-authenticated
+WebSocket connection instead of periodic output polling while connected. It
+covers owner pairing, WebSocket connection, input fidelity, ANSI/control
+rendering, resize behavior, close-as-terminate, reconnect or reload
+reconstruction, and timing evidence showing local keystroke echo is no longer
+bounded by the former polling interval.
+{#260516-ws-web-dashboard-terminal-websocket-browser-gate}
 
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
@@ -340,20 +344,19 @@ not whether the daemon session exists.
 
 ## Terminal I/O Transport {#260516-ws-web-dashboard-terminal-io-transport}
 
-The dashboard exposes authenticated terminal output, input, and resize
+The dashboard exposes authenticated terminal output, input, status, and resize
 transport for daemon-owned PTY sessions. Unauthenticated callers are rejected
 before stream or upgrade acceptance. Resize forwarding remains bounded and does
 not continuously rewrite logical terminal dimensions during visual split drag.
 
-> [!note] Planned 🚧
-> Live browser terminal I/O will use an owner-authenticated WebSocket as the
-> primary transport for daemon-owned PTY sessions. The WebSocket will attach to
-> existing opaque terminal ids after owner auth, carry ordered PTY output,
-> status, and exit data to the browser, and carry raw input plus bounded resize
-> requests back to the daemon. HTTP output transport may remain available for
-> initial replay, reload reconstruction, deterministic tests, or fallback, but
-> the normal connected xterm path will not depend on periodic output polling.
-> {#260516-ws-web-dashboard-terminal-websocket-transport}
+Live browser terminal I/O uses an owner-authenticated WebSocket as the primary
+transport for daemon-owned PTY sessions. The WebSocket attaches to existing
+opaque terminal ids after owner auth, carries ordered PTY output, status, and
+exit data to the browser, and carries raw input plus bounded resize requests
+back to the daemon. HTTP output transport remains available for initial replay,
+reload reconstruction, deterministic tests, or fallback, but the normal
+connected xterm path does not depend on periodic output polling.
+{#260516-ws-web-dashboard-terminal-websocket-transport}
 
 ## Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
 
@@ -386,17 +389,22 @@ contract. Resize forwarding remains bounded; visual split dragging does not
 continuously rewrite logical PTY dimensions.
 
 Terminal rendering prefers a Powerline/Nerd Font-capable monospace stack when
-available, with ordinary monospace fallbacks. Browser polling avoids idle
-terminal state churn and uses bounded per-terminal in-flight requests so quiet
-terminals do not cause visible workbench flicker.
+available, with ordinary monospace fallbacks. HTTP polling is suppressed while a
+terminal WebSocket is connecting or connected; fallback polling avoids idle
+terminal state churn, discards stale in-flight poll results after socket attach
+or cursor advancement, and uses bounded per-terminal in-flight requests.
 
-> [!note] Planned 🚧
-> The browser terminal emulator will preserve byte-stream input behavior for
-> ordinary shell editing and interactive control keys. Acceptance includes
-> Backspace, left/right cursor movement, command history navigation, Ctrl-C,
-> Ctrl-D or EOF where safe, Ctrl-L or clear-screen behavior, paste, and ordinary
-> prompt editing inside a real shell.
-> {#260516-ws-web-dashboard-terminal-websocket-input-fidelity}
+The browser terminal emulator preserves byte-stream input behavior for ordinary
+shell editing and interactive control keys. Acceptance includes Backspace,
+left/right cursor movement, command history navigation, Ctrl-C, Ctrl-D or EOF
+where safe, Ctrl-L or clear-screen behavior, paste, and ordinary prompt editing
+inside a real shell.
+{#260516-ws-web-dashboard-terminal-websocket-input-fidelity}
+
+The terminal surface keeps scrolled output and alternate-screen/fullscreen TUI
+content within the visible terminal box: the active bottom row must remain
+fully visible, and fitted xterm rows are trimmed when the rendered screen would
+otherwise exceed the available surface.
 
 ## Terminal Close Terminates Session {#260516-ws-web-dashboard-terminal-close-termination}
 
