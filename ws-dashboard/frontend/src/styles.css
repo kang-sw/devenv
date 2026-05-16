@@ -55,6 +55,7 @@
   --ws-radius-square: 0;
   --ws-focus-ring: 2px solid var(--ws-color-focus);
 
+  color-scheme: dark;
   color: var(--ws-color-text-primary);
   background: var(--ws-color-canvas);
   font-family: var(--ws-font-family-sans);
@@ -67,8 +68,16 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
+  background: var(--ws-color-canvas);
+  color: var(--ws-color-text-primary);
 }
 
 button {
