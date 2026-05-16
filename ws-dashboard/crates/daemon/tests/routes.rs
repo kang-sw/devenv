@@ -97,7 +97,18 @@ async fn pair_and_cookie(app: axum::Router, token: &str) -> String {
         .await
         .expect("pair response");
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get(header::LOCATION),
+        Some(&header::HeaderValue::from_static("/"))
+    );
+    assert!(!response
+        .headers()
+        .get(header::LOCATION)
+        .expect("pair redirect location")
+        .to_str()
+        .expect("location header is ASCII")
+        .contains(token));
     response
         .headers()
         .get(header::SET_COOKIE)
@@ -123,6 +134,13 @@ async fn pair_response(app: axum::Router, token: Option<&str>) -> axum::response
     )
     .await
     .expect("pair response")
+}
+
+fn assert_pair_failure_does_not_install_cookie_or_redirect_to_app(
+    response: &axum::response::Response,
+) {
+    assert!(response.headers().get(header::SET_COOKIE).is_none());
+    assert!(response.headers().get(header::LOCATION).is_none());
 }
 
 #[tokio::test]
@@ -184,6 +202,18 @@ async fn valid_pairing_installs_http_only_owner_session_cookie_once() {
         .get(header::SET_COOKIE)
         .expect("owner session cookie");
     let set_cookie = set_cookie.to_str().expect("cookie header is ASCII");
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get(header::LOCATION),
+        Some(&header::HeaderValue::from_static("/"))
+    );
+    assert!(!response
+        .headers()
+        .get(header::LOCATION)
+        .expect("pair redirect location")
+        .to_str()
+        .expect("location header is ASCII")
+        .contains(&token));
     assert!(set_cookie.contains("ws-dashboard-owner="));
     assert!(set_cookie.contains("HttpOnly"));
 
@@ -205,11 +235,11 @@ async fn valid_pairing_installs_http_only_owner_session_cookie_once() {
 async fn invalid_missing_and_reused_pairing_tokens_do_not_install_sessions() {
     let missing = pair_response(build_router(app_state()), None).await;
     assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
-    assert!(missing.headers().get(header::SET_COOKIE).is_none());
+    assert_pair_failure_does_not_install_cookie_or_redirect_to_app(&missing);
 
     let invalid = pair_response(build_router(app_state()), Some("not-the-token")).await;
     assert_eq!(invalid.status(), StatusCode::UNAUTHORIZED);
-    assert!(invalid.headers().get(header::SET_COOKIE).is_none());
+    assert_pair_failure_does_not_install_cookie_or_redirect_to_app(&invalid);
 
     let reused_state = app_state();
     let token = reused_state
@@ -219,10 +249,10 @@ async fn invalid_missing_and_reused_pairing_tokens_do_not_install_sessions() {
         .to_owned();
     let reused_app = build_router(reused_state);
     let first = pair_response(reused_app.clone(), Some(&token)).await;
-    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(first.status(), StatusCode::SEE_OTHER);
     let reused = pair_response(reused_app, Some(&token)).await;
     assert_eq!(reused.status(), StatusCode::GONE);
-    assert!(reused.headers().get(header::SET_COOKIE).is_none());
+    assert_pair_failure_does_not_install_cookie_or_redirect_to_app(&reused);
 }
 
 #[tokio::test]
@@ -239,7 +269,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         .to_owned();
     let expired = pair_response(build_router(expired_state), Some(&expired_token)).await;
     assert_eq!(expired.status(), StatusCode::UNAUTHORIZED);
-    assert!(expired.headers().get(header::SET_COOKIE).is_none());
+    assert_pair_failure_does_not_install_cookie_or_redirect_to_app(&expired);
 }
 
 #[tokio::test]
@@ -956,7 +986,11 @@ async fn daemon_security_smoke_covers_auth_and_health_boundary() {
         )
         .await
         .expect("pair response");
-    assert_eq!(pair.status(), StatusCode::OK);
+    assert_eq!(pair.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        pair.headers().get(header::LOCATION),
+        Some(&header::HeaderValue::from_static("/"))
+    );
     let cookie = pair
         .headers()
         .get(header::SET_COOKIE)

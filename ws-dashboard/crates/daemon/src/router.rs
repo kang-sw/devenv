@@ -60,7 +60,14 @@ async fn pair(
     match state.auth.consume_pairing_token(token) {
         PairingOutcome::Paired => {
             let cookie = state.auth.issue_session_cookie().as_set_cookie_header();
-            ([(header::SET_COOKIE, cookie)], "paired\n").into_response()
+            (
+                StatusCode::SEE_OTHER,
+                [
+                    (header::SET_COOKIE, cookie),
+                    (header::LOCATION, "/".to_owned()),
+                ],
+            )
+                .into_response()
         }
         PairingOutcome::Invalid => {
             (StatusCode::UNAUTHORIZED, "invalid pairing token\n").into_response()
