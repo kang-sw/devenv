@@ -26,8 +26,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
+
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
+use tokio::net::TcpListener;
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
@@ -1023,6 +1027,46 @@ async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -
         .to_owned()
 }
 
+async fn create_terminal_for_test(app: axum::Router, cookie: &str, work_root_id: &str) -> String {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24, "title": "Test terminal" })
+                        .to_string(),
+                ))
+                .expect("create terminal request"),
+        )
+        .await
+        .expect("create terminal response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("create terminal body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("create terminal JSON");
+    value["terminalId"]
+        .as_str()
+        .expect("terminal id")
+        .to_owned()
+}
+
+async fn spawn_test_server(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("test server addr");
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("test server");
+    });
+    (format!("127.0.0.1:{}", addr.port()), handle)
+}
+
 #[tokio::test]
 async fn work_root_file_read_routes_are_owner_authenticated() {
     let app = build_router(app_state());
@@ -1582,6 +1626,164 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
         .expect("closed output response");
     assert_eq!(output_after_close.status(), StatusCode::NOT_FOUND);
 
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn terminal_websocket_attaches_for_owner_and_forwards_io_and_resize() {
+    let root = temp_fixture_path("terminal-websocket-root");
+    fs::create_dir_all(&root).expect("create terminal websocket root dir");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
+    let (addr, server) = spawn_test_server(app).await;
+
+    let mut request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
+        .into_client_request()
+        .expect("websocket request");
+    request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("connect terminal websocket");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({ "type": "resize", "columns": 100, "rows": 30 }).to_string(),
+        ))
+        .await
+        .expect("send websocket resize");
+    socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({ "type": "input", "data": "printf WS-SOCKET-TEST\n; exit\n" })
+                .to_string(),
+        ))
+        .await
+        .expect("send websocket input");
+
+    let mut text = String::new();
+    for _ in 0..80 {
+        let Some(message) = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .expect("websocket message timeout")
+        else {
+            break;
+        };
+        let message = message.expect("websocket message");
+        let TungsteniteMessage::Text(payload) = message else {
+            continue;
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).expect("websocket frame JSON");
+        assert_eq!(value["terminalId"], terminal_id);
+        match value["type"].as_str() {
+            Some("output") => {
+                text.push_str(value["chunk"]["data"].as_str().expect("output data"));
+            }
+            Some("exit") => break,
+            Some("status") => {}
+            other => panic!("unexpected websocket frame type: {other:?}"),
+        }
+        if text.contains("WS-SOCKET-TEST") {
+            break;
+        }
+    }
+    assert!(text.contains("WS-SOCKET-TEST"), "{text:?}");
+
+    socket.close(None).await.expect("close websocket");
+    server.abort();
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn terminal_websocket_rejects_unknown_and_closed_terminals_before_upgrade() {
+    let root = temp_fixture_path("terminal-websocket-closed-root");
+    fs::create_dir_all(&root).expect("create terminal websocket closed root dir");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
+
+    let (addr, server) = spawn_test_server(app.clone()).await;
+    let mut unknown_request = format!("ws://{addr}/api/dashboard/terminals/term_missing/socket")
+        .into_client_request()
+        .expect("unknown websocket request");
+    unknown_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let error = tokio_tungstenite::connect_async(unknown_request)
+        .await
+        .expect_err("unknown websocket rejects");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+        other => panic!("unexpected unknown websocket error: {other}"),
+    }
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/input"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": "exit\n" }).to_string(),
+                ))
+                .expect("exit input request"),
+        )
+        .await
+        .expect("exit input response");
+    for _ in 0..40 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/terminals/{terminal_id}/output?after=0"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("poll exited terminal request"),
+            )
+            .await
+            .expect("poll exited terminal response");
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("poll exited terminal body bytes");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("poll output JSON");
+        if value["status"] != "running" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let mut closed_request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
+        .into_client_request()
+        .expect("closed websocket request");
+    closed_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let error = tokio_tungstenite::connect_async(closed_request)
+        .await
+        .expect_err("closed websocket rejects");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::GONE);
+        }
+        other => panic!("unexpected closed websocket error: {other}"),
+    }
+
+    server.abort();
     remove_static_fixture(&root);
 }
 

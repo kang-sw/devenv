@@ -39,20 +39,25 @@ import {
 } from "./workRootFiles";
 import {
   appendTerminalOutput,
+  appendTerminalWebSocketMessage,
   clampTerminalSize,
   closeTerminal,
   createTerminal,
   fetchTerminalOutput,
   listTerminals,
   markTerminalPaneCloseError,
+  markTerminalSocketStatus,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
   resizeTerminal,
   sendTerminalInput,
+  shouldPollTerminalOutput,
   terminalOutputPollChangedState,
   terminalPaneFromSession,
   terminalPaneLogicalKey,
+  terminalWebSocketUrl,
   type TerminalPaneState,
+  type TerminalWebSocketServerMessage,
   type TerminalSessionView,
 } from "./terminals";
 import {
@@ -853,6 +858,9 @@ function WorkbenchShell({
               onSendData: sendTerminalData,
               onClose: closeTerminalPane,
               onResize: forwardTerminalResize,
+              onSocketStatus: updateTerminalSocketStatus,
+              onSocketMessage: applyTerminalSocketMessage,
+              onSocketResize: acceptTerminalSocketResize,
             },
           ),
           paneOrderByGroup,
@@ -889,7 +897,7 @@ function WorkbenchShell({
         .filter(
           (pane) =>
             pane.session.workRootId === workbenchModel.root.id &&
-            pane.session.status === "running",
+            shouldPollTerminalOutput(pane),
         )
         .map((pane) => ({
           terminalId: pane.session.terminalId,
@@ -1019,6 +1027,40 @@ function WorkbenchShell({
         setActiveTerminalPaneRequest({ paneId: pane.paneId, sequence: terminalOpenSequence.current++ });
       })
       .catch(() => undefined);
+  }
+
+  function updateTerminalSocketStatus(
+    pane: TerminalPaneState,
+    socketStatus: TerminalPaneState["socketStatus"],
+    error: string | null = null,
+  ) {
+    setTerminalPanes((current) =>
+      current[pane.logicalKey]
+        ? { ...current, [pane.logicalKey]: markTerminalSocketStatus(current[pane.logicalKey], socketStatus, error) }
+        : current,
+    );
+  }
+
+  function applyTerminalSocketMessage(pane: TerminalPaneState, message: TerminalWebSocketServerMessage) {
+    setTerminalPanes((current) =>
+      current[pane.logicalKey]
+        ? { ...current, [pane.logicalKey]: appendTerminalWebSocketMessage(current[pane.logicalKey], message) }
+        : current,
+    );
+  }
+
+  function acceptTerminalSocketResize(pane: TerminalPaneState, columns: number, rows: number) {
+    setTerminalPanes((current) =>
+      current[pane.logicalKey]
+        ? {
+            ...current,
+            [pane.logicalKey]: {
+              ...current[pane.logicalKey],
+              session: { ...current[pane.logicalKey].session, columns, rows },
+            },
+          }
+        : current,
+    );
   }
 
   function sendTerminalData(pane: TerminalPaneState, data: string) {
@@ -1417,6 +1459,9 @@ type TerminalPaneActions = {
   onSendData: (pane: TerminalPaneState, data: string) => void;
   onClose: (pane: TerminalPaneState) => void;
   onResize: (pane: TerminalPaneState, columns: number, rows: number) => Promise<void>;
+  onSocketStatus: (pane: TerminalPaneState, socketStatus: TerminalPaneState["socketStatus"], error?: string | null) => void;
+  onSocketMessage: (pane: TerminalPaneState, message: TerminalWebSocketServerMessage) => void;
+  onSocketResize: (pane: TerminalPaneState, columns: number, rows: number) => void;
 };
 
 function terminalWorkbenchPane(pane: TerminalPaneState, actions: TerminalPaneActions): WorkbenchPane {
@@ -1433,7 +1478,7 @@ function terminalWorkbenchPane(pane: TerminalPaneState, actions: TerminalPaneAct
     title: pane.session.title,
     detail: pane.session.terminalId,
     state,
-    meta: [pane.session.status, `${pane.session.columns}x${pane.session.rows}`],
+    meta: [pane.session.status, pane.socketStatus, `${pane.session.columns}x${pane.session.rows}`],
     body: <TerminalPaneBody key={pane.paneId} pane={pane} actions={actions} />,
   };
 }
@@ -1443,6 +1488,7 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
   const terminalRef = useRef<Terminal | null>(null);
   const writtenLengthRef = useRef(0);
   const lastForwardedSizeRef = useRef<{ columns: number; rows: number } | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   // Latest pane/actions for emulator callbacks registered once at mount.
   const liveRef = useRef({ pane, actions });
   liveRef.current = { pane, actions };
@@ -1483,6 +1529,11 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     // Keyboard input originates from the focused emulator surface and reaches
     // the daemon terminal session.
     const inputDisposable = terminal.onData((data) => {
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "input", data }));
+        return;
+      }
       liveRef.current.actions.onSendData(liveRef.current.pane, data);
     });
 
@@ -1511,6 +1562,13 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       }
       // Record the forwarded size only after the daemon accepts it; a rejected
       // resize must stay retryable rather than being suppressed as a no-op.
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "resize", columns: next.columns, rows: next.rows }));
+        liveRef.current.actions.onSocketResize(liveRef.current.pane, next.columns, next.rows);
+        lastForwardedSizeRef.current = next;
+        return;
+      }
       void liveRef.current.actions
         .onResize(liveRef.current.pane, next.columns, next.rows)
         .then(() => {
@@ -1549,6 +1607,42 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       terminalRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const socket = new WebSocket(terminalWebSocketUrl(terminalId));
+    socketRef.current = socket;
+    liveRef.current.actions.onSocketStatus(liveRef.current.pane, "connecting", null);
+
+    socket.addEventListener("open", () => {
+      if (!disposed) liveRef.current.actions.onSocketStatus(liveRef.current.pane, "connected", null);
+    });
+    socket.addEventListener("message", (event) => {
+      if (disposed || typeof event.data !== "string") return;
+      try {
+        liveRef.current.actions.onSocketMessage(
+          liveRef.current.pane,
+          JSON.parse(event.data) as TerminalWebSocketServerMessage,
+        );
+      } catch {
+        // Ignore malformed daemon frames and allow the socket close/fallback path to recover.
+      }
+    });
+    socket.addEventListener("error", () => {
+      if (!disposed) {
+        liveRef.current.actions.onSocketStatus(liveRef.current.pane, "fallback", "terminal WebSocket failed");
+      }
+    });
+    socket.addEventListener("close", () => {
+      if (!disposed) liveRef.current.actions.onSocketStatus(liveRef.current.pane, "fallback", null);
+    });
+
+    return () => {
+      disposed = true;
+      if (socketRef.current === socket) socketRef.current = null;
+      socket.close();
+    };
+  }, [terminalId]);
 
   // Stream PTY output deltas into the emulator so ANSI color and control
   // sequences render as terminal behavior rather than raw text.

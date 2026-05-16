@@ -103,6 +103,21 @@ async function documentScrolls(page: Page): Promise<boolean> {
 }
 
 test("dashboard workRoot UI browser acceptance", async ({ page }) => {
+  const terminalSocketUrls: string[] = [];
+  const terminalSocketFrames: string[] = [];
+  let terminalOutputPolls = 0;
+  page.on("websocket", (ws) => {
+    if (ws.url().includes("/api/dashboard/terminals/") && ws.url().endsWith("/socket")) {
+      terminalSocketUrls.push(ws.url());
+      ws.on("framesent", (frame) => terminalSocketFrames.push(String(frame.payload)));
+    }
+  });
+  page.on("request", (request) => {
+    const url = request.url();
+    if (url.includes("/api/dashboard/terminals/") && url.includes("/output")) {
+      terminalOutputPolls += 1;
+    }
+  });
   // --- Owner pairing against the daemon-served production frontend ---------
   await test.step("owner pairing", async () => {
     await page.goto(daemon.pairingUrl, { waitUntil: "domcontentloaded" });
@@ -208,16 +223,41 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.locator('[data-command-id="terminal.create"]').click();
     await terminalSurface(page);
     await expect(terminalTabs(page)).toHaveCount(1);
+    await expect.poll(() => terminalSocketUrls.length, { timeout: 10_000 }).toBeGreaterThan(0);
+    const pollsAfterSocket = terminalOutputPolls;
+    await page.waitForTimeout(500);
+    expect(terminalOutputPolls).toBe(pollsAfterSocket);
 
-    await runInTerminal(page, "printf 'GATEOUT-%s\\n' 12345");
+    const start = Date.now();
+    await runInTerminal(page, "printf 'GATEOUT-%s\n' 12345");
     await expect(page.locator(".xterm-rows")).toContainText("GATEOUT-12345");
+    const echoMs = Date.now() - start;
+
+    await page.locator(".terminal-surface").click();
+    await page.keyboard.type("printf 'BAD'");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await page.keyboard.type("printf 'EDITED-OK\n'");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("EDITED-OK");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Control+C");
+    await page.keyboard.press("Control+L");
+    await page.locator(".terminal-surface").click();
+    await page.keyboard.insertText("printf 'PASTE-OK\n'");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
+
+    expect(terminalSocketFrames.some((frame) => frame.includes('"type":"input"'))).toBe(true);
+    expect(terminalSocketFrames.some((frame) => frame.includes('"type":"resize"'))).toBe(true);
+    expect(terminalOutputPolls).toBe(pollsAfterSocket);
 
     // The long explorer tree and a live terminal coexist without the document
     // scrolling: both the explorer and the terminal own their own overflow.
     expect(await documentScrolls(page)).toBe(false);
     note(
-      "terminal IO: keyboard input reached the daemon PTY and output rendered " +
-        "in the emulator; the document still does not scroll with a live terminal",
+      `terminal WebSocket: ${terminalSocketUrls[0]} connected; HTTP output polls stayed at ` +
+        `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with edit, history, ` +
+        "Ctrl-C, Ctrl-L, paste, and no document scroll",
     );
   });
 
@@ -271,7 +311,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await terminalTabs(page).nth(0).click();
     await settlePastPollCycle(page);
     await terminalSurface(page);
-    await expect(page.locator(".xterm-rows")).toContainText("GATEOUT-12345");
+    await expect(page.locator(".xterm-rows")).toContainText("GATE-GREEN");
     await expect(page.locator(".xterm-rows")).not.toContainText("SECOND-MARKER");
 
     // Switch to the second terminal tab; it shows only its own output.
@@ -285,9 +325,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
   // --- Close terminates the session ---------------------------------------
   await test.step("close terminal terminates session", async () => {
+    await page.locator(".terminal-surface").click();
+    await page.keyboard.press("Control+D");
     await page.locator('[data-command-id="terminal.close"]').click();
     await expect(terminalTabs(page)).toHaveCount(1);
-    note("close: terminating a terminal removes its tab; one terminal session remains");
+    note("close: Ctrl-D was delivered safely before explicit terminate removed the tab; one terminal session remains");
   });
 
   // --- Refresh keeps daemon-owned terminal, shows no mock surfaces --------

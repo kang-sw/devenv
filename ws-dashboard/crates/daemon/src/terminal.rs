@@ -5,14 +5,19 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::{ws::WebSocketUpgrade, Path as AxumPath, Query, State};
+use axum::extract::{
+    ws::{Message, WebSocket, WebSocketUpgrade},
+    Path as AxumPath, Query, State,
+};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use futures_util::{SinkExt, StreamExt};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use ws_dashboard_core::WorkRootId;
 
 use crate::router::AppState;
@@ -76,6 +81,7 @@ struct TerminalSession {
     title: String,
     created_at_ms: u64,
     inner: Mutex<TerminalSessionInner>,
+    output_signal: watch::Sender<u64>,
 }
 
 struct TerminalSessionInner {
@@ -127,17 +133,22 @@ pub struct TerminalOutputChunk {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TerminalWebSocketServerMessage {
     Output {
+        #[serde(rename = "terminalId")]
         terminal_id: String,
         chunk: TerminalOutputChunk,
     },
     Status {
+        #[serde(rename = "terminalId")]
         terminal_id: String,
         status: TerminalStatus,
+        #[serde(rename = "nextSequence")]
         next_sequence: u64,
     },
     Exit {
+        #[serde(rename = "terminalId")]
         terminal_id: String,
         status: TerminalStatus,
+        #[serde(rename = "nextSequence")]
         next_sequence: u64,
     },
 }
@@ -286,7 +297,7 @@ pub async fn terminal_resize(
 pub async fn terminal_websocket(
     State(state): State<AppState>,
     AxumPath(terminal_id): AxumPath<String>,
-    _upgrade: WebSocketUpgrade,
+    upgrade: WebSocketUpgrade,
 ) -> Response {
     // CONTRACT: This route is nested behind the owner auth and Host/Origin
     // pre-upgrade gate in router.rs. Implementation must reject unknown or
@@ -301,10 +312,9 @@ pub async fn terminal_websocket(
     if !session.is_live() {
         return terminal_error(StatusCode::GONE, "terminal is closed");
     }
-    terminal_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "terminal WebSocket not implemented",
-    )
+    upgrade
+        .on_upgrade(move |socket| terminal_socket_task(session, socket))
+        .into_response()
 }
 
 pub async fn close_terminal(
@@ -365,6 +375,7 @@ impl TerminalSession {
                 master: Some(pair.master),
                 child: Some(child),
             }),
+            output_signal: watch::channel(0).0,
         });
         spawn_reader(session.clone(), reader);
         Ok(session)
@@ -448,56 +459,192 @@ impl TerminalSession {
     }
 
     fn terminate(&self) {
-        let mut inner = self.inner.lock().expect("terminal session lock poisoned");
-        inner.status = TerminalStatus::Terminated;
-        inner.writer = None;
-        inner.master = None;
-        if let Some(mut child) = inner.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-
-    fn append_output(&self, data: String) {
-        let mut inner = self.inner.lock().expect("terminal session lock poisoned");
-        if data.is_empty() {
-            return;
-        }
-        let sequence = inner.next_sequence;
-        inner.next_sequence += 1;
-        inner.output.push_back(TerminalOutputChunk {
-            sequence,
-            data,
-            stream: "pty".to_owned(),
-        });
-        while inner.output.len() > MAX_OUTPUT_CHUNKS {
-            inner.output.pop_front();
-        }
-    }
-
-    fn mark_error(&self) {
-        let mut inner = self.inner.lock().expect("terminal session lock poisoned");
-        if inner.status == TerminalStatus::Running {
-            inner.status = TerminalStatus::Error;
+        let next_sequence = {
+            let mut inner = self.inner.lock().expect("terminal session lock poisoned");
+            inner.status = TerminalStatus::Terminated;
             inner.writer = None;
             inner.master = None;
             if let Some(mut child) = inner.child.take() {
                 let _ = child.kill();
+                let _ = child.wait();
             }
-        }
+            inner.next_sequence
+        };
+        let _ = self.output_signal.send(next_sequence);
+    }
+
+    fn append_output(&self, data: String) {
+        let next_sequence = {
+            let mut inner = self.inner.lock().expect("terminal session lock poisoned");
+            if data.is_empty() {
+                return;
+            }
+            let sequence = inner.next_sequence;
+            inner.next_sequence += 1;
+            inner.output.push_back(TerminalOutputChunk {
+                sequence,
+                data,
+                stream: "pty".to_owned(),
+            });
+            while inner.output.len() > MAX_OUTPUT_CHUNKS {
+                inner.output.pop_front();
+            }
+            inner.next_sequence
+        };
+        let _ = self.output_signal.send(next_sequence);
+    }
+
+    fn mark_error(&self) {
+        let next_sequence = {
+            let mut inner = self.inner.lock().expect("terminal session lock poisoned");
+            if inner.status == TerminalStatus::Running {
+                inner.status = TerminalStatus::Error;
+                inner.writer = None;
+                inner.master = None;
+                if let Some(mut child) = inner.child.take() {
+                    let _ = child.kill();
+                }
+            }
+            inner.next_sequence
+        };
+        let _ = self.output_signal.send(next_sequence);
     }
 
     fn mark_exited(&self) {
-        let mut inner = self.inner.lock().expect("terminal session lock poisoned");
-        if inner.status == TerminalStatus::Running {
-            inner.status = TerminalStatus::Exited;
-            inner.writer = None;
-            inner.master = None;
-            if let Some(mut child) = inner.child.take() {
-                let _ = child.wait();
+        let next_sequence = {
+            let mut inner = self.inner.lock().expect("terminal session lock poisoned");
+            if inner.status == TerminalStatus::Running {
+                inner.status = TerminalStatus::Exited;
+                inner.writer = None;
+                inner.master = None;
+                if let Some(mut child) = inner.child.take() {
+                    let _ = child.wait();
+                }
+            }
+            inner.next_sequence
+        };
+        let _ = self.output_signal.send(next_sequence);
+    }
+}
+
+async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket) {
+    let (mut sender, mut receiver) = socket.split();
+    let mut output_signal = session.output_signal.subscribe();
+    let mut cursor = 0_u64;
+
+    if send_output_backfill(&session, &mut sender, &mut cursor)
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            maybe_message = receiver.next() => {
+                let Some(Ok(message)) = maybe_message else { break; };
+                match message {
+                    Message::Text(text) => {
+                        let Ok(message) = serde_json::from_str::<TerminalWebSocketClientMessage>(&text) else {
+                            break;
+                        };
+                        if handle_terminal_socket_client_message(&session, message).is_err() {
+                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            break;
+                        }
+                    }
+                    Message::Binary(bytes) => {
+                        if session.write_input(&bytes).is_err() {
+                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            break;
+                        }
+                    }
+                    Message::Close(_) => break,
+                    Message::Ping(payload) => {
+                        if sender.send(Message::Pong(payload)).await.is_err() { break; }
+                    }
+                    Message::Pong(_) => {}
+                }
+            }
+            changed = output_signal.changed() => {
+                if changed.is_err() { break; }
+                if send_output_backfill(&session, &mut sender, &mut cursor).await.is_err() {
+                    break;
+                }
+                if !session.is_live() {
+                    let _ = send_terminal_socket_status(&session, &mut sender, true).await;
+                    break;
+                }
             }
         }
     }
+}
+
+fn handle_terminal_socket_client_message(
+    session: &TerminalSession,
+    message: TerminalWebSocketClientMessage,
+) -> Result<(), TerminalError> {
+    match message {
+        TerminalWebSocketClientMessage::Input { data } => session.write_input(data.as_bytes()),
+        TerminalWebSocketClientMessage::Resize { columns, rows } => {
+            let (columns, rows) = validate_size(columns, rows)
+                .map_err(|_| TerminalError::BadRequest("invalid terminal size"))?;
+            session.resize(columns, rows).map(|_| ())
+        }
+    }
+}
+
+async fn send_output_backfill(
+    session: &TerminalSession,
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    cursor: &mut u64,
+) -> Result<(), ()> {
+    let output = session.output_after(*cursor);
+    for chunk in output.chunks {
+        *cursor = (*cursor).max(chunk.sequence);
+        send_socket_json(
+            sender,
+            &TerminalWebSocketServerMessage::Output {
+                terminal_id: session.id.clone(),
+                chunk,
+            },
+        )
+        .await?;
+    }
+    send_terminal_socket_status(session, sender, !session.is_live()).await
+}
+
+async fn send_terminal_socket_status(
+    session: &TerminalSession,
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    exit: bool,
+) -> Result<(), ()> {
+    let output = session.output_after(u64::MAX);
+    let message = if exit {
+        TerminalWebSocketServerMessage::Exit {
+            terminal_id: session.id.clone(),
+            status: output.status,
+            next_sequence: output.next_sequence,
+        }
+    } else {
+        TerminalWebSocketServerMessage::Status {
+            terminal_id: session.id.clone(),
+            status: output.status,
+            next_sequence: output.next_sequence,
+        }
+    };
+    send_socket_json(sender, &message).await
+}
+
+async fn send_socket_json(
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    message: &TerminalWebSocketServerMessage,
+) -> Result<(), ()> {
+    let text = serde_json::to_string(message).map_err(|_| ())?;
+    sender
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|_| ())
 }
 
 fn spawn_reader(session: Arc<TerminalSession>, mut reader: Box<dyn Read + Send>) {

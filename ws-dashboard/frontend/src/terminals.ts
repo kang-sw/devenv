@@ -49,6 +49,7 @@ export type TerminalPaneState = {
   nextSequence: number;
   error: string | null;
   localCreatedAtMs: number;
+  socketStatus: "disconnected" | "connecting" | "connected" | "fallback";
 };
 
 // PTY logical size contract, mirrored from the daemon terminal registry
@@ -191,6 +192,7 @@ export function terminalPaneFromSession(session: TerminalSessionView): TerminalP
     nextSequence: 0,
     error: null,
     localCreatedAtMs: Date.now(),
+    socketStatus: "disconnected",
   };
 }
 
@@ -237,6 +239,44 @@ export function appendTerminalOutput(pane: TerminalPaneState, output: TerminalOu
     error: null,
     localCreatedAtMs: Date.now(),
   };
+}
+
+export function markTerminalSocketStatus(
+  pane: TerminalPaneState,
+  socketStatus: TerminalPaneState["socketStatus"],
+  error: string | null = pane.error,
+) {
+  return { ...pane, socketStatus, error, localCreatedAtMs: Date.now() };
+}
+
+export function appendTerminalWebSocketMessage(
+  pane: TerminalPaneState,
+  message: TerminalWebSocketServerMessage,
+): TerminalPaneState {
+  if (message.terminalId !== pane.session.terminalId) {
+    return pane;
+  }
+  if (message.type === "output") {
+    return {
+      ...pane,
+      output: pane.output + message.chunk.data,
+      nextSequence: Math.max(pane.nextSequence, message.chunk.sequence),
+      error: null,
+      localCreatedAtMs: Date.now(),
+    };
+  }
+  return {
+    ...pane,
+    session: { ...pane.session, status: message.status },
+    nextSequence: Math.max(pane.nextSequence, message.nextSequence),
+    socketStatus: message.type === "exit" ? "fallback" : pane.socketStatus,
+    error: null,
+    localCreatedAtMs: Date.now(),
+  };
+}
+
+export function shouldPollTerminalOutput(pane: TerminalPaneState) {
+  return pane.session.status === "running" && pane.socketStatus !== "connected";
 }
 
 /**

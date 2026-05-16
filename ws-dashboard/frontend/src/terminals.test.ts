@@ -1,7 +1,9 @@
 import {
   appendTerminalOutput,
+  appendTerminalWebSocketMessage,
   clampTerminalSize,
   markTerminalPaneCloseError,
+  markTerminalSocketStatus,
   mergeListedTerminalSessions,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
@@ -13,6 +15,9 @@ import {
   terminalPaneId,
   terminalPaneLogicalKey,
   terminalResizeEndpoint,
+  terminalWebSocketEndpoint,
+  terminalWebSocketUrl,
+  shouldPollTerminalOutput,
   validateTerminalSize,
   workRootTerminalsEndpoint,
   type TerminalSessionView,
@@ -45,12 +50,18 @@ assertEqual(terminalOutputEndpoint("term/abc", 12), "/api/dashboard/terminals/te
 assertEqual(terminalInputEndpoint("term/abc"), "/api/dashboard/terminals/term%2Fabc/input", "input endpoint encodes id");
 assertEqual(terminalResizeEndpoint("term/abc"), "/api/dashboard/terminals/term%2Fabc/resize", "resize endpoint encodes id");
 assertEqual(terminalCloseEndpoint("term/abc"), "/api/dashboard/terminals/term%2Fabc", "close endpoint encodes id");
+assertEqual(terminalWebSocketEndpoint("term/abc"), "/api/dashboard/terminals/term%2Fabc/socket", "websocket endpoint encodes id");
+assertEqual(terminalWebSocketUrl("term/abc", { protocol: "http:", host: "127.0.0.1:1234" } as Location), "ws://127.0.0.1:1234/api/dashboard/terminals/term%2Fabc/socket", "websocket URL uses ws for http");
+assertEqual(terminalWebSocketUrl("term/abc", { protocol: "https:", host: "example.test" } as Location), "wss://example.test/api/dashboard/terminals/term%2Fabc/socket", "websocket URL uses wss for https");
 assertEqual(terminalPaneLogicalKey("root-local-abc", "term_abc"), "persistentTerminal/root-local-abc/term_abc", "logical key uses workRoot and terminal id");
 assertEqual(terminalPaneId("term/abc"), "terminal:term%2Fabc", "pane id encodes terminal id");
 assertEqual(String(terminalPaneLogicalKey("root-local-abc", "term_abc")).includes("/Users/"), false, "logical key omits host paths");
 
 const pane = terminalPaneFromSession(session);
 assertEqual(pane.nextSequence, 0, "new pane starts at cursor zero");
+assertEqual(pane.socketStatus, "disconnected", "new pane starts without a socket attachment");
+assertEqual(shouldPollTerminalOutput(pane), true, "disconnected running panes remain eligible for HTTP fallback polling");
+assertEqual(shouldPollTerminalOutput(markTerminalSocketStatus(pane, "connected")), false, "connected websocket panes suppress live HTTP output polling");
 const merged = mergeListedTerminalSessions({}, [session]);
 assertEqual(Boolean(merged[pane.logicalKey]), true, "listed live session reconstructs pane state");
 assertDeepEqual(
@@ -73,6 +84,12 @@ assertEqual(
 const withOutput = appendTerminalOutput(pane, { terminalId: "term_abc", status: "running", nextSequence: 3, chunks: [{ sequence: 1, data: "hi", stream: "pty" }] });
 assertEqual(withOutput.output, "hi", "output appends chunk data");
 assertEqual(withOutput.nextSequence, 3, "output advances cursor");
+const withSocketOutput = appendTerminalWebSocketMessage(markTerminalSocketStatus(pane, "connected"), { type: "output", terminalId: "term_abc", chunk: { sequence: 4, data: " socket", stream: "pty" } });
+assertEqual(withSocketOutput.output, " socket", "websocket output appends chunk data");
+assertEqual(withSocketOutput.nextSequence, 4, "websocket output advances cursor to chunk sequence");
+const withSocketExit = appendTerminalWebSocketMessage(withSocketOutput, { type: "exit", terminalId: "term_abc", status: "exited", nextSequence: 5 });
+assertEqual(withSocketExit.session.status, "exited", "websocket exit updates terminal status");
+assertEqual(withSocketExit.socketStatus, "fallback", "websocket exit leaves pane in fallback state");
 
 const idleOutput = { terminalId: "term_abc", status: "running", nextSequence: 0, chunks: [] };
 assertEqual(
