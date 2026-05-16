@@ -214,6 +214,10 @@ builds the production frontend, serves it through the dashboard daemon, pairs
 as owner through the startup pairing URL, and records textual evidence plus
 regenerable screenshot artifacts outside tracked source.
 
+The gate includes viewport containment checks for long file explorer content:
+expanding a large tree must not make the top-level document scroll or push the
+dashboard footer out of view, and overflow must stay inside the explorer region.
+
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
 automated browser tooling cannot run, the verification artifact records exact
@@ -280,7 +284,8 @@ write-back editing.
 The explorer presents conventional tree/list affordances that visibly
 distinguish files from directories, make expansion and refresh controls
 recognizable, keep the selected workRoot identity visible, and avoid hidden or
-nonstandard interactions while staying read-only.
+nonstandard interactions while staying read-only. Long expanded trees scroll
+inside the explorer region instead of growing the whole browser document.
 {#260516-ws-web-dashboard-file-explorer-conventional-affordance}
 
 ## Read-Only File API {#260516-ws-web-dashboard-readonly-file-api}
@@ -360,6 +365,11 @@ The terminal fills the available workbench pane and fits or resizes from
 measured container dimensions while staying within the daemon PTY size
 contract. Resize forwarding remains bounded; visual split dragging does not
 continuously rewrite logical PTY dimensions.
+
+Terminal rendering prefers a Powerline/Nerd Font-capable monospace stack when
+available, with ordinary monospace fallbacks. Browser polling avoids idle
+terminal state churn and uses bounded per-terminal in-flight requests so quiet
+terminals do not cause visible workbench flicker.
 
 ## Terminal Close Terminates Session {#260516-ws-web-dashboard-terminal-close-termination}
 

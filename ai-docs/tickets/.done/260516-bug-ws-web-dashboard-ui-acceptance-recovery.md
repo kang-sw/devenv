@@ -214,6 +214,18 @@ instance. `FitAddon` plus `ResizeObserver` makes the surface fill the pane while
 clamping to the daemon PTY bounds before resize forwarding. Review added direct
 unit coverage for the clamp boundary behavior.
 
+#### Edition (ef26dc6) - 2026-05-16
+
+Follow-up dogfood feedback found terminal interaction still sluggish and
+visually noisy. The terminal output poll now runs on a stable selected-workRoot
+interval, skips unchanged idle state writes, clears stale errors on the next
+successful poll, guards each PTY from stacked requests, and uses a shorter
+poll interval for more responsive echo within the current HTTP polling
+architecture. The xterm font stack now prefers Powerline/Nerd Font-capable
+monospace fonts. Remaining constraint: terminal tab switches still remount the
+emulator and replay full output history; keeping hidden panes mounted is a
+larger render-architecture change.
+
 ### Phase 4: Recover file explorer affordance
 
 Revise the workRoot file explorer into a conventional, inspectable tree/list
@@ -233,6 +245,16 @@ controls. Directories and files are visually distinct, directory rows toggle
 through familiar disclosure affordances, previewable files open read-only panes,
 and existing command ids for select, expand, open, and refresh remain present.
 Browser evidence covers expansion, refresh, selection, and read-only preview.
+
+#### Edition (ef26dc6) - 2026-05-16
+
+Follow-up dogfood feedback found long expanded trees growing the whole browser
+document and pushing the footer off-screen. The desktop dashboard shell is now
+viewport-bounded and the file explorer body owns overflow scrolling, while the
+narrow stacked layout keeps document scrolling available. The browser gate now
+creates a long explorer fixture and asserts that the document does not scroll,
+the app shell stays within the viewport, and the explorer body contains the
+overflow.
 
 ### Phase 5: Sonnet design verification and autonomous tweak pass
 
@@ -281,3 +303,9 @@ desktop and narrow viewports, terminal commands used to verify ANSI/color and
 session isolation, screenshot artifact paths, and a pass table for every
 user-reported failure. Generated screenshots and Playwright artifacts remain
 gitignored and regenerable.
+
+#### Edition (ef26dc6) - 2026-05-16
+
+The browser gate was extended for the follow-up feedback. It now covers long
+file explorer containment with and without a live terminal and remains green
+after the terminal poll de-churn and error-clearing fixes.
