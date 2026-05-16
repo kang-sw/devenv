@@ -5,6 +5,9 @@ related:
   260514-epic-ws-web-dashboard-mvp: parent dashboard MVP board
   260516-epic-ws-web-dashboard-workroot-io-substrate: containing milestone
   260516-feat-ws-web-local-workspace-discovery: workRoot discovery prerequisite
+spec:
+  - 260516-ws-web-dashboard-workroot-file-listing-api
+  - 260516-ws-web-dashboard-workroot-file-explorer
 related-mental-model:
   - ws-web-dashboard
 ---
