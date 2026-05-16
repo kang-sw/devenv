@@ -146,11 +146,24 @@ The MVP should cover:
 - Do not apply `ai-docs/ref/design.md` as a light-mode palette by default.
   Dashboard frontend work should derive a dark-first, Carbon-inspired product
   theme with semantic tokens before additional large UI surfaces are built.
-- The frontend workbench should be VS Code-inspired but constrained: left
-  navigation, central primary surface, bottom terminal/agent/output tabs, and an
-  optional right inspector/viewer. Prefer a layout-library substrate such as
-  Dockview only behind a dashboard-owned panel registry and adapter. Keep
-  FlexLayout as the comparison fallback if Dockview policy code becomes noisy.
+- The frontend workbench should be VS Code-inspired but constrained around a
+  `left nav | workRoot workbench` information architecture. The left nav
+  should select server/workspace/workRoot locations, while each opened
+  workRoot owns sibling split groups with group-local pinned and opened rows.
+  Main instances are durable workRoot-local surfaces, sub instances are
+  badge/popover/card projections attached to a main instance, and utility
+  panels such as viewer, task view, diagnostics, events, and inspector open as
+  support surfaces rather than permanent global regions. Prefer a
+  layout-library substrate such as Dockview only behind a dashboard-owned panel
+  registry and adapter. Keep FlexLayout as the comparison fallback if Dockview
+  policy code becomes noisy.
+- The default workbench preset should use two split groups: side-by-side on
+  wide screens and stacked on narrow screens. File opens should prefer the
+  second or later split group to avoid replacing the active agent view, while
+  agent and persistent terminal surfaces default to the first or focused group.
+- A frontend panel is an attachment, not a backend instance. Terminal and
+  agent lifecycle should be daemon-owned; panel close should detach by default,
+  and explicit terminate commands should own process or agent shutdown.
 - Pairing tokens should remain one-time startup entry URLs. After successful
   pairing, the browser should land on a token-free stable app URL and rely on
   the HTTP-only owner cookie for refresh-safe navigation.

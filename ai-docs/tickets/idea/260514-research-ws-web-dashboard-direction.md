@@ -219,15 +219,30 @@ binding list is intentionally deferred for user curation.
 
 The next frontend substrate should treat the current three-panel shell as an
 information-architecture skeleton, not as final visual design. Preserve the
-left navigation, primary work surface, and reserved viewer concept, but evolve
-the layout into a constrained workbench:
+left navigation as a location selector, but evolve the layout into a
+workRoot-scoped constrained workbench:
 
 ```text
-left: resource navigation, file explorer, server/workRoot discovery
-main: editor, document, primary agent or workspace surface
-bottom: terminal, agent TUI, output, events, diagnostics
-right: optional inspector, viewer, metadata, contextual documents
+left nav:
+  server
+    workspace
+      workRoot rows with compact status badges
+
+workRoot workbench:
+  split group A
+    pinned row: agent or persistent terminal
+    opened row: editor, viewer, diagnostics, events, or task view
+  split group B
+    pinned row: agent or persistent terminal
+    opened row: editor, viewer, diagnostics, events, or task view
 ```
+
+The old `center/sub area` split is less useful than sibling split groups whose
+placement policy protects the active agent view while still letting editors,
+viewers, terminals, and support surfaces move flexibly. The default preset
+should start with two groups, side-by-side on wide screens and stacked on
+narrow screens. The model should keep room for later free splitting without
+requiring the first substrate to expose a complete split-manipulation UI.
 
 Use `ai-docs/ref/design.md` as a Carbon-inspired reference for density, square
 corners, hairlines, and restrained operational UI. Do not apply it as a default
@@ -236,19 +251,33 @@ allow later color tuning without hardcoding light-mode values throughout the
 component tree.
 
 Workbench-library verification currently favors Dockview as a constrained
-layout substrate, with FlexLayout as the comparison fallback. Dockview's edge
-groups, tabbed groups, serialization, theming, and focus navigation line up
-with the desired left/main/bottom/right workbench shape. The important
-constraint is that Dockview should stay a layout skeleton, not an IDE platform
-or resource model. Placement policy belongs in a dashboard-owned panel
-registry:
+layout substrate, with FlexLayout as the comparison fallback. Dockview's tabbed
+groups, serialization, theming, and focus navigation line up with the desired
+VS Code-editor-group-like workbench shape. The important constraint is that
+Dockview should stay a layout skeleton, not an IDE platform or resource model.
+Placement policy belongs in a dashboard-owned panel registry:
 
 ```text
-resource/file navigation: left
-editor/document/primary surfaces: main
-terminal and agent TUI: bottom or main
-inspector/viewer/diagnostics: right or bottom
+left nav: server/workspace/workRoot location selection only
+split group pinned rows: durable agent and persistent terminal surfaces
+split group opened rows: editor, viewer, diff, diagnostics, logs/events, task view, inspector
+file open default: second or later split group, preserving the active agent view
+workRoot utility toggles: global/workRoot combined bar, not split-group tabs
 ```
+
+`mainInstance` should not remain a default left-nav child. It is better treated
+as a durable workRoot-local surface that can appear in a split group's pinned
+row. `subInstance` should remain a view-only projection attached to a main
+instance through badges, popovers, cards, or drawers rather than becoming a
+top-level split-group tab. Long-running tasks should aggregate into a
+workRoot-scoped task view and main-instance-local badges/popovers; individual
+tasks should not become top-level tabs by default.
+
+Terminal panes should behave like daemon-owned, tmux-like sessions: closing a
+panel detaches the view, while explicit terminate commands own process
+shutdown. Agent panes should remain a higher-level abstraction where a PTY is
+only one possible interface type, so future named-agent projections, headless
+calls, or structured agent GUIs do not have to masquerade as terminals.
 
 The selected layout library must not own dashboard auth, route identity,
 resource identity, runtime authority, or command semantics. Persisted layout
@@ -316,7 +345,9 @@ are ready:
 - named-agent dashboard view models;
 - browser-native editor and modal editing;
 - document viewer, translation, stem popup, and mention substrate;
-- constrained workbench layout substrate with Dockview/FlexLayout verification;
+- constrained workRoot workbench layout substrate with Dockview/FlexLayout
+  verification, sibling split groups, pinned/opened rows, and daemon-owned
+  terminal/agent lifecycle boundaries;
 - linked daemon/server forwarding for local, WSL, and remote environments;
 - remote, WSL, and public-bind hardening;
 - runtime/library harness capability;
