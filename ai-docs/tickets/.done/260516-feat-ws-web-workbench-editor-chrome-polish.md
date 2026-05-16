@@ -10,6 +10,7 @@ plans:
   phase-1: 2026-05/16-ws-web-workbench-editor-chrome-polish-phase-1
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web dashboard workbench editor chrome polish
@@ -158,3 +159,32 @@ presence of sections. The gate should explicitly fail if:
 
 Capture real paired desktop and narrow screenshots, or record the exact blocker
 if browser tooling is unavailable.
+
+### Result (be9f885) - 2026-05-16
+
+Completed visual contract verification with real authenticated dashboard
+captures through the daemon-served frontend. Desktop and narrow screenshots
+confirmed that large topology labels such as `split group`, `Pinned row`,
+`Opened row`, `Primary`, and `Support` are no longer exposed, compact
+pinned/opened tab lanes remain visible, tabs select pane bodies, and the
+side-by-side desktop split keeps pane bodies dominant with footer/status rows
+anchored at the bottom.
+
+The first narrow capture found a visual contract issue: the first stacked split
+collapsed to a very short pane body, making the body secondary to chrome. Commit
+`be9f885` fixed the narrow stacked layout with minimum group and pane-body
+height while preserving desktop layout, pinned/opened lanes, tab movement, and
+footer alignment. After the fix, narrow metrics showed no horizontal overflow
+and pane body heights of 189px and 202px for the stacked groups.
+
+Artifacts:
+- Desktop screenshot:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/026c4673-01-workbench-phase-2-desktop-after.png`
+- Narrow screenshot:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/026c4673-02-workbench-phase-2-narrow-after.png`
+- Capture report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/026c4673-03-workbench-phase-2-report-after.md`
+
+Verification passed:
+`cd ws-dashboard/frontend && npm run test:routes && npm run test:workbench &&
+npm run build`.
