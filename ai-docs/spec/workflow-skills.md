@@ -309,13 +309,12 @@ spec -> ticket -> implementation
 Existing non-epic `ready/` ticket paths skip ticket creation and become
 implementation targets after `lead-proceed` selects an implementation slice.
 Targets without phase sections use the whole target. When the user names phases,
-that explicit request is the hard slice boundary. When the user does not name
-phases, `lead-proceed` autonomously selects the broadest cohesive unfinished
-phase range that can be implemented and reviewed together, falling back to the
-first unfinished phase only when adjacent phases are unrelated, independently
-reviewable, or cross different public contract boundaries. Compatibility
-phrasing such as `auto-slice` remains accepted, but autonomous slice selection
-is the default rather than an opt-in flag.
+that explicit request is honored exactly. When the user does not name phases,
+`lead-proceed` autonomously selects the broadest cohesive unfinished phase range
+that can be implemented and reviewed together. It chooses a narrower slice when
+later phases introduce a separate public contract, independent skeleton need, or
+separately reviewable security boundary. Compatibility phrasing such as
+`auto-slice` remains accepted as the same default autonomous slice policy.
 
 Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
