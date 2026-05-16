@@ -1226,8 +1226,9 @@ button {
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
+  border: var(--ws-space-04) solid transparent;
   background: var(--ws-color-canvas);
-  padding: var(--ws-space-04);
+  padding: 0;
 }
 
 .terminal-surface .xterm {

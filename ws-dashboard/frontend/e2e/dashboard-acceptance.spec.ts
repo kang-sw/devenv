@@ -315,6 +315,26 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note("ANSI: SGR color sequence rendered as terminal color (xterm-fg-2), not raw text");
   });
 
+  // --- Scrolled terminal keeps the active bottom row visible ---------------
+  await test.step("terminal scrolled bottom row remains visible", async () => {
+    await runInTerminal(page, "seq 1 80 | sed 's/^/SCROLL-LINE-/'");
+    await expect(page.locator(".xterm-rows")).toContainText("SCROLL-LINE-80");
+
+    const bottomRowVisible = await page.evaluate(() => {
+      const surface = document.querySelector(".terminal-surface");
+      const rows = Array.from(document.querySelectorAll(".xterm-rows > div"));
+      const row = rows.find((element) =>
+        (element.textContent ?? "").includes("SCROLL-LINE-80"),
+      );
+      if (!surface || !row) return false;
+      const surfaceBox = surface.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
+      return rowBox.bottom <= surfaceBox.bottom && rowBox.top >= surfaceBox.top;
+    });
+    expect(bottomRowVisible).toBe(true);
+    note("terminal scroll: SCROLL-LINE-80 active bottom row stayed fully inside .terminal-surface");
+  });
+
   // --- Terminal fills the pane --------------------------------------------
   await test.step("terminal fills the pane", async () => {
     // Compare the emulator surface against the height of its actual containing
@@ -351,7 +371,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await terminalTabs(page).nth(0).click();
     await settlePastPollCycle(page);
     await terminalSurface(page);
-    await expect(page.locator(".xterm-rows")).toContainText("GATE-GREEN");
+    await expect(page.locator(".xterm-rows")).toContainText("SCROLL-LINE-80");
     await expect(page.locator(".xterm-rows")).not.toContainText("SECOND-MARKER");
 
     // Switch to the second terminal tab; it shows only its own output.
