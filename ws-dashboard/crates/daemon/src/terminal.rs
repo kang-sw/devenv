@@ -57,15 +57,24 @@ pub fn select_terminal_shell(
     // CONTRACT: Shell selection must be explicit and testable for Unix and
     // Windows without relying on compile-time cfg branches inside tests.
     // HINT: Unix uses SHELL then /bin/sh; Windows uses COMSPEC then cmd.exe.
-    // HOLE: Normalize fallback path type and integrate with spawn diagnostics.
-    void_shell_selector_inputs(platform, env);
-    todo!("HOLE: select terminal shell")
-}
+    let (key, source, fallback) = match platform {
+        TerminalPlatform::Unix => ("SHELL", TerminalShellSource::ShellEnv, "/bin/sh"),
+        TerminalPlatform::Windows => ("COMSPEC", TerminalShellSource::ComspecEnv, "cmd.exe"),
+    };
 
-fn void_shell_selector_inputs(
-    _platform: TerminalPlatform,
-    _env: impl Fn(&str) -> Option<std::ffi::OsString>,
-) {
+    if let Some(program) = env(key).filter(|value| !value.is_empty()) {
+        return TerminalShellSelection {
+            platform,
+            program: PathBuf::from(program),
+            source,
+        };
+    }
+
+    TerminalShellSelection {
+        platform,
+        program: PathBuf::from(fallback),
+        source: TerminalShellSource::Fallback,
+    }
 }
 
 #[derive(Clone, Default)]
@@ -347,10 +356,9 @@ pub async fn terminal_websocket(
     // CONTRACT: This route is nested behind the owner auth and Host/Origin
     // pre-upgrade gate in router.rs. Implementation must reject unknown or
     // closed opaque terminal ids before accepting the WebSocket attachment.
-    // HINT: Stub is normalized to Axum's WebSocketUpgrade extractor and routes
-    // through TerminalRegistry::get before any on_upgrade acceptance.
-    // HOLE: WebSocket task wiring, output wakeup/backfill strategy, and close
-    // propagation belong to the implementation pass.
+    // The Axum WebSocketUpgrade extractor is accepted only after
+    // TerminalRegistry::get confirms a live session; terminal_socket_task owns
+    // output backfill, resize/input frames, and close propagation.
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
@@ -726,18 +734,14 @@ fn terminal_error(status: StatusCode, error: impl Into<String>) -> Response {
         .into_response()
 }
 
-fn default_shell() -> String {
+fn default_shell() -> PathBuf {
     #[cfg(windows)]
     {
-        // HINT: Replace with select_terminal_shell(TerminalPlatform::Windows, ...)
-        // when the skeleton is populated.
-        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_owned())
+        select_terminal_shell(TerminalPlatform::Windows, |key| std::env::var_os(key)).program
     }
     #[cfg(not(windows))]
     {
-        // HINT: Replace with select_terminal_shell(TerminalPlatform::Unix, ...)
-        // when the skeleton is populated.
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned())
+        select_terminal_shell(TerminalPlatform::Unix, |key| std::env::var_os(key)).program
     }
 }
 
@@ -750,11 +754,36 @@ mod terminal_portability_skeleton_tests {
         // CONTRACT: Fill executable assertions for SHELL, COMSPEC, Unix
         // fallback, Windows fallback, invalid/missing env values where
         // practical, and spawn cwd diagnostics.
-        let _ = TerminalPlatform::Unix;
-        let _ = TerminalPlatform::Windows;
-        let _ = TerminalShellSource::ShellEnv;
-        let _ = TerminalShellSource::ComspecEnv;
-        let _ = TerminalShellSource::Fallback;
+        let unix_env = |key: &str| (key == "SHELL").then(|| std::ffi::OsString::from("/bin/zsh"));
+        assert_eq!(
+            select_terminal_shell(TerminalPlatform::Unix, unix_env),
+            TerminalShellSelection {
+                platform: TerminalPlatform::Unix,
+                program: PathBuf::from("/bin/zsh"),
+                source: TerminalShellSource::ShellEnv,
+            }
+        );
+
+        let windows_env = |key: &str| {
+            (key == "COMSPEC").then(|| std::ffi::OsString::from(r"C:\Windows\System32\cmd.exe"))
+        };
+        assert_eq!(
+            select_terminal_shell(TerminalPlatform::Windows, windows_env),
+            TerminalShellSelection {
+                platform: TerminalPlatform::Windows,
+                program: PathBuf::from(r"C:\Windows\System32\cmd.exe"),
+                source: TerminalShellSource::ComspecEnv,
+            }
+        );
+
+        assert_eq!(
+            select_terminal_shell(TerminalPlatform::Unix, |_| None).program,
+            PathBuf::from("/bin/sh")
+        );
+        assert_eq!(
+            select_terminal_shell(TerminalPlatform::Windows, |_| None).program,
+            PathBuf::from("cmd.exe")
+        );
     }
 }
 

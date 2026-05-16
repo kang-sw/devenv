@@ -29,36 +29,78 @@ export type DaemonHarnessConfig = SpawnDaemonHarnessConfig | ExternalDaemonHarne
 
 export type DaemonHandle = {
   mode: "spawned" | "external";
-  child: ChildProcess;
+  child?: ChildProcess;
   baseUrl: string;
   pairingUrl: string;
   stop: () => Promise<void>;
 };
 
+function optionalPositiveInteger(name: string, value: string | undefined): number | undefined {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65_535) {
+    throw new Error(`${name} must be an integer port/timeout value between 0 and 65535`);
+  }
+  return parsed;
+}
+
+function optionalBindMode(value: string | undefined): DashboardBindMode | undefined {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  if (value === "local" || value === "tunnel" || value === "public") {
+    return value;
+  }
+  throw new Error("WS_DASHBOARD_DAEMON_BIND_MODE must be local, tunnel, or public");
+}
+
 export function parseDaemonHarnessConfig(env: NodeJS.ProcessEnv = process.env): DaemonHarnessConfig {
   // CONTRACT: Environment parsing must expose fixed host/port/bind-mode,
   // daemon binary, static dir, readiness timeout, and external base/pairing URL.
   // HINT: Keep existing no-env behavior equivalent to locally spawned port 0.
-  // HOLE: Choose stable env var names and validation diagnostics.
-  void env;
-  throw new Error("HOLE: parse daemon harness config");
+  const readinessTimeoutMs = optionalPositiveInteger(
+    "WS_DASHBOARD_DAEMON_READINESS_TIMEOUT_MS",
+    env.WS_DASHBOARD_DAEMON_READINESS_TIMEOUT_MS,
+  );
+  const mode = env.WS_DASHBOARD_DAEMON_MODE;
+  const baseUrl = env.WS_DASHBOARD_DAEMON_BASE_URL;
+  const pairingUrl = env.WS_DASHBOARD_DAEMON_PAIRING_URL;
+
+  if (mode === "external" || baseUrl || pairingUrl) {
+    if (mode && mode !== "external") {
+      throw new Error("WS_DASHBOARD_DAEMON_MODE must be spawn or external");
+    }
+    return { mode: "external", baseUrl, pairingUrl, readinessTimeoutMs };
+  }
+
+  if (mode && mode !== "spawn") {
+    throw new Error("WS_DASHBOARD_DAEMON_MODE must be spawn or external");
+  }
+
+  return {
+    mode: "spawn",
+    host: env.WS_DASHBOARD_DAEMON_HOST,
+    port: optionalPositiveInteger("WS_DASHBOARD_DAEMON_PORT", env.WS_DASHBOARD_DAEMON_PORT),
+    bindMode: optionalBindMode(env.WS_DASHBOARD_DAEMON_BIND_MODE),
+    daemonBin: env.WS_DASHBOARD_DAEMON_BIN,
+    staticDir: env.WS_DASHBOARD_STATIC_DIR,
+    readinessTimeoutMs,
+  };
 }
 
 export function dashboardBinaryName(platform: NodeJS.Platform = process.platform): string {
   // CONTRACT: Native Windows resolves `ws-dashboard.exe`; other platforms keep
   // `ws-dashboard`.
-  // HOLE: Normalize platform-specific executable naming in one place.
-  void platform;
-  throw new Error("HOLE: dashboard binary name");
+  return platform === "win32" ? "ws-dashboard.exe" : "ws-dashboard";
 }
 
 export function resolveDaemonBinary(root: string, platform: NodeJS.Platform = process.platform): string {
   // CONTRACT: The harness must resolve the debug daemon binary in a
   // cross-platform way unless an explicit daemonBin override is provided.
   // HINT: Adjacent path is target/debug plus dashboardBinaryName(platform).
-  void root;
-  void platform;
-  throw new Error("HOLE: resolve daemon binary");
+  return path.join(root, "target", "debug", dashboardBinaryName(platform));
 }
 
 export async function stopDaemonProcess(
@@ -67,10 +109,26 @@ export async function stopDaemonProcess(
 ): Promise<void> {
   // CONTRACT: Shutdown must not assume POSIX-only signal behavior. It should
   // prefer graceful stop when available and report forced termination clearly.
-  // HOLE: Fill Windows-safe stop behavior and timeout diagnostics.
-  void child;
-  void options;
-  throw new Error("HOLE: stop daemon process");
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  const platform = options.platform ?? process.platform;
+  const timeoutMs = options.timeoutMs ?? 5_000;
+
+  await new Promise<void>((resolve) => {
+    const killTimer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      resolve();
+    }, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(killTimer);
+      resolve();
+    });
+    child.kill(platform === "win32" ? undefined : "SIGINT");
+  });
 }
 
 /**
@@ -78,17 +136,56 @@ export async function stopDaemonProcess(
  * scrape the one-time owner pairing URL from startup output. The browser gate
  * must exercise the daemon-served frontend, not a Vite dev server.
  */
-export async function startDaemon(config: DaemonHarnessConfig = {}): Promise<DaemonHandle> {
+async function waitForHttpReadiness(baseUrl: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() <= deadline) {
+    try {
+      const response = await fetch(new URL("/healthz", baseUrl));
+      if (response.status === 200 || response.status === 401) {
+        return;
+      }
+      lastError = new Error(`unexpected /healthz status ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const detail = lastError instanceof Error ? `: ${lastError.message}` : "";
+  throw new Error(`daemon endpoint ${baseUrl} was not reachable within ${timeoutMs}ms${detail}`);
+}
+
+export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarnessConfig()): Promise<DaemonHandle> {
   // CONTRACT: startDaemon must support both spawned-daemon mode and external
   // fixed-endpoint mode. External mode attaches to a supplied base/pairing URL
   // and uses a no-op stop handle.
   // HINT: The existing implementation below is the spawned default path.
-  // HOLE: Wire config into CLI args, endpoint readiness, and external attach.
-  void config;
-  const daemonBin = path.join(repoRoot, "target", "debug", "ws-dashboard");
-  const staticDir = path.join(repoRoot, "frontend", "dist");
+  const readinessTimeoutMs = config.readinessTimeoutMs ?? 60_000;
 
-  const child = spawn(daemonBin, ["serve", "--static-dir", staticDir], {
+  if (config.mode === "external") {
+    const pairingUrl = config.pairingUrl ?? config.baseUrl;
+    if (!pairingUrl) {
+      throw new Error("external daemon mode requires WS_DASHBOARD_DAEMON_PAIRING_URL or WS_DASHBOARD_DAEMON_BASE_URL");
+    }
+    const baseUrl = config.baseUrl ?? new URL(pairingUrl).origin;
+    await waitForHttpReadiness(baseUrl, readinessTimeoutMs);
+    return { mode: "external", baseUrl, pairingUrl, stop: async () => {} };
+  }
+
+  const daemonBin = config.daemonBin ?? resolveDaemonBinary(repoRoot);
+  const staticDir = config.staticDir ?? path.join(repoRoot, "frontend", "dist");
+  const args = ["serve", "--static-dir", staticDir];
+  if (config.host) {
+    args.push("--host", config.host);
+  }
+  if (config.bindMode) {
+    args.push("--bind-mode", config.bindMode);
+  }
+  if (config.port !== undefined) {
+    args.push("--port", String(config.port));
+  }
+
+  const child = spawn(daemonBin, args, {
     cwd: repoRoot,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -97,8 +194,8 @@ export async function startDaemon(config: DaemonHarnessConfig = {}): Promise<Dae
   let scrape: ((chunk: Buffer) => void) | null = null;
   const pairingUrl = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error("daemon did not report a pairing URL within 60s"));
-    }, 60_000);
+      reject(new Error(`daemon did not report a pairing URL within ${readinessTimeoutMs}ms`));
+    }, readinessTimeoutMs);
 
     scrape = (chunk: Buffer) => {
       startupBuffer += chunk.toString();
@@ -134,22 +231,7 @@ export async function startDaemon(config: DaemonHarnessConfig = {}): Promise<Dae
 
   const baseUrl = new URL(pairingUrl).origin;
 
-  const stop = () =>
-    new Promise<void>((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        resolve();
-        return;
-      }
-      const killTimer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve();
-      }, 5_000);
-      child.once("exit", () => {
-        clearTimeout(killTimer);
-        resolve();
-      });
-      child.kill("SIGINT");
-    });
+  const stop = () => stopDaemonProcess(child);
 
   return { mode: "spawned", child, baseUrl, pairingUrl, stop };
 }
