@@ -218,6 +218,32 @@ The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
 
+## 🚧 WorkRoot File Listing API {#260516-ws-web-dashboard-workroot-file-listing-api}
+
+The dashboard exposes an authenticated API for listing directories below a
+selected workRoot. Responses identify children by daemon-owned workRoot-relative
+location data rather than raw host paths, distinguish file and directory
+entries, expose basic readability or preview eligibility when cheap, and report
+unreadable or inaccessible locations without mutating the filesystem.
+
+Listing requests remain rooted below the selected workRoot. Traversal attempts,
+missing paths, files requested as directories, and inaccessible locations return
+bounded unavailable or error states without exposing host paths as browser route
+identity.
+
+## 🚧 WorkRoot File Explorer {#260516-ws-web-dashboard-workroot-file-explorer}
+
+The dashboard browser shell renders a selected-workRoot file explorer in the
+lower portion of the left navigation area. The explorer supports directory
+expansion, explicit refresh, loading, empty, and error states while keeping
+server, workspace, and workRoot identity visible above it.
+
+The first explorer surface is navigation-only. It does not offer delete,
+rename, move, copy, chmod, recursive folder deletion, or broad file-manager
+operations. Readable file open actions may hand off to read-only text pane
+behavior when that later surface exists; until then, the explorer does not imply
+write-back editing.
+
 ## Instance Event Envelope Fixtures {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 
 The dashboard defines a shared event envelope for instance-scoped streams.
