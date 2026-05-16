@@ -237,6 +237,32 @@ automated browser tooling cannot run, the verification artifact records exact
 manual browser steps, viewports, screenshot or trace paths when generated, and
 pass/fail observations.
 
+## 🚧 Deterministic Terminal Endpoint Harness {#260516-ws-web-dashboard-terminal-deterministic-endpoint-harness}
+
+The daemon-served browser acceptance harness will support deterministic daemon
+endpoints for terminal portability verification. Callers will be able to run
+the dashboard daemon on an explicit host, bind mode, port, daemon binary path,
+and static asset directory, or attach the browser gate to an already-running
+base or pairing URL.
+
+The same browser acceptance flow will work when a native Windows daemon runs on
+remote loopback behind SSH local forwarding. The harness will wait for a real
+readiness signal such as a pairing URL or reachable HTTP endpoint before
+starting browser assertions, and failures will identify whether startup,
+forwarding, pairing, or browser assertions failed.
+
+## 🚧 Terminal Cross-Platform Evidence {#260516-ws-web-dashboard-terminal-cross-platform-evidence}
+
+Terminal portability work will record durable evidence for each supported
+environment exercised during implementation. The evidence will identify the OS,
+shell, daemon command, fixed port or endpoint mode, forwarding path when used,
+readiness signal, browser gate result, terminal commands or fixtures used, and
+any explicit OS-scoped limitations.
+
+Native Windows evidence may use a machine-local SSH host recorded outside
+tracked source. If that host is unavailable, the evidence must say so directly
+instead of treating a POSIX local gate as native-Windows coverage.
+
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
 The dashboard daemon provides a live local discovery provider that maps opened
@@ -400,6 +426,31 @@ left/right cursor movement, command history navigation, Ctrl-C, Ctrl-D or EOF
 where safe, Ctrl-L or clear-screen behavior, paste, and ordinary prompt editing
 inside a real shell.
 {#260516-ws-web-dashboard-terminal-websocket-input-fidelity}
+
+## 🚧 Terminal Shell Selection Portability {#260516-ws-web-dashboard-terminal-shell-selection-portability}
+
+Dashboard terminal spawning will expose an explicit, testable shell-selection
+contract across supported platforms. Unix-like platforms will use the configured
+shell or a documented fallback, and native Windows will use `%COMSPEC%` or a
+documented fallback such as `cmd.exe`.
+
+Failures to select or spawn a shell will produce recoverable diagnostics that
+name the platform, selected shell candidate, fallback path, and workRoot used
+for the terminal spawn without exposing private host paths to unauthenticated
+callers.
+
+## 🚧 Platform-Aware Terminal Command Helpers {#260516-ws-web-dashboard-terminal-platform-command-helpers}
+
+Terminal tests and browser acceptance gates will express portable terminal
+intent through platform-aware helpers or daemon-side fixtures rather than
+shared POSIX command strings. Acceptance behaviors such as echo, line editing,
+paste, clear screen, interrupt, EOF, resize, and ANSI/control rendering will map
+to shell-appropriate commands or fixtures for Unix shells, `cmd.exe`, and
+PowerShell where practical.
+
+Any behavior that cannot be made equivalent on a supported platform will carry
+an explicit OS or shell guard and will not be presented as native-Windows
+evidence.
 
 The terminal surface keeps scrolled output and alternate-screen/fullscreen TUI
 content within the visible terminal box: the active bottom row must remain
