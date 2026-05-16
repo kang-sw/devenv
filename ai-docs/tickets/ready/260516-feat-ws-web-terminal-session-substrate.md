@@ -6,6 +6,11 @@ related:
   260516-epic-ws-web-dashboard-workroot-io-substrate: containing milestone
   260516-feat-ws-web-instance-event-stream: existing authenticated event scaffold
   260516-epic-ws-web-dashboard-workbench-substrate: workbench placement substrate
+spec:
+  - 260516-ws-web-dashboard-terminal-registry-pty-spawn
+  - 260516-ws-web-dashboard-terminal-io-transport
+  - 260516-ws-web-dashboard-terminal-pane
+  - 260516-ws-web-dashboard-terminal-close-termination
 related-mental-model:
   - ws-web-dashboard
 ---
