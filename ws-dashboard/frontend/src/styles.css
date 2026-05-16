@@ -991,6 +991,85 @@ button {
   color: var(--ws-color-text-disabled);
 }
 
+.readonly-text-pane {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.readonly-text-pane-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ws-space-08);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-subtle);
+  padding: var(--ws-space-07) var(--ws-space-08);
+}
+
+.readonly-text-pane-title-block {
+  min-width: 0;
+}
+
+.readonly-text-pane-title,
+.readonly-text-pane-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readonly-text-pane-title {
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-03);
+  font-weight: 600;
+  line-height: var(--ws-line-height-04);
+}
+
+.readonly-text-pane-path {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-03);
+}
+
+.readonly-text-pane-badges {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ws-space-03);
+}
+
+.readonly-text-content {
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  color: var(--ws-color-text-primary);
+  background: var(--ws-color-panel);
+  padding: var(--ws-space-09);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-04);
+  white-space: pre;
+}
+
+.readonly-text-pane-state {
+  margin: var(--ws-space-09);
+  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-action);
+  background: var(--ws-color-notice-info);
+  color: var(--ws-color-text-secondary);
+  padding: var(--ws-space-08);
+  font-size: var(--ws-font-size-03);
+  line-height: var(--ws-line-height-05);
+  overflow-wrap: anywhere;
+}
+
+.readonly-text-pane-error {
+  border-left-color: var(--ws-color-state-error-strong);
+  background: var(--ws-color-notice-error);
+  color: var(--ws-color-state-error-text);
+}
+
 .resource-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

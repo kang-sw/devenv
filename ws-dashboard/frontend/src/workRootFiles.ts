@@ -16,6 +16,33 @@ export type WorkRootFileListView = {
   entries: WorkRootFileEntryView[];
 };
 
+export type WorkRootTextFileView = {
+  workRootId: string;
+  path: string;
+  name: string;
+  status: "ok" | string;
+  readOnly: true;
+  content: string;
+  sizeBytes: number;
+  languageHint: string | null;
+  extension: string | null;
+};
+
+export type ReadOnlyFilePane = {
+  id: string;
+  logicalKey: string;
+  workRootId: string;
+  path: string;
+  title: string;
+  status: "loading" | "loaded" | "error";
+  content: string;
+  error: string | null;
+  readOnly: true;
+  sizeBytes: number | null;
+  languageHint: string | null;
+  extension: string | null;
+};
+
 export type DirectoryLoadState = {
   status: "idle" | "loading" | "loaded" | "error";
   entries: WorkRootFileEntryView[];
@@ -53,6 +80,77 @@ export function workRootFilesEndpoint(workRootId: string, path = "") {
 
   const query = new URLSearchParams({ path });
   return `${endpoint}?${query.toString()}`;
+}
+
+export function workRootFileReadEndpoint(workRootId: string, path: string) {
+  const encodedWorkRootId = encodeURIComponent(workRootId);
+  const query = new URLSearchParams({ path });
+  return `/api/dashboard/work-roots/${encodedWorkRootId}/files/read?${query.toString()}`;
+}
+
+export async function fetchWorkRootTextFile(
+  workRootId: string,
+  path: string,
+): Promise<WorkRootTextFileView> {
+  const response = await fetch(workRootFileReadEndpoint(workRootId, path), {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error(await workRootFilesErrorMessage(response));
+  }
+
+  return (await response.json()) as WorkRootTextFileView;
+}
+
+export function readOnlyFilePaneLogicalKey(workRootId: string, path: string) {
+  return ["editor", workRootId, path].join("/");
+}
+
+export function readOnlyFilePaneId(workRootId: string, path: string) {
+  return `readonly:${encodeURIComponent(workRootId)}:${encodeURIComponent(path)}`;
+}
+
+export function createLoadingReadOnlyFilePane(workRootId: string, path: string): ReadOnlyFilePane {
+  return {
+    id: readOnlyFilePaneId(workRootId, path),
+    logicalKey: readOnlyFilePaneLogicalKey(workRootId, path),
+    workRootId,
+    path,
+    title: fileNameFromPath(path),
+    status: "loading",
+    content: "",
+    error: null,
+    readOnly: true,
+    sizeBytes: null,
+    languageHint: null,
+    extension: null,
+  };
+}
+
+export function applyReadOnlyFilePaneContent(
+  pane: ReadOnlyFilePane,
+  file: WorkRootTextFileView,
+): ReadOnlyFilePane {
+  return {
+    ...pane,
+    title: file.name || fileNameFromPath(file.path),
+    status: "loaded",
+    content: file.content,
+    error: null,
+    sizeBytes: file.sizeBytes,
+    languageHint: file.languageHint,
+    extension: file.extension,
+  };
+}
+
+export function applyReadOnlyFilePaneError(pane: ReadOnlyFilePane, error: string): ReadOnlyFilePane {
+  return {
+    ...pane,
+    status: "error",
+    content: "",
+    error,
+  };
 }
 
 export async function fetchWorkRootFiles(
@@ -132,6 +230,10 @@ async function workRootFilesErrorMessage(response: Response) {
   }
 
   return `HTTP ${response.status}`;
+}
+
+function fileNameFromPath(path: string) {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
 function appendDirectoryRows(

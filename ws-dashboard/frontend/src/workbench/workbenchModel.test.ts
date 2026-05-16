@@ -549,6 +549,76 @@ assertDeepEqual(
   "durable pinned surfaces fall back to the first group",
 );
 
+
+
+const readmeFileKey = surfaceLogicalKey("editor", "root-local-abc", "README.md");
+const nestedFileKey = surfaceLogicalKey("editor", "root-local-abc", "src/main.rs");
+assertDeepEqual(
+  decideSurfaceOpen(
+    {
+      groups: [{ groupId: groupOne }, { groupId: groupTwo }],
+      attachments: [
+        {
+          attachmentId: attachmentId("att-readme"),
+          groupId: groupTwo,
+          surfaceKind: "editor",
+          logicalKey: readmeFileKey,
+        },
+      ],
+    },
+    {
+      surfaceKind: "editor",
+      logicalKey: readmeFileKey,
+      attachmentId: attachmentId("att-readme-duplicate"),
+    },
+  ),
+  {
+    type: "focusExisting",
+    attachmentId: "att-readme",
+    groupId: "group-2",
+    logicalKey: "editor/root-local-abc/README.md",
+  },
+  "read-only file logical key dedupes the same workRootId and relative path",
+);
+assertDeepEqual(
+  decideSurfaceOpen(
+    { groups: [{ groupId: groupOne }, { groupId: groupTwo }], attachments: [] },
+    {
+      surfaceKind: "editor",
+      logicalKey: nestedFileKey,
+      attachmentId: attachmentId("att-main-rs"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-main-rs",
+    groupId: "group-2",
+    logicalKey: "editor/root-local-abc/src/main.rs",
+    rowPolicy: "opened",
+  },
+  "new read-only file panes prefer the second split group",
+);
+assertDeepEqual(
+  decideSurfaceOpen(
+    { groups: [{ groupId: groupOne }], attachments: [] },
+    {
+      surfaceKind: "editor",
+      logicalKey: nestedFileKey,
+      attachmentId: attachmentId("att-main-rs"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-main-rs",
+    groupId: "group-1",
+    logicalKey: "editor/root-local-abc/src/main.rs",
+    rowPolicy: "opened",
+  },
+  "new read-only file panes fall back to the first split when it is the only group",
+);
+assert(readmeFileKey !== nestedFileKey, "different read-only file paths open distinct logical panes");
+assert(!String(readmeFileKey).includes("/Users/"), "read-only logical key omits raw host paths");
+
 assertDeepEqual(
   decideSurfaceClose("agent"),
   {

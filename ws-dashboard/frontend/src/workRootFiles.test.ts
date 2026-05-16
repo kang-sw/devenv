@@ -1,11 +1,18 @@
 import {
+  applyReadOnlyFilePaneContent,
+  applyReadOnlyFilePaneError,
+  createLoadingReadOnlyFilePane,
   fetchWorkRootFiles,
+  fetchWorkRootTextFile,
   flattenWorkRootFileTree,
   toggleExpandedPath,
   workRootExplorerInitialLoadPath,
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
+  workRootFileReadEndpoint,
   workRootFilesEndpoint,
+  readOnlyFilePaneId,
+  readOnlyFilePaneLogicalKey,
   type DirectoryLoadState,
 } from "./workRootFiles.js";
 
@@ -47,6 +54,39 @@ assertEqual(
   "/api/dashboard/work-roots/root%2Flocal%20abc/files?path=src%2Fmain+file.ts",
   "endpoint encodes opaque workRootId and relative path only",
 );
+assertEqual(
+  workRootFileReadEndpoint("root-local-abc", "src/main.rs"),
+  "/api/dashboard/work-roots/root-local-abc/files/read?path=src%2Fmain.rs",
+  "read endpoint encodes relative path query",
+);
+assertEqual(
+  workRootFileReadEndpoint("root/local abc", "docs/read me.md"),
+  "/api/dashboard/work-roots/root%2Flocal%20abc/files/read?path=docs%2Fread+me.md",
+  "read endpoint encodes opaque workRootId and spaced relative path",
+);
+assertEqual(
+  readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs"),
+  "editor/root-local-abc/src/main.rs",
+  "read-only logical key is scoped by workRootId and relative path",
+);
+assertEqual(
+  readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs") ===
+    readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs"),
+  true,
+  "same file produces stable read-only logical key",
+);
+assertEqual(
+  readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs") ===
+    readOnlyFilePaneLogicalKey("root-local-abc", "src/lib.rs"),
+  false,
+  "different relative paths produce different logical keys",
+);
+assertEqual(
+  readOnlyFilePaneId("root/local abc", "docs/read me.md"),
+  "readonly:root%2Flocal%20abc:docs%2Fread%20me.md",
+  "pane id encodes scoped file identity without host paths",
+);
+
 
 const expanded = toggleExpandedPath(new Set([""]), "src");
 assertEqual(expanded.has(""), true, "toggle preserves existing expanded root");
@@ -127,6 +167,24 @@ try {
     /HTTP 418/,
     "fetch falls back to bounded HTTP status when error JSON is unavailable",
   );
+
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        workRootId: "root-local-abc",
+        path: "README.md",
+        name: "README.md",
+        status: "ok",
+        readOnly: true,
+        content: "hello\n",
+        sizeBytes: 6,
+        languageHint: "markdown",
+        extension: "md",
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+  const textFile = await fetchWorkRootTextFile("root-local-abc", "README.md");
+  assertEqual(textFile.content, "hello\n", "read helper returns text content");
 } finally {
   globalThis.fetch = errorFetch;
 }
@@ -178,4 +236,27 @@ assertEqual(
   errorRows[0]?.type === "state" && errorRows[0].status,
   "error",
   "error snapshot renders an error state row",
+);
+
+
+const loadingPane = createLoadingReadOnlyFilePane("root-local-abc", "src/main.rs");
+assertEqual(loadingPane.status, "loading", "new read-only pane starts loading");
+assertEqual(loadingPane.title, "main.rs", "new read-only pane derives basename title");
+const loadedPane = applyReadOnlyFilePaneContent(loadingPane, {
+  workRootId: "root-local-abc",
+  path: "src/main.rs",
+  name: "main.rs",
+  status: "ok",
+  readOnly: true,
+  content: "fn main() {}\n",
+  sizeBytes: 13,
+  languageHint: "rust",
+  extension: "rs",
+});
+assertEqual(loadedPane.status, "loaded", "pane content marks pane loaded");
+assertEqual(loadedPane.content, "fn main() {}\n", "pane content is preserved");
+assertEqual(
+  applyReadOnlyFilePaneError(loadingPane, "unsupported text file").error,
+  "unsupported text file",
+  "pane error remains bounded",
 );

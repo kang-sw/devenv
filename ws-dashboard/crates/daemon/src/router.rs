@@ -14,7 +14,7 @@ use crate::config::ServeConfig;
 use crate::events::instance_events;
 use crate::resources::dashboard_resources;
 use crate::root_picker::{create_empty_directory, list_root_picker, open_work_root};
-use crate::work_root_files::{list_work_root_files, OpenedWorkRoots};
+use crate::work_root_files::{list_work_root_files, read_work_root_file, OpenedWorkRoots};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -43,6 +43,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/work-roots/{work_root_id}/files",
             get(list_work_root_files),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/files/read",
+            get(read_work_root_file),
         )
         .route("/assets/{*asset_path}", get(static_asset))
         .route("/servers", get(index))

@@ -20,6 +20,8 @@
 //   dashboard hierarchy contract that frontend work will consume.
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -920,6 +922,224 @@ async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -
         .as_str()
         .expect("workRoot id")
         .to_owned()
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-test/files/read?path=README.md")
+                .body(Body::empty())
+                .expect("unauthenticated workRoot file read request"),
+        )
+        .await
+        .expect("unauthenticated workRoot file read response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_return_text_file() {
+    let root = temp_fixture_path("work-root-read");
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("write rust file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read?path=src/main.rs"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("read workRoot file request"),
+        )
+        .await
+        .expect("read workRoot file response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("read body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("read JSON");
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["path"], "src/main.rs");
+    assert_eq!(value["name"], "main.rs");
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["readOnly"], true);
+    assert_eq!(value["content"], "fn main() {}\n");
+    assert_eq!(value["sizeBytes"], 13);
+    assert_eq!(value["extension"], "rs");
+    assert_eq!(value["languageHint"], "rust");
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_reject_traversal_without_path_leak() {
+    let parent = temp_fixture_path("work-root-read-traversal");
+    let root = parent.join("root");
+    fs::create_dir_all(&root).expect("create root dir");
+    fs::write(parent.join("outside.txt"), "secret\n").expect("write outside file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read?path=../outside.txt"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("traversal read request"),
+        )
+        .await
+        .expect("traversal read response");
+
+    assert_ne!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("traversal body bytes");
+    let body = String::from_utf8(body.to_vec()).expect("traversal body is UTF-8");
+    assert!(!body.contains("outside.txt"));
+    assert!(!body.contains("secret"));
+    assert!(!body.contains(&parent.display().to_string()));
+
+    remove_static_fixture(&parent);
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_report_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/files/read?path=README.md")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown read request"),
+        )
+        .await
+        .expect("unknown read response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unknown body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown JSON");
+    assert_eq!(value["error"], "unknown workRoot");
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_report_missing_directory_binary_and_oversized() {
+    let root = temp_fixture_path("work-root-read-errors");
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(root.join("binary.bin"), b"hello\0world").expect("write binary");
+    fs::write(root.join("large.txt"), vec![b'a'; 600 * 1024]).expect("write large file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    for (path, status, error) in [
+        ("missing.txt", StatusCode::NOT_FOUND, "file not found"),
+        ("src", StatusCode::BAD_REQUEST, "path is a directory"),
+        (
+            "binary.bin",
+            StatusCode::BAD_REQUEST,
+            "unsupported text file",
+        ),
+        ("large.txt", StatusCode::BAD_REQUEST, "file is too large"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/work-roots/{work_root_id}/files/read?path={path}"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("read error request"),
+            )
+            .await
+            .expect("read error response");
+        assert_eq!(response.status(), status, "{path}");
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("error body bytes");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("error JSON");
+        assert_eq!(value["error"], error, "{path}");
+        assert!(!String::from_utf8(body.to_vec())
+            .expect("body UTF-8")
+            .contains(&root.display().to_string()));
+    }
+
+    remove_static_fixture(&root);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn work_root_file_read_routes_report_unreadable_file() {
+    let root = temp_fixture_path("work-root-read-unreadable");
+    fs::create_dir_all(&root).expect("create root dir");
+    let unreadable = root.join("unreadable.txt");
+    fs::write(&unreadable, "hidden\n").expect("write unreadable file");
+    let mut permissions = fs::metadata(&unreadable)
+        .expect("unreadable metadata")
+        .permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(&unreadable, permissions).expect("make file unreadable");
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read?path=unreadable.txt"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unreadable read request"),
+        )
+        .await
+        .expect("unreadable read response");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unreadable body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unreadable JSON");
+    assert_eq!(value["error"], "file unavailable");
+
+    let mut permissions = fs::metadata(&unreadable)
+        .expect("unreadable metadata after read")
+        .permissions();
+    permissions.set_mode(0o644);
+    fs::set_permissions(&unreadable, permissions).expect("restore unreadable permissions");
+    remove_static_fixture(&root);
 }
 
 #[tokio::test]

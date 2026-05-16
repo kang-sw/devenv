@@ -16,7 +16,11 @@ import {
   type WorkbenchPaneOrder,
 } from "./workbench";
 import {
+  applyReadOnlyFilePaneContent,
+  applyReadOnlyFilePaneError,
+  createLoadingReadOnlyFilePane,
   fetchWorkRootFiles,
+  fetchWorkRootTextFile,
   flattenWorkRootFileTree,
   idleDirectoryLoadState,
   toggleExpandedPath,
@@ -24,6 +28,7 @@ import {
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
   type DirectoryLoadState,
+  type ReadOnlyFilePane,
   type WorkRootFileEntryView,
 } from "./workRootFiles";
 
@@ -174,7 +179,13 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
+  const [readOnlyFilePanes, setReadOnlyFilePanes] = useState<Record<string, ReadOnlyFilePane>>({});
+  const [activeReadOnlyFilePaneRequest, setActiveReadOnlyFilePaneRequest] = useState<{
+    paneId: string;
+    sequence: number;
+  } | null>(null);
   const commandSequence = useRef(0);
+  const fileOpenSequence = useRef(0);
 
   const loadResources = useCallback(async () => {
     setLoading(true);
@@ -228,6 +239,47 @@ export function App() {
     [resources, selectedId],
   );
 
+
+  const openReadOnlyFile = useCallback(
+    (workRoot: WorkRootView, entry: WorkRootFileEntryView) => {
+      const pane = createLoadingReadOnlyFilePane(workRoot.id, entry.path);
+      const focusPane = () =>
+        setActiveReadOnlyFilePaneRequest({
+          paneId: pane.id,
+          sequence: fileOpenSequence.current++,
+        });
+
+      if (readOnlyFilePanes[pane.logicalKey]) {
+        focusPane();
+        return;
+      }
+
+      setReadOnlyFilePanes((current) => ({
+        ...current,
+        [pane.logicalKey]: pane,
+      }));
+      focusPane();
+
+      void fetchWorkRootTextFile(workRoot.id, entry.path)
+        .then((file) => {
+          setReadOnlyFilePanes((current) => ({
+            ...current,
+            [pane.logicalKey]: applyReadOnlyFilePaneContent(current[pane.logicalKey] ?? pane, file),
+          }));
+        })
+        .catch((error) => {
+          setReadOnlyFilePanes((current) => ({
+            ...current,
+            [pane.logicalKey]: applyReadOnlyFilePaneError(
+              current[pane.logicalKey] ?? pane,
+              error instanceof Error ? error.message : "file read failed",
+            ),
+          }));
+        });
+    },
+    [readOnlyFilePanes],
+  );
+
   const executeCommand = useCallback(
     (commandId: string, payload: CommandPayload) => {
       if (payload.type === "select") {
@@ -275,6 +327,7 @@ export function App() {
             selectedId={selectedEntity?.id ?? null}
             selectedWorkRoot={workbenchSelection?.root ?? null}
             onCommand={executeCommand}
+            onOpenFile={openReadOnlyFile}
           />
         </aside>
 
@@ -287,6 +340,8 @@ export function App() {
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
             onCommand={executeCommand}
+            readOnlyFilePanes={Object.values(readOnlyFilePanes)}
+            activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
           />
         </section>
       </div>
@@ -347,6 +402,7 @@ function ResourceNavigation({
   selectedId,
   selectedWorkRoot,
   onCommand,
+  onOpenFile,
 }: {
   resources: DashboardResourcesView | null;
   loading: boolean;
@@ -354,6 +410,7 @@ function ResourceNavigation({
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
   onCommand: (commandId: string, payload: CommandPayload) => void;
+  onOpenFile: (workRoot: WorkRootView, entry: WorkRootFileEntryView) => void;
 }) {
   if (loading && !resources) {
     return <StatusPane title="Loading" detail="resources" />;
@@ -396,7 +453,7 @@ function ResourceNavigation({
           />
         ))}
       </div>
-      <WorkRootFileExplorer workRoot={selectedWorkRoot} onCommand={onCommand} />
+      <WorkRootFileExplorer workRoot={selectedWorkRoot} onCommand={onCommand} onOpenFile={onOpenFile} />
     </div>
   );
 }
@@ -404,9 +461,11 @@ function ResourceNavigation({
 function WorkRootFileExplorer({
   workRoot,
   onCommand,
+  onOpenFile,
 }: {
   workRoot: WorkRootView | null;
   onCommand: (commandId: string, payload: CommandPayload) => void;
+  onOpenFile: (workRoot: WorkRootView, entry: WorkRootFileEntryView) => void;
 }) {
   const [snapshots, setSnapshots] = useState<Record<string, WorkRootExplorerSnapshot>>({});
 
@@ -525,6 +584,16 @@ function WorkRootFileExplorer({
     }
   };
 
+  const openFile = (entry: WorkRootFileEntryView) => {
+    updateSnapshot(workRoot.id, (current) => ({ ...current, selectedPath: entry.path }));
+    onCommand("fileExplorer.openFile", {
+      type: "action",
+      label: entry.name,
+      entityId: workRoot.id,
+    });
+    onOpenFile(workRoot, entry);
+  };
+
   const refreshExplorer = () => {
     onCommand("fileExplorer.refresh", {
       type: "action",
@@ -577,6 +646,7 @@ function WorkRootFileExplorer({
                 selected={row.selected}
                 onSelect={selectEntry}
                 onToggleDirectory={toggleDirectory}
+                onOpenFile={openFile}
               />
             ),
           )
@@ -593,6 +663,7 @@ function FileExplorerRow({
   selected,
   onSelect,
   onToggleDirectory,
+  onOpenFile,
 }: {
   entry: WorkRootFileEntryView;
   depth: number;
@@ -600,6 +671,7 @@ function FileExplorerRow({
   selected: boolean;
   onSelect: (entry: WorkRootFileEntryView) => void;
   onToggleDirectory: (entry: WorkRootFileEntryView) => void;
+  onOpenFile: (entry: WorkRootFileEntryView) => void;
 }) {
   const isDirectory = entry.kind === "directory";
   const isFile = entry.kind === "file";
@@ -642,11 +714,12 @@ function FileExplorerRow({
           <button
             className="file-explorer-inline-button"
             data-command-id="fileExplorer.openFile"
-            disabled
-            title="Read-only file panes are not implemented yet"
+            disabled={!entry.previewEligible || entry.status !== "ok"}
+            title={entry.previewEligible ? "Open read-only preview" : "Preview unavailable"}
             type="button"
+            onClick={() => onOpenFile(entry)}
           >
-            Open pending
+            Open
           </button>
         ) : null}
       </div>
@@ -692,6 +765,8 @@ function WorkbenchShell({
   loading,
   error,
   onCommand,
+  readOnlyFilePanes,
+  activeReadOnlyFilePaneRequest,
 }: {
   resources: DashboardResourcesView | null;
   selection: WorkbenchSelection | null;
@@ -700,10 +775,53 @@ function WorkbenchShell({
   loading: boolean;
   error: string | null;
   onCommand: (commandId: string, payload: CommandPayload) => void;
+  readOnlyFilePanes: ReadOnlyFilePane[];
+  activeReadOnlyFilePaneRequest: { paneId: string; sequence: number } | null;
 }) {
   const [activePaneByGroup, setActivePaneByGroup] = useState<Record<string, string>>({});
   const [paneOrderByGroup, setPaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
   const [draggedPaneId, setDraggedPaneId] = useState<string | null>(null);
+  const focusedReadOnlyRequest = useRef<number | null>(null);
+
+  const workbenchModel = resources && selection
+    ? (() => {
+        const { workspace, root, mainInstance, selectedInstance } = selection;
+        const supportEntity = selectedEntity ?? resourceEntityForWorkRoot(root);
+        const editorGroups = applyWorkbenchPaneOrder(
+          buildWorkbenchEditorGroups(root, mainInstance, selectedInstance, supportEntity, readOnlyFilePanes),
+          paneOrderByGroup,
+        );
+        return { workspace, root, mainInstance, selectedInstance, editorGroups };
+      })()
+    : null;
+  const editorGroups = workbenchModel?.editorGroups ?? [];
+
+  useEffect(() => {
+    if (
+      !activeReadOnlyFilePaneRequest ||
+      focusedReadOnlyRequest.current === activeReadOnlyFilePaneRequest.sequence
+    ) {
+      return;
+    }
+
+    const targetGroup = editorGroups.find((group) =>
+      group.panes.some((pane) => pane.id === activeReadOnlyFilePaneRequest.paneId),
+    );
+    if (!targetGroup) {
+      return;
+    }
+
+    focusedReadOnlyRequest.current = activeReadOnlyFilePaneRequest.sequence;
+    setActivePaneByGroup((current) =>
+      selectWorkbenchPane(current, targetGroup.id, activeReadOnlyFilePaneRequest.paneId),
+    );
+  }, [activeReadOnlyFilePaneRequest, editorGroups]);
+
+  const movePane = (paneId: string, targetGroupId: string, beforePaneId?: string) => {
+    const result = commitWorkbenchPaneMove(editorGroups, activePaneByGroup, { paneId, targetGroupId, beforePaneId });
+    setPaneOrderByGroup(result.paneOrderByGroup);
+    setActivePaneByGroup(result.activePaneByGroup);
+  };
 
   if (loading && !resources) {
     return <StatusPane title="Loading" detail="workbench resources" />;
@@ -713,22 +831,11 @@ function WorkbenchShell({
     return <StatusPane title="Workbench unavailable" detail={error} />;
   }
 
-  if (!resources || !selection) {
+  if (!resources || !workbenchModel) {
     return <StatusPane title="No workRoot" detail="select a workRoot or main instance" />;
   }
 
-  const { workspace, root, mainInstance, selectedInstance } = selection;
-  const supportEntity = selectedEntity ?? resourceEntityForWorkRoot(root);
-  const editorGroups = applyWorkbenchPaneOrder(
-    buildWorkbenchEditorGroups(root, mainInstance, selectedInstance, supportEntity),
-    paneOrderByGroup,
-  );
-
-  const movePane = (paneId: string, targetGroupId: string, beforePaneId?: string) => {
-    const result = commitWorkbenchPaneMove(editorGroups, activePaneByGroup, { paneId, targetGroupId, beforePaneId });
-    setPaneOrderByGroup(result.paneOrderByGroup);
-    setActivePaneByGroup(result.activePaneByGroup);
-  };
+  const { workspace, root } = workbenchModel;
 
   return (
     <div className="workbench-shell">
@@ -870,6 +977,7 @@ function buildWorkbenchEditorGroups(
   mainInstance: InstanceView | null,
   selectedInstance: InstanceView | null,
   supportEntity: ResourceEntity | null,
+  readOnlyFilePanes: ReadOnlyFilePane[],
 ): WorkbenchEditorGroupModel[] {
   return [
     {
@@ -949,9 +1057,66 @@ function buildWorkbenchEditorGroups(
           state: supportEntity?.state ?? root.state,
           meta: [supportEntity?.type ?? "workRoot"],
         },
+        ...readOnlyFilePanes.map((pane) => readOnlyWorkbenchPane(root, pane)),
       ],
     },
   ];
+}
+
+
+function readOnlyWorkbenchPane(root: WorkRootView, pane: ReadOnlyFilePane): WorkbenchPane {
+  const state: ViewState = {
+    status: pane.status,
+    loading: pane.status === "loading",
+    stale: false,
+    error: pane.error,
+  };
+  const meta = [
+    "read-only",
+    pane.languageHint ?? pane.extension ?? "text",
+    pane.sizeBytes === null ? "pending" : `${pane.sizeBytes} bytes`,
+  ];
+
+  return {
+    id: pane.id,
+    kind: "editor",
+    category: "opened",
+    title: pane.title,
+    detail: pane.path,
+    state,
+    meta,
+    body: <ReadOnlyTextPane pane={pane} root={root} />,
+  };
+}
+
+function ReadOnlyTextPane({ pane, root }: { pane: ReadOnlyFilePane; root: WorkRootView }) {
+  return (
+    <div className="readonly-text-pane">
+      <div className="readonly-text-pane-header">
+        <div className="readonly-text-pane-title-block">
+          <div className="readonly-text-pane-title">{pane.title}</div>
+          <div className="readonly-text-pane-path" title={pane.path}>
+            {root.label} / {pane.path}
+          </div>
+        </div>
+        <div className="readonly-text-pane-badges">
+          <span className="meta-chip">read-only</span>
+          <span className="meta-chip">{pane.languageHint ?? pane.extension ?? "text"}</span>
+        </div>
+      </div>
+      {pane.status === "loading" ? (
+        <div className="readonly-text-pane-state">Loading file content</div>
+      ) : pane.status === "error" ? (
+        <div className="readonly-text-pane-state readonly-text-pane-error">
+          {pane.error ?? "file read failed"}
+        </div>
+      ) : (
+        <pre className="readonly-text-content">
+          <code>{pane.content}</code>
+        </pre>
+      )}
+    </div>
+  );
 }
 
 function WorkbenchEditorGroup({
