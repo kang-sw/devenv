@@ -8,6 +8,7 @@ related:
   260516-feat-ws-web-instance-event-stream: completed event envelope and stream scaffold prerequisite
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web dashboard workRoot IO substrate
@@ -58,7 +59,7 @@ The milestone should establish:
 - `260516-feat-ws-web-terminal-session-substrate` - done; daemon-owned PTY
   terminal session lifecycle, I/O forwarding, refresh persistence, and close
   termination.
-- `260516-feat-ws-web-workroot-io-workbench-integration` - todo; combine file
+- `260516-feat-ws-web-workroot-io-workbench-integration` - done; combine file
   panes and terminal sessions with workbench placement, restore, and dogfood
   verification.
 
@@ -101,3 +102,15 @@ The milestone should establish:
 - Deferred: write-back editing, hardcoded agent presets, named-agent controls,
   terminal multiplexing depth, detached terminal restore UX, and full IDE file
   management belong to later milestones.
+
+### Result (d9d4bfbf) - 2026-05-16
+
+Completed the workRoot IO substrate milestone. The dashboard now supports
+selected-workRoot file navigation, read-only text panes, daemon-owned terminal
+sessions with I/O and close termination, and cross-surface workbench integration
+with daemon-served dogfood verification.
+
+The flow remains intentionally read-only for files, avoids hardcoded agent
+presets, keeps terminal lifecycle daemon-owned, and records the remaining visual
+breakpoint dogfood gap as an explicit tooling blocker rather than claiming
+unverified screenshots.

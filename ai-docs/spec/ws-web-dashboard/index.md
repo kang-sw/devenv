@@ -309,7 +309,7 @@ session. The first terminal substrate keeps hidden detached restore UX absent;
 future confirmation or foreground-process checks may be added without changing
 the basic close-as-terminate contract.
 
-## 🚧 WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
+## WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
 
 The dashboard combines daemon-owned live terminal state, read-only file pane
 state, and browser workbench arrangement into one restore model for selected
@@ -318,14 +318,14 @@ browser arrangement remains presentation state. File panes restore only when
 the file remains previewable; otherwise the pane shows an honest unavailable
 state.
 
-## 🚧 WorkRoot IO Command And Placement Polish {#260516-ws-web-dashboard-workroot-io-command-placement-polish}
+## WorkRoot IO Command And Placement Polish {#260516-ws-web-dashboard-workroot-io-command-placement-polish}
 
 WorkRoot IO commands use consistent command ids and placement behavior across
 file open, create terminal, focus existing surface, close terminal, and refresh.
 Logical targets that are already open focus existing surfaces rather than
 duplicating panes.
 
-## 🚧 WorkRoot IO Dogfood Verification {#260516-ws-web-dashboard-workroot-io-dogfood-verification}
+## WorkRoot IO Dogfood Verification {#260516-ws-web-dashboard-workroot-io-dogfood-verification}
 
 The dashboard verifies the workRoot IO workflow through the daemon-served
 frontend: open/select a workRoot, browse files, open a read-only text pane,

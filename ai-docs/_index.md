@@ -150,8 +150,6 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260516-epic-ws-web-dashboard-workroot-io-substrate` | todo | Coordinate the workRoot filesystem and terminal substrate milestone |
-| `260516-feat-ws-web-workroot-io-workbench-integration` | ready | Integrate workRoot file and terminal surfaces with workbench restore and verification |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -172,7 +170,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260516-feat-ws-web-workroot-io-workbench-integration` - integrate file panes and terminal sessions with restore, command placement, and daemon-served dogfood verification.
 
 ## Session Notes
 

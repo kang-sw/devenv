@@ -83,7 +83,7 @@ The MVP should cover:
   for dark-first theme setup, token-free stable browser entry after pairing,
   server-scoped route identity, and a constrained VS Code-inspired workbench
   substrate.
-- `260516-epic-ws-web-dashboard-workroot-io-substrate` - todo; next milestone
+- `260516-epic-ws-web-dashboard-workroot-io-substrate` - done; next milestone
   for making opened workRoots usable through a workRoot-local file navigator,
   read-only text panes, daemon-owned terminal sessions, and workbench restore
   integration.
