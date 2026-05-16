@@ -15,6 +15,14 @@ import {
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
 } from "./workbench";
+import {
+  fetchWorkRootFiles,
+  flattenWorkRootFileTree,
+  idleDirectoryLoadState,
+  toggleExpandedPath,
+  type DirectoryLoadState,
+  type WorkRootFileEntryView,
+} from "./workRootFiles";
 
 type ViewState = {
   status: string;
@@ -142,6 +150,12 @@ type CommandEntry = {
   label: string;
 };
 
+type WorkRootExplorerSnapshot = {
+  expandedPaths: Set<string>;
+  directories: Record<string, DirectoryLoadState>;
+  selectedPath: string | null;
+};
+
 type WorkbenchSelection = {
   workspace: WorkspaceView;
   root: WorkRootView;
@@ -256,6 +270,7 @@ export function App() {
             loading={loading}
             error={error}
             selectedId={selectedEntity?.id ?? null}
+            selectedWorkRoot={workbenchSelection?.root ?? null}
             onCommand={executeCommand}
           />
         </aside>
@@ -327,12 +342,14 @@ function ResourceNavigation({
   loading,
   error,
   selectedId,
+  selectedWorkRoot,
   onCommand,
 }: {
   resources: DashboardResourcesView | null;
   loading: boolean;
   error: string | null;
   selectedId: string | null;
+  selectedWorkRoot: WorkRootView | null;
   onCommand: (commandId: string, payload: CommandPayload) => void;
 }) {
   if (loading && !resources) {
@@ -363,19 +380,289 @@ function ResourceNavigation({
   }
 
   return (
-    <div className="resource-list">
-      {error ? <InlineNotice tone="error" title="Refresh failed" detail={error} /> : null}
-      {loading ? <InlineNotice tone="info" title="Refreshing" detail="resources" /> : null}
-      {resources.workspaces.map((workspace) => (
-        <WorkspaceRows
-          key={workspace.id}
-          workspace={workspace}
-          selectedId={selectedId}
-          onCommand={onCommand}
-        />
-      ))}
+    <div className="nav-stack">
+      <div className="resource-list resource-list-region">
+        {error ? <InlineNotice tone="error" title="Refresh failed" detail={error} /> : null}
+        {loading ? <InlineNotice tone="info" title="Refreshing" detail="resources" /> : null}
+        {resources.workspaces.map((workspace) => (
+          <WorkspaceRows
+            key={workspace.id}
+            workspace={workspace}
+            selectedId={selectedId}
+            onCommand={onCommand}
+          />
+        ))}
+      </div>
+      <WorkRootFileExplorer workRoot={selectedWorkRoot} onCommand={onCommand} />
     </div>
   );
+}
+
+function WorkRootFileExplorer({
+  workRoot,
+  onCommand,
+}: {
+  workRoot: WorkRootView | null;
+  onCommand: (commandId: string, payload: CommandPayload) => void;
+}) {
+  const [snapshots, setSnapshots] = useState<Record<string, WorkRootExplorerSnapshot>>({});
+
+  const snapshot = workRoot ? snapshots[workRoot.id] ?? initialExplorerSnapshot() : null;
+
+  const updateSnapshot = useCallback(
+    (
+      workRootId: string,
+      updater: (snapshot: WorkRootExplorerSnapshot) => WorkRootExplorerSnapshot,
+    ) => {
+      setSnapshots((current) => ({
+        ...current,
+        [workRootId]: updater(current[workRootId] ?? initialExplorerSnapshot()),
+      }));
+    },
+    [],
+  );
+
+  const loadDirectory = useCallback(
+    async (workRootId: string, path: string) => {
+      updateSnapshot(workRootId, (current) => ({
+        ...current,
+        directories: {
+          ...current.directories,
+          [path]: { ...idleDirectoryLoadState(), status: "loading" },
+        },
+      }));
+
+      try {
+        const listing = await fetchWorkRootFiles(workRootId, path);
+        updateSnapshot(workRootId, (current) => ({
+          ...current,
+          directories: {
+            ...current.directories,
+            [listing.path]: {
+              status: "loaded",
+              entries: listing.entries,
+              error: null,
+            },
+          },
+        }));
+      } catch (error) {
+        updateSnapshot(workRootId, (current) => ({
+          ...current,
+          directories: {
+            ...current.directories,
+            [path]: {
+              status: "error",
+              entries: [],
+              error: error instanceof Error ? error.message : "listing failed",
+            },
+          },
+        }));
+      }
+    },
+    [updateSnapshot],
+  );
+
+  useEffect(() => {
+    if (!workRoot) {
+      return;
+    }
+
+    const rootState = snapshots[workRoot.id]?.directories[""];
+    if (!rootState || rootState.status === "idle") {
+      void loadDirectory(workRoot.id, "");
+    }
+  }, [loadDirectory, snapshots, workRoot]);
+
+  if (!workRoot) {
+    return (
+      <section className="file-explorer" aria-label="WorkRoot files">
+        <div className="file-explorer-header">
+          <div>
+            <div className="section-label">Files</div>
+            <div className="file-explorer-title">Select a workRoot</div>
+          </div>
+        </div>
+        <div className="file-explorer-body">
+          <div className="file-explorer-state">No workRoot selected</div>
+        </div>
+      </section>
+    );
+  }
+
+  const rows = flattenWorkRootFileTree({
+    expandedPaths: snapshot?.expandedPaths ?? new Set([""]),
+    directories: snapshot?.directories ?? {},
+    selectedPath: snapshot?.selectedPath ?? null,
+  });
+
+  const selectEntry = (entry: WorkRootFileEntryView) => {
+    updateSnapshot(workRoot.id, (current) => ({ ...current, selectedPath: entry.path }));
+    onCommand("fileExplorer.selectEntry", {
+      type: "action",
+      label: entry.name,
+      entityId: workRoot.id,
+    });
+  };
+
+  const toggleDirectory = (entry: WorkRootFileEntryView) => {
+    const isExpanded = snapshot?.expandedPaths.has(entry.path) ?? false;
+    updateSnapshot(workRoot.id, (current) => ({
+      ...current,
+      expandedPaths: toggleExpandedPath(current.expandedPaths, entry.path),
+      selectedPath: entry.path,
+    }));
+    onCommand("fileExplorer.toggleDirectory", {
+      type: "action",
+      label: entry.name,
+      entityId: workRoot.id,
+    });
+
+    const directoryState = snapshot?.directories[entry.path];
+    if (!isExpanded && (!directoryState || directoryState.status === "idle")) {
+      void loadDirectory(workRoot.id, entry.path);
+    }
+  };
+
+  const refreshExplorer = () => {
+    onCommand("fileExplorer.refresh", {
+      type: "action",
+      label: "Refresh files",
+      entityId: workRoot.id,
+    });
+    const paths = Array.from(snapshot?.expandedPaths ?? new Set([""]));
+    for (const path of paths.length > 0 ? paths : [""]) {
+      void loadDirectory(workRoot.id, path);
+    }
+  };
+
+  return (
+    <section className="file-explorer" aria-label={`Files for ${workRoot.label}`}>
+      <div className="file-explorer-header">
+        <div className="file-explorer-heading">
+          <div className="section-label">Files</div>
+          <div className="file-explorer-title" title={workRoot.label}>
+            {workRoot.label}
+          </div>
+        </div>
+        <button
+          className="action-button file-explorer-refresh"
+          data-command-id="fileExplorer.refresh"
+          type="button"
+          onClick={refreshExplorer}
+        >
+          Refresh
+        </button>
+      </div>
+      <div className="file-explorer-body" role="tree" aria-label="WorkRoot file tree">
+        {rows.length === 0 ? (
+          <div className="file-explorer-state">Loading</div>
+        ) : (
+          rows.map((row) =>
+            row.type === "state" ? (
+              <div
+                className={`file-explorer-state file-explorer-state-${row.status}`}
+                key={`${row.path}:${row.status}`}
+                style={{ "--depth": row.depth } as CSSProperties}
+              >
+                {row.label}
+              </div>
+            ) : (
+              <FileExplorerRow
+                entry={row.entry}
+                expanded={row.expanded}
+                key={row.entry.path}
+                depth={row.depth}
+                selected={row.selected}
+                onSelect={selectEntry}
+                onToggleDirectory={toggleDirectory}
+              />
+            ),
+          )
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FileExplorerRow({
+  entry,
+  depth,
+  expanded,
+  selected,
+  onSelect,
+  onToggleDirectory,
+}: {
+  entry: WorkRootFileEntryView;
+  depth: number;
+  expanded: boolean;
+  selected: boolean;
+  onSelect: (entry: WorkRootFileEntryView) => void;
+  onToggleDirectory: (entry: WorkRootFileEntryView) => void;
+}) {
+  const isDirectory = entry.kind === "directory";
+  const isFile = entry.kind === "file";
+
+  return (
+    <div
+      className={`file-explorer-row ${selected ? "file-explorer-row-selected" : ""} ${
+        entry.status !== "ok" ? "file-explorer-row-muted" : ""
+      }`}
+      role="treeitem"
+      aria-expanded={isDirectory ? expanded : undefined}
+      aria-selected={selected}
+      style={{ "--depth": depth } as CSSProperties}
+    >
+      <button
+        className="file-explorer-row-main"
+        data-command-id="fileExplorer.selectEntry"
+        type="button"
+        onClick={() => onSelect(entry)}
+      >
+        <span className="file-explorer-icon" aria-hidden="true">
+          {isDirectory ? (expanded ? "▾" : "▸") : "·"}
+        </span>
+        <span className="file-explorer-name" title={entry.path || entry.name}>
+          {entry.name}
+        </span>
+      </button>
+      <div className="file-explorer-row-actions">
+        {isDirectory ? (
+          <button
+            className="file-explorer-inline-button"
+            data-command-id="fileExplorer.toggleDirectory"
+            type="button"
+            onClick={() => onToggleDirectory(entry)}
+          >
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+        ) : null}
+        {isFile ? (
+          <button
+            className="file-explorer-inline-button"
+            data-command-id="fileExplorer.openFile"
+            disabled
+            title="Read-only file panes are not implemented yet"
+            type="button"
+          >
+            Open pending
+          </button>
+        ) : null}
+      </div>
+      <div className="file-explorer-meta">
+        <span>{entry.kind}</span>
+        <span>{entry.status}</span>
+        {entry.previewEligible ? <span>preview</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function initialExplorerSnapshot(): WorkRootExplorerSnapshot {
+  return {
+    expandedPaths: new Set([""]),
+    directories: {},
+    selectedPath: null,
+  };
 }
 
 function InlineNotice({
