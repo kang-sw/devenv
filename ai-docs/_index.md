@@ -149,7 +149,6 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
-| `260516-feat-ws-web-stable-pairing-routes` | ready | Make pairing redirect token-free and reserve server-scoped browser routes |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260516-epic-ws-web-dashboard-workbench-substrate` | todo | Coordinate dark-first stable-entry constrained workbench substrate |
 | `260516-research-ws-web-workbench-layout-spike` | todo | Decide Dockview/FlexLayout workbench adapter fit for split-group IA |
@@ -174,7 +173,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
-`260516-feat-ws-web-stable-pairing-routes` - implement token-free post-pairing navigation and explicit server-scoped browser route identity.
 
 ## Session Notes
 
