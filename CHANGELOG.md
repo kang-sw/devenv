@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.26.4 - 2026-05-16
+
+### Added
+- Add the authenticated `ws-dashboard` daemon and visible frontend substrate,
+  including resource fixtures, workspace discovery, instance event streams,
+  dark visual tokens, stable pairing routes, and the first workRoot workbench
+  shell.
+
+### Changed
+- Require `lead-write-code` briefs to preserve selected-slice binding decisions
+  from tickets, including caller-visible contracts, implementation strategy
+  decisions, rejected alternatives, and verification expectations.
+
+### Fixed
+- Keep ticket-driven `lead-write-code` fit review responsible for detecting
+  ticket-to-brief decision loss while preserving the implementer brief-only
+  boundary.
+- Polish dashboard workbench editor chrome so internal topology concepts remain
+  compact and pane bodies stay dominant on desktop and narrow viewports.
+
 ## v0.26.3 - 2026-05-15
 
 ### Added

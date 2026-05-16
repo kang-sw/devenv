@@ -1,6 +1,6 @@
 {
   "name": "wsflow",
-  "version": "0.26.3",
+  "version": "0.26.4",
   "description": "Agentless workflow plugin for project context, tickets, specs, docs, and Git tools.",
   "author": {
     "name": "kang-sw"
