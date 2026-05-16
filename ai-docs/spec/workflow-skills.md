@@ -169,14 +169,29 @@ while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
 they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundary}
 
-`lead-write-ticket` recognizes related-ticket propagation requests such as
-"cascade", updating parent and child tickets together, or organizing a board and
-its children in one pass. In that mode it identifies the impacted ticket graph,
-selects only affected edit targets, keeps epic edits board-level, puts
-slice-specific decisions in child tickets, updates active inventory when
-needed, and commits the propagation as one logical documentation unit. It does
-not promote propagated tickets to `ready/` unless the user explicitly requests
-ready promotion or routes through `lead-proceed`.
+`lead-write-ticket` treats tickets as recoverability artifacts before compact
+summaries. Non-epic actionable tickets preserve caller-visible contracts,
+constraints, rationale, implementation strategy decisions, rejected
+alternatives, forward-compatibility contracts, verification expectations, and
+phase dependencies. Plan-level source details such as paths, signatures,
+integration mechanics, and test command classification may move to plans, but
+settled local or cross-ticket decisions must stay in the relevant child ticket
+or phase.
+
+`lead-write-ticket` reviews related-ticket decisions by default when
+creating or editing a non-epic actionable ticket. It inspects the target's
+parent, containing epic, child board, explicitly related tickets, and available
+active siblings only far enough to find settled decisions that constrain the
+current implementation slice. It records only binding decisions in the target
+as scope, constraints, forward-compatibility contracts, rejected alternatives,
+verification expectations, or phase dependencies, and avoids copying unrelated
+future-phase detail. Explicit "cascade" requests, board organization, or parent
+and child edits broaden this into a multi-ticket propagation pass: the skill
+identifies the impacted graph, selects only affected edit targets, keeps epic
+edits board-level, updates active inventory when needed, and commits the
+propagation as one logical documentation unit. It does not promote propagated
+tickets to `ready/` unless the user explicitly requests ready promotion or
+routes through `lead-proceed`.
 {#260516-write-ticket-related-ticket-propagation}
 
 Skill-authoring guidance treats local shorthand as trigger examples for a
