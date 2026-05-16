@@ -218,6 +218,15 @@ The gate includes viewport containment checks for long file explorer content:
 expanding a large tree must not make the top-level document scroll or push the
 dashboard footer out of view, and overflow must stay inside the explorer region.
 
+> [!note] Planned 🚧
+> The browser gate will prove the live terminal path uses an owner-authenticated
+> WebSocket connection instead of periodic output polling while connected. It
+> will cover owner pairing, WebSocket connection, input fidelity, ANSI/control
+> rendering, resize behavior, close-as-terminate, reconnect or reload
+> reconstruction, and timing evidence showing local keystroke echo is no longer
+> bounded by the former polling interval.
+> {#260516-ws-web-dashboard-terminal-websocket-browser-gate}
+
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
 automated browser tooling cannot run, the verification artifact records exact
@@ -336,6 +345,16 @@ transport for daemon-owned PTY sessions. Unauthenticated callers are rejected
 before stream or upgrade acceptance. Resize forwarding remains bounded and does
 not continuously rewrite logical terminal dimensions during visual split drag.
 
+> [!note] Planned 🚧
+> Live browser terminal I/O will use an owner-authenticated WebSocket as the
+> primary transport for daemon-owned PTY sessions. The WebSocket will attach to
+> existing opaque terminal ids after owner auth, carry ordered PTY output,
+> status, and exit data to the browser, and carry raw input plus bounded resize
+> requests back to the daemon. HTTP output transport may remain available for
+> initial replay, reload reconstruction, deterministic tests, or fallback, but
+> the normal connected xterm path will not depend on periodic output polling.
+> {#260516-ws-web-dashboard-terminal-websocket-transport}
+
 ## Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
 
 The dashboard workbench renders daemon-owned terminal sessions in terminal panes
@@ -370,6 +389,14 @@ Terminal rendering prefers a Powerline/Nerd Font-capable monospace stack when
 available, with ordinary monospace fallbacks. Browser polling avoids idle
 terminal state churn and uses bounded per-terminal in-flight requests so quiet
 terminals do not cause visible workbench flicker.
+
+> [!note] Planned 🚧
+> The browser terminal emulator will preserve byte-stream input behavior for
+> ordinary shell editing and interactive control keys. Acceptance includes
+> Backspace, left/right cursor movement, command history navigation, Ctrl-C,
+> Ctrl-D or EOF where safe, Ctrl-L or clear-screen behavior, paste, and ordinary
+> prompt editing inside a real shell.
+> {#260516-ws-web-dashboard-terminal-websocket-input-fidelity}
 
 ## Terminal Close Terminates Session {#260516-ws-web-dashboard-terminal-close-termination}
 
