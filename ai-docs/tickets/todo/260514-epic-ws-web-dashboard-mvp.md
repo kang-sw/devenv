@@ -7,6 +7,7 @@ related:
   260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
   260515-epic-ws-web-dashboard-first-visible-substrate: first visible dashboard substrate milestone
   260516-epic-ws-web-dashboard-workbench-substrate: next frontend workbench substrate milestone
+  260516-epic-ws-web-dashboard-workroot-io-substrate: next workRoot filesystem and terminal substrate milestone
   260516-feat-ws-web-resource-view-model-contract: first child of the visible substrate milestone
   260516-feat-ws-web-minimal-frontend-shell: inspectable frontend child of the visible substrate milestone
 related-mental-model:
@@ -82,6 +83,10 @@ The MVP should cover:
   for dark-first theme setup, token-free stable browser entry after pairing,
   server-scoped route identity, and a constrained VS Code-inspired workbench
   substrate.
+- `260516-epic-ws-web-dashboard-workroot-io-substrate` - todo; next milestone
+  for making opened workRoots usable through a workRoot-local file navigator,
+  read-only text panes, daemon-owned terminal sessions, and workbench restore
+  integration.
 
 ## Cross-Child Decisions
 
@@ -161,9 +166,12 @@ The MVP should cover:
   wide screens and stacked on narrow screens. File opens should prefer the
   second or later split group to avoid replacing the active agent view, while
   agent and persistent terminal surfaces default to the first or focused group.
-- A frontend panel is an attachment, not a backend instance. Terminal and
-  agent lifecycle should be daemon-owned; panel close should detach by default,
-  and explicit terminate commands should own process or agent shutdown.
+- A frontend panel is an attachment, not a backend instance. Backend lifecycle
+  should be daemon-owned. Terminal panels are the first deliberate exception to
+  close-as-detach: a terminal survives browser refresh because the daemon owns
+  the session, but explicitly closing the terminal panel terminates that
+  terminal session. Hidden detached terminal restore UX is out of scope unless
+  a later ticket reintroduces it.
 - Pairing tokens should remain one-time startup entry URLs. After successful
   pairing, the browser should land on a token-free stable app URL and rely on
   the HTTP-only owner cookie for refresh-safe navigation.
