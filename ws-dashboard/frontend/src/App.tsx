@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
 import {
   decideSurfaceClose,
   decideSurfaceOpen,
-  defaultPtyLogicalSize,
   defaultSurfaceRegistry,
   applyWorkbenchPaneOrder,
   commitWorkbenchPaneMove,
@@ -44,6 +46,7 @@ import {
   markTerminalPaneCloseError,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
+  resizeTerminal,
   sendTerminalInput,
   terminalPaneFromSession,
   terminalPaneLogicalKey,
@@ -705,61 +708,65 @@ function FileExplorerRow({
   onOpenFile: (entry: WorkRootFileEntryView) => void;
 }) {
   const isDirectory = entry.kind === "directory";
-  const isFile = entry.kind === "file";
+  const isOk = entry.status === "ok";
+  const canOpen = !isDirectory && entry.previewEligible && isOk;
+
+  // Conventional tree interaction: the whole row is the control. A directory
+  // row toggles expansion, a previewable file row opens its read-only preview,
+  // and any other row simply selects. The emitted command id matches that
+  // action so the keyboard command layer stays aligned with the click.
+  const commandId = isDirectory
+    ? "fileExplorer.toggleDirectory"
+    : canOpen
+      ? "fileExplorer.openFile"
+      : "fileExplorer.selectEntry";
+
+  const activate = () => {
+    if (isDirectory) {
+      onToggleDirectory(entry);
+    } else if (canOpen) {
+      onOpenFile(entry);
+    } else {
+      onSelect(entry);
+    }
+  };
+
+  const title = isDirectory
+    ? `${entry.path || entry.name} (${expanded ? "expanded" : "collapsed"})`
+    : canOpen
+      ? `Open read-only preview of ${entry.name}`
+      : isOk
+        ? `${entry.name} (preview unavailable)`
+        : `${entry.name} (${entry.status})`;
 
   return (
-    <div
-      className={`file-explorer-row ${selected ? "file-explorer-row-selected" : ""} ${
-        entry.status !== "ok" ? "file-explorer-row-muted" : ""
-      }`}
+    <button
+      className={`file-explorer-row ${isDirectory ? "file-explorer-row-directory" : "file-explorer-row-file"} ${
+        selected ? "file-explorer-row-selected" : ""
+      } ${!isOk ? "file-explorer-row-muted" : ""}`}
       role="treeitem"
       aria-expanded={isDirectory ? expanded : undefined}
       aria-selected={selected}
+      data-command-id={commandId}
+      type="button"
       style={{ "--depth": depth } as CSSProperties}
+      title={title}
+      onClick={activate}
     >
-      <button
-        className="file-explorer-row-main"
-        data-command-id="fileExplorer.selectEntry"
-        type="button"
-        onClick={() => onSelect(entry)}
-      >
-        <span className="file-explorer-icon" aria-hidden="true">
-          {isDirectory ? (expanded ? "▾" : "▸") : "·"}
+      <span className="file-explorer-twisty" aria-hidden="true">
+        {isDirectory ? (expanded ? "▾" : "▸") : ""}
+      </span>
+      <span className="file-explorer-name">
+        {entry.name}
+        {isDirectory ? "/" : ""}
+      </span>
+      {!isOk ? <span className="file-explorer-row-status">{entry.status}</span> : null}
+      {canOpen ? (
+        <span className="file-explorer-row-hint" aria-hidden="true">
+          open
         </span>
-        <span className="file-explorer-name" title={entry.path || entry.name}>
-          {entry.name}
-        </span>
-      </button>
-      <div className="file-explorer-row-actions">
-        {isDirectory ? (
-          <button
-            className="file-explorer-inline-button"
-            data-command-id="fileExplorer.toggleDirectory"
-            type="button"
-            onClick={() => onToggleDirectory(entry)}
-          >
-            {expanded ? "Collapse" : "Expand"}
-          </button>
-        ) : null}
-        {isFile ? (
-          <button
-            className="file-explorer-inline-button"
-            data-command-id="fileExplorer.openFile"
-            disabled={!entry.previewEligible || entry.status !== "ok"}
-            title={entry.previewEligible ? "Open read-only preview" : "Preview unavailable"}
-            type="button"
-            onClick={() => onOpenFile(entry)}
-          >
-            Open
-          </button>
-        ) : null}
-      </div>
-      <div className="file-explorer-meta">
-        <span>{entry.kind}</span>
-        <span>{entry.status}</span>
-        {entry.previewEligible ? <span>preview</span> : null}
-      </div>
-    </div>
+      ) : null}
+    </button>
   );
 }
 
@@ -818,6 +825,7 @@ function WorkbenchShell({
   const [activeTerminalPaneRequest, setActiveTerminalPaneRequest] = useState<{ paneId: string; sequence: number } | null>(null);
   const [terminalPaneOrderByGroup, setTerminalPaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
   const focusedReadOnlyRequest = useRef<number | null>(null);
+  const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
 
   const workbenchModel = resources && selection
@@ -835,9 +843,9 @@ function WorkbenchShell({
             Object.values(terminalPanes),
             terminalPaneOrderByGroup,
             {
-              onSend: sendTerminalDraft,
+              onSendData: sendTerminalData,
               onClose: closeTerminalPane,
-              onInputDraft: updateTerminalDraft,
+              onResize: forwardTerminalResize,
             },
           ),
           paneOrderByGroup,
@@ -923,7 +931,14 @@ function WorkbenchShell({
   }, [activeReadOnlyFilePaneRequest, editorGroups]);
 
   useEffect(() => {
-    if (!activeTerminalPaneRequest) {
+    // Focus a freshly created terminal exactly once per request. Without the
+    // sequence guard this effect re-asserts the active pane on every
+    // `editorGroups` rebuild (the 500ms output poll churns identity), which
+    // fights a user clicking a different terminal tab.
+    if (
+      !activeTerminalPaneRequest ||
+      focusedTerminalRequest.current === activeTerminalPaneRequest.sequence
+    ) {
       return;
     }
     const targetGroup = editorGroups.find((group) =>
@@ -932,6 +947,7 @@ function WorkbenchShell({
     if (!targetGroup) {
       return;
     }
+    focusedTerminalRequest.current = activeTerminalPaneRequest.sequence;
     setActivePaneByGroup((current) =>
       selectWorkbenchPane(current, targetGroup.id, activeTerminalPaneRequest.paneId),
     );
@@ -951,14 +967,37 @@ function WorkbenchShell({
       .catch(() => undefined);
   }
 
-  function sendTerminalDraft(pane: TerminalPaneState) {
-    const data = pane.inputDraft.endsWith("\r") ? pane.inputDraft : `${pane.inputDraft}\r`;
-    void sendTerminalInput(pane.session.terminalId, data).then(() => {
-      setTerminalPanes((current) => ({
-        ...current,
-        [pane.logicalKey]: { ...(current[pane.logicalKey] ?? pane), inputDraft: "" },
-      }));
+  function sendTerminalData(pane: TerminalPaneState, data: string) {
+    // Raw emulator input flows straight to the daemon terminal session; the
+    // emulator already delivers Enter as `\r`, so no line buffering is needed.
+    void sendTerminalInput(pane.session.terminalId, data).catch((error) => {
+      setTerminalPanes((current) =>
+        current[pane.logicalKey]
+          ? {
+              ...current,
+              [pane.logicalKey]: {
+                ...current[pane.logicalKey],
+                error: error instanceof Error ? error.message : "terminal input failed",
+              },
+            }
+          : current,
+      );
     });
+  }
+
+  function forwardTerminalResize(pane: TerminalPaneState, columns: number, rows: number) {
+    // Bounded resize forwarding: the emulator debounces fit() output before
+    // calling this, so logical PTY columns/rows are not rewritten on every
+    // visual drag frame.
+    void resizeTerminal(pane.session.terminalId, columns, rows)
+      .then((session) => {
+        setTerminalPanes((current) =>
+          current[pane.logicalKey]
+            ? { ...current, [pane.logicalKey]: { ...current[pane.logicalKey], session } }
+            : current,
+        );
+      })
+      .catch(() => undefined);
   }
 
   function closeTerminalPane(pane: TerminalPaneState) {
@@ -973,13 +1012,6 @@ function WorkbenchShell({
           ),
         );
       });
-  }
-
-  function updateTerminalDraft(pane: TerminalPaneState, inputDraft: string) {
-    setTerminalPanes((current) => ({
-      ...current,
-      [pane.logicalKey]: { ...(current[pane.logicalKey] ?? pane), inputDraft },
-    }));
   }
 
   const movePane = (paneId: string, targetGroupId: string, beforePaneId?: string) => {
@@ -1185,15 +1217,6 @@ function buildWorkbenchEditorGroups(
             ? [mainInstance.kind, mainInstance.interactionMode, closeContractLabel("agent")]
             : [kindLabel(root.kind), closeContractLabel("agent")],
         },
-        {
-          id: "persistent-terminal",
-          kind: "persistentTerminal",
-          category: "pinned",
-          title: "Terminal",
-          detail: `${root.label} command surface reserved.`,
-          state: root.state,
-          meta: [root.status, kindLabel(root.kind), closeContractLabel("persistentTerminal"), ptySizeLabel()],
-        },
         ...(terminalPanesByGroup.primary ?? []),
         {
           id: "selected-viewer",
@@ -1334,9 +1357,9 @@ function terminalWorkbenchPanesByGroup(
 }
 
 type TerminalPaneActions = {
-  onSend: (pane: TerminalPaneState) => void;
+  onSendData: (pane: TerminalPaneState, data: string) => void;
   onClose: (pane: TerminalPaneState) => void;
-  onInputDraft: (pane: TerminalPaneState, inputDraft: string) => void;
+  onResize: (pane: TerminalPaneState, columns: number, rows: number) => void;
 };
 
 function terminalWorkbenchPane(pane: TerminalPaneState, actions: TerminalPaneActions): WorkbenchPane {
@@ -1354,36 +1377,133 @@ function terminalWorkbenchPane(pane: TerminalPaneState, actions: TerminalPaneAct
     detail: pane.session.terminalId,
     state,
     meta: [pane.session.status, `${pane.session.columns}x${pane.session.rows}`],
-    body: <TerminalPaneBody pane={pane} actions={actions} />,
+    body: <TerminalPaneBody key={pane.paneId} pane={pane} actions={actions} />,
   };
 }
 
 function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions: TerminalPaneActions }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const writtenLengthRef = useRef(0);
+  const lastForwardedSizeRef = useRef<{ columns: number; rows: number } | null>(null);
+  // Latest pane/actions for emulator callbacks registered once at mount.
+  const liveRef = useRef({ pane, actions });
+  liveRef.current = { pane, actions };
+
+  const terminalId = pane.session.terminalId;
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const terminal = new Terminal({
+      cursorBlink: true,
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+      fontSize: 12,
+      theme: { background: "#0b0d10" },
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(container);
+    terminalRef.current = terminal;
+    writtenLengthRef.current = 0;
+
+    // Replay PTY output buffered before this surface mounted so reselecting a
+    // terminal tab restores its emulator contents.
+    const initialOutput = liveRef.current.pane.output;
+    if (initialOutput.length > 0) {
+      terminal.write(initialOutput);
+      writtenLengthRef.current = initialOutput.length;
+    }
+
+    // Keyboard input originates from the focused emulator surface and reaches
+    // the daemon terminal session.
+    const inputDisposable = terminal.onData((data) => {
+      liveRef.current.actions.onSendData(liveRef.current.pane, data);
+    });
+
+    const fitNow = () => {
+      try {
+        fitAddon.fit();
+      } catch {
+        /* container not measurable yet */
+      }
+    };
+
+    const forwardSize = () => {
+      const next = { columns: terminal.cols, rows: terminal.rows };
+      if (next.columns <= 0 || next.rows <= 0) {
+        return;
+      }
+      const prev = lastForwardedSizeRef.current;
+      if (prev && prev.columns === next.columns && prev.rows === next.rows) {
+        return;
+      }
+      lastForwardedSizeRef.current = next;
+      liveRef.current.actions.onResize(liveRef.current.pane, next.columns, next.rows);
+    };
+
+    fitNow();
+
+    // ResizeObserver keeps the emulator fitted to the pane; resize forwarding
+    // to the daemon is debounced so visual split drag does not continuously
+    // rewrite logical PTY dimensions.
+    let resizeTimer: number | null = null;
+    const observer = new ResizeObserver(() => {
+      fitNow();
+      if (resizeTimer !== null) {
+        window.clearTimeout(resizeTimer);
+      }
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        forwardSize();
+      }, 250);
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      if (resizeTimer !== null) {
+        window.clearTimeout(resizeTimer);
+      }
+      inputDisposable.dispose();
+      terminal.dispose();
+      terminalRef.current = null;
+    };
+  }, []);
+
+  // Stream PTY output deltas into the emulator so ANSI color and control
+  // sequences render as terminal behavior rather than raw text.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+    if (pane.output.length > writtenLengthRef.current) {
+      terminal.write(pane.output.slice(writtenLengthRef.current));
+      writtenLengthRef.current = pane.output.length;
+    } else if (pane.output.length < writtenLengthRef.current) {
+      terminal.clear();
+      terminal.write(pane.output);
+      writtenLengthRef.current = pane.output.length;
+    }
+  }, [pane.output]);
+
   return (
-    <div className="terminal-pane">
-      <pre className="terminal-output"><code>{pane.output || "terminal ready"}</code></pre>
+    <div className="terminal-pane" data-terminal-id={terminalId}>
+      <div
+        className="terminal-surface"
+        data-command-id="terminal.input"
+        ref={containerRef}
+      />
       {pane.error ? <div className="terminal-error">{pane.error}</div> : null}
       <div className="terminal-controls">
-        <input
-          className="terminal-input"
-          aria-label="Terminal input"
-          value={pane.inputDraft}
-          onChange={(event) => actions.onInputDraft(pane, event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              actions.onSend(pane);
-            }
-          }}
-        />
-        <button
-          className="action-button"
-          data-command-id="terminal.input"
-          type="button"
-          onClick={() => actions.onSend(pane)}
-        >
-          Send
-        </button>
+        <span className="terminal-status-line">
+          {pane.session.status} · {pane.session.columns}x{pane.session.rows}
+        </span>
         <button
           className="action-button"
           data-command-id="terminal.close"
@@ -2113,10 +2233,6 @@ function instanceSummary(instance: InstanceView) {
 
 function closeContractLabel(kind: SurfaceKind) {
   return `close: ${decideSurfaceClose(kind).behavior}`;
-}
-
-function ptySizeLabel() {
-  return `pty: ${defaultPtyLogicalSize.columns}x${defaultPtyLogicalSize.rows}`;
 }
 
 function compactMainInstance(workspace: WorkspaceView) {

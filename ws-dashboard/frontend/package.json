@@ -15,11 +15,14 @@
     "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminals.test.js"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "dockview": "^6.2.2",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
