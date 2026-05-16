@@ -39,6 +39,8 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/dashboard/work-roots/open", post(open_work_root))
         .route("/assets/{*asset_path}", get(static_asset))
+        .route("/servers", get(index))
+        .route("/servers/{*app_path}", get(index))
         .route("/", get(index))
         .fallback(not_found)
         .layer(from_fn_with_state(state.clone(), require_owner_auth));

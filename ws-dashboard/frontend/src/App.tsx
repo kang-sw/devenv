@@ -128,6 +128,7 @@ type CommandEntry = {
 };
 
 const resourceEndpoint = "/api/dashboard/resources";
+const serverRoutePrefix = "/servers";
 
 export function App() {
   const [resources, setResources] = useState<DashboardResourcesView | null>(null);
@@ -162,6 +163,14 @@ export function App() {
   useEffect(() => {
     void loadResources();
   }, [loadResources]);
+
+  useEffect(() => {
+    if (!resources) {
+      return;
+    }
+
+    normalizeServerRoute(resources.server.id);
+  }, [resources]);
 
   const entities = useMemo(() => flattenEntities(resources), [resources]);
 
@@ -741,6 +750,35 @@ function appendInstanceEntities(entities: ResourceEntity[], instance: InstanceVi
   for (const subInstance of instance.subInstances) {
     appendInstanceEntities(entities, subInstance);
   }
+}
+
+function normalizeServerRoute(serverId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const targetPath = serverRoutePath(serverId);
+  const currentPath = window.location.pathname;
+
+  if (currentPath === targetPath || currentPath.startsWith(`${targetPath}/`)) {
+    return;
+  }
+
+  if (
+    currentPath === "/" ||
+    currentPath === serverRoutePrefix ||
+    currentPath.startsWith(`${serverRoutePrefix}/`)
+  ) {
+    window.history.replaceState(
+      null,
+      "",
+      `${targetPath}${window.location.search}${window.location.hash}`,
+    );
+  }
+}
+
+function serverRoutePath(serverId: string) {
+  return `${serverRoutePrefix}/${encodeURIComponent(serverId)}`;
 }
 
 function preferredSelection(entities: ResourceEntity[]) {
