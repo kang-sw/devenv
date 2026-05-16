@@ -21,15 +21,11 @@ On startup, the daemon creates an in-memory high-entropy one-time pairing token
 with an explicit expiry policy and exposes the corresponding pairing URL to the
 local owner through startup output. The pairing route is the only
 unauthenticated browser entrypoint. A successful pairing exchange consumes the
-token, installs an HTTP-only owner session cookie with `SameSite=Lax`, and lets
-the browser access authenticated routes. Missing, invalid, reused, or expired
-pairing tokens fail without installing a session cookie.
-
-> [!note] Planned 🚧
-> Successful pairing will redirect browser callers to a token-free stable app
-> URL after installing the owner cookie, while invalid, reused, or expired
-> pairing tokens will continue to fail without redirecting into an
-> authenticated-looking app route. {#260516-ws-web-dashboard-token-free-pairing-landing}
+token, installs an HTTP-only owner session cookie with `SameSite=Lax`, and
+redirects browser callers to a token-free stable app URL. Missing, invalid,
+reused, or expired pairing tokens fail without installing a session cookie and
+without redirecting into an authenticated-looking app route.
+{#260516-ws-web-dashboard-token-free-pairing-landing}
 
 Authenticated owner sessions have broad host-control authority for dashboard
 features, but the daemon remains separate from ws MCP stdio session authority.

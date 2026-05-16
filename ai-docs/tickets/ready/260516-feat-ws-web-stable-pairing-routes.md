@@ -8,6 +8,8 @@ related:
 spec:
   - 260516-ws-web-dashboard-token-free-pairing-landing
   - 260516-ws-web-dashboard-server-scoped-browser-routes
+plans:
+  phase-1: 2026-05/16-260516-feat-ws-web-stable-pairing-routes-phase-1.brief
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -42,6 +44,18 @@ Update the pairing flow so a successful token exchange installs the existing
 owner session cookie and redirects the browser to a token-free stable app URL.
 Preserve one-time token consumption, expiry handling, bearer-auth behavior for
 smoke callers, and protected-route rejection before authentication.
+
+### Result (679f3fe) - 2026-05-16
+
+Updated the browser pairing route so a valid `/pair?token=...` request consumes
+the token, installs the owner cookie, and returns `303 See Other` to `/`
+without carrying the token forward. Failure paths for missing, invalid, reused,
+and expired tokens remain non-redirecting and cookie-free.
+
+Verified with `cargo test --manifest-path ws-dashboard/crates/daemon/Cargo.toml
+--test routes --test server` and `cargo test --workspace` from
+`ws-dashboard/`. Correctness and test review reported clean. Phase 2
+`/servers/:serverId/...` route identity was not touched.
 
 ### Phase 2: Server-Scoped Browser Route Basis
 

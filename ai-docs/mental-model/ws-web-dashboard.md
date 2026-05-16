@@ -27,6 +27,7 @@ related:
 
 - Loopback is only a reachability default, not authorization: every browser route except `/pair` must pass owner-session auth before handler execution, including fallback paths. {#260515-ws-web-daemon-foundation}
 - The pairing URL is constructed after the listener is bound so port `0` resolves to the actual socket; changing startup reporting must preserve a single owner-visible pairing URL without leaking it through request diagnostics.
+- Valid `/pair?token=...` exchanges consume the token, install the owner cookie, and redirect to token-free `/`; missing, invalid, reused, or expired tokens must stay non-redirecting and cookie-free so browser history and retry paths do not retain usable pairing URLs. {#260516-ws-web-dashboard-token-free-pairing-landing}
 - `OwnerAuthState` is cloned into Axum state, so auth storage changes must preserve shared one-time pairing consumption, pairing TTL enforcement before consumption, and rejection of session cookies before pairing succeeds.
 - Bearer auth is a daemon-local protected-route exception for CLI/smoke callers; it authenticates before cookie pairing state is considered, so browser cookie flow changes must not accidentally remove or broaden that non-browser path.
 - Authenticated browser requests and WebSocket upgrade requests pass conservative Host/Origin checks; missing headers are tolerated for ordinary clients, but clearly non-loopback hosts/origins fail before handler or upgrade behavior.
@@ -65,7 +66,7 @@ related:
 ## Extension Points & Change Recipes
 
 - **Add an authenticated HTTP route or static asset family**: add it inside the protected router, then add both unauthenticated rejection and paired-cookie success tests; static file serving must keep traversal rejection before filesystem reads.
-- **Change pairing, session, or bearer behavior**: update `auth.rs`, `/pair` status/cookie handling, and route tests together; preserve one-time consumption, expiry failure without cookie installation, no pre-pair session-cookie authentication, and the narrow bearer path for protected HTTP smoke callers.
+- **Change pairing, session, or bearer behavior**: update `auth.rs`, `/pair` redirect/cookie handling, and route tests together; preserve token-free success redirect, one-time consumption, failure paths without redirects or cookie installation, no pre-pair session-cookie authentication, and the narrow bearer path for protected HTTP smoke callers.
 - **Change bind-mode guardrails**: update CLI vocabulary, config validation, and server tests together; preserve local/tunnel rejection for non-loopback hosts, public-mode owner-auth requirement, and the separation from browser Host/Origin authorization.
 - **Expose diagnostics**: add an authenticated route; do not expand `/healthz` beyond the minimal body contract.
 - **Change core resource vocabulary**: update `ids.rs`, `resources.rs`, public re-exports, and serde contract tests together; keep `workRoot` naming stable unless the dashboard spec and dependent API/fixture tickets are intentionally revised.
