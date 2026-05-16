@@ -157,10 +157,11 @@ dominant pane bodies. Pinned and opened concepts remain dashboard model
 concepts: durable surfaces such as agent and persistent terminal views appear as
 compact workbench tabs or chips, while transient or support surfaces such as
 editor, viewer, diff, diagnostics, logs/events, task view, and inspector
-surfaces appear as ordinary workbench tabs. Main instances are durable
-workRoot-local surfaces. Sub instances are view-only projections attached to a
-main instance through badges, popovers, cards, or drawers rather than
-independent top-level navigation rows.
+surfaces appear as ordinary workbench tabs. The compact header preserves that
+pinned/opened structure without returning to large explanatory rows. Main
+instances are durable workRoot-local surfaces. Sub instances are view-only
+projections attached to a main instance through badges, popovers, cards, or
+drawers rather than independent top-level navigation rows.
 
 Layout attachment identity stays separate from daemon resource identity. Layout
 state records arrangement only; daemon APIs and `/servers/:serverId/...`

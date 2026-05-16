@@ -98,6 +98,7 @@ related:
 - Persisting workbench surface kind, row policy, or daemon ids in layout JSON; those belong to the dashboard registry/resource model and make restored layouts authoritative over daemon state.
 - Returning raw Dockview panel or group handles from dashboard workbench APIs; that bypasses the adapter policy for detach, placement, floating/popout, and later PTY/TUI resize constraints.
 - Treating visible tab drag/drop as raw Dockview state; the current shell needs dashboard-owned pane order and active-pane reconciliation so cross-split moves, empty split drop targets, and resource refreshes do not snap tabs back or show stale bodies.
+- Flattening pinned/durable and opened/transient surfaces into one undifferentiated visible tab row; the chrome should be compact, but it still preserves the pinned/opened structure.
 - Reintroducing mainInstance/subInstance rows as default left-nav hierarchy; that competes with the workRoot workbench and breaks the workspace/workRoot navigation model.
 - Opening duplicate workbench attachments because the caller keys by display title, raw Dockview id, or daemon process id alone instead of a dashboard logical surface key.
 - Adding new dashboard UI with raw light palette values, rounded cards, decorative shadows, or gradients instead of the semantic dark tokens and square operational style.

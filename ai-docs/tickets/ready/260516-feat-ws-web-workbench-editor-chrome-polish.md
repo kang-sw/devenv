@@ -122,6 +122,23 @@ boundaries. Verification passed:
 `cd ws-dashboard/frontend && npm run test:routes && npm run test:workbench &&
 npm run build`.
 
+#### Edition (c79d8a7) - 2026-05-16
+
+Fixed a follow-up UI contract gap found during dogfooding. The first Phase 1
+implementation removed the thick explanatory pinned/opened rows but also
+flattened all tabs into one undifferentiated row. The follow-up restores a
+compact structured header: durable/pinned surfaces and opened/transient
+surfaces render in separate thin lanes without returning to the previous heavy
+row presentation. Main agent and persistent terminal remain pinned by default;
+viewer, editor/detail, task, diagnostics, and inspector remain opened by
+default.
+
+The same pass fixed the side-by-side split layout so pane bodies fill the
+available height and the footer/status row sits at the bottom instead of leaving
+awkward unused space. Verification passed:
+`cd ws-dashboard/frontend && npm run test:routes && npm run test:workbench &&
+npm run build`.
+
 ### Phase 2: Visual Contract Verification
 
 Add or run visual verification that checks the product contract, not just
