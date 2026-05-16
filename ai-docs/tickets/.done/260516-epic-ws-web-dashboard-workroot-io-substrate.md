@@ -8,6 +8,7 @@ related:
   260516-feat-ws-web-instance-event-stream: completed event envelope and stream scaffold prerequisite
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web dashboard workRoot IO substrate
@@ -51,16 +52,19 @@ The milestone should establish:
 
 ## Child Tickets
 
-- `260516-feat-ws-web-workroot-file-navigation` - todo; authenticated
+- `260516-feat-ws-web-workroot-file-navigation` - done; authenticated
   workRoot file listing and a left-nav file explorer draft.
-- `260516-feat-ws-web-readonly-text-pane` - todo; authenticated read-only text
+- `260516-feat-ws-web-readonly-text-pane` - done; authenticated read-only text
   file open path and workbench text pane placement.
-- `260516-feat-ws-web-terminal-session-substrate` - todo; daemon-owned PTY
+- `260516-feat-ws-web-terminal-session-substrate` - done; daemon-owned PTY
   terminal session lifecycle, I/O forwarding, refresh persistence, and close
   termination.
-- `260516-feat-ws-web-workroot-io-workbench-integration` - todo; combine file
+- `260516-feat-ws-web-workroot-io-workbench-integration` - done; combine file
   panes and terminal sessions with workbench placement, restore, and dogfood
   verification.
+- `260516-bug-ws-web-dashboard-live-resource-api-connection` - done; connect
+  the primary dashboard resource API and browser resource model to real opened
+  workRoots instead of leaving the first screen backed by mock resources.
 
 ## Cross-Child Decisions
 
@@ -93,11 +97,42 @@ The milestone should establish:
 
 - Done: child tickets let an owner open a workRoot, browse files, open
   read-only text panes, create live terminal sessions, refresh without losing
-  terminal sessions, explicitly close terminal sessions, and verify the flow
-  through the daemon-served frontend.
+  terminal sessions, explicitly close terminal sessions, load the primary
+  dashboard resource tree from real opened workRoots rather than mock fixtures,
+  and verify the flow through the daemon-served frontend.
 - Dropped: a different near-term usability direction replaces the workRoot
   filesystem and terminal substrate, or live PTY support proves unsuitable for
   the intended dashboard MVP.
 - Deferred: write-back editing, hardcoded agent presets, named-agent controls,
   terminal multiplexing depth, detached terminal restore UX, and full IDE file
   management belong to later milestones.
+
+### Result (d9d4bfbf) - 2026-05-16
+
+Completed the workRoot IO substrate milestone. The dashboard now supports
+selected-workRoot file navigation, read-only text panes, daemon-owned terminal
+sessions with I/O and close termination, and cross-surface workbench integration
+with daemon-served dogfood verification.
+
+The flow remains intentionally read-only for files, avoids hardcoded agent
+presets, keeps terminal lifecycle daemon-owned, and records the remaining visual
+breakpoint dogfood gap as an explicit tooling blocker rather than claiming
+unverified screenshots.
+
+### Reopen Note - 2026-05-16
+
+The milestone was reopened after review found a product-flow acceptance gap:
+`GET /api/dashboard/resources` still used the mock dashboard provider as the
+frontend's initial resource source. The implemented file, text-pane, and
+terminal substrates are retained, but the final child ticket must make real
+opened workRoots the primary dashboard resource model before this epic can close
+again.
+
+#### Edition (80bc4e42) - 2026-05-16
+
+The reopened completion gap is closed. Normal dashboard resource loads now use
+live opened workRoot state, the frontend can open a workRoot through a minimal
+path-input control and refresh the canonical resource tree, and daemon-served
+dogfood verifies the default resource load, live file/read flow, and terminal
+flow against a real opened workRoot with mock fixtures absent from production
+resource state.

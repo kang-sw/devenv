@@ -113,6 +113,12 @@ instances, sub instances, stale/error/loading states, and visible action hints.
 Protected API route tests verify that fixture-backed dashboard data remains
 behind the owner-auth boundary.
 
+Normal daemon operation uses live opened workRoot state as the primary resource
+authority for authenticated dashboard resource loads. Fixture-backed resources
+remain available for deterministic tests and explicit fixture contexts, but the
+production resources endpoint does not silently return the mock workspace when
+no workRoot has been opened. {#260516-ws-web-dashboard-live-resource-authority}
+
 ## Protected Frontend Shell {#260516-ws-web-dashboard-protected-frontend-shell}
 
 The dashboard daemon serves the first React/TypeScript/Vite browser shell
@@ -163,6 +169,11 @@ instances are durable workRoot-local surfaces. Sub instances are view-only
 projections attached to a main instance through badges, popovers, cards, or
 drawers rather than independent top-level navigation rows.
 
+Workbench panes do not add a second generic title/status chrome below the
+pinned/opened tab rows. The tab rows provide visible surface identity and
+selection, while pane-local content or controls provide any useful
+surface-specific status.
+
 Layout attachment identity stays separate from daemon resource identity. Layout
 state records arrangement only; daemon APIs and `/servers/:serverId/...`
 browser routes keep authoritative server, workspace, workRoot, and instance
@@ -194,6 +205,38 @@ geometry, hairline, and component reference rather than as a default light
 palette. Desktop and narrow viewport screenshot checks make the resulting
 shell inspectable before larger workbench surfaces depend on it.
 
+## Browser UI Acceptance Gate {#260516-ws-web-dashboard-browser-ui-acceptance-gate}
+
+Dashboard frontend changes that affect visible browser behavior provide a
+browser-level acceptance gate against the daemon-served production frontend
+after owner pairing. The gate exercises the workRoot UI as a user sees it:
+opening a real workRoot, browsing files, creating terminals, switching terminal
+tabs, sending terminal input, observing terminal output, and checking pane
+layout at recorded viewport sizes.
+
+The frontend package exposes this gate through `npm run test:browser`. The gate
+builds the production frontend, serves it through the dashboard daemon, pairs
+as owner through the startup pairing URL, and records textual evidence plus
+regenerable screenshot artifacts outside tracked source.
+
+The gate includes viewport containment checks for long file explorer content:
+expanding a large tree must not make the top-level document scroll or push the
+dashboard footer out of view, and overflow must stay inside the explorer region.
+
+The browser gate proves the live terminal path uses an owner-authenticated
+WebSocket connection instead of periodic output polling while connected. It
+covers owner pairing, WebSocket connection, input fidelity, ANSI/control
+rendering, resize behavior, close-as-terminate, reconnect or reload
+reconstruction, and timing evidence showing local keystroke echo is no longer
+bounded by the former polling interval.
+{#260516-ws-web-dashboard-terminal-websocket-browser-gate}
+
+Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
+fixture-only dogfood do not by themselves close UI-facing dashboard work. When
+automated browser tooling cannot run, the verification artifact records exact
+manual browser steps, viewports, screenshot or trace paths when generated, and
+pass/fail observations.
+
 ## Local WorkRoot Discovery Provider {#260516-ws-web-dashboard-local-workroot-discovery-provider}
 
 The dashboard daemon provides a live local discovery provider that maps opened
@@ -217,6 +260,195 @@ directories or Git-backed directories into the dashboard model.
 The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
+
+After an authenticated owner opens a workRoot, the browser-visible resource
+tree refreshes from the canonical dashboard resources endpoint and selects the
+real opened workRoot instead of continuing to present mock workspace state.
+Open-workRoot responses may update the view immediately, but the resources
+endpoint remains the canonical source for subsequent refreshes.
+{#260516-ws-web-dashboard-open-workroot-resource-refresh}
+
+## WorkRoot File Listing API {#260516-ws-web-dashboard-workroot-file-listing-api}
+
+The dashboard exposes an authenticated API for listing directories below a
+selected workRoot. Responses identify children by daemon-owned workRoot-relative
+location data rather than raw host paths, distinguish file and directory
+entries, expose basic readability or preview eligibility when cheap, and report
+unreadable or inaccessible locations without mutating the filesystem.
+
+Listing requests remain rooted below the selected workRoot. Traversal attempts,
+missing paths, files requested as directories, and inaccessible locations return
+bounded unavailable or error states without exposing host paths as browser route
+identity.
+
+## WorkRoot File Explorer {#260516-ws-web-dashboard-workroot-file-explorer}
+
+The dashboard browser shell renders a selected-workRoot file explorer in the
+lower portion of the left navigation area. The explorer supports directory
+expansion, explicit refresh, loading, empty, and error states while keeping
+server, workspace, and workRoot identity visible above it.
+
+The first explorer surface is navigation-only. It does not offer delete,
+rename, move, copy, chmod, recursive folder deletion, or broad file-manager
+operations. Readable file open actions may hand off to read-only text pane
+behavior when that later surface exists; until then, the explorer does not imply
+write-back editing.
+
+The explorer presents conventional tree/list affordances that visibly
+distinguish files from directories, make expansion and refresh controls
+recognizable, keep the selected workRoot identity visible, and avoid hidden or
+nonstandard interactions while staying read-only. Long expanded trees scroll
+inside the explorer region instead of growing the whole browser document.
+{#260516-ws-web-dashboard-file-explorer-conventional-affordance}
+
+## Read-Only File API {#260516-ws-web-dashboard-readonly-file-api}
+
+The dashboard exposes an authenticated API for reading previewable text files
+below an opened workRoot. Callers address files by opaque `workRootId` and
+workRoot-relative location data from the file listing API. The route rejects
+traversal, missing files, directories, unreadable paths, unsupported binary
+content, and oversized files with bounded unavailable states.
+
+Successful responses include read-only text content and enough metadata for the
+browser to render a stable viewer title, language or extension hint when cheap,
+size information, and read-only status without exposing absolute host paths.
+
+## Read-Only Text Pane {#260516-ws-web-dashboard-readonly-text-pane}
+
+The dashboard workbench can open a read-only text pane for a previewable file
+under the selected workRoot. The pane renders file content as an inspectable
+viewer/editor body and clearly indicates read-only status. Opening the same
+file focuses the existing logical pane instead of duplicating it by default.
+
+The text pane does not provide save, dirty-state, formatting, rename, delete,
+move, copy, conflict handling, or language-server behavior.
+
+## File Open Placement Policy {#260516-ws-web-dashboard-file-open-placement-policy}
+
+File-open commands from the workRoot file explorer use workbench placement
+policy that prefers the second or later split group when available, so active
+terminal or future agent work is not displaced. Placement remains browser
+arrangement state; file content authorization and preview availability remain
+daemon-owned.
+
+## Terminal Registry And PTY Spawn {#260516-ws-web-dashboard-terminal-registry-pty-spawn}
+
+The dashboard daemon owns shell terminal sessions scoped to opened workRoots.
+Authenticated owners can create and list live terminal sessions by opaque
+terminal ids. Spawns run in the selected workRoot directory and terminal ids are
+not process ids or host paths.
+
+Live terminal sessions persist across browser refresh because the daemon owns
+their lifecycle. Browser arrangement state controls where sessions are shown,
+not whether the daemon session exists.
+
+## Terminal I/O Transport {#260516-ws-web-dashboard-terminal-io-transport}
+
+The dashboard exposes authenticated terminal output, input, status, and resize
+transport for daemon-owned PTY sessions. Unauthenticated callers are rejected
+before stream or upgrade acceptance. Resize forwarding remains bounded and does
+not continuously rewrite logical terminal dimensions during visual split drag.
+
+Live browser terminal I/O uses an owner-authenticated WebSocket as the primary
+transport for daemon-owned PTY sessions. The WebSocket attaches to existing
+opaque terminal ids after owner auth, carries ordered PTY output, status, and
+exit data to the browser, and carries raw input plus bounded resize requests
+back to the daemon. HTTP output transport remains available for initial replay,
+reload reconstruction, deterministic tests, or fallback, but the normal
+connected xterm path does not depend on periodic output polling.
+{#260516-ws-web-dashboard-terminal-websocket-transport}
+
+## Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
+
+The dashboard workbench renders daemon-owned terminal sessions in terminal panes
+for the selected workRoot. Creating a terminal opens or focuses a terminal pane,
+and refresh can reconstruct visible terminal panes from daemon live session
+state plus browser arrangement where available.
+
+The terminal pane is a shell terminal substrate only; it does not hardcode
+Codex, Claude, or other agent presets.
+
+Terminal tab labels behave as selectable workbench tabs for every visible
+terminal session. Opening a real workRoot shows an explicit empty workbench
+state or a live daemon terminal surface, never a mock or placeholder terminal.
+Selecting a terminal focuses only that session, and terminal input and output
+do not cross between sessions.
+{#260516-ws-web-dashboard-terminal-tab-selection-and-empty-initial-state}
+
+## Browser Terminal Emulator Behavior {#260516-ws-web-dashboard-browser-terminal-emulator-behavior}
+
+The browser terminal pane behaves as a real terminal emulator surface for a
+daemon-owned PTY. PTY output is delivered into the terminal emulator so ANSI
+color and control sequences render as terminal behavior rather than raw text.
+Keyboard input originates from the focused emulator surface and reaches the
+corresponding daemon terminal session.
+
+The terminal fills the available workbench pane and fits or resizes from
+measured container dimensions while staying within the daemon PTY size
+contract. Resize forwarding remains bounded; visual split dragging does not
+continuously rewrite logical PTY dimensions.
+
+Terminal rendering prefers a Powerline/Nerd Font-capable monospace stack when
+available, with ordinary monospace fallbacks. HTTP polling is suppressed while a
+terminal WebSocket is connecting or connected; fallback polling avoids idle
+terminal state churn, discards stale in-flight poll results after socket attach
+or cursor advancement, and uses bounded per-terminal in-flight requests.
+
+The browser terminal emulator preserves byte-stream input behavior for ordinary
+shell editing and interactive control keys. Acceptance includes Backspace,
+left/right cursor movement, command history navigation, Ctrl-C, Ctrl-D or EOF
+where safe, Ctrl-L or clear-screen behavior, paste, and ordinary prompt editing
+inside a real shell.
+{#260516-ws-web-dashboard-terminal-websocket-input-fidelity}
+
+The terminal surface keeps scrolled output and alternate-screen/fullscreen TUI
+content within the visible terminal box: the active bottom row must remain
+fully visible, and fitted xterm rows are trimmed when the rendered screen would
+otherwise exceed the available surface.
+
+## Terminal Close Terminates Session {#260516-ws-web-dashboard-terminal-close-termination}
+
+Closing a terminal panel explicitly terminates its daemon-owned terminal
+session. The first terminal substrate keeps hidden detached restore UX absent;
+future confirmation or foreground-process checks may be added without changing
+the basic close-as-terminate contract.
+
+## WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
+
+The dashboard combines daemon-owned live terminal state, read-only file pane
+state, and browser workbench arrangement into one restore model for selected
+workRoots. Daemon state is authoritative for live terminal existence, while
+browser arrangement remains presentation state. File panes restore only when
+the file remains previewable; otherwise the pane shows an honest unavailable
+state.
+
+## WorkRoot IO Command And Placement Polish {#260516-ws-web-dashboard-workroot-io-command-placement-polish}
+
+WorkRoot IO commands use consistent command ids and placement behavior across
+file open, create terminal, focus existing surface, close terminal, and refresh.
+Logical targets that are already open focus existing surfaces rather than
+duplicating panes.
+
+## WorkRoot IO Dogfood Verification {#260516-ws-web-dashboard-workroot-io-dogfood-verification}
+
+The dashboard verifies the workRoot IO workflow through the daemon-served
+frontend: open/select a workRoot, browse files, open a read-only text pane,
+create and use a terminal, refresh without losing the terminal, close the
+terminal, and inspect desktop and narrow layouts. Verification records exact
+tooling blockers when a check cannot run.
+
+WorkRoot IO acceptance verification starts from the default dashboard resource
+load, opens or selects a real workRoot, and proves the browser-visible resource
+tree, file navigation, read-only text pane, and terminal session all operate
+against that real workRoot rather than mock fixtures.
+{#260516-ws-web-dashboard-live-resource-dogfood-verification}
+
+WorkRoot IO dogfood includes browser-level evidence from the daemon-served
+production frontend after owner pairing. The artifact records the daemon
+command, browser automation or manual browser steps, viewport sizes, terminal
+commands used to verify color/control handling, generated screenshot or trace
+paths when present, and explicit pass/fail checks for the known UI failures.
+{#260516-ws-web-dashboard-browser-workroot-io-dogfood-evidence}
 
 ## Instance Event Envelope Fixtures {#260516-ws-web-dashboard-instance-event-envelope-fixtures}
 

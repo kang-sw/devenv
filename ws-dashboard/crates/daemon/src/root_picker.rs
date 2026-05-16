@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use axum::extract::Query;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use ws_dashboard_core::DashboardResourcesView;
 
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
-use crate::resources::DashboardResourcesProvider;
+use crate::resources::{live_dashboard_resources, DashboardResourcesProvider};
+use crate::router::AppState;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,9 +84,13 @@ pub async fn create_empty_directory(Json(request): Json<CreateEmptyDirectoryRequ
     }
 }
 
-pub async fn open_work_root(Json(request): Json<OpenWorkRootRequest>) -> Response {
+pub async fn open_work_root(
+    State(state): State<AppState>,
+    Json(request): Json<OpenWorkRootRequest>,
+) -> Response {
+    let requested_path = PathBuf::from(request.path);
     let provider = LocalDashboardResourcesProvider::new(vec![LocalWorkRootCandidate::new(
-        PathBuf::from(request.path),
+        requested_path.clone(),
     )]);
     let view = provider.dashboard_resources();
     let Some(work_root) = view
@@ -107,7 +112,15 @@ pub async fn open_work_root(Json(request): Json<OpenWorkRootRequest>) -> Respons
         );
     }
 
-    Json::<DashboardResourcesView>(view).into_response()
+    state
+        .opened_work_roots
+        .register(work_root.id.clone(), requested_path);
+
+    // CONTRACT: return the aggregated live view of every opened workRoot so the
+    // immediate open response is consistent with later GET /api/dashboard/resources
+    // refreshes. The single-candidate `view` above is only the Online gate.
+    let aggregated = live_dashboard_resources(&state.opened_work_roots);
+    Json::<DashboardResourcesView>(aggregated).into_response()
 }
 
 fn root_picker_view(path: &Path) -> Result<RootPickerView, String> {

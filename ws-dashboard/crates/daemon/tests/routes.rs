@@ -16,20 +16,28 @@
 //   endpoint behavior is considered.
 // - health output stays minimal and does not expose token, host paths, cache
 //   paths, Git roots, wsstate internals, or diagnostics.
-// - `/api/dashboard/resources` is protected and returns the same deterministic
-//   dashboard hierarchy contract that frontend work will consume.
+// - `/api/dashboard/resources` is protected and returns the live opened-workRoot
+//   resource view-model contract that frontend work consumes.
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
+
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
+use tokio::net::TcpListener;
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::router::{build_router, AppState};
+use ws_dashboard_daemon::terminal::TerminalRegistry;
+use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -37,6 +45,8 @@ fn app_state() -> AppState {
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
+        opened_work_roots: OpenedWorkRoots::default(),
+        terminals: TerminalRegistry::default(),
     }
 }
 
@@ -47,6 +57,8 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
             ..ServeConfig::default_loopback()
         },
         auth: OwnerAuthState::new_ephemeral(),
+        opened_work_roots: OpenedWorkRoots::default(),
+        terminals: TerminalRegistry::default(),
     }
 }
 
@@ -261,6 +273,8 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
     let expired_state = AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
+        opened_work_roots: OpenedWorkRoots::default(),
+        terminals: TerminalRegistry::default(),
     };
     let expired_token = expired_state
         .auth
@@ -436,11 +450,10 @@ async fn dashboard_resources_api_is_owner_authenticated() {
 }
 
 #[tokio::test]
-async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
-    // CONTRACT: paired owners receive deterministic JSON with server,
-    // workspaces, workRoots, mainInstances, subInstances, state, compactable,
-    // and action hint fields. Parse with serde_json and assert contract field
-    // names rather than depending on private Rust structs.
+async fn dashboard_resources_api_returns_empty_live_view_before_open() {
+    // CONTRACT: with no workRoot opened the canonical route returns an honest
+    // empty live view (server present, `workspaces: []`) and never the static
+    // mock fixture workspaces.
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
@@ -463,61 +476,77 @@ async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
         .expect("dashboard resources body bytes");
     let value: serde_json::Value =
         serde_json::from_slice(&body).expect("dashboard resources JSON body");
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/dashboard_resources.json"))
-            .expect("dashboard resources fixture JSON");
-    assert_eq!(value, fixture);
 
     assert!(value.get("server").is_some());
     assert_eq!(value["server"]["id"], "server-local");
     assert_eq!(value["server"]["state"]["loading"], false);
     assert_eq!(value["server"]["state"]["stale"], false);
-    assert_eq!(value["server"]["actions"][0]["id"], "refresh");
 
     let workspaces = value["workspaces"].as_array().expect("workspaces array");
-    assert_eq!(workspaces.len(), 2);
-    assert!(value.get("work_roots").is_none());
-
-    let devenv = &workspaces[0];
-    assert_eq!(devenv["id"], "workspace-devenv");
-    assert_eq!(devenv["compactable"], false);
-    assert!(devenv.get("workRoots").is_some());
-    assert!(devenv.get("work_roots").is_none());
-
-    let work_roots = devenv["workRoots"].as_array().expect("workRoots array");
-    assert_eq!(work_roots.len(), 3);
-    assert_eq!(work_roots[0]["kind"], "gitPrimaryRoot");
-    assert_eq!(work_roots[1]["kind"], "gitLinkedWorktree");
-    assert_eq!(work_roots[2]["kind"], "plainDirectory");
-    assert_eq!(work_roots[2]["status"], "offline");
-    assert_eq!(work_roots[2]["state"]["error"], "workRoot is offline");
-
-    let main_instance = &work_roots[0]["mainInstances"][0];
-    assert_eq!(main_instance["role"], "main");
-    assert_eq!(
-        main_instance["resourcePath"]["workRootId"],
-        "root-devenv-primary"
+    assert!(
+        workspaces.is_empty(),
+        "empty live view exposes no workspaces before any open"
     );
-    assert!(main_instance.get("main_instances").is_none());
-    assert!(main_instance.get("subInstances").is_some());
-    assert!(main_instance.get("sub_instances").is_none());
-    assert_eq!(main_instance["actions"][0]["label"], "Open");
-
-    let sub_instance = &main_instance["subInstances"][0];
-    assert_eq!(sub_instance["role"], "sub");
-    assert_eq!(sub_instance["interactionMode"], "delegated");
-    assert_eq!(sub_instance["state"]["stale"], true);
-
-    let singleton = &workspaces[1];
-    assert_eq!(singleton["id"], "workspace-notes");
-    assert_eq!(singleton["compactable"], true);
-    assert_eq!(singleton["workRoots"][0]["kind"], "plainDirectory");
-    assert_eq!(singleton["workRoots"][0]["status"], "inaccessible");
-    assert_eq!(singleton["workRoots"][0]["compactable"], true);
-    assert_eq!(
-        singleton["workRoots"][0]["mainInstances"][0]["kind"],
-        "viewer"
+    assert!(
+        !body_contains_workspace(&value, "workspace-devenv"),
+        "live route must not return the mock fixture workspace"
     );
+}
+
+#[tokio::test]
+async fn dashboard_resources_api_includes_opened_work_root() {
+    // CONTRACT: the brief's required 1->2->3 sequence. After an owner opens a
+    // real workRoot, GET /api/dashboard/resources includes that opened workRoot
+    // and not only the static mock fixture workspace.
+    let root = temp_fixture_path("live-resources");
+    fs::create_dir_all(&root).expect("create live resources workRoot");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated dashboard resources request"),
+        )
+        .await
+        .expect("authenticated dashboard resources response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("dashboard resources body bytes");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("dashboard resources JSON body");
+
+    assert_eq!(value["server"]["id"], "server-local");
+    assert!(
+        work_root_ids(&value).iter().any(|id| id == &work_root_id),
+        "opened workRoot {work_root_id} must appear in the live resources view"
+    );
+    assert!(
+        !body_contains_workspace(&value, "workspace-devenv"),
+        "live route must not return the mock fixture workspace"
+    );
+
+    // CONTRACT: workRoots stay camelCase in the serialized view-model.
+    let workspace = &value["workspaces"][0];
+    assert!(
+        workspace.get("workRoots").is_some(),
+        "workspace exposes camelCase workRoots"
+    );
+    assert!(
+        workspace.get("work_roots").is_none(),
+        "workspace must not leak snake_case work_roots"
+    );
+
+    remove_static_fixture(&root);
 }
 
 #[tokio::test]
@@ -699,6 +728,1106 @@ async fn root_picker_can_open_existing_directory_into_dashboard_model() {
         "openRoot"
     );
 
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn open_work_root_returns_aggregated_view_of_all_opened_roots() {
+    // CONTRACT: open_work_root returns the aggregated live view of every opened
+    // workRoot, so the immediate open response matches the canonical resources
+    // route and does not drop previously opened roots.
+    let first = temp_fixture_path("open-aggregate-first");
+    let second = temp_fixture_path("open-aggregate-second");
+    fs::create_dir_all(&first).expect("create first workRoot");
+    fs::create_dir_all(&second).expect("create second workRoot");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let first_id = open_work_root_for_test(app.clone(), cookie.as_str(), &first).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": second.display().to_string() }).to_string(),
+                ))
+                .expect("open second workRoot request"),
+        )
+        .await
+        .expect("open second workRoot response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("open second workRoot body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("open JSON");
+    let ids = work_root_ids(&value);
+    assert_eq!(
+        ids.len(),
+        2,
+        "aggregated view includes both opened workRoots"
+    );
+    assert!(
+        ids.iter().any(|id| id == &first_id),
+        "aggregated view keeps the previously opened workRoot {first_id}"
+    );
+
+    remove_static_fixture(&first);
+    remove_static_fixture(&second);
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-test/files")
+                .body(Body::empty())
+                .expect("unauthenticated workRoot files request"),
+        )
+        .await
+        .expect("unauthenticated workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_succeeds_after_opening_work_root() {
+    let root = temp_fixture_path("work-root-files");
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(root.join("README.md"), "hello\n").expect("write readme");
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("write main");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let open_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": root.display().to_string()
+                    })
+                    .to_string(),
+                ))
+                .expect("open workRoot request"),
+        )
+        .await
+        .expect("open workRoot response");
+    assert_eq!(open_response.status(), StatusCode::OK);
+    let open_body = axum::body::to_bytes(open_response.into_body(), 64 * 1024)
+        .await
+        .expect("open workRoot body bytes");
+    let open_value: serde_json::Value = serde_json::from_slice(&open_body).expect("open JSON");
+    let work_root_id = open_value["workspaces"][0]["workRoots"][0]["id"]
+        .as_str()
+        .expect("workRoot id");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{work_root_id}/files"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("workRoot files request"),
+        )
+        .await
+        .expect("workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("workRoot files body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("workRoot files JSON");
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["path"], "");
+    assert_eq!(value["status"], "ok");
+    let entries = value["entries"].as_array().expect("entries array");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["name"], "src");
+    assert_eq!(entries[0]["path"], "src");
+    assert_eq!(entries[0]["kind"], "directory");
+    assert_eq!(entries[0]["readable"], true);
+    assert_eq!(entries[0]["previewEligible"], false);
+    assert_eq!(entries[1]["name"], "README.md");
+    assert_eq!(entries[1]["path"], "README.md");
+    assert_eq!(entries[1]["kind"], "file");
+    assert_eq!(entries[1]["readable"], true);
+    assert_eq!(entries[1]["previewEligible"], true);
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_rejects_traversal() {
+    let parent = temp_fixture_path("work-root-traversal");
+    let root = parent.join("root");
+    fs::create_dir_all(&root).expect("create root dir");
+    fs::write(parent.join("outside.txt"), "secret\n").expect("write outside file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files?path=../outside.txt"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("traversal workRoot files request"),
+        )
+        .await
+        .expect("traversal workRoot files response");
+
+    assert_ne!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("traversal response body bytes");
+    let body = String::from_utf8(body.to_vec()).expect("traversal body is UTF-8");
+    assert!(!body.contains("outside.txt"));
+    assert!(!body.contains(&parent.display().to_string()));
+
+    remove_static_fixture(&parent);
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_reports_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/files")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown workRoot files request"),
+        )
+        .await
+        .expect("unknown workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unknown body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown JSON");
+    assert_eq!(value["error"], "unknown workRoot");
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_reports_non_directory_target() {
+    let root = temp_fixture_path("work-root-non-dir");
+    fs::create_dir_all(&root).expect("create root dir");
+    fs::write(root.join("file.txt"), "not a directory\n").expect("write file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files?path=file.txt"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("non-directory workRoot files request"),
+        )
+        .await
+        .expect("non-directory workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("non-directory body bytes");
+    let body = String::from_utf8(body.to_vec()).expect("non-directory body is UTF-8");
+    assert!(body.contains("not a directory"));
+    assert!(!body.contains(&root.display().to_string()));
+
+    remove_static_fixture(&root);
+}
+
+fn work_root_ids(value: &serde_json::Value) -> Vec<String> {
+    value["workspaces"]
+        .as_array()
+        .map(|workspaces| {
+            workspaces
+                .iter()
+                .flat_map(|workspace| {
+                    workspace["workRoots"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .filter_map(|root| root["id"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn body_contains_workspace(value: &serde_json::Value, workspace_id: &str) -> bool {
+    value["workspaces"]
+        .as_array()
+        .map(|workspaces| {
+            workspaces
+                .iter()
+                .any(|workspace| workspace["id"] == workspace_id)
+        })
+        .unwrap_or(false)
+}
+
+async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -> String {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": root.display().to_string()
+                    })
+                    .to_string(),
+                ))
+                .expect("open workRoot request"),
+        )
+        .await
+        .expect("open workRoot response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("open workRoot body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("open JSON");
+    value["workspaces"][0]["workRoots"][0]["id"]
+        .as_str()
+        .expect("workRoot id")
+        .to_owned()
+}
+
+async fn create_terminal_for_test(app: axum::Router, cookie: &str, work_root_id: &str) -> String {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24, "title": "Test terminal" })
+                        .to_string(),
+                ))
+                .expect("create terminal request"),
+        )
+        .await
+        .expect("create terminal response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("create terminal body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("create terminal JSON");
+    value["terminalId"]
+        .as_str()
+        .expect("terminal id")
+        .to_owned()
+}
+
+async fn spawn_test_server(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("test server addr");
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("test server");
+    });
+    (format!("127.0.0.1:{}", addr.port()), handle)
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-test/files/read?path=README.md")
+                .body(Body::empty())
+                .expect("unauthenticated workRoot file read request"),
+        )
+        .await
+        .expect("unauthenticated workRoot file read response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_return_text_file() {
+    let root = temp_fixture_path("work-root-read");
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("write rust file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read?path=src/main.rs"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("read workRoot file request"),
+        )
+        .await
+        .expect("read workRoot file response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("read body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("read JSON");
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["path"], "src/main.rs");
+    assert_eq!(value["name"], "main.rs");
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["readOnly"], true);
+    assert_eq!(value["content"], "fn main() {}\n");
+    assert_eq!(value["sizeBytes"], 13);
+    assert_eq!(value["extension"], "rs");
+    assert_eq!(value["languageHint"], "rust");
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_reject_traversal_without_path_leak() {
+    let parent = temp_fixture_path("work-root-read-traversal");
+    let root = parent.join("root");
+    fs::create_dir_all(&root).expect("create root dir");
+    fs::write(parent.join("outside.txt"), "secret\n").expect("write outside file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read?path=../outside.txt"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("traversal read request"),
+        )
+        .await
+        .expect("traversal read response");
+
+    assert_ne!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("traversal body bytes");
+    let body = String::from_utf8(body.to_vec()).expect("traversal body is UTF-8");
+    assert!(!body.contains("outside.txt"));
+    assert!(!body.contains("secret"));
+    assert!(!body.contains(&parent.display().to_string()));
+
+    remove_static_fixture(&parent);
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_report_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/files/read?path=README.md")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown read request"),
+        )
+        .await
+        .expect("unknown read response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unknown body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown JSON");
+    assert_eq!(value["error"], "unknown workRoot");
+}
+
+#[tokio::test]
+async fn work_root_file_read_routes_report_missing_directory_binary_and_oversized() {
+    let root = temp_fixture_path("work-root-read-errors");
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(root.join("binary.bin"), b"hello\0world").expect("write binary");
+    fs::write(root.join("large.txt"), vec![b'a'; 600 * 1024]).expect("write large file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let no_path_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("read no path request"),
+        )
+        .await
+        .expect("read no path response");
+    assert_eq!(no_path_response.status(), StatusCode::BAD_REQUEST);
+    let no_path_body = axum::body::to_bytes(no_path_response.into_body(), 4096)
+        .await
+        .expect("no path body bytes");
+    let no_path_value: serde_json::Value =
+        serde_json::from_slice(&no_path_body).expect("no path JSON");
+    assert_eq!(no_path_value["error"], "file path is required");
+
+    for (path, status, error) in [
+        ("", StatusCode::BAD_REQUEST, "file path is required"),
+        ("missing.txt", StatusCode::NOT_FOUND, "file not found"),
+        ("src", StatusCode::BAD_REQUEST, "path is a directory"),
+        (
+            "binary.bin",
+            StatusCode::BAD_REQUEST,
+            "unsupported text file",
+        ),
+        ("large.txt", StatusCode::BAD_REQUEST, "file is too large"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/work-roots/{work_root_id}/files/read?path={path}"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("read error request"),
+            )
+            .await
+            .expect("read error response");
+        assert_eq!(response.status(), status, "{path}");
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("error body bytes");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("error JSON");
+        assert_eq!(value["error"], error, "{path}");
+        assert!(!String::from_utf8(body.to_vec())
+            .expect("body UTF-8")
+            .contains(&root.display().to_string()));
+    }
+
+    remove_static_fixture(&root);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn work_root_file_read_routes_report_unreadable_file() {
+    let root = temp_fixture_path("work-root-read-unreadable");
+    fs::create_dir_all(&root).expect("create root dir");
+    let unreadable = root.join("unreadable.txt");
+    fs::write(&unreadable, "hidden\n").expect("write unreadable file");
+    let mut permissions = fs::metadata(&unreadable)
+        .expect("unreadable metadata")
+        .permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(&unreadable, permissions).expect("make file unreadable");
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files/read?path=unreadable.txt"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unreadable read request"),
+        )
+        .await
+        .expect("unreadable read response");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unreadable body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unreadable JSON");
+    assert_eq!(value["error"], "file unavailable");
+
+    let mut permissions = fs::metadata(&unreadable)
+        .expect("unreadable metadata after read")
+        .permissions();
+    permissions.set_mode(0o644);
+    fs::set_permissions(&unreadable, permissions).expect("restore unreadable permissions");
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_terminal_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+    let requests = [
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/work-roots/root-local-test/terminals")
+            .body(Body::from("{}"))
+            .expect("create terminal request"),
+        Request::builder()
+            .uri("/api/dashboard/work-roots/root-local-test/terminals")
+            .body(Body::empty())
+            .expect("list terminal request"),
+        Request::builder()
+            .uri("/api/dashboard/terminals/term_test/output")
+            .body(Body::empty())
+            .expect("output terminal request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/terminals/term_test/input")
+            .body(Body::from("{}"))
+            .expect("input terminal request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/terminals/term_test/resize")
+            .body(Body::from("{}"))
+            .expect("resize terminal request"),
+        Request::builder()
+            .uri("/api/dashboard/terminals/term_test/socket")
+            .header(header::UPGRADE, "websocket")
+            .header(header::CONNECTION, "upgrade")
+            .header(header::HOST, "127.0.0.1")
+            .body(Body::empty())
+            .expect("terminal websocket request"),
+        Request::builder()
+            .method(Method::DELETE)
+            .uri("/api/dashboard/terminals/term_test")
+            .body(Body::empty())
+            .expect("close terminal request"),
+    ];
+
+    for request in requests {
+        let response = app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("unauthenticated terminal response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
+async fn work_root_terminal_routes_reject_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    for request in [
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/work-roots/root-local-missing/terminals")
+            .header(header::COOKIE, cookie.as_str())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .expect("unknown create terminal request"),
+        Request::builder()
+            .uri("/api/dashboard/work-roots/root-local-missing/terminals")
+            .header(header::COOKIE, cookie.as_str())
+            .body(Body::empty())
+            .expect("unknown list terminal request"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("unknown workRoot terminal response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("unknown terminal body bytes");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("unknown terminal JSON");
+        assert_eq!(value["error"], "unknown workRoot");
+    }
+}
+
+#[tokio::test]
+async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
+    let root = temp_fixture_path("terminal-root");
+    fs::create_dir_all(&root).expect("create terminal root dir");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let invalid_create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 0, "rows": 24 }).to_string(),
+                ))
+                .expect("invalid create terminal request"),
+        )
+        .await
+        .expect("invalid create terminal response");
+    assert_eq!(invalid_create.status(), StatusCode::BAD_REQUEST);
+
+    let create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24, "title": "Test terminal" })
+                        .to_string(),
+                ))
+                .expect("create terminal request"),
+        )
+        .await
+        .expect("create terminal response");
+    assert_eq!(create.status(), StatusCode::OK);
+    let create_body = axum::body::to_bytes(create.into_body(), 4096)
+        .await
+        .expect("create terminal body bytes");
+    let created: serde_json::Value =
+        serde_json::from_slice(&create_body).expect("create terminal JSON");
+    let terminal_id = created["terminalId"]
+        .as_str()
+        .expect("terminal id")
+        .to_owned();
+    assert!(terminal_id.starts_with("term_"));
+    assert_eq!(created["workRootId"], work_root_id);
+    assert_eq!(created["status"], "running");
+    assert_eq!(created["columns"], 80);
+    assert_eq!(created["rows"], 24);
+    assert!(!create_body
+        .windows(root.display().to_string().len())
+        .any(|window| window == root.display().to_string().as_bytes()));
+
+    let list = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("list terminal request"),
+        )
+        .await
+        .expect("list terminal response");
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body = axum::body::to_bytes(list.into_body(), 4096)
+        .await
+        .expect("list terminal body bytes");
+    let listed: serde_json::Value = serde_json::from_slice(&list_body).expect("list terminal JSON");
+    assert_eq!(listed.as_array().expect("terminal array").len(), 1);
+    assert_eq!(listed[0]["terminalId"], terminal_id);
+
+    let invalid_resize = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/resize"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 301, "rows": 30 }).to_string(),
+                ))
+                .expect("invalid resize terminal request"),
+        )
+        .await
+        .expect("invalid resize terminal response");
+    assert_eq!(invalid_resize.status(), StatusCode::BAD_REQUEST);
+
+    let resized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/resize"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 100, "rows": 30 }).to_string(),
+                ))
+                .expect("resize terminal request"),
+        )
+        .await
+        .expect("resize terminal response");
+    assert_eq!(resized.status(), StatusCode::OK);
+    let resized_body = axum::body::to_bytes(resized.into_body(), 4096)
+        .await
+        .expect("resize terminal body bytes");
+    let resized: serde_json::Value = serde_json::from_slice(&resized_body).expect("resize JSON");
+    assert_eq!(resized["columns"], 100);
+    assert_eq!(resized["rows"], 30);
+
+    let input = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/input"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": "printf ws-terminal-test\\n; exit\\n" })
+                        .to_string(),
+                ))
+                .expect("input terminal request"),
+        )
+        .await
+        .expect("input terminal response");
+    assert_eq!(input.status(), StatusCode::NO_CONTENT);
+
+    let mut output_text = String::new();
+    for _ in 0..40 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/terminals/{terminal_id}/output?after=0"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("output terminal request"),
+            )
+            .await
+            .expect("output terminal response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("output body bytes");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("output JSON");
+        output_text = value["chunks"]
+            .as_array()
+            .expect("chunks array")
+            .iter()
+            .filter_map(|chunk| chunk["data"].as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        if output_text.contains("ws-terminal-test") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(output_text.contains("ws-terminal-test"), "{output_text:?}");
+
+    let close = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("close terminal request"),
+        )
+        .await
+        .expect("close terminal response");
+    assert_eq!(close.status(), StatusCode::NO_CONTENT);
+
+    let input_after_close = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/input"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": "echo nope\n" }).to_string(),
+                ))
+                .expect("closed input request"),
+        )
+        .await
+        .expect("closed input response");
+    assert_eq!(input_after_close.status(), StatusCode::NOT_FOUND);
+
+    let resize_after_close = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/resize"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24 }).to_string(),
+                ))
+                .expect("closed resize request"),
+        )
+        .await
+        .expect("closed resize response");
+    assert_eq!(resize_after_close.status(), StatusCode::NOT_FOUND);
+
+    let output_after_close = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/output"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("closed output request"),
+        )
+        .await
+        .expect("closed output response");
+    assert_eq!(output_after_close.status(), StatusCode::NOT_FOUND);
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn terminal_websocket_attaches_for_owner_and_forwards_io_and_resize() {
+    let root = temp_fixture_path("terminal-websocket-root");
+    fs::create_dir_all(&root).expect("create terminal websocket root dir");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
+    let (addr, server) = spawn_test_server(app.clone()).await;
+
+    let mut request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
+        .into_client_request()
+        .expect("websocket request");
+    request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("connect terminal websocket");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({ "type": "resize", "columns": 100, "rows": 30 })
+                .to_string()
+                .into(),
+        ))
+        .await
+        .expect("send websocket resize");
+    for attempt in 0..40 {
+        let list = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/work-roots/{work_root_id}/terminals"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("list resized terminal request"),
+            )
+            .await
+            .expect("list resized terminal response");
+        assert_eq!(list.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(list.into_body(), 4096)
+            .await
+            .expect("list resized terminal body bytes");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("list resized JSON");
+        let listed = value.as_array().expect("listed terminals array");
+        let terminal = listed
+            .iter()
+            .find(|value| value["terminalId"] == terminal_id)
+            .expect("resized terminal listed");
+        if terminal["columns"] == 100 && terminal["rows"] == 30 {
+            break;
+        }
+        assert!(
+            attempt < 39,
+            "resize frame did not update daemon terminal size: {terminal:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({ "type": "input", "data": "printf WS-SOCKET-TEST\n; exit\n" })
+                .to_string()
+                .into(),
+        ))
+        .await
+        .expect("send websocket input");
+
+    let mut text = String::new();
+    for _ in 0..80 {
+        let Some(message) = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .expect("websocket message timeout")
+        else {
+            break;
+        };
+        let message = message.expect("websocket message");
+        let TungsteniteMessage::Text(payload) = message else {
+            continue;
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).expect("websocket frame JSON");
+        assert_eq!(value["terminalId"], terminal_id);
+        match value["type"].as_str() {
+            Some("output") => {
+                text.push_str(value["chunk"]["data"].as_str().expect("output data"));
+            }
+            Some("exit") => break,
+            Some("status") => {}
+            other => panic!("unexpected websocket frame type: {other:?}"),
+        }
+        if text.contains("WS-SOCKET-TEST") {
+            break;
+        }
+    }
+    assert!(text.contains("WS-SOCKET-TEST"), "{text:?}");
+
+    socket.close(None).await.expect("close websocket");
+    server.abort();
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn terminal_websocket_rejects_unknown_and_closed_terminals_before_upgrade() {
+    let root = temp_fixture_path("terminal-websocket-closed-root");
+    fs::create_dir_all(&root).expect("create terminal websocket closed root dir");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
+
+    let (addr, server) = spawn_test_server(app.clone()).await;
+    let mut unknown_request = format!("ws://{addr}/api/dashboard/terminals/term_missing/socket")
+        .into_client_request()
+        .expect("unknown websocket request");
+    unknown_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let error = tokio_tungstenite::connect_async(unknown_request)
+        .await
+        .expect_err("unknown websocket rejects");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+        other => panic!("unexpected unknown websocket error: {other}"),
+    }
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/input"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": "exit\n" }).to_string(),
+                ))
+                .expect("exit input request"),
+        )
+        .await
+        .expect("exit input response");
+    for _ in 0..40 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/terminals/{terminal_id}/output?after=0"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("poll exited terminal request"),
+            )
+            .await
+            .expect("poll exited terminal response");
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("poll exited terminal body bytes");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("poll output JSON");
+        if value["status"] != "running" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let mut closed_request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
+        .into_client_request()
+        .expect("closed websocket request");
+    closed_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let error = tokio_tungstenite::connect_async(closed_request)
+        .await
+        .expect_err("closed websocket rejects");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::GONE);
+        }
+        other => panic!("unexpected closed websocket error: {other}"),
+    }
+
+    server.abort();
     remove_static_fixture(&root);
 }
 

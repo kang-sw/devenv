@@ -83,10 +83,20 @@ The MVP should cover:
   for dark-first theme setup, token-free stable browser entry after pairing,
   server-scoped route identity, and a constrained VS Code-inspired workbench
   substrate.
-- `260516-epic-ws-web-dashboard-workroot-io-substrate` - todo; next milestone
-  for making opened workRoots usable through a workRoot-local file navigator,
-  read-only text panes, daemon-owned terminal sessions, and workbench restore
-  integration.
+- `260516-epic-ws-web-dashboard-workroot-io-substrate` - done; opened
+  workRoots now drive the primary dashboard resource API and browser resource
+  model, with file, read-only pane, terminal, refresh, and dogfood coverage.
+- `260516-bug-ws-web-dashboard-ui-acceptance-recovery` - done; recovered
+  browser-level dashboard usability before merging workRoot IO UI work,
+  including terminal tabs, live initial terminal state, real xterm behavior,
+  pane fill, file explorer affordance, and visual/browser acceptance evidence.
+- `260516-bug-ws-web-terminal-websocket-transport` - done; replaced polling
+  terminal I/O with an owner-authenticated WebSocket live path and recover
+  interactive input fidelity before considering dashboard terminal quality
+  mergeable.
+- `260516-bug-ws-web-terminal-cross-platform-portability` - todo; make
+  dashboard terminal shell selection, PTY commands, browser harness behavior,
+  and acceptance evidence honestly cross-platform or explicitly OS-scoped.
 
 ## Cross-Child Decisions
 

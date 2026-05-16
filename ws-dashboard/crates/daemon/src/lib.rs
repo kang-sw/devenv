@@ -9,3 +9,5 @@ pub mod resources;
 pub mod root_picker;
 pub mod router;
 pub mod server;
+pub mod terminal;
+pub mod work_root_files;

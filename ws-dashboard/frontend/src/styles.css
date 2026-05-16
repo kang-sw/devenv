@@ -85,13 +85,20 @@ button {
 }
 
 .app-shell {
-  min-height: 100vh;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--ws-color-canvas);
 }
 
 .shell-grid {
   display: grid;
-  min-height: 100vh;
+  min-height: 0;
+  flex: 1 1 auto;
+  /* A single viewport-bounded row clamps both columns: long explorer content
+     scrolls inside its own pane instead of growing the document. */
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(248px, 316px) minmax(380px, 1fr) minmax(248px, 336px);
   border-top: var(--ws-border-width-hairline) solid var(--ws-color-border);
   border-left: var(--ws-border-width-hairline) solid var(--ws-color-border);
@@ -108,6 +115,12 @@ button {
 .shell-panel-nav,
 .shell-panel-viewer {
   background: var(--ws-color-panel-subtle);
+}
+
+.shell-panel-nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .shell-panel-main {
@@ -196,6 +209,199 @@ button {
   height: calc(100vh - 48px);
   overflow: auto;
   padding: 8px;
+}
+
+.nav-stack {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.open-work-root {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--ws-space-04);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel);
+  padding: var(--ws-space-06) var(--ws-space-06) var(--ws-space-06) var(--ws-space-09);
+}
+
+.open-work-root-row {
+  display: flex;
+  gap: var(--ws-space-04);
+}
+
+.open-work-root-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  border-radius: var(--ws-radius-square);
+  background: var(--ws-color-panel-subtle);
+  color: var(--ws-color-text-primary);
+  padding: var(--ws-space-04) var(--ws-space-06);
+  font-size: var(--ws-font-size-02);
+}
+
+.open-work-root-input:focus-visible {
+  border-color: var(--ws-color-action);
+  outline: var(--ws-focus-ring);
+  outline-offset: -2px;
+}
+
+.resource-list-region {
+  height: auto;
+  min-height: 160px;
+  flex: 0 1 46%;
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+}
+
+.file-explorer {
+  display: flex;
+  min-height: 180px;
+  flex: 1 1 54%;
+  flex-direction: column;
+  background: var(--ws-color-panel-subtle);
+}
+
+.file-explorer-header {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-06);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  padding: var(--ws-space-06) var(--ws-space-06) var(--ws-space-06) var(--ws-space-09);
+}
+
+.file-explorer-heading {
+  min-width: 0;
+}
+
+.file-explorer-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-03);
+  font-weight: 600;
+  line-height: var(--ws-line-height-04);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-explorer-refresh {
+  flex: 0 0 auto;
+}
+
+.file-explorer-body {
+  min-height: 0;
+  /* Absorb the explorer height and scroll internally so an expanded tree never
+     pushes the document past the viewport. */
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: var(--ws-space-04);
+}
+
+.file-explorer-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: var(--ws-space-04);
+  border: 0;
+  border-left: var(--ws-border-width-state-rail) solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: var(--ws-space-03) var(--ws-space-04) var(--ws-space-03)
+    calc(var(--ws-space-04) + (var(--depth) * 14px));
+  font: inherit;
+  text-align: left;
+}
+
+.file-explorer-row:hover {
+  background: var(--ws-color-panel-hover);
+}
+
+.file-explorer-row:focus-visible {
+  outline: var(--ws-focus-ring);
+  outline-offset: -1px;
+}
+
+.file-explorer-row-selected {
+  border-left-color: var(--ws-color-action);
+  background: var(--ws-color-panel-selected);
+}
+
+.file-explorer-row-muted {
+  color: var(--ws-color-text-tertiary);
+}
+
+.file-explorer-twisty {
+  width: 12px;
+  flex: 0 0 auto;
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+  line-height: var(--ws-line-height-01);
+  text-align: center;
+}
+
+.file-explorer-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-03);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-explorer-row-directory .file-explorer-name {
+  font-weight: 600;
+}
+
+.file-explorer-row-muted .file-explorer-name {
+  color: var(--ws-color-text-tertiary);
+  font-weight: 400;
+}
+
+.file-explorer-row-status,
+.file-explorer-row-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+  line-height: var(--ws-line-height-01);
+  text-transform: uppercase;
+}
+
+.file-explorer-row-hint {
+  color: var(--ws-color-action);
+  opacity: 0;
+}
+
+.file-explorer-row:hover .file-explorer-row-hint,
+.file-explorer-row:focus-visible .file-explorer-row-hint,
+.file-explorer-row-selected .file-explorer-row-hint {
+  opacity: 1;
+}
+
+.file-explorer-state {
+  margin: var(--ws-space-04) 0;
+  border-left: var(--ws-border-width-state-rail) solid transparent;
+  color: var(--ws-color-text-tertiary);
+  padding: var(--ws-space-04) var(--ws-space-06) var(--ws-space-04)
+    calc(var(--ws-space-06) + (var(--depth, 0) * 14px));
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-03);
+  overflow-wrap: anywhere;
+}
+
+.file-explorer-state-error {
+  border-left-color: var(--ws-color-state-error-strong);
+  background: var(--ws-color-notice-error);
+  color: var(--ws-color-state-error-text);
 }
 
 .resource-group {
@@ -489,10 +695,20 @@ button {
 }
 
 @media (max-width: 960px) {
-  .shell-grid {
-    grid-template-columns: 1fr;
+  /* Stacked single-column layout returns to document scrolling: the panels can
+     no longer share one viewport-bounded row. */
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
   }
 
+  .shell-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
+  .nav-stack,
   .resource-list,
   .detail-body,
   .viewer-body {
@@ -501,6 +717,10 @@ button {
   }
 
   .shell-panel {
+    min-height: 220px;
+  }
+
+  .file-explorer {
     min-height: 220px;
   }
 }
@@ -702,7 +922,7 @@ button {
 }
 
 .workbench-tab-active {
-  border-bottom-color: var(--ws-color-accent);
+  border-bottom-color: var(--ws-color-action);
   background: var(--ws-color-panel);
   color: var(--ws-color-text-primary);
 }
@@ -729,7 +949,7 @@ button {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   background: var(--ws-color-panel);
 }
 
@@ -798,6 +1018,85 @@ button {
   content: "·";
   margin-left: 6px;
   color: var(--ws-color-text-disabled);
+}
+
+.readonly-text-pane {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.readonly-text-pane-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ws-space-08);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-subtle);
+  padding: var(--ws-space-07) var(--ws-space-08);
+}
+
+.readonly-text-pane-title-block {
+  min-width: 0;
+}
+
+.readonly-text-pane-title,
+.readonly-text-pane-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readonly-text-pane-title {
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-03);
+  font-weight: 600;
+  line-height: var(--ws-line-height-04);
+}
+
+.readonly-text-pane-path {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-03);
+}
+
+.readonly-text-pane-badges {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ws-space-03);
+}
+
+.readonly-text-content {
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  color: var(--ws-color-text-primary);
+  background: var(--ws-color-panel);
+  padding: var(--ws-space-09);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-04);
+  white-space: pre;
+}
+
+.readonly-text-pane-state {
+  margin: var(--ws-space-09);
+  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-action);
+  background: var(--ws-color-notice-info);
+  color: var(--ws-color-text-secondary);
+  padding: var(--ws-space-08);
+  font-size: var(--ws-font-size-03);
+  line-height: var(--ws-line-height-05);
+  overflow-wrap: anywhere;
+}
+
+.readonly-text-pane-error {
+  border-left-color: var(--ws-color-state-error-strong);
+  background: var(--ws-color-notice-error);
+  color: var(--ws-color-state-error-text);
 }
 
 .resource-summary {
@@ -890,4 +1189,75 @@ button {
   padding: 0 8px 7px 28px;
   font-size: var(--ws-font-size-01);
   line-height: var(--ws-line-height-01);
+}
+
+
+/* The terminal surface is a real emulator and fills the workbench pane body. */
+.workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* The shared workbench shell always renders `<p>{activePane.detail}</p>` at the
+   top of the pane body; for a full-bleed terminal that detail line is
+   suppressed so the emulator surface owns the whole pane body. */
+.workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-body > p {
+  display: none;
+}
+
+.workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-content {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin-top: 0;
+}
+
+.terminal-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  background: var(--ws-color-canvas);
+}
+
+.terminal-surface {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border: var(--ws-space-04) solid transparent;
+  background: var(--ws-color-canvas);
+  padding: 0;
+}
+
+.terminal-surface .xterm {
+  height: 100%;
+}
+
+.terminal-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-04);
+  border-top: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-subtle);
+  padding: var(--ws-space-04) var(--ws-space-06);
+}
+
+.terminal-status-line {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-font-size-01);
+  line-height: var(--ws-line-height-01);
+  text-transform: uppercase;
+}
+
+.terminal-error {
+  flex: 0 0 auto;
+  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-state-error-strong);
+  background: var(--ws-color-notice-error);
+  color: var(--ws-color-state-error-text);
+  padding: var(--ws-space-06);
 }
