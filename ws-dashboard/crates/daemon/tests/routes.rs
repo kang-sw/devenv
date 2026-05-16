@@ -30,6 +30,7 @@ use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::router::{build_router, AppState};
+use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -37,6 +38,7 @@ fn app_state() -> AppState {
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
+        opened_work_roots: OpenedWorkRoots::default(),
     }
 }
 
@@ -47,6 +49,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
             ..ServeConfig::default_loopback()
         },
         auth: OwnerAuthState::new_ephemeral(),
+        opened_work_roots: OpenedWorkRoots::default(),
     }
 }
 
@@ -261,6 +264,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
     let expired_state = AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
+        opened_work_roots: OpenedWorkRoots::default(),
     };
     let expired_token = expired_state
         .auth
@@ -700,6 +704,222 @@ async fn root_picker_can_open_existing_directory_into_dashboard_model() {
     );
 
     remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-test/files")
+                .body(Body::empty())
+                .expect("unauthenticated workRoot files request"),
+        )
+        .await
+        .expect("unauthenticated workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_succeeds_after_opening_work_root() {
+    let root = temp_fixture_path("work-root-files");
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(root.join("README.md"), "hello\n").expect("write readme");
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("write main");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let open_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": root.display().to_string()
+                    })
+                    .to_string(),
+                ))
+                .expect("open workRoot request"),
+        )
+        .await
+        .expect("open workRoot response");
+    assert_eq!(open_response.status(), StatusCode::OK);
+    let open_body = axum::body::to_bytes(open_response.into_body(), 64 * 1024)
+        .await
+        .expect("open workRoot body bytes");
+    let open_value: serde_json::Value = serde_json::from_slice(&open_body).expect("open JSON");
+    let work_root_id = open_value["workspaces"][0]["workRoots"][0]["id"]
+        .as_str()
+        .expect("workRoot id");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{work_root_id}/files"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("workRoot files request"),
+        )
+        .await
+        .expect("workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("workRoot files body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("workRoot files JSON");
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["path"], "");
+    assert_eq!(value["status"], "ok");
+    let entries = value["entries"].as_array().expect("entries array");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["name"], "src");
+    assert_eq!(entries[0]["path"], "src");
+    assert_eq!(entries[0]["kind"], "directory");
+    assert_eq!(entries[0]["readable"], true);
+    assert_eq!(entries[0]["previewEligible"], false);
+    assert_eq!(entries[1]["name"], "README.md");
+    assert_eq!(entries[1]["path"], "README.md");
+    assert_eq!(entries[1]["kind"], "file");
+    assert_eq!(entries[1]["readable"], true);
+    assert_eq!(entries[1]["previewEligible"], true);
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_rejects_traversal() {
+    let parent = temp_fixture_path("work-root-traversal");
+    let root = parent.join("root");
+    fs::create_dir_all(&root).expect("create root dir");
+    fs::write(parent.join("outside.txt"), "secret\n").expect("write outside file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files?path=../outside.txt"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("traversal workRoot files request"),
+        )
+        .await
+        .expect("traversal workRoot files response");
+
+    assert_ne!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("traversal response body bytes");
+    let body = String::from_utf8(body.to_vec()).expect("traversal body is UTF-8");
+    assert!(!body.contains("outside.txt"));
+    assert!(!body.contains(&parent.display().to_string()));
+
+    remove_static_fixture(&parent);
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_reports_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/files")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown workRoot files request"),
+        )
+        .await
+        .expect("unknown workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unknown body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown JSON");
+    assert_eq!(value["error"], "unknown workRoot");
+}
+
+#[tokio::test]
+async fn work_root_file_listing_routes_reports_non_directory_target() {
+    let root = temp_fixture_path("work-root-non-dir");
+    fs::create_dir_all(&root).expect("create root dir");
+    fs::write(root.join("file.txt"), "not a directory\n").expect("write file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/files?path=file.txt"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("non-directory workRoot files request"),
+        )
+        .await
+        .expect("non-directory workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("non-directory body bytes");
+    let body = String::from_utf8(body.to_vec()).expect("non-directory body is UTF-8");
+    assert!(body.contains("not a directory"));
+    assert!(!body.contains(&root.display().to_string()));
+
+    remove_static_fixture(&root);
+}
+
+async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -> String {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": root.display().to_string()
+                    })
+                    .to_string(),
+                ))
+                .expect("open workRoot request"),
+        )
+        .await
+        .expect("open workRoot response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("open workRoot body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("open JSON");
+    value["workspaces"][0]["workRoots"][0]["id"]
+        .as_str()
+        .expect("workRoot id")
+        .to_owned()
 }
 
 #[tokio::test]

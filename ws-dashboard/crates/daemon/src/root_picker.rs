@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use axum::extract::Query;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -11,6 +11,7 @@ use ws_dashboard_core::DashboardResourcesView;
 
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
 use crate::resources::DashboardResourcesProvider;
+use crate::router::AppState;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,9 +84,13 @@ pub async fn create_empty_directory(Json(request): Json<CreateEmptyDirectoryRequ
     }
 }
 
-pub async fn open_work_root(Json(request): Json<OpenWorkRootRequest>) -> Response {
+pub async fn open_work_root(
+    State(state): State<AppState>,
+    Json(request): Json<OpenWorkRootRequest>,
+) -> Response {
+    let requested_path = PathBuf::from(request.path);
     let provider = LocalDashboardResourcesProvider::new(vec![LocalWorkRootCandidate::new(
-        PathBuf::from(request.path),
+        requested_path.clone(),
     )]);
     let view = provider.dashboard_resources();
     let Some(work_root) = view
@@ -106,6 +111,10 @@ pub async fn open_work_root(Json(request): Json<OpenWorkRootRequest>) -> Respons
                 .unwrap_or_else(|| work_root.state.status.clone()),
         );
     }
+
+    state
+        .opened_work_roots
+        .register(work_root.id.clone(), requested_path);
 
     Json::<DashboardResourcesView>(view).into_response()
 }

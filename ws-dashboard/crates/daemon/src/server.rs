@@ -7,6 +7,7 @@ use tracing::info;
 use crate::auth::OwnerAuthState;
 use crate::config::ServeConfig;
 use crate::router::{build_router, AppState};
+use crate::work_root_files::OpenedWorkRoots;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StartupInfo {
@@ -36,7 +37,11 @@ where
     eprintln!("ws-dashboard owner pairing URL: {}", info.pairing_url);
     info!(bound_addr = %info.bound_addr, "ws-dashboard daemon listening");
 
-    let app = build_router(AppState { config, auth });
+    let app = build_router(AppState {
+        config,
+        auth,
+        opened_work_roots: OpenedWorkRoots::default(),
+    });
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await?;
