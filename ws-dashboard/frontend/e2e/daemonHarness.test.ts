@@ -14,12 +14,22 @@ function assertIncludes(actual: string, expected: string, label: string) {
   if (!actual.includes(expected)) throw new Error(`${label}: expected ${actual} to include ${expected}`);
 }
 
-async function assertRejects(fn: () => Promise<unknown>, expected: string, label: string) {
+async function assertRejects(
+  fn: () => Promise<unknown>,
+  expected: string,
+  label: string,
+  unexpected: string[] = [],
+) {
   try {
     await fn();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     assertIncludes(message, expected, label);
+    for (const value of unexpected) {
+      if (message.includes(value)) {
+        throw new Error(`${label}: expected ${message} not to include ${value}`);
+      }
+    }
     return;
   }
   throw new Error(`${label}: expected rejection`);
@@ -121,7 +131,8 @@ try {
 }
 
 await assertRejects(
-  () => startDaemon({ mode: "external", baseUrl: "http://127.0.0.1:9", readinessTimeoutMs: 1 }),
-  "was not reachable",
-  "external readiness failure is explicit",
+  () => startDaemon({ mode: "external", baseUrl: "http://127.0.0.1:9/pair?token=secret-token", readinessTimeoutMs: 1 }),
+  "daemon endpoint <redacted-url> was not reachable",
+  "external readiness failure is explicit and scrubbed",
+  ["secret-token", "127.0.0.1"],
 );

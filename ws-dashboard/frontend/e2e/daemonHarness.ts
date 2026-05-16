@@ -183,8 +183,8 @@ async function waitForHttpReadiness(baseUrl: string, timeoutMs: number): Promise
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  const detail = lastError instanceof Error ? `: ${lastError.message}` : "";
-  throw new Error(`daemon endpoint ${baseUrl} was not reachable within ${timeoutMs}ms${detail}`);
+  const detail = lastError instanceof Error ? `: ${scrubDiagnosticText(lastError.message)}` : "";
+  throw new Error(`daemon endpoint ${scrubDiagnosticText(baseUrl)} was not reachable within ${timeoutMs}ms${detail}`);
 }
 
 export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarnessConfig()): Promise<DaemonHandle> {
