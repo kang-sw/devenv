@@ -8,6 +8,10 @@ related:
   260516-feat-ws-web-readonly-text-pane: read-only text pane child
   260516-feat-ws-web-terminal-session-substrate: terminal session child
   260516-feat-ws-web-workbench-editor-chrome-polish: current workbench chrome baseline
+spec:
+  - 260516-ws-web-dashboard-workroot-io-restore-model
+  - 260516-ws-web-dashboard-workroot-io-command-placement-polish
+  - 260516-ws-web-dashboard-workroot-io-dogfood-verification
 related-mental-model:
   - ws-web-dashboard
 ---
