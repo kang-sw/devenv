@@ -217,6 +217,56 @@ topic, not only an editor feature. The desired direction is tmux- and Vim-like
 navigation across panes, tabs, command surfaces, and editor buffers. The exact
 binding list is intentionally deferred for user curation.
 
+The next frontend substrate should treat the current three-panel shell as an
+information-architecture skeleton, not as final visual design. Preserve the
+left navigation, primary work surface, and reserved viewer concept, but evolve
+the layout into a constrained workbench:
+
+```text
+left: resource navigation, file explorer, server/workRoot discovery
+main: editor, document, primary agent or workspace surface
+bottom: terminal, agent TUI, output, events, diagnostics
+right: optional inspector, viewer, metadata, contextual documents
+```
+
+Use `ai-docs/ref/design.md` as a Carbon-inspired reference for density, square
+corners, hairlines, and restrained operational UI. Do not apply it as a default
+light palette. The dashboard should start from a dark-first semantic theme and
+allow later color tuning without hardcoding light-mode values throughout the
+component tree.
+
+Workbench-library verification currently favors Dockview as a constrained
+layout substrate, with FlexLayout as the comparison fallback. Dockview's edge
+groups, tabbed groups, serialization, theming, and focus navigation line up
+with the desired left/main/bottom/right workbench shape. The important
+constraint is that Dockview should stay a layout skeleton, not an IDE platform
+or resource model. Placement policy belongs in a dashboard-owned panel
+registry:
+
+```text
+resource/file navigation: left
+editor/document/primary surfaces: main
+terminal and agent TUI: bottom or main
+inspector/viewer/diagnostics: right or bottom
+```
+
+The selected layout library must not own dashboard auth, route identity,
+resource identity, runtime authority, or command semantics. Persisted layout
+JSON stores arrangement only. The authoritative resource route shape should
+keep explicit server identity, such as `/servers/:serverId/...`, rather than
+encoding backed server context inside workspace, workRoot, or instance ids.
+
+The pairing URL should remain a one-time startup entrypoint. After successful
+pairing, the browser should receive the owner session cookie and redirect to a
+token-free stable app URL so refresh and deep-link navigation do not expose or
+depend on the pairing token.
+
+Terminal and agent TUI panes need a stable logical size policy. Visual panel
+resize should not continuously trigger PTY/TUI logical width changes, because
+Codex-like TUIs can redraw and dump large conversation state when columns
+change. Logical columns should move through presets, committed resize, or an
+explicit later fit command.
+
 ## Documents, Translation, And Mentions
 
 The dashboard should have a reusable text/document viewer rather than one-off
@@ -266,6 +316,7 @@ are ready:
 - named-agent dashboard view models;
 - browser-native editor and modal editing;
 - document viewer, translation, stem popup, and mention substrate;
+- constrained workbench layout substrate with Dockview/FlexLayout verification;
 - linked daemon/server forwarding for local, WSL, and remote environments;
 - remote, WSL, and public-bind hardening;
 - runtime/library harness capability;

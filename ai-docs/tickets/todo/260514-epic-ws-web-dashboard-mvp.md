@@ -6,6 +6,7 @@ related:
   260513-feat-async-exec-output-reader: adjacent persisted process output and reader-agent pattern
   260514-research-ws-web-dashboard-direction: absorbed provisional dashboard child backlog and future direction
   260515-epic-ws-web-dashboard-first-visible-substrate: first visible dashboard substrate milestone
+  260516-epic-ws-web-dashboard-workbench-substrate: next frontend workbench substrate milestone
   260516-feat-ws-web-resource-view-model-contract: first child of the visible substrate milestone
   260516-feat-ws-web-minimal-frontend-shell: inspectable frontend child of the visible substrate milestone
 related-mental-model:
@@ -77,6 +78,10 @@ The MVP should cover:
   system step that turns `ai-docs/ref/design.md` into a dashboard-specific
   `DESIGN.md`-style theme guideline under `ws-dashboard/frontend/` before
   deeper UI feature work.
+- `260516-epic-ws-web-dashboard-workbench-substrate` - next frontend milestone
+  for dark-first theme setup, token-free stable browser entry after pairing,
+  server-scoped route identity, and a constrained VS Code-inspired workbench
+  substrate.
 
 ## Cross-Child Decisions
 
@@ -113,6 +118,9 @@ The MVP should cover:
   such as MCP or model backend sessions. Do not use `session` for dashboard
   terminal/editor/agent resources.
 - Route APIs through explicit server/workspace/workRoot/instance identifiers.
+- Browser routes should mirror that explicit hierarchy with
+  `/servers/:serverId/...` paths. Do not encode server identity inside
+  workspace, workRoot, or instance ids.
 - Use opaque ids in API paths. Do not expose host paths as workspace ids; keep
   root paths, Git roots, workRoot keys, and link details in daemon-owned state
   and view models.
@@ -138,6 +146,17 @@ The MVP should cover:
 - Do not apply `ai-docs/ref/design.md` as a light-mode palette by default.
   Dashboard frontend work should derive a dark-first, Carbon-inspired product
   theme with semantic tokens before additional large UI surfaces are built.
+- The frontend workbench should be VS Code-inspired but constrained: left
+  navigation, central primary surface, bottom terminal/agent/output tabs, and an
+  optional right inspector/viewer. Prefer a layout-library substrate such as
+  Dockview only behind a dashboard-owned panel registry and adapter. Keep
+  FlexLayout as the comparison fallback if Dockview policy code becomes noisy.
+- Pairing tokens should remain one-time startup entry URLs. After successful
+  pairing, the browser should land on a token-free stable app URL and rely on
+  the HTTP-only owner cookie for refresh-safe navigation.
+- Terminal and agent TUI panes must avoid continuous logical width changes
+  during visual layout drag. Logical PTY/TUI columns should change only through
+  explicit presets, committed resize, or a later user-invoked fit command.
 - Put future dashboard specs under `ai-docs/spec/ws-web-dashboard/`. Add
   `ai-docs/mental-model/ws-web-dashboard/` only after implementation creates
   real dashboard subdomains; do not prefill speculative mental-model material.
