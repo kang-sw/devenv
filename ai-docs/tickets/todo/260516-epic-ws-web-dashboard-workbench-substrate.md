@@ -65,23 +65,22 @@ The milestone should establish:
 
 ## Child Tickets
 
-- Planned: dark-first frontend visual system baseline. Create
+- `260516-feat-ws-web-dark-visual-system` - create
   `ws-dashboard/frontend/DESIGN.md`, define semantic theme tokens, convert the
   existing shell away from hardcoded light colors, and verify desktop/mobile
   screenshots.
-- Planned: stable pairing redirect and route identity basis. Redirect
-  successful `/pair?token=...` exchanges to `/`, keep invalid/reused/expired
-  token failures non-redirecting, and introduce the frontend route shape for
-  `/servers/:serverId/...`.
-- Planned: constrained workbench layout spike. Compare Dockview against
-  FlexLayout on the actual dashboard requirements: workRoot-scoped sibling
-  split groups, group-local pinned/opened rows, placement registry, layout
-  serialization, keyboard focus movement, disabled or intercepted
-  unconstrained floating/popout behavior, and stable terminal logical width
-  policy.
-- Planned: workbench substrate implementation. Adopt the selected layout
-  library behind a dashboard-owned workbench adapter and render the current
-  resource shell through the `left nav | workRoot workbench` model.
+- `260516-feat-ws-web-stable-pairing-routes` - redirect successful
+  `/pair?token=...` exchanges to a token-free app URL, keep
+  invalid/reused/expired token failures non-redirecting, and introduce the
+  frontend route shape for `/servers/:serverId/...`.
+- `260516-research-ws-web-workbench-layout-spike` - compare Dockview against
+  FlexLayout on workRoot-scoped sibling split groups, group-local
+  pinned/opened rows, placement registry, layout serialization, keyboard focus
+  movement, constrained floating/popout policy, and stable terminal logical
+  width policy.
+- `260516-feat-ws-web-workbench-substrate` - adopt the selected layout library
+  behind a dashboard-owned workbench adapter and render the current resource
+  shell through the `left nav | workRoot workbench` model.
 
 ## Cross-Child Decisions
 
