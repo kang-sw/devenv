@@ -244,7 +244,7 @@ operations. Readable file open actions may hand off to read-only text pane
 behavior when that later surface exists; until then, the explorer does not imply
 write-back editing.
 
-## 🚧 Read-Only File API {#260516-ws-web-dashboard-readonly-file-api}
+## Read-Only File API {#260516-ws-web-dashboard-readonly-file-api}
 
 The dashboard exposes an authenticated API for reading previewable text files
 below an opened workRoot. Callers address files by opaque `workRootId` and
@@ -256,7 +256,7 @@ Successful responses include read-only text content and enough metadata for the
 browser to render a stable viewer title, language or extension hint when cheap,
 size information, and read-only status without exposing absolute host paths.
 
-## 🚧 Read-Only Text Pane {#260516-ws-web-dashboard-readonly-text-pane}
+## Read-Only Text Pane {#260516-ws-web-dashboard-readonly-text-pane}
 
 The dashboard workbench can open a read-only text pane for a previewable file
 under the selected workRoot. The pane renders file content as an inspectable
@@ -266,7 +266,7 @@ file focuses the existing logical pane instead of duplicating it by default.
 The text pane does not provide save, dirty-state, formatting, rename, delete,
 move, copy, conflict handling, or language-server behavior.
 
-## 🚧 File Open Placement Policy {#260516-ws-web-dashboard-file-open-placement-policy}
+## File Open Placement Policy {#260516-ws-web-dashboard-file-open-placement-policy}
 
 File-open commands from the workRoot file explorer use workbench placement
 policy that prefers the second or later split group when available, so active

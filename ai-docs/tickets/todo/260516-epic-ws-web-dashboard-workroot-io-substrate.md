@@ -53,7 +53,7 @@ The milestone should establish:
 
 - `260516-feat-ws-web-workroot-file-navigation` - done; authenticated
   workRoot file listing and a left-nav file explorer draft.
-- `260516-feat-ws-web-readonly-text-pane` - todo; authenticated read-only text
+- `260516-feat-ws-web-readonly-text-pane` - done; authenticated read-only text
   file open path and workbench text pane placement.
 - `260516-feat-ws-web-terminal-session-substrate` - todo; daemon-owned PTY
   terminal session lifecycle, I/O forwarding, refresh persistence, and close
