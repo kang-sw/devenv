@@ -11,8 +11,10 @@ spec:
 plans:
   phase-1: 2026-05/16-260516-feat-ws-web-workbench-substrate-phase-1.brief
   phase-2: 2026-05/16-260516-feat-ws-web-workbench-substrate-phase-2.brief
+  phase-3: 2026-05/16-260516-feat-ws-web-workbench-substrate-phase-3.brief
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web dashboard workbench substrate implementation
@@ -120,3 +122,22 @@ Represent panel close as detach for daemon-backed resources in the UI contract,
 and reserve explicit terminate commands for lifecycle shutdown. Preserve the
 stable PTY/TUI logical resize policy in the adapter even if live PTY
 implementation remains deferred.
+
+### Result (3256199) - 2026-05-16
+
+Added the dashboard-owned workbench placement and lifecycle policy layer.
+Opened/support surfaces now resolve to the second or later split group when one
+exists, durable agent and persistent-terminal surfaces prefer the focused group
+and otherwise fall back to the first group, and already-open logical surface keys
+focus the existing attachment instead of creating duplicates. The policy layer
+also resolves daemon-backed close to detach by default, reserves explicit
+`workbench.lifecycle.terminate` commands separately, and preserves stable PTY
+logical dimensions while visual split resize data remains deferred.
+
+The visible Phase 2 shell received only small contract chips for close policy
+and stable PTY logical dimensions. No live PTY/editor/viewer/task backend,
+layout persistence, drag/drop editing, free docking, keyboard navigation, or raw
+Dockview lifecycle exposure was added.
+
+Verification passed with frontend route tests, workbench model tests, frontend
+production build, and a delegated Phase 3 policy/scope review.

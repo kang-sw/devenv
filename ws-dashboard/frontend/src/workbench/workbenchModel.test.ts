@@ -10,6 +10,16 @@ import {
   serializeWorkbenchLayout,
   type WorkbenchLayoutState,
 } from "./layoutSerialization.js";
+import {
+  decideSurfaceClose,
+  decideSurfaceOpen,
+  defaultPtyLogicalSize,
+  preservePtyLogicalSize,
+  reserveTerminateCommand,
+  surfaceLogicalKey,
+  workbenchGroupId,
+  type WorkbenchPlacementState,
+} from "./policy.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -245,3 +255,134 @@ assertDeepEqual(
   serialized,
   "bridge serialization returns the sanitized dashboard workbench layout",
 );
+
+const groupOne = workbenchGroupId("group-1");
+const groupTwo = workbenchGroupId("group-2");
+const agentKey = surfaceLogicalKey("agent", "workroot-devenv", "instance-agent-main");
+const editorKey = surfaceLogicalKey("editor", "workroot-devenv", "README.md");
+const placementState: WorkbenchPlacementState = {
+  groups: [{ groupId: groupOne }, { groupId: groupTwo }],
+  focusedGroupId: groupTwo,
+  attachments: [
+    {
+      attachmentId: attachmentId("att-existing-editor"),
+      groupId: groupTwo,
+      surfaceKind: "editor",
+      logicalKey: editorKey,
+    },
+  ],
+};
+
+assertDeepEqual(
+  decideSurfaceOpen(placementState, {
+    surfaceKind: "editor",
+    logicalKey: editorKey,
+    attachmentId: attachmentId("att-duplicate-editor"),
+  }),
+  {
+    type: "focusExisting",
+    attachmentId: "att-existing-editor",
+    groupId: "group-2",
+    logicalKey: "editor/workroot-devenv/README.md",
+  },
+  "surface open focuses an existing logical key instead of creating a duplicate attachment",
+);
+
+assertDeepEqual(
+  decideSurfaceOpen(placementState, {
+    surfaceKind: "viewer",
+    logicalKey: surfaceLogicalKey("viewer", "workroot-devenv", "preview"),
+    attachmentId: attachmentId("att-viewer-preview"),
+  }),
+  {
+    type: "openNew",
+    attachmentId: "att-viewer-preview",
+    groupId: "group-2",
+    logicalKey: "viewer/workroot-devenv/preview",
+    rowPolicy: "opened",
+  },
+  "opened/support surfaces prefer the second split group when it exists",
+);
+
+assertDeepEqual(
+  decideSurfaceOpen(placementState, {
+    surfaceKind: "agent",
+    logicalKey: agentKey,
+    attachmentId: attachmentId("att-agent-main"),
+  }),
+  {
+    type: "openNew",
+    attachmentId: "att-agent-main",
+    groupId: "group-2",
+    logicalKey: "agent/workroot-devenv/instance-agent-main",
+    rowPolicy: "pinned",
+  },
+  "durable pinned surfaces prefer the focused group",
+);
+
+assertDeepEqual(
+  decideSurfaceOpen(
+    { groups: [{ groupId: groupOne }], attachments: [] },
+    {
+      surfaceKind: "persistentTerminal",
+      logicalKey: surfaceLogicalKey("terminal", "workroot-devenv"),
+      attachmentId: attachmentId("att-terminal"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-terminal",
+    groupId: "group-1",
+    logicalKey: "terminal/workroot-devenv",
+    rowPolicy: "pinned",
+  },
+  "durable pinned surfaces fall back to the first group",
+);
+
+assertDeepEqual(
+  decideSurfaceClose("agent"),
+  {
+    closePolicy: "detachDaemonResource",
+    behavior: "detach",
+    terminateReservation: {
+      commandId: "workbench.lifecycle.terminate",
+      reserved: true,
+      surfaceKind: "agent",
+    },
+  },
+  "daemon-backed close resolves to detach and reserves terminate separately",
+);
+assertDeepEqual(
+  reserveTerminateCommand("persistentTerminal"),
+  {
+    commandId: "workbench.lifecycle.terminate",
+    reserved: true,
+    surfaceKind: "persistentTerminal",
+  },
+  "explicit terminate command reservation is separate from close",
+);
+assertDeepEqual(
+  decideSurfaceClose("inspector"),
+  {
+    closePolicy: "closeAttachment",
+    behavior: "closeAttachment",
+    terminateReservation: null,
+  },
+  "browser-owned inspector closes the attachment without daemon termination",
+);
+
+const resizeDecision = preservePtyLogicalSize(defaultPtyLogicalSize, {
+  widthPx: 1440,
+  heightPx: 640,
+});
+assertDeepEqual(
+  resizeDecision,
+  {
+    logicalSize: { columns: 80, rows: 24 },
+    visualSize: { widthPx: 1440, heightPx: 640 },
+    resizeRequest: "deferred",
+  },
+  "visual split size is recorded without rewriting PTY logical dimensions",
+);
+assert(resizeDecision.logicalSize === defaultPtyLogicalSize, "PTY logical size object is preserved");
+

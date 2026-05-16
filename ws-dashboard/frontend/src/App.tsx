@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { normalizeServerRouteLocation } from "./routeBasis";
-import { defaultSurfaceRegistry, type SurfaceKind } from "./workbench";
+import {
+  decideSurfaceClose,
+  defaultPtyLogicalSize,
+  defaultSurfaceRegistry,
+  type SurfaceKind,
+} from "./workbench";
 
 type ViewState = {
   status: string;
@@ -434,14 +439,18 @@ function WorkbenchShell({
               title={mainInstance?.label ?? "No main agent"}
               detail={mainInstance ? instanceSummary(mainInstance) : "waiting for main instance"}
               state={mainInstance?.state ?? root.state}
-              meta={mainInstance ? [mainInstance.kind, mainInstance.interactionMode] : [kindLabel(root.kind)]}
+              meta={
+                mainInstance
+                  ? [mainInstance.kind, mainInstance.interactionMode, closeContractLabel("agent")]
+                  : [kindLabel(root.kind), closeContractLabel("agent")]
+              }
             />
             <SurfaceTile
               kind="persistentTerminal"
               title="Persistent terminal"
               detail={`${root.label} command surface reserved`}
               state={root.state}
-              meta={[root.status, kindLabel(root.kind)]}
+              meta={[root.status, kindLabel(root.kind), closeContractLabel("persistentTerminal"), ptySizeLabel()]}
             />
           </SurfaceRow>
           <SurfaceRow title="Opened row">
@@ -1094,6 +1103,14 @@ function resourceEntityForWorkRoot(root: WorkRootView): ResourceEntity {
 
 function instanceSummary(instance: InstanceView) {
   return `${instance.role} ${instance.kind} · ${instance.interactionMode}`;
+}
+
+function closeContractLabel(kind: SurfaceKind) {
+  return `close: ${decideSurfaceClose(kind).behavior}`;
+}
+
+function ptySizeLabel() {
+  return `pty: ${defaultPtyLogicalSize.columns}x${defaultPtyLogicalSize.rows}`;
 }
 
 function preferredSelection(entities: ResourceEntity[]) {

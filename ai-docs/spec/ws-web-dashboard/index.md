@@ -145,7 +145,7 @@ Mouse-triggered navigation actions route through command ids so later keyboard
 bindings can call the same commands. The shell reserves `^b` to
 mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
 
-## 🚧 WorkRoot Workbench Substrate {#260516-ws-web-dashboard-workroot-workbench-substrate}
+## WorkRoot Workbench Substrate {#260516-ws-web-dashboard-workroot-workbench-substrate}
 
 The dashboard frontend presents a `left nav | workRoot workbench` shell. The
 left navigation selects server, workspace, and concrete workRoot locations,
@@ -166,6 +166,11 @@ browser routes keep authoritative server, workspace, workRoot, and instance
 identity. Panel close detaches the frontend view by default, while explicit
 terminate commands own daemon-backed lifecycle shutdown. PTY/TUI logical
 columns do not continuously follow visual drag resizing.
+
+Surface opening follows dashboard-owned placement policy: already-open logical
+surface keys focus their existing attachment, opened/support surfaces prefer the
+second or later split group, and durable agent or persistent terminal surfaces
+prefer the focused group before falling back to the first group.
 
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
