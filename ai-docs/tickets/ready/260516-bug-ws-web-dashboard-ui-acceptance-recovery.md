@@ -6,6 +6,12 @@ related:
   260516-bug-ws-web-dashboard-live-resource-api-connection: live resource connection branch where the user-visible regressions were observed
   260516-feat-ws-web-terminal-session-substrate: terminal substrate that needs browser-terminal acceptance recovery
   260516-feat-ws-web-workroot-file-navigation: file explorer substrate that needs conventional navigation recovery
+spec:
+  - 260516-ws-web-dashboard-browser-ui-acceptance-gate
+  - 260516-ws-web-dashboard-terminal-tab-selection-and-empty-initial-state
+  - 260516-ws-web-dashboard-browser-terminal-emulator-behavior
+  - 260516-ws-web-dashboard-file-explorer-conventional-affordance
+  - 260516-ws-web-dashboard-browser-workroot-io-dogfood-evidence
 related-mental-model:
   - ws-web-dashboard
 ---
