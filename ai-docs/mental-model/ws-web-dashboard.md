@@ -9,6 +9,10 @@ related:
 
 # ws Web Dashboard
 
+## Domain Rules
+
+- Any ws-dashboard frontend implementation that changes visible browser UI must include browser-level visual/interaction verification, preferably Playwright or equivalent screenshot/DOM automation against the daemon-served production frontend; pure TypeScript tests, Vite build, and curl/API dogfood are not sufficient to close UI-facing work.
+
 ## Entry Points
 
 - `ws-dashboard/crates/daemon/src/main.rs`, `cli.rs`, and `config.rs` keep `ws-dashboard serve` as a thin command adapter over normalized serving config.
