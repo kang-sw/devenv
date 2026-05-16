@@ -118,6 +118,40 @@ pub struct TerminalOutputChunk {
     stream: String,
 }
 
+// CONTRACT: Terminal WebSocket server frames are the public live terminal
+// stream from daemon to browser. Output frames preserve the same ordered PTY
+// chunk semantics as the HTTP backfill route; status frames report terminal
+// lifecycle changes; exit frames end the live attachment without making the
+// browser connection own the daemon process lifecycle.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TerminalWebSocketServerMessage {
+    Output {
+        terminal_id: String,
+        chunk: TerminalOutputChunk,
+    },
+    Status {
+        terminal_id: String,
+        status: TerminalStatus,
+        next_sequence: u64,
+    },
+    Exit {
+        terminal_id: String,
+        status: TerminalStatus,
+        next_sequence: u64,
+    },
+}
+
+// CONTRACT: Terminal WebSocket client frames are the public live browser to
+// daemon terminal control stream. Input data is raw terminal data from xterm's
+// onData callback; resize uses the existing bounded PTY size contract.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TerminalWebSocketClientMessage {
+    Input { data: String },
+    Resize { columns: u16, rows: u16 },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum TerminalStatus {
@@ -247,6 +281,23 @@ pub async fn terminal_resize(
         Ok(view) => Json(view).into_response(),
         Err(error) => error.into_response(),
     }
+}
+
+pub async fn terminal_websocket(
+    State(state): State<AppState>,
+    AxumPath(terminal_id): AxumPath<String>,
+) -> Response {
+    // CONTRACT: This route is nested behind the owner auth and Host/Origin
+    // pre-upgrade gate in router.rs. Implementation must reject unknown or
+    // closed opaque terminal ids before accepting the WebSocket attachment.
+    // HINT: Normalize this stub to Axum's WebSocketUpgrade extractor and route
+    // through TerminalRegistry::get plus TerminalSession read/write helpers.
+    // HOLE: WebSocket task wiring, output wakeup/backfill strategy, and close
+    // propagation belong to the implementation pass.
+    if state.terminals.get(&terminal_id).is_none() {
+        return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
+    }
+    terminal_error(StatusCode::NOT_IMPLEMENTED, "terminal WebSocket not implemented")
 }
 
 pub async fn close_terminal(

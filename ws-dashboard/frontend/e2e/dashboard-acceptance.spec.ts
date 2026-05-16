@@ -198,6 +198,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
   // --- Create a terminal and verify emulator IO ---------------------------
   await test.step("create terminal and run a command", async () => {
+    // CONTRACT: This step must prove the live terminal path attaches a
+    // WebSocket, does not keep periodic output polling active while connected,
+    // and preserves byte-stream input fidelity for Backspace, cursor movement,
+    // shell history, Ctrl keys, paste, and prompt editing.
+    // HINT: Intercept `/api/dashboard/terminals/*/output` and browser
+    // WebSocket events around this block; use a real shell prompt rather than
+    // fixture-only assertions.
     await page.locator('[data-command-id="terminal.create"]').click();
     await terminalSurface(page);
     await expect(terminalTabs(page)).toHaveCount(1);

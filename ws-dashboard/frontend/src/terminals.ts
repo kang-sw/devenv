@@ -23,6 +23,24 @@ export type TerminalOutputView = {
   chunks: TerminalOutputChunk[];
 };
 
+// CONTRACT: Browser terminal panes use this message shape for live daemon to
+// xterm traffic once WebSocket transport is connected. Output frames feed
+// terminal.write(...) directly; HTTP output remains only replay/backfill/fallback.
+export type TerminalWebSocketServerMessage =
+  | { type: "output"; terminalId: string; chunk: TerminalOutputChunk }
+  | {
+      type: "status" | "exit";
+      terminalId: string;
+      status: TerminalSessionView["status"];
+      nextSequence: number;
+    };
+
+// CONTRACT: xterm onData traffic is forwarded as raw input data over the live
+// WebSocket, and resize messages preserve the daemon's bounded PTY size contract.
+export type TerminalWebSocketClientMessage =
+  | { type: "input"; data: string }
+  | { type: "resize"; columns: number; rows: number };
+
 export type TerminalPaneState = {
   session: TerminalSessionView;
   logicalKey: string;
@@ -71,6 +89,18 @@ export function terminalInputEndpoint(terminalId: string) {
 
 export function terminalResizeEndpoint(terminalId: string) {
   return `/api/dashboard/terminals/${encodeURIComponent(terminalId)}/resize`;
+}
+
+export function terminalWebSocketEndpoint(terminalId: string) {
+  return `/api/dashboard/terminals/${encodeURIComponent(terminalId)}/socket`;
+}
+
+export function terminalWebSocketUrl(terminalId: string, locationLike = window.location) {
+  // HINT: Implementation should use this helper when attaching xterm panes and
+  // tests should assert live panes do not continue periodic output polling once
+  // this socket is open.
+  const protocol = locationLike.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${locationLike.host}${terminalWebSocketEndpoint(terminalId)}`;
 }
 
 export function terminalCloseEndpoint(terminalId: string) {

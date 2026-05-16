@@ -16,7 +16,7 @@ use crate::resources::dashboard_resources;
 use crate::root_picker::{create_empty_directory, list_root_picker, open_work_root};
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
-    terminal_resize, TerminalRegistry,
+    terminal_resize, terminal_websocket, TerminalRegistry,
 };
 use crate::work_root_files::{list_work_root_files, read_work_root_file, OpenedWorkRoots};
 
@@ -60,6 +60,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/terminals/{terminal_id}/resize",
             post(terminal_resize),
+        )
+        .route(
+            "/api/dashboard/terminals/{terminal_id}/socket",
+            get(terminal_websocket),
         )
         .route(
             "/api/dashboard/terminals/{terminal_id}",
