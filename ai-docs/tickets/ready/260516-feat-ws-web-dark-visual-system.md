@@ -7,6 +7,8 @@ related:
   260514-research-ws-web-dashboard-direction: visual direction and dashboard UX research
 spec:
   - 260516-ws-web-dashboard-dark-visual-system
+plans:
+  phase-1: 2026-05/16-260516-feat-ws-web-dark-visual-system-phase-1.brief
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -46,6 +48,18 @@ constraints for operational UI.
 
 Add or normalize the frontend token layer so application components consume
 semantic variables rather than scattered literal colors.
+
+### Result (7af4d45) - 2026-05-16
+
+Added `ws-dashboard/frontend/DESIGN.md` as the dashboard-local dark-first
+visual guide and normalized `ws-dashboard/frontend/src/styles.css` around
+semantic CSS variables for surfaces, text, borders, actions, focus, density,
+and state treatment.
+
+The implementation stayed within Phase 1: resource API behavior and command
+identifiers were unchanged, and full screenshot verification remains Phase 2.
+Verified with `cd ws-dashboard/frontend && npm run build`. Fit and test review
+reported clean.
 
 ### Phase 2: Shell Reskin And Visual Verification
 
