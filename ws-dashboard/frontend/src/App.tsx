@@ -50,121 +50,19 @@ import {
   type TerminalPaneState,
   type TerminalSessionView,
 } from "./terminals";
-
-type ViewState = {
-  status: string;
-  loading: boolean;
-  stale: boolean;
-  error: string | null;
-};
-
-type ActionHint = {
-  id: string;
-  label: string;
-  enabled: boolean;
-};
-
-type ResourcePath = {
-  serverId: string;
-  workspaceId: string;
-  workRootId: string;
-  instanceId: string | null;
-};
-
-type ServerView = {
-  id: string;
-  label: string;
-  state: ViewState;
-  actions: ActionHint[];
-};
-
-type WorkspaceView = {
-  id: string;
-  label: string;
-  state: ViewState;
-  compactable: boolean;
-  workRoots: WorkRootView[];
-  actions: ActionHint[];
-};
-
-type WorkRootView = {
-  id: string;
-  resourcePath: ResourcePath;
-  label: string;
-  kind: "plainDirectory" | "gitPrimaryRoot" | "gitLinkedWorktree";
-  status: "online" | "offline" | "moved" | "inaccessible";
-  state: ViewState;
-  compactable: boolean;
-  mainInstances: InstanceView[];
-  actions: ActionHint[];
-};
-
-type InstanceView = {
-  id: string;
-  resourcePath: ResourcePath;
-  role: "main" | "sub";
-  kind:
-    | "harness"
-    | "agent"
-    | "terminal"
-    | "editor"
-    | "viewer"
-    | "exec"
-    | "translation"
-    | "task";
-  interactionMode: "direct" | "delegated" | "passive";
-  label: string;
-  state: ViewState;
-  subInstances: InstanceView[];
-  actions: ActionHint[];
-};
-
-type DashboardResourcesView = {
-  server: ServerView;
-  workspaces: WorkspaceView[];
-};
-
-type ResourceEntity =
-  | {
-      id: string;
-      type: "server";
-      label: string;
-      state: ViewState;
-      actions: ActionHint[];
-    }
-  | {
-      id: string;
-      type: "workspace";
-      label: string;
-      state: ViewState;
-      actions: ActionHint[];
-      compactable: boolean;
-      workRootCount: number;
-    }
-  | {
-      id: string;
-      type: "workRoot";
-      label: string;
-      state: ViewState;
-      actions: ActionHint[];
-      compactable: boolean;
-      path: ResourcePath;
-      kind: WorkRootView["kind"];
-      status: WorkRootView["status"];
-      instanceCount: number;
-    }
-  | {
-      id: string;
-      type: "instance";
-      label: string;
-      state: ViewState;
-      actions: ActionHint[];
-      path: ResourcePath;
-      role: InstanceView["role"];
-      kind: InstanceView["kind"];
-      interactionMode: InstanceView["interactionMode"];
-      subInstanceCount: number;
-    };
+import {
+  flattenEntities,
+  reconcileSelectedId,
+  type ActionHint,
+  type DashboardResourcesView,
+  type InstanceView,
+  type ResourceEntity,
+  type ResourcePath,
+  type ServerView,
+  type ViewState,
+  type WorkRootView,
+  type WorkspaceView,
+} from "./resourceModel";
 
 type CommandPayload =
   | { type: "select"; entityId: string }
@@ -233,6 +131,17 @@ export function App() {
     void loadResources();
   }, [loadResources]);
 
+  const handleWorkRootOpened = useCallback(
+    (openedView: DashboardResourcesView) => {
+      // Reconcile immediately with the aggregated open response, then re-fetch
+      // the canonical endpoint so it stays the source of truth for refresh and
+      // re-entry.
+      setResources(openedView);
+      void loadResources();
+    },
+    [loadResources],
+  );
+
   useEffect(() => {
     if (!resources) {
       return;
@@ -244,11 +153,12 @@ export function App() {
   const entities = useMemo(() => flattenEntities(resources), [resources]);
 
   useEffect(() => {
-    if (
-      entities.length > 0 &&
-      (!selectedId || !entities.some((entity) => entity.id === selectedId))
-    ) {
-      setSelectedId(preferredSelection(entities));
+    // Reconcile after every resource change so a selection that left the
+    // entity set (the mock workspace once the tree turns live) cannot remain
+    // active.
+    const nextSelectedId = reconcileSelectedId(entities, selectedId);
+    if (nextSelectedId !== selectedId) {
+      setSelectedId(nextSelectedId);
     }
   }, [entities, selectedId]);
 
@@ -350,6 +260,7 @@ export function App() {
             entityId={resources?.server.id ?? "server"}
             onCommand={executeCommand}
           />
+          <OpenWorkRootControl onOpened={handleWorkRootOpened} onCommand={executeCommand} />
           <ResourceNavigation
             resources={resources}
             loading={loading}
@@ -424,6 +335,105 @@ function PanelHeader({
       ) : null}
     </div>
   );
+}
+
+function OpenWorkRootControl({
+  onOpened,
+  onCommand,
+}: {
+  onOpened: (view: DashboardResourcesView) => void;
+  onCommand: (commandId: string, payload: CommandPayload) => void;
+}) {
+  const [path, setPath] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const requestedPath = path.trim();
+    if (requestedPath.length === 0 || pending) {
+      return;
+    }
+
+    onCommand("workRoot.open", {
+      type: "action",
+      label: "Open workRoot",
+      entityId: "workRoot.open",
+    });
+    setPending(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/dashboard/work-roots/open", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ path: requestedPath }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await openWorkRootErrorDetail(response));
+      }
+
+      const openedView = (await response.json()) as DashboardResourcesView;
+      setPath("");
+      onOpened(openedView);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "open failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <form
+      className="open-work-root"
+      aria-label="Open workRoot"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <label className="section-label" htmlFor="open-work-root-path">
+        Open workRoot
+      </label>
+      <div className="open-work-root-row">
+        <input
+          id="open-work-root-path"
+          className="open-work-root-input"
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="/path/to/workRoot"
+          value={path}
+          disabled={pending}
+          onChange={(event) => setPath(event.target.value)}
+        />
+        <button
+          className="action-button action-button-primary"
+          data-command-id="workRoot.open"
+          disabled={pending || path.trim().length === 0}
+          type="submit"
+        >
+          {pending ? "Opening" : "Open"}
+        </button>
+      </div>
+      {error ? <InlineNotice tone="error" title="Open failed" detail={error} /> : null}
+    </form>
+  );
+}
+
+async function openWorkRootErrorDetail(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (typeof body.error === "string" && body.error.length > 0) {
+      return body.error;
+    }
+  } catch {
+    // Fall through to the status-based detail when the body is not JSON.
+  }
+  return `HTTP ${response.status}`;
 }
 
 function ResourceNavigation({
@@ -2030,53 +2040,6 @@ function StateDot({ state }: { state: ViewState }) {
   );
 }
 
-function flattenEntities(resources: DashboardResourcesView | null): ResourceEntity[] {
-  if (!resources) {
-    return [];
-  }
-
-  const entities: ResourceEntity[] = [
-    {
-      id: resources.server.id,
-      type: "server",
-      label: resources.server.label,
-      state: resources.server.state,
-      actions: resources.server.actions,
-    },
-  ];
-
-  for (const workspace of resources.workspaces) {
-    entities.push({
-      id: workspace.id,
-      type: "workspace",
-      label: workspace.label,
-      state: workspace.state,
-      actions: workspace.actions,
-      compactable: workspace.compactable,
-      workRootCount: workspace.workRoots.length,
-    });
-
-    for (const root of workspace.workRoots) {
-      entities.push({
-        id: root.id,
-        type: "workRoot",
-        label: root.label,
-        state: root.state,
-        actions: root.actions,
-        compactable: root.compactable,
-        path: root.resourcePath,
-        kind: root.kind,
-        status: root.status,
-        instanceCount: root.mainInstances.length,
-      });
-
-      // Main and sub instances are workbench surfaces/projections, not default left-nav rows.
-    }
-  }
-
-  return entities;
-}
-
 function normalizeServerRoute(serverId: string) {
   if (typeof window === "undefined") {
     return;
@@ -2164,10 +2127,6 @@ function closeContractLabel(kind: SurfaceKind) {
 
 function ptySizeLabel() {
   return `pty: ${defaultPtyLogicalSize.columns}x${defaultPtyLogicalSize.rows}`;
-}
-
-function preferredSelection(entities: ResourceEntity[]) {
-  return entities.find((entity) => entity.type === "workRoot")?.id ?? entities[0]?.id;
 }
 
 function compactMainInstance(workspace: WorkspaceView) {

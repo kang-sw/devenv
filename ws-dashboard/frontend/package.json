@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test:routes": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/routeBasis.test.js",
+    "test:resource-model": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/resourceModel.test.js",
     "test:workbench": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workbench/workbenchModel.test.js",
     "test:work-root-files": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workRootFiles.test.js",
     "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminals.test.js"

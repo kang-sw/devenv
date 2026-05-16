@@ -110,6 +110,12 @@ button {
   background: var(--ws-color-panel-subtle);
 }
 
+.shell-panel-nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .shell-panel-main {
   background: var(--ws-color-panel);
 }
@@ -200,9 +206,41 @@ button {
 
 .nav-stack {
   display: flex;
-  height: calc(100vh - 48px);
   min-height: 0;
+  flex: 1 1 auto;
   flex-direction: column;
+}
+
+.open-work-root {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--ws-space-04);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel);
+  padding: var(--ws-space-06) var(--ws-space-06) var(--ws-space-06) 12px;
+}
+
+.open-work-root-row {
+  display: flex;
+  gap: var(--ws-space-04);
+}
+
+.open-work-root-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  border-radius: var(--ws-radius-square);
+  background: var(--ws-color-panel-subtle);
+  color: var(--ws-color-text-primary);
+  padding: var(--ws-space-04) var(--ws-space-06);
+  font-size: var(--ws-font-size-02);
+}
+
+.open-work-root-input:focus-visible {
+  border-color: var(--ws-color-action);
+  outline: var(--ws-focus-ring);
+  outline-offset: -2px;
 }
 
 .resource-list-region {

@@ -11,6 +11,8 @@
   "include": [
     "src/routeBasis.ts",
     "src/routeBasis.test.ts",
+    "src/resourceModel.ts",
+    "src/resourceModel.test.ts",
     "src/workRootFiles.ts",
     "src/workRootFiles.test.ts",
     "src/terminals.ts",
