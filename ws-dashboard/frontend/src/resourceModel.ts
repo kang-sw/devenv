@@ -119,10 +119,10 @@ export type ResourceEntity =
       subInstanceCount: number;
     };
 
-/// Flatten the resource hierarchy into the left-nav entity rows.
-///
-/// Main and sub instances are workbench surfaces/projections, not default
-/// left-nav rows, so they are intentionally omitted here.
+// Flatten the resource hierarchy into the left-nav entity rows.
+//
+// Main and sub instances are workbench surfaces/projections, not default
+// left-nav rows, so they are intentionally omitted here.
 export function flattenEntities(
   resources: DashboardResourcesView | null,
 ): ResourceEntity[] {
@@ -170,20 +170,21 @@ export function flattenEntities(
   return entities;
 }
 
-/// The entity that should be selected by default: the first workRoot row, or
-/// the first entity (the server) when no workRoot exists yet.
-export function preferredSelection(entities: ResourceEntity[]): string {
+// The entity that should be selected by default: the first workRoot row, or
+// the first entity (the server) when no workRoot exists yet. Returns undefined
+// only for an empty entity list.
+export function preferredSelection(entities: ResourceEntity[]): string | undefined {
   return (
     entities.find((entity) => entity.type === "workRoot")?.id ??
     entities[0]?.id
   );
 }
 
-/// Reconcile the active selection after the resource tree changes.
-///
-/// Keeps a still-present selection, otherwise falls back to `preferredSelection`
-/// so a selection that left the entity set (for example the mock workspace
-/// after the tree turns live) cannot remain active.
+// Reconcile the active selection after the resource tree changes.
+//
+// Keeps a still-present selection, otherwise falls back to `preferredSelection`
+// so a selection that left the entity set (for example the mock workspace
+// after the tree turns live) cannot remain active.
 export function reconcileSelectedId(
   entities: ResourceEntity[],
   selectedId: string | null,

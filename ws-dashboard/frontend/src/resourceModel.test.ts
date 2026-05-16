@@ -3,6 +3,7 @@ import {
   preferredSelection,
   reconcileSelectedId,
   type DashboardResourcesView,
+  type InstanceView,
   type ViewState,
   type WorkRootView,
 } from "./resourceModel.js";
@@ -21,7 +22,26 @@ function assertTrue(value: boolean, label: string) {
 
 const readyState: ViewState = { status: "ready", loading: false, stale: false, error: null };
 
-function workRoot(id: string, workspaceId: string, label: string): WorkRootView {
+function instance(id: string, workspaceId: string, workRootId: string): InstanceView {
+  return {
+    id,
+    resourcePath: { serverId: "server-local", workspaceId, workRootId, instanceId: id },
+    role: "main",
+    kind: "harness",
+    interactionMode: "direct",
+    label: id,
+    state: readyState,
+    subInstances: [],
+    actions: [],
+  };
+}
+
+function workRoot(
+  id: string,
+  workspaceId: string,
+  label: string,
+  mainInstances: InstanceView[] = [],
+): WorkRootView {
   return {
     id,
     resourcePath: { serverId: "server-local", workspaceId, workRootId: id, instanceId: null },
@@ -30,7 +50,7 @@ function workRoot(id: string, workspaceId: string, label: string): WorkRootView 
     status: "online",
     state: readyState,
     compactable: false,
-    mainInstances: [],
+    mainInstances,
     actions: [],
   };
 }
@@ -81,8 +101,50 @@ assertEqual(
   "mock preferred selection is the mock workRoot",
 );
 
+// flattenEntities returns an empty list for a null view (the initial-load
+// production path before resources are fetched).
+assertEqual(flattenEntities(null).length, 0, "null resources flatten to no entities");
+
+// Main/sub instances are workbench projections, not left-nav rows: they are
+// omitted from the flattened entities even when present, while the owning
+// workRoot row still reports their count.
+const instanceView: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-local-xyz",
+      label: "devenv",
+      state: readyState,
+      compactable: false,
+      workRoots: [
+        workRoot("root-local-xyz", "workspace-local-xyz", "devenv", [
+          instance("instance-main-a", "workspace-local-xyz", "root-local-xyz"),
+          instance("instance-main-b", "workspace-local-xyz", "root-local-xyz"),
+        ]),
+      ],
+      actions: [],
+    },
+  ],
+};
+const instanceEntities = flattenEntities(instanceView);
+assertEqual(
+  instanceEntities.length,
+  3,
+  "view with main instances still flattens to server + workspace + workRoot only",
+);
+assertTrue(
+  !instanceEntities.some((entity) => entity.type === "instance"),
+  "instance rows are omitted from the flattened entities",
+);
+const workRootEntity = instanceEntities.find((entity) => entity.type === "workRoot");
+assertEqual(
+  workRootEntity?.type === "workRoot" ? workRootEntity.instanceCount : -1,
+  2,
+  "workRoot entity reports its main instance count",
+);
+
 // A caller selects the mock workRoot...
-const mockSelectedId = preferredSelection(mockEntities);
+const mockSelectedId = preferredSelection(mockEntities) ?? null;
 
 // ...then the tree turns live. The mock workRoot left the entity set, so the
 // selection must reconcile to the live opened workRoot.
@@ -101,6 +163,14 @@ assertEqual(
   reconcileSelectedId(liveEntities, "root-local-abc"),
   "root-local-abc",
   "a still-present selection is kept",
+);
+
+// Initial-load default selection: a null selection against a non-empty entity
+// set resolves to the first workRoot.
+assertEqual(
+  reconcileSelectedId(liveEntities, null),
+  "root-local-abc",
+  "a null selection defaults to the first live workRoot",
 );
 
 // Empty live view (pre-open): only the server row, and a stale mock selection

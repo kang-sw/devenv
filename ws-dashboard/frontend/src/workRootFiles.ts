@@ -1,3 +1,5 @@
+import { apiErrorDetail } from "./apiError.js";
+
 export type WorkRootFileEntryKind = "directory" | "file" | "other";
 
 export type WorkRootFileEntryView = {
@@ -97,7 +99,7 @@ export async function fetchWorkRootTextFile(
   });
 
   if (!response.ok) {
-    throw new Error(await workRootFilesErrorMessage(response));
+    throw new Error(await apiErrorDetail(response));
   }
 
   return (await response.json()) as WorkRootTextFileView;
@@ -162,7 +164,7 @@ export async function fetchWorkRootFiles(
   });
 
   if (!response.ok) {
-    throw new Error(await workRootFilesErrorMessage(response));
+    throw new Error(await apiErrorDetail(response));
   }
 
   return (await response.json()) as WorkRootFileListView;
@@ -217,19 +219,6 @@ export function flattenWorkRootFileTree({
   const rows: WorkRootFileTreeRow[] = [];
   appendDirectoryRows(rows, rootPath, 0, expandedPaths, directories, selectedPath);
   return rows;
-}
-
-async function workRootFilesErrorMessage(response: Response) {
-  try {
-    const value = (await response.json()) as { error?: unknown };
-    if (typeof value.error === "string" && value.error.trim()) {
-      return value.error;
-    }
-  } catch {
-    // Fall through to bounded HTTP status text.
-  }
-
-  return `HTTP ${response.status}`;
 }
 
 function fileNameFromPath(path: string) {

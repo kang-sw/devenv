@@ -218,7 +218,7 @@ button {
   gap: var(--ws-space-04);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
   background: var(--ws-color-panel);
-  padding: var(--ws-space-06) var(--ws-space-06) var(--ws-space-06) 12px;
+  padding: var(--ws-space-06) var(--ws-space-06) var(--ws-space-06) var(--ws-space-09);
 }
 
 .open-work-root-row {

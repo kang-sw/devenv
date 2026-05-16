@@ -63,6 +63,7 @@ import {
   type WorkRootView,
   type WorkspaceView,
 } from "./resourceModel";
+import { requestOpenWorkRoot } from "./openWorkRoot";
 
 type CommandPayload =
   | { type: "select"; entityId: string }
@@ -133,13 +134,27 @@ export function App() {
 
   const handleWorkRootOpened = useCallback(
     (openedView: DashboardResourcesView) => {
-      // Reconcile immediately with the aggregated open response, then re-fetch
-      // the canonical endpoint so it stays the source of truth for refresh and
-      // re-entry.
+      // Identify the just-opened workRoot: the workRoot present in the
+      // aggregated open response but absent from the prior resource view.
+      const priorWorkRootIds = new Set(
+        flattenEntities(resources)
+          .filter((entity) => entity.type === "workRoot")
+          .map((entity) => entity.id),
+      );
+      const openedWorkRootId = flattenEntities(openedView).find(
+        (entity) => entity.type === "workRoot" && !priorWorkRootIds.has(entity.id),
+      )?.id;
+
+      // Reconcile immediately with the aggregated open response and select the
+      // opened workRoot, then re-fetch the canonical endpoint so it stays the
+      // source of truth for refresh and re-entry.
       setResources(openedView);
+      if (openedWorkRootId) {
+        setSelectedId(openedWorkRootId);
+      }
       void loadResources();
     },
-    [loadResources],
+    [loadResources, resources],
   );
 
   useEffect(() => {
@@ -357,26 +372,13 @@ function OpenWorkRootControl({
     onCommand("workRoot.open", {
       type: "action",
       label: "Open workRoot",
-      entityId: "workRoot.open",
+      entityId: "",
     });
     setPending(true);
     setError(null);
 
     try {
-      const response = await fetch("/api/dashboard/work-roots/open", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({ path: requestedPath }),
-      });
-
-      if (!response.ok) {
-        throw new Error(await openWorkRootErrorDetail(response));
-      }
-
-      const openedView = (await response.json()) as DashboardResourcesView;
+      const openedView = await requestOpenWorkRoot(requestedPath);
       setPath("");
       onOpened(openedView);
     } catch (nextError) {
@@ -422,18 +424,6 @@ function OpenWorkRootControl({
       {error ? <InlineNotice tone="error" title="Open failed" detail={error} /> : null}
     </form>
   );
-}
-
-async function openWorkRootErrorDetail(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: unknown };
-    if (typeof body.error === "string" && body.error.length > 0) {
-      return body.error;
-    }
-  } catch {
-    // Fall through to the status-based detail when the body is not JSON.
-  }
-  return `HTTP ${response.status}`;
 }
 
 function ResourceNavigation({
