@@ -25,6 +25,12 @@ token, installs an HTTP-only owner session cookie with `SameSite=Lax`, and lets
 the browser access authenticated routes. Missing, invalid, reused, or expired
 pairing tokens fail without installing a session cookie.
 
+> [!note] Planned 🚧
+> Successful pairing will redirect browser callers to a token-free stable app
+> URL after installing the owner cookie, while invalid, reused, or expired
+> pairing tokens will continue to fail without redirecting into an
+> authenticated-looking app route. {#260516-ws-web-dashboard-token-free-pairing-landing}
+
 Authenticated owner sessions have broad host-control authority for dashboard
 features, but the daemon remains separate from ws MCP stdio session authority.
 The daemon must not make itself the canonical ws MCP root, harness, model
@@ -123,6 +129,12 @@ The frontend package provides documented local development and production build
 entrypoints that later dashboard slices can reuse. The first shell remains
 narrow: it does not implement PTY, editor, document viewer, live workspace
 discovery, event streams, named-agent controls, or root picker behavior.
+
+> [!note] Planned 🚧
+> Browser navigation will reserve explicit server-scoped routes such as
+> `/servers/:serverId/...` for dashboard resources, while daemon-owned opaque
+> ids remain the source of truth and server identity is not hidden inside
+> workspace, workRoot, or instance ids. {#260516-ws-web-dashboard-server-scoped-browser-routes}
 
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
