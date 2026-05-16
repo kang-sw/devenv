@@ -246,7 +246,10 @@ static asset directory through `WS_DASHBOARD_DAEMON_HOST`,
 `WS_DASHBOARD_DAEMON_BIND_MODE`, `WS_DASHBOARD_DAEMON_PORT`,
 `WS_DASHBOARD_DAEMON_BIN`, and `WS_DASHBOARD_STATIC_DIR`. External mode can
 attach the browser gate to an already-running base or pairing URL through
-`WS_DASHBOARD_DAEMON_BASE_URL` or `WS_DASHBOARD_DAEMON_PAIRING_URL`.
+`WS_DASHBOARD_DAEMON_BASE_URL` or `WS_DASHBOARD_DAEMON_PAIRING_URL`. When the
+daemon runs on a different host from Playwright, the gate can use
+`WS_DASHBOARD_TEST_WORKROOT` to open a fixture path that exists on the daemon
+host instead of creating a local Playwright-host temporary directory.
 
 The same browser acceptance flow can target a native Windows daemon running on
 remote loopback behind SSH local forwarding. The harness waits for an owner

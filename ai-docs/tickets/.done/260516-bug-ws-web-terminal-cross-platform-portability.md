@@ -124,6 +124,13 @@ pairing, supports external forwarded endpoints, preserves the existing product
 CLI contract, and redacts private endpoint and token details from readiness and
 startup diagnostics.
 
+#### Edition (de36231) - 2026-05-17
+
+Added `WS_DASHBOARD_TEST_WORKROOT` so external browser gates can open a fixture
+path that exists on the daemon host instead of using a temporary path from the
+local Playwright host. This is required for SSH-forwarded native-Windows daemon
+evidence where Playwright runs locally but the daemon opens Windows paths.
+
 ### Phase 2: Make shell selection explicit and testable
 
 Extract or expose the dashboard terminal shell-selection behavior enough for
@@ -219,3 +226,12 @@ host; SSH and remote frontend build succeeded, but native daemon build was
 blocked by an outdated remote Cargo toolchain. The Windows result is recorded
 as an explicit evidence gap without private endpoint, user, host, path, token,
 or screenshot details.
+
+#### Edition (de36231) - 2026-05-17
+
+Updated the remote Windows Cargo toolchain and retried the fixed-endpoint
+evidence path. Native daemon build, fixed loopback serving, SSH local
+forwarding, owner pairing, and daemon-host workRoot opening all succeeded. The
+browser gate then reached a real `cmd.exe` terminal session but failed because
+Ctrl-C did not interrupt the long-running command fixture; that remaining
+native-Windows control-key gap is captured separately for follow-up.

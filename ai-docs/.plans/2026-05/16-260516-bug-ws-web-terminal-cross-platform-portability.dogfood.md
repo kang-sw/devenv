@@ -15,11 +15,11 @@
 ## Native Windows fixed-endpoint / SSH-forward evidence
 
 - Result: explicit gap
-- Layer reached: SSH remote was reachable and frontend dependencies/build succeeded on the remote Windows host.
-- Blocker: remote daemon build could not proceed because the installed Cargo toolchain is too old for the repository lockfile/dependency graph. The first build stopped on Cargo lockfile version 4; retrying without the lockfile stopped on a dependency requiring Cargo edition-2024 support. No daemon was started, so the fixed loopback endpoint, SSH local-forward, owner pairing, and browser assertions were not run.
+- Layer reached: SSH remote was reachable, Rust/Cargo was updated to a toolchain that supports the current lockfile/dependency graph, the native Windows daemon built, the fixed loopback daemon started, SSH local forwarding worked, owner pairing succeeded, and the browser gate opened a daemon-host workRoot fixture.
+- Blocker: the browser gate reached a real `cmd.exe` terminal session, but Ctrl-C did not interrupt the long-running command fixture. The terminal stayed in the running `ping` command and the follow-up `CTRL-C-OK` echo was not observed. This is now captured as a separate Windows terminal control-key follow-up instead of a build/toolchain blocker.
 - Private endpoint, user, host, paths, pairing URLs, screenshots, and tokens are intentionally omitted.
 
 ## Residual limitations
 
-- Native-Windows terminal behavior is not yet evidenced in a browser gate until the remote Windows Rust toolchain is updated or a compatible Windows daemon binary is supplied.
+- Native-Windows terminal behavior is not yet evidenced as a passing browser gate until the Windows `cmd.exe` Ctrl-C/control-key behavior is fixed or explicitly scoped.
 - `cmd.exe` command plans intentionally record ANSI color and alternate-screen limitations rather than claiming equivalent behavior to Unix shells.
