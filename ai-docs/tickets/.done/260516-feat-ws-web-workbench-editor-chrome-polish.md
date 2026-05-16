@@ -6,8 +6,11 @@ related:
   260516-feat-ws-web-workbench-substrate: completed implementation whose visible shell needs UI correction
 spec:
   - 260516-ws-web-dashboard-workroot-workbench-substrate
+plans:
+  phase-1: 2026-05/16-ws-web-workbench-editor-chrome-polish-phase-1
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web dashboard workbench editor chrome polish
@@ -97,6 +100,46 @@ preserving dashboard-owned placement and serialization policy. The movement does
 not start, stop, terminate, or resize daemon-backed resources; it only changes
 browser workbench arrangement.
 
+### Result (92d642a) - 2026-05-16
+
+Implemented the Phase 1 workbench chrome correction. The visible workRoot
+workbench now renders compact editor-like split groups with thin tab strips and
+dominant pane bodies instead of large `Primary`, `Support`, `Pinned row`, and
+`Opened row` topology labels. Placeholder surfaces now read as agent,
+terminal, viewer, editor/detail, task, diagnostics, and inspector panes rather
+than dashboard cards.
+
+Visible tabs switch the active pane and support frontend drag/drop movement for
+reordering within a split and moving panes across splits. Cross-split
+membership persists across rerenders, empty split groups render an honest drop
+target instead of crashing, and pure workbench model coverage exercises click
+selection, drag/drop resolution, order restoration, cross-split moves, and
+active-pane reconciliation.
+
+The implementation kept live PTY/editor/viewer/task backends out of scope,
+kept floating/popout groups disabled, preserved left-nav server/workspace/
+workRoot identity, and retained daemon lifecycle and PTY logical-sizing
+boundaries. Verification passed:
+`cd ws-dashboard/frontend && npm run test:routes && npm run test:workbench &&
+npm run build`.
+
+#### Edition (c79d8a7) - 2026-05-16
+
+Fixed a follow-up UI contract gap found during dogfooding. The first Phase 1
+implementation removed the thick explanatory pinned/opened rows but also
+flattened all tabs into one undifferentiated row. The follow-up restores a
+compact structured header: durable/pinned surfaces and opened/transient
+surfaces render in separate thin lanes without returning to the previous heavy
+row presentation. Main agent and persistent terminal remain pinned by default;
+viewer, editor/detail, task, diagnostics, and inspector remain opened by
+default.
+
+The same pass fixed the side-by-side split layout so pane bodies fill the
+available height and the footer/status row sits at the bottom instead of leaving
+awkward unused space. Verification passed:
+`cd ws-dashboard/frontend && npm run test:routes && npm run test:workbench &&
+npm run build`.
+
 ### Phase 2: Visual Contract Verification
 
 Add or run visual verification that checks the product contract, not just
@@ -116,3 +159,32 @@ presence of sections. The gate should explicitly fail if:
 
 Capture real paired desktop and narrow screenshots, or record the exact blocker
 if browser tooling is unavailable.
+
+### Result (be9f885) - 2026-05-16
+
+Completed visual contract verification with real authenticated dashboard
+captures through the daemon-served frontend. Desktop and narrow screenshots
+confirmed that large topology labels such as `split group`, `Pinned row`,
+`Opened row`, `Primary`, and `Support` are no longer exposed, compact
+pinned/opened tab lanes remain visible, tabs select pane bodies, and the
+side-by-side desktop split keeps pane bodies dominant with footer/status rows
+anchored at the bottom.
+
+The first narrow capture found a visual contract issue: the first stacked split
+collapsed to a very short pane body, making the body secondary to chrome. Commit
+`be9f885` fixed the narrow stacked layout with minimum group and pane-body
+height while preserving desktop layout, pinned/opened lanes, tab movement, and
+footer alignment. After the fix, narrow metrics showed no horizontal overflow
+and pane body heights of 189px and 202px for the stacked groups.
+
+Artifacts:
+- Desktop screenshot:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/026c4673-01-workbench-phase-2-desktop-after.png`
+- Narrow screenshot:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/026c4673-02-workbench-phase-2-narrow-after.png`
+- Capture report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/026c4673-03-workbench-phase-2-report-after.md`
+
+Verification passed:
+`cd ws-dashboard/frontend && npm run test:routes && npm run test:workbench &&
+npm run build`.

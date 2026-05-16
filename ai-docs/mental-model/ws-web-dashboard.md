@@ -1,6 +1,6 @@
 ---
 domain: ws-web-dashboard
-description: "Personal ws dashboard daemon, owner-auth boundary, UI serving/route basis, frontend visual system, resource view-model API/fixtures, and host-control separation."
+description: "Personal ws dashboard daemon, owner-auth boundary, UI serving/route basis, frontend workbench chrome, visual system, resource view-model API/fixtures, and host-control separation."
 sources:
   - ws-dashboard/
 related:
@@ -22,7 +22,7 @@ related:
 - `ws-dashboard/crates/daemon/src/root_picker.rs` owns the authenticated backend root picker, empty-directory creation, and open-workRoot route handlers. {#260516-ws-web-dashboard-root-picker-empty-directory-creation}
 - `ws-dashboard/frontend/` owns the React/Vite browser shell that is served by the daemon when `--static-dir` points at its production build output and renders the first inspectable resource hierarchy. {#260516-ws-web-dashboard-protected-frontend-shell} {#260516-ws-web-dashboard-inspectable-navigation-shell}
 - `ws-dashboard/frontend/src/routeBasis.ts` owns browser-path normalization to the daemon-reported server id; it is route chrome, not resource authority. {#260516-ws-web-dashboard-server-scoped-browser-routes}
-- `ws-dashboard/frontend/src/workbench/` owns the dashboard workbench registry, layout attachment identity, sanitized layout serialization, and Dockview bridge boundary before the visible split-group shell is wired in. {#260516-ws-web-dashboard-workroot-workbench-substrate}
+- `ws-dashboard/frontend/src/workbench/` owns the dashboard workbench registry, layout attachment identity, sanitized layout serialization, Dockview bridge boundary, and pure editor-group tab movement model. {#260516-ws-web-dashboard-workroot-workbench-substrate}
 - `ws-dashboard/frontend/DESIGN.md` and `frontend/src/styles.css` own the dashboard-local dark visual vocabulary for browser UI work. {#260516-ws-web-dashboard-dark-visual-system}
 
 ## Module Contracts
@@ -49,6 +49,7 @@ related:
 - Frontend mouse actions carry `data-command-id` command identities so later keyboard bindings can dispatch the same command layer instead of forking interaction behavior. {#260516-ws-web-dashboard-inspectable-navigation-shell}
 - Workbench layout attachments are browser-side view attachments, not daemon resources. Serialized workbench layout may keep attachment ids, arrangement, and active attachment identity, but daemon resource ids, surface kind metadata, and registry-derived row policy stay in the dashboard model/registry rather than persisted layout JSON. {#260516-ws-web-dashboard-workroot-workbench-substrate}
 - Dockview is a mechanical layout substrate behind the dashboard workbench bridge. New workbench behavior should add dashboard-owned policy around creation, move/drop validation, focus, close/detach, and restore sanitization instead of returning raw Dockview panel/group handles or making Dockview lifecycle APIs product-level capabilities. {#260516-ws-web-dashboard-workroot-workbench-substrate}
+- Visible workbench tab movement is currently a dashboard-owned frontend model layered over resource-derived pane groups. `editorGroupModel.ts` must preserve cross-split group membership through rerenders, append newly discovered original panes instead of dropping them, and reconcile active panes by omitting emptied groups rather than keeping stale active ids. {#260516-ws-web-dashboard-workroot-workbench-substrate}
 - The visible workbench shell keeps the left nav at workspace/workRoot identity. Main instances render as durable pinned workbench surfaces, and sub instances render as secondary projections in the workbench rather than recursive default nav rows. {#260516-ws-web-dashboard-workroot-workbench-substrate}
 - Workbench surface opening is mediated by dashboard logical surface keys and placement policy: support surfaces prefer group 2+, pinned agent/terminal surfaces prefer focused then first group, and duplicate logical keys focus existing attachments. Close resolves through registry policy, so daemon-backed surfaces detach by default and explicit terminate remains a separate reserved command. {#260516-ws-web-dashboard-workroot-workbench-substrate}
 - PTY/TUI visual size and logical dimensions stay separate in the workbench policy. Visual split dimensions may be recorded for a deferred resize decision, but they must not rewrite stable terminal columns/rows continuously. {#260516-ws-web-dashboard-workroot-workbench-substrate}
@@ -83,7 +84,7 @@ related:
 - **Add live instance stream sources**: produce the shared event envelope from PTY, named-agent, exec, diagnostic, viewer, or translation sources; do not define feature-specific stream identity or cursor formats outside `core/src/events.rs`.
 - **Change instance stream transport**: keep fixture-backed finite JSON as a deterministic contract test path while adding SSE/WebSocket or live producers behind the same auth gate and event envelope.
 - **Extend the browser shell beyond inspectable navigation**: keep feature depth layered on top of the existing resource shell, route visible actions through command ids, use the dark semantic token system for new surfaces, and preserve the reserved viewer region until a later viewer ticket implements real document/editor/terminal behavior. {#260516-ws-web-dashboard-inspectable-navigation-shell} {#260516-ws-web-dashboard-dark-visual-system}
-- **Add a workbench surface or lifecycle behavior**: register surface kind and row/lifecycle policy in the workbench registry, keep daemon identity as model metadata, serialize only attachment arrangement, and expose any Dockview operation through the workbench bridge rather than raw Dockview handles. {#260516-ws-web-dashboard-workroot-workbench-substrate}
+- **Add a workbench surface or lifecycle behavior**: register surface kind and row/lifecycle policy in the workbench registry, keep daemon identity as model metadata, serialize only attachment arrangement, update editor-group tab ordering/active-state tests when visible panes move, and expose any Dockview operation through the workbench bridge rather than raw Dockview handles. {#260516-ws-web-dashboard-workroot-workbench-substrate}
 
 ## Common Mistakes
 
@@ -96,6 +97,8 @@ related:
 - Duplicating dashboard resource fixtures in React state, hiding post-load refresh errors, or trusting `/servers/:serverId` over `/api/dashboard/resources`; all make the browser disagree with the daemon-owned resource view.
 - Persisting workbench surface kind, row policy, or daemon ids in layout JSON; those belong to the dashboard registry/resource model and make restored layouts authoritative over daemon state.
 - Returning raw Dockview panel or group handles from dashboard workbench APIs; that bypasses the adapter policy for detach, placement, floating/popout, and later PTY/TUI resize constraints.
+- Treating visible tab drag/drop as raw Dockview state; the current shell needs dashboard-owned pane order and active-pane reconciliation so cross-split moves, empty split drop targets, and resource refreshes do not snap tabs back or show stale bodies.
+- Flattening pinned/durable and opened/transient surfaces into one undifferentiated visible tab row; the chrome should be compact, but it still preserves the pinned/opened structure.
 - Reintroducing mainInstance/subInstance rows as default left-nav hierarchy; that competes with the workRoot workbench and breaks the workspace/workRoot navigation model.
 - Opening duplicate workbench attachments because the caller keys by display title, raw Dockview id, or daemon process id alone instead of a dashboard logical surface key.
 - Adding new dashboard UI with raw light palette values, rounded cards, decorative shadows, or gradients instead of the semantic dark tokens and square operational style.

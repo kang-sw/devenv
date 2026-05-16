@@ -5,6 +5,17 @@ import {
 } from "./dockviewBridge.js";
 import { defaultSurfaceKinds, defaultSurfaceRegistry } from "./surfaceRegistry.js";
 import {
+  applyWorkbenchPaneOrder,
+  commitWorkbenchPaneMove,
+  deriveWorkbenchPaneOrder,
+  moveWorkbenchPane,
+  partitionWorkbenchPanesByCategory,
+  reconcileActiveWorkbenchPanes,
+  resolveWorkbenchPaneDrop,
+  selectWorkbenchPane,
+  workbenchPaneDragMimeType,
+} from "./editorGroupModel.js";
+import {
   attachmentId,
   daemonResourceId,
   serializeWorkbenchLayout,
@@ -178,10 +189,209 @@ assertThrows(
 assertDeepEqual(
   dockviewBridgeOptions,
   {
-    disableDnd: true,
     disableFloatingGroups: true,
   },
-  "bridge defaults disable raw Dockview drag/drop and floating group controls",
+  "bridge defaults allow Dockview tab movement while disabling floating group controls",
+);
+assert(
+  !("disableDnd" in dockviewBridgeOptions),
+  "bridge does not hard-disable Dockview tab drag/reorder behavior",
+);
+
+
+const editorGroups = [
+  {
+    id: "primary",
+    panes: [{ id: "agent" }, { id: "terminal" }, { id: "viewer" }],
+  },
+  {
+    id: "support",
+    panes: [{ id: "editor" }, { id: "tasks" }, { id: "diagnostics" }],
+  },
+] as const;
+
+
+assertDeepEqual(
+  partitionWorkbenchPanesByCategory([
+    { id: "main-agent", category: "pinned" },
+    { id: "persistent-terminal", category: "pinned" },
+    { id: "selected-viewer", category: "opened" },
+    { id: "diagnostics", category: "opened" },
+  ]),
+  {
+    pinned: [
+      { id: "main-agent", category: "pinned" },
+      { id: "persistent-terminal", category: "pinned" },
+    ],
+    opened: [
+      { id: "selected-viewer", category: "opened" },
+      { id: "diagnostics", category: "opened" },
+    ],
+  },
+  "visible workbench header preserves compact pinned and opened pane categories",
+);
+
+const reorderedEditorGroups = moveWorkbenchPane(editorGroups, {
+  paneId: "viewer",
+  targetGroupId: "primary",
+  beforePaneId: "agent",
+});
+assertDeepEqual(
+  deriveWorkbenchPaneOrder(reorderedEditorGroups),
+  {
+    primary: ["viewer", "agent", "terminal"],
+    support: ["editor", "tasks", "diagnostics"],
+  },
+  "visible workbench movement model reorders tabs inside a split group",
+);
+
+const crossSplitEditorGroups = moveWorkbenchPane(reorderedEditorGroups, {
+  paneId: "terminal",
+  targetGroupId: "support",
+  beforePaneId: "diagnostics",
+});
+assertDeepEqual(
+  deriveWorkbenchPaneOrder(crossSplitEditorGroups),
+  {
+    primary: ["viewer", "agent"],
+    support: ["editor", "tasks", "terminal", "diagnostics"],
+  },
+  "visible workbench movement model moves tabs across split groups",
+);
+
+assertDeepEqual(
+  applyWorkbenchPaneOrder(editorGroups, {
+    primary: ["terminal", "missing"],
+    support: ["diagnostics"],
+  }).map((group) => ({ id: group.id, panes: group.panes.map((pane) => pane.id) })),
+  [
+    { id: "primary", panes: ["terminal", "agent", "viewer"] },
+    { id: "support", panes: ["diagnostics", "editor", "tasks"] },
+  ],
+  "visible workbench movement model reapplies saved tab order without dropping new panes",
+);
+
+assertDeepEqual(
+  reconcileActiveWorkbenchPanes(
+    crossSplitEditorGroups,
+    { primary: "terminal", support: "editor" },
+    { support: "terminal" },
+  ),
+  {
+    primary: "viewer",
+    support: "terminal",
+  },
+  "visible workbench active state follows moved panes and falls back per group",
+);
+
+
+assertDeepEqual(
+  deriveWorkbenchPaneOrder(applyWorkbenchPaneOrder(editorGroups, deriveWorkbenchPaneOrder(crossSplitEditorGroups))),
+  {
+    primary: ["viewer", "agent"],
+    support: ["editor", "tasks", "terminal", "diagnostics"],
+  },
+  "visible workbench movement model preserves cross-split group membership across rerenders",
+);
+
+const emptiedSourceGroups = moveWorkbenchPane(
+  [
+    { id: "primary", panes: [{ id: "only" }] },
+    { id: "support", panes: [{ id: "editor" }] },
+  ],
+  { paneId: "only", targetGroupId: "support" },
+);
+assertDeepEqual(
+  deriveWorkbenchPaneOrder(emptiedSourceGroups),
+  {
+    primary: [],
+    support: ["editor", "only"],
+  },
+  "visible workbench movement model can represent an empty source split for the empty drop target UI",
+);
+assertDeepEqual(
+  reconcileActiveWorkbenchPanes(emptiedSourceGroups, { primary: "only", support: "editor" }, { support: "only" }),
+  {
+    support: "only",
+  },
+  "visible workbench active state omits empty split groups instead of preserving stale active panes",
+);
+
+assertDeepEqual(
+  selectWorkbenchPane({ primary: "agent" }, "support", "tasks"),
+  {
+    primary: "agent",
+    support: "tasks",
+  },
+  "visible workbench click selection updates group-local active pane state",
+);
+
+assertEqual(
+  workbenchPaneDragMimeType,
+  "application/x-ws-workbench-pane",
+  "visible workbench drag wiring uses a stable pane dataTransfer MIME key",
+);
+assertDeepEqual(
+  resolveWorkbenchPaneDrop({
+    dataTransferPaneId: "terminal",
+    fallbackPaneId: "agent",
+    targetGroupId: "support",
+    beforePaneId: "editor",
+  }),
+  {
+    paneId: "terminal",
+    targetGroupId: "support",
+    beforePaneId: "editor",
+  },
+  "visible workbench drop wiring prefers the dataTransfer pane id for cross-split moves",
+);
+assertDeepEqual(
+  resolveWorkbenchPaneDrop({
+    dataTransferPaneId: "",
+    fallbackPaneId: "agent",
+    targetGroupId: "primary",
+    beforePaneId: "viewer",
+  }),
+  {
+    paneId: "agent",
+    targetGroupId: "primary",
+    beforePaneId: "viewer",
+  },
+  "visible workbench drop wiring falls back to local drag state for reorder moves",
+);
+assertEqual(
+  resolveWorkbenchPaneDrop({
+    dataTransferPaneId: "agent",
+    fallbackPaneId: null,
+    targetGroupId: "primary",
+    beforePaneId: "agent",
+  }),
+  null,
+  "visible workbench drop wiring ignores self-drops on the same tab",
+);
+
+const committedMove = commitWorkbenchPaneMove(editorGroups, { primary: "terminal", support: "editor" }, {
+  paneId: "terminal",
+  targetGroupId: "support",
+  beforePaneId: "diagnostics",
+});
+assertDeepEqual(
+  committedMove,
+  {
+    groups: [
+      { id: "primary", panes: [{ id: "agent" }, { id: "viewer" }] },
+      { id: "support", panes: [{ id: "editor" }, { id: "tasks" }, { id: "terminal" }, { id: "diagnostics" }] },
+    ],
+    paneOrderByGroup: {
+      primary: ["agent", "viewer"],
+      support: ["editor", "tasks", "terminal", "diagnostics"],
+    },
+    activePaneByGroup: {
+      primary: "agent",
+      support: "terminal",
+    },
+  },
+  "visible workbench move commit covers drag move, serialized group membership, and active body reconciliation",
 );
 
 const addedPanels: unknown[] = [];
