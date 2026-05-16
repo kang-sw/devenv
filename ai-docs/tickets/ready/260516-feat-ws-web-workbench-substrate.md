@@ -6,6 +6,8 @@ related:
   260516-epic-ws-web-dashboard-workbench-substrate: containing workbench substrate epic
   260516-research-ws-web-workbench-layout-spike: prerequisite layout-library decision
   260514-research-ws-web-dashboard-direction: workbench IA research
+spec:
+  - 260516-ws-web-dashboard-workroot-workbench-substrate
 related-mental-model:
   - ws-web-dashboard
 ---

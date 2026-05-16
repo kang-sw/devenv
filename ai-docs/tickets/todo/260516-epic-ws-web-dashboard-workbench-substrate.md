@@ -78,7 +78,7 @@ The milestone should establish:
   pinned/opened rows, placement registry, layout serialization, keyboard focus
   movement, constrained floating/popout policy, and stable terminal logical
   width policy.
-- `260516-feat-ws-web-workbench-substrate` - adopt the selected layout library
+- `260516-feat-ws-web-workbench-substrate` - ready; adopt the selected layout library
   behind a dashboard-owned workbench adapter and render the current resource
   shell through the `left nav | workRoot workbench` model.
 

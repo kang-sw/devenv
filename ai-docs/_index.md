@@ -149,9 +149,9 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
+| `260516-feat-ws-web-workbench-substrate` | ready | Implement the workRoot-scoped split-group workbench substrate |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260516-epic-ws-web-dashboard-workbench-substrate` | todo | Coordinate dark-first stable-entry constrained workbench substrate |
-| `260516-feat-ws-web-workbench-substrate` | todo | Implement the workRoot-scoped split-group workbench substrate |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -172,6 +172,7 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
+`260516-feat-ws-web-workbench-substrate` - implement the Dockview-backed workRoot workbench adapter, split-group shell, and placement/lifecycle semantics.
 
 ## Session Notes
 
