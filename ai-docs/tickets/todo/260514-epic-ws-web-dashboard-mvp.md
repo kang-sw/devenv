@@ -83,9 +83,9 @@ The MVP should cover:
   for dark-first theme setup, token-free stable browser entry after pairing,
   server-scoped route identity, and a constrained VS Code-inspired workbench
   substrate.
-- `260516-epic-ws-web-dashboard-workroot-io-substrate` - reopened; final
-  completion bug remains to connect the primary dashboard resource API and
-  browser resource model to real opened workRoots instead of mock resources.
+- `260516-epic-ws-web-dashboard-workroot-io-substrate` - done; opened
+  workRoots now drive the primary dashboard resource API and browser resource
+  model, with file, read-only pane, terminal, refresh, and dogfood coverage.
 
 ## Cross-Child Decisions
 

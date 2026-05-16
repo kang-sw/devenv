@@ -12,6 +12,11 @@ spec:
   - 260516-ws-web-dashboard-live-resource-dogfood-verification
 related-mental-model:
   - ws-web-dashboard
+plans:
+  phase-1: 2026-05/16-260516-bug-ws-web-dashboard-live-resource-api-connection
+  phase-2: 2026-05/16-260516-bug-ws-web-dashboard-live-resource-api-connection
+  phase-3: 2026-05/16-260516-bug-ws-web-dashboard-live-resource-api-connection
+completed: 2026-05-16
 ---
 
 # ws web dashboard live resource API connection
@@ -59,6 +64,16 @@ Success means a route-level test can open a real temporary workRoot, call the
 resources endpoint afterward, and observe that the returned resource tree
 contains the opened workRoot rather than the static mock fixture.
 
+### Result (80bc4e42) - 2026-05-16
+
+The daemon resources route now derives the public resource view from registered
+opened workRoots instead of the static mock fixture. With no opened workRoot it
+returns an honest empty live server view, and after opening a workRoot the
+canonical endpoint includes that live workRoot. The open-workRoot route returns
+the aggregated live view so immediate responses and later canonical refreshes
+match. Review fixes moved blocking discovery work off the async route path and
+kept the mock provider covered as a fixture-only test surface.
+
 ### Phase 2: Refresh browser resource state after opening a workRoot
 
 Ensure the frontend's resource model uses the live resources endpoint after
@@ -72,6 +87,16 @@ Success means frontend tests cover the open-or-refresh path and prove the
 resource tree swaps to the live workRoot model without losing existing pane or
 terminal behavior.
 
+### Result (80bc4e42) - 2026-05-16
+
+The frontend gained a minimal path-input open-workRoot control, an
+`openWorkRoot` helper, and a pure `resourceModel` module that owns entity
+flattening and selection reconciliation. After an open succeeds, the browser
+reconciles with the aggregated response, selects the just-opened workRoot, and
+reloads the canonical resources endpoint. Shared API error handling and
+resource-model tests cover the selection and error branches without adding a
+broad root-picker redesign.
+
 ### Phase 3: Record acceptance dogfood for the default product flow
 
 Run daemon-served verification against the production frontend path and record
@@ -84,3 +109,14 @@ If interactive screenshot tooling is unavailable, record that limitation
 separately, but still include HTTP or browser-equivalent evidence that the
 primary resources endpoint no longer returns the mock fixture after the real
 workRoot is opened.
+
+### Result (80bc4e42) - 2026-05-16
+
+Daemon-served dogfood evidence was recorded in
+`ai-docs/.plans/2026-05/16-260516-bug-ws-web-dashboard-live-resource-api-connection.dogfood.md`.
+The evidence starts from the default resources endpoint, confirms an empty live
+view before open, opens `/Users/kang-sw/devenv`, confirms the canonical endpoint
+matches the live open response with mock `workspace-devenv` absent, and
+exercises file listing, read-only file read, terminal create/input/output/list,
+and close against the real opened workRoot. Interactive screenshot tooling
+remains recorded as unavailable.

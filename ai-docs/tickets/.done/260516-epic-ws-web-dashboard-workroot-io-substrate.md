@@ -8,6 +8,7 @@ related:
   260516-feat-ws-web-instance-event-stream: completed event envelope and stream scaffold prerequisite
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web dashboard workRoot IO substrate
@@ -61,7 +62,7 @@ The milestone should establish:
 - `260516-feat-ws-web-workroot-io-workbench-integration` - done; combine file
   panes and terminal sessions with workbench placement, restore, and dogfood
   verification.
-- `260516-bug-ws-web-dashboard-live-resource-api-connection` - ready; connect
+- `260516-bug-ws-web-dashboard-live-resource-api-connection` - done; connect
   the primary dashboard resource API and browser resource model to real opened
   workRoots instead of leaving the first screen backed by mock resources.
 
@@ -126,3 +127,12 @@ frontend's initial resource source. The implemented file, text-pane, and
 terminal substrates are retained, but the final child ticket must make real
 opened workRoots the primary dashboard resource model before this epic can close
 again.
+
+#### Edition (80bc4e42) - 2026-05-16
+
+The reopened completion gap is closed. Normal dashboard resource loads now use
+live opened workRoot state, the frontend can open a workRoot through a minimal
+path-input control and refresh the canonical resource tree, and daemon-served
+dogfood verifies the default resource load, live file/read flow, and terminal
+flow against a real opened workRoot with mock fixtures absent from production
+resource state.
