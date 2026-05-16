@@ -404,6 +404,8 @@ function WorkbenchShell({
   error: string | null;
   onCommand: (commandId: string, payload: CommandPayload) => void;
 }) {
+  const [activePaneByGroup, setActivePaneByGroup] = useState<Record<string, string>>({});
+
   if (loading && !resources) {
     return <StatusPane title="Loading" detail="workbench resources" />;
   }
@@ -418,6 +420,7 @@ function WorkbenchShell({
 
   const { workspace, root, mainInstance, selectedInstance } = selection;
   const supportEntity = selectedEntity ?? resourceEntityForWorkRoot(root);
+  const editorGroups = buildWorkbenchEditorGroups(root, mainInstance, selectedInstance, supportEntity);
 
   return (
     <div className="workbench-shell">
@@ -432,82 +435,19 @@ function WorkbenchShell({
       {error ? <InlineNotice tone="error" title="Refresh failed" detail={error} /> : null}
       {loading ? <InlineNotice tone="info" title="Refreshing" detail="resources" /> : null}
       <div className="workbench-splits" aria-label="Default two-split workbench preset">
-        <WorkbenchSplitGroup title="Primary" description="durable workRoot surfaces">
-          <SurfaceRow title="Pinned row">
-            <SurfaceTile
-              kind="agent"
-              title={mainInstance?.label ?? "No main agent"}
-              detail={mainInstance ? instanceSummary(mainInstance) : "waiting for main instance"}
-              state={mainInstance?.state ?? root.state}
-              meta={
-                mainInstance
-                  ? [mainInstance.kind, mainInstance.interactionMode, closeContractLabel("agent")]
-                  : [kindLabel(root.kind), closeContractLabel("agent")]
-              }
-            />
-            <SurfaceTile
-              kind="persistentTerminal"
-              title="Persistent terminal"
-              detail={`${root.label} command surface reserved`}
-              state={root.state}
-              meta={[root.status, kindLabel(root.kind), closeContractLabel("persistentTerminal"), ptySizeLabel()]}
-            />
-          </SurfaceRow>
-          <SurfaceRow title="Opened row">
-            <SurfaceTile
-              kind="viewer"
-              title={selectedInstance?.label ?? root.label}
-              detail="selected resource projection"
-              state={selectedInstance?.state ?? root.state}
-              meta={[selectedInstance?.role ?? "workRoot", selectedInstance?.kind ?? root.status]}
-            />
-            <SubInstanceStrip mainInstance={mainInstance} />
-          </SurfaceRow>
-        </WorkbenchSplitGroup>
-
-        <WorkbenchSplitGroup title="Support" description="opened inspection surfaces">
-          <SurfaceRow title="Pinned row">
-            <SurfaceTile
-              kind="persistentTerminal"
-              title="Support pinned reserve"
-              detail="durable support slot reserved for later focused groups"
-              state={root.state}
-              meta={["reserved"]}
-            />
-          </SurfaceRow>
-          <SurfaceRow title="Opened row">
-            <SurfaceTile
-              kind="editor"
-              title="Editor / detail"
-              detail={supportEntity ? `${supportEntity.type}: ${supportEntity.label}` : "no selection"}
-              state={supportEntity?.state ?? root.state}
-              meta={["fixture data"]}
-            >
-              {supportEntity ? <ResourceSummary entity={supportEntity} /> : null}
-            </SurfaceTile>
-            <SurfaceTile
-              kind="taskView"
-              title="Task view"
-              detail="workRoot-scoped task surface reserved"
-              state={root.state}
-              meta={[`${root.mainInstances.length} main`]}
-            />
-            <SurfaceTile
-              kind="diagnostics"
-              title="Diagnostics / events"
-              detail={root.state.error ?? "resource and command events"}
-              state={root.state}
-              meta={[root.state.stale ? "stale" : "current"]}
-            />
-            <SurfaceTile
-              kind="inspector"
-              title="Inspector"
-              detail="dashboard-owned metadata surface"
-              state={supportEntity?.state ?? root.state}
-              meta={[supportEntity?.type ?? "workRoot"]}
-            />
-          </SurfaceRow>
-        </WorkbenchSplitGroup>
+        {editorGroups.map((group) => (
+          <WorkbenchEditorGroup
+            activePaneId={activePaneByGroup[group.id]}
+            group={group}
+            key={group.id}
+            onSelectPane={(paneId) =>
+              setActivePaneByGroup((current) => ({
+                ...current,
+                [group.id]: paneId,
+              }))
+            }
+          />
+        ))}
       </div>
     </div>
   );
@@ -599,99 +539,181 @@ function toolbarActions(root: WorkRootView, selectedEntity: ResourceEntity | nul
   return actions;
 }
 
-function WorkbenchSplitGroup({
-  title,
-  description,
-  children,
+type WorkbenchPane = {
+  readonly id: string;
+  readonly kind: SurfaceKind;
+  readonly title: string;
+  readonly detail: string;
+  readonly state: ViewState;
+  readonly meta: readonly string[];
+  readonly body?: ReactNode;
+};
+
+type WorkbenchEditorGroupModel = {
+  readonly id: string;
+  readonly label: string;
+  readonly panes: readonly WorkbenchPane[];
+};
+
+function buildWorkbenchEditorGroups(
+  root: WorkRootView,
+  mainInstance: InstanceView | null,
+  selectedInstance: InstanceView | null,
+  supportEntity: ResourceEntity | null,
+): WorkbenchEditorGroupModel[] {
+  return [
+    {
+      id: "primary",
+      label: "workRoot",
+      panes: [
+        {
+          id: "main-agent",
+          kind: "agent",
+          title: mainInstance?.label ?? "Main agent",
+          detail: mainInstance ? instanceSummary(mainInstance) : "Waiting for a main instance.",
+          state: mainInstance?.state ?? root.state,
+          meta: mainInstance
+            ? [mainInstance.kind, mainInstance.interactionMode, closeContractLabel("agent")]
+            : [kindLabel(root.kind), closeContractLabel("agent")],
+        },
+        {
+          id: "persistent-terminal",
+          kind: "persistentTerminal",
+          title: "Terminal",
+          detail: `${root.label} command surface reserved.`,
+          state: root.state,
+          meta: [root.status, kindLabel(root.kind), closeContractLabel("persistentTerminal"), ptySizeLabel()],
+        },
+        {
+          id: "selected-viewer",
+          kind: "viewer",
+          title: selectedInstance?.label ?? root.label,
+          detail: "Selected resource projection.",
+          state: selectedInstance?.state ?? root.state,
+          meta: [selectedInstance?.role ?? "workRoot", selectedInstance?.kind ?? root.status],
+          body: <SubInstancePane mainInstance={mainInstance} />,
+        },
+      ],
+    },
+    {
+      id: "support",
+      label: "inspect",
+      panes: [
+        {
+          id: "editor-detail",
+          kind: "editor",
+          title: "Editor / detail",
+          detail: supportEntity ? `${supportEntity.type}: ${supportEntity.label}` : "No selection.",
+          state: supportEntity?.state ?? root.state,
+          meta: ["fixture data"],
+          body: supportEntity ? <ResourceSummary entity={supportEntity} /> : undefined,
+        },
+        {
+          id: "task-view",
+          kind: "taskView",
+          title: "Tasks",
+          detail: "WorkRoot-scoped task surface reserved.",
+          state: root.state,
+          meta: [`${root.mainInstances.length} main`],
+        },
+        {
+          id: "diagnostics-events",
+          kind: "diagnostics",
+          title: "Diagnostics",
+          detail: root.state.error ?? "Resource and command events.",
+          state: root.state,
+          meta: [root.state.stale ? "stale" : "current"],
+        },
+        {
+          id: "inspector",
+          kind: "inspector",
+          title: "Inspector",
+          detail: "Dashboard-owned metadata surface.",
+          state: supportEntity?.state ?? root.state,
+          meta: [supportEntity?.type ?? "workRoot"],
+        },
+      ],
+    },
+  ];
+}
+
+function WorkbenchEditorGroup({
+  group,
+  activePaneId,
+  onSelectPane,
 }: {
-  title: string;
-  description: string;
-  children: ReactNode;
+  group: WorkbenchEditorGroupModel;
+  activePaneId: string | undefined;
+  onSelectPane: (paneId: string) => void;
 }) {
+  const activePane = group.panes.find((pane) => pane.id === activePaneId) ?? group.panes[0];
+  const activeRegistry = defaultSurfaceRegistry()[activePane.kind];
+
   return (
-    <section className="workbench-group" aria-label={`${title} split group`}>
-      <div className="workbench-group-header">
-        <div>
-          <div className="section-label">split group</div>
-          <h2>{title}</h2>
-        </div>
-        <span>{description}</span>
+    <section className="workbench-group" aria-label={`${group.label} editor group`}>
+      <div className="workbench-tab-strip" role="tablist" aria-label={group.label}>
+        {group.panes.map((pane) => {
+          const selected = pane.id === activePane.id;
+          const registry = defaultSurfaceRegistry()[pane.kind];
+
+          return (
+            <button
+              aria-controls={`pane-${group.id}-${pane.id}`}
+              aria-selected={selected}
+              className={`workbench-tab ${selected ? "workbench-tab-active" : ""}`}
+              key={pane.id}
+              role="tab"
+              type="button"
+              onClick={() => onSelectPane(pane.id)}
+            >
+              <span className="workbench-tab-kind">{registry.label}</span>
+              <span className="workbench-tab-title">{pane.title}</span>
+            </button>
+          );
+        })}
       </div>
-      <div className="workbench-group-rows">{children}</div>
+      <article
+        aria-labelledby={`pane-title-${group.id}-${activePane.id}`}
+        className="workbench-pane"
+        data-surface-kind={activePane.kind}
+        id={`pane-${group.id}-${activePane.id}`}
+        role="tabpanel"
+      >
+        <header className="workbench-pane-header">
+          <div>
+            <div className="surface-kind">{activeRegistry.label}</div>
+            <h2 id={`pane-title-${group.id}-${activePane.id}`}>{activePane.title}</h2>
+          </div>
+          <StateBadge state={activePane.state} />
+        </header>
+        <div className="workbench-pane-body">
+          <p>{activePane.detail}</p>
+          {activePane.body ? <div className="workbench-pane-content">{activePane.body}</div> : null}
+        </div>
+        <footer className="workbench-pane-status">
+          <span>{activeRegistry.rowPolicy}</span>
+          {activePane.meta.map((value) => (
+            <span key={value}>{value}</span>
+          ))}
+        </footer>
+      </article>
     </section>
   );
 }
 
-function SurfaceRow({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="surface-row">
-      <div className="surface-row-label">{title}</div>
-      <div className="surface-row-items">{children}</div>
-    </div>
-  );
-}
-
-function SurfaceTile({
-  kind,
-  title,
-  detail,
-  state,
-  meta,
-  children,
-}: {
-  kind: SurfaceKind;
-  title: string;
-  detail: string;
-  state: ViewState;
-  meta: string[];
-  children?: ReactNode;
-}) {
-  const registry = defaultSurfaceRegistry()[kind];
-
-  return (
-    <article className="surface-tile" data-surface-kind={kind}>
-      <div className="surface-tile-header">
-        <div>
-          <div className="surface-kind">{registry.label}</div>
-          <h3>{title}</h3>
-        </div>
-        <StateBadge state={state} />
-      </div>
-      <p>{detail}</p>
-      <div className="surface-meta">
-        <span className="meta-chip">{registry.rowPolicy}</span>
-        {meta.map((value) => (
-          <span className="meta-chip" key={value}>
-            {value}
-          </span>
-        ))}
-      </div>
-      {children ? <div className="surface-body">{children}</div> : null}
-    </article>
-  );
-}
-
-function SubInstanceStrip({ mainInstance }: { mainInstance: InstanceView | null }) {
+function SubInstancePane({ mainInstance }: { mainInstance: InstanceView | null }) {
   if (!mainInstance || mainInstance.subInstances.length === 0) {
-    return (
-      <div className="surface-tile surface-tile-muted">
-        <div className="surface-kind">Sub projections</div>
-        <p>No sub instances attached to this main surface.</p>
-      </div>
-    );
+    return <p className="workbench-pane-empty">No sub instances attached to this main surface.</p>;
   }
 
   return (
-    <div className="surface-tile surface-tile-muted">
-      <div className="surface-kind">Sub projections</div>
-      <div className="subinstance-list">
-        {mainInstance.subInstances.map((instance) => (
-          <div className="subinstance-pill" key={instance.id}>
-            <span>{instance.label}</span>
-            <StateBadge state={instance.state} />
-          </div>
-        ))}
-      </div>
+    <div className="subinstance-list">
+      {mainInstance.subInstances.map((instance) => (
+        <div className="subinstance-pill" key={instance.id}>
+          <span>{instance.label}</span>
+          <StateBadge state={instance.state} />
+        </div>
+      ))}
     </div>
   );
 }

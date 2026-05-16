@@ -178,10 +178,13 @@ assertThrows(
 assertDeepEqual(
   dockviewBridgeOptions,
   {
-    disableDnd: true,
     disableFloatingGroups: true,
   },
-  "bridge defaults disable raw Dockview drag/drop and floating group controls",
+  "bridge defaults allow Dockview tab movement while disabling floating group controls",
+);
+assert(
+  !("disableDnd" in dockviewBridgeOptions),
+  "bridge does not hard-disable Dockview tab drag/reorder behavior",
 );
 
 const addedPanels: unknown[] = [];

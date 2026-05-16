@@ -8,12 +8,10 @@ import type {
 import { serializeWorkbenchLayout } from "./layoutSerialization.js";
 
 export type DockviewBridgeOptions = {
-  readonly disableDnd: true;
   readonly disableFloatingGroups: true;
 };
 
 export const dockviewBridgeOptions: DockviewBridgeOptions = Object.freeze({
-  disableDnd: true,
   disableFloatingGroups: true,
 });
 
