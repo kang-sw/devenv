@@ -223,6 +223,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.locator('[data-command-id="terminal.create"]').click();
     await terminalSurface(page);
     await expect(terminalTabs(page)).toHaveCount(1);
+    await expect(
+      page.locator('.workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-header'),
+    ).toBeHidden();
     await expect.poll(() => terminalSocketUrls.length, { timeout: 10_000 }).toBeGreaterThan(0);
     const pollsAfterSocket = terminalOutputPolls;
     await page.waitForTimeout(500);
