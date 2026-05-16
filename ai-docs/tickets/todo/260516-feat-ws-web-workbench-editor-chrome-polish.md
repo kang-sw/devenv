@@ -40,6 +40,12 @@ resource API, route identity, workbench policy model, and backend scope.
 - Contract/debug details such as `close: detach` and `pty: 80x24` should not be
   permanently prominent chrome. They may appear in a subtle status area,
   tooltip, inspector detail, or debug-only surface.
+- A visible tab or selector affordance must be honest. If it looks clickable, it
+  must at least switch the active surface in that split; if it looks draggable,
+  drag behavior must exist or the affordance must be clearly absent/disabled.
+- Placeholder surfaces must preserve the intended interaction metaphor. A
+  non-live agent/editor/terminal pane may be empty or fixture-backed, but it
+  must not pretend that static topology labels are interactive controls.
 
 ## Constraints
 
@@ -54,6 +60,8 @@ resource API, route identity, workbench policy model, and backend scope.
 - Keep the dark-first semantic token system and dense operational visual style.
 - Avoid card-heavy dashboard presentation, nested cards, marketing-scale text,
   decorative gradients, or explanatory labels that consume editor body space.
+- Do not present fake controls. Deferred behaviors should be either omitted,
+  disabled with clear state, or represented as non-interactive status text.
 
 ## Phases
 
@@ -70,6 +78,12 @@ realistic product chrome rather than topology visualization. Placeholder
 content is acceptable only when it resembles empty agent/editor/terminal/viewer
 pane bodies, not dashboard cards.
 
+Clickable selector controls must maintain active state inside their split group.
+The minimum acceptable behavior is selecting which placeholder pane body is
+active. Drag/drop remains out of scope unless a later ticket implements it, so
+the UI must not expose draggable-looking handles or tabs that suggest movement
+between groups.
+
 ### Phase 2: Visual Contract Verification
 
 Add or run visual verification that checks the product contract, not just
@@ -78,6 +92,9 @@ presence of sections. The gate should explicitly fail if:
 - internal model terms are exposed as large visible labels;
 - pinned/opened areas consume substantial vertical space before pane content;
 - surface placeholders render as large cards instead of pane bodies;
+- visible tab/selector buttons cannot change the active pane;
+- draggable-looking affordances are present without drag behavior or an
+  explicit disabled/deferred state;
 - the workbench cannot plausibly host an agent, terminal, or editor without a
   second redesign;
 - narrow viewport behavior introduces horizontal overflow or unreadable chrome.

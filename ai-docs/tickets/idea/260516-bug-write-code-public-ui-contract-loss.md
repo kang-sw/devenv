@@ -32,6 +32,10 @@ acceptance criteria that are too weak to preserve the product-facing contract.
 - The delegated visual review checked blank page, auth, dark theme, split
   presence, overflow, and screenshots, but did not evaluate whether the UI
   matched the discussed product chrome.
+- The review did not test interaction-affordance honesty. It accepted visible
+  pinned/opened areas even though the apparent tab/selector controls did not
+  switch active panes, did not support placement, and did not clearly present
+  themselves as disabled or deferred.
 - The lead merged the phase because technical and structural gates passed,
   even though the screenshots should have triggered a product-intent review.
 
@@ -43,6 +47,9 @@ acceptance criteria that are too weak to preserve the product-facing contract.
   in addition to structural and visual-regression checks?
 - Should visual verification distinguish "page is not broken" from "UI matches
   the agreed information architecture, density, and interaction metaphor"?
+- Should visual verification require basic interaction checks for visible
+  controls, such as clicking tab selectors, checking active pane changes, and
+  flagging draggable-looking affordances that cannot actually drag?
 - Should internal model vocabulary be treated as suspect when it appears as
   large user-facing labels unless the brief explicitly allows it?
 
@@ -54,6 +61,9 @@ For frontend/product UI tasks, the brief should carry:
 - public labels that are allowed or forbidden;
 - internal model terms that must remain implementation-only;
 - examples of UI shapes to avoid;
+- interaction-affordance honesty rules: visible selectors must select, visible
+  drag affordances must drag or be absent/disabled, and deferred behavior must
+  not masquerade as an available control;
 - screenshot/review criteria that compare against the product contract, not only
   against blank/overflow/regression checks.
 
