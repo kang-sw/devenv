@@ -94,6 +94,9 @@ The MVP should cover:
   terminal I/O with an owner-authenticated WebSocket live path and recover
   interactive input fidelity before considering dashboard terminal quality
   mergeable.
+- `260516-bug-ws-web-terminal-cross-platform-portability` - todo; make
+  dashboard terminal shell selection, PTY commands, browser harness behavior,
+  and acceptance evidence honestly cross-platform or explicitly OS-scoped.
 
 ## Cross-Child Decisions
 
