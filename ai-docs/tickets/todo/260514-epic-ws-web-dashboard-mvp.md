@@ -90,7 +90,7 @@ The MVP should cover:
   browser-level dashboard usability before merging workRoot IO UI work,
   including terminal tabs, live initial terminal state, real xterm behavior,
   pane fill, file explorer affordance, and visual/browser acceptance evidence.
-- `260516-bug-ws-web-terminal-websocket-transport` - ready; replace polling
+- `260516-bug-ws-web-terminal-websocket-transport` - done; replaced polling
   terminal I/O with an owner-authenticated WebSocket live path and recover
   interactive input fidelity before considering dashboard terminal quality
   mergeable.

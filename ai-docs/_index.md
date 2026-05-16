@@ -150,7 +150,6 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260427-chore-claude-dash-windows` | ready | Verify native Windows behavior for claude-dash |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260516-bug-ws-web-terminal-websocket-transport` | ready | Replace polling terminal I/O with WebSocket live transport and input fidelity evidence |
 | `260516-bug-ws-web-terminal-cross-platform-portability` | todo | Make dashboard terminal shell selection, PTY commands, browser harness behavior, and evidence cross-platform or explicitly OS-scoped |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
@@ -173,10 +172,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 `260427-chore-claude-dash-windows` - verify Windows build/runtime behavior.
 
-`260516-bug-ws-web-terminal-websocket-transport` - replace polling terminal I/O
-with owner-authenticated WebSocket live transport, recover byte-stream input
-fidelity, and extend daemon-served browser evidence before dashboard terminal
-quality merge.
 
 ## Session Notes
 

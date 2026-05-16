@@ -9,10 +9,13 @@ spec:
   - 260516-ws-web-dashboard-terminal-websocket-transport
   - 260516-ws-web-dashboard-terminal-websocket-input-fidelity
   - 260516-ws-web-dashboard-terminal-websocket-browser-gate
+plans:
+  phase-1: 2026-05/16-260516-bug-ws-web-terminal-websocket-transport
 skeletons:
   phase-1: 93a725f
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web terminal WebSocket transport
@@ -83,6 +86,17 @@ Success means route tests cover unauthenticated rejection before upgrade,
 unknown/closed terminal rejection, successful owner upgrade, input forwarding,
 output forwarding, resize forwarding, and close behavior.
 
+### Result (136ae95) - 2026-05-16
+
+Added the authenticated terminal WebSocket route for daemon-owned PTY sessions.
+The route stays behind owner authentication and Host/Origin upgrade checks,
+rejects unknown or closed opaque terminal ids before accepting an attachment,
+streams ordered PTY output/status/exit data to the browser, and forwards raw
+input plus bounded resize messages to the daemon terminal session. Backend route
+tests cover unauthenticated socket rejection, unknown/closed terminal rejection,
+owner upgrade success, input/output forwarding, daemon-visible resize updates,
+and close behavior.
+
 ### Phase 2: Make xterm use WebSocket as the live path
 
 Switch the browser terminal pane so an active xterm attaches to the terminal
@@ -98,6 +112,17 @@ Success means the frontend no longer runs periodic output HTTP polling for a
 terminal while its WebSocket is connected, and closing the terminal still
 terminates the daemon PTY through the existing lifecycle contract.
 
+### Result (136ae95) - 2026-05-16
+
+Implemented the browser terminal WebSocket live path. Xterm panes attach to the
+terminal socket with an output cursor, feed WebSocket output into the emulator,
+send raw `onData` input and resize messages over the socket, suppress HTTP
+polling while a socket is connecting or connected, and discard stale in-flight
+poll results after socket attach or cursor advancement. HTTP output remains
+available for replay/reload/fallback. Follow-up dogfood fixes removed redundant
+generic pane chrome and corrected xterm visible-box fitting so terminal rows and
+alternate-screen TUIs stay inside the visible surface.
+
 ### Phase 3: Recover interactive terminal input fidelity
 
 Verify and fix terminal byte-stream behavior for ordinary shell editing and
@@ -110,6 +135,17 @@ Success means browser evidence shows the terminal behaves like a normal
 PTY-backed xterm for those interactions. If one behavior remains platform- or
 shell-specific, document the exact environment and residual constraint rather
 than hiding it behind a passing output-rendering check.
+
+### Result (136ae95) - 2026-05-16
+
+Recovered terminal byte-stream input behavior through the WebSocket path and
+browser gate. The daemon-served browser evidence covers prompt editing,
+Backspace, left/right cursor movement, command history navigation, Ctrl-C,
+Ctrl-D before explicit close, Ctrl-L or clear-screen behavior, paste, ANSI
+rendering, and ordinary PTY echo with local responsiveness no longer bounded by
+the previous polling interval. A follow-up portability ticket captures the
+remaining cross-platform risk that some acceptance commands are POSIX-shell
+oriented.
 
 ### Phase 4: Browser gate and dogfood evidence
 
@@ -127,3 +163,15 @@ artifact records paths and pass/fail observations.
 Success means the browser gate and dogfood evidence would have failed the
 current polling-based terminal path for responsiveness or input fidelity, and
 the branch can be reconsidered for merge only after those checks pass.
+
+### Result (136ae95) - 2026-05-16
+
+Extended `npm run test:browser` to prove the daemon-served production frontend
+pairs as owner, opens a real workRoot, connects a terminal WebSocket, stops live
+HTTP output polling while connected, verifies input fidelity and ANSI/control
+rendering, checks resize forwarding, verifies close-as-terminate and reload
+reconstruction, and asserts no mock terminal surface is used. The persistent
+dogfood artifact is
+`ai-docs/.plans/2026-05/16-260516-bug-ws-web-terminal-websocket-transport-dogfood.md`;
+generated screenshots and traces remain ignored under the frontend e2e artifact
+directory.
