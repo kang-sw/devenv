@@ -39,6 +39,37 @@ use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TestShellProfile {
+    UnixSh,
+    CmdExe,
+    PowerShell,
+}
+
+struct TerminalTestCommands {
+    echo_and_exit: String,
+    exit: String,
+}
+
+fn terminal_test_commands(profile: TestShellProfile, marker: &str) -> TerminalTestCommands {
+    // CONTRACT: Backend terminal route tests must not embed POSIX command
+    // strings in shared behavior checks. This helper maps observable terminal
+    // intent to Unix shell, cmd.exe, and PowerShell command syntax.
+    // HOLE: Fill command builders and route tests for the three profiles.
+    let _ = profile;
+    let _ = marker;
+    todo!("HOLE: platform terminal test commands")
+}
+
+fn terminal_test_commands_for_current_platform(marker: &str) -> TerminalTestCommands {
+    // CONTRACT: Current-platform tests should use the same helper as explicit
+    // profile tests so native Windows evidence exercises cmd.exe/PowerShell
+    // syntax instead of POSIX-only commands.
+    // HOLE: Detect the profile from cfg and/or shell selection.
+    let _ = marker;
+    todo!("HOLE: current platform terminal commands")
+}
+
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn app_state() -> AppState {

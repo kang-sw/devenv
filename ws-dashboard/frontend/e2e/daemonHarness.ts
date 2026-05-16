@@ -6,19 +6,85 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // frontend/e2e -> ws-dashboard
 const repoRoot = path.resolve(here, "..", "..");
 
+export type DashboardBindMode = "local" | "tunnel" | "public";
+
+export type SpawnDaemonHarnessConfig = {
+  mode?: "spawn";
+  host?: string;
+  port?: number;
+  bindMode?: DashboardBindMode;
+  daemonBin?: string;
+  staticDir?: string;
+  readinessTimeoutMs?: number;
+};
+
+export type ExternalDaemonHarnessConfig = {
+  mode: "external";
+  baseUrl?: string;
+  pairingUrl?: string;
+  readinessTimeoutMs?: number;
+};
+
+export type DaemonHarnessConfig = SpawnDaemonHarnessConfig | ExternalDaemonHarnessConfig;
+
 export type DaemonHandle = {
+  mode: "spawned" | "external";
   child: ChildProcess;
   baseUrl: string;
   pairingUrl: string;
   stop: () => Promise<void>;
 };
 
+export function parseDaemonHarnessConfig(env: NodeJS.ProcessEnv = process.env): DaemonHarnessConfig {
+  // CONTRACT: Environment parsing must expose fixed host/port/bind-mode,
+  // daemon binary, static dir, readiness timeout, and external base/pairing URL.
+  // HINT: Keep existing no-env behavior equivalent to locally spawned port 0.
+  // HOLE: Choose stable env var names and validation diagnostics.
+  void env;
+  throw new Error("HOLE: parse daemon harness config");
+}
+
+export function dashboardBinaryName(platform: NodeJS.Platform = process.platform): string {
+  // CONTRACT: Native Windows resolves `ws-dashboard.exe`; other platforms keep
+  // `ws-dashboard`.
+  // HOLE: Normalize platform-specific executable naming in one place.
+  void platform;
+  throw new Error("HOLE: dashboard binary name");
+}
+
+export function resolveDaemonBinary(root: string, platform: NodeJS.Platform = process.platform): string {
+  // CONTRACT: The harness must resolve the debug daemon binary in a
+  // cross-platform way unless an explicit daemonBin override is provided.
+  // HINT: Adjacent path is target/debug plus dashboardBinaryName(platform).
+  void root;
+  void platform;
+  throw new Error("HOLE: resolve daemon binary");
+}
+
+export async function stopDaemonProcess(
+  child: ChildProcess,
+  options: { platform?: NodeJS.Platform; timeoutMs?: number } = {},
+): Promise<void> {
+  // CONTRACT: Shutdown must not assume POSIX-only signal behavior. It should
+  // prefer graceful stop when available and report forced termination clearly.
+  // HOLE: Fill Windows-safe stop behavior and timeout diagnostics.
+  void child;
+  void options;
+  throw new Error("HOLE: stop daemon process");
+}
+
 /**
  * Boot the dashboard daemon serving the production `frontend/dist` build and
  * scrape the one-time owner pairing URL from startup output. The browser gate
  * must exercise the daemon-served frontend, not a Vite dev server.
  */
-export async function startDaemon(): Promise<DaemonHandle> {
+export async function startDaemon(config: DaemonHarnessConfig = {}): Promise<DaemonHandle> {
+  // CONTRACT: startDaemon must support both spawned-daemon mode and external
+  // fixed-endpoint mode. External mode attaches to a supplied base/pairing URL
+  // and uses a no-op stop handle.
+  // HINT: The existing implementation below is the spawned default path.
+  // HOLE: Wire config into CLI args, endpoint readiness, and external attach.
+  void config;
   const daemonBin = path.join(repoRoot, "target", "debug", "ws-dashboard");
   const staticDir = path.join(repoRoot, "frontend", "dist");
 
@@ -85,5 +151,5 @@ export async function startDaemon(): Promise<DaemonHandle> {
       child.kill("SIGINT");
     });
 
-  return { child, baseUrl, pairingUrl, stop };
+  return { mode: "spawned", child, baseUrl, pairingUrl, stop };
 }

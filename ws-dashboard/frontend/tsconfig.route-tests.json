@@ -20,6 +20,8 @@
     "src/workRootFiles.test.ts",
     "src/terminals.ts",
     "src/terminals.test.ts",
+    "src/terminalCommandPlan.ts",
+    "src/terminalCommandPlan.test.ts",
     "src/workbench/**/*.ts"
   ]
 }

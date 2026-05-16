@@ -30,6 +30,44 @@ const MIN_ROWS: u16 = 1;
 const MAX_COLUMNS: u16 = 300;
 const MAX_ROWS: u16 = 120;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalPlatform {
+    Unix,
+    Windows,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalShellSource {
+    ShellEnv,
+    ComspecEnv,
+    Fallback,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalShellSelection {
+    pub platform: TerminalPlatform,
+    pub program: std::path::PathBuf,
+    pub source: TerminalShellSource,
+}
+
+pub fn select_terminal_shell(
+    platform: TerminalPlatform,
+    env: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> TerminalShellSelection {
+    // CONTRACT: Shell selection must be explicit and testable for Unix and
+    // Windows without relying on compile-time cfg branches inside tests.
+    // HINT: Unix uses SHELL then /bin/sh; Windows uses COMSPEC then cmd.exe.
+    // HOLE: Normalize fallback path type and integrate with spawn diagnostics.
+    void_shell_selector_inputs(platform, env);
+    todo!("HOLE: select terminal shell")
+}
+
+fn void_shell_selector_inputs(
+    _platform: TerminalPlatform,
+    _env: impl Fn(&str) -> Option<std::ffi::OsString>,
+) {
+}
+
 #[derive(Clone, Default)]
 pub struct TerminalRegistry {
     sessions: Arc<RwLock<HashMap<String, Arc<TerminalSession>>>>,
@@ -691,11 +729,32 @@ fn terminal_error(status: StatusCode, error: impl Into<String>) -> Response {
 fn default_shell() -> String {
     #[cfg(windows)]
     {
+        // HINT: Replace with select_terminal_shell(TerminalPlatform::Windows, ...)
+        // when the skeleton is populated.
         std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_owned())
     }
     #[cfg(not(windows))]
     {
+        // HINT: Replace with select_terminal_shell(TerminalPlatform::Unix, ...)
+        // when the skeleton is populated.
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod terminal_portability_skeleton_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_shell_selection_contract_targets() {
+        // CONTRACT: Fill executable assertions for SHELL, COMSPEC, Unix
+        // fallback, Windows fallback, invalid/missing env values where
+        // practical, and spawn cwd diagnostics.
+        let _ = TerminalPlatform::Unix;
+        let _ = TerminalPlatform::Windows;
+        let _ = TerminalShellSource::ShellEnv;
+        let _ = TerminalShellSource::ComspecEnv;
+        let _ = TerminalShellSource::Fallback;
     }
 }
 
