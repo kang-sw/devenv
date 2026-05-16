@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.26.5 - 2026-05-16
+
+### Changed
+- Teach `lead-write-ticket` to treat cascade wording as related-ticket
+  propagation across parent and child ticket graphs, while keeping epics
+  board-level and child tickets detail-bearing.
+- Default `lead-proceed` to autonomous cohesive phase-slice selection when the
+  user does not name phases, keeping `auto-slice` as compatible wording for
+  the same policy.
+- Add skill-authoring guidance that local shorthand should be represented as a
+  trigger example for a general workflow intent.
+
 ## v0.26.4 - 2026-05-16
 
 ### Added
