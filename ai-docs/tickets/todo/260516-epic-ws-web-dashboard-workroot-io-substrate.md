@@ -61,7 +61,7 @@ The milestone should establish:
 - `260516-feat-ws-web-workroot-io-workbench-integration` - done; combine file
   panes and terminal sessions with workbench placement, restore, and dogfood
   verification.
-- `260516-bug-ws-web-dashboard-live-resource-api-connection` - todo; connect
+- `260516-bug-ws-web-dashboard-live-resource-api-connection` - ready; connect
   the primary dashboard resource API and browser resource model to real opened
   workRoots instead of leaving the first screen backed by mock resources.
 

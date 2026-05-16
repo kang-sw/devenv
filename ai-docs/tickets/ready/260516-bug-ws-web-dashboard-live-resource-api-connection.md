@@ -6,6 +6,10 @@ related:
   260516-feat-ws-web-local-workspace-discovery: opened workRoot discovery prerequisite
   260516-feat-ws-web-workroot-file-navigation: live file navigation consumer
   260516-feat-ws-web-workroot-io-workbench-integration: prior integration pass that missed this product-flow acceptance
+spec:
+  - 260516-ws-web-dashboard-live-resource-authority
+  - 260516-ws-web-dashboard-open-workroot-resource-refresh
+  - 260516-ws-web-dashboard-live-resource-dogfood-verification
 related-mental-model:
   - ws-web-dashboard
 ---
