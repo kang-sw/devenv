@@ -169,6 +169,21 @@ while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
 they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundary}
 
+`lead-write-ticket` recognizes related-ticket propagation requests such as
+"cascade", updating parent and child tickets together, or organizing a board and
+its children in one pass. In that mode it identifies the impacted ticket graph,
+selects only affected edit targets, keeps epic edits board-level, puts
+slice-specific decisions in child tickets, updates active inventory when
+needed, and commits the propagation as one logical documentation unit. It does
+not promote propagated tickets to `ready/` unless the user explicitly requests
+ready promotion or routes through `lead-proceed`.
+{#260516-write-ticket-related-ticket-propagation}
+
+Skill-authoring guidance treats local shorthand as trigger examples for a
+general intent, not as the concept name itself. New workflow shorthand should
+name the broad intent first and list the shorthand only where it prevents
+repeated routing failures.
+
 `lead-salvage` handles failed large implementations, sprints, branches, and
 agent runs where a wrong premise may require rollback or recovery. It freezes
 evidence before cleanup, interviews the user to confirm the failure claim and
@@ -293,15 +308,13 @@ spec -> ticket -> implementation
 
 Existing non-epic `ready/` ticket paths skip ticket creation and become
 implementation targets after `lead-proceed` selects an implementation slice.
-The default slice is the first unfinished phase; targets without phase sections
-use the whole target. Multiple phases are selected when the user explicitly
-requests them, when the user grants `auto-slice` permission and adjacent
-unfinished phases form one cohesive implementation and review slice, or when
-the ticket artifacts show the phases cannot be verified separately.
-`auto-slice` is permission rather than a mandate: `lead-proceed` may group
-adjacent phases, especially when a later phase only verifies the immediately
-preceding implementation, while keeping unrelated public contracts, independent
-skeleton needs, or separately reviewable security boundaries split.
+Targets without phase sections use the whole target. When the user names phases,
+that explicit request is honored exactly. When the user does not name phases,
+`lead-proceed` autonomously selects the broadest cohesive unfinished phase range
+that can be implemented and reviewed together. It chooses a narrower slice when
+later phases introduce a separate public contract, independent skeleton need, or
+separately reviewable security boundary. Compatibility phrasing such as
+`auto-slice` remains accepted as the same default autonomous slice policy.
 
 Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
