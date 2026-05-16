@@ -12,7 +12,7 @@
     "test:resource-model": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/resourceModel.test.js",
     "test:workbench": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workbench/workbenchModel.test.js",
     "test:work-root-files": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workRootFiles.test.js",
-    "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminals.test.js",
+    "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminalCommandPlan.test.js && node ./node_modules/.tmp/route-tests/terminals.test.js && tsc -p tsconfig.e2e-tests.json && node ./node_modules/.tmp/e2e-tests/e2e/daemonHarness.test.js",
     "test:browser": "npm run build && (cd .. && cargo build -p ws-dashboard-daemon) && playwright test"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "@types/node": "^25.8.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",

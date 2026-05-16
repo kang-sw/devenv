@@ -37,6 +37,25 @@ export type DaemonHandle = {
   stop: () => Promise<void>;
 };
 
+
+function scrubDiagnosticText(value: string): string {
+  return value
+    .replace(/https?:\/\/\S+/g, "<redacted-url>")
+    .replace(/owner pairing URL:\s*\S+/gi, "owner pairing URL: <redacted-url>")
+    .replace(/([A-Za-z]:)?[\\/][^\s;]+/g, "<redacted-path>");
+}
+
+function diagnosticCommand(command: string[]): string {
+  return command
+    .map((part, index, parts) => {
+      if (index === 0) return path.basename(part);
+      if (parts[index - 1] === "--static-dir") return "<static-dir>";
+      if (parts[index - 1] === "--host") return "<host>";
+      return scrubDiagnosticText(part);
+    })
+    .join(" ");
+}
+
 function optionalPort(name: string, value: string | undefined): number | undefined {
   if (value === undefined || value === "") {
     return undefined;
@@ -176,23 +195,16 @@ export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarne
   const readinessTimeoutMs = config.readinessTimeoutMs ?? 60_000;
 
   if (config.mode === "external") {
-    let pairingUrl = config.pairingUrl;
+    const pairingUrl = config.pairingUrl ?? config.baseUrl;
+    if (!pairingUrl) {
+      throw new Error("external daemon mode requires WS_DASHBOARD_DAEMON_PAIRING_URL or WS_DASHBOARD_DAEMON_BASE_URL");
+    }
     let baseUrl: string;
     try {
-      if (pairingUrl) {
-        baseUrl = config.baseUrl ?? new URL(pairingUrl).origin;
-      } else if (config.baseUrl && new URL(config.baseUrl).pathname.startsWith("/pair")) {
-        pairingUrl = config.baseUrl;
-        baseUrl = new URL(config.baseUrl).origin;
-      } else {
-        throw new Error("external daemon mode requires WS_DASHBOARD_DAEMON_PAIRING_URL unless WS_DASHBOARD_DAEMON_BASE_URL is itself a /pair URL");
-      }
+      baseUrl = config.baseUrl && config.pairingUrl ? config.baseUrl : new URL(pairingUrl).origin;
       new URL(baseUrl);
       new URL(pairingUrl);
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith("external daemon mode requires")) {
-        throw error;
-      }
       const detail = error instanceof Error ? `: ${error.message}` : "";
       throw new Error(`external daemon mode received an invalid WS_DASHBOARD_DAEMON_BASE_URL or WS_DASHBOARD_DAEMON_PAIRING_URL${detail}`);
     }
@@ -222,41 +234,47 @@ export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarne
 
   let startupBuffer = "";
   let scrape: ((chunk: Buffer) => void) | null = null;
-  const pairingUrl = await new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(
-        new Error(
-          `daemon startup timed out waiting for owner pairing URL within ${readinessTimeoutMs}ms; command=${command.join(" ")}; startup=${startupBuffer.slice(-4000)}`,
-        ),
-      );
-    }, readinessTimeoutMs);
+  let pairingUrl: string;
+  try {
+    pairingUrl = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(
+          new Error(
+            `daemon startup timed out waiting for owner pairing URL within ${readinessTimeoutMs}ms; command=${diagnosticCommand(command)}; startup=${scrubDiagnosticText(startupBuffer.slice(-4000))}`,
+          ),
+        );
+      }, readinessTimeoutMs);
 
-    scrape = (chunk: Buffer) => {
-      startupBuffer += chunk.toString();
-      // Require the trailing newline so a pairing token split across a
-      // stdout/stderr chunk boundary is never resolved truncated.
-      const match = startupBuffer.match(/owner pairing URL:\s*(\S+)\r?\n/);
-      if (match) {
+      scrape = (chunk: Buffer) => {
+        startupBuffer += chunk.toString();
+        // Require the trailing newline so a pairing token split across a
+        // stdout/stderr chunk boundary is never resolved truncated.
+        const match = startupBuffer.match(/owner pairing URL:\s*(\S+)\r?\n/);
+        if (match) {
+          clearTimeout(timer);
+          resolve(match[1]);
+        }
+      };
+
+      child.stderr?.on("data", scrape);
+      child.stdout?.on("data", scrape);
+      child.once("exit", (code, signal) => {
         clearTimeout(timer);
-        resolve(match[1]);
-      }
-    };
-
-    child.stderr?.on("data", scrape);
-    child.stdout?.on("data", scrape);
-    child.once("exit", (code, signal) => {
-      clearTimeout(timer);
-      reject(
-        new Error(
-          `daemon exited before pairing (code ${code}, signal ${signal}); command=${command.join(" ")}; startup=${startupBuffer.slice(-4000)}`,
-        ),
-      );
+        reject(
+          new Error(
+            `daemon exited before pairing (code ${code}, signal ${signal}); command=${diagnosticCommand(command)}; startup=${scrubDiagnosticText(startupBuffer.slice(-4000))}`,
+          ),
+        );
+      });
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
     });
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-  });
+  } catch (error) {
+    await stopDaemonProcess(child).catch(() => {});
+    throw error;
+  }
 
   // Stop scraping startup output, then just drain the pipes so a full buffer
   // never blocks the daemon and `startupBuffer` does not grow for the run.
@@ -268,7 +286,12 @@ export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarne
   child.stdout?.on("data", () => {});
 
   const baseUrl = new URL(pairingUrl).origin;
-  await waitForHttpReadiness(baseUrl, readinessTimeoutMs);
+  try {
+    await waitForHttpReadiness(baseUrl, readinessTimeoutMs);
+  } catch (error) {
+    await stopDaemonProcess(child).catch(() => {});
+    throw error;
+  }
 
   const stop = () => stopDaemonProcess(child);
 

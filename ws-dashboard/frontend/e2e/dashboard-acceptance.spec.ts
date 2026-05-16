@@ -52,8 +52,13 @@ test.beforeAll(async () => {
 
   daemon = await startDaemon();
   const shellProfileHint = process.env.WS_DASHBOARD_TERMINAL_SHELL_PROFILE;
-  const targetPlatform = process.env.WS_DASHBOARD_TERMINAL_PLATFORM ?? process.platform;
-  commandPlan = terminalCommandPlanForPlatform(targetPlatform, shellProfileHint);
+  const targetPlatform = process.env.WS_DASHBOARD_TERMINAL_PLATFORM;
+  if (daemon.mode === "external" && !shellProfileHint && !targetPlatform) {
+    throw new Error(
+      "external daemon browser gate requires WS_DASHBOARD_TERMINAL_SHELL_PROFILE or WS_DASHBOARD_TERMINAL_PLATFORM so command helpers match the remote daemon shell",
+    );
+  }
+  commandPlan = terminalCommandPlanForPlatform(targetPlatform ?? process.platform, shellProfileHint);
   portabilityEvidence = {
     os: `${os.type()} ${os.release()}`,
     platform: process.platform,

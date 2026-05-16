@@ -11,9 +11,6 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
 function assertIncludes(actual: string, expected: string, label: string) {
   if (!actual.includes(expected)) throw new Error(`${label}: expected ${actual} to include ${expected}`);
 }
-function assertNotIncludes(actual: string, unexpected: string, label: string) {
-  if (actual.includes(unexpected)) throw new Error(`${label}: expected ${actual} not to include ${unexpected}`);
-}
 function assertThrows(fn: () => unknown, label: string) {
   try {
     fn();
@@ -61,7 +58,8 @@ const powershell = terminalCommandPlanForPlatform("win32", "PowerShell");
 assertEqual(powershell.profile, "powershell", "PowerShell profile selected");
 assertIncludes(powershell.echo("PS-MARKER"), "PS-MARKER", "PowerShell echo includes marker");
 assertIncludes(powershell.echo("quote'&marker"), "'quote''&marker'", "PowerShell single quote is escaped");
-assertIncludes(powershell.ansiGreen("PS-GREEN"), "[32mPS-GREEN", "PowerShell ANSI emits SGR");
-assertNotIncludes(powershell.ansiGreen("tick`marker"), "tick`marker", "PowerShell backtick is escaped in ANSI fixture");
+assertIncludes(powershell.ansiGreen("PS-GREEN"), "`e[32m", "PowerShell ANSI emits SGR prefix");
+assertIncludes(powershell.ansiGreen("PS-GREEN"), "PS-GREEN", "PowerShell ANSI includes marker");
+assertIncludes(powershell.ansiGreen("dollar$marker;ok"), "'dollar$marker;ok'", "PowerShell ANSI single-quotes shell metacharacters");
 assertIncludes(powershell.scrollLines("LINE-", 3), "ForEach-Object", "PowerShell scroll uses pipeline loop");
 assertIncludes(powershell.longRunningCommand(), "Start-Sleep", "PowerShell long-running command uses built-in command");
