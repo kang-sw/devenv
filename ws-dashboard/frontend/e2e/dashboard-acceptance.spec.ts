@@ -37,6 +37,15 @@ test.beforeAll(async () => {
   mkdirSync(path.join(workRoot, "gate-subdir"));
   writeFileSync(path.join(workRoot, "gate-subdir", "nested.txt"), "nested gate file\n");
 
+  // Many root files make the explorer tree far taller than its pane so the
+  // viewport-containment assertion below is meaningful.
+  for (let index = 0; index < 80; index += 1) {
+    writeFileSync(
+      path.join(workRoot, `gate-bulk-${String(index).padStart(3, "0")}.txt`),
+      `bulk gate fixture ${index}\n`,
+    );
+  }
+
   daemon = await startDaemon();
   note(`daemon base URL: ${daemon.baseUrl}`);
   note(`temp workRoot: ${path.basename(workRoot)}`);
@@ -77,10 +86,20 @@ async function terminalColumns(page: Page): Promise<number> {
   return match ? Number(match[1]) : Number.NaN;
 }
 
-// One full output-poll cycle is 500ms; settling past it proves a tab
-// selection survives the poll-driven `editorGroups` rebuild.
+// The terminal output poll cycle is ~120ms; a 900ms settle covers several
+// cycles and proves a tab selection survives the poll-driven `editorGroups`
+// rebuild.
 async function settlePastPollCycle(page: Page) {
   await page.waitForTimeout(900);
+}
+
+// The shell is viewport-bounded: long pane content scrolls inside its own
+// region rather than growing the document and pushing the footer off-screen.
+async function documentScrolls(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const root = document.scrollingElement ?? document.documentElement;
+    return root.scrollHeight > root.clientHeight + 1;
+  });
 }
 
 test("dashboard workRoot UI browser acceptance", async ({ page }) => {
@@ -102,6 +121,39 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       path.basename(workRoot),
     );
     note("open workRoot: live opened workRoot is selected and shown in the explorer");
+  });
+
+  // --- Long explorer content stays inside its pane, not the document -----
+  await test.step("long explorer content stays within the viewport", async () => {
+    // The fixture root holds 80+ files, so the explorer tree is far taller
+    // than its pane on the default 1440x900 viewport.
+    await expect(
+      page.locator(".file-explorer-row", { hasText: "gate-bulk-000.txt" }),
+    ).toBeVisible();
+
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+
+    // The document itself must not scroll: the explorer body owns the overflow.
+    expect(await documentScrolls(page)).toBe(false);
+
+    // The app shell stays inside the viewport so the footer is never pushed
+    // off-screen by an expanded tree.
+    const shellBox = await page.locator(".app-shell").boundingBox();
+    expect(shellBox).not.toBeNull();
+    expect(shellBox!.height).toBeLessThanOrEqual(viewport!.height + 1);
+
+    // The explorer body is the scroll container that absorbs the long tree.
+    const explorerScrolls = await page.evaluate(() => {
+      const body = document.querySelector(".file-explorer-body");
+      return body ? body.scrollHeight > body.clientHeight + 1 : false;
+    });
+    expect(explorerScrolls).toBe(true);
+
+    note(
+      "explorer containment: 80+ file rows scroll inside .file-explorer-body; " +
+        "the document does not scroll and .app-shell stays within the viewport",
+    );
   });
 
   // --- No mock/placeholder terminal in the freshly opened workbench -------
@@ -152,7 +204,14 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     await runInTerminal(page, "printf 'GATEOUT-%s\\n' 12345");
     await expect(page.locator(".xterm-rows")).toContainText("GATEOUT-12345");
-    note("terminal IO: keyboard input reached the daemon PTY and output rendered in the emulator");
+
+    // The long explorer tree and a live terminal coexist without the document
+    // scrolling: both the explorer and the terminal own their own overflow.
+    expect(await documentScrolls(page)).toBe(false);
+    note(
+      "terminal IO: keyboard input reached the daemon PTY and output rendered " +
+        "in the emulator; the document still does not scroll with a live terminal",
+    );
   });
 
   // --- ANSI color rendering -----------------------------------------------

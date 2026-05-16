@@ -95,6 +95,11 @@ type WorkbenchSelection = {
 
 const resourceEndpoint = "/api/dashboard/resources";
 
+// Terminal output is short-polled over HTTP (the daemon output route returns
+// immediately). A snappy interval keeps keystroke echo latency low; idle polls
+// are guarded below so they do not re-render the workbench.
+const terminalOutputPollIntervalMs = 120;
+
 export function App() {
   const [resources, setResources] = useState<DashboardResourcesView | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -872,43 +877,92 @@ function WorkbenchShell({
       .catch(() => undefined);
   }, [workbenchModel?.root.id]);
 
+  // The output poll reads live terminal sessions from a ref so the polling
+  // interval stays stable across renders. Depending the interval on
+  // `terminalPanes` would tear down and recreate it on every output delta.
+  const livePollPanesRef = useRef<
+    Array<{ terminalId: string; logicalKey: string; nextSequence: number }>
+  >([]);
+  livePollPanesRef.current = workbenchModel
+    ? Object.values(terminalPanes)
+        .filter(
+          (pane) =>
+            pane.session.workRootId === workbenchModel.root.id &&
+            pane.session.status === "running",
+        )
+        .map((pane) => ({
+          terminalId: pane.session.terminalId,
+          logicalKey: pane.logicalKey,
+          nextSequence: pane.nextSequence,
+        }))
+    : [];
+
   useEffect(() => {
     if (!workbenchModel) {
       return;
     }
-    const livePanes = Object.values(terminalPanes).filter(
-      (pane) => pane.session.workRootId === workbenchModel.root.id && pane.session.status === "running",
-    );
-    if (livePanes.length === 0) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      for (const pane of livePanes) {
-        void fetchTerminalOutput(pane.session.terminalId, pane.nextSequence)
+    // Track in-flight requests per PTY so a slow response never stacks
+    // overlapping polls for the same terminal.
+    const inFlight = new Set<string>();
+    let cancelled = false;
+
+    const poll = () => {
+      for (const pane of livePollPanesRef.current) {
+        if (inFlight.has(pane.terminalId)) {
+          continue;
+        }
+        inFlight.add(pane.terminalId);
+        void fetchTerminalOutput(pane.terminalId, pane.nextSequence)
           .then((output) => {
-            setTerminalPanes((current) =>
-              current[pane.logicalKey]
-                ? { ...current, [pane.logicalKey]: appendTerminalOutput(current[pane.logicalKey], output) }
-                : current,
-            );
+            if (cancelled) {
+              return;
+            }
+            setTerminalPanes((current) => {
+              const existing = current[pane.logicalKey];
+              if (!existing) {
+                return current;
+              }
+              // An idle poll returns no chunks and an unchanged status; skip
+              // the state replacement so React does not re-render the whole
+              // workbench tree every cycle while terminals are quiet.
+              if (
+                output.chunks.length === 0 &&
+                output.status === existing.session.status
+              ) {
+                return current;
+              }
+              return {
+                ...current,
+                [pane.logicalKey]: appendTerminalOutput(existing, output),
+              };
+            });
           })
           .catch((error) => {
-            setTerminalPanes((current) =>
-              current[pane.logicalKey]
-                ? {
-                    ...current,
-                    [pane.logicalKey]: {
-                      ...current[pane.logicalKey],
-                      error: error instanceof Error ? error.message : "terminal output failed",
-                    },
-                  }
-                : current,
-            );
+            if (cancelled) {
+              return;
+            }
+            const message =
+              error instanceof Error ? error.message : "terminal output failed";
+            setTerminalPanes((current) => {
+              const existing = current[pane.logicalKey];
+              if (!existing || existing.error === message) {
+                return current;
+              }
+              return { ...current, [pane.logicalKey]: { ...existing, error: message } };
+            });
+          })
+          .finally(() => {
+            inFlight.delete(pane.terminalId);
           });
       }
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [terminalPanes, workbenchModel?.root.id]);
+    };
+
+    const timer = window.setInterval(poll, terminalOutputPollIntervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [workbenchModel?.root.id]);
 
   useEffect(() => {
     if (
@@ -1404,8 +1458,12 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
 
     const terminal = new Terminal({
       cursorBlink: true,
+      // Prefer Powerline/Nerd Font capable families so prompt glyphs render
+      // correctly, falling back to plain monospace when none are installed.
       fontFamily:
-        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+        '"MesloLGS NF", "JetBrainsMono Nerd Font", "CaskaydiaCove Nerd Font", ' +
+        '"FiraCode Nerd Font", "Hack Nerd Font", ui-monospace, SFMono-Regular, ' +
+        'Menlo, Consolas, "Liberation Mono", monospace',
       fontSize: 12,
       theme: { background: "#0b0d10" },
     });

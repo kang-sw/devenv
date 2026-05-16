@@ -85,13 +85,20 @@ button {
 }
 
 .app-shell {
-  min-height: 100vh;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--ws-color-canvas);
 }
 
 .shell-grid {
   display: grid;
-  min-height: 100vh;
+  min-height: 0;
+  flex: 1 1 auto;
+  /* A single viewport-bounded row clamps both columns: long explorer content
+     scrolls inside its own pane instead of growing the document. */
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(248px, 316px) minmax(380px, 1fr) minmax(248px, 336px);
   border-top: var(--ws-border-width-hairline) solid var(--ws-color-border);
   border-left: var(--ws-border-width-hairline) solid var(--ws-color-border);
@@ -289,6 +296,9 @@ button {
 
 .file-explorer-body {
   min-height: 0;
+  /* Absorb the explorer height and scroll internally so an expanded tree never
+     pushes the document past the viewport. */
+  flex: 1 1 auto;
   overflow: auto;
   padding: var(--ws-space-04);
 }
@@ -685,8 +695,17 @@ button {
 }
 
 @media (max-width: 960px) {
+  /* Stacked single-column layout returns to document scrolling: the panels can
+     no longer share one viewport-bounded row. */
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
   .shell-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
   }
 
   .nav-stack,
