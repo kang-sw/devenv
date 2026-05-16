@@ -5,6 +5,10 @@ related:
   260516-bug-ws-web-dashboard-ui-acceptance-recovery: xterm surface recovery that remains merge-blocked by polling transport and input fidelity
   260516-feat-ws-web-terminal-session-substrate: completed daemon terminal lifecycle substrate currently exposed through HTTP routes
   260516-feat-ws-web-instance-event-stream: completed authenticated stream scaffold whose auth/stream boundaries inform WebSocket route behavior
+spec:
+  - 260516-ws-web-dashboard-terminal-websocket-transport
+  - 260516-ws-web-dashboard-terminal-websocket-input-fidelity
+  - 260516-ws-web-dashboard-terminal-websocket-browser-gate
 related-mental-model:
   - ws-web-dashboard
 ---
