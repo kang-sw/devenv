@@ -145,6 +145,28 @@ Mouse-triggered navigation actions route through command ids so later keyboard
 bindings can call the same commands. The shell reserves `^b` to
 mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
 
+## 🚧 WorkRoot Workbench Substrate {#260516-ws-web-dashboard-workroot-workbench-substrate}
+
+The dashboard frontend presents a `left nav | workRoot workbench` shell. The
+left navigation selects server, workspace, and concrete workRoot locations,
+while each opened workRoot owns a constrained workbench area backed by a
+dashboard-owned adapter over the selected layout library.
+
+The workbench uses sibling split groups with group-local pinned and opened
+rows. Pinned rows represent durable surfaces such as agent and persistent
+terminal views; opened rows represent transient or support surfaces such as
+editor, viewer, diff, diagnostics, logs/events, task view, and inspector
+surfaces. Main instances are durable workRoot-local surfaces. Sub instances are
+view-only projections attached to a main instance through badges, popovers,
+cards, or drawers rather than independent top-level navigation rows.
+
+Layout attachment identity stays separate from daemon resource identity. Layout
+state records arrangement only; daemon APIs and `/servers/:serverId/...`
+browser routes keep authoritative server, workspace, workRoot, and instance
+identity. Panel close detaches the frontend view by default, while explicit
+terminate commands own daemon-backed lifecycle shutdown. PTY/TUI logical
+columns do not continuously follow visual drag resizing.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
