@@ -36,8 +36,9 @@ Route Context
 Routing
 - Use the first matching route row.
 - Captured `Ticket:` paths re-enter route context before implementation.
-- Treat `--auto-slice`, `auto-slice`, and equivalent autonomous phase-grouping phrasing as broader-slice permission.
-- Execution slice defaults to one unfinished phase unless user-requested, auto-selected, or inseparable.
+- Treat explicit phase names or ranges as hard slice boundaries.
+- When the user does not name phases, autonomously choose the broadest cohesive unfinished slice.
+- Treat `--auto-slice`, `auto-slice`, and equivalent phrasing as compatibility aliases for the default autonomous slice policy.
 
 ## On: invoke
 
@@ -54,7 +55,7 @@ Routing
 9. If `target-kind=inline` and `actionable=yes`: apply `judge: needs-ticket`.
 10. Classify warmth from conversation state.
 11. If `has-ticket=yes` and warmth is warm: apply `judge: ticket-freshness`.
-12. Detect explicit `auto-slice` permission from flags or autonomous phase-grouping phrasing.
+12. Detect explicit phase constraints or autonomous slice phrasing.
 
 ### 2. Select Route
 
@@ -151,15 +152,16 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 | Decision | When |
 |----------|------|
 | Whole target | Ready target has no phase sections |
-| First unfinished phase | Ready target has unfinished phases and the user did not request a broader slice |
-| Auto-selected phase range | User granted `auto-slice` permission and adjacent unfinished phases form one cohesive implementation/review slice |
 | User-requested phase range | User explicitly named phases to implement |
+| Auto-selected phase range | User did not name phases and adjacent unfinished phases form one cohesive implementation/review slice |
+| First unfinished phase | Adjacent unfinished phases are unrelated, independently reviewable, or cross different public contract boundaries |
 | Inseparable phase range | Adjacent phases cannot be verified separately from ticket artifacts |
 
-`auto-slice` is permission, not a mandate. Prefer grouping adjacent phases when
-a later phase only verifies the immediately preceding implementation. Keep
-unrelated public contracts, independent setup needs, or separately reviewable
-security boundaries split.
+Autonomous slice selection is the default when the user does not name phases.
+Prefer grouping adjacent phases when they share one implementation/review surface
+or when a later phase only verifies the immediately preceding implementation.
+Keep unrelated public contracts, independent setup needs, or separately
+reviewable security boundaries split.
 
 ### judge: ticket-freshness
 
