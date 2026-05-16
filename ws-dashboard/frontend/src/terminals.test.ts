@@ -8,6 +8,7 @@ import {
   terminalCloseEndpoint,
   terminalInputEndpoint,
   terminalOutputEndpoint,
+  terminalOutputPollChangedState,
   terminalPaneFromSession,
   terminalPaneId,
   terminalPaneLogicalKey,
@@ -72,6 +73,33 @@ assertEqual(
 const withOutput = appendTerminalOutput(pane, { terminalId: "term_abc", status: "running", nextSequence: 3, chunks: [{ sequence: 1, data: "hi", stream: "pty" }] });
 assertEqual(withOutput.output, "hi", "output appends chunk data");
 assertEqual(withOutput.nextSequence, 3, "output advances cursor");
+
+const idleOutput = { terminalId: "term_abc", status: "running", nextSequence: 0, chunks: [] };
+assertEqual(
+  terminalOutputPollChangedState(pane, idleOutput),
+  false,
+  "idle poll with no chunks, status, or cursor change is skipped",
+);
+assertEqual(
+  terminalOutputPollChangedState({ ...pane, error: "terminal output failed" }, idleOutput),
+  true,
+  "successful idle poll clears a stale error instead of leaving it",
+);
+assertEqual(
+  terminalOutputPollChangedState(pane, { ...idleOutput, chunks: [{ sequence: 1, data: "x", stream: "pty" }] }),
+  true,
+  "new chunks count as a state change",
+);
+assertEqual(
+  terminalOutputPollChangedState(pane, { ...idleOutput, status: "exited" }),
+  true,
+  "a status change counts as a state change",
+);
+assertEqual(
+  terminalOutputPollChangedState(pane, { ...idleOutput, nextSequence: 5 }),
+  true,
+  "cursor advancement without chunks still counts as a state change",
+);
 assertDeepEqual(removeClosedTerminalPane(merged, pane.logicalKey), {}, "close success removes pane state");
 assertEqual(
   markTerminalPaneCloseError(merged, pane.logicalKey, "close failed")[pane.logicalKey]?.error,

@@ -49,6 +49,7 @@ import {
   removeClosedTerminalPane,
   resizeTerminal,
   sendTerminalInput,
+  terminalOutputPollChangedState,
   terminalPaneFromSession,
   terminalPaneLogicalKey,
   type TerminalPaneState,
@@ -922,13 +923,11 @@ function WorkbenchShell({
               if (!existing) {
                 return current;
               }
-              // An idle poll returns no chunks and an unchanged status; skip
-              // the state replacement so React does not re-render the whole
-              // workbench tree every cycle while terminals are quiet.
-              if (
-                output.chunks.length === 0 &&
-                output.status === existing.session.status
-              ) {
+              // Skip the state replacement when a poll changed nothing so
+              // React does not re-render the whole workbench tree every cycle
+              // while terminals are quiet. A stale error still counts as a
+              // change so a successful poll clears it.
+              if (!terminalOutputPollChangedState(existing, output)) {
                 return current;
               }
               return {

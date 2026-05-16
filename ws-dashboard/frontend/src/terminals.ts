@@ -209,6 +209,26 @@ export function appendTerminalOutput(pane: TerminalPaneState, output: TerminalOu
   };
 }
 
+/**
+ * Decide whether a successful terminal output poll changed anything worth a
+ * React state update. A truly idle poll - no new chunks, unchanged status, no
+ * cursor advancement, and no stale error to clear - is skipped so the
+ * workbench does not re-render while terminals are quiet. A non-null
+ * `pane.error` always counts as a change so a transient output failure is
+ * cleared by the next successful poll instead of lingering.
+ */
+export function terminalOutputPollChangedState(
+  pane: TerminalPaneState,
+  output: TerminalOutputView,
+): boolean {
+  return (
+    output.chunks.length > 0 ||
+    output.status !== pane.session.status ||
+    output.nextSequence !== pane.nextSequence ||
+    pane.error !== null
+  );
+}
+
 export function markTerminalPaneCloseError(
   current: Record<string, TerminalPaneState>,
   logicalKey: string,
