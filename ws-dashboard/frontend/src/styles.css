@@ -903,7 +903,7 @@ button {
 }
 
 .workbench-tab-active {
-  border-bottom-color: var(--ws-color-accent);
+  border-bottom-color: var(--ws-color-action);
   background: var(--ws-color-panel);
   color: var(--ws-color-text-primary);
 }
