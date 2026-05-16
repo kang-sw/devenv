@@ -9,6 +9,8 @@ spec:
   - 260516-ws-web-dashboard-terminal-shell-selection-portability
   - 260516-ws-web-dashboard-terminal-platform-command-helpers
   - 260516-ws-web-dashboard-terminal-cross-platform-evidence
+skeletons:
+  phase-1: 7e71449
 related-mental-model:
   - ws-web-dashboard
 ---
