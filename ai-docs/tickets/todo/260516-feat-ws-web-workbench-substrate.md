@@ -22,6 +22,9 @@ agent, editor, viewer, task, diagnostics, and inspector surfaces.
 
 ## Decisions
 
+- Use Dockview as the selected layout substrate behind a dashboard-owned
+  adapter. FlexLayout remains a fallback only if implementation exposes
+  unacceptable Dockview policy complexity.
 - The left nav selects server/workspace/workRoot locations. It may show compact
   badges, but it should not expand main instances or sub instances as the
   default hierarchy.
@@ -37,6 +40,13 @@ agent, editor, viewer, task, diagnostics, and inspector surfaces.
 - Task visibility should aggregate through a workRoot-scoped task view and
   main-instance badges/popovers. Individual tasks should not become top-level
   split-group tabs by default.
+- Pinned/opened rows, durable/transient surface meaning, placement policy,
+  detach semantics, and logical terminal resize policy are dashboard adapter
+  responsibilities. Dockview provides split/tab mechanics and serialized
+  arrangement only.
+- Raw Dockview floating, popout, free docking, and restore APIs should not be
+  exposed as product behavior. The adapter validates creation, move, drop, and
+  restored layout state.
 
 ## Phases
 

@@ -73,7 +73,7 @@ The milestone should establish:
   `/pair?token=...` exchanges to a token-free app URL, keep
   invalid/reused/expired token failures non-redirecting, and introduce the
   frontend route shape for `/servers/:serverId/...`.
-- `260516-research-ws-web-workbench-layout-spike` - compare Dockview against
+- `260516-research-ws-web-workbench-layout-spike` - done; compared Dockview against
   FlexLayout on workRoot-scoped sibling split groups, group-local
   pinned/opened rows, placement registry, layout serialization, keyboard focus
   movement, constrained floating/popout policy, and stable terminal logical
