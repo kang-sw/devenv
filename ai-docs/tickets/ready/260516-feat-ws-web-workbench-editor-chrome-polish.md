@@ -6,6 +6,8 @@ related:
   260516-feat-ws-web-workbench-substrate: completed implementation whose visible shell needs UI correction
 spec:
   - 260516-ws-web-dashboard-workroot-workbench-substrate
+plans:
+  phase-1: 2026-05/16-ws-web-workbench-editor-chrome-polish-phase-1
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -96,6 +98,29 @@ practical: reorder within a split group and move between split groups while
 preserving dashboard-owned placement and serialization policy. The movement does
 not start, stop, terminate, or resize daemon-backed resources; it only changes
 browser workbench arrangement.
+
+### Result (92d642a) - 2026-05-16
+
+Implemented the Phase 1 workbench chrome correction. The visible workRoot
+workbench now renders compact editor-like split groups with thin tab strips and
+dominant pane bodies instead of large `Primary`, `Support`, `Pinned row`, and
+`Opened row` topology labels. Placeholder surfaces now read as agent,
+terminal, viewer, editor/detail, task, diagnostics, and inspector panes rather
+than dashboard cards.
+
+Visible tabs switch the active pane and support frontend drag/drop movement for
+reordering within a split and moving panes across splits. Cross-split
+membership persists across rerenders, empty split groups render an honest drop
+target instead of crashing, and pure workbench model coverage exercises click
+selection, drag/drop resolution, order restoration, cross-split moves, and
+active-pane reconciliation.
+
+The implementation kept live PTY/editor/viewer/task backends out of scope,
+kept floating/popout groups disabled, preserved left-nav server/workspace/
+workRoot identity, and retained daemon lifecycle and PTY logical-sizing
+boundaries. Verification passed:
+`cd ws-dashboard/frontend && npm run test:routes && npm run test:workbench &&
+npm run build`.
 
 ### Phase 2: Visual Contract Verification
 
