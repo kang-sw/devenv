@@ -949,7 +949,7 @@ button {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   background: var(--ws-color-panel);
 }
 
@@ -1191,12 +1191,6 @@ button {
   line-height: var(--ws-line-height-01);
 }
 
-
-/* Terminal tabs and footer already identify the PTY; hide the duplicated
-   low-information pane header so the emulator owns the vertical space. */
-.workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-header {
-  display: none;
-}
 
 /* The terminal surface is a real emulator and fills the workbench pane body. */
 .workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-body {

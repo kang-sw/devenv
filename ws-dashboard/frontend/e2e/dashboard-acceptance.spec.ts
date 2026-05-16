@@ -208,7 +208,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "ws-dashboard browser gate fixture",
     );
     await expect(pane.locator(".readonly-text-pane-badges")).toContainText("read-only");
-    note("read-only file: previewable file opens a read-only text pane with content");
+    await expect(page.locator(".workbench-pane-header")).toHaveCount(0);
+    await expect(page.locator(".workbench-pane-status")).toHaveCount(0);
+    note("read-only file: previewable file opens a read-only text pane with content and no generic pane chrome");
   });
 
   // --- Create a terminal and verify emulator IO ---------------------------
@@ -223,9 +225,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.locator('[data-command-id="terminal.create"]').click();
     await terminalSurface(page);
     await expect(terminalTabs(page)).toHaveCount(1);
-    await expect(
-      page.locator('.workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-header'),
-    ).toBeHidden();
+    await expect(page.locator(".workbench-pane-header")).toHaveCount(0);
+    await expect(page.locator(".workbench-pane-status")).toHaveCount(0);
+    await expect(page.locator('[data-command-id="terminal.close"]')).toBeVisible();
     await expect.poll(() => terminalSocketUrls.length, { timeout: 10_000 }).toBeGreaterThan(0);
     const pollsAfterSocket = terminalOutputPolls;
     await page.waitForTimeout(500);

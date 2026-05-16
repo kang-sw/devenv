@@ -1896,29 +1896,16 @@ function WorkbenchEditorGroup({
         />
       </div>
       <article
-        aria-labelledby={`pane-title-${group.id}-${activePane.id}`}
+        aria-label={`${activeRegistry.label}: ${activePane.title}`}
         className="workbench-pane"
         data-surface-kind={activePane.kind}
         id={`pane-${group.id}-${activePane.id}`}
         role="tabpanel"
       >
-        <header className="workbench-pane-header">
-          <div>
-            <div className="surface-kind">{activeRegistry.label}</div>
-            <h2 id={`pane-title-${group.id}-${activePane.id}`}>{activePane.title}</h2>
-          </div>
-          <StateBadge state={activePane.state} />
-        </header>
         <div className="workbench-pane-body">
           <p>{activePane.detail}</p>
           {activePane.body ? <div className="workbench-pane-content">{activePane.body}</div> : null}
         </div>
-        <footer className="workbench-pane-status">
-          <span>{activeRegistry.rowPolicy}</span>
-          {activePane.meta.map((value) => (
-            <span key={value}>{value}</span>
-          ))}
-        </footer>
       </article>
     </section>
   );
