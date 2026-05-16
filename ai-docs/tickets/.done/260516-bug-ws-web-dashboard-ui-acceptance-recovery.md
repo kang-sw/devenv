@@ -12,6 +12,7 @@ spec:
   - 260516-ws-web-dashboard-browser-terminal-emulator-behavior
   - 260516-ws-web-dashboard-file-explorer-conventional-affordance
   - 260516-ws-web-dashboard-browser-workroot-io-dogfood-evidence
+completed: 2026-05-16
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -146,6 +147,16 @@ Success means the implementation can no longer close a UI-facing dashboard
 ticket based only on Rust route tests, pure TypeScript tests, Vite build, and
 curl evidence.
 
+### Result (e6982b5) - 2026-05-16
+
+Added a Playwright browser acceptance gate exposed as `npm run test:browser`.
+The gate builds the production frontend, starts the dashboard daemon on an
+ephemeral port, pairs through the owner pairing URL, opens a real temporary
+workRoot, and records textual evidence plus gitignored screenshots. Review
+cycle fixes strengthened the gate so terminal tab selection settles past the
+500ms poll cycle, terminal pane fill is compared against its actual container,
+bounded resize is asserted, and pairing URL scraping is newline-safe.
+
 ### Phase 2: Recover terminal tab and initial terminal state
 
 Fix workbench terminal tabs so every visible terminal tab label is selectable
@@ -157,6 +168,15 @@ make that state explicit and non-mock.
 Success means browser evidence shows multiple terminal tabs can be selected,
 the focused pane changes correctly, terminal input/output does not cross between
 sessions, and no mock terminal remains visible after opening a real workRoot.
+
+### Result (e6982b5) - 2026-05-16
+
+Removed the unconditional bodyless `persistent-terminal` placeholder pane and
+kept the empty workbench state explicit with the existing `New terminal`
+affordance. Terminal focus requests now use a sequence guard so output-poll
+reconciliation no longer steals focus back from a user-selected terminal tab.
+Browser evidence verifies multiple terminal tabs, per-session input/output
+isolation, close-as-terminate, and reload reconstruction without mock surfaces.
 
 ### Phase 3: Recover terminal rendering, input, and sizing
 
@@ -185,6 +205,15 @@ Success means browser evidence shows a real shell command with colored/control
 output rendering correctly, typed input reaching the PTY, output returning to
 the same xterm surface, and the terminal occupying the available pane body.
 
+### Result (e6982b5) - 2026-05-16
+
+Replaced raw `<pre>` output and line-buffered input with an `@xterm/xterm`
+terminal surface. PTY output deltas stream into the emulator, input flows from
+the emulator to the daemon input route, and each pane owns an isolated emulator
+instance. `FitAddon` plus `ResizeObserver` makes the surface fill the pane while
+clamping to the daemon PTY bounds before resize forwarding. Review added direct
+unit coverage for the clamp boundary behavior.
+
 ### Phase 4: Recover file explorer affordance
 
 Revise the workRoot file explorer into a conventional, inspectable tree/list
@@ -197,6 +226,14 @@ Success means browser evidence shows a user can understand how to expand a
 directory, refresh, and open a previewable file without relying on hidden or
 nonstandard affordances.
 
+### Result (e6982b5) - 2026-05-16
+
+Reworked the workRoot file explorer rows into conventional read-only tree/list
+controls. Directories and files are visually distinct, directory rows toggle
+through familiar disclosure affordances, previewable files open read-only panes,
+and existing command ids for select, expand, open, and refresh remain present.
+Browser evidence covers expansion, refresh, selection, and read-only preview.
+
 ### Phase 5: Sonnet design verification and autonomous tweak pass
 
 Run the workflow override after the primary implementation for Phases 1-4 and
@@ -208,6 +245,15 @@ assess the final implementation.
 Success means the Sonnet pass reports browser evidence for the dashboard flow,
 lists any tweaks it made, and leaves no unresolved design blocker that would
 make ordinary correctness/fit/test review premature.
+
+### Result (e6982b5) - 2026-05-16
+
+Ran the required ws named-agent Sonnet design verification pass before normal
+review. The pass used `npm run test:browser`, inspected the generated desktop
+and narrow screenshots, and committed a bounded visual fix changing the active
+tab underline from an undefined CSS token to the dashboard action color. It
+reported no unresolved design blocker; remaining notes were out-of-scope
+pre-existing toolbar/agent placeholder behaviors.
 
 ### Phase 6: Product-flow dogfood and merge decision
 
@@ -225,3 +271,13 @@ or trace files were generated.
 Success means the dogfood artifact includes browser-level evidence, the known
 user-reported failures are explicitly checked off, and the branch can be
 reconsidered for merge only after those checks pass.
+
+### Result (e6982b5) - 2026-05-16
+
+Recorded browser-level dogfood evidence in
+`ai-docs/.plans/2026-05/16-260516-bug-ws-web-dashboard-ui-acceptance-recovery.dogfood.md`.
+The artifact includes the daemon-served command path, owner pairing flow,
+desktop and narrow viewports, terminal commands used to verify ANSI/color and
+session isolation, screenshot artifact paths, and a pass table for every
+user-reported failure. Generated screenshots and Playwright artifacts remain
+gitignored and regenerable.

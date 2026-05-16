@@ -86,7 +86,7 @@ The MVP should cover:
 - `260516-epic-ws-web-dashboard-workroot-io-substrate` - done; opened
   workRoots now drive the primary dashboard resource API and browser resource
   model, with file, read-only pane, terminal, refresh, and dogfood coverage.
-- `260516-bug-ws-web-dashboard-ui-acceptance-recovery` - ready; recover
+- `260516-bug-ws-web-dashboard-ui-acceptance-recovery` - done; recovered
   browser-level dashboard usability before merging workRoot IO UI work,
   including terminal tabs, live initial terminal state, real xterm behavior,
   pane fill, file explorer affordance, and visual/browser acceptance evidence.
