@@ -1,5 +1,6 @@
 ---
 title: ws web dashboard dark visual system
+completed: 2026-05-16
 parent: 260516-epic-ws-web-dashboard-workbench-substrate
 related:
   260514-epic-ws-web-dashboard-mvp: parent dashboard MVP board
@@ -9,6 +10,7 @@ spec:
   - 260516-ws-web-dashboard-dark-visual-system
 plans:
   phase-1: 2026-05/16-260516-feat-ws-web-dark-visual-system-phase-1.brief
+  phase-2: 2026-05/16-260516-feat-ws-web-dark-visual-system-phase-2.brief
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -69,3 +71,17 @@ command ids while making the shell visibly consistent with the guide.
 
 Verify the updated shell with build checks and screenshot inspection across at
 least one desktop and one narrow viewport.
+
+### Result (7c3856d) - 2026-05-16
+
+Aligned the protected frontend shell's root and page surfaces with the dark
+semantic baseline, including dark UA color-scheme and page canvas defaults.
+The implementation preserved resource API behavior, command ids, hierarchy
+rendering, and loading/error/stale component behavior.
+
+Verified with `cd ws-dashboard/frontend && npm run build`. A delegated visual
+verifier inspected desktop `1440x960`, narrow `390x844`, and tall narrow
+`390x1800` screenshots from a frontend-only static build server with fixture
+data. The verifier reported a nonblank coherent dark shell, readable text
+without visible overlap, inspectable navigation/detail/viewer areas, and no
+blocking visual findings. Fit and test review reported clean.
