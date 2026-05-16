@@ -11,8 +11,14 @@ spec:
   - 260516-ws-web-dashboard-terminal-io-transport
   - 260516-ws-web-dashboard-terminal-pane
   - 260516-ws-web-dashboard-terminal-close-termination
+plans:
+  phase-1: 2026-05/16-260516-feat-ws-web-terminal-session-substrate
+  phase-2: 2026-05/16-260516-feat-ws-web-terminal-session-substrate
+  phase-3: 2026-05/16-260516-feat-ws-web-terminal-session-substrate
+  phase-4: 2026-05/16-260516-feat-ws-web-terminal-session-substrate
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-16
 ---
 
 # ws web dashboard terminal session substrate
@@ -48,6 +54,13 @@ PTY sessions with the selected workRoot as the run directory, list live
 sessions for refresh restore, and close sessions explicitly. Session ids must be
 opaque browser-facing ids, not process ids or host paths.
 
+### Result (84776ee0) - 2026-05-16
+
+Implemented a daemon-owned terminal registry scoped to opened workRoots.
+Terminal sessions spawn shell PTYs in the selected workRoot, list as live
+daemon resources for refresh reconstruction, and expose opaque `term_*` ids
+instead of process ids or host paths.
+
 ### Phase 2: Terminal I/O Transport
 
 Add authenticated terminal output, input, and resize transport. The transport
@@ -56,6 +69,12 @@ and resize without pretending output-only polling is enough for an interactive
 terminal. Unauthenticated callers must be rejected before stream or upgrade
 acceptance.
 
+### Result (84776ee0) - 2026-05-16
+
+Implemented owner-authenticated terminal output, input, and resize routes with
+opaque terminal ids, cursor-based output polling, bounded terminal dimensions,
+and post-close rejection for output/input/resize.
+
 ### Phase 3: Frontend Terminal Pane
 
 Render terminal sessions inside workbench panes with an xterm-style terminal
@@ -63,9 +82,29 @@ surface. Creating a terminal should open or focus a terminal pane for the
 selected workRoot. Refresh should reconstruct panes from daemon live session
 state and browser arrangement where possible.
 
+### Result (84776ee0) - 2026-05-16
+
+Implemented frontend terminal helpers and workbench terminal panes with create,
+list/reconstruct, output polling, input send, resize request, and placement
+through workbench policy. Stale output polls no longer recreate panes after
+explicit close.
+
 ### Phase 4: Close Semantics And Verification
 
 Wire terminal close to session termination and keep detached restore UX absent.
 Add tests and dogfood checks for create, stream, input, resize, refresh
 persistence, explicit close, unauthenticated rejection, and narrow/wide layout
 behavior.
+
+### Result (84776ee0) - 2026-05-16
+
+Implemented daemon-owned shell terminal sessions across all phases. Sessions are
+scoped to opened workRoots, use opaque `term_*` ids, spawn PTYs through the
+daemon, survive browser refresh through live session listing, and terminate on
+explicit close. Close cleanup kills and waits for the PTY child; rejected
+registry inserts also terminate the spawned session.
+
+Verification covered Rust formatting, daemon route tests, the full daemon crate
+test suite, workspace check, frontend route/workRoot/workbench/terminal tests,
+production build, and delegated correctness/fit/test review with one follow-up
+fix cycle.

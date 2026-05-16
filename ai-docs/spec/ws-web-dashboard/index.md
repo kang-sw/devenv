@@ -274,7 +274,7 @@ terminal or future agent work is not displaced. Placement remains browser
 arrangement state; file content authorization and preview availability remain
 daemon-owned.
 
-## 🚧 Terminal Registry And PTY Spawn {#260516-ws-web-dashboard-terminal-registry-pty-spawn}
+## Terminal Registry And PTY Spawn {#260516-ws-web-dashboard-terminal-registry-pty-spawn}
 
 The dashboard daemon owns shell terminal sessions scoped to opened workRoots.
 Authenticated owners can create and list live terminal sessions by opaque
@@ -285,14 +285,14 @@ Live terminal sessions persist across browser refresh because the daemon owns
 their lifecycle. Browser arrangement state controls where sessions are shown,
 not whether the daemon session exists.
 
-## 🚧 Terminal I/O Transport {#260516-ws-web-dashboard-terminal-io-transport}
+## Terminal I/O Transport {#260516-ws-web-dashboard-terminal-io-transport}
 
 The dashboard exposes authenticated terminal output, input, and resize
 transport for daemon-owned PTY sessions. Unauthenticated callers are rejected
 before stream or upgrade acceptance. Resize forwarding remains bounded and does
 not continuously rewrite logical terminal dimensions during visual split drag.
 
-## 🚧 Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
+## Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
 
 The dashboard workbench renders daemon-owned terminal sessions in terminal panes
 for the selected workRoot. Creating a terminal opens or focuses a terminal pane,
@@ -302,7 +302,7 @@ state plus browser arrangement where available.
 The terminal pane is a shell terminal substrate only; it does not hardcode
 Codex, Claude, or other agent presets.
 
-## 🚧 Terminal Close Terminates Session {#260516-ws-web-dashboard-terminal-close-termination}
+## Terminal Close Terminates Session {#260516-ws-web-dashboard-terminal-close-termination}
 
 Closing a terminal panel explicitly terminates its daemon-owned terminal
 session. The first terminal substrate keeps hidden detached restore UX absent;
