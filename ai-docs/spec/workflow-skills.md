@@ -169,6 +169,21 @@ while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
 they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundary}
 
+`lead-write-ticket` recognizes related-ticket propagation requests such as
+"cascade", updating parent and child tickets together, or organizing a board and
+its children in one pass. In that mode it identifies the impacted ticket graph,
+selects only affected edit targets, keeps epic edits board-level, puts
+slice-specific decisions in child tickets, updates active inventory when
+needed, and commits the propagation as one logical documentation unit. It does
+not promote propagated tickets to `ready/` unless the user explicitly requests
+ready promotion or routes through `lead-proceed`.
+{#260516-write-ticket-related-ticket-propagation}
+
+Skill-authoring guidance treats local shorthand as trigger examples for a
+general intent, not as the concept name itself. New workflow shorthand should
+name the broad intent first and list the shorthand only where it prevents
+repeated routing failures.
+
 `lead-salvage` handles failed large implementations, sprints, branches, and
 agent runs where a wrong premise may require rollback or recovery. It freezes
 evidence before cleanup, interviews the user to confirm the failure claim and

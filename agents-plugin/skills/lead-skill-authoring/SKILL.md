@@ -31,6 +31,7 @@ These apply to both skill and agent documents.
 - Reserve "arguments" for MCP tools, CLI commands, and structured templates.
 - Use examples only when they prevent repeated wrong execution.
 - Preserve full grammar when compression could change order, ownership, or safety.
+- For user shorthand, name the general intent first and list shorthand only as trigger examples.
 
 ### Invariant / Constraint checklist
 
