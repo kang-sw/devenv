@@ -172,6 +172,18 @@ surface keys focus their existing attachment, opened/support surfaces prefer the
 second or later split group, and durable agent or persistent terminal surfaces
 prefer the focused group before falling back to the first group.
 
+> [!note] Planned 🚧
+> The visible workbench chrome will be corrected into compact editor-like split
+> groups where thin tab strips sit above dominant pane bodies. Pinned and
+> opened concepts remain dashboard model concepts, but callers should see
+> workbench tabs or compact chips rather than large explanatory rows. Visible
+> tabs select the active pane and, where practical, support frontend-only
+> Dockview movement such as reordering within a split group and moving to
+> another split group. That movement changes browser arrangement state only:
+> floating/popout groups stay disabled, daemon-backed lifecycle stays separate,
+> and PTY/TUI logical dimensions do not continuously follow visual drag
+> resizing.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
