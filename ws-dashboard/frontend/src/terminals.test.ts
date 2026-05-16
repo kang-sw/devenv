@@ -62,6 +62,7 @@ const pane = terminalPaneFromSession(session);
 assertEqual(pane.nextSequence, 0, "new pane starts at cursor zero");
 assertEqual(pane.socketStatus, "disconnected", "new pane starts without a socket attachment");
 assertEqual(shouldPollTerminalOutput(pane), true, "disconnected running panes remain eligible for HTTP fallback polling");
+assertEqual(shouldPollTerminalOutput(markTerminalSocketStatus(pane, "connecting")), false, "connecting websocket panes suppress live HTTP output polling");
 assertEqual(shouldPollTerminalOutput(markTerminalSocketStatus(pane, "connected")), false, "connected websocket panes suppress live HTTP output polling");
 const merged = mergeListedTerminalSessions({}, [session]);
 assertEqual(Boolean(merged[pane.logicalKey]), true, "listed live session reconstructs pane state");

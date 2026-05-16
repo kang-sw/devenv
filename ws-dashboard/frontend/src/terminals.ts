@@ -281,7 +281,11 @@ export function appendTerminalWebSocketMessage(
 }
 
 export function shouldPollTerminalOutput(pane: TerminalPaneState) {
-  return pane.session.status === "running" && pane.socketStatus !== "connected";
+  return (
+    pane.session.status === "running" &&
+    pane.socketStatus !== "connecting" &&
+    pane.socketStatus !== "connected"
+  );
 }
 
 /**

@@ -252,6 +252,25 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("CURSOR-OK");
 
+    const historyBefore = ((await page.locator(".xterm-rows").textContent()) ?? "").split("CURSOR-OK").length;
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => {
+      const text = (await page.locator(".xterm-rows").textContent()) ?? "";
+      return text.split("CURSOR-OK").length;
+    }, { timeout: 5_000 }).toBeGreaterThan(historyBefore);
+
+    await page.keyboard.type("sleep 5");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Control+C");
+    await page.keyboard.type("printf 'CTRL-C-OK\n'");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("CTRL-C-OK", { timeout: 2_000 });
+
+    await page.keyboard.press("Control+L");
+    await expect(page.locator(".xterm-rows")).not.toContainText("BACKSPACE-OK");
+
     await page.locator(".terminal-surface").click();
     await page.keyboard.type("printf 'BAD'");
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
