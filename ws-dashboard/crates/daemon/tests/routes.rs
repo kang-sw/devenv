@@ -16,8 +16,8 @@
 //   endpoint behavior is considered.
 // - health output stays minimal and does not expose token, host paths, cache
 //   paths, Git roots, wsstate internals, or diagnostics.
-// - `/api/dashboard/resources` is protected and returns the same deterministic
-//   dashboard hierarchy contract that frontend work will consume.
+// - `/api/dashboard/resources` is protected and returns the live opened-workRoot
+//   resource view-model contract that frontend work consumes.
 
 use std::fs;
 #[cfg(unix)]
@@ -446,11 +446,10 @@ async fn dashboard_resources_api_is_owner_authenticated() {
 }
 
 #[tokio::test]
-async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
-    // CONTRACT: paired owners receive deterministic JSON with server,
-    // workspaces, workRoots, mainInstances, subInstances, state, compactable,
-    // and action hint fields. Parse with serde_json and assert contract field
-    // names rather than depending on private Rust structs.
+async fn dashboard_resources_api_returns_empty_live_view_before_open() {
+    // CONTRACT: with no workRoot opened the canonical route returns an honest
+    // empty live view (server present, `workspaces: []`) and never the static
+    // mock fixture workspaces.
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
@@ -473,61 +472,68 @@ async fn dashboard_resources_api_returns_mock_hierarchy_with_owner_cookie() {
         .expect("dashboard resources body bytes");
     let value: serde_json::Value =
         serde_json::from_slice(&body).expect("dashboard resources JSON body");
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/dashboard_resources.json"))
-            .expect("dashboard resources fixture JSON");
-    assert_eq!(value, fixture);
 
     assert!(value.get("server").is_some());
     assert_eq!(value["server"]["id"], "server-local");
     assert_eq!(value["server"]["state"]["loading"], false);
     assert_eq!(value["server"]["state"]["stale"], false);
-    assert_eq!(value["server"]["actions"][0]["id"], "refresh");
-
-    let workspaces = value["workspaces"].as_array().expect("workspaces array");
-    assert_eq!(workspaces.len(), 2);
     assert!(value.get("work_roots").is_none());
 
-    let devenv = &workspaces[0];
-    assert_eq!(devenv["id"], "workspace-devenv");
-    assert_eq!(devenv["compactable"], false);
-    assert!(devenv.get("workRoots").is_some());
-    assert!(devenv.get("work_roots").is_none());
-
-    let work_roots = devenv["workRoots"].as_array().expect("workRoots array");
-    assert_eq!(work_roots.len(), 3);
-    assert_eq!(work_roots[0]["kind"], "gitPrimaryRoot");
-    assert_eq!(work_roots[1]["kind"], "gitLinkedWorktree");
-    assert_eq!(work_roots[2]["kind"], "plainDirectory");
-    assert_eq!(work_roots[2]["status"], "offline");
-    assert_eq!(work_roots[2]["state"]["error"], "workRoot is offline");
-
-    let main_instance = &work_roots[0]["mainInstances"][0];
-    assert_eq!(main_instance["role"], "main");
-    assert_eq!(
-        main_instance["resourcePath"]["workRootId"],
-        "root-devenv-primary"
+    let workspaces = value["workspaces"].as_array().expect("workspaces array");
+    assert!(
+        workspaces.is_empty(),
+        "empty live view exposes no workspaces before any open"
     );
-    assert!(main_instance.get("main_instances").is_none());
-    assert!(main_instance.get("subInstances").is_some());
-    assert!(main_instance.get("sub_instances").is_none());
-    assert_eq!(main_instance["actions"][0]["label"], "Open");
-
-    let sub_instance = &main_instance["subInstances"][0];
-    assert_eq!(sub_instance["role"], "sub");
-    assert_eq!(sub_instance["interactionMode"], "delegated");
-    assert_eq!(sub_instance["state"]["stale"], true);
-
-    let singleton = &workspaces[1];
-    assert_eq!(singleton["id"], "workspace-notes");
-    assert_eq!(singleton["compactable"], true);
-    assert_eq!(singleton["workRoots"][0]["kind"], "plainDirectory");
-    assert_eq!(singleton["workRoots"][0]["status"], "inaccessible");
-    assert_eq!(singleton["workRoots"][0]["compactable"], true);
-    assert_eq!(
-        singleton["workRoots"][0]["mainInstances"][0]["kind"],
-        "viewer"
+    assert!(
+        !body_contains_workspace(&value, "workspace-devenv"),
+        "live route must not return the mock fixture workspace"
     );
+}
+
+#[tokio::test]
+async fn dashboard_resources_api_includes_opened_work_root() {
+    // CONTRACT: the brief's required 1->2->3 sequence. After an owner opens a
+    // real workRoot, GET /api/dashboard/resources includes that opened workRoot
+    // and not only the static mock fixture workspace.
+    let root = temp_fixture_path("live-resources");
+    fs::create_dir_all(&root).expect("create live resources workRoot");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated dashboard resources request"),
+        )
+        .await
+        .expect("authenticated dashboard resources response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("dashboard resources body bytes");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("dashboard resources JSON body");
+
+    assert_eq!(value["server"]["id"], "server-local");
+    assert!(value.get("work_roots").is_none());
+    assert!(
+        work_root_ids(&value).iter().any(|id| id == &work_root_id),
+        "opened workRoot {work_root_id} must appear in the live resources view"
+    );
+    assert!(
+        !body_contains_workspace(&value, "workspace-devenv"),
+        "live route must not return the mock fixture workspace"
+    );
+
+    remove_static_fixture(&root);
 }
 
 #[tokio::test]
@@ -710,6 +716,57 @@ async fn root_picker_can_open_existing_directory_into_dashboard_model() {
     );
 
     remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn open_work_root_returns_aggregated_view_of_all_opened_roots() {
+    // CONTRACT: open_work_root returns the aggregated live view of every opened
+    // workRoot, so the immediate open response matches the canonical resources
+    // route and does not drop previously opened roots.
+    let first = temp_fixture_path("open-aggregate-first");
+    let second = temp_fixture_path("open-aggregate-second");
+    fs::create_dir_all(&first).expect("create first workRoot");
+    fs::create_dir_all(&second).expect("create second workRoot");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let first_id = open_work_root_for_test(app.clone(), cookie.as_str(), &first).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": second.display().to_string() }).to_string(),
+                ))
+                .expect("open second workRoot request"),
+        )
+        .await
+        .expect("open second workRoot response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("open second workRoot body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("open JSON");
+    let ids = work_root_ids(&value);
+    assert_eq!(
+        ids.len(),
+        2,
+        "aggregated view includes both opened workRoots"
+    );
+    assert!(
+        ids.iter().any(|id| id == &first_id),
+        "aggregated view keeps the previously opened workRoot {first_id}"
+    );
+
+    remove_static_fixture(&first);
+    remove_static_fixture(&second);
 }
 
 #[tokio::test]
@@ -897,6 +954,35 @@ async fn work_root_file_listing_routes_reports_non_directory_target() {
     assert!(!body.contains(&root.display().to_string()));
 
     remove_static_fixture(&root);
+}
+
+fn work_root_ids(value: &serde_json::Value) -> Vec<String> {
+    value["workspaces"]
+        .as_array()
+        .map(|workspaces| {
+            workspaces
+                .iter()
+                .flat_map(|workspace| {
+                    workspace["workRoots"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .filter_map(|root| root["id"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn body_contains_workspace(value: &serde_json::Value, workspace_id: &str) -> bool {
+    value["workspaces"]
+        .as_array()
+        .map(|workspaces| {
+            workspaces
+                .iter()
+                .any(|workspace| workspace["id"] == workspace_id)
+        })
+        .unwrap_or(false)
 }
 
 async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -> String {

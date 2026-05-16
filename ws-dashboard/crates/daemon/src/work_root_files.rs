@@ -35,6 +35,23 @@ impl OpenedWorkRoots {
             .get(work_root_id)
             .cloned()
     }
+
+    /// Registered workRoot paths in a deterministic order.
+    ///
+    /// The backing store is an unordered `HashMap`, so callers that build
+    /// aggregated resource views (the live `/api/dashboard/resources` route)
+    /// must sort to keep route responses and route tests stable.
+    pub fn candidate_paths(&self) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = self
+            .roots
+            .read()
+            .expect("opened workRoots lock poisoned")
+            .values()
+            .cloned()
+            .collect();
+        paths.sort();
+        paths
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]

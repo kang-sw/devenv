@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use ws_dashboard_core::DashboardResourcesView;
 
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
-use crate::resources::DashboardResourcesProvider;
+use crate::resources::{live_dashboard_resources, DashboardResourcesProvider};
 use crate::router::AppState;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -116,7 +116,11 @@ pub async fn open_work_root(
         .opened_work_roots
         .register(work_root.id.clone(), requested_path);
 
-    Json::<DashboardResourcesView>(view).into_response()
+    // CONTRACT: return the aggregated live view of every opened workRoot so the
+    // immediate open response is consistent with later GET /api/dashboard/resources
+    // refreshes. The single-candidate `view` above is only the Online gate.
+    let aggregated = live_dashboard_resources(&state.opened_work_roots);
+    Json::<DashboardResourcesView>(aggregated).into_response()
 }
 
 fn root_picker_view(path: &Path) -> Result<RootPickerView, String> {
