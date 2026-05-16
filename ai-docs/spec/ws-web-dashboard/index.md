@@ -136,7 +136,7 @@ Mouse-triggered navigation actions route through command ids so later keyboard
 bindings can call the same commands. The shell reserves `^b` to
 mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
 
-## 🚧 Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
+## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
 browser shell. Callers see a dashboard-specific `DESIGN.md` guide under the
