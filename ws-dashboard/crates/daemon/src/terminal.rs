@@ -201,6 +201,12 @@ pub struct TerminalOutputQuery {
     after: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct TerminalWebSocketQuery {
+    #[serde(default)]
+    after: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalErrorView {
@@ -297,6 +303,7 @@ pub async fn terminal_resize(
 pub async fn terminal_websocket(
     State(state): State<AppState>,
     AxumPath(terminal_id): AxumPath<String>,
+    Query(query): Query<TerminalWebSocketQuery>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     // CONTRACT: This route is nested behind the owner auth and Host/Origin
@@ -313,7 +320,7 @@ pub async fn terminal_websocket(
         return terminal_error(StatusCode::GONE, "terminal is closed");
     }
     upgrade
-        .on_upgrade(move |socket| terminal_socket_task(session, socket))
+        .on_upgrade(move |socket| terminal_socket_task(session, socket, query.after))
         .into_response()
 }
 
@@ -527,10 +534,10 @@ impl TerminalSession {
     }
 }
 
-async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket) {
+async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket, after: u64) {
     let (mut sender, mut receiver) = socket.split();
     let mut output_signal = session.output_signal.subscribe();
-    let mut cursor = 0_u64;
+    let mut cursor = after;
 
     if send_output_backfill(&session, &mut sender, &mut cursor)
         .await
@@ -572,7 +579,6 @@ async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket) 
                     break;
                 }
                 if !session.is_live() {
-                    let _ = send_terminal_socket_status(&session, &mut sender, true).await;
                     break;
                 }
             }

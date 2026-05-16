@@ -1335,6 +1335,13 @@ async fn work_root_terminal_routes_are_owner_authenticated() {
             .body(Body::from("{}"))
             .expect("resize terminal request"),
         Request::builder()
+            .uri("/api/dashboard/terminals/term_test/socket")
+            .header(header::UPGRADE, "websocket")
+            .header(header::CONNECTION, "upgrade")
+            .header(header::HOST, "127.0.0.1")
+            .body(Body::empty())
+            .expect("terminal websocket request"),
+        Request::builder()
             .method(Method::DELETE)
             .uri("/api/dashboard/terminals/term_test")
             .body(Body::empty())
@@ -1639,7 +1646,7 @@ async fn terminal_websocket_attaches_for_owner_and_forwards_io_and_resize() {
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
     let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
-    let (addr, server) = spawn_test_server(app).await;
+    let (addr, server) = spawn_test_server(app.clone()).await;
 
     let mut request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
         .into_client_request()
@@ -1654,14 +1661,51 @@ async fn terminal_websocket_attaches_for_owner_and_forwards_io_and_resize() {
 
     socket
         .send(TungsteniteMessage::Text(
-            serde_json::json!({ "type": "resize", "columns": 100, "rows": 30 }).to_string(),
+            serde_json::json!({ "type": "resize", "columns": 100, "rows": 30 })
+                .to_string()
+                .into(),
         ))
         .await
         .expect("send websocket resize");
+    for attempt in 0..40 {
+        let list = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/dashboard/work-roots/{work_root_id}/terminals"
+                    ))
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("list resized terminal request"),
+            )
+            .await
+            .expect("list resized terminal response");
+        assert_eq!(list.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(list.into_body(), 4096)
+            .await
+            .expect("list resized terminal body bytes");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("list resized JSON");
+        let listed = value.as_array().expect("listed terminals array");
+        let terminal = listed
+            .iter()
+            .find(|value| value["terminalId"] == terminal_id)
+            .expect("resized terminal listed");
+        if terminal["columns"] == 100 && terminal["rows"] == 30 {
+            break;
+        }
+        assert!(
+            attempt < 39,
+            "resize frame did not update daemon terminal size: {terminal:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
     socket
         .send(TungsteniteMessage::Text(
             serde_json::json!({ "type": "input", "data": "printf WS-SOCKET-TEST\n; exit\n" })
-                .to_string(),
+                .to_string()
+                .into(),
         ))
         .await
         .expect("send websocket input");

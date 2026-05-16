@@ -17,6 +17,7 @@ import {
   terminalResizeEndpoint,
   terminalWebSocketEndpoint,
   terminalWebSocketUrl,
+  terminalWebSocketCursor,
   shouldPollTerminalOutput,
   validateTerminalSize,
   workRootTerminalsEndpoint,
@@ -50,9 +51,9 @@ assertEqual(terminalOutputEndpoint("term/abc", 12), "/api/dashboard/terminals/te
 assertEqual(terminalInputEndpoint("term/abc"), "/api/dashboard/terminals/term%2Fabc/input", "input endpoint encodes id");
 assertEqual(terminalResizeEndpoint("term/abc"), "/api/dashboard/terminals/term%2Fabc/resize", "resize endpoint encodes id");
 assertEqual(terminalCloseEndpoint("term/abc"), "/api/dashboard/terminals/term%2Fabc", "close endpoint encodes id");
-assertEqual(terminalWebSocketEndpoint("term/abc"), "/api/dashboard/terminals/term%2Fabc/socket", "websocket endpoint encodes id");
-assertEqual(terminalWebSocketUrl("term/abc", { protocol: "http:", host: "127.0.0.1:1234" } as Location), "ws://127.0.0.1:1234/api/dashboard/terminals/term%2Fabc/socket", "websocket URL uses ws for http");
-assertEqual(terminalWebSocketUrl("term/abc", { protocol: "https:", host: "example.test" } as Location), "wss://example.test/api/dashboard/terminals/term%2Fabc/socket", "websocket URL uses wss for https");
+assertEqual(terminalWebSocketEndpoint("term/abc", 12), "/api/dashboard/terminals/term%2Fabc/socket?after=12", "websocket endpoint encodes id and cursor");
+assertEqual(terminalWebSocketUrl("term/abc", 12, { protocol: "http:", host: "127.0.0.1:1234" } as Location), "ws://127.0.0.1:1234/api/dashboard/terminals/term%2Fabc/socket?after=12", "websocket URL uses ws for http");
+assertEqual(terminalWebSocketUrl("term/abc", 0, { protocol: "https:", host: "example.test" } as Location), "wss://example.test/api/dashboard/terminals/term%2Fabc/socket?after=0", "websocket URL uses wss for https");
 assertEqual(terminalPaneLogicalKey("root-local-abc", "term_abc"), "persistentTerminal/root-local-abc/term_abc", "logical key uses workRoot and terminal id");
 assertEqual(terminalPaneId("term/abc"), "terminal:term%2Fabc", "pane id encodes terminal id");
 assertEqual(String(terminalPaneLogicalKey("root-local-abc", "term_abc")).includes("/Users/"), false, "logical key omits host paths");
@@ -86,7 +87,8 @@ assertEqual(withOutput.output, "hi", "output appends chunk data");
 assertEqual(withOutput.nextSequence, 3, "output advances cursor");
 const withSocketOutput = appendTerminalWebSocketMessage(markTerminalSocketStatus(pane, "connected"), { type: "output", terminalId: "term_abc", chunk: { sequence: 4, data: " socket", stream: "pty" } });
 assertEqual(withSocketOutput.output, " socket", "websocket output appends chunk data");
-assertEqual(withSocketOutput.nextSequence, 4, "websocket output advances cursor to chunk sequence");
+assertEqual(withSocketOutput.nextSequence, 5, "websocket output advances cursor past chunk sequence");
+assertEqual(terminalWebSocketCursor(withOutput), 2, "socket cursor resumes from the last HTTP-observed sequence");
 const withSocketExit = appendTerminalWebSocketMessage(withSocketOutput, { type: "exit", terminalId: "term_abc", status: "exited", nextSequence: 5 });
 assertEqual(withSocketExit.session.status, "exited", "websocket exit updates terminal status");
 assertEqual(withSocketExit.socketStatus, "fallback", "websocket exit leaves pane in fallback state");

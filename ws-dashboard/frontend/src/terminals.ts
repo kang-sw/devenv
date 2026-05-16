@@ -92,16 +92,21 @@ export function terminalResizeEndpoint(terminalId: string) {
   return `/api/dashboard/terminals/${encodeURIComponent(terminalId)}/resize`;
 }
 
-export function terminalWebSocketEndpoint(terminalId: string) {
-  return `/api/dashboard/terminals/${encodeURIComponent(terminalId)}/socket`;
+export function terminalWebSocketEndpoint(terminalId: string, after = 0) {
+  const query = new URLSearchParams({ after: String(after) });
+  return `/api/dashboard/terminals/${encodeURIComponent(terminalId)}/socket?${query.toString()}`;
 }
 
-export function terminalWebSocketUrl(terminalId: string, locationLike = window.location) {
+export function terminalWebSocketUrl(terminalId: string, after = 0, locationLike = window.location) {
   // HINT: Implementation should use this helper when attaching xterm panes and
   // tests should assert live panes do not continue periodic output polling once
   // this socket is open.
   const protocol = locationLike.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${locationLike.host}${terminalWebSocketEndpoint(terminalId)}`;
+  return `${protocol}//${locationLike.host}${terminalWebSocketEndpoint(terminalId, after)}`;
+}
+
+export function terminalWebSocketCursor(pane: TerminalPaneState) {
+  return Math.max(0, pane.nextSequence - 1);
 }
 
 export function terminalCloseEndpoint(terminalId: string) {
@@ -260,7 +265,7 @@ export function appendTerminalWebSocketMessage(
     return {
       ...pane,
       output: pane.output + message.chunk.data,
-      nextSequence: Math.max(pane.nextSequence, message.chunk.sequence),
+      nextSequence: Math.max(pane.nextSequence, message.chunk.sequence + 1),
       error: null,
       localCreatedAtMs: Date.now(),
     };

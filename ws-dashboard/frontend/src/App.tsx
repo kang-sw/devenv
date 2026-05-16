@@ -55,6 +55,7 @@ import {
   terminalOutputPollChangedState,
   terminalPaneFromSession,
   terminalPaneLogicalKey,
+  terminalWebSocketCursor,
   terminalWebSocketUrl,
   type TerminalPaneState,
   type TerminalWebSocketServerMessage,
@@ -1610,7 +1611,7 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
 
   useEffect(() => {
     let disposed = false;
-    const socket = new WebSocket(terminalWebSocketUrl(terminalId));
+    const socket = new WebSocket(terminalWebSocketUrl(terminalId, terminalWebSocketCursor(liveRef.current.pane)));
     socketRef.current = socket;
     liveRef.current.actions.onSocketStatus(liveRef.current.pane, "connecting", null);
 

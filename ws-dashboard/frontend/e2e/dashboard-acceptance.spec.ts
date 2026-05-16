@@ -107,7 +107,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   const terminalSocketFrames: string[] = [];
   let terminalOutputPolls = 0;
   page.on("websocket", (ws) => {
-    if (ws.url().includes("/api/dashboard/terminals/") && ws.url().endsWith("/socket")) {
+    if (ws.url().includes("/api/dashboard/terminals/") && ws.url().includes("/socket")) {
       terminalSocketUrls.push(ws.url());
       ws.on("framesent", (frame) => terminalSocketFrames.push(String(frame.payload)));
     }
@@ -232,6 +232,25 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await runInTerminal(page, "printf 'GATEOUT-%s\n' 12345");
     await expect(page.locator(".xterm-rows")).toContainText("GATEOUT-12345");
     const echoMs = Date.now() - start;
+    expect(echoMs).toBeLessThan(2_000);
+
+    await page.locator(".terminal-surface").click();
+    await page.keyboard.type("printf 'BACKSPACE-BAD");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type("OK\n'");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("BACKSPACE-OK");
+
+    await page.keyboard.type("echo CURSOROK");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.type("-");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("CURSOR-OK");
 
     await page.locator(".terminal-surface").click();
     await page.keyboard.type("printf 'BAD'");
@@ -256,7 +275,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     expect(await documentScrolls(page)).toBe(false);
     note(
       `terminal WebSocket: ${terminalSocketUrls[0]} connected; HTTP output polls stayed at ` +
-        `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with edit, history, ` +
+        `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with Backspace, cursor movement, edit, history, ` +
         "Ctrl-C, Ctrl-L, paste, and no document scroll",
     );
   });
