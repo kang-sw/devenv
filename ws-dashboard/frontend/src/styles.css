@@ -1161,3 +1161,44 @@ button {
   font-size: var(--ws-font-size-01);
   line-height: var(--ws-line-height-01);
 }
+
+.terminal-pane {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--ws-space-06);
+}
+
+.terminal-output {
+  min-height: 160px;
+  margin: 0;
+  overflow: auto;
+  background: var(--ws-color-canvas);
+  color: var(--ws-color-text-primary);
+  padding: var(--ws-space-08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-04);
+  white-space: pre-wrap;
+}
+
+.terminal-controls {
+  display: flex;
+  gap: var(--ws-space-04);
+}
+
+.terminal-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  background: var(--ws-color-panel-subtle);
+  color: var(--ws-color-text-primary);
+  padding: var(--ws-space-04) var(--ws-space-06);
+}
+
+.terminal-error {
+  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-state-error-strong);
+  background: var(--ws-color-notice-error);
+  color: var(--ws-color-state-error-text);
+  padding: var(--ws-space-06);
+}

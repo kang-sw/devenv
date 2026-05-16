@@ -619,6 +619,60 @@ assertDeepEqual(
 assert(readmeFileKey !== nestedFileKey, "different read-only file paths open distinct logical panes");
 assert(!String(readmeFileKey).includes("/Users/"), "read-only logical key omits raw host paths");
 
+
+const terminalSessionKey = surfaceLogicalKey("persistentTerminal", "root-local-abc", "term_abc");
+assertDeepEqual(
+  decideSurfaceOpen(
+    {
+      groups: [{ groupId: groupOne }, { groupId: groupTwo }],
+      focusedGroupId: groupTwo,
+      attachments: [
+        {
+          attachmentId: attachmentId("att-terminal-existing"),
+          groupId: groupTwo,
+          surfaceKind: "persistentTerminal",
+          logicalKey: terminalSessionKey,
+        },
+      ],
+    },
+    {
+      surfaceKind: "persistentTerminal",
+      logicalKey: terminalSessionKey,
+      attachmentId: attachmentId("att-terminal-duplicate"),
+    },
+  ),
+  {
+    type: "focusExisting",
+    attachmentId: "att-terminal-existing",
+    groupId: "group-2",
+    logicalKey: "persistentTerminal/root-local-abc/term_abc",
+  },
+  "persistent terminal duplicate logical key focuses existing session pane",
+);
+assertDeepEqual(
+  decideSurfaceOpen(
+    { groups: [{ groupId: groupOne }, { groupId: groupTwo }], focusedGroupId: groupTwo, attachments: [] },
+    {
+      surfaceKind: "persistentTerminal",
+      logicalKey: terminalSessionKey,
+      attachmentId: attachmentId("att-terminal-new"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-terminal-new",
+    groupId: "group-2",
+    logicalKey: "persistentTerminal/root-local-abc/term_abc",
+    rowPolicy: "pinned",
+  },
+  "persistent terminal opens into the focused group",
+);
+assertDeepEqual(
+  decideSurfaceClose("persistentTerminal").terminateReservation?.commandId,
+  "workbench.lifecycle.terminate",
+  "persistent terminal close reserves terminate command",
+);
+
 assertDeepEqual(
   decideSurfaceClose("agent"),
   {

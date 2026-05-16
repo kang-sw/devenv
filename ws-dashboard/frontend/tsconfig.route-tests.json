@@ -13,6 +13,8 @@
     "src/routeBasis.test.ts",
     "src/workRootFiles.ts",
     "src/workRootFiles.test.ts",
+    "src/terminals.ts",
+    "src/terminals.test.ts",
     "src/workbench/**/*.ts"
   ]
 }
