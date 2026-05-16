@@ -6,6 +6,10 @@ related:
   260516-epic-ws-web-dashboard-workroot-io-substrate: containing milestone
   260516-feat-ws-web-workroot-file-navigation: file navigation source surface
   260516-epic-ws-web-dashboard-workbench-substrate: workbench placement substrate
+spec:
+  - 260516-ws-web-dashboard-readonly-file-api
+  - 260516-ws-web-dashboard-readonly-text-pane
+  - 260516-ws-web-dashboard-file-open-placement-policy
 related-mental-model:
   - ws-web-dashboard
 ---
