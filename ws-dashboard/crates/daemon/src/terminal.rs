@@ -184,9 +184,12 @@ pub async fn create_terminal(
     ) {
         Ok(session) => {
             let view = session.view();
-            match state.terminals.insert(session) {
+            match state.terminals.insert(session.clone()) {
                 Ok(()) => Json(view).into_response(),
-                Err(error) => error.into_response(),
+                Err(error) => {
+                    session.terminate();
+                    error.into_response()
+                }
             }
         }
         Err(error) => error.into_response(),
@@ -393,6 +396,7 @@ impl TerminalSession {
         inner.master = None;
         if let Some(mut child) = inner.child.take() {
             let _ = child.kill();
+            let _ = child.wait();
         }
     }
 

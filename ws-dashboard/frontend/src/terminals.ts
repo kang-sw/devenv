@@ -165,6 +165,15 @@ export function appendTerminalOutput(pane: TerminalPaneState, output: TerminalOu
   };
 }
 
+export function markTerminalPaneCloseError(
+  current: Record<string, TerminalPaneState>,
+  logicalKey: string,
+  error: string,
+) {
+  const pane = current[logicalKey];
+  return pane ? { ...current, [logicalKey]: { ...pane, error } } : current;
+}
+
 export function removeClosedTerminalPane(
   current: Record<string, TerminalPaneState>,
   logicalKey: string,

@@ -1,5 +1,6 @@
 import {
   appendTerminalOutput,
+  markTerminalPaneCloseError,
   mergeListedTerminalSessions,
   removeClosedTerminalPane,
   terminalCloseEndpoint,
@@ -53,6 +54,11 @@ const withOutput = appendTerminalOutput(pane, { terminalId: "term_abc", status: 
 assertEqual(withOutput.output, "hi", "output appends chunk data");
 assertEqual(withOutput.nextSequence, 3, "output advances cursor");
 assertDeepEqual(removeClosedTerminalPane(merged, pane.logicalKey), {}, "close success removes pane state");
+assertEqual(
+  markTerminalPaneCloseError(merged, pane.logicalKey, "close failed")[pane.logicalKey]?.error,
+  "close failed",
+  "close failure preserves pane state with error",
+);
 assertDeepEqual(validateTerminalSize(100, 30), { columns: 100, rows: 30 }, "valid resize accepted");
 assertThrows(() => validateTerminalSize(0, 30), /invalid terminal size/, "non-positive columns rejected");
 assertThrows(() => validateTerminalSize(1000, 30), /invalid terminal size/, "oversized columns rejected");

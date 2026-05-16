@@ -1258,6 +1258,25 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
 
+    let invalid_create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 0, "rows": 24 }).to_string(),
+                ))
+                .expect("invalid create terminal request"),
+        )
+        .await
+        .expect("invalid create terminal response");
+    assert_eq!(invalid_create.status(), StatusCode::BAD_REQUEST);
+
     let create = app
         .clone()
         .oneshot(
@@ -1315,6 +1334,23 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
     let listed: serde_json::Value = serde_json::from_slice(&list_body).expect("list terminal JSON");
     assert_eq!(listed.as_array().expect("terminal array").len(), 1);
     assert_eq!(listed[0]["terminalId"], terminal_id);
+
+    let invalid_resize = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/resize"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 301, "rows": 30 }).to_string(),
+                ))
+                .expect("invalid resize terminal request"),
+        )
+        .await
+        .expect("invalid resize terminal response");
+    assert_eq!(invalid_resize.status(), StatusCode::BAD_REQUEST);
 
     let resized = app
         .clone()
@@ -1404,6 +1440,40 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
         .await
         .expect("close terminal response");
     assert_eq!(close.status(), StatusCode::NO_CONTENT);
+
+    let input_after_close = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/input"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "data": "echo nope\n" }).to_string(),
+                ))
+                .expect("closed input request"),
+        )
+        .await
+        .expect("closed input response");
+    assert_eq!(input_after_close.status(), StatusCode::NOT_FOUND);
+
+    let resize_after_close = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}/resize"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24 }).to_string(),
+                ))
+                .expect("closed resize request"),
+        )
+        .await
+        .expect("closed resize response");
+    assert_eq!(resize_after_close.status(), StatusCode::NOT_FOUND);
 
     let output_after_close = app
         .oneshot(

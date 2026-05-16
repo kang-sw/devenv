@@ -41,12 +41,14 @@ import {
   createTerminal,
   fetchTerminalOutput,
   listTerminals,
+  markTerminalPaneCloseError,
   mergeListedTerminalSessions,
   removeClosedTerminalPane,
   sendTerminalInput,
   terminalPaneFromSession,
   terminalPaneLogicalKey,
   type TerminalPaneState,
+  type TerminalSessionView,
 } from "./terminals";
 
 type ViewState = {
@@ -814,6 +816,7 @@ function WorkbenchShell({
   const [draggedPaneId, setDraggedPaneId] = useState<string | null>(null);
   const [terminalPanes, setTerminalPanes] = useState<Record<string, TerminalPaneState>>({});
   const [activeTerminalPaneRequest, setActiveTerminalPaneRequest] = useState<{ paneId: string; sequence: number } | null>(null);
+  const [terminalPaneOrderByGroup, setTerminalPaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
 
@@ -830,6 +833,7 @@ function WorkbenchShell({
             readOnlyFilePanes,
             readOnlyFilePaneOrderByGroup,
             Object.values(terminalPanes),
+            terminalPaneOrderByGroup,
             {
               onSend: sendTerminalDraft,
               onClose: closeTerminalPane,
@@ -849,7 +853,10 @@ function WorkbenchShell({
       return;
     }
     void listTerminals(workbenchModel.root.id)
-      .then((sessions) => setTerminalPanes((current) => mergeListedTerminalSessions(current, sessions)))
+      .then((sessions) => {
+        setTerminalPanes((current) => mergeListedTerminalSessions(current, sessions));
+        setTerminalPaneOrderByGroup((current) => placeTerminalSessions(current, terminalPanes, sessions));
+      })
       .catch(() => undefined);
   }, [workbenchModel?.root.id]);
 
@@ -867,19 +874,24 @@ function WorkbenchShell({
       for (const pane of livePanes) {
         void fetchTerminalOutput(pane.session.terminalId, pane.nextSequence)
           .then((output) => {
-            setTerminalPanes((current) => ({
-              ...current,
-              [pane.logicalKey]: appendTerminalOutput(current[pane.logicalKey] ?? pane, output),
-            }));
+            setTerminalPanes((current) =>
+              current[pane.logicalKey]
+                ? { ...current, [pane.logicalKey]: appendTerminalOutput(current[pane.logicalKey], output) }
+                : current,
+            );
           })
           .catch((error) => {
-            setTerminalPanes((current) => ({
-              ...current,
-              [pane.logicalKey]: {
-                ...(current[pane.logicalKey] ?? pane),
-                error: error instanceof Error ? error.message : "terminal output failed",
-              },
-            }));
+            setTerminalPanes((current) =>
+              current[pane.logicalKey]
+                ? {
+                    ...current,
+                    [pane.logicalKey]: {
+                      ...current[pane.logicalKey],
+                      error: error instanceof Error ? error.message : "terminal output failed",
+                    },
+                  }
+                : current,
+            );
           });
       }
     }, 500);
@@ -930,6 +942,7 @@ function WorkbenchShell({
       .then((session) => {
         const pane = terminalPaneFromSession(session);
         setTerminalPanes((current) => ({ ...current, [pane.logicalKey]: pane }));
+        setTerminalPaneOrderByGroup((current) => placeTerminalSessions(current, terminalPanes, [session]));
         setActiveTerminalPaneRequest({ paneId: pane.paneId, sequence: terminalOpenSequence.current++ });
       })
       .catch(() => undefined);
@@ -949,13 +962,13 @@ function WorkbenchShell({
     void closeTerminal(pane.session.terminalId)
       .then(() => setTerminalPanes((current) => removeClosedTerminalPane(current, pane.logicalKey)))
       .catch((error) => {
-        setTerminalPanes((current) => ({
-          ...current,
-          [pane.logicalKey]: {
-            ...(current[pane.logicalKey] ?? pane),
-            error: error instanceof Error ? error.message : "terminal close failed",
-          },
-        }));
+        setTerminalPanes((current) =>
+          markTerminalPaneCloseError(
+            current,
+            pane.logicalKey,
+            error instanceof Error ? error.message : "terminal close failed",
+          ),
+        );
       });
   }
 
@@ -1143,12 +1156,16 @@ function buildWorkbenchEditorGroups(
   readOnlyFilePanes: ReadOnlyFilePane[],
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
   terminalPanes: TerminalPaneState[],
+  terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
 ): WorkbenchEditorGroupModel[] {
   const readOnlyPanesByGroup = readOnlyWorkbenchPanesByGroup(root, readOnlyFilePanes, readOnlyFilePaneOrderByGroup);
-  const terminalWorkbenchPanes = terminalPanes
-    .filter((pane) => pane.session.workRootId === root.id)
-    .map((pane) => terminalWorkbenchPane(pane, terminalActions));
+  const terminalPanesByGroup = terminalWorkbenchPanesByGroup(
+    root,
+    terminalPanes,
+    terminalPaneOrderByGroup,
+    terminalActions,
+  );
   return [
     {
       id: "primary",
@@ -1174,7 +1191,7 @@ function buildWorkbenchEditorGroups(
           state: root.state,
           meta: [root.status, kindLabel(root.kind), closeContractLabel("persistentTerminal"), ptySizeLabel()],
         },
-        ...terminalWorkbenchPanes,
+        ...(terminalPanesByGroup.primary ?? []),
         {
           id: "selected-viewer",
           kind: "viewer",
@@ -1236,6 +1253,82 @@ function buildWorkbenchEditorGroups(
 }
 
 
+
+
+function placeTerminalSessions(
+  current: WorkbenchPaneOrder,
+  existingPanes: Record<string, TerminalPaneState>,
+  sessions: TerminalSessionView[],
+): WorkbenchPaneOrder {
+  let next = { ...current };
+  let placementState = terminalPlacementState(existingPanes);
+  for (const session of sessions) {
+    const decision = decideSurfaceOpen(placementState, {
+      surfaceKind: "persistentTerminal",
+      logicalKey: surfaceLogicalKey("persistentTerminal", session.workRootId, session.terminalId),
+    });
+    if (decision.type === "openNew") {
+      const pane = terminalPaneFromSession(session);
+      next = {
+        ...next,
+        [decision.groupId]: [...(next[decision.groupId] ?? []), pane.paneId],
+      };
+      placementState = {
+        ...placementState,
+        attachments: [
+          ...placementState.attachments,
+          {
+            attachmentId: pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+            groupId: decision.groupId,
+            surfaceKind: "persistentTerminal",
+            logicalKey: decision.logicalKey,
+          },
+        ],
+      };
+    }
+  }
+  return next;
+}
+
+function terminalPlacementState(panesByLogicalKey: Record<string, TerminalPaneState>): WorkbenchPlacementState {
+  return {
+    groups: [{ groupId: workbenchGroupId("primary") }, { groupId: workbenchGroupId("support") }],
+    focusedGroupId: workbenchGroupId("primary"),
+    attachments: Object.values(panesByLogicalKey).map((pane) => ({
+      attachmentId: pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+      groupId: workbenchGroupId("primary"),
+      surfaceKind: "persistentTerminal",
+      logicalKey: surfaceLogicalKey("persistentTerminal", pane.session.workRootId, pane.session.terminalId),
+    })),
+  };
+}
+
+function terminalWorkbenchPanesByGroup(
+  root: WorkRootView,
+  terminalPanes: TerminalPaneState[],
+  terminalPaneOrderByGroup: WorkbenchPaneOrder,
+  terminalActions: TerminalPaneActions,
+): Record<string, WorkbenchPane[]> {
+  const panes = terminalPanes
+    .filter((pane) => pane.session.workRootId === root.id)
+    .map((pane) => terminalWorkbenchPane(pane, terminalActions));
+  const paneById = new Map(panes.map((pane) => [pane.id, pane]));
+  const consumed = new Set<string>();
+  const byGroup: Record<string, WorkbenchPane[]> = { primary: [], support: [] };
+  for (const groupId of ["primary", "support"]) {
+    for (const paneId of terminalPaneOrderByGroup[groupId] ?? []) {
+      const pane = paneById.get(paneId);
+      if (pane && !consumed.has(paneId)) {
+        byGroup[groupId].push(pane);
+        consumed.add(paneId);
+      }
+    }
+  }
+  for (const pane of panes) {
+    if (!consumed.has(pane.id)) byGroup.primary.push(pane);
+  }
+  return byGroup;
+}
 
 type TerminalPaneActions = {
   onSend: (pane: TerminalPaneState) => void;
