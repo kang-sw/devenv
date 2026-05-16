@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "./node_modules/.tmp/route-tests",
+    "rootDir": "./src"
+  },
+  "include": [
+    "src/routeBasis.ts",
+    "src/routeBasis.test.ts"
+  ]
+}

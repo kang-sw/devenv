@@ -372,6 +372,53 @@ async fn static_dashboard_assets_succeed_with_owner_session_cookie() {
 }
 
 #[tokio::test]
+async fn server_scoped_dashboard_routes_refresh_to_protected_shell() {
+    let static_dir = write_static_fixture();
+    let state = app_state_with_static_dir(static_dir.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    for uri in [
+        "/servers",
+        "/servers/server-local",
+        "/servers/server-local/workspaces/workspace-devenv",
+    ] {
+        let unauthenticated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .body(Body::empty())
+                    .expect("unauthenticated server-scoped shell request"),
+            )
+            .await
+            .expect("unauthenticated server-scoped shell response");
+        assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED, "{uri}");
+
+        let authenticated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("authenticated server-scoped shell request"),
+            )
+            .await
+            .expect("authenticated server-scoped shell response");
+        assert_eq!(authenticated.status(), StatusCode::OK, "{uri}");
+        let body = axum::body::to_bytes(authenticated.into_body(), 4096)
+            .await
+            .expect("server-scoped shell body bytes");
+        let body = std::str::from_utf8(&body).expect("server-scoped shell body utf8");
+        assert!(body.contains("fixture dashboard"), "{uri}");
+    }
+
+    remove_static_fixture(&static_dir);
+}
+
+#[tokio::test]
 async fn dashboard_resources_api_is_owner_authenticated() {
     let app = build_router(app_state());
 

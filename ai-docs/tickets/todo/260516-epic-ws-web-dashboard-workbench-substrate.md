@@ -69,7 +69,7 @@ The milestone should establish:
   `ws-dashboard/frontend/DESIGN.md`, define semantic theme tokens, convert the
   existing shell away from hardcoded light colors, and verify desktop/mobile
   screenshots.
-- `260516-feat-ws-web-stable-pairing-routes` - ready; redirect successful
+- `260516-feat-ws-web-stable-pairing-routes` - done; redirected successful
   `/pair?token=...` exchanges to a token-free app URL, keep
   invalid/reused/expired token failures non-redirecting, and introduce the
   frontend route shape for `/servers/:serverId/...`.

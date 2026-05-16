@@ -126,11 +126,12 @@ entrypoints that later dashboard slices can reuse. The first shell remains
 narrow: it does not implement PTY, editor, document viewer, live workspace
 discovery, event streams, named-agent controls, or root picker behavior.
 
-> [!note] Planned 🚧
-> Browser navigation will reserve explicit server-scoped routes such as
-> `/servers/:serverId/...` for dashboard resources, while daemon-owned opaque
-> ids remain the source of truth and server identity is not hidden inside
-> workspace, workRoot, or instance ids. {#260516-ws-web-dashboard-server-scoped-browser-routes}
+Browser navigation reserves explicit server-scoped routes such as
+`/servers/:serverId/...` for dashboard resources, while daemon-owned opaque ids
+remain the source of truth and server identity is not hidden inside workspace,
+workRoot, or instance ids. Refreshing `/servers` or server-scoped app paths
+serves the protected frontend shell through the same owner-auth static route
+boundary. {#260516-ws-web-dashboard-server-scoped-browser-routes}
 
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 

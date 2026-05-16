@@ -1,5 +1,6 @@
 ---
 title: ws web dashboard stable pairing routes
+completed: 2026-05-16
 parent: 260516-epic-ws-web-dashboard-workbench-substrate
 related:
   260514-epic-ws-web-dashboard-mvp: parent dashboard MVP board
@@ -10,6 +11,7 @@ spec:
   - 260516-ws-web-dashboard-server-scoped-browser-routes
 plans:
   phase-1: 2026-05/16-260516-feat-ws-web-stable-pairing-routes-phase-1.brief
+  phase-2: 2026-05/16-260516-feat-ws-web-stable-pairing-routes-phase-2.brief
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -63,3 +65,21 @@ Introduce the frontend route identity basis for `/servers/:serverId/...` while
 keeping daemon-owned opaque resource ids as the source of truth. The first pass
 does not need complete deep-link coverage, but it should make refresh-safe,
 server-scoped navigation the intended route shape for later workbench surfaces.
+
+### Result (9461754) - 2026-05-16
+
+Added the first server-scoped browser route basis. The frontend now normalizes
+`/`, `/servers`, and `/servers/:serverId...` against the daemon-reported
+`resources.server.id`, preserving daemon resource data as the authority rather
+than treating route params as workspace, workRoot, or instance identity.
+
+The daemon serves the protected frontend shell for `/servers` and
+`/servers/{*app_path}` refreshes through the existing owner-auth static route
+boundary. Follow-up test coverage in `6ed9528` added exact `/servers` fallback
+coverage and frontend route-normalization assertions for `/`, `/servers`,
+wrong server ids, already-scoped routes, and query/hash preservation.
+
+Verified with `cargo fmt --manifest-path crates/daemon/Cargo.toml`, frontend
+build plus `npm run test:routes`, daemon route tests, and daemon server tests.
+Correctness, fit, and test review reported clean after the test coverage
+follow-up.

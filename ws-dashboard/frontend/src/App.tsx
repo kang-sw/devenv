@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { normalizeServerRouteLocation } from "./routeBasis";
 
 type ViewState = {
   status: string;
@@ -162,6 +163,14 @@ export function App() {
   useEffect(() => {
     void loadResources();
   }, [loadResources]);
+
+  useEffect(() => {
+    if (!resources) {
+      return;
+    }
+
+    normalizeServerRoute(resources.server.id);
+  }, [resources]);
 
   const entities = useMemo(() => flattenEntities(resources), [resources]);
 
@@ -740,6 +749,17 @@ function appendInstanceEntities(entities: ResourceEntity[], instance: InstanceVi
 
   for (const subInstance of instance.subInstances) {
     appendInstanceEntities(entities, subInstance);
+  }
+}
+
+function normalizeServerRoute(serverId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const normalizedPath = normalizeServerRouteLocation(window.location, serverId);
+  if (normalizedPath) {
+    window.history.replaceState(null, "", normalizedPath);
   }
 }
 
