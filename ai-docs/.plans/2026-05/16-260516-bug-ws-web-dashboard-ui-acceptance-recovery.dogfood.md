@@ -75,7 +75,7 @@ Regenerate with `npm run test:browser`.
 |---|------------------|--------|----------|
 | 1 | Terminal tabs were not selectable | PASS | Two terminals created; clicking each tab focuses only that session. |
 | 2 | Mock/placeholder terminal shown after opening a real workRoot | PASS | After opening the workRoot and before `New terminal`, zero terminal tabs/surfaces exist; the static placeholder pane is removed. |
-| 3 | Terminal not a real emulator (raw text, line input, no pane fill) | PASS | PTY output streams into the xterm emulator; ANSI green renders as `xterm-fg-2`, not raw `\033[` text; keyboard input flows via the emulator; surface measures 656px tall and fills the pane. |
+| 3 | Terminal not a real emulator (raw text, line input, no pane fill) | PASS | PTY output streams into the xterm emulator; ANSI green renders as `xterm-fg-2`, not raw `\033[` text; keyboard input flows via the emulator; the surface (656px) fills its 697px containing pane body. |
 | 4 | File explorer not conventional | PASS | Directory rows expand on whole-row click with disclosure triangle + trailing slash; previewable file rows open a read-only pane; refresh keeps entries. |
 
 Additional acceptance checks exercised by the gate:
@@ -85,8 +85,13 @@ Additional acceptance checks exercised by the gate:
 - Open a previewable read-only file — PASS (content + read-only badge shown).
 - Terminal input/output round trip — PASS.
 - ANSI color rendering — PASS.
-- Terminal pane fill — PASS (656px surface height at desktop viewport).
-- Terminal tab selection with per-session input/output isolation — PASS.
+- Terminal pane fill — PASS (656px surface vs the 697px containing pane body,
+  measured against the actual pane body rather than a fixed threshold).
+- Terminal tab selection with per-session input/output isolation — PASS (each
+  tab click is settled past a full 500ms output-poll cycle to prove the
+  selection sticks, so the focus-guard regression would fail first).
+- Bounded PTY resize forwarding — PASS (narrowing the viewport to 480px refit
+  the emulator and forwarded a smaller, bounds-clamped logical PTY size).
 - Close-as-terminate — PASS (tab removed; surviving session preserved).
 - Reload reconstruction without mock surfaces — PASS (daemon-owned terminal
   reconstructs as a selectable tab; no mock workspace/terminal).
@@ -98,7 +103,9 @@ Additional acceptance checks exercised by the gate:
   close remain daemon APIs; explicit close still terminates the session.
 - Terminal resize forwarding stays bounded: the emulator debounces `fit()`
   output (250ms) before calling the daemon resize route, so logical PTY
-  columns/rows are not rewritten on every visual drag frame.
+  columns/rows are not rewritten on every visual drag frame. The fitted grid
+  is also clamped to the daemon PTY size contract (1-300 columns, 1-120 rows)
+  so the emulator and the logical PTY size never disagree on very large panes.
 - Owner pairing/auth flow unchanged: the gate uses the real one-time pairing
   URL and token-free paired navigation.
 - Opaque command ids (`terminal.create`, `terminal.input`, `terminal.close`,

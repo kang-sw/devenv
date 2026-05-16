@@ -1180,6 +1180,9 @@ button {
   padding: 0;
 }
 
+/* The shared workbench shell always renders `<p>{activePane.detail}</p>` at the
+   top of the pane body; for a full-bleed terminal that detail line is
+   suppressed so the emulator surface owns the whole pane body. */
 .workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-body > p {
   display: none;
 }

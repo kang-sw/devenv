@@ -29,10 +29,32 @@ export type TerminalPaneState = {
   paneId: string;
   output: string;
   nextSequence: number;
-  inputDraft: string;
   error: string | null;
   localCreatedAtMs: number;
 };
+
+// PTY logical size contract, mirrored from the daemon terminal registry
+// (crates/daemon/src/terminal.rs MIN/MAX columns/rows). Resize forwarding must
+// stay inside these bounds or the daemon rejects the request.
+export const terminalSizeBounds = Object.freeze({
+  minColumns: 1,
+  maxColumns: 300,
+  minRows: 1,
+  maxRows: 120,
+});
+
+export function clampTerminalSize(columns: number, rows: number) {
+  return {
+    columns: Math.min(
+      Math.max(Math.trunc(columns), terminalSizeBounds.minColumns),
+      terminalSizeBounds.maxColumns,
+    ),
+    rows: Math.min(
+      Math.max(Math.trunc(rows), terminalSizeBounds.minRows),
+      terminalSizeBounds.maxRows,
+    ),
+  };
+}
 
 export function workRootTerminalsEndpoint(workRootId: string) {
   return `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/terminals`;
@@ -137,7 +159,6 @@ export function terminalPaneFromSession(session: TerminalSessionView): TerminalP
     paneId: terminalPaneId(session.terminalId),
     output: "",
     nextSequence: 0,
-    inputDraft: "",
     error: null,
     localCreatedAtMs: Date.now(),
   };
@@ -207,7 +228,14 @@ export function removeClosedTerminalPane(
 }
 
 export function validateTerminalSize(columns: number, rows: number) {
-  if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns <= 0 || rows <= 0 || columns > 300 || rows > 120) {
+  if (
+    !Number.isInteger(columns) ||
+    !Number.isInteger(rows) ||
+    columns < terminalSizeBounds.minColumns ||
+    rows < terminalSizeBounds.minRows ||
+    columns > terminalSizeBounds.maxColumns ||
+    rows > terminalSizeBounds.maxRows
+  ) {
     throw new Error("invalid terminal size");
   }
   return { columns, rows };

@@ -28,22 +28,25 @@ export async function startDaemon(): Promise<DaemonHandle> {
   });
 
   let startupBuffer = "";
+  let scrape: ((chunk: Buffer) => void) | null = null;
   const pairingUrl = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error("daemon did not report a pairing URL within 60s"));
     }, 60_000);
 
-    const onChunk = (chunk: Buffer) => {
+    scrape = (chunk: Buffer) => {
       startupBuffer += chunk.toString();
-      const match = startupBuffer.match(/owner pairing URL:\s*(\S+)/);
+      // Require the trailing newline so a pairing token split across a
+      // stdout/stderr chunk boundary is never resolved truncated.
+      const match = startupBuffer.match(/owner pairing URL:\s*(\S+)\r?\n/);
       if (match) {
         clearTimeout(timer);
         resolve(match[1]);
       }
     };
 
-    child.stderr?.on("data", onChunk);
-    child.stdout?.on("data", onChunk);
+    child.stderr?.on("data", scrape);
+    child.stdout?.on("data", scrape);
     child.once("exit", (code) => {
       clearTimeout(timer);
       reject(new Error(`daemon exited before pairing (code ${code})`));
@@ -54,7 +57,12 @@ export async function startDaemon(): Promise<DaemonHandle> {
     });
   });
 
-  // Keep draining output so a full pipe buffer never blocks the daemon.
+  // Stop scraping startup output, then just drain the pipes so a full buffer
+  // never blocks the daemon and `startupBuffer` does not grow for the run.
+  if (scrape) {
+    child.stderr?.off("data", scrape);
+    child.stdout?.off("data", scrape);
+  }
   child.stderr?.on("data", () => {});
   child.stdout?.on("data", () => {});
 

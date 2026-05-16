@@ -39,6 +39,7 @@ import {
 } from "./workRootFiles";
 import {
   appendTerminalOutput,
+  clampTerminalSize,
   closeTerminal,
   createTerminal,
   fetchTerminalOutput,
@@ -985,19 +986,22 @@ function WorkbenchShell({
     });
   }
 
-  function forwardTerminalResize(pane: TerminalPaneState, columns: number, rows: number) {
+  function forwardTerminalResize(
+    pane: TerminalPaneState,
+    columns: number,
+    rows: number,
+  ): Promise<void> {
     // Bounded resize forwarding: the emulator debounces fit() output before
     // calling this, so logical PTY columns/rows are not rewritten on every
-    // visual drag frame.
-    void resizeTerminal(pane.session.terminalId, columns, rows)
-      .then((session) => {
-        setTerminalPanes((current) =>
-          current[pane.logicalKey]
-            ? { ...current, [pane.logicalKey]: { ...current[pane.logicalKey], session } }
-            : current,
-        );
-      })
-      .catch(() => undefined);
+    // visual drag frame. The rejection is propagated (not swallowed) so the
+    // caller does not record a failed resize as the last forwarded size.
+    return resizeTerminal(pane.session.terminalId, columns, rows).then((session) => {
+      setTerminalPanes((current) =>
+        current[pane.logicalKey]
+          ? { ...current, [pane.logicalKey]: { ...current[pane.logicalKey], session } }
+          : current,
+      );
+    });
   }
 
   function closeTerminalPane(pane: TerminalPaneState) {
@@ -1359,7 +1363,7 @@ function terminalWorkbenchPanesByGroup(
 type TerminalPaneActions = {
   onSendData: (pane: TerminalPaneState, data: string) => void;
   onClose: (pane: TerminalPaneState) => void;
-  onResize: (pane: TerminalPaneState, columns: number, rows: number) => void;
+  onResize: (pane: TerminalPaneState, columns: number, rows: number) => Promise<void>;
 };
 
 function terminalWorkbenchPane(pane: TerminalPaneState, actions: TerminalPaneActions): WorkbenchPane {
@@ -1430,20 +1434,34 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
         fitAddon.fit();
       } catch {
         /* container not measurable yet */
+        return;
+      }
+      // Cap the emulator grid to the PTY size contract so the emulator and the
+      // daemon-owned logical PTY size never disagree on very wide/tall panes.
+      const capped = clampTerminalSize(terminal.cols, terminal.rows);
+      if (capped.columns !== terminal.cols || capped.rows !== terminal.rows) {
+        terminal.resize(capped.columns, capped.rows);
       }
     };
 
     const forwardSize = () => {
-      const next = { columns: terminal.cols, rows: terminal.rows };
-      if (next.columns <= 0 || next.rows <= 0) {
-        return;
-      }
+      // The emulator grid is already capped to the PTY bounds by fitNow, so
+      // this size is always inside the daemon resize contract.
+      const next = clampTerminalSize(terminal.cols, terminal.rows);
       const prev = lastForwardedSizeRef.current;
       if (prev && prev.columns === next.columns && prev.rows === next.rows) {
         return;
       }
-      lastForwardedSizeRef.current = next;
-      liveRef.current.actions.onResize(liveRef.current.pane, next.columns, next.rows);
+      // Record the forwarded size only after the daemon accepts it; a rejected
+      // resize must stay retryable rather than being suppressed as a no-op.
+      void liveRef.current.actions
+        .onResize(liveRef.current.pane, next.columns, next.rows)
+        .then(() => {
+          lastForwardedSizeRef.current = next;
+        })
+        .catch(() => {
+          /* leave lastForwardedSizeRef unchanged so the next fit retries */
+        });
     };
 
     fitNow();

@@ -69,6 +69,20 @@ function terminalTabs(page: Page) {
   return page.getByRole("tab").filter({ hasText: "Terminal" });
 }
 
+// The terminal pane footer renders `<status> · <columns>x<rows>` from the
+// daemon-confirmed session size, so it reflects forwarded PTY resizes.
+async function terminalColumns(page: Page): Promise<number> {
+  const text = (await page.locator(".terminal-status-line").first().textContent()) ?? "";
+  const match = text.match(/(\d+)x(\d+)/i);
+  return match ? Number(match[1]) : Number.NaN;
+}
+
+// One full output-poll cycle is 500ms; settling past it proves a tab
+// selection survives the poll-driven `editorGroups` rebuild.
+async function settlePastPollCycle(page: Page) {
+  await page.waitForTimeout(900);
+}
+
 test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   // --- Owner pairing against the daemon-served production frontend ---------
   await test.step("owner pairing", async () => {
@@ -144,9 +158,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   // --- ANSI color rendering -----------------------------------------------
   await test.step("ANSI color rendering", async () => {
     await runInTerminal(page, "printf '\\033[32mGATE-GREEN\\033[0m\\n'");
-    await expect(page.locator(".xterm-rows")).toContainText("GATE-GREEN");
-    // The output is rendered in a green (palette index 2) emulator span, which
-    // proves the SGR color sequence was interpreted rather than printed raw.
+    // The output is rendered in a green (palette index 2) emulator span. A
+    // plain text check is intentionally avoided here: the PTY-echoed input
+    // line also contains `GATE-GREEN`, so only the colored span proves the SGR
+    // sequence was interpreted rather than printed raw.
     await expect(
       page.locator(".xterm-rows span.xterm-fg-2", { hasText: "GATE-GREEN" }),
     ).toBeVisible();
@@ -156,10 +171,23 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
   // --- Terminal fills the pane --------------------------------------------
   await test.step("terminal fills the pane", async () => {
-    const box = await page.locator(".terminal-surface").boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThan(220);
-    note(`pane fill: terminal surface height ${Math.round(box!.height)}px fills the workbench pane`);
+    // Compare the emulator surface against the height of its actual containing
+    // workbench pane body, not a fixed constant: a partially filled terminal
+    // must fail this regardless of viewport size.
+    const paneBody = page.locator(
+      '.workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-body',
+    );
+    const bodyBox = await paneBody.boundingBox();
+    const surfaceBox = await page.locator(".terminal-surface").boundingBox();
+    expect(bodyBox).not.toBeNull();
+    expect(surfaceBox).not.toBeNull();
+    // The surface occupies the bulk of the pane body; the remainder is only
+    // the thin terminal controls bar.
+    expect(surfaceBox!.height).toBeGreaterThan(bodyBox!.height * 0.7);
+    note(
+      `pane fill: terminal surface ${Math.round(surfaceBox!.height)}px of ` +
+        `${Math.round(bodyBox!.height)}px containing pane body`,
+    );
   });
 
   // --- Terminal tab selection and per-session isolation -------------------
@@ -170,18 +198,23 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await runInTerminal(page, "printf 'SECOND-%s\\n' MARKER");
     await expect(page.locator(".xterm-rows")).toContainText("SECOND-MARKER");
 
-    // Switch back to the first terminal tab; it must focus its own session.
+    // Switch back to the first terminal tab and settle past a full output
+    // poll cycle: the selection must stick. Without the focus guard the
+    // poll-driven editorGroups rebuild steals focus back to the most-recently
+    // created terminal, so this fails first if the guard regresses.
     await terminalTabs(page).nth(0).click();
+    await settlePastPollCycle(page);
     await terminalSurface(page);
     await expect(page.locator(".xterm-rows")).toContainText("GATEOUT-12345");
     await expect(page.locator(".xterm-rows")).not.toContainText("SECOND-MARKER");
 
     // Switch to the second terminal tab; it shows only its own output.
     await terminalTabs(page).nth(1).click();
+    await settlePastPollCycle(page);
     await terminalSurface(page);
     await expect(page.locator(".xterm-rows")).toContainText("SECOND-MARKER");
     await expect(page.locator(".xterm-rows")).not.toContainText("GATEOUT-12345");
-    note("tab selection: every terminal tab focuses its own session; input/output stay isolated");
+    note("tab selection: tab focus survives a poll cycle; input/output stay isolated per session");
   });
 
   // --- Close terminates the session ---------------------------------------
@@ -205,13 +238,27 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note("refresh: daemon-owned terminal reconstructs as a selectable tab after reload, no mock surfaces");
   });
 
-  // --- Narrow viewport ----------------------------------------------------
-  await test.step("narrow viewport layout", async () => {
+  // --- Narrow viewport relayout and bounded PTY resize --------------------
+  await test.step("narrow viewport relayout and bounded resize", async () => {
+    const wideColumns = await terminalColumns(page);
+    expect(wideColumns).toBeGreaterThan(0);
+
     await page.setViewportSize({ width: 480, height: 900 });
     await expect(page.locator(".app-shell")).toBeVisible();
     await expect(page.locator(".file-explorer")).toBeVisible();
+
+    // The ResizeObserver refits the emulator and debounced resize forwarding
+    // updates the daemon-owned PTY logical size; the footer reflects it once
+    // the daemon confirms the (bounded) resize.
+    await expect
+      .poll(() => terminalColumns(page), { timeout: 20_000 })
+      .toBeLessThan(wideColumns);
+
     await page.screenshot({ path: path.join(artifactsDir, "narrow-workbench.png"), fullPage: true });
-    note("narrow viewport: 480px layout keeps the shell, explorer, and workbench inspectable");
+    note(
+      `narrow viewport: 480px relayout refit the PTY below ${wideColumns} columns ` +
+        "via bounded resize forwarding",
+    );
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 });
