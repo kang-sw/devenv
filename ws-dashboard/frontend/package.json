@@ -12,7 +12,8 @@
     "test:resource-model": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/resourceModel.test.js",
     "test:workbench": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workbench/workbenchModel.test.js",
     "test:work-root-files": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/workRootFiles.test.js",
-    "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminals.test.js"
+    "test:terminals": "tsc -p tsconfig.route-tests.json && node ./node_modules/.tmp/route-tests/terminals.test.js",
+    "test:browser": "npm run build && (cd .. && cargo build -p ws-dashboard-daemon) && playwright test"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
