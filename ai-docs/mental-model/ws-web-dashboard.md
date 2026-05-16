@@ -12,6 +12,7 @@ related:
 ## Domain Rules
 
 - Any ws-dashboard frontend implementation that changes visible browser UI must include browser-level visual/interaction verification, preferably Playwright or equivalent screenshot/DOM automation against the daemon-served production frontend; pure TypeScript tests, Vite build, and curl/API dogfood are not sufficient to close UI-facing work.
+- Dashboard terminal work must treat cross-platform behavior as part of the contract: shell selection, PTY commands, browser/harness tests, and control-key evidence must avoid POSIX-only assumptions or record explicit OS-scoped limitations.
 
 ## Entry Points
 
