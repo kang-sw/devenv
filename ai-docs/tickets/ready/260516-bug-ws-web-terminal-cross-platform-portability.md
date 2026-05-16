@@ -4,6 +4,11 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260516-bug-ws-web-terminal-websocket-transport: current terminal transport recovery exposed POSIX-heavy browser and route test assumptions
   260427-chore-claude-dash-windows: prior Windows PTY/dashboard surface motivation
+spec:
+  - 260516-ws-web-dashboard-terminal-deterministic-endpoint-harness
+  - 260516-ws-web-dashboard-terminal-shell-selection-portability
+  - 260516-ws-web-dashboard-terminal-platform-command-helpers
+  - 260516-ws-web-dashboard-terminal-cross-platform-evidence
 related-mental-model:
   - ws-web-dashboard
 ---
