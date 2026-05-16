@@ -141,6 +141,22 @@ export function terminalPaneFromSession(session: TerminalSessionView): TerminalP
   };
 }
 
+export function reconcileListedTerminalSessions(
+  current: Record<string, TerminalPaneState>,
+  workRootId: string,
+  sessions: TerminalSessionView[],
+) {
+  const liveKeys = new Set(
+    sessions.map((session) => terminalPaneLogicalKey(session.workRootId, session.terminalId)),
+  );
+  const retained = Object.fromEntries(
+    Object.entries(current).filter(
+      ([key, pane]) => pane.session.workRootId !== workRootId || liveKeys.has(key),
+    ),
+  );
+  return mergeListedTerminalSessions(retained, sessions);
+}
+
 export function mergeListedTerminalSessions(
   current: Record<string, TerminalPaneState>,
   sessions: TerminalSessionView[],

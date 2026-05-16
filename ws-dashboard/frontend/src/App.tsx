@@ -42,7 +42,7 @@ import {
   fetchTerminalOutput,
   listTerminals,
   markTerminalPaneCloseError,
-  mergeListedTerminalSessions,
+  reconcileListedTerminalSessions,
   removeClosedTerminalPane,
   sendTerminalInput,
   terminalPaneFromSession,
@@ -854,7 +854,7 @@ function WorkbenchShell({
     }
     void listTerminals(workbenchModel.root.id)
       .then((sessions) => {
-        setTerminalPanes((current) => mergeListedTerminalSessions(current, sessions));
+        setTerminalPanes((current) => reconcileListedTerminalSessions(current, workbenchModel.root.id, sessions));
         setTerminalPaneOrderByGroup((current) => placeTerminalSessions(current, terminalPanes, sessions));
       })
       .catch(() => undefined);

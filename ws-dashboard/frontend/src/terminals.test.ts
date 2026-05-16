@@ -2,6 +2,7 @@ import {
   appendTerminalOutput,
   markTerminalPaneCloseError,
   mergeListedTerminalSessions,
+  reconcileListedTerminalSessions,
   removeClosedTerminalPane,
   terminalCloseEndpoint,
   terminalInputEndpoint,
@@ -50,6 +51,11 @@ const pane = terminalPaneFromSession(session);
 assertEqual(pane.nextSequence, 0, "new pane starts at cursor zero");
 const merged = mergeListedTerminalSessions({}, [session]);
 assertEqual(Boolean(merged[pane.logicalKey]), true, "listed live session reconstructs pane state");
+assertDeepEqual(
+  reconcileListedTerminalSessions(merged, "root-local-abc", []),
+  {},
+  "absent listed sessions for a workRoot are removed from pane state",
+);
 const withOutput = appendTerminalOutput(pane, { terminalId: "term_abc", status: "running", nextSequence: 3, chunks: [{ sequence: 1, data: "hi", stream: "pty" }] });
 assertEqual(withOutput.output, "hi", "output appends chunk data");
 assertEqual(withOutput.nextSequence, 3, "output advances cursor");
