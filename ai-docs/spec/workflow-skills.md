@@ -258,6 +258,17 @@ scope boundaries but does not require missing skeletons. When workflow primitive
 context is not already active, it loads `lead-workflow-manual` before
 registering delegates or reviewers.
 
+The implementation brief is the implementer's sole context source, but it is
+not a lossy ticket summary. For the selected implementation slice, the brief
+records every settled caller-visible contract, implementation strategy decision,
+rejected alternative, and verification expectation from the target, or marks it
+explicitly deferred or out of scope. Ticket noise such as background discussion,
+unsettled options, and unrelated future phases is stripped. In ticket-driven
+runs, the fit reviewer reads the ticket and treats selected-slice binding
+decisions omitted from the brief or violated by the implementation as blocking
+findings. Correctness and test reviewers remain scoped to the diff and their
+assigned partitions.
+
 `lead-edit` and `lead-write-code` are code-and-review primitives; callers own
 documentation pipeline timing. `lead-implement` runs the documentation pre-pass
 after either primitive returns, while `lead-sprint` defers that pass to wrap-up.

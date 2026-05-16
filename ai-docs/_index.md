@@ -161,7 +161,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
-| `260516-bug-write-code-public-ui-contract-loss` | idea | Investigate write-code brief and review loss of public UI intent |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260515-bug-git-commit-rename-status-summary` | idea | Fix git.commit ticket-change summaries for edited ticket renames |

@@ -52,7 +52,7 @@ related:
 - Orchestration-heavy skills load `lead-workflow-manual` when primitive context is not already active; skipping it causes notation drift and wrong agent-call forms. {#260505-workflow-primitive-reference}
 - Implementation skills honor existing skeleton artifacts but do not require missing skeletons; `lead-implement` owns optional skeleton execution before implementation edits. {#260505-implementation-workflow-skills}
 - `lead-edit` and `lead-write-code` are code-and-review primitives; `lead-implement` and `lead-sprint` own documentation pipeline timing. {#260505-implementation-workflow-skills}
-- `lead-write-code` uses brief-bounded implementation and file-based reviewer output; reviewer allocation is risk-scoped, reviewers return summaries, and implementers read finding files directly. {#260505-implementation-workflow-skills}
+- `lead-write-code` uses brief-bounded implementation and file-based reviewer output; the brief must preserve selected-slice binding decisions, and ticket-driven fit review checks ticket-to-brief decision preservation. {#260505-implementation-workflow-skills}
 - Sprint defers doc pipeline until wrap-up; per-task doc updates inside sprint create partial checkpoints that confuse wrap-up. {#260505-sprint-session-container}
 - wsflow includes sprint as a branch container and routes source changes through `lead-edit`; scoped subagents may help exploration, implementation, verification, audit, or review while the lead keeps integration, final judgment, and commits explicit. {#260513-wsflow-agentless-skill-surface} {#260513-wsflow-sprint-skill}
 - `lead-review` loads `ai-docs/_review.local.md` for all environment-specific configuration (remote, phases, comment/merge/notification methods); when absent, it interviews the user and writes the config before the first review runs. {#260513-review-workflow-skill}
@@ -87,3 +87,4 @@ related:
 - Removing the final `Ticket:` artifact from write-ticket output.
 - Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve workflow intent while using wsflow notation, scoped subagent guidance, and the curated skill inventory.
 - Relaying reviewer file contents instead of file paths, which breaks the write-code review protocol and inflates lead context.
+- Treating brief compression as permission to drop settled caller-visible contracts, implementation strategy decisions, rejected alternatives, or verification expectations.

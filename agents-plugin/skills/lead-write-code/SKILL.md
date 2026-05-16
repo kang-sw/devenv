@@ -12,7 +12,8 @@ Target: user request
 - Operate on current branch; caller owns branch creation.
 - Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Implementer reads only the brief, plus plan when provided; never the ticket directly.
-- Fit reviewer may read the ticket for architectural headroom; correctness/test reviewers may not.
+- Brief strips ticket noise, never selected-slice binding decisions.
+- Fit reviewer reads the ticket when ticket-driven; correctness/test reviewers may not.
 - Honor existing skeleton contracts and integration tests as acceptance criteria.
 - Honor caller-provided scope or phase slices as hard implementation boundaries.
 - Lead puts ancestor-loading rule in implementer prompt.
@@ -41,9 +42,10 @@ ws/agents.call(name: "project-survey", prompt: <ticket path or inline descriptio
 ### 2. Write Brief
 
 1. Write `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` with the brief template.
-2. Strip ticket noise; the brief is the implementer's sole context source.
+2. Strip ticket noise; preserve every selected-slice binding decision in the brief.
 3. Populate `## References` from project-survey output.
-4. Commit the brief before plan-depth.
+4. Audit the brief against the target; every settled caller-visible contract, implementation strategy decision, rejected alternative, and verification expectation must appear in the brief or be explicitly out of scope/deferred.
+5. Commit the brief before plan-depth.
 
 ### 3. Plan Depth
 
@@ -147,7 +149,7 @@ Instructions:
 - Review focus: <2-4 fit or architecture concerns to verify>.
 - Ignore outside this partition unless directly broken by the diff.
 - Judge whether the implementation achieves the brief and leaves room for future phases.
-- You may reference the ticket at <ticket-path> for architectural headroom checks (optional).
+<if ticket-driven:> Read the ticket at <ticket-path>; report any selected-slice binding decision omitted from the brief or violated by the implementation.
 - Write your full findings to: <fit-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 ```
@@ -230,7 +232,7 @@ Full review is reserved for risks spanning correctness, fit, and tests.
 | Partition | Assign when |
 |-----------|-------------|
 | Correctness | New logic, modified error paths, contract/security surface |
-| Fit | Existing components reused/modified, or new pattern others will follow |
+| Fit | Existing components reused/modified, new pattern others will follow, or ticket-driven decision preservation must be checked |
 | Test | Tests added/modified, or new code paths lack existing coverage |
 | Correctness + Test | Executable behavior changed and coverage is material |
 | Correctness + Fit | Workflow/API semantics changed without a meaningful test surface |
@@ -249,6 +251,19 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 ## Intent
 <what this achieves - one paragraph>
 
+## Scope Boundary
+<selected slice and explicit deferred or excluded ticket scope>
+
+## Caller-Visible Contract
+<observable behavior, public API/protocol/UI/doc output/lifecycle contract>
+<write "None beyond existing behavior" only when the target is internal-only>
+
+## Implementation Strategy Decisions
+<settled approach, optimization, reuse, abstraction, or boundary choices the implementer must not reopen>
+
+## Rejected Alternatives
+<approaches already ruled out and why; omit only when none are settled>
+
 ## Approach
 <macro-level how - bullets>
 
@@ -261,6 +276,9 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 ## Details
 <interface specs, data types, public contracts at ticket-level resolution>
 <required when no skeleton references exist; may be omitted when skeleton provides contracts>
+
+## Verification Contract
+<tests, probes, screenshots, command outputs, compatibility checks, or review gates required for acceptance>
 
 ## References
 <!-- Populated from project-survey [Must/Maybe] output. -->
@@ -280,8 +298,8 @@ Test status: pass | fail | skipped
 
 ## Doctrine
 
-Write-code optimizes for **brief-to-commit throughput within a branch**. The
-brief isolates intent, persistent agents carry implementation and review state,
-file paths keep findings out of lead context, and cleanup closes the loop. When
-a rule is ambiguous, apply whichever interpretation advances the commit without
-widening the caller's coordination surface.
+Write-code optimizes for **brief-to-commit fidelity within a branch**. The
+brief isolates executable decisions, persistent agents carry implementation and
+review state, file paths keep findings out of lead context, and cleanup closes
+the loop. When a rule is ambiguous, preserve selected-slice decisions without
+widening the implementer's coordination surface.

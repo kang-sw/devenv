@@ -5,6 +5,7 @@ related:
   260516-feat-ws-web-workbench-substrate: dogfood case that exposed the issue
 related-mental-model:
   - workflow-skills
+completed: 2026-05-16
 ---
 
 # write-code public UI contract loss
@@ -69,3 +70,15 @@ For frontend/product UI tasks, the brief should carry:
 
 The reviewer should treat failure to preserve those public UI constraints as a
 blocking finding even when tests and structural checks pass.
+
+## Resolution
+
+The hotfix generalized the issue beyond UI-specific work. `lead-write-code`
+briefs now preserve selected-slice binding decisions instead of only structural
+summaries: caller-visible contracts, implementation strategy decisions, rejected
+alternatives, and verification expectations must appear in the brief or be
+explicitly deferred or out of scope.
+
+Ticket-driven fit review now reads the ticket and treats omitted selected-slice
+binding decisions or implementation violations as blocking findings, while the
+implementer still reads only the brief and optional plan.
