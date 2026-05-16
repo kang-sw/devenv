@@ -56,6 +56,10 @@ tooling as unavailable and use HTTP or browser-equivalent evidence instead.
   pane.
 - Mock or placeholder surfaces must not be visible in the production default
   workRoot flow once a real workRoot is opened.
+- This ticket uses an exceptional workflow: after the main implementation pass
+  and before the normal correctness/fit/test review cycle, run one ws named
+  agent pass on a Sonnet model for frontend design verification and bounded
+  autonomous tweaks.
 
 ## Constraints
 
@@ -70,6 +74,31 @@ tooling as unavailable and use HTTP or browser-equivalent evidence instead.
 - Keep UI fixes scoped to workRoot file/terminal usability. Do not add agent
   presets, broad file-manager verbs, write-back editing, or named-agent
   controls here.
+
+## Workflow Override
+
+After the primary implementation pass completes and before the standard review
+partitions run, register a ws named agent on the Sonnet model for a single
+frontend design verification and tweak pass. This is an intentional exception
+to the usual implement-then-review relay order for this ticket.
+
+The Sonnet pass should:
+
+- Inspect the daemon-served browser flow using the browser/visual acceptance
+  gate from Phase 1.
+- Judge the visible frontend experience against the user-reported failures and
+  the dashboard visual-system/domain rules.
+- Make bounded UI tweaks directly when they are necessary to pass the browser
+  acceptance criteria.
+- Commit its changes as one logical checkpoint before the normal
+  correctness/fit/test reviewers run.
+- Report exact evidence, changed files, and any design concerns that remain.
+
+The pass must not expand scope into a full root picker, agent presets,
+write-back editing, broad file-manager verbs, or unrelated visual redesign. If
+the Sonnet pass finds a product-direction question that cannot be resolved by
+the ticket's acceptance criteria, it should stop and report that blocker rather
+than inventing a new interaction model.
 
 ## Phases
 
@@ -127,7 +156,19 @@ Success means browser evidence shows a user can understand how to expand a
 directory, refresh, and open a previewable file without relying on hidden or
 nonstandard affordances.
 
-### Phase 5: Product-flow dogfood and merge decision
+### Phase 5: Sonnet design verification and autonomous tweak pass
+
+Run the workflow override after the primary implementation for Phases 1-4 and
+before the standard review cycle. The Sonnet named agent must use the
+browser-level acceptance gate to verify the frontend design, make bounded
+tweaks when needed, and commit one logical checkpoint before normal reviewers
+assess the final implementation.
+
+Success means the Sonnet pass reports browser evidence for the dashboard flow,
+lists any tweaks it made, and leaves no unresolved design blocker that would
+make ordinary correctness/fit/test review premature.
+
+### Phase 6: Product-flow dogfood and merge decision
 
 Run a daemon-served browser dogfood from first load through opening a real
 workRoot, browsing files, opening a read-only file, creating and switching
