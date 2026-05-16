@@ -8,7 +8,6 @@ related:
   260516-feat-ws-web-instance-event-stream: completed event envelope and stream scaffold prerequisite
 related-mental-model:
   - ws-web-dashboard
-completed: 2026-05-16
 ---
 
 # ws web dashboard workRoot IO substrate
@@ -62,6 +61,9 @@ The milestone should establish:
 - `260516-feat-ws-web-workroot-io-workbench-integration` - done; combine file
   panes and terminal sessions with workbench placement, restore, and dogfood
   verification.
+- `260516-bug-ws-web-dashboard-live-resource-api-connection` - todo; connect
+  the primary dashboard resource API and browser resource model to real opened
+  workRoots instead of leaving the first screen backed by mock resources.
 
 ## Cross-Child Decisions
 
@@ -94,8 +96,9 @@ The milestone should establish:
 
 - Done: child tickets let an owner open a workRoot, browse files, open
   read-only text panes, create live terminal sessions, refresh without losing
-  terminal sessions, explicitly close terminal sessions, and verify the flow
-  through the daemon-served frontend.
+  terminal sessions, explicitly close terminal sessions, load the primary
+  dashboard resource tree from real opened workRoots rather than mock fixtures,
+  and verify the flow through the daemon-served frontend.
 - Dropped: a different near-term usability direction replaces the workRoot
   filesystem and terminal substrate, or live PTY support proves unsuitable for
   the intended dashboard MVP.
@@ -114,3 +117,12 @@ The flow remains intentionally read-only for files, avoids hardcoded agent
 presets, keeps terminal lifecycle daemon-owned, and records the remaining visual
 breakpoint dogfood gap as an explicit tooling blocker rather than claiming
 unverified screenshots.
+
+### Reopen Note - 2026-05-16
+
+The milestone was reopened after review found a product-flow acceptance gap:
+`GET /api/dashboard/resources` still used the mock dashboard provider as the
+frontend's initial resource source. The implemented file, text-pane, and
+terminal substrates are retained, but the final child ticket must make real
+opened workRoots the primary dashboard resource model before this epic can close
+again.
