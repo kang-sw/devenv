@@ -6,9 +6,10 @@ import {
   defaultPtyLogicalSize,
   defaultSurfaceRegistry,
   applyWorkbenchPaneOrder,
-  deriveWorkbenchPaneOrder,
-  moveWorkbenchPane,
-  reconcileActiveWorkbenchPanes,
+  commitWorkbenchPaneMove,
+  resolveWorkbenchPaneDrop,
+  selectWorkbenchPane,
+  workbenchPaneDragMimeType,
   type SurfaceKind,
   type WorkbenchPaneOrder,
 } from "./workbench";
@@ -433,11 +434,9 @@ function WorkbenchShell({
   );
 
   const movePane = (paneId: string, targetGroupId: string, beforePaneId?: string) => {
-    const movedGroups = moveWorkbenchPane(editorGroups, { paneId, targetGroupId, beforePaneId });
-    setPaneOrderByGroup(deriveWorkbenchPaneOrder(movedGroups));
-    setActivePaneByGroup((current) =>
-      reconcileActiveWorkbenchPanes(movedGroups, current, { [targetGroupId]: paneId }),
-    );
+    const result = commitWorkbenchPaneMove(editorGroups, activePaneByGroup, { paneId, targetGroupId, beforePaneId });
+    setPaneOrderByGroup(result.paneOrderByGroup);
+    setActivePaneByGroup(result.activePaneByGroup);
   };
 
   return (
@@ -463,10 +462,7 @@ function WorkbenchShell({
             onDragStart={(paneId) => setDraggedPaneId(paneId)}
             onMovePane={movePane}
             onSelectPane={(paneId) =>
-              setActivePaneByGroup((current) => ({
-                ...current,
-                [group.id]: paneId,
-              }))
+              setActivePaneByGroup((current) => selectWorkbenchPane(current, group.id, paneId))
             }
           />
         ))}
@@ -677,6 +673,61 @@ function WorkbenchEditorGroup({
   onSelectPane: (paneId: string) => void;
 }) {
   const activePane = group.panes.find((pane) => pane.id === activePaneId) ?? group.panes[0];
+
+  if (!activePane) {
+    return (
+      <section className="workbench-group" aria-label={`${group.label} editor group`}>
+        <div
+          className="workbench-tab-strip workbench-tab-strip-empty"
+          role="tablist"
+          aria-label={group.label}
+          onDragOver={(event) => {
+            if (draggedPaneId) {
+              event.preventDefault();
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const move = resolveWorkbenchPaneDrop({
+              dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
+              fallbackPaneId: draggedPaneId,
+              targetGroupId: group.id,
+            });
+            if (move) {
+              onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
+            }
+            onDragEnd();
+          }}
+        />
+        <article
+          className="workbench-pane workbench-pane-empty-state"
+          role="status"
+          onDragOver={(event) => {
+            if (draggedPaneId) {
+              event.preventDefault();
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const move = resolveWorkbenchPaneDrop({
+              dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
+              fallbackPaneId: draggedPaneId,
+              targetGroupId: group.id,
+            });
+            if (move) {
+              onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
+            }
+            onDragEnd();
+          }}
+        >
+          <div className="workbench-pane-body">
+            <p>Drop a tab here to add a pane to this split.</p>
+          </div>
+        </article>
+      </section>
+    );
+  }
+
   const activeRegistry = defaultSurfaceRegistry()[activePane.kind];
 
   return (
@@ -692,9 +743,13 @@ function WorkbenchEditorGroup({
         }}
         onDrop={(event) => {
           event.preventDefault();
-          const paneId = event.dataTransfer.getData("application/x-ws-workbench-pane") || draggedPaneId;
-          if (paneId) {
-            onMovePane(paneId, group.id);
+          const move = resolveWorkbenchPaneDrop({
+            dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
+            fallbackPaneId: draggedPaneId,
+            targetGroupId: group.id,
+          });
+          if (move) {
+            onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
           }
           onDragEnd();
         }}
@@ -724,15 +779,20 @@ function WorkbenchEditorGroup({
               }}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("application/x-ws-workbench-pane", pane.id);
+                event.dataTransfer.setData(workbenchPaneDragMimeType, pane.id);
                 onDragStart(pane.id);
               }}
               onDrop={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                const paneId = event.dataTransfer.getData("application/x-ws-workbench-pane") || draggedPaneId;
-                if (paneId && paneId !== pane.id) {
-                  onMovePane(paneId, group.id, pane.id);
+                const move = resolveWorkbenchPaneDrop({
+                  dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
+                  fallbackPaneId: draggedPaneId,
+                  targetGroupId: group.id,
+                  beforePaneId: pane.id,
+                });
+                if (move) {
+                  onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
                 }
                 onDragEnd();
               }}

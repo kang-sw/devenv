@@ -1,3 +1,5 @@
+export const workbenchPaneDragMimeType = "application/x-ws-workbench-pane";
+
 export type WorkbenchEditorPaneRef = {
   readonly id: string;
 };
@@ -16,25 +18,51 @@ export type WorkbenchPaneMove = {
   readonly beforePaneId?: string;
 };
 
+export type WorkbenchPaneMoveResult<TGroup extends WorkbenchEditorGroupRef = WorkbenchEditorGroupRef> = {
+  readonly groups: readonly TGroup[];
+  readonly paneOrderByGroup: WorkbenchPaneOrder;
+  readonly activePaneByGroup: WorkbenchActivePaneState;
+};
+
 export function applyWorkbenchPaneOrder<TGroup extends WorkbenchEditorGroupRef>(
   groups: readonly TGroup[],
   orderByGroup: WorkbenchPaneOrder,
 ): TGroup[] {
-  return groups.map((group) => {
-    const requestedOrder = orderByGroup[group.id] ?? [];
-    const paneById = new Map(group.panes.map((pane) => [pane.id, pane]));
-    const orderedPanes = requestedOrder.flatMap((paneId) => {
+  const paneById = new Map<string, TGroup["panes"][number]>();
+  const originalGroupByPaneId = new Map<string, string>();
+
+  for (const group of groups) {
+    for (const pane of group.panes) {
+      paneById.set(pane.id, pane as TGroup["panes"][number]);
+      originalGroupByPaneId.set(pane.id, group.id);
+    }
+  }
+
+  const consumedPaneIds = new Set<string>();
+  const arrangedGroups = groups.map((group) => {
+    const panes = (orderByGroup[group.id] ?? []).flatMap((paneId) => {
       const pane = paneById.get(paneId);
-      if (!pane) {
+      if (!pane || consumedPaneIds.has(paneId)) {
         return [];
       }
-      paneById.delete(paneId);
+      consumedPaneIds.add(paneId);
       return [pane];
     });
 
     return {
       ...group,
-      panes: [...orderedPanes, ...paneById.values()],
+      panes,
+    };
+  });
+
+  return arrangedGroups.map((group) => {
+    const remainingOriginalPanes = groups
+      .find((sourceGroup) => sourceGroup.id === group.id)
+      ?.panes.filter((pane) => originalGroupByPaneId.get(pane.id) === group.id && !consumedPaneIds.has(pane.id));
+
+    return {
+      ...group,
+      panes: [...group.panes, ...(remainingOriginalPanes ?? [])],
     };
   });
 }
@@ -108,4 +136,55 @@ export function reconcileActiveWorkbenchPanes(
   }
 
   return next;
+}
+
+export function selectWorkbenchPane(
+  current: WorkbenchActivePaneState,
+  groupId: string,
+  paneId: string,
+): Record<string, string> {
+  return {
+    ...current,
+    [groupId]: paneId,
+  };
+}
+
+export function resolveWorkbenchPaneDrop({
+  dataTransferPaneId,
+  fallbackPaneId,
+  targetGroupId,
+  beforePaneId,
+}: {
+  readonly dataTransferPaneId: string;
+  readonly fallbackPaneId: string | null;
+  readonly targetGroupId: string;
+  readonly beforePaneId?: string;
+}): WorkbenchPaneMove | null {
+  const paneId = dataTransferPaneId || fallbackPaneId;
+  if (!paneId || paneId === beforePaneId) {
+    return null;
+  }
+
+  return {
+    paneId,
+    targetGroupId,
+    beforePaneId,
+  };
+}
+
+export function commitWorkbenchPaneMove<TGroup extends WorkbenchEditorGroupRef>(
+  groups: readonly TGroup[],
+  currentActivePaneByGroup: WorkbenchActivePaneState,
+  move: WorkbenchPaneMove,
+): WorkbenchPaneMoveResult<TGroup> {
+  const movedGroups = moveWorkbenchPane(groups, move);
+  const activePaneByGroup = reconcileActiveWorkbenchPanes(movedGroups, currentActivePaneByGroup, {
+    [move.targetGroupId]: move.paneId,
+  });
+
+  return {
+    groups: movedGroups,
+    paneOrderByGroup: deriveWorkbenchPaneOrder(movedGroups),
+    activePaneByGroup,
+  };
 }

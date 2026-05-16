@@ -632,6 +632,10 @@ button {
   background: var(--ws-color-panel-raised);
 }
 
+.workbench-tab-strip-empty {
+  border-bottom-style: dashed;
+}
+
 .workbench-tab {
   display: flex;
   min-width: 118px;
@@ -722,7 +726,8 @@ button {
 }
 
 .workbench-pane-body > p,
-.workbench-pane-empty {
+.workbench-pane-empty,
+.workbench-pane-empty-state p {
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--ws-color-text-secondary);
