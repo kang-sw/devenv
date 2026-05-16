@@ -56,6 +56,10 @@ tooling as unavailable and use HTTP or browser-equivalent evidence instead.
   pane.
 - Mock or placeholder surfaces must not be visible in the production default
   workRoot flow once a real workRoot is opened.
+- Prefer an explicit empty workbench plus a clear `New Terminal` affordance over
+  auto-creating a terminal when a workRoot opens. Auto terminal creation is a
+  daemon process lifecycle side effect and should not be introduced merely to
+  hide placeholder UI.
 - This ticket uses an exceptional workflow: after the main implementation pass
   and before the normal correctness/fit/test review cycle, run one ws named
   agent pass on a Sonnet model for frontend design verification and bounded
@@ -71,6 +75,14 @@ tooling as unavailable and use HTTP or browser-equivalent evidence instead.
 - Add browser-level acceptance evidence. If a persistent visual test framework
   is not added, the ticket must record manual browser evidence with exact
   viewport, steps, and pass/fail notes; pure helper tests alone are not enough.
+- Browser acceptance must run against the daemon-served production frontend
+  after owner pairing. Vite-only component or dev-server checks are not enough
+  for this recovery because the observed failures involve the real daemon
+  resource, workbench, and terminal flow.
+- Screenshots or traces may be generated as verification artifacts, but do not
+  commit bulky generated images by default. Record paths, viewport sizes, and
+  pass/fail observations in the dogfood artifact unless a later convention says
+  otherwise.
 - Keep UI fixes scoped to workRoot file/terminal usability. Do not add agent
   presets, broad file-manager verbs, write-back editing, or named-agent
   controls here.
@@ -116,6 +128,14 @@ If persistent tooling is deferred, record manual browser evidence in a dogfood
 artifact and make the lack of automation an explicit blocker for future UI
 completion claims.
 
+The gate should expose a runnable command such as `npm run test:browser`,
+`npm run test:e2e`, or the closest project-local equivalent. It should cover
+pairing, opening a real workRoot, file explorer interaction, terminal creation,
+terminal tab switching, terminal input/output/rendering, and terminal pane fill
+against the daemon-served app. Start by proving the current branch fails at
+least the known reported behaviors or recording why fail-first evidence cannot
+be captured.
+
 Success means the implementation can no longer close a UI-facing dashboard
 ticket based only on Rust route tests, pure TypeScript tests, Vite build, and
 curl evidence.
@@ -129,8 +149,8 @@ If the default workRoot view should start empty instead of showing a terminal,
 make that state explicit and non-mock.
 
 Success means browser evidence shows multiple terminal tabs can be selected,
-the focused pane changes correctly, and no mock terminal remains visible after
-opening a real workRoot.
+the focused pane changes correctly, terminal input/output does not cross between
+sessions, and no mock terminal remains visible after opening a real workRoot.
 
 ### Phase 3: Recover terminal rendering, input, and sizing
 
@@ -139,6 +159,21 @@ control sequences must be interpreted by the terminal emulator rather than
 displayed raw. Keyboard input must flow through the focused terminal surface to
 the daemon PTY. The terminal must fill its workbench panel and fit or resize
 within the pane without leaving unusable dead space.
+
+First verify whether the current pane is actually using xterm.js correctly. If
+not, rebuild the pane around the established xterm package pattern, such as
+`@xterm/xterm` plus a fit addon or the project-local equivalent. PTY output
+must be written into the terminal emulator (`terminal.write(...)` or equivalent)
+rather than rendered as raw text nodes. Browser input must come from the
+terminal emulator's data/input callback (`onData(...)` or equivalent) and flow
+to the daemon input route. Pane sizing should use a real container measurement
+path such as `ResizeObserver` plus fit-addon behavior, and any daemon resize
+updates must remain bounded rather than continuously rewriting logical PTY size
+during visual drag.
+
+CSS/layout work is part of this phase: the terminal container, xterm viewport,
+and workbench body must use stable flex or grid sizing with `min-height: 0`,
+`height: 100%`, or equivalent rules so the terminal fills the available pane.
 
 Success means browser evidence shows a real shell command with colored/control
 output rendering correctly, typed input reaching the PTY, output returning to
@@ -174,6 +209,12 @@ Run a daemon-served browser dogfood from first load through opening a real
 workRoot, browsing files, opening a read-only file, creating and switching
 between terminals, verifying terminal rendering/input/fill behavior, and
 refreshing without reintroducing mock surfaces.
+
+The dogfood must include owner pairing and the same production frontend path
+used by the browser acceptance gate. It should record the command used to start
+the daemon, the browser automation or manual browser steps, viewport sizes,
+terminal commands used to verify color/control handling, and whether screenshot
+or trace files were generated.
 
 Success means the dogfood artifact includes browser-level evidence, the known
 user-reported failures are explicitly checked off, and the branch can be
