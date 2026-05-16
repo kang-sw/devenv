@@ -33,10 +33,18 @@ resource API, route identity, workbench policy model, and backend scope.
   left-nav identity boundary: server/workspace/workRoot only by default.
 - Preserve the default two-split preset, but make each split feel like an
   editor group: a thin tab/header strip above a dominant content body.
+- Treat pane bodies as the primary visible product surface. Even when live
+  backends are deferred, each selected agent, terminal, editor, or viewer
+  placeholder must occupy the group body like a real workbench pane rather than
+  leaving the shell as chrome-only topology.
 - Main agent and persistent terminal affordances should appear as compact
   pinned tabs/chips/icons within a split group, not as a tall explanatory row.
 - Opened/support surfaces should appear as ordinary editor/workbench tabs or
   compact toolbar affordances, not as card grids.
+- Use Dockview's frontend tab movement affordances where practical. Tab
+  dragging may reorder tabs inside a split group or move a tab to another split
+  group, but this updates only browser workbench arrangement state and must not
+  imply daemon lifecycle changes.
 - Contract/debug details such as `close: detach` and `pty: 80x24` should not be
   permanently prominent chrome. They may appear in a subtle status area,
   tooltip, inspector detail, or debug-only surface.
@@ -56,6 +64,9 @@ resource API, route identity, workbench policy model, and backend scope.
 - Do not weaken the Phase 1/3 workbench policies around serialized layout,
   logical surface keys, close-as-detach, terminate reservation, or PTY logical
   sizing.
+- Keep floating/popout groups disabled unless a later ticket explicitly adds
+  them. Frontend tab movement is allowed; raw Dockview lifecycle handles remain
+  behind the dashboard-owned adapter boundary.
 - Do not reintroduce mainInstance or subInstance rows into the default left nav.
 - Keep the dark-first semantic token system and dense operational visual style.
 - Avoid card-heavy dashboard presentation, nested cards, marketing-scale text,
@@ -80,9 +91,11 @@ pane bodies, not dashboard cards.
 
 Clickable selector controls must maintain active state inside their split group.
 The minimum acceptable behavior is selecting which placeholder pane body is
-active. Drag/drop remains out of scope unless a later ticket implements it, so
-the UI must not expose draggable-looking handles or tabs that suggest movement
-between groups.
+active. Tab labels should also support frontend-only Dockview movement where
+practical: reorder within a split group and move between split groups while
+preserving dashboard-owned placement and serialization policy. The movement does
+not start, stop, terminate, or resize daemon-backed resources; it only changes
+browser workbench arrangement.
 
 ### Phase 2: Visual Contract Verification
 
@@ -91,10 +104,12 @@ presence of sections. The gate should explicitly fail if:
 
 - internal model terms are exposed as large visible labels;
 - pinned/opened areas consume substantial vertical space before pane content;
+- the selected pane body is absent or visually secondary to chrome;
 - surface placeholders render as large cards instead of pane bodies;
 - visible tab/selector buttons cannot change the active pane;
-- draggable-looking affordances are present without drag behavior or an
-  explicit disabled/deferred state;
+- visible tabs cannot be reordered or moved between split groups, unless the UI
+  clearly omits drag affordances and the implementation records why Dockview
+  movement was blocked;
 - the workbench cannot plausibly host an agent, terminal, or editor without a
   second redesign;
 - narrow viewport behavior introduces horizontal overflow or unreadable chrome.
