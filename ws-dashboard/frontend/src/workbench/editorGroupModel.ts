@@ -32,6 +32,7 @@ export type WorkbenchPaneMoveResult<TGroup extends WorkbenchEditorGroupRef = Wor
 
 export type WorkbenchDynamicGroupRequest = {
   readonly targetGroupId: string;
+  /** Dockview display metadata only; dashboard group state persists ids and panes. */
   readonly targetGroupLabel?: string;
 };
 
@@ -229,9 +230,8 @@ export function commitWorkbenchPaneMoveIntoDynamicGroup<TGroup extends Workbench
   // The function returns the same serialized pane order and active-pane state
   // as commitWorkbenchPaneMove plus the id of a newly-created dashboard group,
   // if the Dockview target group was not already known.
-  // HINT: Preserve commitWorkbenchPaneMove semantics for existing groups, and
-  // synthesize an empty group when dynamicTargetGroup names an unknown target.
-  // HOLE: Decide whether targetGroupLabel is stored on the group object or
-  // remains Dockview-only metadata after App.tsx adopts dynamic group state.
+  // Existing-group moves must preserve commitWorkbenchPaneMove semantics. Unknown
+  // dynamicTargetGroup ids must synthesize an empty dashboard group before the
+  // move, while targetGroupLabel remains Dockview-only metadata.
   throw new Error("dynamic workbench group moves are not implemented");
 }

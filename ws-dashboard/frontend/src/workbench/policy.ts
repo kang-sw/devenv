@@ -138,11 +138,9 @@ export function decideSurfaceOpenWithDynamicGroups(
   // persistent terminal panes prefer group 1. New editor/read-only file panes
   // prefer group 2, creating group 2 when only group 1 exists. Groups 3+ are
   // user-created groups and are not automatic placement targets.
-  // HINT: Reuse decideSurfaceOpen duplicate-focus behavior and selectTargetGroup
-  // row-policy intent, but return nextState so App.tsx can persist created group
-  // ids instead of hard-coding primary/support.
-  // HOLE: Define the generated group id seed so it remains stable within the
-  // current browser workRoot state without leaking Dockview raw group handles.
+  // Duplicate logical keys must keep decideSurfaceOpen focusExisting behavior.
+  // Generated dashboard groups use the ordered browser-state seed `group-N`
+  // (next index after the current groups), never raw Dockview handles.
   throw new Error("dynamic workbench placement is not implemented");
 }
 

@@ -158,10 +158,10 @@ async function expectDurableDockviewSplitDrop(_page: Page) {
   // into a new split target, the moved pane keeps a distinct
   // `data-workbench-group-id` after React synchronization, and file/terminal
   // interactions still work in the resulting split layout.
-  // HINT: Reuse `.dockview-workbench-tab`, `data-workbench-pane-id`,
+  // Use `.dockview-workbench-tab`, `data-workbench-pane-id`,
   // `data-workbench-group-id`, expectDockviewWorkbench, and settlePastPollCycle.
-  // HOLE: Normalize the exact Playwright drag coordinates against Dockview's
-  // overlay target once dynamic group mapping is implemented.
+  // Drag coordinates should target Dockview's split overlay near the workbench
+  // body midpoint so the preview and resulting group are both observable.
   throw new Error("durable Dockview split-drop browser evidence is not implemented");
 }
 
