@@ -181,6 +181,13 @@ async function terminalSurface(page: Page) {
   return surface;
 }
 
+async function terminalInputTarget(page: Page) {
+  const surface = await terminalSurface(page);
+  const inputTarget = surface.locator(".xterm-helper-textarea");
+  await expect(inputTarget).toBeAttached();
+  return inputTarget;
+}
+
 function workRootDisplayName(rootPath: string) {
   const normalized = rootPath.replace(/[\\/]+$/, "");
   const match = normalized.match(/[^\\/]+$/);
@@ -587,8 +594,6 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // Scrolling over `.readonly-text-content` must not move the top-level
     // browser document, displace dashboard chrome, or depend on a future
     // editor-library replacement.
-    // HINT: Keep this browser-level assertion next to the existing preview and
-    // pin flow so Dockview pane styling and file-open placement are both active.
     const longFileRow = page.locator(".file-explorer-row", {
       hasText: "gate-long-readonly.txt",
     });
@@ -670,9 +675,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // WebSocket, does not keep periodic output polling active while connected,
     // and preserves byte-stream input fidelity for Backspace, cursor movement,
     // shell history, Ctrl keys, paste, and prompt editing.
-    // HINT: Intercept `/api/dashboard/terminals/*/output` and browser
-    // WebSocket events around this block; use a real shell prompt rather than
-    // fixture-only assertions.
+    // Page-level request and WebSocket listeners above capture
+    // `/api/dashboard/terminals/*/output` polling and socket frames while this
+    // block drives a real shell prompt instead of fixture-only assertions.
     await page.locator('[data-command-id="terminal.create"]').click();
     await expectDockviewWorkbench(page);
     await terminalSurface(page);
@@ -752,8 +757,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.press("ArrowUp");
     await page.keyboard.press("Control+C");
     await page.keyboard.insertText("\f");
-    await page.locator(".terminal-surface").click();
-    await page.locator(".terminal-surface .xterm-helper-textarea").focus();
+    const inputTarget = await terminalInputTarget(page);
+    await inputTarget.focus();
     await page.keyboard.type(commandPlan.echo("PASTE-OK"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
@@ -761,9 +766,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // CONTRACT: Focused terminal panes preserve native shell line-editing
     // control bytes through the live xterm/WebSocket input path. `ctrl-u`
     // clears the current command line and `ctrl-w` deletes the previous word.
-    // HINT: Assert both terminal-visible shell effects and raw input frames so
-    // a fallback handler cannot swallow or synthesize the wrong path.
-    await page.locator(".terminal-surface").click();
+    // Assert both terminal-visible shell effects and raw input frames so a
+    // fallback handler cannot swallow or synthesize the wrong path.
+    await inputTarget.focus();
     await page.keyboard.type(commandPlan.clearAndEcho("CTRL-U-START"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("CTRL-U-START");
@@ -772,25 +777,50 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.type(commandPlan.echo("CTRL-U-OK"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("CTRL-U-OK");
+    await expect(page.locator(".xterm-rows")).not.toContainText("CTRL-U-BAD");
 
-    await page.locator(".terminal-surface").click();
+    await inputTarget.focus();
     await page.keyboard.type(commandPlan.echo("CTRL-W-BAD"));
     await page.keyboard.press("Control+W");
     await page.keyboard.type("CTRL-W-OK");
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("CTRL-W-OK");
+    await expect(page.locator(".xterm-rows")).not.toContainText("CTRL-W-BAD");
 
     // CONTRACT: Browser fallback key handling must not forward IME
     // composition-in-progress keystrokes as raw terminal bytes. Real Korean IME
     // commit evidence may be manual when Playwright cannot drive platform IME,
     // but this synthetic guard keeps fallback behavior observable.
-    // HOLE: Normalize event dispatch to the project-local terminal focus helper
-    // if xterm requires the composition events on its helper textarea rather
-    // than the terminal surface container.
     const framesBeforeComposition = terminalSocketFrames.length;
-    await page.locator(".terminal-surface").dispatchEvent("compositionstart");
-    await page.keyboard.press("Process");
-    await page.locator(".terminal-surface").dispatchEvent("compositionend");
+    await inputTarget.focus();
+    await inputTarget.evaluate((node) =>
+      node.dispatchEvent(
+        new CompositionEvent("compositionstart", {
+          bubbles: true,
+          data: "ㅎ",
+        }),
+      ),
+    );
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "ㅎ",
+        }),
+      );
+    });
+    await inputTarget.evaluate((node) =>
+      node.dispatchEvent(
+        new CompositionEvent("compositionend", {
+          bubbles: true,
+          data: "한",
+        }),
+      ),
+    );
     expect(terminalSocketFrames.length).toBe(framesBeforeComposition);
 
     expect(
@@ -813,7 +843,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note(
       `terminal WebSocket: ${terminalSocketUrls[0]} connected; HTTP output polls stayed at ` +
         `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with Backspace, cursor movement, edit, history, ` +
-        "Ctrl-C, clear-screen control rendering/recovery, paste, and no document scroll",
+        "Ctrl-C, ctrl-u, ctrl-w, clear-screen control rendering/recovery, paste, IME composition guard, and no document scroll",
     );
   });
 
