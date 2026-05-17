@@ -16,6 +16,7 @@ skeletons:
   phase-3: 9c6e642
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-17
 ---
 
 # ws dashboard Dockview dynamic groups
@@ -67,6 +68,18 @@ Success means moving a pane into a Dockview-created split creates or maps a
 dashboard group id, records pane membership there, and survives the next
 workbench synchronization without snapping back to the initial two groups.
 
+### Result (687a402) - 2026-05-17
+
+The workbench model now supports dynamic dashboard groups for Dockview-created
+split drops. Unknown Dockview split targets allocate ordered dashboard
+`group-N` ids, commit pane movement into the new group, derive pane order from
+the resulting group set, and reconcile active panes without preserving stale
+empty-group selections.
+
+The app stores dynamic group order, pane order, and active pane state per
+`workRootId`, so user-created groups and active panes do not leak between
+opened workRoots. Raw Dockview handles remain inside the adapter boundary.
+
 ### Phase 2: Apply automatic placement policy
 
 Update terminal and editor/read-only file placement to use the new group model:
@@ -76,6 +89,14 @@ placement unless later explicit focused-group policy says otherwise.
 
 Success means default creation remains predictable after users create additional
 groups: automatic terminal/file opens do not unexpectedly jump to group 3+.
+
+### Result (687a402) - 2026-05-17
+
+Automatic placement now uses the dynamic group model. New terminal panes prefer
+group 1, read-only/editor panes prefer group 2, editor/file opens create group 2
+when only group 1 exists, and user-created groups 3+ are preserved but not used
+as automatic placement targets. Duplicate logical keys still focus existing
+attachments.
 
 ### Phase 3: Verify split drag/drop behavior
 
@@ -88,3 +109,15 @@ terminal/file interactions still work afterward.
 Success means the visible split-drop affordance no longer lies: a previewed and
 accepted Dockview split drop produces a stable dashboard group instead of a
 no-op or snap-back.
+
+### Result (687a402) - 2026-05-17
+
+The browser gate now performs a real Dockview split-drop against the
+daemon-served frontend, verifies the moved pane remains in the created
+dashboard group after React synchronization, and continues ordinary file and
+terminal interactions afterward. It also opens a second workRoot to confirm
+user-created groups and active panes do not leak between workRoots.
+
+External-daemon browser runs can provide `WS_DASHBOARD_TEST_SECOND_WORKROOT`
+for that second-root isolation substep; without it, only that substep is
+skipped while the rest of the browser gate still runs.
