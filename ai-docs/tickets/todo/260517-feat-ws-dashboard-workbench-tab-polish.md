@@ -5,6 +5,7 @@ related:
   260516-epic-ws-web-dashboard-workbench-substrate: owns the dashboard workbench substrate and tab policy boundary
   260516-epic-ws-web-dashboard-workroot-io-substrate: introduced read-only file panes and live terminal panes under opened workRoots
   260516-bug-ws-web-dashboard-ui-acceptance-recovery: recovered baseline terminal/file explorer usability and browser visual gates
+  260517-bug-ws-dashboard-dockview-workbench-parity: prerequisite corrective work to make Dockview the visible workbench layout substrate before further tab polish
 spec:
   - 260516-ws-web-dashboard-workroot-workbench-substrate
   - 260516-ws-web-dashboard-readonly-text-pane
@@ -30,6 +31,11 @@ goal is to polish the surrounding tab interaction before introducing a richer
 editor library, so later editor integration can reuse stable lifecycle rules
 instead of redefining them.
 
+This ticket depends on `260517-bug-ws-dashboard-dockview-workbench-parity`.
+Do not implement these polish behaviors on top of the current custom
+React/CSS/HTML5-drag tab engine; first correct the substrate so Dockview owns
+the visible workbench groups, tabs, and pane layout behind dashboard policy.
+
 ## Decisions
 
 - Do not add a configuration/settings tab in this slice.
@@ -37,6 +43,9 @@ instead of redefining them.
   layout-persistence redesign here.
 - Keep Dockview behind the dashboard-owned workbench registry and policy layer;
   do not expose raw Dockview handles or lifecycle APIs as product behavior.
+- Treat Dockview parity as a hard prerequisite. This ticket should extend the
+  Dockview-backed shell, not preserve or further entrench the custom tab/split
+  implementation.
 - Treat preview mode as frontend workbench policy: a single-click preview may be
   replaced by the next preview open, while a double-click pins the file as a
   normal opened tab.

@@ -97,10 +97,13 @@ The MVP should cover:
 - `260516-bug-ws-web-terminal-cross-platform-portability` - done; make
   dashboard terminal shell selection, PTY commands, browser harness behavior,
   and acceptance evidence honestly cross-platform or explicitly OS-scoped.
+- `260517-bug-ws-dashboard-dockview-workbench-parity` - todo; corrective
+  substrate work to make Dockview the visible workbench layout owner while
+  preserving recovered file and terminal pane behavior.
 - `260517-feat-ws-dashboard-workbench-tab-polish` - todo; polish workbench tab
   close affordances, insertion/focus policy, empty-state cleanup, and
-  preview-to-pinned read-only file behavior before introducing a richer editor
-  library.
+  preview-to-pinned read-only file behavior after Dockview workbench parity is
+  restored and before introducing a richer editor library.
 
 ## Cross-Child Decisions
 
