@@ -235,3 +235,13 @@ forwarding, owner pairing, and daemon-host workRoot opening all succeeded. The
 browser gate then reached a real `cmd.exe` terminal session but failed because
 Ctrl-C did not interrupt the long-running command fixture; that remaining
 native-Windows control-key gap is captured separately for follow-up.
+
+#### Edition (85d4227) - 2026-05-17
+
+Changed the Windows default shell policy to prefer `pwsh.exe`, then
+`powershell.exe`, then `%COMSPEC%`, and finally `cmd.exe`, leaving command
+profiles and fallback behavior covered by focused tests. Retried native-Windows
+fixed-endpoint evidence with the PowerShell profile; the browser gate reached a
+real Windows PowerShell terminal but Ctrl-C still did not interrupt
+`Start-Sleep -Seconds 30`, so the follow-up control-key gap remains but is no
+longer `cmd.exe`-specific.

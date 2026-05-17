@@ -442,10 +442,10 @@ inside a real shell.
 
 Dashboard terminal spawning has an explicit, testable shell-selection contract
 across supported platforms. Unix-like platforms use `$SHELL` or the `/bin/sh`
-fallback, and native Windows uses `%COMSPEC%` or the `cmd.exe` fallback. The
-selection contract is testable independently from the compile-time host
-platform so Unix and Windows fallback behavior can be verified on any developer
-machine.
+fallback. Native Windows prefers `pwsh.exe`, then `powershell.exe`, then
+`%COMSPEC%`, and finally the `cmd.exe` fallback. The selection contract is
+testable independently from the compile-time host platform so Unix and Windows
+fallback behavior can be verified on any developer machine.
 
 Shell spawn failures stay bounded to recoverable diagnostics. Authenticated
 terminal creation may report that terminal spawning failed, but private
