@@ -13,6 +13,9 @@ spec:
   - 260516-ws-web-dashboard-terminal-pane
   - 260516-ws-web-dashboard-terminal-tab-selection-and-empty-initial-state
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
+skeletons:
+  phase-1: 3c75198
+  phase-3: 3c75198
 related-mental-model:
   - ws-web-dashboard
 ---
