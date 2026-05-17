@@ -1132,9 +1132,7 @@ function WorkbenchShell({
 
   const selectPane = (groupId: string, paneId: string) => {
     const pane = editorGroups.flatMap((group) => group.panes).find((candidate) => candidate.id === paneId);
-    if (pane?.kind === "persistentTerminal") {
-      setFocusedTerminalPaneId(paneId);
-    }
+    setFocusedTerminalPaneId(pane?.kind === "persistentTerminal" ? paneId : null);
     setActivePaneByGroup((current) => selectWorkbenchPane(current, groupId, paneId));
   };
 
