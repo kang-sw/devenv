@@ -7,8 +7,12 @@ import {
   type WorkbenchRowPolicy,
 } from "./surfaceRegistry.js";
 
-export type WorkbenchGroupId = string & { readonly __workbenchGroupId: unique symbol };
-export type SurfaceLogicalKey = string & { readonly __surfaceLogicalKey: unique symbol };
+export type WorkbenchGroupId = string & {
+  readonly __workbenchGroupId: unique symbol;
+};
+export type SurfaceLogicalKey = string & {
+  readonly __surfaceLogicalKey: unique symbol;
+};
 
 export type WorkbenchPolicyGroup = {
   readonly groupId: WorkbenchGroupId;
@@ -55,7 +59,11 @@ export type WorkbenchDynamicPlacementDecision = WorkbenchPlacementDecision & {
 
 export type WorkbenchCloseDecision = {
   readonly closePolicy: WorkbenchClosePolicy;
-  readonly behavior: "detach" | "closeAttachment" | "releaseProjection" | "deferToProvider";
+  readonly behavior:
+    | "detach"
+    | "closeAttachment"
+    | "releaseProjection"
+    | "deferToProvider";
   readonly terminateReservation: WorkbenchTerminateReservation | null;
 };
 
@@ -81,14 +89,19 @@ export type PtyVisualResizeDecision = {
   readonly resizeRequest: "deferred";
 };
 
-export const defaultPtyLogicalSize: PtyLogicalSize = Object.freeze({ columns: 80, rows: 24 });
+export const defaultPtyLogicalSize: PtyLogicalSize = Object.freeze({
+  columns: 80,
+  rows: 24,
+});
 
 export function workbenchGroupId(value: string): WorkbenchGroupId {
   assertNonEmpty(value, "workbenchGroupId");
   return value as WorkbenchGroupId;
 }
 
-export function surfaceLogicalKey(...parts: readonly string[]): SurfaceLogicalKey {
+export function surfaceLogicalKey(
+  ...parts: readonly string[]
+): SurfaceLogicalKey {
   if (parts.length === 0) {
     throw new Error("surfaceLogicalKey needs at least one part");
   }
@@ -121,7 +134,8 @@ export function decideSurfaceOpen(
   const groupId = selectTargetGroup(state, registryEntry.rowPolicy);
   return {
     type: "openNew",
-    attachmentId: request.attachmentId ?? attachmentId(`att:${request.logicalKey}`),
+    attachmentId:
+      request.attachmentId ?? attachmentId(`att:${request.logicalKey}`),
     groupId,
     logicalKey: request.logicalKey,
     rowPolicy: registryEntry.rowPolicy,
@@ -129,9 +143,9 @@ export function decideSurfaceOpen(
 }
 
 export function decideSurfaceOpenWithDynamicGroups(
-  _state: WorkbenchPlacementState,
-  _request: OpenSurfaceRequest,
-  _registry: SurfaceRegistry = defaultSurfaceRegistry(),
+  state: WorkbenchPlacementState,
+  request: OpenSurfaceRequest,
+  registry: SurfaceRegistry = defaultSurfaceRegistry(),
 ): WorkbenchDynamicPlacementDecision {
   // CONTRACT: Dynamic placement is the caller-facing policy for Dockview-backed
   // workbenches. Existing logical keys still focus their attachment. New
@@ -141,7 +155,50 @@ export function decideSurfaceOpenWithDynamicGroups(
   // Duplicate logical keys must keep decideSurfaceOpen focusExisting behavior.
   // Generated dashboard groups use the ordered browser-state seed `group-N`
   // (next index after the current groups), never raw Dockview handles.
-  throw new Error("dynamic workbench placement is not implemented");
+  const existing = state.attachments.find(
+    (attachment) => attachment.logicalKey === request.logicalKey,
+  );
+  if (existing) {
+    return {
+      type: "focusExisting",
+      attachmentId: existing.attachmentId,
+      groupId: existing.groupId,
+      logicalKey: existing.logicalKey,
+      nextState: state,
+      createdGroupId: null,
+    };
+  }
+
+  if (state.groups.length === 0) {
+    throw new Error("workbench placement needs at least one group");
+  }
+
+  const registryEntry = registry[request.surfaceKind];
+  const { groupId, groups, createdGroupId } = selectDynamicTargetGroup(
+    state,
+    registryEntry.rowPolicy,
+  );
+  const attachment = {
+    attachmentId:
+      request.attachmentId ?? attachmentId(`att:${request.logicalKey}`),
+    groupId,
+    surfaceKind: request.surfaceKind,
+    logicalKey: request.logicalKey,
+  };
+
+  return {
+    type: "openNew",
+    attachmentId: attachment.attachmentId,
+    groupId,
+    logicalKey: request.logicalKey,
+    rowPolicy: registryEntry.rowPolicy,
+    nextState: {
+      ...state,
+      groups,
+      attachments: [...state.attachments, attachment],
+    },
+    createdGroupId,
+  };
 }
 
 export function decideSurfaceClose(
@@ -165,7 +222,9 @@ export function decideSurfaceClose(
   };
 }
 
-export function reserveTerminateCommand(surfaceKind: SurfaceKind): WorkbenchTerminateReservation {
+export function reserveTerminateCommand(
+  surfaceKind: SurfaceKind,
+): WorkbenchTerminateReservation {
   return {
     commandId: "workbench.lifecycle.terminate",
     reserved: true,
@@ -189,6 +248,48 @@ export function preservePtyLogicalSize(
   };
 }
 
+function selectDynamicTargetGroup(
+  state: WorkbenchPlacementState,
+  rowPolicy: WorkbenchRowPolicy,
+): {
+  readonly groupId: WorkbenchGroupId;
+  readonly groups: readonly WorkbenchPolicyGroup[];
+  readonly createdGroupId: WorkbenchGroupId | null;
+} {
+  if (rowPolicy === "opened") {
+    const secondGroup = state.groups[1]?.groupId;
+    if (secondGroup) {
+      return {
+        groupId: secondGroup,
+        groups: state.groups,
+        createdGroupId: null,
+      };
+    }
+
+    const createdGroupId = nextOrderedWorkbenchGroupId(state.groups);
+    const groups = [...state.groups, { groupId: createdGroupId }];
+    return { groupId: createdGroupId, groups, createdGroupId };
+  }
+
+  return {
+    groupId: state.groups[0].groupId,
+    groups: state.groups,
+    createdGroupId: null,
+  };
+}
+
+function nextOrderedWorkbenchGroupId(
+  groups: readonly WorkbenchPolicyGroup[],
+): WorkbenchGroupId {
+  const used = new Set(groups.map((group) => group.groupId));
+  for (let index = groups.length + 1; ; index += 1) {
+    const candidate = workbenchGroupId(`group-${index}`);
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+}
+
 function selectTargetGroup(
   state: WorkbenchPlacementState,
   rowPolicy: WorkbenchRowPolicy,
@@ -201,7 +302,10 @@ function selectTargetGroup(
     return state.groups[1]?.groupId ?? state.groups[0].groupId;
   }
 
-  if (state.focusedGroupId && state.groups.some((group) => group.groupId === state.focusedGroupId)) {
+  if (
+    state.focusedGroupId &&
+    state.groups.some((group) => group.groupId === state.focusedGroupId)
+  ) {
     return state.focusedGroupId;
   }
 

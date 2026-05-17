@@ -40,6 +40,10 @@ export type DockviewWorkbenchLayoutProps = {
     paneId: string,
     targetGroupId: string,
     beforePaneId?: string,
+    dynamicTargetGroup?: {
+      readonly targetGroupId: string;
+      readonly targetGroupLabel?: string;
+    },
   ) => void;
 };
 
@@ -132,12 +136,21 @@ export function DockviewWorkbenchLayout({
         const params = move.panel.params as
           | DockviewWorkbenchPanelParams
           | undefined;
-        const targetGroupId = dockGroupToWorkbenchGroupRef.current.get(
+        const mappedTargetGroupId = dockGroupToWorkbenchGroupRef.current.get(
           move.panel.group.id,
         );
-        if (!params || !targetGroupId) {
+        if (!params) {
           return;
         }
+        const targetGroupId =
+          mappedTargetGroupId ??
+          nextDynamicWorkbenchGroupId(dockGroupToWorkbenchGroupRef.current);
+        const dynamicTargetGroup = mappedTargetGroupId
+          ? undefined
+          : {
+              targetGroupId,
+              targetGroupLabel: `group ${Number(targetGroupId.replace(/^group-/, "")) || dockGroupToWorkbenchGroupRef.current.size + 1}`,
+            };
         const siblingAfterMoved = move.panel.group.panels
           .slice(
             move.panel.group.panels.findIndex(
@@ -152,6 +165,7 @@ export function DockviewWorkbenchLayout({
           params.paneId,
           targetGroupId,
           siblingAfterMoved?.paneId,
+          dynamicTargetGroup,
         );
       });
       syncPanels();
@@ -394,4 +408,16 @@ function toDockviewWorkbenchPanelParams(
     meta: pane.meta,
     body: pane.body,
   };
+}
+
+function nextDynamicWorkbenchGroupId(
+  current: ReadonlyMap<string, string>,
+): string {
+  const used = new Set(current.values());
+  for (let index = used.size + 1; ; index += 1) {
+    const candidate = `group-${index}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
 }

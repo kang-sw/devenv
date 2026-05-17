@@ -3,7 +3,10 @@ import {
   dockviewBridgeOptions,
   type DockviewBridgePort,
 } from "./dockviewBridge.js";
-import { defaultSurfaceKinds, defaultSurfaceRegistry } from "./surfaceRegistry.js";
+import {
+  defaultSurfaceKinds,
+  defaultSurfaceRegistry,
+} from "./surfaceRegistry.js";
 import {
   applyWorkbenchPaneOrder,
   commitWorkbenchPaneMove,
@@ -36,7 +39,9 @@ import {
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
-    throw new Error(`${label}: expected ${String(expected)}, got ${String(actual)}`);
+    throw new Error(
+      `${label}: expected ${String(expected)}, got ${String(actual)}`,
+    );
   }
 }
 
@@ -87,17 +92,41 @@ assertDeepEqual(
 );
 
 assertEqual(registry.agent.rowPolicy, "pinned", "agent row policy");
-assertEqual(registry.persistentTerminal.rowPolicy, "pinned", "terminal row policy");
-assertEqual(registry.agent.lifecycleOwner, "daemonProcess", "agent lifecycle owner");
-assertEqual(registry.agent.closePolicy, "detachDaemonResource", "agent close policy");
+assertEqual(
+  registry.persistentTerminal.rowPolicy,
+  "pinned",
+  "terminal row policy",
+);
+assertEqual(
+  registry.agent.lifecycleOwner,
+  "daemonProcess",
+  "agent lifecycle owner",
+);
+assertEqual(
+  registry.agent.closePolicy,
+  "detachDaemonResource",
+  "agent close policy",
+);
 assertEqual(
   registry.persistentTerminal.closePolicy,
   "detachDaemonResource",
   "terminal close policy",
 );
 
-for (const kind of ["editor", "viewer", "diff", "diagnostics", "eventsLog", "taskView", "inspector"] as const) {
-  assertEqual(registry[kind].rowPolicy, "opened", `${kind} uses the opened row`);
+for (const kind of [
+  "editor",
+  "viewer",
+  "diff",
+  "diagnostics",
+  "eventsLog",
+  "taskView",
+  "inspector",
+] as const) {
+  assertEqual(
+    registry[kind].rowPolicy,
+    "opened",
+    `${kind} uses the opened row`,
+  );
 }
 
 const layout: WorkbenchLayoutState = {
@@ -155,14 +184,26 @@ assertDeepEqual(
 );
 
 const serializedJson = JSON.stringify(serialized);
-assert(!serializedJson.includes("surfaceKind"), "serialized layout omits surface kind metadata");
-assert(!serializedJson.includes("rowPolicy"), "serialized layout omits registry-derived row policy");
-assert(!serializedJson.includes("server-local"), "serialized layout omits daemon server identity");
+assert(
+  !serializedJson.includes("surfaceKind"),
+  "serialized layout omits surface kind metadata",
+);
+assert(
+  !serializedJson.includes("rowPolicy"),
+  "serialized layout omits registry-derived row policy",
+);
+assert(
+  !serializedJson.includes("server-local"),
+  "serialized layout omits daemon server identity",
+);
 assert(
   !serializedJson.includes("workspace-devenv"),
   "serialized layout omits daemon workspace identity",
 );
-assert(!serializedJson.includes("workroot-devenv"), "serialized layout omits daemon workRoot identity");
+assert(
+  !serializedJson.includes("workroot-devenv"),
+  "serialized layout omits daemon workRoot identity",
+);
 assert(
   !serializedJson.includes("instance-agent-main"),
   "serialized layout omits daemon instance identity",
@@ -172,7 +213,10 @@ assertThrows(
   () =>
     serializeWorkbenchLayout({
       attachments: layout.attachments,
-      arrangement: { type: "attachment", attachmentId: attachmentId("missing") },
+      arrangement: {
+        type: "attachment",
+        attachmentId: attachmentId("missing"),
+      },
     }),
   /unknown attachmentId/,
   "unknown arrangement attachment ids are rejected",
@@ -200,7 +244,6 @@ assert(
   "bridge does not hard-disable Dockview tab drag/reorder behavior",
 );
 
-
 const editorGroups = [
   {
     id: "primary",
@@ -211,7 +254,6 @@ const editorGroups = [
     panes: [{ id: "editor" }, { id: "tasks" }, { id: "diagnostics" }],
   },
 ] as const;
-
 
 assertDeepEqual(
   partitionWorkbenchPanesByCategory([
@@ -265,7 +307,10 @@ assertDeepEqual(
   applyWorkbenchPaneOrder(editorGroups, {
     primary: ["terminal", "missing"],
     support: ["diagnostics"],
-  }).map((group) => ({ id: group.id, panes: group.panes.map((pane) => pane.id) })),
+  }).map((group) => ({
+    id: group.id,
+    panes: group.panes.map((pane) => pane.id),
+  })),
   [
     { id: "primary", panes: ["terminal", "agent", "viewer"] },
     { id: "support", panes: ["diagnostics", "editor", "tasks"] },
@@ -286,9 +331,13 @@ assertDeepEqual(
   "visible workbench active state follows moved panes and falls back per group",
 );
 
-
 assertDeepEqual(
-  deriveWorkbenchPaneOrder(applyWorkbenchPaneOrder(editorGroups, deriveWorkbenchPaneOrder(crossSplitEditorGroups))),
+  deriveWorkbenchPaneOrder(
+    applyWorkbenchPaneOrder(
+      editorGroups,
+      deriveWorkbenchPaneOrder(crossSplitEditorGroups),
+    ),
+  ),
   {
     primary: ["viewer", "agent"],
     support: ["editor", "tasks", "terminal", "diagnostics"],
@@ -312,7 +361,11 @@ assertDeepEqual(
   "visible workbench movement model can represent an empty source split for the empty drop target UI",
 );
 assertDeepEqual(
-  reconcileActiveWorkbenchPanes(emptiedSourceGroups, { primary: "only", support: "editor" }, { support: "only" }),
+  reconcileActiveWorkbenchPanes(
+    emptiedSourceGroups,
+    { primary: "only", support: "editor" },
+    { support: "only" },
+  ),
   {
     support: "only",
   },
@@ -372,17 +425,29 @@ assertEqual(
   "visible workbench drop wiring ignores self-drops on the same tab",
 );
 
-const committedMove = commitWorkbenchPaneMove(editorGroups, { primary: "terminal", support: "editor" }, {
-  paneId: "terminal",
-  targetGroupId: "support",
-  beforePaneId: "diagnostics",
-});
+const committedMove = commitWorkbenchPaneMove(
+  editorGroups,
+  { primary: "terminal", support: "editor" },
+  {
+    paneId: "terminal",
+    targetGroupId: "support",
+    beforePaneId: "diagnostics",
+  },
+);
 assertDeepEqual(
   committedMove,
   {
     groups: [
       { id: "primary", panes: [{ id: "agent" }, { id: "viewer" }] },
-      { id: "support", panes: [{ id: "editor" }, { id: "tasks" }, { id: "terminal" }, { id: "diagnostics" }] },
+      {
+        id: "support",
+        panes: [
+          { id: "editor" },
+          { id: "tasks" },
+          { id: "terminal" },
+          { id: "diagnostics" },
+        ],
+      },
     ],
     paneOrderByGroup: {
       primary: ["agent", "viewer"],
@@ -396,27 +461,74 @@ assertDeepEqual(
   "visible workbench move commit covers drag move, serialized group membership, and active body reconciliation",
 );
 
-assertThrows(
-  () =>
-    commitWorkbenchPaneMoveIntoDynamicGroup(
-      editorGroups,
-      { primary: "terminal", support: "editor" },
-      {
-        paneId: "viewer",
-        targetGroupId: "split-3",
-        dynamicTargetGroup: { targetGroupId: "split-3", targetGroupLabel: "Group 3" },
+assertDeepEqual(
+  commitWorkbenchPaneMoveIntoDynamicGroup(
+    editorGroups,
+    { primary: "terminal", support: "editor" },
+    {
+      paneId: "viewer",
+      targetGroupId: "group-3",
+      dynamicTargetGroup: {
+        targetGroupId: "group-3",
+        targetGroupLabel: "group 3",
       },
-    ),
-  /dynamic workbench group moves are not implemented/,
-  "dynamic workbench move commit skeleton reserves Dockview split-drop group creation",
+    },
+  ),
+  {
+    groups: [
+      { id: "primary", panes: [{ id: "agent" }, { id: "terminal" }] },
+      {
+        id: "support",
+        panes: [{ id: "editor" }, { id: "tasks" }, { id: "diagnostics" }],
+      },
+      { id: "group-3", label: "group 3", panes: [{ id: "viewer" }] },
+    ],
+    paneOrderByGroup: {
+      primary: ["agent", "terminal"],
+      support: ["editor", "tasks", "diagnostics"],
+      "group-3": ["viewer"],
+    },
+    activePaneByGroup: {
+      primary: "terminal",
+      support: "editor",
+      "group-3": "viewer",
+    },
+    createdGroupId: "group-3",
+  },
+  "dynamic workbench move commit creates a durable dashboard group for Dockview split drops",
+);
+
+assertDeepEqual(
+  commitWorkbenchPaneMoveIntoDynamicGroup(
+    editorGroups,
+    { primary: "terminal", support: "editor" },
+    {
+      paneId: "terminal",
+      targetGroupId: "support",
+      beforePaneId: "diagnostics",
+    },
+  ),
+  {
+    ...committedMove,
+    createdGroupId: null,
+  },
+  "dynamic workbench move commit preserves existing-group move semantics",
 );
 
 const addedPanels: unknown[] = [];
 let addedGroupCount = 0;
 let focusNextCount = 0;
 let focusPreviousCount = 0;
-const rawPanel = { id: "raw-panel", api: { close: () => undefined }, focus: () => undefined };
-const rawGroup = { id: "raw-group", moveTo: () => undefined, maximize: () => undefined };
+const rawPanel = {
+  id: "raw-panel",
+  api: { close: () => undefined },
+  focus: () => undefined,
+};
+const rawGroup = {
+  id: "raw-group",
+  moveTo: () => undefined,
+  maximize: () => undefined,
+};
 const fakePort = {
   addPanel(options: unknown) {
     addedPanels.push(options);
@@ -446,7 +558,11 @@ const groupHandle = bridge.addGroup();
 bridge.focusNext();
 bridge.focusPrevious();
 
-assertEqual(addedPanels.length, 1, "bridge adds one Dockview panel through the port");
+assertEqual(
+  addedPanels.length,
+  1,
+  "bridge adds one Dockview panel through the port",
+);
 assertDeepEqual(
   addedPanels[0],
   {
@@ -457,12 +573,30 @@ assertDeepEqual(
   },
   "bridge maps dashboard attachment metadata to Dockview panel parameters internally",
 );
-assertEqual(addedGroupCount, 1, "bridge adds one Dockview group through the port");
-assertEqual(focusNextCount, 1, "bridge forwards focus-next through the adapter");
-assertEqual(focusPreviousCount, 1, "bridge forwards focus-previous through the adapter");
+assertEqual(
+  addedGroupCount,
+  1,
+  "bridge adds one Dockview group through the port",
+);
+assertEqual(
+  focusNextCount,
+  1,
+  "bridge forwards focus-next through the adapter",
+);
+assertEqual(
+  focusPreviousCount,
+  1,
+  "bridge forwards focus-previous through the adapter",
+);
 
-assert(panelHandle !== (rawPanel as unknown), "panel handle is dashboard-owned, not the raw Dockview panel");
-assert(groupHandle !== (rawGroup as unknown), "group handle is dashboard-owned, not the raw Dockview group");
+assert(
+  panelHandle !== (rawPanel as unknown),
+  "panel handle is dashboard-owned, not the raw Dockview panel",
+);
+assert(
+  groupHandle !== (rawGroup as unknown),
+  "group handle is dashboard-owned, not the raw Dockview group",
+);
 assertDeepEqual(
   Object.keys(panelHandle),
   ["type", "attachmentId"],
@@ -473,10 +607,22 @@ assertDeepEqual(
   ["type", "groupHandleId"],
   "group handle exposes only dashboard-owned handle fields",
 );
-assert(!("api" in panelHandle), "panel handle does not expose Dockview panel api");
-assert(!("focus" in panelHandle), "panel handle does not expose Dockview panel focus lifecycle");
-assert(!("moveTo" in groupHandle), "group handle does not expose Dockview group movement");
-assert(!("maximize" in groupHandle), "group handle does not expose Dockview group maximize lifecycle");
+assert(
+  !("api" in panelHandle),
+  "panel handle does not expose Dockview panel api",
+);
+assert(
+  !("focus" in panelHandle),
+  "panel handle does not expose Dockview panel focus lifecycle",
+);
+assert(
+  !("moveTo" in groupHandle),
+  "group handle does not expose Dockview group movement",
+);
+assert(
+  !("maximize" in groupHandle),
+  "group handle does not expose Dockview group maximize lifecycle",
+);
 assertDeepEqual(
   bridge.serialize(layout),
   serialized,
@@ -485,7 +631,11 @@ assertDeepEqual(
 
 const groupOne = workbenchGroupId("group-1");
 const groupTwo = workbenchGroupId("group-2");
-const agentKey = surfaceLogicalKey("agent", "workroot-devenv", "instance-agent-main");
+const agentKey = surfaceLogicalKey(
+  "agent",
+  "workroot-devenv",
+  "instance-agent-main",
+);
 const editorKey = surfaceLogicalKey("editor", "workroot-devenv", "README.md");
 const placementState: WorkbenchPlacementState = {
   groups: [{ groupId: groupOne }, { groupId: groupTwo }],
@@ -566,10 +716,16 @@ assertDeepEqual(
   "durable pinned surfaces fall back to the first group",
 );
 
-
-
-const readmeFileKey = surfaceLogicalKey("editor", "root-local-abc", "README.md");
-const nestedFileKey = surfaceLogicalKey("editor", "root-local-abc", "src/main.rs");
+const readmeFileKey = surfaceLogicalKey(
+  "editor",
+  "root-local-abc",
+  "README.md",
+);
+const nestedFileKey = surfaceLogicalKey(
+  "editor",
+  "root-local-abc",
+  "src/main.rs",
+);
 assertDeepEqual(
   decideSurfaceOpen(
     {
@@ -633,37 +789,69 @@ assertDeepEqual(
   },
   "new read-only file panes fall back to the first split when it is the only group",
 );
-assertThrows(
-  () =>
-    decideSurfaceOpenWithDynamicGroups(
-      { groups: [{ groupId: groupOne }], attachments: [] },
-      {
-        surfaceKind: "editor",
-        logicalKey: nestedFileKey,
-        attachmentId: attachmentId("att-main-rs"),
-      },
-    ),
-  /dynamic workbench placement is not implemented/,
-  "dynamic placement skeleton reserves group 2 creation for editor/file opens",
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    { groups: [{ groupId: groupOne }], attachments: [] },
+    {
+      surfaceKind: "editor",
+      logicalKey: nestedFileKey,
+      attachmentId: attachmentId("att-main-rs"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-main-rs",
+    groupId: "group-2",
+    logicalKey: "editor/root-local-abc/src/main.rs",
+    rowPolicy: "opened",
+    nextState: {
+      groups: [{ groupId: "group-1" }, { groupId: "group-2" }],
+      attachments: [
+        {
+          attachmentId: "att-main-rs",
+          groupId: "group-2",
+          surfaceKind: "editor",
+          logicalKey: "editor/root-local-abc/src/main.rs",
+        },
+      ],
+    },
+    createdGroupId: "group-2",
+  },
+  "dynamic placement creates group 2 for editor/file opens when only group 1 exists",
 );
-assertThrows(
-  () =>
-    decideSurfaceOpenWithDynamicGroups(
-      { groups: [{ groupId: groupOne }, { groupId: groupTwo }, { groupId: workbenchGroupId("group-3") }], attachments: [] },
-      {
-        surfaceKind: "editor",
-        logicalKey: surfaceLogicalKey("editor", "root-local-abc", "src/lib.rs"),
-        attachmentId: attachmentId("att-lib-rs"),
-      },
-    ),
-  /dynamic workbench placement is not implemented/,
-  "dynamic placement skeleton reserves exclusion of group 3 from automatic editor placement",
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    {
+      groups: [
+        { groupId: groupOne },
+        { groupId: groupTwo },
+        { groupId: workbenchGroupId("group-3") },
+      ],
+      attachments: [],
+    },
+    {
+      surfaceKind: "editor",
+      logicalKey: surfaceLogicalKey("editor", "root-local-abc", "src/lib.rs"),
+      attachmentId: attachmentId("att-lib-rs"),
+    },
+  ).groupId,
+  "group-2",
+  "dynamic placement excludes group 3 from automatic editor placement",
 );
-assert(readmeFileKey !== nestedFileKey, "different read-only file paths open distinct logical panes");
-assert(!String(readmeFileKey).includes("/Users/"), "read-only logical key omits raw host paths");
+assert(
+  readmeFileKey !== nestedFileKey,
+  "different read-only file paths open distinct logical panes",
+);
+assert(
+  !String(readmeFileKey).includes("/Users/"),
+  "read-only logical key omits raw host paths",
+);
 
-
-const terminalSessionKey = surfaceLogicalKey("persistentTerminal", "root-local-abc", "term_abc");
+const terminalSessionKey = surfaceLogicalKey(
+  "persistentTerminal",
+  "root-local-abc",
+  "term_abc",
+);
 assertDeepEqual(
   decideSurfaceOpen(
     {
@@ -694,7 +882,11 @@ assertDeepEqual(
 );
 assertDeepEqual(
   decideSurfaceOpen(
-    { groups: [{ groupId: groupOne }, { groupId: groupTwo }], focusedGroupId: groupTwo, attachments: [] },
+    {
+      groups: [{ groupId: groupOne }, { groupId: groupTwo }],
+      focusedGroupId: groupTwo,
+      attachments: [],
+    },
     {
       surfaceKind: "persistentTerminal",
       logicalKey: terminalSessionKey,
@@ -710,18 +902,40 @@ assertDeepEqual(
   },
   "persistent terminal opens into the focused group",
 );
-assertThrows(
-  () =>
-    decideSurfaceOpenWithDynamicGroups(
-      { groups: [{ groupId: groupOne }, { groupId: groupTwo }], focusedGroupId: groupTwo, attachments: [] },
-      {
-        surfaceKind: "persistentTerminal",
-        logicalKey: terminalSessionKey,
-        attachmentId: attachmentId("att-terminal-new"),
-      },
-    ),
-  /dynamic workbench placement is not implemented/,
-  "dynamic placement skeleton reserves terminal preference for group 1",
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    {
+      groups: [{ groupId: groupOne }, { groupId: groupTwo }],
+      focusedGroupId: groupTwo,
+      attachments: [],
+    },
+    {
+      surfaceKind: "persistentTerminal",
+      logicalKey: terminalSessionKey,
+      attachmentId: attachmentId("att-terminal-new"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-terminal-new",
+    groupId: "group-1",
+    logicalKey: "persistentTerminal/root-local-abc/term_abc",
+    rowPolicy: "pinned",
+    nextState: {
+      groups: [{ groupId: "group-1" }, { groupId: "group-2" }],
+      focusedGroupId: "group-2",
+      attachments: [
+        {
+          attachmentId: "att-terminal-new",
+          groupId: "group-1",
+          surfaceKind: "persistentTerminal",
+          logicalKey: "persistentTerminal/root-local-abc/term_abc",
+        },
+      ],
+    },
+    createdGroupId: null,
+  },
+  "dynamic placement sends terminals to group 1 even when group 2 is focused",
 );
 assertDeepEqual(
   decideSurfaceClose("persistentTerminal").terminateReservation?.commandId,
@@ -774,4 +988,7 @@ assertDeepEqual(
   },
   "visual split size is recorded without rewriting PTY logical dimensions",
 );
-assert(resizeDecision.logicalSize === defaultPtyLogicalSize, "PTY logical size object is preserved");
+assert(
+  resizeDecision.logicalSize === defaultPtyLogicalSize,
+  "PTY logical size object is preserved",
+);
