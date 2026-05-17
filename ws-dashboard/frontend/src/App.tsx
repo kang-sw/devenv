@@ -837,8 +837,9 @@ function WorkbenchShell({
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
-  const activePaneByGroupRef = useRef(activePaneByGroup);
-  activePaneByGroupRef.current = activePaneByGroup;
+  const [focusedTerminalPaneId, setFocusedTerminalPaneId] = useState<string | null>(null);
+  const focusedTerminalPaneIdRef = useRef<string | null>(null);
+  focusedTerminalPaneIdRef.current = focusedTerminalPaneId;
 
   const workbenchModel = resources && selection
     ? (() => {
@@ -861,7 +862,8 @@ function WorkbenchShell({
               onSocketStatus: updateTerminalSocketStatus,
               onSocketMessage: applyTerminalSocketMessage,
               onSocketResize: acceptTerminalSocketResize,
-              isActivePane: (pane) => Object.values(activePaneByGroupRef.current).includes(pane.paneId),
+              onFocusInput: (pane) => setFocusedTerminalPaneId(pane.paneId),
+              isActivePane: (pane) => focusedTerminalPaneIdRef.current === pane.paneId,
             },
           ),
           paneOrderByGroup,
@@ -1014,6 +1016,7 @@ function WorkbenchShell({
       return;
     }
     focusedTerminalRequest.current = activeTerminalPaneRequest.sequence;
+    setFocusedTerminalPaneId(activeTerminalPaneRequest.paneId);
     setActivePaneByGroup((current) =>
       selectWorkbenchPane(current, targetGroup.id, activeTerminalPaneRequest.paneId),
     );
@@ -1028,6 +1031,7 @@ function WorkbenchShell({
         const pane = terminalPaneFromSession(session);
         setTerminalPanes((current) => ({ ...current, [pane.logicalKey]: pane }));
         setTerminalPaneOrderByGroup((current) => placeTerminalSessions(current, terminalPanes, [session]));
+        setFocusedTerminalPaneId(pane.paneId);
         setActiveTerminalPaneRequest({ paneId: pane.paneId, sequence: terminalOpenSequence.current++ });
       })
       .catch(() => undefined);
@@ -1126,6 +1130,14 @@ function WorkbenchShell({
     setActivePaneByGroup(result.activePaneByGroup);
   };
 
+  const selectPane = (groupId: string, paneId: string) => {
+    const pane = editorGroups.flatMap((group) => group.panes).find((candidate) => candidate.id === paneId);
+    if (pane?.kind === "persistentTerminal") {
+      setFocusedTerminalPaneId(paneId);
+    }
+    setActivePaneByGroup((current) => selectWorkbenchPane(current, groupId, paneId));
+  };
+
   if (loading && !resources) {
     return <StatusPane title="Loading" detail="workbench resources" />;
   }
@@ -1157,9 +1169,7 @@ function WorkbenchShell({
         activePaneByGroup={activePaneByGroup}
         groups={editorGroups}
         onMovePane={movePane}
-        onSelectPane={(groupId, paneId) =>
-          setActivePaneByGroup((current) => selectWorkbenchPane(current, groupId, paneId))
-        }
+        onSelectPane={selectPane}
       />
     </div>
   );
@@ -1461,6 +1471,7 @@ type TerminalPaneActions = {
   onSocketStatus: (pane: TerminalPaneState, socketStatus: TerminalPaneState["socketStatus"], error?: string | null) => void;
   onSocketMessage: (pane: TerminalPaneState, message: TerminalWebSocketServerMessage) => void;
   onSocketResize: (pane: TerminalPaneState, columns: number, rows: number) => void;
+  onFocusInput: (pane: TerminalPaneState) => void;
   isActivePane: (pane: TerminalPaneState) => boolean;
 };
 
@@ -1534,6 +1545,7 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     // Keyboard input originates from the focused emulator surface and reaches
     // the daemon terminal session.
     const sendInputBytes = (data: string) => {
+      liveRef.current.actions.onFocusInput(liveRef.current.pane);
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "input", data }));
@@ -1543,6 +1555,9 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     };
 
     const inputDisposable = terminal.onData(sendInputBytes);
+    const markFocusedTerminal = () => liveRef.current.actions.onFocusInput(liveRef.current.pane);
+    container.addEventListener("focusin", markFocusedTerminal);
+    container.addEventListener("pointerdown", markFocusedTerminal);
 
     const keydownFallback = (event: KeyboardEvent) => {
       if (!container.offsetParent || container.contains(document.activeElement)) {
@@ -1584,6 +1599,7 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       }
       if (data !== null) {
         event.preventDefault();
+        liveRef.current.actions.onFocusInput(liveRef.current.pane);
         sendInputBytes(data);
       }
     };
@@ -1669,6 +1685,8 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
         window.clearTimeout(resizeTimer);
       }
       window.removeEventListener("keydown", keydownFallback);
+      container.removeEventListener("focusin", markFocusedTerminal);
+      container.removeEventListener("pointerdown", markFocusedTerminal);
       inputDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
