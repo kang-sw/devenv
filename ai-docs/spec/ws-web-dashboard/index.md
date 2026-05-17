@@ -414,6 +414,12 @@ that pinned tab.
 The text pane does not provide save, dirty-state, formatting, rename, delete,
 move, copy, conflict handling, or language-server behavior.
 
+> [!note] Planned 🚧
+> Long read-only file content will scroll inside the text pane without moving
+> the top-level browser document, displacing dashboard chrome, or requiring a
+> future editor replacement to prove containment.
+> {#260517-ws-dashboard-readonly-text-scroll-containment}
+
 ## File Open Placement Policy {#260516-ws-web-dashboard-file-open-placement-policy}
 
 File-open commands from the workRoot file explorer use workbench placement
@@ -491,6 +497,15 @@ left/right cursor movement, command history navigation, Ctrl-C, Ctrl-D or EOF
 where safe, Ctrl-L or clear-screen behavior, paste, and ordinary prompt editing
 inside a real shell.
 {#260516-ws-web-dashboard-terminal-websocket-input-fidelity}
+
+> [!note] Planned 🚧
+> Focused terminal panes will preserve native terminal input fidelity for IME
+> composition and shell line editing. Committed Korean IME text reaches the
+> daemon PTY through the live terminal path, composition-in-progress keystrokes
+> are not forwarded as raw bytes by fallback browser handlers, and shell editing
+> controls such as `ctrl-u` and `ctrl-w` produce their native shell-visible
+> effects.
+> {#260517-ws-dashboard-terminal-ime-and-line-editing-fidelity}
 
 ## Terminal Shell Selection Portability {#260516-ws-web-dashboard-terminal-shell-selection-portability}
 
