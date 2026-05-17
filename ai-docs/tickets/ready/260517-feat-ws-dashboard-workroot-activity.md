@@ -10,6 +10,7 @@ spec:
   - 260517-ws-dashboard-workroot-activity-pane
 skeletons:
   phase-1: 43049cb
+  phase-3: 5757bcf
 plans:
   phase-1: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-1
   phase-2: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-2
