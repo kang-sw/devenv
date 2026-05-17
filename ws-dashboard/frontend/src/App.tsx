@@ -16,6 +16,7 @@ import {
   workbenchPaneDragMimeType,
   surfaceLogicalKey,
   workbenchGroupId,
+  DockviewWorkbenchLayout,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
@@ -1151,22 +1152,14 @@ function WorkbenchShell({
       />
       {error ? <InlineNotice tone="error" title="Refresh failed" detail={error} /> : null}
       {loading ? <InlineNotice tone="info" title="Refreshing" detail="resources" /> : null}
-      <div className="workbench-splits" aria-label="Default two-split workbench preset">
-        {editorGroups.map((group) => (
-          <WorkbenchEditorGroup
-            activePaneId={activePaneByGroup[group.id]}
-            draggedPaneId={draggedPaneId}
-            group={group}
-            key={group.id}
-            onDragEnd={() => setDraggedPaneId(null)}
-            onDragStart={(paneId) => setDraggedPaneId(paneId)}
-            onMovePane={movePane}
-            onSelectPane={(paneId) =>
-              setActivePaneByGroup((current) => selectWorkbenchPane(current, group.id, paneId))
-            }
-          />
-        ))}
-      </div>
+      <DockviewWorkbenchLayout
+        activePaneByGroup={activePaneByGroup}
+        groups={editorGroups}
+        onMovePane={movePane}
+        onSelectPane={(groupId, paneId) =>
+          setActivePaneByGroup((current) => selectWorkbenchPane(current, groupId, paneId))
+        }
+      />
     </div>
   );
 }

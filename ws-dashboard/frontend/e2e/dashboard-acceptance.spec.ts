@@ -143,6 +143,15 @@ function terminalTabs(page: Page) {
   return page.getByRole("tab").filter({ hasText: "Terminal" });
 }
 
+async function expectDockviewWorkbench(page: Page) {
+  const owner = page.locator('[data-workbench-layout-owner="dockview"]');
+  await expect(owner).toBeVisible();
+  // CONTRACT: The visible workbench must be backed by Dockview, not the retired
+  // custom `.workbench-splits > .workbench-group` tab/split shell.
+  await expect(owner.locator(".dv-dockview")).toBeVisible();
+  await expect(page.locator(".workbench-splits > .workbench-group")).toHaveCount(0);
+}
+
 // The terminal pane footer renders `<status> · <columns>x<rows>` from the
 // daemon-confirmed session size, so it reflects forwarded PTY resizes.
 async function terminalColumns(page: Page): Promise<number> {
@@ -198,6 +207,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.locator('[data-command-id="workRoot.open"]').click();
 
     await expect(page.locator(".file-explorer-title")).toContainText(workRootDisplayName(workRoot));
+    await expectDockviewWorkbench(page);
     note("open workRoot: live opened workRoot is selected and shown in the explorer");
   });
 
@@ -270,6 +280,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(pane.locator(".readonly-text-content")).toContainText(
       "ws-dashboard browser gate fixture",
     );
+    await expectDockviewWorkbench(page);
     await expect(pane.locator(".readonly-text-pane-badges")).toContainText("read-only");
     await expect(page.locator(".workbench-pane-header")).toHaveCount(0);
     await expect(page.locator(".workbench-pane-status")).toHaveCount(0);
@@ -286,6 +297,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // WebSocket events around this block; use a real shell prompt rather than
     // fixture-only assertions.
     await page.locator('[data-command-id="terminal.create"]').click();
+    await expectDockviewWorkbench(page);
     await terminalSurface(page);
     await expect(terminalTabs(page)).toHaveCount(1);
     await expect(page.locator(".workbench-pane-header")).toHaveCount(0);
