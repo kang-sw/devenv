@@ -145,6 +145,14 @@ hotfix preserved existing printable fallback behavior because removing it
 regressed browser terminal input. Verification passed `npm run test:terminals`,
 `npm run build`, and `npm run test:browser`.
 
+#### Edition (dde2e06) - 2026-05-17
+
+Flattened Dockview workbench tab chrome so the custom tab content no longer
+draws a second active background box inside Dockview's own tab wrapper. The
+active background and accent line now belong to the Dockview tab wrapper while
+the custom tab remains a transparent icon/title/close content layer.
+Verification passed `npm run build` and `npm run test:browser`.
+
 ### Phase 2: Stabilize tab insertion and focus policy
 
 Define where newly opened file and terminal tabs appear. New tabs should not
