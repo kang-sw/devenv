@@ -155,8 +155,8 @@ mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
 
 The dashboard frontend presents a `left nav | workRoot workbench` shell. The
 left navigation selects server, workspace, and concrete workRoot locations,
-while each opened workRoot owns a constrained workbench area backed by a
-dashboard-owned adapter over the selected layout library.
+while each opened workRoot owns a constrained Dockview-backed workbench area
+behind a dashboard-owned adapter.
 
 The workbench uses sibling split groups with compact editor-like tab strips and
 dominant pane bodies. Pinned and opened concepts remain dashboard model
@@ -192,13 +192,11 @@ changes browser arrangement state only: floating/popout groups stay disabled,
 daemon-backed lifecycle stays separate, and PTY/TUI logical dimensions do not
 continuously follow visual drag resizing.
 
-> [!note] Planned 🚧
-> The visible workbench layout will be corrected so the selected layout library
-> is the rendered layout owner for workbench groups, tabs, split sizing, and
-> pane attachment. Dashboard-owned policy will still own surface identity,
-> duplicate-open focus, placement, close behavior, and restore sanitization.
-> Browser acceptance must distinguish "tabs appear" from "the selected layout
-> substrate owns the visible workbench layout."
+Dockview owns the visible workbench group, tab, split-sizing, and pane
+attachment layout. Dashboard-owned policy still owns surface identity,
+duplicate-open focus, placement, close behavior, restore sanitization, and the
+choice to flatten pinned/opened row concepts into Dockview-compatible tab
+metadata when a two-row custom tab shell would compete with Dockview ownership.
 
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
@@ -238,6 +236,12 @@ rendering, resize behavior, close-as-terminate, reconnect or reload
 reconstruction, and timing evidence showing local keystroke echo is no longer
 bounded by the former polling interval.
 {#260516-ws-web-dashboard-terminal-websocket-browser-gate}
+
+For workbench layout changes, the browser gate also proves that the visible
+workbench is Dockview-backed rather than a parallel custom tab/split shell. The
+assertion checks for the dashboard's stable Dockview owner marker and Dockview
+DOM beneath it, and it rejects the retired `.workbench-splits > .workbench-group`
+layout as the visible workbench authority.
 
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
