@@ -8,8 +8,10 @@ related:
 spec:
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
   - 260516-ws-web-dashboard-readonly-text-pane
+  - 260517-ws-dashboard-readonly-text-scroll-containment
   - 260516-ws-web-dashboard-browser-terminal-emulator-behavior
   - 260516-ws-web-dashboard-terminal-websocket-input-fidelity
+  - 260517-ws-dashboard-terminal-ime-and-line-editing-fidelity
 related-mental-model:
   - ws-web-dashboard
 ---
