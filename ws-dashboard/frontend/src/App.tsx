@@ -11,6 +11,7 @@ import {
   applyWorkbenchPaneOrder,
   commitWorkbenchPaneMoveIntoDynamicGroup,
   reconcileActiveWorkbenchPanes,
+  reconcileDashboardGroupsForPlacement,
   selectWorkbenchPane,
   surfaceLogicalKey,
   workbenchGroupId,
@@ -265,10 +266,12 @@ export function App() {
         return;
       }
 
+      const groupsForPlacement =
+        workbenchGroupsByRoot[workRoot.id] ?? initialWorkbenchGroups;
       const placement = decideSurfaceOpenWithDynamicGroups(
         readOnlyFilePlacementState(
           readOnlyFilePanes,
-          workbenchGroupsByRoot[workRoot.id] ?? initialWorkbenchGroups,
+          groupsForPlacement,
           paneOrderByRoot[workRoot.id] ?? {},
           readOnlyFilePaneOrderByGroup,
         ),
@@ -279,6 +282,16 @@ export function App() {
             pane.id as WorkbenchPlacementState["attachments"][number]["attachmentId"],
         },
       );
+
+      if (placement.type === "openNew" && placement.createdGroupId) {
+        setWorkbenchGroupsByRoot((current) => ({
+          ...current,
+          [workRoot.id]: reconcileDashboardGroupsForPlacement(
+            current[workRoot.id] ?? groupsForPlacement,
+            placement,
+          ),
+        }));
+      }
 
       setReadOnlyFilePanes((current) => {
         const next = { ...current };

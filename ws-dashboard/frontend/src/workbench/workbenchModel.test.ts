@@ -25,6 +25,7 @@ import {
   serializeWorkbenchLayout,
   type WorkbenchLayoutState,
 } from "./layoutSerialization.js";
+import { reconcileDashboardGroupsForPlacement } from "./placementGroups.js";
 import {
   decideSurfaceClose,
   decideSurfaceCloseConfirmation,
@@ -820,6 +821,46 @@ assertDeepEqual(
     createdGroupId: "group-2",
   },
   "dynamic placement creates group 2 for editor/file opens when only group 1 exists",
+);
+const oneGroupEditorPlacement = decideSurfaceOpenWithDynamicGroups(
+  { groups: [{ groupId: groupOne }], attachments: [] },
+  {
+    surfaceKind: "editor",
+    logicalKey: nestedFileKey,
+    attachmentId: attachmentId("att-main-rs"),
+  },
+);
+assertDeepEqual(
+  reconcileDashboardGroupsForPlacement(
+    [{ id: "group-1", label: "group 1" }],
+    oneGroupEditorPlacement,
+  ),
+  [
+    { id: "group-1", label: "group 1" },
+    { id: "group-2", label: "group 2" },
+  ],
+  "read-only App wiring persists policy-created group 2 from group-1-only placement",
+);
+assertDeepEqual(
+  reconcileDashboardGroupsForPlacement(
+    [
+      { id: "group-1", label: "group 1" },
+      { id: "group-2", label: "custom editors" },
+    ],
+    decideSurfaceOpenWithDynamicGroups(
+      { groups: [{ groupId: groupOne }, { groupId: groupTwo }], attachments: [] },
+      {
+        surfaceKind: "editor",
+        logicalKey: surfaceLogicalKey("editor", "root-local-abc", "src/lib.rs"),
+        attachmentId: attachmentId("att-lib-rs"),
+      },
+    ),
+  ),
+  [
+    { id: "group-1", label: "group 1" },
+    { id: "group-2", label: "custom editors" },
+  ],
+  "read-only App wiring preserves existing group labels when no group is created",
 );
 assertDeepEqual(
   decideSurfaceOpenWithDynamicGroups(
