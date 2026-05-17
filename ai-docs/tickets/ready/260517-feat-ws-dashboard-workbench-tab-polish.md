@@ -14,6 +14,10 @@ spec:
   - 260516-ws-web-dashboard-file-open-placement-policy
   - 260516-ws-web-dashboard-terminal-tab-selection-and-empty-initial-state
   - 260516-ws-web-dashboard-terminal-close-termination
+skeletons:
+  phase-1: 013bb1f
+  phase-2: 013bb1f
+  phase-3: 013bb1f
 related-mental-model:
   - ws-web-dashboard
 ---
