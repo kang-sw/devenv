@@ -150,7 +150,6 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
-| `260517-feat-ws-dashboard-workbench-tab-polish` | ready | Polish dashboard workbench tab close, insertion, empty-state, and preview-to-pinned file behavior |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-human-readable-tool-output` | todo | Backlog human-readable defaults for remaining MCP and CLI workflow tool outputs |
@@ -169,12 +168,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
 ## Ticket Queue
-
-- `260517-feat-ws-dashboard-workbench-tab-polish` - implement Dockview-owned
-  tab grouping/chips or pinned-left fallback, hover-only close affordances,
-  session-close confirmation popovers, reversible-pane immediate close,
-  deterministic insertion/focus, preview-to-pinned file tabs, and Playwright
-  browser evidence after the completed Dockview parity and dynamic group work.
 
 ## Session Notes
 

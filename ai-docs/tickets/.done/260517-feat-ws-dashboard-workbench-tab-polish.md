@@ -20,6 +20,7 @@ skeletons:
   phase-3: 013bb1f
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-17
 ---
 
 # ws dashboard workbench tab polish
@@ -125,6 +126,15 @@ and confirm paths. Reversible panes such as read-only editor preview,
 diagnostics, and resource views must close immediately and must not show that
 confirmation popover.
 
+### Result (895aff20) - 2026-05-17
+
+Implemented Dockview-rendered hover-only tab close affordances, cursor-near
+`Yes`/`No` confirmation for live terminal and agent close, immediate close for
+reversible read-only/editor-style panes, and honest empty workbench state
+without fake default panes. The final implementation includes in-repo visual
+tab icons and pinned/opened badge/accent metadata, preserves close-as-terminate
+for confirmed terminal closes, and keeps cancel paths focus-stable.
+
 ### Phase 2: Stabilize tab insertion and focus policy
 
 Define where newly opened file and terminal tabs appear. New tabs should not
@@ -148,6 +158,15 @@ tests plus browser interaction evidence. Browser verification should include a
 desktop screenshot or DOM assertion that pinned tabs remain left-biased or
 grouped and visually separable from opened tabs.
 
+### Result (895aff20) - 2026-05-17
+
+Implemented deterministic Dockview tab presentation and close-after-focus
+behavior on top of the existing dynamic group policy. Terminals continue to
+prefer group 1; read-only file/editor panes prefer group 2; user-created groups
+remain preserved rather than automatic placement targets. Pinned terminal,
+agent, and pinned file tabs are visually distinguished from preview/opened
+tabs through category presentation, badges/icons, and active accent styling.
+
 ### Phase 3: Add preview-to-pinned file tabs
 
 Implement read-only file preview mode for file explorer opens. A single click
@@ -160,3 +179,12 @@ Success means preview replacement, double-click pinning, duplicate pinned-file
 focus, and selected-workRoot scoping are all deterministic. The browser gate
 should prove the interaction with real daemon-served file content and include
 visual/DOM evidence for tab state.
+
+### Result (895aff20) - 2026-05-17
+
+Implemented read-only file preview and pinning behavior: single-click opens or
+replaces the selected workRoot preview tab, double-click pins a stable
+path-keyed file tab, reopening a pinned file focuses the existing tab, and
+stale async preview responses are guarded so a replaced preview cannot show the
+wrong file. Playwright coverage exercises preview replacement, pinned tab
+presentation, and real daemon-served file content.

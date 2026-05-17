@@ -103,7 +103,7 @@ The MVP should cover:
 - `260517-bug-ws-dashboard-dockview-dynamic-groups` - done; make Dockview split
   drops create durable dynamic dashboard groups, with initial two-group defaults
   and constrained automatic placement policy.
-- `260517-feat-ws-dashboard-workbench-tab-polish` - todo; polish workbench tab
+- `260517-feat-ws-dashboard-workbench-tab-polish` - done; polish workbench tab
   close affordances, insertion/focus policy, empty-state cleanup, and
   preview-to-pinned read-only file behavior after Dockview workbench parity is
   restored and before introducing a richer editor library.
