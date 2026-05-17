@@ -173,8 +173,8 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 - `260517-feat-ws-dashboard-workroot-activity` - implement Phase 1 first:
-  daemon-owned read-only named-agent/wsstate projection for opened workRoots.
-  Later phases add the top-bar badge and group-1 activity pane.
+  done. Next slice is Phase 2: top-bar activity badge projection using the
+  daemon projection from Phase 1 while preserving toolbar height.
 
 ## Session Notes
 

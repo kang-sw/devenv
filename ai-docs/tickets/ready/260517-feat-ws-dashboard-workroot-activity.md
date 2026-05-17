@@ -10,6 +10,8 @@ spec:
   - 260517-ws-dashboard-workroot-activity-pane
 skeletons:
   phase-1: 43049cb
+plans:
+  phase-1: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-1
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
@@ -89,6 +91,26 @@ The projection should derive from wsstate/wsagent state rather than introducing
 a parallel dashboard cache. Missing, malformed, or stale agent records should
 produce bounded unavailable or diagnostic states instead of failing the whole
 workRoot activity response.
+
+### Result (7c49130) - 2026-05-17
+
+Implemented the authenticated
+`GET /api/dashboard/work-roots/{workRootId}/activity` route for opened
+workRoots. The daemon now derives wsstate-compatible Git worktree agent
+directories, scans read-only named-agent metadata and current-call state, and
+returns bounded `WorkRootActivityView` rows without exposing host paths, cache
+paths, session ids, pids, or stream paths.
+
+Malformed or missing agent/current-call records degrade individual rows rather
+than failing the whole route. Non-Git, bare-repository, or no-agent workRoots
+return an empty `ok` projection for Phase 1. Verification covered daemon route
+auth, unknown roots, empty projections, fixture agent records, malformed rows,
+linked-worktree layout, Windows/non-UTF-8 hash compatibility, and frontend route
+helpers.
+
+Forward: consider a shared daemon Git subprocess/path-discovery seam before more
+features duplicate Git probing logic; review accepted keeping that refactor out
+of Phase 1.
 
 ### Phase 2: Add top-bar activity badge projection
 
