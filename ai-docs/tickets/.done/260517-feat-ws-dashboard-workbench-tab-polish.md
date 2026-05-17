@@ -177,6 +177,17 @@ remain preserved rather than automatic placement targets. Pinned terminal,
 agent, and pinned file tabs are visually distinguished from preview/opened
 tabs through category presentation, badges/icons, and active accent styling.
 
+#### Edition (3005aa6f) - 2026-05-17
+
+Persisted dashboard group creation when read-only/editor placement policy
+creates group 2 from a group-1-only workbench. Before this follow-up,
+`openReadOnlyFile` consumed the placement decision's target group but did not
+store the created group in `workbenchGroupsByRoot`, so preview-to-pinned flows
+could later fall back to group 1 when rendering read-only panes. The hotfix
+adds a focused workbench helper/test for preserving policy-created group 2.
+Verification passed `npm run test:workbench`, `npm run build`, and
+`npm run test:browser`.
+
 ### Phase 3: Add preview-to-pinned file tabs
 
 Implement read-only file preview mode for file explorer opens. A single click
