@@ -192,6 +192,14 @@ changes browser arrangement state only: floating/popout groups stay disabled,
 daemon-backed lifecycle stays separate, and PTY/TUI logical dimensions do not
 continuously follow visual drag resizing.
 
+> [!note] Planned 🚧
+> The visible workbench layout will be corrected so the selected layout library
+> is the rendered layout owner for workbench groups, tabs, split sizing, and
+> pane attachment. Dashboard-owned policy will still own surface identity,
+> duplicate-open focus, placement, close behavior, and restore sanitization.
+> Browser acceptance must distinguish "tabs appear" from "the selected layout
+> substrate owns the visible workbench layout."
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
