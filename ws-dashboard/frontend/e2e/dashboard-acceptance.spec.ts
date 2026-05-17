@@ -495,17 +495,77 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
-  // CONTRACT: Phase 3 must add a browser-gate step here proving the Activity
-  // badge opens or focuses exactly one WorkRoot Activity pane in group 1,
-  // duplicate badge clicks do not create duplicate panes, the pane closes
-  // immediately with no confirmation popover, and running-command rows are
-  // absent or explicitly empty until the async exec source exists.
-  // Browser-gate selectors for the implementation slice:
-  // - opener: `[data-command-id="workbench.openActivity"].workbench-activity-badge`
-  // - pane: `[data-surface-kind="workRootActivity"][data-workbench-group-id="group-1"]`
-  // - tab/title: `.workbench-tab-title`, `aria-label="Activity: WorkRoot Activity"`
-  // - body: `.workroot-activity-pane`
-  // - empty running commands: `[data-running-commands-state="empty"]`
+  // --- Top-bar badge opens/focuses/closes the WorkRoot Activity pane -----
+  // CONTRACT: The Activity badge opens or focuses exactly one WorkRoot Activity
+  // pane in group 1, duplicate badge clicks do not create duplicate panes, the
+  // pane closes immediately with no confirmation popover, and running-command
+  // rows stay explicitly empty until the async exec source exists.
+  await test.step("activity badge opens, focuses, and closes the WorkRoot Activity pane", async () => {
+    const opener = page.locator(
+      '[data-command-id="workbench.openActivity"].workbench-activity-badge',
+    );
+    const activityPane = page.locator(
+      '[data-surface-kind="workRootActivity"]',
+    );
+    const activityTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="workRootActivity-pane:"]',
+    );
+    await expect(opener).toHaveCount(1);
+
+    // No Activity pane exists until the badge is clicked.
+    await expect(activityPane).toHaveCount(0);
+
+    // Badge click opens exactly one Activity pane, and it lands in group 1.
+    await opener.click();
+    await expect(activityPane).toHaveCount(1);
+    await expect(activityPane).toHaveAttribute(
+      "data-workbench-group-id",
+      "group-1",
+    );
+    await expect(activityPane).toHaveAttribute(
+      "aria-label",
+      "Activity: WorkRoot Activity",
+    );
+    await expectDockviewWorkbench(page);
+
+    // The pane body is the read-only projection. Running commands are an
+    // explicitly empty section, and the empty/no-agent detail is valid and
+    // visible for the plain-directory gate workRoot.
+    const paneBody = activityPane.locator(".workroot-activity-pane");
+    await expect(paneBody).toBeVisible();
+    await expect(
+      paneBody.locator('[data-running-commands-state="empty"]'),
+    ).toBeVisible();
+    await expect(
+      paneBody.locator('[data-named-agents-state="empty"]'),
+    ).toBeVisible();
+
+    // The Activity tab carries the surface title.
+    await expect(activityTab).toHaveCount(1);
+    await expect(activityTab.locator(".workbench-tab-title")).toHaveText(
+      "WorkRoot Activity",
+    );
+
+    // A second badge click focuses the existing pane without duplicating it.
+    await opener.click();
+    await expect(activityPane).toHaveCount(1);
+    await expect(activityTab).toHaveCount(1);
+
+    // Close is immediate: the hover-only tab close removes the pane with no
+    // cursor-near confirmation popover.
+    await activityTab.hover();
+    await activityTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    await expect(activityPane).toHaveCount(0);
+    await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
+
+    note(
+      "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
+        "a second click focused it without duplicating, and hover-only close " +
+        "removed it immediately with no confirmation popover",
+    );
+  });
 
   // --- Long explorer content stays inside its pane, not the document -----
   await test.step("long explorer content stays within the viewport", async () => {
