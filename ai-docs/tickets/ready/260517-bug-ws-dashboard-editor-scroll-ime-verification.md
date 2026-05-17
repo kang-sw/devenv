@@ -1,6 +1,8 @@
 ---
 title: ws dashboard editor scroll and terminal input fidelity follow-up
 parent: 260514-epic-ws-web-dashboard-mvp
+skeletons:
+  phase-1-2: 70881e5
 related:
   260517-feat-ws-dashboard-workbench-tab-polish: introduced Dockview tab polish and the hotfix that added an IME fallback guard
   260516-epic-ws-web-dashboard-workbench-substrate: owns workbench pane lifecycle, focus, and browser evidence policy
