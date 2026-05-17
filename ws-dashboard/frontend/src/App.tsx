@@ -82,6 +82,7 @@ import {
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
   fetchWorkRootActivity,
+  mergeWorkRootActivityViews,
   workRootActivityBadge,
   type NamedAgentActivityView,
   type WorkRootActivityBadgeInput,
@@ -119,6 +120,8 @@ const resourceEndpoint = "/api/dashboard/resources";
 // immediately). A snappy interval keeps keystroke echo latency low; idle polls
 // are guarded below so they do not re-render the workbench.
 const terminalOutputPollIntervalMs = 120;
+const workRootActivityRefreshIntervalMs = 3_000;
+const workRootActivityRecentRefreshLimit = 30;
 const initialWorkbenchGroups = [
   { id: "group-1", label: "group 1" },
   { id: "group-2", label: "group 2" },
@@ -1081,6 +1084,9 @@ function WorkbenchShell({
   const activePaneByGroup = selectedWorkRootId
     ? (activePaneByRoot[selectedWorkRootId] ?? {})
     : {};
+  const activityPaneOpenForSelected = selectedWorkRootId
+    ? (activityPaneOpenByRoot[selectedWorkRootId] ?? false)
+    : false;
 
   const setActivePaneByGroupForSelected = (
     next:
@@ -1202,6 +1208,70 @@ function WorkbenchShell({
       cancelled = true;
     };
   }, [workbenchModel?.root.id]);
+
+  // Hotfix live refresh: while the Activity pane is open, poll only recently
+  // modified agent records and merge them into the full initial projection.
+  // This keeps newly registered/called agents visible without re-fetching a
+  // monotonically growing full list on every interval.
+  useEffect(() => {
+    const rootId = workbenchModel?.root.id;
+    if (!rootId || !activityPaneOpenForSelected) {
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    const refreshRecentActivity = () => {
+      if (cancelled || inFlight || document.hidden) {
+        return;
+      }
+      inFlight = true;
+      void fetchWorkRootActivity(rootId, {
+        recentLimit: workRootActivityRecentRefreshLimit,
+      })
+        .then((view) => {
+          if (cancelled) {
+            return;
+          }
+          setWorkRootActivityState((current) => {
+            if (current.rootId !== rootId) {
+              return current;
+            }
+            if (current.activity.phase !== "ready") {
+              return { rootId, activity: { phase: "ready", view } };
+            }
+            return {
+              rootId,
+              activity: {
+                phase: "ready",
+                view: mergeWorkRootActivityViews(current.activity.view, view),
+              },
+            };
+          });
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+
+    refreshRecentActivity();
+    const timer = window.setInterval(
+      refreshRecentActivity,
+      workRootActivityRefreshIntervalMs,
+    );
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshRecentActivity();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [workbenchModel?.root.id, activityPaneOpenForSelected]);
 
   // The output poll reads live terminal sessions from a ref so the polling
   // interval stays stable across renders. Depending the interval on

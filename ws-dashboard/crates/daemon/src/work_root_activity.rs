@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -25,11 +26,18 @@ const DIAG_STATUS_UNRECOGNIZED: &str = "agent status unrecognized";
 const DIAG_CURRENT_CALL_UNREADABLE: &str = "current call state unreadable";
 
 const STATUS_UNAVAILABLE: &str = "unavailable";
+const MAX_RECENT_ACTIVITY_LIMIT: usize = 30;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkRootActivityError {
     error: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkRootActivityQuery {
+    recent_limit: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -58,6 +66,16 @@ impl WorkRootActivityProjector {
         work_root_id: WorkRootId,
         root_path: &Path,
     ) -> WorkRootActivityView {
+        self.project_with_recent_limit(work_root_id, root_path, None)
+            .await
+    }
+
+    pub async fn project_with_recent_limit(
+        &self,
+        work_root_id: WorkRootId,
+        root_path: &Path,
+        recent_limit: Option<usize>,
+    ) -> WorkRootActivityView {
         // CONTRACT: Phase 1 reads wsstate/wsagent agent records for this opened
         // workRoot through daemon-owned projection logic. Browser callers never
         // receive cache paths, host paths, session ids, pids, or stream paths.
@@ -67,8 +85,14 @@ impl WorkRootActivityProjector {
         // worker thread.
         let cache_home = self.cache_home.clone();
         let root_path = root_path.to_path_buf();
+        let recent_limit = normalize_recent_activity_limit(recent_limit);
         tokio::task::spawn_blocking(move || {
-            project_blocking(work_root_id, &root_path, cache_home.as_deref())
+            project_blocking(
+                work_root_id,
+                &root_path,
+                cache_home.as_deref(),
+                recent_limit,
+            )
         })
         .await
         .expect("workRoot activity projection task panicked")
@@ -78,6 +102,7 @@ impl WorkRootActivityProjector {
 pub async fn work_root_activity(
     State(state): State<AppState>,
     AxumPath(work_root_id): AxumPath<String>,
+    Query(query): Query<WorkRootActivityQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
     let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
@@ -87,10 +112,16 @@ pub async fn work_root_activity(
     Json(
         state
             .work_root_activity
-            .project(work_root_id, &root_path)
+            .project_with_recent_limit(work_root_id, &root_path, query.recent_limit)
             .await,
     )
     .into_response()
+}
+
+fn normalize_recent_activity_limit(limit: Option<usize>) -> Option<usize> {
+    limit
+        .filter(|limit| *limit > 0)
+        .map(|limit| limit.min(MAX_RECENT_ACTIVITY_LIMIT))
 }
 
 fn activity_error(status: StatusCode, message: &str) -> Response {
@@ -122,22 +153,18 @@ pub fn resolve_work_root_agents_dir(cache_home: &Path, root_path: &Path) -> Opti
         let worktree_id = short_hash(&canonical_path_bytes(&identity.worktree_root));
         format!("{project_key}@{worktree_id}")
     };
-    Some(
-        cache_home
-            .join("proj")
-            .join(worktree_key)
-            .join("agents"),
-    )
+    Some(cache_home.join("proj").join(worktree_key).join("agents"))
 }
 
 fn project_blocking(
     work_root_id: WorkRootId,
     root_path: &Path,
     cache_home: Option<&Path>,
+    recent_limit: Option<usize>,
 ) -> WorkRootActivityView {
     let agents = resolve_cache_root(cache_home)
         .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
-        .map(|agents_dir| scan_named_agents(&agents_dir))
+        .map(|agents_dir| scan_named_agents(&agents_dir, recent_limit))
         .unwrap_or_default();
 
     let summary = summarize(&agents);
@@ -170,14 +197,17 @@ fn summarize(agents: &[NamedAgentActivityView]) -> WorkRootActivitySummary {
 
 /// Scan `<worktree>/agents` for `agents/*/agent.json` plus optional
 /// `current/state.json`, mapping each directory into a bounded row.
-fn scan_named_agents(agents_dir: &Path) -> Vec<NamedAgentActivityView> {
+fn scan_named_agents(
+    agents_dir: &Path,
+    recent_limit: Option<usize>,
+) -> Vec<NamedAgentActivityView> {
     let Ok(entries) = std::fs::read_dir(agents_dir) else {
         // No agents directory yet (or unreadable): an empty, healthy
         // projection rather than a route failure.
         return Vec::new();
     };
 
-    let mut rows = Vec::new();
+    let mut agent_dirs = Vec::new();
     for entry in entries.flatten() {
         let Ok(file_type) = entry.file_type() else {
             continue;
@@ -189,10 +219,63 @@ fn scan_named_agents(agents_dir: &Path) -> Vec<NamedAgentActivityView> {
         if agent_key.is_empty() {
             continue;
         }
-        rows.push(named_agent_row(&entry.path(), agent_key));
+        let agent_dir = entry.path();
+        agent_dirs.push(RecentAgentDir {
+            modified_at: agent_record_modified_at(&agent_dir),
+            agent_key,
+            agent_dir,
+        });
     }
+
+    if let Some(limit) = recent_limit {
+        // CONTRACT: hot-path refreshes can ask for only the recently changed
+        // rows. Use portable filesystem modification times from the agent dir
+        // plus key child files instead of platform-specific watchers here.
+        agent_dirs.sort_by(|left, right| {
+            right
+                .modified_at
+                .cmp(&left.modified_at)
+                .then_with(|| left.agent_key.cmp(&right.agent_key))
+        });
+        agent_dirs.truncate(limit);
+    }
+
+    let mut rows = agent_dirs
+        .into_iter()
+        .map(|entry| named_agent_row(&entry.agent_dir, entry.agent_key))
+        .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
     rows
+}
+
+struct RecentAgentDir {
+    agent_key: String,
+    agent_dir: PathBuf,
+    modified_at: SystemTime,
+}
+
+fn agent_record_modified_at(agent_dir: &Path) -> SystemTime {
+    let mut latest = modified_at(agent_dir);
+    for relative in [
+        "agent.json",
+        "output.md",
+        "current/state.json",
+        "current/runtime.jsonl",
+        "current/stdout",
+        "current/stderr",
+    ] {
+        let candidate = modified_at(&agent_dir.join(relative));
+        if candidate > latest {
+            latest = candidate;
+        }
+    }
+    latest
+}
+
+fn modified_at(path: &Path) -> SystemTime {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .unwrap_or(UNIX_EPOCH)
 }
 
 fn named_agent_row(agent_dir: &Path, agent_key: String) -> NamedAgentActivityView {
@@ -301,7 +384,10 @@ fn agent_status(raw: &str) -> (String, Option<&'static str>) {
     match raw {
         "idle" | "running" | "blocked" | "failed" | "erased" => (raw.to_owned(), None),
         "" => (STATUS_UNAVAILABLE.to_owned(), Some(DIAG_STATUS_UNAVAILABLE)),
-        _ => (STATUS_UNAVAILABLE.to_owned(), Some(DIAG_STATUS_UNRECOGNIZED)),
+        _ => (
+            STATUS_UNAVAILABLE.to_owned(),
+            Some(DIAG_STATUS_UNRECOGNIZED),
+        ),
     }
 }
 

@@ -1,7 +1,9 @@
 import {
   fetchWorkRootActivity,
+  mergeWorkRootActivityViews,
   workRootActivityBadge,
   workRootActivityEndpoint,
+  type NamedAgentActivityView,
   type WorkRootActivitySummary,
   type WorkRootActivityView,
 } from "./workRootActivity.js";
@@ -9,6 +11,14 @@ import {
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
     throw new Error(`${label}: expected ${String(expected)}, got ${String(actual)}`);
+  }
+}
+
+function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
+  const actualJson = JSON.stringify(actual);
+  const expectedJson = JSON.stringify(expected);
+  if (actualJson !== expectedJson) {
+    throw new Error(`${label}: expected ${expectedJson}, got ${actualJson}`);
   }
 }
 
@@ -31,14 +41,19 @@ assertEqual(
   "/api/dashboard/work-roots/root%2Flocal%20test/activity",
   "activity endpoint addresses an encoded opaque workRoot id",
 );
+assertEqual(
+  workRootActivityEndpoint("root-local-abc", { recentLimit: 30 }),
+  "/api/dashboard/work-roots/root-local-abc/activity?recentLimit=30",
+  "activity endpoint encodes a recent-limit refresh query",
+);
 
 const originalFetch = globalThis.fetch;
 try {
   globalThis.fetch = (async (input, init) => {
     assertEqual(
       String(input),
-      "/api/dashboard/work-roots/root-local-abc/activity",
-      "fetch helper uses the WorkRoot Activity endpoint",
+      "/api/dashboard/work-roots/root-local-abc/activity?recentLimit=30",
+      "fetch helper uses the recent-limit WorkRoot Activity endpoint",
     );
     assertEqual(
       (init?.headers as Record<string, string>).Accept,
@@ -57,7 +72,9 @@ try {
     });
   }) as typeof fetch;
 
-  const activity = await fetchWorkRootActivity("root-local-abc");
+  const activity = await fetchWorkRootActivity("root-local-abc", {
+    recentLimit: 30,
+  });
   assertEqual(activity.workRootId, "root-local-abc", "fetch helper returns the daemon view");
   assertEqual(activity.summary.total, 0, "Phase 1 no-agent summary can be consumed");
 
@@ -95,6 +112,66 @@ function activityView(
     agents: partial.agents ?? [],
   };
 }
+
+function activityAgent(
+  partial: Partial<NamedAgentActivityView> & { agentId: string },
+): NamedAgentActivityView {
+  return {
+    agentId: partial.agentId,
+    name: partial.name ?? partial.agentId,
+    backend: partial.backend ?? null,
+    harness: partial.harness ?? null,
+    tier: partial.tier ?? null,
+    model: partial.model ?? null,
+    effort: partial.effort ?? null,
+    status: partial.status ?? "idle",
+    lastCallAt: partial.lastCallAt ?? null,
+    sessionPresent: partial.sessionPresent ?? false,
+    currentCall: partial.currentCall ?? null,
+    detailHints: partial.detailHints ?? [],
+    diagnostics: partial.diagnostics ?? [],
+  };
+}
+
+const mergedActivity = mergeWorkRootActivityViews(
+  activityView({
+    summary: { total: 2, active: 1 },
+    agents: [
+      activityAgent({ agentId: "agent-a", status: "running" }),
+      activityAgent({ agentId: "agent-b", status: "idle" }),
+    ],
+  }),
+  activityView({
+    summary: { total: 2, blocked: 1, unavailable: 1 },
+    agents: [
+      activityAgent({ agentId: "agent-b", status: "blocked" }),
+      activityAgent({
+        agentId: "agent-c",
+        status: "unavailable",
+        diagnostics: ["agent status unavailable"],
+      }),
+    ],
+  }),
+);
+assertDeepEqual(
+  mergedActivity.agents.map((agent) => [agent.agentId, agent.status]),
+  [
+    ["agent-a", "running"],
+    ["agent-b", "blocked"],
+    ["agent-c", "unavailable"],
+  ],
+  "recent activity refresh merges updated and new agents by id",
+);
+assertDeepEqual(
+  mergedActivity.summary,
+  { total: 3, active: 1, blocked: 1, failed: 0, unavailable: 1 },
+  "recent activity refresh recomputes the merged summary",
+);
+assertEqual(
+  mergedActivity.status,
+  "degraded",
+  "recent activity refresh preserves degraded status from merged diagnostics",
+);
 
 const loadingBadge = workRootActivityBadge({ phase: "loading" });
 assertEqual(loadingBadge.tone, "loading", "loading badge uses the loading tone");

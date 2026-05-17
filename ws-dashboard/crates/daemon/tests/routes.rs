@@ -1177,7 +1177,10 @@ fn run_git(path: &Path, args: &[&str]) {
 
 fn init_git_repo(path: &Path) {
     run_git(path, &["init"]);
-    run_git(path, &["config", "user.email", "ws-dashboard@example.local"]);
+    run_git(
+        path,
+        &["config", "user.email", "ws-dashboard@example.local"],
+    );
     run_git(path, &["config", "user.name", "ws dashboard"]);
 }
 
@@ -1218,10 +1221,23 @@ async fn fetch_work_root_activity(
     cookie: &str,
     work_root_id: &str,
 ) -> (StatusCode, String) {
+    fetch_work_root_activity_path(
+        app,
+        cookie,
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity"),
+    )
+    .await
+}
+
+async fn fetch_work_root_activity_path(
+    app: axum::Router,
+    cookie: &str,
+    path: &str,
+) -> (StatusCode, String) {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/api/dashboard/work-roots/{work_root_id}/activity"))
+                .uri(path)
                 .header(header::COOKIE, cookie)
                 .body(Body::empty())
                 .expect("workRoot activity request"),
@@ -1356,8 +1372,7 @@ async fn work_root_activity_route_projects_named_agent_records() {
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
 
-    let (status, body_text) =
-        fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
     assert_eq!(status, StatusCode::OK);
     let value: serde_json::Value =
         serde_json::from_str(&body_text).expect("named-agent activity JSON");
@@ -1452,6 +1467,56 @@ async fn work_root_activity_route_projects_named_agent_records() {
 }
 
 #[tokio::test]
+async fn work_root_activity_route_limits_recent_agent_projection() {
+    if skip_without_git("work_root_activity_route_limits_recent_agent_projection") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-recent-limit");
+    let cache_home = temp_fixture_path("work-root-activity-recent-limit-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    for index in 0..5 {
+        write_agent_metadata(
+            &agents_dir,
+            &format!("agent-{index}"),
+            &serde_json::json!({
+                "schema_version": 1,
+                "name": format!("agent-{index}"),
+                "backend": "codex",
+                "status": "idle"
+            }),
+        );
+    }
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity?recentLimit=2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("recent-limited activity JSON");
+    assert_eq!(value["summary"]["total"], 2);
+    assert_eq!(
+        value["agents"]
+            .as_array()
+            .expect("recent-limited agents array")
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
 async fn work_root_activity_route_degrades_malformed_records() {
     if skip_without_git("work_root_activity_route_degrades_malformed_records") {
         return;
@@ -1500,8 +1565,7 @@ async fn work_root_activity_route_degrades_malformed_records() {
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
 
-    let (status, body_text) =
-        fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
     // CONTRACT: malformed records degrade individual rows; the route still
     // succeeds instead of failing the whole projection.
     assert_eq!(status, StatusCode::OK);
@@ -1572,8 +1636,9 @@ async fn work_root_activity_route_degrades_malformed_records() {
 
 #[tokio::test]
 async fn work_root_activity_route_returns_empty_for_git_workroot_without_agents_dir() {
-    if skip_without_git("work_root_activity_route_returns_empty_for_git_workroot_without_agents_dir")
-    {
+    if skip_without_git(
+        "work_root_activity_route_returns_empty_for_git_workroot_without_agents_dir",
+    ) {
         return;
     }
     // A Git workRoot resolves a wsstate layout, but no `agents/` directory has
@@ -1591,8 +1656,7 @@ async fn work_root_activity_route_returns_empty_for_git_workroot_without_agents_
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
 
-    let (status, body_text) =
-        fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
     assert_eq!(status, StatusCode::OK);
     let value: serde_json::Value =
         serde_json::from_str(&body_text).expect("git no-agents activity JSON");
@@ -1631,13 +1695,17 @@ fn work_root_activity_resolves_git_primary_and_linked_worktree_layout() {
     run_git(&primary, &["commit", "-m", "seed"]);
     run_git(
         &primary,
-        &["worktree", "add", linked.to_str().expect("linked path utf-8")],
+        &[
+            "worktree",
+            "add",
+            linked.to_str().expect("linked path utf-8"),
+        ],
     );
 
     let primary_dir = resolve_work_root_agents_dir(&cache_home, &primary)
         .expect("resolve primary worktree layout");
-    let linked_dir = resolve_work_root_agents_dir(&cache_home, &linked)
-        .expect("resolve linked worktree layout");
+    let linked_dir =
+        resolve_work_root_agents_dir(&cache_home, &linked).expect("resolve linked worktree layout");
 
     // Layout shape: `<cache>/proj/<key>/agents`.
     assert!(primary_dir.starts_with(&cache_home));
@@ -1657,7 +1725,11 @@ fn work_root_activity_resolves_git_primary_and_linked_worktree_layout() {
         .and_then(|name| name.to_str())
         .expect("primary key utf-8")
         .to_owned();
-    assert_eq!(primary_key.len(), 8, "project key is an 8-hex digest prefix");
+    assert_eq!(
+        primary_key.len(),
+        8,
+        "project key is an 8-hex digest prefix"
+    );
     assert!(
         primary_key.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "project key is hex: {primary_key}"

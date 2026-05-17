@@ -561,13 +561,19 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
 
     await page.route(
-      /\/api\/dashboard\/work-roots\/.*\/activity$/,
+      /\/api\/dashboard\/work-roots\/.*\/activity(?:\?.*)?$/,
       async (route) => {
+        const match = new URL(route.request().url()).pathname.match(
+          /\/api\/dashboard\/work-roots\/([^/]+)\/activity$/,
+        );
+        const requestedWorkRootId = match
+          ? decodeURIComponent(match[1])
+          : "browser-gate-root";
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            workRootId: "browser-gate-root",
+            workRootId: requestedWorkRootId,
             status: "degraded",
             summary: {
               total: 1,

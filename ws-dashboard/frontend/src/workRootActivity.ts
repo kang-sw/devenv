@@ -45,14 +45,28 @@ export type WorkRootActivityView = {
   agents: NamedAgentActivityView[];
 };
 
-export function workRootActivityEndpoint(workRootId: string) {
-  return `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activity`;
+export type WorkRootActivityFetchOptions = {
+  readonly recentLimit?: number;
+};
+
+export function workRootActivityEndpoint(
+  workRootId: string,
+  options: WorkRootActivityFetchOptions = {},
+) {
+  const path = `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activity`;
+  if (options.recentLimit === undefined) {
+    return path;
+  }
+  const params = new URLSearchParams();
+  params.set("recentLimit", String(options.recentLimit));
+  return `${path}?${params.toString()}`;
 }
 
 export async function fetchWorkRootActivity(
   workRootId: string,
+  options: WorkRootActivityFetchOptions = {},
 ): Promise<WorkRootActivityView> {
-  const response = await fetch(workRootActivityEndpoint(workRootId), {
+  const response = await fetch(workRootActivityEndpoint(workRootId, options), {
     headers: { Accept: "application/json" },
   });
 
@@ -61,6 +75,56 @@ export async function fetchWorkRootActivity(
   }
 
   return (await response.json()) as WorkRootActivityView;
+}
+
+export function mergeWorkRootActivityViews(
+  current: WorkRootActivityView,
+  update: WorkRootActivityView,
+): WorkRootActivityView {
+  if (current.workRootId !== update.workRootId) {
+    return update;
+  }
+
+  const agentsById = new Map(
+    current.agents.map((agent) => [agent.agentId, agent] as const),
+  );
+  for (const agent of update.agents) {
+    agentsById.set(agent.agentId, agent);
+  }
+  const agents = Array.from(agentsById.values()).sort((left, right) =>
+    left.agentId.localeCompare(right.agentId),
+  );
+  const summary = summarizeWorkRootActivityAgents(agents);
+  const degraded =
+    current.status === "degraded" ||
+    update.status === "degraded" ||
+    agents.some((agent) => agent.diagnostics.length > 0);
+  return {
+    ...current,
+    status:
+      update.status === "unavailable" ? "unavailable" : degraded ? "degraded" : "ok",
+    summary,
+    agents,
+  };
+}
+
+function summarizeWorkRootActivityAgents(
+  agents: readonly NamedAgentActivityView[],
+): WorkRootActivitySummary {
+  const summary: WorkRootActivitySummary = {
+    total: agents.length,
+    active: 0,
+    blocked: 0,
+    failed: 0,
+    unavailable: 0,
+  };
+  for (const agent of agents) {
+    if (agent.status === "running") summary.active += 1;
+    if (agent.status === "blocked") summary.blocked += 1;
+    if (agent.status === "failed") summary.failed += 1;
+    if (agent.status === "unavailable") summary.unavailable += 1;
+  }
+  return summary;
 }
 
 // CONTRACT: The top-bar activity badge is a compact summary/entrypoint only.
