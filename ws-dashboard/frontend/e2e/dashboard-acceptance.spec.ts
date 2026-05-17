@@ -215,7 +215,7 @@ async function expectDurableDockviewSplitDrop(
   // body midpoint so the preview and resulting group are both observable.
   const owner = page.locator('[data-workbench-layout-owner="dockview"]');
   const movedTab = page
-    .locator('.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]')
+    .locator('.dockview-workbench-tab[data-workbench-pane-id^="readonly"]')
     .first();
   await expect(movedTab).toBeVisible();
   const paneId = await movedTab.getAttribute("data-workbench-pane-id");
@@ -332,7 +332,6 @@ async function documentScrolls(page: Page): Promise<boolean> {
 }
 
 test("dashboard workRoot UI browser acceptance", async ({ page }) => {
-  let splitEvidence: { paneId: string; groupId: string } | null = null;
   const terminalSocketUrls: string[] = [];
   const terminalSocketFrames: string[] = [];
   let terminalOutputPolls = 0;
@@ -443,7 +442,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   });
 
   // --- Open a previewable read-only file ----------------------------------
-  await test.step("open read-only file preview", async () => {
+  await test.step("preview, close, and pin read-only file tabs", async () => {
     const fileRow = page.locator(".file-explorer-row", {
       hasText: "gate-readme.txt",
     });
@@ -460,19 +459,61 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expectDockviewWorkbench(page);
     await expect(pane.locator(".readonly-text-pane-badges")).toContainText(
-      "read-only",
+      "preview",
+    );
+    const previewTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+    );
+    await expect(previewTab).toBeVisible();
+    await expect(previewTab).toHaveAttribute(
+      "data-workbench-tab-close-affordance",
+      "hover-only",
+    );
+    await expect(previewTab).toHaveAttribute(
+      "data-workbench-tab-category-presentation",
+      /dockview-category-chip|pinned-left-badge-fallback/,
+    );
+    const previewClose = previewTab.locator(
+      '[data-command-id="workbench.tab.close"]',
+    );
+    await expect
+      .poll(() =>
+        previewClose.evaluate((node) => getComputedStyle(node).opacity),
+      )
+      .toBe("0");
+    await previewTab.hover();
+    await expect
+      .poll(() =>
+        previewClose.evaluate((node) => getComputedStyle(node).opacity),
+      )
+      .toBe("1");
+    await previewClose.click();
+    await expect(page.locator(".readonly-text-pane")).toHaveCount(0);
+
+    await fileRow.click();
+    await expect(previewTab).toBeVisible();
+    await fileRow.dblclick();
+    const pinnedTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
+    );
+    await expect(pinnedTab).toBeVisible();
+    await expect(previewTab).toHaveCount(0);
+    await expect(pane.locator(".readonly-text-pane-badges")).toContainText(
+      "pinned",
     );
     await expect(page.locator(".workbench-pane-header")).toHaveCount(0);
     await expect(page.locator(".workbench-pane-status")).toHaveCount(0);
-    splitEvidence = await expectDurableDockviewSplitDrop(page);
+    await expect(pinnedTab).toHaveAttribute(
+      "data-workbench-group-id",
+      "group-2",
+    );
     note(
-      "read-only file: previewable file opens a read-only text pane with content and no generic pane chrome",
+      "read-only file: single click opened a replaceable preview, hover-only close immediately removed it, and double click pinned the file in the opened file group",
     );
   });
 
   // --- Dynamic workbench state remains per workRoot ------------------------
   await test.step("dynamic split state is isolated per opened workRoot", async () => {
-    expect(splitEvidence).not.toBeNull();
     if (!secondWorkRoot) {
       note(
         "dynamic groups: second workRoot isolation skipped because external daemon mode did not provide WS_DASHBOARD_TEST_SECOND_WORKROOT",
@@ -480,10 +521,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       return;
     }
     await openWorkRootInBrowser(page, secondWorkRoot);
-    expect(await visibleWorkbenchGroupIds(page)).toEqual([
-      "group-1",
-      "group-2",
-    ]);
+    expect(await visibleWorkbenchGroupIds(page)).toEqual([]);
 
     const secondFileRow = page.locator(".file-explorer-row", {
       hasText: "second-readme.txt",
@@ -498,28 +536,21 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expect(
       page.locator(
-        '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
+        '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
       ),
     ).toHaveAttribute("data-workbench-group-id", "group-2");
-    expect(await visibleWorkbenchGroupIds(page)).toEqual([
-      "group-1",
-      "group-2",
-    ]);
+    expect(await visibleWorkbenchGroupIds(page)).toEqual(["group-2"]);
 
     await selectWorkRootInBrowser(page, workRoot);
     await expect(
-      page.locator(
-        `.dockview-workbench-tab[data-workbench-pane-id="${splitEvidence!.paneId}"]`,
-      ),
-    ).toHaveAttribute("data-workbench-group-id", splitEvidence!.groupId);
-    expect(await visibleWorkbenchGroupIds(page)).toContain(
-      splitEvidence!.groupId,
-    );
+      page.locator('.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]'),
+    ).toHaveAttribute("data-workbench-group-id", "group-2");
+    expect(await visibleWorkbenchGroupIds(page)).toContain("group-2");
     await expect(page.locator(".readonly-text-pane")).toContainText(
       "ws-dashboard browser gate fixture",
     );
     note(
-      "dynamic groups: split group persisted for the first workRoot and did not leak into a second opened workRoot",
+      "dynamic groups: opened-file group placement stayed scoped per workRoot and did not auto-target user-created groups",
     );
   });
 
@@ -781,13 +812,38 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   });
 
   // --- Close terminates the session ---------------------------------------
-  await test.step("close terminal terminates session", async () => {
+  await test.step("terminal tab close confirms then terminates session", async () => {
     await page.locator(".terminal-surface").click();
     await page.keyboard.press("Control+D");
-    await page.locator('[data-command-id="terminal.close"]').click();
+    const activeTerminalTab = page
+      .locator(
+        '.dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
+        { hasText: "Terminal" },
+      )
+      .last();
+    await activeTerminalTab.hover();
+    await activeTerminalTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    const popover = page.locator('[data-workbench-close-popover="cursor-near"]');
+    await expect(popover).toBeVisible();
+    await popover
+      .locator('[data-command-id="workbench.tab.close.cancel"]')
+      .click();
+    await expect(popover).toHaveCount(0);
+    await expect(terminalTabs(page)).toHaveCount(2);
+
+    await activeTerminalTab.hover();
+    await activeTerminalTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    await expect(popover).toBeVisible();
+    await popover
+      .locator('[data-command-id="workbench.tab.close.confirm"]')
+      .click();
     await expect(terminalTabs(page)).toHaveCount(1);
     note(
-      "close: Ctrl-D was delivered safely before explicit terminate removed the tab; one terminal session remains",
+      "close: terminal tab close showed cursor-near No/Yes confirmation; No preserved the tab and Yes terminated one daemon session",
     );
   });
 

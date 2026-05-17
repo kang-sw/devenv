@@ -24,6 +24,7 @@ export type DockviewWorkbenchPane = {
   readonly detail: string;
   readonly meta: readonly string[];
   readonly body?: ReactNode;
+  readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
 };
 
 export type DockviewWorkbenchGroup = {
@@ -66,6 +67,7 @@ type DockviewWorkbenchPanelParams = WorkbenchDockviewPanelParams & {
   readonly detail: string;
   readonly meta: readonly string[];
   readonly body?: ReactNode;
+  readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
 };
 
 const workbenchDockviewComponent = "workbenchPane";
@@ -121,6 +123,7 @@ export function DockviewWorkbenchLayout({
         apiRef.current,
         groups,
         activePaneByGroup,
+        callbacksRef.current.onRequestClosePane,
       );
     } finally {
       queueMicrotask(() => {
@@ -275,6 +278,26 @@ function DockviewWorkbenchTab({
           cursor-near session confirmation without exposing Dockview handles. */}
       <span className="workbench-tab-kind">{registry.label}</span>
       <span className="workbench-tab-title">{api.title ?? params.title}</span>
+      <button
+        aria-label={`Close ${api.title ?? params.title}`}
+        className="workbench-tab-close"
+        data-command-id="workbench.tab.close"
+        tabIndex={-1}
+        type="button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          params.onRequestClosePane?.({
+            groupId: params.groupId,
+            paneId: params.paneId,
+            surfaceKind: params.surfaceKind,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          });
+        }}
+      >
+        ×
+      </button>
     </div>
   );
 }
@@ -283,6 +306,7 @@ function syncDockviewWorkbench(
   api: DockviewApi,
   groups: readonly DockviewWorkbenchGroup[],
   activePaneByGroup: Readonly<Record<string, string>>,
+  onRequestClosePane?: (request: DockviewTabCloseRequest) => void,
 ): ReadonlyMap<string, string> {
   const desiredPaneIds = new Set(
     groups.flatMap((group) => group.panes.map((pane) => pane.id)),
@@ -310,7 +334,7 @@ function syncDockviewWorkbench(
     const activePaneId = activePaneByGroup[group.id] ?? group.panes[0]?.id;
 
     for (const [index, pane] of group.panes.entries()) {
-      const params = toDockviewWorkbenchPanelParams(group, pane);
+      const params = toDockviewWorkbenchPanelParams(group, pane, onRequestClosePane);
       const existingPanel = api.getPanel(pane.id);
 
       if (!existingPanel) {
@@ -334,9 +358,11 @@ function syncDockviewWorkbench(
                   position: {
                     referenceGroup: firstDockGroup,
                     direction:
-                      groupIndex === 0
-                        ? ("within" as const)
-                        : ("right" as const),
+                      groupIndex === 0 && dockGroupByWorkbenchGroup.size > 0
+                        ? ("left" as const)
+                        : groupIndex === 0
+                          ? ("within" as const)
+                          : ("right" as const),
                     index,
                   },
                 }
@@ -426,6 +452,7 @@ function shouldUpdateDockviewWorkbenchPanelParams(
 function toDockviewWorkbenchPanelParams(
   group: DockviewWorkbenchGroup,
   pane: DockviewWorkbenchPane,
+  onRequestClosePane?: (request: DockviewTabCloseRequest) => void,
 ): DockviewWorkbenchPanelParams {
   return {
     attachmentId: pane.id,
@@ -438,6 +465,7 @@ function toDockviewWorkbenchPanelParams(
     detail: pane.detail,
     meta: pane.meta,
     body: pane.body,
+    onRequestClosePane,
   };
 }
 
