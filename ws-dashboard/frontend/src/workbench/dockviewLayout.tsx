@@ -276,6 +276,11 @@ function DockviewWorkbenchTab({
           Close clicks must call the dashboard callback with pane identity and
           pointer coordinates so App policy can decide immediate close versus
           cursor-near session confirmation without exposing Dockview handles. */}
+      <span
+        aria-hidden="true"
+        className="workbench-tab-icon"
+        data-workbench-tab-icon={params.surfaceKind}
+      />
       <span className="workbench-tab-kind">{registry.label}</span>
       <span className="workbench-tab-title">{api.title ?? params.title}</span>
       <button

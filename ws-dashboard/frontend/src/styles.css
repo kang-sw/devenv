@@ -1291,3 +1291,36 @@ button {
 .workbench-pane[data-surface-kind="editor"] .readonly-text-content {
   flex: 1 1 auto;
 }
+
+.workbench-tab-icon {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel-subtle);
+}
+
+.workbench-tab-icon::after {
+  position: absolute;
+  inset: 2px;
+  content: "";
+  background: var(--ws-color-text-tertiary);
+}
+
+.workbench-tab-icon[data-workbench-tab-icon="agent"]::after {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: var(--ws-color-state-info);
+}
+
+.workbench-tab-icon[data-workbench-tab-icon="persistentTerminal"]::after {
+  inset: 3px 2px;
+  background: transparent;
+  border-right: 2px solid var(--ws-color-state-success);
+  border-bottom: 2px solid var(--ws-color-state-success);
+}
+
+.workbench-tab-icon[data-workbench-tab-icon="editor"]::after {
+  inset: 2px 3px;
+  background: var(--ws-color-action);
+}

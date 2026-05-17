@@ -410,6 +410,46 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // --- Agent tab close uses the same session confirmation contract ---------
+  await test.step("agent tab close confirmation when a live agent tab exists", async () => {
+    const agentTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
+      { hasText: "Agent" },
+    );
+    if ((await agentTab.count()) === 0) {
+      note(
+        "agent close: skipped because the daemon fixture exposed no live main agent tab",
+      );
+      return;
+    }
+
+    await agentTab.first().hover();
+    await agentTab
+      .first()
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    const popover = page.locator('[data-workbench-close-popover="cursor-near"]');
+    await expect(popover).toBeVisible();
+    await popover
+      .locator('[data-command-id="workbench.tab.close.cancel"]')
+      .click();
+    await expect(agentTab).toHaveCount(1);
+
+    await agentTab.first().hover();
+    await agentTab
+      .first()
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    await expect(popover).toBeVisible();
+    await popover
+      .locator('[data-command-id="workbench.tab.close.confirm"]')
+      .click();
+    await expect(agentTab).toHaveCount(0);
+    note(
+      "agent close: cursor-near No preserved the agent tab and Yes detached the live agent surface",
+    );
+  });
+
   // --- Conventional read-only file explorer -------------------------------
   await test.step("file explorer expansion and refresh", async () => {
     const dirRow = page.locator(".file-explorer-row", {
@@ -487,6 +527,20 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         previewClose.evaluate((node) => getComputedStyle(node).opacity),
       )
       .toBe("1");
+
+    const replacementRow = page.locator(".file-explorer-row", {
+      hasText: "gate-bulk-000.txt",
+    });
+    await replacementRow.click();
+    await expect(previewTab).toHaveCount(1);
+    await expect(pane.locator(".readonly-text-pane-title")).toContainText(
+      "gate-bulk-000.txt",
+    );
+    await expect(pane.locator(".readonly-text-content")).toContainText(
+      "bulk gate fixture 0",
+    );
+
+    await previewTab.hover();
     await previewClose.click();
     await expect(page.locator(".readonly-text-pane")).toHaveCount(0);
 
@@ -506,6 +560,14 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(pinnedTab).toHaveAttribute(
       "data-workbench-group-id",
       "group-2",
+    );
+    await expect(pinnedTab).toHaveAttribute(
+      "data-workbench-pane-category",
+      "pinned",
+    );
+    await expect(pinnedTab).toHaveAttribute(
+      "data-workbench-tab-category-presentation",
+      "pinned-left-badge-fallback",
     );
     note(
       "read-only file: single click opened a replaceable preview, hover-only close immediately removed it, and double click pinned the file in the opened file group",

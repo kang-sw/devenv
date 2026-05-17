@@ -307,30 +307,34 @@ export function App() {
 
       void fetchWorkRootTextFile(workRoot.id, entry.path)
         .then((file) => {
-          setReadOnlyFilePanes((current) =>
-            current[pane.logicalKey]
-              ? {
-                  ...current,
-                  [pane.logicalKey]: applyReadOnlyFilePaneContent(
-                    current[pane.logicalKey],
-                    file,
-                  ),
-                }
-              : current,
-          );
+          setReadOnlyFilePanes((current) => {
+            const currentPane = current[pane.logicalKey];
+            if (!sameReadOnlyOpenRequest(currentPane, pane)) {
+              return current;
+            }
+            return {
+              ...current,
+              [pane.logicalKey]: applyReadOnlyFilePaneContent(
+                currentPane,
+                file,
+              ),
+            };
+          });
         })
         .catch((error) => {
-          setReadOnlyFilePanes((current) =>
-            current[pane.logicalKey]
-              ? {
-                  ...current,
-                  [pane.logicalKey]: applyReadOnlyFilePaneError(
-                    current[pane.logicalKey],
-                    error instanceof Error ? error.message : "file read failed",
-                  ),
-                }
-              : current,
-          );
+          setReadOnlyFilePanes((current) => {
+            const currentPane = current[pane.logicalKey];
+            if (!sameReadOnlyOpenRequest(currentPane, pane)) {
+              return current;
+            }
+            return {
+              ...current,
+              [pane.logicalKey]: applyReadOnlyFilePaneError(
+                currentPane,
+                error instanceof Error ? error.message : "file read failed",
+              ),
+            };
+          });
         });
     },
     [
@@ -1016,8 +1020,15 @@ function WorkbenchShell({
   const [terminalPaneOrderByGroup, setTerminalPaneOrderByGroup] =
     useState<WorkbenchPaneOrder>({});
   const [pendingCloseRequest, setPendingCloseRequest] = useState<
-    (DockviewTabCloseRequest & { readonly anchor: { clientX: number; clientY: number } }) | null
+    | (DockviewTabCloseRequest & {
+        readonly anchor: { clientX: number; clientY: number };
+        readonly workRootId: string;
+      })
+    | null
   >(null);
+  const [closedAgentPaneByRoot, setClosedAgentPaneByRoot] = useState<
+    Record<string, readonly string[]>
+  >({});
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
@@ -1082,6 +1093,7 @@ function WorkbenchShell({
                 isActivePane: (pane) =>
                   focusedTerminalPaneIdRef.current === pane.paneId,
               },
+              closedAgentPaneByRoot[root.id] ?? [],
             ),
             paneOrderByGroup,
           );
@@ -1429,7 +1441,24 @@ function WorkbenchShell({
     );
   }
 
-  function performWorkbenchPaneClose(request: DockviewTabCloseRequest) {
+  function closeAgentPane(paneId: string) {
+    if (!selectedWorkRootId) {
+      return;
+    }
+    setClosedAgentPaneByRoot((current) => ({
+      ...current,
+      [selectedWorkRootId]: [
+        ...new Set([...(current[selectedWorkRootId] ?? []), paneId]),
+      ],
+    }));
+  }
+
+  function performWorkbenchPaneClose(
+    request: DockviewTabCloseRequest & { readonly workRootId?: string },
+  ) {
+    if (request.workRootId && request.workRootId !== selectedWorkRootId) {
+      return;
+    }
     const pane = editorGroups
       .flatMap((group) => group.panes)
       .find((candidate) => candidate.id === request.paneId);
@@ -1447,6 +1476,8 @@ function WorkbenchShell({
       }
     } else if (pane.kind === "editor") {
       closeReadOnlyFilePane(pane.id);
+    } else if (pane.kind === "agent") {
+      closeAgentPane(pane.id);
     }
 
     if (closeDecision.terminateReservation) {
@@ -1471,9 +1502,13 @@ function WorkbenchShell({
       clientY: request.clientY,
     });
     if (decision.type === "requestConfirmation") {
+      if (!selectedWorkRootId) {
+        return;
+      }
       setPendingCloseRequest({
         ...request,
         anchor: decision.anchor,
+        workRootId: selectedWorkRootId,
       });
       return;
     }
@@ -1575,11 +1610,7 @@ function WorkbenchShell({
         <WorkbenchClosePopover
           request={pendingCloseRequest}
           onCancel={() => {
-            const request = pendingCloseRequest;
             setPendingCloseRequest(null);
-            setActivePaneByGroupForSelected((current) =>
-              selectWorkbenchPane(current, request.groupId, request.paneId),
-            );
           }}
           onConfirm={() => {
             const request = pendingCloseRequest;
@@ -1599,6 +1630,7 @@ function WorkbenchClosePopover({
 }: {
   request: DockviewTabCloseRequest & {
     readonly anchor: { readonly clientX: number; readonly clientY: number };
+    readonly workRootId: string;
   };
   onCancel: () => void;
   onConfirm: () => void;
@@ -1782,6 +1814,7 @@ function buildWorkbenchEditorGroups(
   terminalPanes: TerminalPaneState[],
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
+  closedAgentPaneIds: readonly string[] = [],
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
   void supportEntity;
@@ -1799,23 +1832,25 @@ function buildWorkbenchEditorGroups(
     terminalActions,
     dashboardGroups,
   );
-  const agentPane: WorkbenchPane[] = mainInstance
-    ? [
-        {
-          id: "main-agent",
-          kind: "agent",
-          category: "pinned",
-          title: mainInstance.label,
-          detail: instanceSummary(mainInstance),
-          state: mainInstance.state,
-          meta: [
-            mainInstance.kind,
-            mainInstance.interactionMode,
-            closeContractLabel("agent"),
-          ],
-        },
-      ]
-    : [];
+  const closedAgentPaneIdSet = new Set(closedAgentPaneIds);
+  const agentPane: WorkbenchPane[] =
+    mainInstance && !closedAgentPaneIdSet.has("main-agent")
+      ? [
+          {
+            id: "main-agent",
+            kind: "agent",
+            category: "pinned",
+            title: mainInstance.label,
+            detail: instanceSummary(mainInstance),
+            state: mainInstance.state,
+            meta: [
+              mainInstance.kind,
+              mainInstance.interactionMode,
+              closeContractLabel("agent"),
+            ],
+          },
+        ]
+      : [];
 
   return dashboardGroups.map((group, index) => ({
     id: group.id,
@@ -2368,6 +2403,18 @@ function readOnlyFilePlacementState(
       logicalKey: surfaceLogicalKey(...pane.logicalKey.split("/")),
     })),
   };
+}
+
+function sameReadOnlyOpenRequest(
+  current: ReadOnlyFilePane | undefined,
+  requested: ReadOnlyFilePane,
+): current is ReadOnlyFilePane {
+  return (
+    current !== undefined &&
+    current.workRootId === requested.workRootId &&
+    current.path === requested.path &&
+    current.mode === requested.mode
+  );
 }
 
 function removePaneFromOrder(
