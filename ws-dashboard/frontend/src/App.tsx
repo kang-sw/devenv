@@ -1840,6 +1840,11 @@ function WorkbenchActivityBadge({
   // CONTRACT: Phase 2 renders a compact named-agent summary chip inside the
   // existing toolbar metadata row. It is a summary/entrypoint only: no detail
   // pane, agent controls, or row diagnostics live here.
+  // CONTRACT: Phase 3 turns this entrypoint into the only top-bar opener for a
+  // selected-workRoot Activity pane. The click handler must route through
+  // dashboard workbench placement policy, focus duplicate panes, and keep the
+  // pane reversible/read-only.
+  // HOLE: onOpenActivity callback and button semantics.
   return (
     <span
       className={`meta-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}

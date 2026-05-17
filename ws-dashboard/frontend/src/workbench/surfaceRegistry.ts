@@ -6,6 +6,7 @@ export type SurfaceKind =
   | "diff"
   | "diagnostics"
   | "eventsLog"
+  | "workRootActivity"
   | "taskView"
   | "inspector";
 
@@ -90,6 +91,16 @@ const defaultSurfaceRegistryEntries = {
   eventsLog: {
     kind: "eventsLog",
     label: "Events",
+    rowPolicy: "opened",
+    lifecycleOwner: "daemonProjection",
+    closePolicy: "releaseProjection",
+    closeConfirmationPolicy: "none",
+  },
+  workRootActivity: {
+    // CONTRACT: WorkRoot Activity is a reversible daemon projection surface.
+    // It is not a daemon process/session and must close without confirmation.
+    kind: "workRootActivity",
+    label: "Activity",
     rowPolicy: "opened",
     lifecycleOwner: "daemonProjection",
     closePolicy: "releaseProjection",

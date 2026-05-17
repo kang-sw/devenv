@@ -495,6 +495,16 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // CONTRACT: Phase 3 must add a browser-gate step here proving the Activity
+  // badge opens or focuses exactly one WorkRoot Activity pane in group 1,
+  // duplicate badge clicks do not create duplicate panes, the pane closes
+  // immediately with no confirmation popover, and running-command rows are
+  // absent or explicitly empty until the async exec source exists.
+  // HINT: Assert Dockview markers
+  // `[data-surface-kind="workRootActivity"]` and
+  // `[data-workbench-group-id="group-1"]` rather than raw Dockview internals.
+  // HOLE: final pane title/body selectors.
+
   // --- Long explorer content stays inside its pane, not the document -----
   await test.step("long explorer content stays within the viewport", async () => {
     // The fixture root holds 80+ files, so the explorer tree is far taller

@@ -88,6 +88,7 @@ assertDeepEqual(
     "diff",
     "diagnostics",
     "eventsLog",
+    "workRootActivity",
     "taskView",
     "inspector",
   ],
@@ -122,6 +123,7 @@ for (const kind of [
   "diff",
   "diagnostics",
   "eventsLog",
+  "workRootActivity",
   "taskView",
   "inspector",
 ] as const) {
@@ -131,6 +133,14 @@ for (const kind of [
     `${kind} uses the opened row`,
   );
 }
+
+// CONTRACT: Phase 3 must add behavior tests proving workRootActivity opens in
+// group 1 despite its opened row policy, duplicate logical keys focus the
+// existing activity pane, and close presentation stays immediate with no
+// cursor-near confirmation.
+// HINT: Add the placement tests near the existing terminal/editor dynamic-group
+// assertions below, using surfaceLogicalKey("workRootActivity", root id).
+// HOLE: exact pane logical-key helper and App-level state owner.
 
 const layout: WorkbenchLayoutState = {
   attachments: [

@@ -176,6 +176,11 @@ export function decideSurfaceOpenWithDynamicGroups(
   // persistent terminal panes prefer group 1. New editor/read-only file panes
   // prefer group 2, creating group 2 when only group 1 exists. Groups 3+ are
   // user-created groups and are not automatic placement targets.
+  // CONTRACT: WorkRoot Activity is the one reversible opened projection with a
+  // group-1 placement exception. New opens must target group 1 while duplicate
+  // logical keys keep focusing the existing attachment through the branch above.
+  // HOLE: implement the group-1 exception without changing the general opened
+  // surface rule in selectDynamicTargetGroup.
   // Duplicate logical keys must keep decideSurfaceOpen focusExisting behavior.
   // Generated dashboard groups use the ordered browser-state seed `group-N`
   // (next index after the current groups), never raw Dockview handles.
