@@ -121,3 +121,11 @@ user-created groups and active panes do not leak between workRoots.
 External-daemon browser runs can provide `WS_DASHBOARD_TEST_SECOND_WORKROOT`
 for that second-root isolation substep; without it, only that substep is
 skipped while the rest of the browser gate still runs.
+
+#### Edition (add89b6) - 2026-05-17
+
+A post-completion visual follow-up fixed a terminal sizing regression observed
+after the dynamic Dockview group work. Terminal panes now stretch through the
+Dockview workbench pane body in both axes, and browser acceptance compares the
+terminal pane, emulator surface, controls, and containing pane dimensions so a
+partially filled terminal fails the gate.
