@@ -23,6 +23,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -38,7 +39,7 @@ use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_activity::{
-    WorkRootActivityProjectionConfig, WorkRootActivityProjector,
+    resolve_work_root_agents_dir, WorkRootActivityProjectionConfig, WorkRootActivityProjector,
 };
 use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
 
@@ -1141,6 +1142,361 @@ async fn work_root_activity_route_returns_empty_named_agent_projection() {
         "stdout".to_owned(),
         "stderr".to_owned(),
         "pid".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "activity response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+fn git_available() -> bool {
+    Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn run_git(path: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn init_git_repo(path: &Path) {
+    run_git(path, &["init"]);
+}
+
+fn write_agent_metadata(agents_dir: &Path, agent_key: &str, agent_json: &serde_json::Value) {
+    let agent_dir = agents_dir.join(agent_key);
+    fs::create_dir_all(&agent_dir).expect("create agent fixture dir");
+    fs::write(
+        agent_dir.join("agent.json"),
+        serde_json::to_string_pretty(agent_json).expect("encode agent fixture"),
+    )
+    .expect("write agent.json fixture");
+}
+
+fn write_agent_metadata_raw(agents_dir: &Path, agent_key: &str, raw: &str) {
+    let agent_dir = agents_dir.join(agent_key);
+    fs::create_dir_all(&agent_dir).expect("create agent fixture dir");
+    fs::write(agent_dir.join("agent.json"), raw).expect("write raw agent.json fixture");
+}
+
+fn write_current_call(agents_dir: &Path, agent_key: &str, raw: &str) {
+    let current_dir = agents_dir.join(agent_key).join("current");
+    fs::create_dir_all(&current_dir).expect("create current fixture dir");
+    fs::write(current_dir.join("state.json"), raw).expect("write state.json fixture");
+}
+
+async fn fetch_work_root_activity(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+) -> (StatusCode, String) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{work_root_id}/activity"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("workRoot activity request"),
+        )
+        .await
+        .expect("workRoot activity response");
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("workRoot activity body bytes");
+    (
+        status,
+        String::from_utf8(body.to_vec()).expect("activity body is UTF-8"),
+    )
+}
+
+#[tokio::test]
+async fn work_root_activity_route_projects_named_agent_records() {
+    if !git_available() {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-records");
+    let cache_home = temp_fixture_path("work-root-activity-records-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    write_agent_metadata(
+        &agents_dir,
+        "reviewer",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "reviewer",
+            "backend": "codex",
+            "harness": "codex",
+            "tier": "core",
+            "model": "gpt-5.3-codex",
+            "effort": "medium",
+            "session_id": "session-abc",
+            "status": "idle",
+            "last_call_at": "2026-05-17T09:00:00Z",
+            "last_output_path": "/cache/agents/reviewer/output.md",
+            "pid": 4242,
+            "stdout_path": "/cache/agents/reviewer/current/stdout"
+        }),
+    );
+
+    write_agent_metadata(
+        &agents_dir,
+        "builder",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "builder",
+            "backend": "claude",
+            "status": "running",
+            "session_id": "session-def",
+            "last_call_at": "2026-05-17T10:00:00Z"
+        }),
+    );
+    write_current_call(
+        &agents_dir,
+        "builder",
+        &serde_json::json!({
+            "schema_version": 1,
+            "agent_name": "builder",
+            "status": "running",
+            "execution_id": "000123",
+            "started_at": "2026-05-17T10:00:00Z",
+            "updated_at": "2026-05-17T10:01:00Z",
+            "pid": 5151,
+            "stdout_path": "/cache/agents/builder/current/stdout",
+            "stderr_path": "/cache/agents/builder/current/stderr"
+        })
+        .to_string(),
+    );
+
+    write_agent_metadata(
+        &agents_dir,
+        "tester",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "tester",
+            "backend": "gemini",
+            "status": "failed",
+            "last_call_at": "2026-05-17T08:00:00Z"
+        }),
+    );
+    write_current_call(
+        &agents_dir,
+        "tester",
+        &serde_json::json!({
+            "schema_version": 1,
+            "agent_name": "tester",
+            "status": "failed",
+            "execution_id": "000077",
+            "started_at": "2026-05-17T07:59:00Z",
+            "updated_at": "2026-05-17T08:00:00Z",
+            "finished_at": "2026-05-17T08:00:00Z",
+            "cleanup_needed": true,
+            "error": "backend exited with status 1"
+        })
+        .to_string(),
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) =
+        fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("named-agent activity JSON");
+
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["status"], "ok");
+    assert_eq!(
+        value["summary"],
+        serde_json::json!({
+            "total": 3,
+            "active": 1,
+            "blocked": 0,
+            "failed": 1,
+            "unavailable": 0
+        })
+    );
+
+    let agents = value["agents"].as_array().expect("activity agents array");
+    assert_eq!(agents.len(), 3);
+
+    // Rows are ordered by opaque agent id: builder, reviewer, tester.
+    assert_eq!(agents[0]["agentId"], "builder");
+    assert_eq!(agents[0]["status"], "running");
+    assert_eq!(agents[0]["sessionPresent"], true);
+    assert_eq!(agents[0]["currentCall"]["status"], "running");
+    assert_eq!(agents[0]["currentCall"]["active"], true);
+    assert_eq!(agents[0]["currentCall"]["terminal"], false);
+    assert_eq!(agents[0]["currentCall"]["executionId"], "000123");
+    assert!(agents[0]["diagnostics"]
+        .as_array()
+        .expect("builder diagnostics array")
+        .is_empty());
+
+    assert_eq!(agents[1]["agentId"], "reviewer");
+    assert_eq!(agents[1]["status"], "idle");
+    assert_eq!(agents[1]["backend"], "codex");
+    assert_eq!(agents[1]["model"], "gpt-5.3-codex");
+    assert_eq!(agents[1]["lastCallAt"], "2026-05-17T09:00:00Z");
+    assert_eq!(agents[1]["sessionPresent"], true);
+    assert!(agents[1]["currentCall"].is_null());
+    assert!(agents[1]["detailHints"]
+        .as_array()
+        .expect("reviewer detail hints array")
+        .iter()
+        .any(|hint| hint == "recent output available"));
+
+    assert_eq!(agents[2]["agentId"], "tester");
+    assert_eq!(agents[2]["status"], "failed");
+    assert_eq!(agents[2]["currentCall"]["status"], "failed");
+    assert_eq!(agents[2]["currentCall"]["active"], false);
+    assert_eq!(agents[2]["currentCall"]["terminal"], true);
+    assert_eq!(agents[2]["currentCall"]["cleanupNeeded"], true);
+    assert_eq!(
+        agents[2]["currentCall"]["error"],
+        "backend exited with status 1"
+    );
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "agent.json".to_owned(),
+        "current/state.json".to_owned(),
+        "session_id".to_owned(),
+        "session-abc".to_owned(),
+        "session-def".to_owned(),
+        "stdout".to_owned(),
+        "stderr".to_owned(),
+        "pid".to_owned(),
+        "output.md".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "activity response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_degrades_malformed_records() {
+    if !git_available() {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-malformed");
+    let cache_home = temp_fixture_path("work-root-activity-malformed-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    // Healthy idle agent.
+    write_agent_metadata(
+        &agents_dir,
+        "healthy",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "healthy",
+            "backend": "codex",
+            "status": "idle"
+        }),
+    );
+
+    // Malformed agent.json must degrade only its own row.
+    write_agent_metadata_raw(&agents_dir, "broken-meta", "{ this is not valid json");
+
+    // Valid metadata but unreadable current-call state.
+    write_agent_metadata(
+        &agents_dir,
+        "broken-call",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "broken-call",
+            "backend": "claude",
+            "status": "running"
+        }),
+    );
+    write_current_call(&agents_dir, "broken-call", "}{ not json either");
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) =
+        fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    // CONTRACT: malformed records degrade individual rows; the route still
+    // succeeds instead of failing the whole projection.
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("degraded activity JSON");
+
+    assert_eq!(value["status"], "degraded");
+    assert_eq!(value["summary"]["total"], 3);
+    assert_eq!(value["summary"]["unavailable"], 1);
+
+    let agents = value["agents"].as_array().expect("activity agents array");
+    assert_eq!(agents.len(), 3);
+
+    // Rows sorted by opaque agent id: broken-call, broken-meta, healthy.
+    let broken_call = &agents[0];
+    assert_eq!(broken_call["agentId"], "broken-call");
+    assert_eq!(broken_call["status"], "running");
+    assert!(broken_call["currentCall"].is_null());
+    assert!(!broken_call["diagnostics"]
+        .as_array()
+        .expect("broken-call diagnostics array")
+        .is_empty());
+
+    let broken_meta = &agents[1];
+    assert_eq!(broken_meta["agentId"], "broken-meta");
+    assert_eq!(broken_meta["status"], "unavailable");
+    assert!(broken_meta["name"].is_null());
+    assert!(!broken_meta["diagnostics"]
+        .as_array()
+        .expect("broken-meta diagnostics array")
+        .is_empty());
+
+    let healthy = &agents[2];
+    assert_eq!(healthy["agentId"], "healthy");
+    assert_eq!(healthy["status"], "idle");
+    assert!(healthy["diagnostics"]
+        .as_array()
+        .expect("healthy diagnostics array")
+        .is_empty());
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "agent.json".to_owned(),
+        "state.json".to_owned(),
+        "session_id".to_owned(),
     ] {
         assert!(
             !body_text.contains(&forbidden),
