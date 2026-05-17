@@ -22,7 +22,7 @@ const artifactsDir = path.join(here, ".artifacts");
 
 let daemon: DaemonHandle;
 let workRoot: string;
-let secondWorkRoot: string;
+let secondWorkRoot: string | null = null;
 let ownsWorkRoot = false;
 let ownsSecondWorkRoot = false;
 let commandPlan: TerminalCommandPlan;
@@ -65,14 +65,21 @@ test.beforeAll(async () => {
     }
   }
 
-  secondWorkRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-gate-second-"));
-  ownsSecondWorkRoot = true;
-  writeFileSync(
-    path.join(secondWorkRoot, "second-readme.txt"),
-    "second ws-dashboard browser gate fixture\n",
-  );
-
   daemon = await startDaemon();
+
+  const externalSecondWorkRoot = process.env.WS_DASHBOARD_TEST_SECOND_WORKROOT;
+  if (externalSecondWorkRoot) {
+    secondWorkRoot = externalSecondWorkRoot;
+  } else if (daemon.mode === "spawned") {
+    secondWorkRoot = mkdtempSync(
+      path.join(os.tmpdir(), "ws-dash-gate-second-"),
+    );
+    ownsSecondWorkRoot = true;
+    writeFileSync(
+      path.join(secondWorkRoot, "second-readme.txt"),
+      "second ws-dashboard browser gate fixture\n",
+    );
+  }
   const shellProfileHint = process.env.WS_DASHBOARD_TERMINAL_SHELL_PROFILE;
   const targetPlatform = process.env.WS_DASHBOARD_TERMINAL_PLATFORM;
   if (daemon.mode === "external" && !shellProfileHint && !targetPlatform) {
@@ -119,6 +126,11 @@ test.beforeAll(async () => {
   note(`daemon base URL: ${daemon.baseUrl}`);
   note(`terminal command profile: ${commandPlan.profile}`);
   note(`test workRoot: ${workRootDisplayName(workRoot)}`);
+  if (secondWorkRoot) {
+    note(`second test workRoot: ${workRootDisplayName(secondWorkRoot)}`);
+  } else {
+    note("second test workRoot: not configured for external daemon");
+  }
 });
 
 test.afterEach(async ({}, testInfo) => {
@@ -455,6 +467,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   // --- Dynamic workbench state remains per workRoot ------------------------
   await test.step("dynamic split state is isolated per opened workRoot", async () => {
     expect(splitEvidence).not.toBeNull();
+    if (!secondWorkRoot) {
+      note(
+        "dynamic groups: second workRoot isolation skipped because external daemon mode did not provide WS_DASHBOARD_TEST_SECOND_WORKROOT",
+      );
+      return;
+    }
     await openWorkRootInBrowser(page, secondWorkRoot);
     expect(await visibleWorkbenchGroupIds(page)).toEqual([
       "group-1",
