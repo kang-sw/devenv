@@ -5,10 +5,12 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
+    "jsx": "react-jsx",
     "outDir": "./node_modules/.tmp/route-tests",
     "rootDir": "./src"
   },
   "include": [
+    "src/vite-env.d.ts",
     "src/routeBasis.ts",
     "src/routeBasis.test.ts",
     "src/apiError.ts",

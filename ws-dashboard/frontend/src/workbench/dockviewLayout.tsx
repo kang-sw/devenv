@@ -219,11 +219,15 @@ function DockviewWorkbenchTab({
     <div
       aria-selected={selected}
       className={`dockview-workbench-tab ${selected ? "dockview-workbench-tab-active" : ""}`}
+      data-workbench-pane-category={params.category}
       data-workbench-group-id={params.groupId}
       data-workbench-pane-id={params.paneId}
       role="tab"
       title={api.title ?? params.title}
     >
+      {/* Dockview owns one deterministic tab strip per group in this slice.
+          Dashboard row policy is retained as pane category metadata instead
+          of rendering the retired two-row pinned/opened custom header. */}
       <span className="workbench-tab-kind">{registry.label}</span>
       <span className="workbench-tab-title">{api.title ?? params.title}</span>
     </div>

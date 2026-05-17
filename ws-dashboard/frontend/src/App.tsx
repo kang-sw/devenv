@@ -7,21 +7,17 @@ import { normalizeServerRouteLocation } from "./routeBasis";
 import {
   decideSurfaceClose,
   decideSurfaceOpen,
-  defaultSurfaceRegistry,
   applyWorkbenchPaneOrder,
   commitWorkbenchPaneMove,
-  partitionWorkbenchPanesByCategory,
-  resolveWorkbenchPaneDrop,
   selectWorkbenchPane,
-  workbenchPaneDragMimeType,
   surfaceLogicalKey,
   workbenchGroupId,
+  DockviewWorkbenchLayout,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
   type WorkbenchPlacementState,
 } from "./workbench";
-import { DockviewWorkbenchLayout } from "./workbench/dockviewLayout.js";
 import {
   applyReadOnlyFilePaneContent,
   applyReadOnlyFilePaneError,
@@ -835,13 +831,14 @@ function WorkbenchShell({
 }) {
   const [activePaneByGroup, setActivePaneByGroup] = useState<Record<string, string>>({});
   const [paneOrderByGroup, setPaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
-  const [draggedPaneId, setDraggedPaneId] = useState<string | null>(null);
   const [terminalPanes, setTerminalPanes] = useState<Record<string, TerminalPaneState>>({});
   const [activeTerminalPaneRequest, setActiveTerminalPaneRequest] = useState<{ paneId: string; sequence: number } | null>(null);
   const [terminalPaneOrderByGroup, setTerminalPaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
+  const activePaneByGroupRef = useRef(activePaneByGroup);
+  activePaneByGroupRef.current = activePaneByGroup;
 
   const workbenchModel = resources && selection
     ? (() => {
@@ -864,6 +861,7 @@ function WorkbenchShell({
               onSocketStatus: updateTerminalSocketStatus,
               onSocketMessage: applyTerminalSocketMessage,
               onSocketResize: acceptTerminalSocketResize,
+              isActivePane: (pane) => Object.values(activePaneByGroupRef.current).includes(pane.paneId),
             },
           ),
           paneOrderByGroup,
@@ -1463,6 +1461,7 @@ type TerminalPaneActions = {
   onSocketStatus: (pane: TerminalPaneState, socketStatus: TerminalPaneState["socketStatus"], error?: string | null) => void;
   onSocketMessage: (pane: TerminalPaneState, message: TerminalWebSocketServerMessage) => void;
   onSocketResize: (pane: TerminalPaneState, columns: number, rows: number) => void;
+  isActivePane: (pane: TerminalPaneState) => boolean;
 };
 
 function terminalWorkbenchPane(pane: TerminalPaneState, actions: TerminalPaneActions): WorkbenchPane {
@@ -1547,6 +1546,9 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
 
     const keydownFallback = (event: KeyboardEvent) => {
       if (!container.offsetParent || container.contains(document.activeElement)) {
+        return;
+      }
+      if (!liveRef.current.actions.isActivePane(liveRef.current.pane)) {
         return;
       }
       const target = event.target as HTMLElement | null;
@@ -1688,7 +1690,6 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
         const message = JSON.parse(event.data) as TerminalWebSocketServerMessage;
         if (message.type === "output") {
           terminalRef.current?.write(message.chunk.data);
-          terminalRef.current?.focus();
           writtenLengthRef.current += message.chunk.data.length;
         } else {
           setDisplaySession((current) => ({ ...current, status: message.status }));
@@ -1724,16 +1725,10 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     if (pane.output.length > writtenLengthRef.current) {
       terminal.write(pane.output.slice(writtenLengthRef.current));
       writtenLengthRef.current = pane.output.length;
-      if (containerRef.current?.offsetParent) {
-        requestAnimationFrame(() => terminal.focus());
-      }
     } else if (pane.output.length < writtenLengthRef.current) {
       terminal.clear();
       terminal.write(pane.output);
       writtenLengthRef.current = pane.output.length;
-      if (containerRef.current?.offsetParent) {
-        requestAnimationFrame(() => terminal.focus());
-      }
     }
   }, [pane.output]);
 
@@ -1873,227 +1868,6 @@ function ReadOnlyTextPane({ pane, root }: { pane: ReadOnlyFilePane; root: WorkRo
   );
 }
 
-function WorkbenchEditorGroup({
-  group,
-  activePaneId,
-  draggedPaneId,
-  onDragEnd,
-  onDragStart,
-  onMovePane,
-  onSelectPane,
-}: {
-  group: WorkbenchEditorGroupModel;
-  activePaneId: string | undefined;
-  draggedPaneId: string | null;
-  onDragEnd: () => void;
-  onDragStart: (paneId: string) => void;
-  onMovePane: (paneId: string, targetGroupId: string, beforePaneId?: string) => void;
-  onSelectPane: (paneId: string) => void;
-}) {
-  const activePane = group.panes.find((pane) => pane.id === activePaneId) ?? group.panes[0];
-  const panesByCategory = partitionWorkbenchPanesByCategory(group.panes);
-
-  if (!activePane) {
-    return (
-      <section className="workbench-group" aria-label={`${group.label} editor group`}>
-        <div className="workbench-tab-header workbench-tab-header-empty" aria-label={group.label}>
-          <WorkbenchTabLane
-            activePaneId={undefined}
-            category="pinned"
-            draggedPaneId={draggedPaneId}
-            groupId={group.id}
-            panes={panesByCategory.pinned}
-            onDragEnd={onDragEnd}
-            onDragStart={onDragStart}
-            onMovePane={onMovePane}
-            onSelectPane={onSelectPane}
-          />
-          <WorkbenchTabLane
-            activePaneId={undefined}
-            category="opened"
-            draggedPaneId={draggedPaneId}
-            groupId={group.id}
-            panes={panesByCategory.opened}
-            onDragEnd={onDragEnd}
-            onDragStart={onDragStart}
-            onMovePane={onMovePane}
-            onSelectPane={onSelectPane}
-          />
-        </div>
-        <article
-          className="workbench-pane workbench-pane-empty-state"
-          role="status"
-          onDragOver={(event) => {
-            if (draggedPaneId) {
-              event.preventDefault();
-            }
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            const move = resolveWorkbenchPaneDrop({
-              dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-              fallbackPaneId: draggedPaneId,
-              targetGroupId: group.id,
-            });
-            if (move) {
-              onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-            }
-            onDragEnd();
-          }}
-        >
-          <div className="workbench-pane-body">
-            <p>Drop a tab here to add a pane to this split.</p>
-          </div>
-        </article>
-      </section>
-    );
-  }
-
-  const activeRegistry = defaultSurfaceRegistry()[activePane.kind];
-
-  return (
-    <section className="workbench-group" aria-label={`${group.label} editor group`}>
-      <div className="workbench-tab-header" aria-label={group.label}>
-        <WorkbenchTabLane
-          activePaneId={activePane.id}
-          category="pinned"
-          draggedPaneId={draggedPaneId}
-          groupId={group.id}
-          panes={panesByCategory.pinned}
-          onDragEnd={onDragEnd}
-          onDragStart={onDragStart}
-          onMovePane={onMovePane}
-          onSelectPane={onSelectPane}
-        />
-        <WorkbenchTabLane
-          activePaneId={activePane.id}
-          category="opened"
-          draggedPaneId={draggedPaneId}
-          groupId={group.id}
-          panes={panesByCategory.opened}
-          onDragEnd={onDragEnd}
-          onDragStart={onDragStart}
-          onMovePane={onMovePane}
-          onSelectPane={onSelectPane}
-        />
-      </div>
-      <article
-        aria-label={`${activeRegistry.label}: ${activePane.title}`}
-        className="workbench-pane"
-        data-surface-kind={activePane.kind}
-        id={`pane-${group.id}-${activePane.id}`}
-        role="tabpanel"
-      >
-        <div className="workbench-pane-body">
-          <p>{activePane.detail}</p>
-          {activePane.body ? <div className="workbench-pane-content">{activePane.body}</div> : null}
-        </div>
-      </article>
-    </section>
-  );
-}
-
-function WorkbenchTabLane({
-  activePaneId,
-  category,
-  draggedPaneId,
-  groupId,
-  panes,
-  onDragEnd,
-  onDragStart,
-  onMovePane,
-  onSelectPane,
-}: {
-  activePaneId: string | undefined;
-  category: WorkbenchPaneCategory;
-  draggedPaneId: string | null;
-  groupId: string;
-  panes: readonly WorkbenchPane[];
-  onDragEnd: () => void;
-  onDragStart: (paneId: string) => void;
-  onMovePane: (paneId: string, targetGroupId: string, beforePaneId?: string) => void;
-  onSelectPane: (paneId: string) => void;
-}) {
-  const label = category === "pinned" ? "pinned" : "opened";
-
-  return (
-    <div className={`workbench-tab-lane workbench-tab-lane-${category}`}>
-      <span className="workbench-tab-lane-label">{label}</span>
-      <div
-        className={`workbench-tab-strip ${panes.length === 0 ? "workbench-tab-strip-empty" : ""}`}
-        role="tablist"
-        aria-label={`${label} panes`}
-        onDragOver={(event) => {
-          if (draggedPaneId) {
-            event.preventDefault();
-          }
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          const move = resolveWorkbenchPaneDrop({
-            dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-            fallbackPaneId: draggedPaneId,
-            targetGroupId: groupId,
-          });
-          if (move) {
-            onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-          }
-          onDragEnd();
-        }}
-      >
-        {panes.length === 0 ? <span className="workbench-tab-drop-hint">drop</span> : null}
-        {panes.map((pane) => {
-          const selected = pane.id === activePaneId;
-          const registry = defaultSurfaceRegistry()[pane.kind];
-
-          return (
-            <button
-              aria-controls={`pane-${groupId}-${pane.id}`}
-              aria-selected={selected}
-              className={`workbench-tab ${selected ? "workbench-tab-active" : ""} ${
-                draggedPaneId === pane.id ? "workbench-tab-dragging" : ""
-              }`}
-              draggable
-              key={pane.id}
-              role="tab"
-              title="Drag to reorder or move to another split"
-              type="button"
-              onClick={() => onSelectPane(pane.id)}
-              onDragEnd={onDragEnd}
-              onDragOver={(event) => {
-                if (draggedPaneId && draggedPaneId !== pane.id) {
-                  event.preventDefault();
-                }
-              }}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData(workbenchPaneDragMimeType, pane.id);
-                onDragStart(pane.id);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                const move = resolveWorkbenchPaneDrop({
-                  dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-                  fallbackPaneId: draggedPaneId,
-                  targetGroupId: groupId,
-                  beforePaneId: pane.id,
-                });
-                if (move) {
-                  onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-                }
-                onDragEnd();
-              }}
-            >
-              <span className="workbench-tab-kind">{registry.label}</span>
-              <span className="workbench-tab-title">{pane.title}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 function SubInstancePane({ mainInstance }: { mainInstance: InstanceView | null }) {
   if (!mainInstance || mainInstance.subInstances.length === 0) {
