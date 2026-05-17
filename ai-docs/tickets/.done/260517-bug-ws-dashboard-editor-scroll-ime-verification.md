@@ -1,6 +1,7 @@
 ---
 title: ws dashboard editor scroll and terminal input fidelity follow-up
 parent: 260514-epic-ws-web-dashboard-mvp
+completed: 2026-05-17
 skeletons:
   phase-1-2: 70881e5
 related:
@@ -69,6 +70,14 @@ including the Dockview editor pane after tab polish styling. If current behavior
 is broken, fix only the read-only pane containment chain and avoid introducing a
 new editor library in this ticket.
 
+### Result (1c1fa1b) - 2026-05-17
+
+Implemented the scroll containment fix by bounding editor panes within their
+Dockview panel host so `.readonly-text-content` becomes the vertical scroll
+owner for long files. The browser acceptance gate now opens a long read-only
+fixture, proves the internal scroll position changes, and verifies the
+top-level document does not scroll.
+
 ### Phase 2: Verify terminal IME composition and shell control keys
 
 Validate terminal input against the live xterm path. The terminal should allow
@@ -84,3 +93,13 @@ composition behavior or a clearly scoped manual verification artifact when
 Playwright cannot drive the platform IME. Tests should include fallback guard
 coverage and shell-visible `ctrl-u` / `ctrl-w` behavior so future changes do not
 reintroduce raw composition forwarding or swallowed line-editing controls.
+
+### Result (9dadeab) - 2026-05-17
+
+Implemented terminal input fidelity coverage and fixes for the live browser
+terminal path. The terminal fallback now mirrors xterm-style raw bytes for
+`ctrl-u` and `ctrl-w` when Dockview focus leaves the helper textarea, while
+composition-in-progress fallback keydown events remain ignored. Browser
+evidence now proves shell-visible `ctrl-u` and `ctrl-w` behavior, WebSocket
+input frames for those controls, committed Hangul text reaching the shell, and
+synthetic IME composition guard behavior.
