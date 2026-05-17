@@ -53,6 +53,24 @@ assumptions if Dockview dynamic groups are still missing.
 - Treat dynamic group support as a prerequisite for placement-sensitive tab
   polish. Close, insertion, and preview behavior should operate on the dynamic
   group model rather than on fixed primary/support group names.
+- Preserve the pinned/opened information structure inside the Dockview-owned
+  tab surface. Do not silently flatten pinned and opened panes into an
+  indistinguishable single-row presentation.
+- Prefer Dockview-native tab groups/chips for a richer pinned/opened
+  presentation. If a literal two-row tab shell would compete with Dockview
+  ownership, keep Dockview as the tab owner and restore the hierarchy through
+  native tab grouping, pinned-left ordering, chip/badge metadata, or equivalent
+  Dockview-compatible affordances.
+- Keep pinned panes visually distinguishable from ordinary opened panes.
+  Pinned agent and terminal tabs should render license-free vector icon badges
+  or an equivalent in-repo icon treatment; emoji must not be the primary icon
+  system because platform font rendering changes tab width and tone. If a new
+  icon package is introduced, prefer a small permissively licensed set such as
+  `lucide-react` over a heavier icon dependency.
+- Make active and pinned tab styling clearer than the current flattened tabs:
+  a bright but restrained accent line is acceptable, pinned badges may use
+  higher-contrast color, and terminal/agent/editor surface kinds should be
+  distinguishable without relying on text labels alone.
 - Treat preview mode as frontend workbench policy: a single-click preview may be
   replaced by the next preview open, while a double-click pins the file as a
   normal opened tab.
@@ -70,7 +88,10 @@ well-defined.
 
 Success means an opened workRoot starts from an honest empty or live-resource
 state, every visible closeable tab has a clear close affordance, and closing a
-tab leaves focus on a predictable neighboring tab or empty state.
+tab leaves focus on a predictable neighboring tab or empty state. The same
+browser evidence should confirm that pinned agent and terminal tabs are visually
+distinct through Dockview tab rendering, with readable icon badges and active
+accent styling.
 
 ### Phase 2: Stabilize tab insertion and focus policy
 
@@ -81,9 +102,17 @@ policy is "new tabs open at the left edge," implement that consistently across
 read-only file panes and terminal panes; otherwise record and implement the
 chosen placement rule explicitly.
 
+Within each Dockview group, pinned panes should cluster before ordinary opened
+panes unless Dockview-native tab groups/chips provide a clearer equivalent.
+User movement must either preserve that category ordering or deliberately
+record a new dashboard-owned category/order policy; it must not accidentally
+erase pinned/opened semantics.
+
 Success means tab insertion order, duplicate-open focusing, close-after-focus,
 and refresh reconciliation are deterministic and covered by workbench model
-tests plus browser interaction evidence.
+tests plus browser interaction evidence. Browser verification should include a
+desktop screenshot or DOM assertion that pinned tabs remain left-biased or
+grouped and visually separable from opened tabs.
 
 ### Phase 3: Add preview-to-pinned file tabs
 
