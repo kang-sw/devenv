@@ -823,6 +823,46 @@ button {
   text-transform: lowercase;
 }
 
+.dockview-workbench-layout {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  border-top: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  background: var(--ws-color-panel);
+}
+
+.dockview-workbench-layout .dv-dockview {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.dockview-workbench-layout .dv-groupview {
+  background: var(--ws-color-panel);
+}
+
+.dockview-workbench-layout .dv-tabs-and-actions-container {
+  background: var(--ws-color-panel-raised);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
+}
+
+.dockview-workbench-tab {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  gap: 6px;
+  color: var(--ws-color-text-secondary);
+  padding: 0 9px;
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-02);
+}
+
+.dockview-workbench-tab-active {
+  color: var(--ws-color-text-primary);
+}
+
 .workbench-splits {
   display: grid;
   min-height: 0;
