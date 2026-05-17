@@ -80,6 +80,15 @@ import {
   type WorkspaceView,
 } from "./resourceModel";
 import { requestOpenWorkRoot } from "./openWorkRoot";
+import {
+  fetchWorkRootActivity,
+  mergeWorkRootActivityViews,
+  workRootActivityBadge,
+  type NamedAgentActivityView,
+  type WorkRootActivityBadgeInput,
+  type WorkRootActivityBadgeView,
+  type WorkRootActivityView,
+} from "./workRootActivity";
 
 type CommandPayload =
   | { type: "select"; entityId: string }
@@ -111,6 +120,8 @@ const resourceEndpoint = "/api/dashboard/resources";
 // immediately). A snappy interval keeps keystroke echo latency low; idle polls
 // are guarded below so they do not re-render the workbench.
 const terminalOutputPollIntervalMs = 120;
+const workRootActivityRefreshIntervalMs = 3_000;
+const workRootActivityRecentRefreshLimit = 30;
 const initialWorkbenchGroups = [
   { id: "group-1", label: "group 1" },
   { id: "group-2", label: "group 2" },
@@ -1050,6 +1061,19 @@ function WorkbenchShell({
   >(null);
   const focusedTerminalPaneIdRef = useRef<string | null>(null);
   focusedTerminalPaneIdRef.current = focusedTerminalPaneId;
+  // Selected-workRoot named-agent activity for the compact top-bar badge.
+  // Keep the owning root id beside the fetch state so a root switch never
+  // renders the previous root's activity for a frame before the effect resets.
+  const [workRootActivityState, setWorkRootActivityState] = useState<{
+    rootId: string | null;
+    activity: WorkRootActivityBadgeInput;
+  }>({ rootId: null, activity: { phase: "loading" } });
+  // Whether the reversible WorkRoot Activity pane is open, scoped per workRoot
+  // like terminal/read-only pane state. The badge entrypoint toggles this on;
+  // immediate close toggles it off.
+  const [activityPaneOpenByRoot, setActivityPaneOpenByRoot] = useState<
+    Record<string, boolean>
+  >({});
   const selectedWorkRootId = selection?.root.id ?? null;
   const workbenchGroups = selectedWorkRootId
     ? (workbenchGroupsByRoot[selectedWorkRootId] ?? initialWorkbenchGroups)
@@ -1060,6 +1084,9 @@ function WorkbenchShell({
   const activePaneByGroup = selectedWorkRootId
     ? (activePaneByRoot[selectedWorkRootId] ?? {})
     : {};
+  const activityPaneOpenForSelected = selectedWorkRootId
+    ? (activityPaneOpenByRoot[selectedWorkRootId] ?? false)
+    : false;
 
   const setActivePaneByGroupForSelected = (
     next:
@@ -1107,6 +1134,10 @@ function WorkbenchShell({
                   focusedTerminalPaneIdRef.current === pane.paneId,
               },
               closedAgentPaneByRoot[root.id] ?? [],
+              activityPaneOpenByRoot[root.id] ?? false,
+              workRootActivityState.rootId === root.id
+                ? workRootActivityState.activity
+                : { phase: "loading" },
             ),
             paneOrderByGroup,
           );
@@ -1148,6 +1179,99 @@ function WorkbenchShell({
       })
       .catch(() => undefined);
   }, [workbenchModel?.root.id]);
+
+  // Fetch named-agent activity for the selected workRoot through the Phase 1
+  // protected route. Loading/error are bounded badge states; a failure never
+  // breaks the workbench.
+  useEffect(() => {
+    const rootId = workbenchModel?.root.id;
+    if (!rootId) {
+      return;
+    }
+    let cancelled = false;
+    setWorkRootActivityState({ rootId, activity: { phase: "loading" } });
+    void fetchWorkRootActivity(rootId)
+      .then((view) => {
+        if (!cancelled) {
+          setWorkRootActivityState({
+            rootId,
+            activity: { phase: "ready", view },
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkRootActivityState({ rootId, activity: { phase: "error" } });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workbenchModel?.root.id]);
+
+  // Hotfix live refresh: while the Activity pane is open, poll only recently
+  // modified agent records and merge them into the full initial projection.
+  // This keeps newly registered/called agents visible without re-fetching a
+  // monotonically growing full list on every interval.
+  useEffect(() => {
+    const rootId = workbenchModel?.root.id;
+    if (!rootId || !activityPaneOpenForSelected) {
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    const refreshRecentActivity = () => {
+      if (cancelled || inFlight || document.hidden) {
+        return;
+      }
+      inFlight = true;
+      void fetchWorkRootActivity(rootId, {
+        recentLimit: workRootActivityRecentRefreshLimit,
+      })
+        .then((view) => {
+          if (cancelled) {
+            return;
+          }
+          setWorkRootActivityState((current) => {
+            if (current.rootId !== rootId) {
+              return current;
+            }
+            if (current.activity.phase !== "ready") {
+              return { rootId, activity: { phase: "ready", view } };
+            }
+            return {
+              rootId,
+              activity: {
+                phase: "ready",
+                view: mergeWorkRootActivityViews(current.activity.view, view),
+              },
+            };
+          });
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+
+    refreshRecentActivity();
+    const timer = window.setInterval(
+      refreshRecentActivity,
+      workRootActivityRefreshIntervalMs,
+    );
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshRecentActivity();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [workbenchModel?.root.id, activityPaneOpenForSelected]);
 
   // The output poll reads live terminal sessions from a ref so the polling
   // interval stays stable across renders. Depending the interval on
@@ -1491,6 +1615,8 @@ function WorkbenchShell({
       closeReadOnlyFilePane(pane.id);
     } else if (pane.kind === "agent") {
       closeAgentPane(pane.id);
+    } else if (pane.kind === "workRootActivity") {
+      closeActivityPane(pane.id);
     }
 
     if (closeDecision.terminateReservation) {
@@ -1576,6 +1702,54 @@ function WorkbenchShell({
     );
   };
 
+  function openWorkRootActivityPane() {
+    if (!workbenchModel) {
+      return;
+    }
+    // CONTRACT: The top-bar Activity badge is the selected-workRoot entrypoint
+    // for one reversible WorkRoot Activity pane. Routing through
+    // decideSurfaceOpenWithDynamicGroups keeps duplicate opens focusing the
+    // existing pane and new opens using policy-owned group-1 placement instead
+    // of a raw Dockview handle.
+    const rootId = workbenchModel.root.id;
+    const paneId = workRootActivityPaneId(rootId);
+    const decision = decideSurfaceOpenWithDynamicGroups(
+      workRootActivityPlacementState(workbenchGroups, editorGroups, rootId),
+      {
+        surfaceKind: "workRootActivity",
+        logicalKey: workRootActivityPaneLogicalKey(rootId),
+        attachmentId:
+          paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+      },
+    );
+    if (decision.type === "openNew") {
+      setActivityPaneOpenByRoot((current) => ({ ...current, [rootId]: true }));
+    }
+    setActivePaneByGroupForSelected((current) =>
+      selectWorkbenchPane(current, decision.groupId, paneId),
+    );
+  }
+
+  function closeActivityPane(paneId: string) {
+    // CONTRACT: closing the WorkRoot Activity pane only detaches the browser
+    // view. It is reversible and daemon-owned, so no daemon named-agent state
+    // changes here.
+    if (!selectedWorkRootId) {
+      return;
+    }
+    setActivityPaneOpenByRoot((current) => ({
+      ...current,
+      [selectedWorkRootId]: false,
+    }));
+    onPaneOrderByRootChange((current) => ({
+      ...current,
+      [selectedWorkRootId]: removePaneFromOrder(
+        current[selectedWorkRootId] ?? {},
+        paneId,
+      ),
+    }));
+  }
+
   if (loading && !resources) {
     return <StatusPane title="Loading" detail="workbench resources" />;
   }
@@ -1594,16 +1768,23 @@ function WorkbenchShell({
   }
 
   const { workspace, root } = workbenchModel;
+  const activityBadge = workRootActivityBadge(
+    workRootActivityState.rootId === root.id
+      ? workRootActivityState.activity
+      : { phase: "loading" },
+  );
 
   return (
     <div className="workbench-shell">
       <WorkbenchToolbar
+        activity={activityBadge}
         commandLog={commandLog}
         root={root}
         selectedEntity={selectedEntity}
         server={resources.server}
         workspace={workspace}
         onCommand={onCommand}
+        onOpenActivity={openWorkRootActivityPane}
         onCreateTerminal={createTerminalPane}
       />
       {error ? (
@@ -1688,7 +1869,9 @@ function WorkbenchToolbar({
   root,
   selectedEntity,
   commandLog,
+  activity,
   onCommand,
+  onOpenActivity,
   onCreateTerminal,
 }: {
   server: ServerView;
@@ -1696,7 +1879,9 @@ function WorkbenchToolbar({
   root: WorkRootView;
   selectedEntity: ResourceEntity | null;
   commandLog: CommandEntry[];
+  activity: WorkRootActivityBadgeView;
   onCommand: (commandId: string, payload: CommandPayload) => void;
+  onOpenActivity: () => void;
   onCreateTerminal: () => void;
 }) {
   const toggles = [
@@ -1716,6 +1901,17 @@ function WorkbenchToolbar({
       </div>
       <div className="workbench-toolbar-meta">
         <StateBadge state={root.state} />
+        <WorkbenchActivityBadge
+          activity={activity}
+          onOpenActivity={() => {
+            onCommand("workbench.openActivity", {
+              type: "action",
+              label: "Open WorkRoot Activity",
+              entityId: root.id,
+            });
+            onOpenActivity();
+          }}
+        />
         <span className="meta-chip">{kindLabel(root.kind)}</span>
         <span className="meta-chip">{root.status}</span>
         {commandLog[0] ? (
@@ -1781,6 +1977,251 @@ function WorkbenchToolbar({
   );
 }
 
+function WorkbenchActivityBadge({
+  activity,
+  onOpenActivity,
+}: {
+  activity: WorkRootActivityBadgeView;
+  onOpenActivity: () => void;
+}) {
+  // CONTRACT: Phase 2 renders a compact named-agent summary chip inside the
+  // existing toolbar metadata row. It is a summary/entrypoint only: no detail
+  // pane, agent controls, or row diagnostics live here.
+  // CONTRACT: Phase 3 turns this entrypoint into the only top-bar opener for a
+  // selected-workRoot Activity pane. The click handler must route through
+  // dashboard workbench placement policy, focus duplicate panes, and keep the
+  // pane reversible/read-only.
+  return (
+    <button
+      className={`meta-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
+      data-command-id="workbench.openActivity"
+      data-activity-tone={activity.tone}
+      type="button"
+      title={activity.title}
+      aria-label={`Open WorkRoot Activity: ${activity.title}`}
+      onClick={onOpenActivity}
+    >
+      <span className="workbench-activity-badge-dot" aria-hidden="true" />
+      <span className="workbench-activity-badge-label">{activity.label}</span>
+      {activity.summary ? (
+        <span className="workbench-activity-badge-summary">
+          {activity.summary}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function workRootActivityPaneLogicalKey(workRootId: string) {
+  return surfaceLogicalKey("workRootActivity", workRootId);
+}
+
+function workRootActivityPaneId(workRootId: string) {
+  return `workRootActivity-pane:${workRootId}`;
+}
+
+// Build the placement state the WorkRoot Activity badge feeds into
+// decideSurfaceOpenWithDynamicGroups. It mirrors the live editor groups so a
+// duplicate open focuses the pane in whatever group it currently occupies,
+// while a first open resolves to the policy-owned group-1 exception.
+function workRootActivityPlacementState(
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  editorGroups: WorkbenchEditorGroupModel[],
+  workRootId: string,
+): WorkbenchPlacementState {
+  const dashboardGroups = groups.length > 0 ? groups : initialWorkbenchGroups;
+  const paneId = workRootActivityPaneId(workRootId);
+  const owningGroup = editorGroups.find((group) =>
+    group.panes.some((pane) => pane.id === paneId),
+  );
+  return {
+    groups: dashboardGroups.map((group) => ({
+      groupId: workbenchGroupId(group.id),
+    })),
+    focusedGroupId: workbenchGroupId(dashboardGroups[0]?.id ?? "group-1"),
+    attachments: owningGroup
+      ? [
+          {
+            attachmentId:
+              paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+            groupId: workbenchGroupId(owningGroup.id),
+            surfaceKind: "workRootActivity",
+            logicalKey: workRootActivityPaneLogicalKey(workRootId),
+          },
+        ]
+      : [],
+  };
+}
+
+function workRootActivityWorkbenchPane(
+  root: WorkRootView,
+  activity: WorkRootActivityBadgeInput,
+): WorkbenchPane {
+  const ready = activity.phase === "ready" ? activity.view : null;
+  const state: ViewState = {
+    status:
+      activity.phase === "loading"
+        ? "loading"
+        : activity.phase === "error"
+          ? "unavailable"
+          : (ready?.status ?? "ok"),
+    loading: activity.phase === "loading",
+    stale: false,
+    error: activity.phase === "error" ? "activity unavailable" : null,
+  };
+  const meta =
+    ready !== null
+      ? [
+          `${ready.summary.total} agents`,
+          `${ready.summary.active} active`,
+          "read-only",
+        ]
+      : [activity.phase, "read-only"];
+  return {
+    id: workRootActivityPaneId(root.id),
+    kind: "workRootActivity",
+    category: "opened",
+    title: "WorkRoot Activity",
+    detail: `${root.label} named-agent activity`,
+    state,
+    meta,
+    body: <WorkRootActivityPane activity={activity} />,
+  };
+}
+
+function WorkRootActivityPane({
+  activity,
+}: {
+  activity: WorkRootActivityBadgeInput;
+}) {
+  // CONTRACT: A reversible read-only projection of the Phase 1 named-agent
+  // activity API. It never exposes host cache paths, stream paths, pids, or
+  // session ids, and offers no agent control actions.
+  return (
+    <section className="workroot-activity-pane" aria-label="WorkRoot Activity">
+      {activity.phase === "loading" ? (
+        <div className="workroot-activity-state">
+          Loading workRoot activity
+        </div>
+      ) : activity.phase === "error" ? (
+        <div className="workroot-activity-state workroot-activity-state-error">
+          WorkRoot activity is unavailable
+        </div>
+      ) : (
+        <WorkRootActivityDetail view={activity.view} />
+      )}
+      {/* CONTRACT: Running command rows stay explicitly empty until
+          260513-feat-async-exec-output-reader provides the async exec source. */}
+      <section
+        className="workroot-activity-section"
+        data-running-commands-state="empty"
+      >
+        <h3 className="workroot-activity-section-title">Running commands</h3>
+        <p className="workroot-activity-empty">
+          No running commands. Command activity arrives with the async exec
+          output reader.
+        </p>
+      </section>
+    </section>
+  );
+}
+
+function WorkRootActivityDetail({ view }: { view: WorkRootActivityView }) {
+  const { summary, agents } = view;
+  return (
+    <section className="workroot-activity-section">
+      <div className="workroot-activity-section-head">
+        <h3 className="workroot-activity-section-title">Named agents</h3>
+        <span className="meta-chip">{view.status}</span>
+      </div>
+      <div className="workroot-activity-summary">
+        <span className="meta-chip">{summary.total} total</span>
+        <span className="meta-chip">{summary.active} active</span>
+        <span className="meta-chip">{summary.blocked} blocked</span>
+        <span className="meta-chip">{summary.failed} failed</span>
+        <span className="meta-chip">{summary.unavailable} unavailable</span>
+      </div>
+      {agents.length === 0 ? (
+        <p
+          className="workroot-activity-empty"
+          data-named-agents-state="empty"
+        >
+          No named agents for this workRoot.
+        </p>
+      ) : (
+        <ul className="workroot-activity-agents">
+          {agents.map((agent) => (
+            <WorkRootActivityAgentRow agent={agent} key={agent.agentId} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function WorkRootActivityAgentRow({
+  agent,
+}: {
+  agent: NamedAgentActivityView;
+}) {
+  const metaParts = [
+    agent.backend,
+    agent.harness,
+    agent.model ?? agent.tier,
+    agent.effort,
+  ].filter((part): part is string => Boolean(part));
+  const call = agent.currentCall;
+  return (
+    <li className="workroot-activity-agent" data-agent-status={agent.status}>
+      <div className="workroot-activity-agent-head">
+        <span className="workroot-activity-agent-name">
+          {agent.name ?? agent.agentId}
+        </span>
+        <span className="meta-chip">{agent.status}</span>
+        {agent.sessionPresent ? (
+          <span className="meta-chip">session</span>
+        ) : null}
+      </div>
+      {metaParts.length > 0 ? (
+        <div className="workroot-activity-agent-meta">
+          {metaParts.join(" · ")}
+        </div>
+      ) : null}
+      {call ? (
+        <div className="workroot-activity-agent-call">
+          <span className="meta-chip">call {call.status}</span>
+          {call.executionId ? <span>exec {call.executionId}</span> : null}
+          {call.startedAt ? <span>started {call.startedAt}</span> : null}
+          {call.updatedAt ? <span>updated {call.updatedAt}</span> : null}
+          {call.finishedAt ? <span>finished {call.finishedAt}</span> : null}
+        </div>
+      ) : null}
+      {call?.error ? (
+        <div className="workroot-activity-agent-error">{call.error}</div>
+      ) : null}
+      {agent.lastCallAt ? (
+        <div className="workroot-activity-agent-timing">
+          last call {agent.lastCallAt}
+        </div>
+      ) : null}
+      {agent.detailHints.length > 0 ? (
+        <ul className="workroot-activity-hints">
+          {agent.detailHints.map((hint, index) => (
+            <li key={`hint-${index}`}>{hint}</li>
+          ))}
+        </ul>
+      ) : null}
+      {agent.diagnostics.length > 0 ? (
+        <ul className="workroot-activity-diagnostics">
+          {agent.diagnostics.map((diagnostic, index) => (
+            <li key={`diagnostic-${index}`}>{diagnostic}</li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
 function toolbarActions(
   root: WorkRootView,
   selectedEntity: ResourceEntity | null,
@@ -1828,6 +2269,8 @@ function buildWorkbenchEditorGroups(
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
   closedAgentPaneIds: readonly string[] = [],
+  activityPaneOpen = false,
+  activityState: WorkRootActivityBadgeInput = { phase: "loading" },
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
   void supportEntity;
@@ -1865,12 +2308,20 @@ function buildWorkbenchEditorGroups(
         ]
       : [];
 
+  // CONTRACT: The WorkRoot Activity pane is the one reversible opened
+  // projection that defaults into group 1 (the agent/terminal-side split)
+  // rather than the group-2 editor/read-only column.
+  const activityPane: WorkbenchPane[] = activityPaneOpen
+    ? [workRootActivityWorkbenchPane(root, activityState)]
+    : [];
+
   return dashboardGroups.map((group, index) => ({
     id: group.id,
     label: group.label,
     panes: [
       ...(index === 0 ? agentPane : []),
       ...(terminalPanesByGroup[group.id] ?? []),
+      ...(index === 0 ? activityPane : []),
       ...(readOnlyPanesByGroup[group.id] ?? []),
     ],
   }));
@@ -2062,6 +2513,9 @@ function TerminalPaneBody({
     window.setTimeout(() => {
       if (keepTerminalFocusRef.current && containerRef.current?.offsetParent) {
         terminalRef.current?.focus();
+        containerRef.current
+          ?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+          ?.focus();
       }
     }, 0);
   };
@@ -2133,11 +2587,18 @@ function TerminalPaneBody({
         keepTerminalFocusRef.current = false;
       }
     };
+    const clearFocusedTerminalOnOutsideFocus = (event: FocusEvent) => {
+      const target = event.target as Node | null;
+      if (target && !container.contains(target)) {
+        keepTerminalFocusRef.current = false;
+      }
+    };
     container.addEventListener("compositionstart", markComposing);
     container.addEventListener("compositionend", clearComposing);
     container.addEventListener("focusin", markFocusedTerminal);
     container.addEventListener("pointerdown", markFocusedTerminal);
     window.addEventListener("pointerdown", clearFocusedTerminal, true);
+    window.addEventListener("focusin", clearFocusedTerminalOnOutsideFocus, true);
 
     const keydownFallback = (event: KeyboardEvent) => {
       if (!container.offsetParent) {
@@ -2290,10 +2751,26 @@ function TerminalPaneBody({
     const observer = new ResizeObserver(scheduleResizeForward);
     observer.observe(container);
     window.addEventListener("resize", scheduleResizeForward);
+    const focusWatchdog = window.setInterval(() => {
+      if (!keepTerminalFocusRef.current) {
+        return;
+      }
+      if (!container.offsetParent) {
+        return;
+      }
+      if (!liveRef.current.actions.isActivePane(liveRef.current.pane)) {
+        return;
+      }
+      if (container.contains(document.activeElement)) {
+        return;
+      }
+      refocusActiveTerminal();
+    }, 100);
 
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", scheduleResizeForward);
+      window.clearInterval(focusWatchdog);
       if (resizeTimer !== null) {
         window.clearTimeout(resizeTimer);
       }
@@ -2303,6 +2780,11 @@ function TerminalPaneBody({
       container.removeEventListener("focusin", markFocusedTerminal);
       container.removeEventListener("pointerdown", markFocusedTerminal);
       window.removeEventListener("pointerdown", clearFocusedTerminal, true);
+      window.removeEventListener(
+        "focusin",
+        clearFocusedTerminalOnOutsideFocus,
+        true,
+      );
       inputDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;

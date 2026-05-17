@@ -88,6 +88,7 @@ assertDeepEqual(
     "diff",
     "diagnostics",
     "eventsLog",
+    "workRootActivity",
     "taskView",
     "inspector",
   ],
@@ -122,6 +123,7 @@ for (const kind of [
   "diff",
   "diagnostics",
   "eventsLog",
+  "workRootActivity",
   "taskView",
   "inspector",
 ] as const) {
@@ -131,6 +133,16 @@ for (const kind of [
     `${kind} uses the opened row`,
   );
 }
+
+// CONTRACT: Phase 3 must add behavior tests proving workRootActivity opens in
+// group 1 despite its opened row policy, duplicate logical keys focus the
+// existing activity pane, and close presentation stays immediate with no
+// cursor-near confirmation.
+// Placement assertions live with the existing terminal/editor dynamic-group
+// assertions below and use surfaceLogicalKey("workRootActivity", root id).
+// App uses surfaceLogicalKey("workRootActivity", root id) for one activity pane
+// per selected workRoot. App-level pane storage/rendering is left to the
+// implementation slice; policy behavior is locked below.
 
 const layout: WorkbenchLayoutState = {
   attachments: [
@@ -640,6 +652,10 @@ const agentKey = surfaceLogicalKey(
   "instance-agent-main",
 );
 const editorKey = surfaceLogicalKey("editor", "workroot-devenv", "README.md");
+const workRootActivityKey = surfaceLogicalKey(
+  "workRootActivity",
+  "workroot-devenv",
+);
 const placementState: WorkbenchPlacementState = {
   groups: [{ groupId: groupOne }, { groupId: groupTwo }],
   focusedGroupId: groupTwo,
@@ -717,6 +733,94 @@ assertDeepEqual(
     rowPolicy: "pinned",
   },
   "durable pinned surfaces fall back to the first group",
+);
+
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(placementState, {
+    surfaceKind: "workRootActivity",
+    logicalKey: workRootActivityKey,
+    attachmentId: attachmentId("att-workroot-activity"),
+  }),
+  {
+    type: "openNew",
+    attachmentId: "att-workroot-activity",
+    groupId: "group-1",
+    logicalKey: "workRootActivity/workroot-devenv",
+    rowPolicy: "opened",
+    nextState: {
+      ...placementState,
+      attachments: [
+        ...placementState.attachments,
+        {
+          attachmentId: "att-workroot-activity",
+          groupId: "group-1",
+          surfaceKind: "workRootActivity",
+          logicalKey: "workRootActivity/workroot-devenv",
+        },
+      ],
+    },
+    createdGroupId: null,
+  },
+  "WorkRoot Activity is the opened-row exception that defaults new panes to group 1",
+);
+
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    {
+      groups: [{ groupId: groupOne }, { groupId: groupTwo }],
+      focusedGroupId: groupTwo,
+      attachments: [
+        {
+          attachmentId: attachmentId("att-workroot-activity"),
+          groupId: groupOne,
+          surfaceKind: "workRootActivity",
+          logicalKey: workRootActivityKey,
+        },
+      ],
+    },
+    {
+      surfaceKind: "workRootActivity",
+      logicalKey: workRootActivityKey,
+      attachmentId: attachmentId("att-workroot-activity-duplicate"),
+    },
+  ),
+  {
+    type: "focusExisting",
+    attachmentId: "att-workroot-activity",
+    groupId: "group-1",
+    logicalKey: "workRootActivity/workroot-devenv",
+    nextState: {
+      groups: [{ groupId: "group-1" }, { groupId: "group-2" }],
+      focusedGroupId: "group-2",
+      attachments: [
+        {
+          attachmentId: "att-workroot-activity",
+          groupId: "group-1",
+          surfaceKind: "workRootActivity",
+          logicalKey: "workRootActivity/workroot-devenv",
+        },
+      ],
+    },
+    createdGroupId: null,
+  },
+  "duplicate WorkRoot Activity opens focus the existing logical key",
+);
+
+assertDeepEqual(
+  decideWorkbenchTabClosePresentation("workRootActivity", {
+    clientX: 12,
+    clientY: 34,
+  }),
+  {
+    type: "closeImmediately",
+    confirmation: {
+      confirmationPolicy: "none",
+      presentation: "none",
+      confirmLabel: null,
+      cancelLabel: null,
+    },
+  },
+  "WorkRoot Activity panes close immediately with no confirmation popover",
 );
 
 const readmeFileKey = surfaceLogicalKey(

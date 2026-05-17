@@ -23,6 +23,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -37,6 +38,9 @@ use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
+use ws_dashboard_daemon::work_root_activity::{
+    resolve_work_root_agents_dir, WorkRootActivityProjectionConfig, WorkRootActivityProjector,
+};
 use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -121,6 +125,7 @@ fn app_state() -> AppState {
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
     }
 }
 
@@ -133,6 +138,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
     }
 }
 
@@ -349,6 +355,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         opened_work_roots: OpenedWorkRoots::default(),
         terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
     };
     let expired_token = expired_state
         .auth
@@ -1006,6 +1013,777 @@ async fn work_root_file_listing_routes_reports_unknown_work_root() {
         .expect("unknown body bytes");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown JSON");
     assert_eq!(value["error"], "unknown workRoot");
+}
+
+// CONTRACT: WorkRoot Activity Phase 1 route tests should cover:
+// - unauthenticated `/api/dashboard/work-roots/{workRootId}/activity` rejects
+//   before reading wsstate or opened workRoot state;
+// - unknown opened workRoot ids return 404 `{ "error": "unknown workRoot" }`;
+// - an opened workRoot with no wsstate agents returns `status: "ok"` and an
+//   empty `agents` list;
+// - fixture wsstate with idle/running/failed agent records returns summary
+//   counts and bounded row data;
+// - malformed agent/current-call JSON degrades individual rows instead of
+//   failing the whole route;
+// - response bodies never contain host paths, cache paths, session ids, pids,
+//   stdout/stderr paths, `agent.json`, or `current/state.json`.
+
+fn app_state_with_activity_cache_home(cache_home: PathBuf) -> AppState {
+    AppState {
+        config: ServeConfig::default_loopback(),
+        auth: OwnerAuthState::new_ephemeral(),
+        opened_work_roots: OpenedWorkRoots::default(),
+        terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
+            cache_home: Some(cache_home),
+        }),
+    }
+}
+
+#[tokio::test]
+async fn work_root_activity_route_is_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/activity")
+                .body(Body::empty())
+                .expect("unauthenticated workRoot activity request"),
+        )
+        .await
+        .expect("unauthenticated workRoot activity response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_reports_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/activity")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown workRoot activity request"),
+        )
+        .await
+        .expect("unknown workRoot activity response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unknown activity body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown activity JSON");
+    assert_eq!(value["error"], "unknown workRoot");
+}
+
+#[tokio::test]
+async fn work_root_activity_route_returns_empty_named_agent_projection() {
+    let root = temp_fixture_path("work-root-activity-empty");
+    let cache_home = temp_fixture_path("work-root-activity-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    fs::create_dir_all(&cache_home).expect("create activity cache fixture root");
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{work_root_id}/activity"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("empty workRoot activity request"),
+        )
+        .await
+        .expect("empty workRoot activity response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("empty activity body bytes");
+    let body_text = String::from_utf8(body.to_vec()).expect("empty activity body is UTF-8");
+    let value: serde_json::Value = serde_json::from_str(&body_text).expect("empty activity JSON");
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["status"], "ok");
+    assert_eq!(
+        value["summary"],
+        serde_json::json!({
+            "total": 0,
+            "active": 0,
+            "blocked": 0,
+            "failed": 0,
+            "unavailable": 0
+        })
+    );
+    assert_eq!(
+        value["agents"]
+            .as_array()
+            .expect("activity agents array")
+            .len(),
+        0
+    );
+    assert!(value.get("work_root_id").is_none());
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "agent.json".to_owned(),
+        "current/state.json".to_owned(),
+        "session_id".to_owned(),
+        "stdout".to_owned(),
+        "stderr".to_owned(),
+        "pid".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "activity response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+fn git_available() -> bool {
+    Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn run_git(path: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn init_git_repo(path: &Path) {
+    run_git(path, &["init"]);
+    run_git(
+        path,
+        &["config", "user.email", "ws-dashboard@example.local"],
+    );
+    run_git(path, &["config", "user.name", "ws dashboard"]);
+}
+
+fn skip_without_git(test_name: &str) -> bool {
+    if git_available() {
+        return false;
+    }
+    // Visible signal so a git-less environment does not hide this coverage
+    // behind a silently-green result.
+    eprintln!("SKIP {test_name}: the `git` binary is unavailable");
+    true
+}
+
+fn write_agent_metadata(agents_dir: &Path, agent_key: &str, agent_json: &serde_json::Value) {
+    let agent_dir = agents_dir.join(agent_key);
+    fs::create_dir_all(&agent_dir).expect("create agent fixture dir");
+    fs::write(
+        agent_dir.join("agent.json"),
+        serde_json::to_string_pretty(agent_json).expect("encode agent fixture"),
+    )
+    .expect("write agent.json fixture");
+}
+
+fn write_agent_metadata_raw(agents_dir: &Path, agent_key: &str, raw: &str) {
+    let agent_dir = agents_dir.join(agent_key);
+    fs::create_dir_all(&agent_dir).expect("create agent fixture dir");
+    fs::write(agent_dir.join("agent.json"), raw).expect("write raw agent.json fixture");
+}
+
+fn write_current_call(agents_dir: &Path, agent_key: &str, raw: &str) {
+    let current_dir = agents_dir.join(agent_key).join("current");
+    fs::create_dir_all(&current_dir).expect("create current fixture dir");
+    fs::write(current_dir.join("state.json"), raw).expect("write state.json fixture");
+}
+
+async fn fetch_work_root_activity(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+) -> (StatusCode, String) {
+    fetch_work_root_activity_path(
+        app,
+        cookie,
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity"),
+    )
+    .await
+}
+
+async fn fetch_work_root_activity_path(
+    app: axum::Router,
+    cookie: &str,
+    path: &str,
+) -> (StatusCode, String) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(path)
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("workRoot activity request"),
+        )
+        .await
+        .expect("workRoot activity response");
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("workRoot activity body bytes");
+    (
+        status,
+        String::from_utf8(body.to_vec()).expect("activity body is UTF-8"),
+    )
+}
+
+#[tokio::test]
+async fn work_root_activity_route_projects_named_agent_records() {
+    if skip_without_git("work_root_activity_route_projects_named_agent_records") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-records");
+    let cache_home = temp_fixture_path("work-root-activity-records-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    write_agent_metadata(
+        &agents_dir,
+        "reviewer",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "reviewer",
+            "backend": "codex",
+            "harness": "codex",
+            "tier": "core",
+            "model": "gpt-5.3-codex",
+            "effort": "medium",
+            "session_id": "session-abc",
+            "status": "idle",
+            "last_call_at": "2026-05-17T09:00:00Z",
+            "last_output_path": "/cache/agents/reviewer/output.md",
+            "pid": 4242,
+            "stdout_path": "/cache/agents/reviewer/current/stdout"
+        }),
+    );
+
+    write_agent_metadata(
+        &agents_dir,
+        "builder",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "builder",
+            "backend": "claude",
+            "status": "running",
+            "session_id": "session-def",
+            "last_call_at": "2026-05-17T10:00:00Z"
+        }),
+    );
+    write_current_call(
+        &agents_dir,
+        "builder",
+        &serde_json::json!({
+            "schema_version": 1,
+            "agent_name": "builder",
+            "status": "running",
+            "execution_id": "000123",
+            "started_at": "2026-05-17T10:00:00Z",
+            "updated_at": "2026-05-17T10:01:00Z",
+            "pid": 5151,
+            "stdout_path": "/cache/agents/builder/current/stdout",
+            "stderr_path": "/cache/agents/builder/current/stderr"
+        })
+        .to_string(),
+    );
+
+    write_agent_metadata(
+        &agents_dir,
+        "planner",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "planner",
+            "backend": "codex",
+            "status": "blocked",
+            "last_call_at": "2026-05-17T09:30:00Z"
+        }),
+    );
+
+    write_agent_metadata(
+        &agents_dir,
+        "retired",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "retired",
+            "backend": "gemini",
+            "status": "erased"
+        }),
+    );
+
+    write_agent_metadata(
+        &agents_dir,
+        "tester",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "tester",
+            "backend": "gemini",
+            "status": "failed",
+            "last_call_at": "2026-05-17T08:00:00Z"
+        }),
+    );
+    write_current_call(
+        &agents_dir,
+        "tester",
+        &serde_json::json!({
+            "schema_version": 1,
+            "agent_name": "tester",
+            "status": "failed",
+            "execution_id": "000077",
+            "started_at": "2026-05-17T07:59:00Z",
+            "updated_at": "2026-05-17T08:00:00Z",
+            "finished_at": "2026-05-17T08:00:00Z",
+            "cleanup_needed": true,
+            "error": "backend exited with status 1"
+        })
+        .to_string(),
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("named-agent activity JSON");
+
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["status"], "ok");
+    assert_eq!(
+        value["summary"],
+        serde_json::json!({
+            "total": 5,
+            "active": 1,
+            "blocked": 1,
+            "failed": 1,
+            "unavailable": 0
+        })
+    );
+
+    let agents = value["agents"].as_array().expect("activity agents array");
+    assert_eq!(agents.len(), 5);
+    let agent_row = |agent_id: &str| -> &serde_json::Value {
+        agents
+            .iter()
+            .find(|agent| agent["agentId"] == agent_id)
+            .unwrap_or_else(|| panic!("missing agent row {agent_id}"))
+    };
+
+    let builder = agent_row("builder");
+    assert_eq!(builder["status"], "running");
+    assert_eq!(builder["sessionPresent"], true);
+    assert_eq!(builder["currentCall"]["status"], "running");
+    assert_eq!(builder["currentCall"]["active"], true);
+    assert_eq!(builder["currentCall"]["terminal"], false);
+    assert_eq!(builder["currentCall"]["executionId"], "000123");
+    assert!(builder["diagnostics"]
+        .as_array()
+        .expect("builder diagnostics array")
+        .is_empty());
+
+    let reviewer = agent_row("reviewer");
+    assert_eq!(reviewer["status"], "idle");
+    assert_eq!(reviewer["backend"], "codex");
+    assert_eq!(reviewer["model"], "gpt-5.3-codex");
+    assert_eq!(reviewer["lastCallAt"], "2026-05-17T09:00:00Z");
+    assert_eq!(reviewer["sessionPresent"], true);
+    assert!(reviewer["currentCall"].is_null());
+    assert!(reviewer["detailHints"]
+        .as_array()
+        .expect("reviewer detail hints array")
+        .iter()
+        .any(|hint| hint == "recent output available"));
+
+    let planner = agent_row("planner");
+    assert_eq!(planner["status"], "blocked");
+    assert_eq!(planner["sessionPresent"], false);
+    assert!(planner["currentCall"].is_null());
+
+    let retired = agent_row("retired");
+    assert_eq!(retired["status"], "erased");
+
+    let tester = agent_row("tester");
+    assert_eq!(tester["status"], "failed");
+    assert_eq!(tester["currentCall"]["status"], "failed");
+    assert_eq!(tester["currentCall"]["active"], false);
+    assert_eq!(tester["currentCall"]["terminal"], true);
+    assert_eq!(tester["currentCall"]["cleanupNeeded"], true);
+    assert_eq!(
+        tester["currentCall"]["error"],
+        "backend exited with status 1"
+    );
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "agent.json".to_owned(),
+        "current/state.json".to_owned(),
+        "session_id".to_owned(),
+        "session-abc".to_owned(),
+        "session-def".to_owned(),
+        "stdout".to_owned(),
+        "stderr".to_owned(),
+        "pid".to_owned(),
+        "output.md".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "activity response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_limits_recent_agent_projection() {
+    if skip_without_git("work_root_activity_route_limits_recent_agent_projection") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-recent-limit");
+    let cache_home = temp_fixture_path("work-root-activity-recent-limit-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    for index in 0..5 {
+        write_agent_metadata(
+            &agents_dir,
+            &format!("agent-{index}"),
+            &serde_json::json!({
+                "schema_version": 1,
+                "name": format!("agent-{index}"),
+                "backend": "codex",
+                "status": "idle"
+            }),
+        );
+    }
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_path(
+        app,
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{work_root_id}/activity?recentLimit=2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("recent-limited activity JSON");
+    assert_eq!(value["summary"]["total"], 2);
+    assert_eq!(
+        value["agents"]
+            .as_array()
+            .expect("recent-limited agents array")
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn work_root_activity_route_degrades_malformed_records() {
+    if skip_without_git("work_root_activity_route_degrades_malformed_records") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-malformed");
+    let cache_home = temp_fixture_path("work-root-activity-malformed-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    // Healthy idle agent.
+    write_agent_metadata(
+        &agents_dir,
+        "healthy",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "healthy",
+            "backend": "codex",
+            "status": "idle"
+        }),
+    );
+
+    // Malformed agent.json must degrade only its own row.
+    write_agent_metadata_raw(&agents_dir, "broken-meta", "{ this is not valid json");
+
+    // Agent directory with no agent.json file at all.
+    fs::create_dir_all(agents_dir.join("missing-meta")).expect("create missing-meta agent dir");
+
+    // Valid metadata but unreadable current-call state.
+    write_agent_metadata(
+        &agents_dir,
+        "broken-call",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "broken-call",
+            "backend": "claude",
+            "status": "running"
+        }),
+    );
+    write_current_call(&agents_dir, "broken-call", "}{ not json either");
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    // CONTRACT: malformed records degrade individual rows; the route still
+    // succeeds instead of failing the whole projection.
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("degraded activity JSON");
+
+    assert_eq!(value["status"], "degraded");
+    assert_eq!(value["summary"]["total"], 4);
+    assert_eq!(value["summary"]["unavailable"], 2);
+
+    let agents = value["agents"].as_array().expect("activity agents array");
+    assert_eq!(agents.len(), 4);
+    let agent_row = |agent_id: &str| -> &serde_json::Value {
+        agents
+            .iter()
+            .find(|agent| agent["agentId"] == agent_id)
+            .unwrap_or_else(|| panic!("missing agent row {agent_id}"))
+    };
+    let diagnostics_of = |agent: &serde_json::Value| -> Vec<String> {
+        agent["diagnostics"]
+            .as_array()
+            .expect("diagnostics array")
+            .iter()
+            .map(|entry| entry.as_str().expect("diagnostic string").to_owned())
+            .collect()
+    };
+
+    // Valid metadata, but the current-call record cannot be parsed.
+    let broken_call = agent_row("broken-call");
+    assert_eq!(broken_call["status"], "running");
+    assert!(broken_call["currentCall"].is_null());
+    assert!(!diagnostics_of(broken_call).is_empty());
+
+    // Unreadable agent.json degrades the row to unavailable.
+    let broken_meta = agent_row("broken-meta");
+    assert_eq!(broken_meta["status"], "unavailable");
+    assert!(broken_meta["name"].is_null());
+    assert!(!diagnostics_of(broken_meta).is_empty());
+
+    // Missing agent.json also degrades the row to unavailable.
+    let missing_meta = agent_row("missing-meta");
+    assert_eq!(missing_meta["status"], "unavailable");
+    assert!(missing_meta["name"].is_null());
+    assert!(missing_meta["currentCall"].is_null());
+    assert!(!diagnostics_of(missing_meta).is_empty());
+
+    // The healthy row is unaffected by sibling degradation.
+    let healthy = agent_row("healthy");
+    assert_eq!(healthy["status"], "idle");
+    assert!(diagnostics_of(healthy).is_empty());
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "agent.json".to_owned(),
+        "state.json".to_owned(),
+        "session_id".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "activity response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_returns_empty_for_git_workroot_without_agents_dir() {
+    if skip_without_git(
+        "work_root_activity_route_returns_empty_for_git_workroot_without_agents_dir",
+    ) {
+        return;
+    }
+    // A Git workRoot resolves a wsstate layout, but no `agents/` directory has
+    // been created yet: `scan_named_agents` must short-circuit to an empty,
+    // healthy projection rather than fail.
+    let root = temp_fixture_path("work-root-activity-no-agents");
+    let cache_home = temp_fixture_path("work-root-activity-no-agents-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    fs::create_dir_all(&cache_home).expect("create activity cache fixture root");
+    init_git_repo(&root);
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("git no-agents activity JSON");
+
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["summary"]["total"], 0);
+    assert_eq!(
+        value["agents"]
+            .as_array()
+            .expect("activity agents array")
+            .len(),
+        0
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[test]
+fn work_root_activity_resolves_git_primary_and_linked_worktree_layout() {
+    if skip_without_git("work_root_activity_resolves_git_primary_and_linked_worktree_layout") {
+        return;
+    }
+    // Independently verify the wsstate layout derivation (not just route
+    // self-consistency): the agents directory is `<cache>/proj/<key>/agents`,
+    // the primary key is an 8-hex project key, and the linked-worktree key is
+    // `<projectKey>@<worktreeId>` sharing that same project key.
+    let base = temp_fixture_path("work-root-activity-layout");
+    let cache_home = base.join("cache");
+    let primary = base.join("primary");
+    let linked = base.join("linked");
+    fs::create_dir_all(&primary).expect("create primary workRoot");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "layout fixture\n").expect("write seed file");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    run_git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            linked.to_str().expect("linked path utf-8"),
+        ],
+    );
+
+    let primary_dir = resolve_work_root_agents_dir(&cache_home, &primary)
+        .expect("resolve primary worktree layout");
+    let linked_dir =
+        resolve_work_root_agents_dir(&cache_home, &linked).expect("resolve linked worktree layout");
+
+    // Layout shape: `<cache>/proj/<key>/agents`.
+    assert!(primary_dir.starts_with(&cache_home));
+    assert_eq!(primary_dir.file_name().expect("agents leaf"), "agents");
+    let primary_key_dir = primary_dir.parent().expect("primary key dir");
+    assert_eq!(
+        primary_key_dir
+            .parent()
+            .expect("proj dir")
+            .file_name()
+            .expect("proj leaf"),
+        "proj"
+    );
+
+    let primary_key = primary_key_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("primary key utf-8")
+        .to_owned();
+    assert_eq!(
+        primary_key.len(),
+        8,
+        "project key is an 8-hex digest prefix"
+    );
+    assert!(
+        primary_key.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "project key is hex: {primary_key}"
+    );
+
+    let linked_key = linked_dir
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str())
+        .expect("linked key utf-8")
+        .to_owned();
+    let (linked_project, linked_worktree) = linked_key
+        .split_once('@')
+        .expect("linked worktree key joins project and worktree ids with '@'");
+    assert_eq!(
+        linked_project, primary_key,
+        "linked worktree key shares the primary project key"
+    );
+    assert_eq!(linked_worktree.len(), 8, "worktree id is an 8-hex prefix");
+    assert!(linked_worktree.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert_ne!(
+        linked_worktree, primary_key,
+        "linked worktree id differs from the project key"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[test]
+fn work_root_activity_rejects_non_git_and_bare_repository_layout() {
+    if skip_without_git("work_root_activity_rejects_non_git_and_bare_repository_layout") {
+        return;
+    }
+    let base = temp_fixture_path("work-root-activity-reject");
+    let cache_home = base.join("cache");
+    let plain = base.join("plain");
+    let bare = base.join("bare.git");
+    fs::create_dir_all(&plain).expect("create plain dir");
+    fs::create_dir_all(&bare).expect("create bare dir");
+
+    // A plain non-Git directory has no wsstate layout.
+    assert!(
+        resolve_work_root_agents_dir(&cache_home, &plain).is_none(),
+        "non-Git directory must not resolve a wsstate agents dir"
+    );
+
+    // A bare repository is not a usable worktree and is rejected.
+    run_git(&bare, &["init", "--bare"]);
+    assert!(
+        resolve_work_root_agents_dir(&cache_home, &bare).is_none(),
+        "bare repository must not resolve a wsstate agents dir"
+    );
+
+    remove_static_fixture(&base);
 }
 
 #[tokio::test]

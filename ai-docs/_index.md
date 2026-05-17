@@ -149,7 +149,6 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260517-feat-ws-dashboard-workroot-activity` | ready | Add a workRoot-owned activity projection, top-bar badge, and group-1 detail pane for named-agent state |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -162,8 +161,10 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | idea | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
+| `260517-feat-ws-dashboard-workroot-activity-live-refresh` | idea | Replace WorkRoot Activity polling hotfix with workRoot-scoped SSE/filewatch refresh |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | idea | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260517-bug-lead-proceed-overbroad-slice` | idea | Investigate conservative lead-proceed implementation slice routing when phase blast radii differ |
+| `260517-bug-ws-dashboard-terminal-focus-browser-gate-regression` | idea | Investigate terminal helper textarea focus loss blocking dashboard browser gate |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260515-bug-git-commit-rename-status-summary` | idea | Fix git.commit ticket-change summaries for edited ticket renames |
@@ -172,9 +173,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260517-feat-ws-dashboard-workroot-activity` - implement Phase 1 first:
-  daemon-owned read-only named-agent/wsstate projection for opened workRoots.
-  Later phases add the top-bar badge and group-1 activity pane.
+No ready tickets are currently queued for dashboard WorkRoot Activity.
 
 ## Session Notes
 

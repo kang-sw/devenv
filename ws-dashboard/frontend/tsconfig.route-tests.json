@@ -20,6 +20,8 @@
     "src/resourceModel.test.ts",
     "src/workRootFiles.ts",
     "src/workRootFiles.test.ts",
+    "src/workRootActivity.ts",
+    "src/workRootActivity.test.ts",
     "src/terminals.ts",
     "src/terminals.test.ts",
     "src/terminalCommandPlan.ts",

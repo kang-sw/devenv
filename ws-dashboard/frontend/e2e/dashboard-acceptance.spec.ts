@@ -400,6 +400,269 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // --- Top-bar WorkRoot Activity badge sits in the existing metadata row --
+  await test.step("activity badge renders in the toolbar metadata row without growing it", async () => {
+    const metaRow = page.locator(".workbench-toolbar-meta");
+    const badge = page.locator(
+      ".workbench-toolbar-meta .workbench-activity-badge",
+    );
+    const stateBadge = page.locator(".workbench-toolbar-meta .state-badge");
+
+    // CONTRACT: the badge is a single named-agent summary chip inside the
+    // existing metadata row; it must not add a second badge or a new toolbar
+    // row.
+    await expect(badge).toHaveCount(1);
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText(/agent/i);
+
+    const measureToolbar = async () => {
+      const metaBox = await metaRow.boundingBox();
+      const badgeBox = await badge.boundingBox();
+      const stateBadgeBox = await stateBadge.boundingBox();
+      const toolbarBox = await page
+        .locator(".workbench-toolbar")
+        .boundingBox();
+      expect(metaBox).not.toBeNull();
+      expect(badgeBox).not.toBeNull();
+      expect(stateBadgeBox).not.toBeNull();
+      expect(toolbarBox).not.toBeNull();
+      return {
+        metaBox: metaBox!,
+        badgeBox: badgeBox!,
+        stateBadgeBox: stateBadgeBox!,
+        toolbarBox: toolbarBox!,
+      };
+    };
+    const activitySummaryDisplay = async () =>
+      page.evaluate(() => {
+        const badgeNode = document.querySelector(".workbench-activity-badge");
+        if (!badgeNode) return "missing";
+        const probe = document.createElement("span");
+        probe.className = "workbench-activity-badge-summary";
+        probe.textContent = "probe";
+        badgeNode.appendChild(probe);
+        const display = window.getComputedStyle(probe).display;
+        probe.remove();
+        return display;
+      });
+
+    const assertSingleLineMetaRow = (
+      measured: Awaited<ReturnType<typeof measureToolbar>>,
+      label: string,
+    ) => {
+      // The metadata row stays one chip line tall. A wrapped row or a stacked
+      // badge would make this a multiple of the chip height.
+      expect(
+        measured.metaBox.height,
+        `${label}: metadata row stays a single chip line`,
+      ).toBeLessThanOrEqual(measured.stateBadgeBox.height + 2);
+      // The activity badge is vertically inside the metadata row, not a new
+      // toolbar row above or below it.
+      expect(
+        measured.badgeBox.y,
+        `${label}: badge starts inside the metadata row`,
+      ).toBeGreaterThanOrEqual(measured.metaBox.y - 1);
+      expect(
+        measured.badgeBox.y + measured.badgeBox.height,
+        `${label}: badge ends inside the metadata row`,
+      ).toBeLessThanOrEqual(measured.metaBox.y + measured.metaBox.height + 1);
+    };
+
+    const wide = await measureToolbar();
+    assertSingleLineMetaRow(wide, "1440px viewport");
+    expect(await activitySummaryDisplay()).not.toBe("none");
+    const wideToolbarHeight = wide.toolbarBox.height;
+
+    // Constrained width: the badge compacts/clips instead of wrapping the
+    // metadata row or adding a toolbar row.
+    await page.setViewportSize({ width: 480, height: 900 });
+    await expect(badge).toBeVisible();
+    assertSingleLineMetaRow(await measureToolbar(), "480px viewport");
+    expect(await activitySummaryDisplay()).toBe("none");
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const restored = await measureToolbar();
+    assertSingleLineMetaRow(restored, "restored 1440px viewport");
+    expect(
+      Math.abs(restored.toolbarBox.height - wideToolbarHeight),
+      "toolbar height does not increase across the viewport change",
+    ).toBeLessThanOrEqual(1);
+
+    note(
+      "activity badge: named-agent summary chip renders inside " +
+        ".workbench-toolbar-meta; the metadata row stays a single chip line " +
+        "at 1440px and 480px without adding a toolbar row",
+    );
+  });
+
+  // --- Top-bar badge opens/focuses/closes the WorkRoot Activity pane -----
+  // CONTRACT: The Activity badge opens or focuses exactly one WorkRoot Activity
+  // pane in group 1, duplicate badge clicks do not create duplicate panes, the
+  // pane closes immediately with no confirmation popover, and running-command
+  // rows stay explicitly empty until the async exec source exists.
+  await test.step("activity badge opens, focuses, and closes the WorkRoot Activity pane", async () => {
+    const opener = page.locator(
+      '[data-command-id="workbench.openActivity"].workbench-activity-badge',
+    );
+    const activityPane = page.locator(
+      '[data-surface-kind="workRootActivity"]',
+    );
+    const activityTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="workRootActivity-pane:"]',
+    );
+    await expect(opener).toHaveCount(1);
+
+    // No Activity pane exists until the badge is clicked.
+    await expect(activityPane).toHaveCount(0);
+
+    // Badge click opens exactly one Activity pane, and it lands in group 1.
+    await opener.click();
+    await expect(activityPane).toHaveCount(1);
+    await expect(activityPane).toHaveAttribute(
+      "data-workbench-group-id",
+      "group-1",
+    );
+    await expect(activityPane).toHaveAttribute(
+      "aria-label",
+      "Activity: WorkRoot Activity",
+    );
+    await expectDockviewWorkbench(page);
+
+    // The pane body is the read-only projection. Running commands are an
+    // explicitly empty section, and the empty/no-agent detail is valid and
+    // visible for the plain-directory gate workRoot.
+    const paneBody = activityPane.locator(".workroot-activity-pane");
+    await expect(paneBody).toBeVisible();
+    await expect(
+      paneBody.locator('[data-running-commands-state="empty"]'),
+    ).toBeVisible();
+    await expect(
+      paneBody.locator('[data-named-agents-state="empty"]'),
+    ).toBeVisible();
+
+    // The Activity tab carries the surface title.
+    await expect(activityTab).toHaveCount(1);
+    await expect(activityTab.locator(".workbench-tab-title")).toHaveText(
+      "WorkRoot Activity",
+    );
+
+    // A second badge click focuses the existing pane without duplicating it.
+    await opener.click();
+    await expect(activityPane).toHaveCount(1);
+    await expect(activityTab).toHaveCount(1);
+
+    // Close is immediate: the hover-only tab close removes the pane with no
+    // cursor-near confirmation popover.
+    await activityTab.hover();
+    await activityTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    await expect(activityPane).toHaveCount(0);
+    await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
+
+    await page.route(
+      /\/api\/dashboard\/work-roots\/.*\/activity(?:\?.*)?$/,
+      async (route) => {
+        const match = new URL(route.request().url()).pathname.match(
+          /\/api\/dashboard\/work-roots\/([^/]+)\/activity$/,
+        );
+        const requestedWorkRootId = match
+          ? decodeURIComponent(match[1])
+          : "browser-gate-root";
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            workRootId: requestedWorkRootId,
+            status: "degraded",
+            summary: {
+              total: 1,
+              active: 1,
+              blocked: 0,
+              failed: 0,
+              unavailable: 0,
+            },
+            agents: [
+              {
+                agentId: "agent-alpha",
+                name: "agent-alpha",
+                backend: "claude",
+                harness: "codex",
+                tier: "core",
+                model: "opus",
+                effort: "high",
+                status: "running",
+                lastCallAt: "2026-05-17T11:58:00Z",
+                sessionPresent: true,
+                currentCall: {
+                  status: "running",
+                  active: true,
+                  terminal: false,
+                  executionId: "exec-alpha",
+                  startedAt: "2026-05-17T11:57:00Z",
+                  updatedAt: "2026-05-17T11:58:00Z",
+                  finishedAt: null,
+                  cleanupNeeded: false,
+                  error: "bounded diagnostic",
+                },
+                detailHints: ["review output ready"],
+                diagnostics: ["cache row degraded"],
+              },
+            ],
+          }),
+        });
+      },
+    );
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await openWorkRootInBrowser(page, workRoot);
+    await expect(opener).toContainText("1 agent");
+
+    await opener.click();
+    await expect(activityPane).toHaveCount(1);
+    await expect(activityPane).toHaveAttribute(
+      "data-workbench-group-id",
+      "group-1",
+    );
+    await expect(activityTab).toHaveCount(1);
+    await expect(activityTab).toHaveAttribute("aria-selected", "true");
+
+    const populatedBody = activityPane.locator(".workroot-activity-pane");
+    await expect(
+      populatedBody.locator('[data-running-commands-state="empty"]'),
+    ).toBeVisible();
+    await expect(
+      populatedBody.locator(".workroot-activity-agent", {
+        hasText: "agent-alpha",
+      }),
+    ).toBeVisible();
+    await expect(populatedBody).toContainText("running");
+    await expect(populatedBody).toContainText("session");
+    await expect(populatedBody).toContainText("claude · codex · opus · high");
+    await expect(populatedBody).toContainText("exec exec-alpha");
+    await expect(populatedBody).toContainText("bounded diagnostic");
+    await expect(populatedBody).toContainText("review output ready");
+    await expect(populatedBody).toContainText("cache row degraded");
+
+    await opener.click();
+    await expect(activityPane).toHaveCount(1);
+    await expect(activityTab).toHaveCount(1);
+    await expect(activityTab).toHaveAttribute("aria-selected", "true");
+
+    await activityTab.hover();
+    await activityTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    await expect(activityPane).toHaveCount(0);
+    await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
+
+    note(
+      "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
+        "empty and populated named-agent projections rendered, a second click " +
+        "focused it without duplicating, and hover-only close removed it " +
+        "immediately with no confirmation popover",
+    );
+  });
+
   // --- Long explorer content stays inside its pane, not the document -----
   await test.step("long explorer content stays within the viewport", async () => {
     // The fixture root holds 80+ files, so the explorer tree is far taller
@@ -862,6 +1125,22 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       ),
     );
     expect(terminalSocketFrames.length).toBe(framesBeforeComposition);
+
+    // CONTRACT: The terminal focus watchdog may restore focus after terminal
+    // input/output churn, but it must not steal focus back after an intentional
+    // outside focus move.
+    await page.locator('[data-command-id="terminal.create"]').focus();
+    await page.waitForTimeout(250);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const element = document.activeElement;
+          return element instanceof HTMLElement
+            ? element.dataset.commandId
+            : "";
+        }),
+      )
+      .toBe("terminal.create");
 
     expect(
       terminalSocketFrames.some((frame) => frame.includes('"type":"input"')),

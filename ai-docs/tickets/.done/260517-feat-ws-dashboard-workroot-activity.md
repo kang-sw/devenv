@@ -8,9 +8,17 @@ spec:
   - 260517-ws-dashboard-workroot-activity-projection
   - 260517-ws-dashboard-workroot-activity-topbar-badge
   - 260517-ws-dashboard-workroot-activity-pane
+skeletons:
+  phase-1: 43049cb
+  phase-3: 5757bcf
+plans:
+  phase-1: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-1
+  phase-2: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-2
+  phase-3: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-3
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
+completed: 2026-05-17
 ---
 
 # ws dashboard WorkRoot Activity projection
@@ -88,6 +96,26 @@ a parallel dashboard cache. Missing, malformed, or stale agent records should
 produce bounded unavailable or diagnostic states instead of failing the whole
 workRoot activity response.
 
+### Result (7c49130) - 2026-05-17
+
+Implemented the authenticated
+`GET /api/dashboard/work-roots/{workRootId}/activity` route for opened
+workRoots. The daemon now derives wsstate-compatible Git worktree agent
+directories, scans read-only named-agent metadata and current-call state, and
+returns bounded `WorkRootActivityView` rows without exposing host paths, cache
+paths, session ids, pids, or stream paths.
+
+Malformed or missing agent/current-call records degrade individual rows rather
+than failing the whole route. Non-Git, bare-repository, or no-agent workRoots
+return an empty `ok` projection for Phase 1. Verification covered daemon route
+auth, unknown roots, empty projections, fixture agent records, malformed rows,
+linked-worktree layout, Windows/non-UTF-8 hash compatibility, and frontend route
+helpers.
+
+Forward: consider a shared daemon Git subprocess/path-discovery seam before more
+features duplicate Git probing logic; review accepted keeping that refactor out
+of Phase 1.
+
 ### Phase 2: Add top-bar activity badge projection
 
 Render a compact named-agent activity badge in the existing workRoot top-bar
@@ -98,6 +126,21 @@ The top bar must keep its current height. Add browser evidence that the badge
 does not introduce a new row, does not wrap the toolbar under the covered
 viewports, and does not reduce terminal/workbench usable height beyond the
 existing toolbar footprint.
+
+### Result (7d22fa3) - 2026-05-17
+
+Implemented the compact selected-workRoot named-agent badge in the existing
+toolbar metadata row. The frontend consumes the Phase 1 activity route, renders
+bounded loading/error/ready summaries, keeps the badge summary-only, and avoids
+stale prior-workRoot activity during root switches.
+
+The browser gate now asserts that the badge stays inside the existing metadata
+row, preserves toolbar height at wide and constrained widths, and hides
+secondary badge text at 480px instead of wrapping. A pre-existing terminal focus
+browser-gate failure reproduced on the Phase 2 baseline; the branch includes a
+narrow terminal focus watchdog hotfix and follow-up ticket reconciliation so the
+full dashboard browser gate can pass while preserving the remaining terminal
+focus stabilization work as follow-up.
 
 ### Phase 3: Add WorkRoot Activity workbench pane
 
@@ -112,3 +155,25 @@ ordinary close behavior.
 
 Running-command rows should remain absent or explicitly empty until
 `260513-feat-async-exec-output-reader` lands.
+
+### Result (d025d9d) - 2026-05-17
+
+Implemented the reversible WorkRoot Activity workbench pane. The top-bar
+activity badge now opens or focuses one selected-workRoot Activity pane through
+the dashboard workbench placement policy. New Activity panes default to group 1,
+duplicate badge clicks focus the existing pane without creating duplicates, and
+close detaches the browser view immediately with no confirmation or daemon
+named-agent side effect.
+
+The pane renders the read-only Phase 1 named-agent projection, including summary
+counts, agent status/session/model/current-call metadata, bounded hints and
+diagnostics, empty/no-agent state, and an explicit empty Running Commands
+section. Real running-command rows and agent controls remain deferred to their
+own future tickets.
+
+Verification covered workbench policy, activity helpers, production build, and
+the daemon-served browser gate. Browser evidence covers empty and populated
+Activity pane projections, group-1 placement, duplicate focus/no duplicate,
+immediate close/no confirmation, and the existing terminal/browser acceptance
+flow. One browser-gate run failed later in the known terminal IME area and the
+immediate rerun passed; the Activity pane assertions passed on the green run.

@@ -216,42 +216,54 @@ editor previews, diagnostics, and resource views close immediately and use the
 same deterministic focus handoff as ordinary tab close. Opened workRoots do
 not show mock or default panes when no live or user-opened surface exists.
 
-### 🚧 WorkRoot Activity Projection {#260517-ws-dashboard-workroot-activity-projection}
+### WorkRoot Activity Projection {#260517-ws-dashboard-workroot-activity-projection}
 
-The dashboard will expose a workRoot-owned runtime activity projection for
-opened workRoots. The projection will summarize read-only named-agent activity
+The dashboard exposes a workRoot-owned runtime activity projection for opened
+workRoots. Authenticated callers request it through
+`GET /api/dashboard/work-roots/{workRootId}/activity`. The projection summarizes
+read-only named-agent activity
 from daemon-owned wsstate and wsagent state without making browser callers read
 cache files or host paths directly.
 
-The projection will report bounded status for named agents, including identity,
+The projection reports bounded status for named agents, including identity,
 backend or model metadata when available, current-call state, last-call timing,
-and unavailable or diagnostic states for stale or malformed records. It will not
+and unavailable or diagnostic states for stale or malformed records. It does not
 provide agent control actions such as start, interrupt, cancel, erase, or retry.
 Running command activity remains absent until the async exec job model exists.
 
-### 🚧 WorkRoot Activity Top-Bar Badge {#260517-ws-dashboard-workroot-activity-topbar-badge}
+### WorkRoot Activity Top-Bar Badge {#260517-ws-dashboard-workroot-activity-topbar-badge}
 
-Opened workRoot top bars will show a compact activity badge in the existing
-badge row. The badge will summarize named-agent activity counts and act as an
-entrypoint to the detailed WorkRoot Activity pane.
+Opened workRoot top bars show a compact activity badge in the existing badge
+row. The badge summarizes named-agent activity counts for the selected workRoot
+and opens or focuses the detailed WorkRoot Activity pane.
 
-Adding activity summary must not add a new top-bar row or increase the top-bar
-height. Under constrained widths the badge may compact, truncate, or hide
+Adding activity summary does not add a new top-bar row or increase the top-bar
+height. Under constrained widths the badge compacts, truncates, or hides
 secondary text rather than wrapping the toolbar and reducing workbench body
-space.
+space. Switching workRoots must not briefly render the previous workRoot's
+activity state.
 
-### 🚧 WorkRoot Activity Pane {#260517-ws-dashboard-workroot-activity-pane}
+### WorkRoot Activity Pane {#260517-ws-dashboard-workroot-activity-pane}
 
-The WorkRoot Activity pane will be a reversible workbench surface showing the
-selected workRoot's detailed runtime activity projection. Closing it will detach
+The WorkRoot Activity pane is a reversible workbench surface showing the
+selected workRoot's detailed runtime activity projection. Closing it detaches
 the browser view immediately without confirmation and without changing daemon
 agent state.
 
-Opening the activity detail from the top-bar badge will focus an existing
-activity pane for the selected workRoot or create one in group 1, the
-agent/terminal-side split. This group-1 placement is an explicit exception for a
-reversible projection surface; general opened/support surfaces continue to use
+Opening the activity detail from the top-bar badge focuses an existing activity
+pane for the selected workRoot or creates one in group 1, the
+agent/terminal-side split. This group-1 placement is an explicit exception for
+a reversible projection surface; general opened/support surfaces continue to use
 their existing support-group placement policy.
+
+The pane displays named-agent projection rows and an explicit empty Running
+Commands section. Real running-command rows remain absent until the async exec
+job model exists.
+
+While the Activity pane is open, the dashboard refreshes recently updated
+named-agent rows and merges them into the existing projection so newly
+registered or called agents appear without a browser reload. The full projection
+remains available for the initial selected-workRoot fetch.
 
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 

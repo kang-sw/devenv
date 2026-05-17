@@ -1,8 +1,13 @@
+pub mod activity;
 pub mod events;
 pub mod ids;
 pub mod resources;
 pub mod view_model;
 
+pub use activity::{
+    NamedAgentActivityView, NamedAgentCallActivityView, WorkRootActivitySummary,
+    WorkRootActivityView,
+};
 pub use events::{
     InstanceEvent, InstanceEventCategory, InstanceEventFixtures, InstanceEventPayload,
     InstanceEventTranscript,
