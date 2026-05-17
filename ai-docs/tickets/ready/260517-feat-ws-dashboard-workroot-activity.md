@@ -4,6 +4,10 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260513-feat-async-exec-output-reader: future running-command activity source
   260514-research-ws-web-dashboard-direction: prior dashboard activity and instance projection research
+spec:
+  - 260517-ws-dashboard-workroot-activity-projection
+  - 260517-ws-dashboard-workroot-activity-topbar-badge
+  - 260517-ws-dashboard-workroot-activity-pane
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
@@ -67,6 +71,9 @@ agent GUI work to later tickets.
   placement exception rather than changing the general policy.
 
 ## Phases
+
+Implement Phase 1 first. Phases 2 and 3 consume the projection from Phase 1 and
+touch separate browser layout and workbench placement surfaces.
 
 ### Phase 1: Add read-only WorkRoot activity projection
 

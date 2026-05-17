@@ -149,7 +149,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260517-feat-ws-dashboard-workroot-activity` | todo | Add a workRoot-owned activity projection, top-bar badge, and group-1 detail pane for named-agent state |
+| `260517-feat-ws-dashboard-workroot-activity` | ready | Add a workRoot-owned activity projection, top-bar badge, and group-1 detail pane for named-agent state |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -171,6 +171,10 @@ dropped tickets live in hidden archive dirs and git history.
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
 ## Ticket Queue
+
+- `260517-feat-ws-dashboard-workroot-activity` - implement Phase 1 first:
+  daemon-owned read-only named-agent/wsstate projection for opened workRoots.
+  Later phases add the top-bar badge and group-1 activity pane.
 
 ## Session Notes
 
