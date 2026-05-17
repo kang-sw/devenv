@@ -216,16 +216,18 @@ editor previews, diagnostics, and resource views close immediately and use the
 same deterministic focus handoff as ordinary tab close. Opened workRoots do
 not show mock or default panes when no live or user-opened surface exists.
 
-### 🚧 WorkRoot Activity Projection {#260517-ws-dashboard-workroot-activity-projection}
+### WorkRoot Activity Projection {#260517-ws-dashboard-workroot-activity-projection}
 
-The dashboard will expose a workRoot-owned runtime activity projection for
-opened workRoots. The projection will summarize read-only named-agent activity
+The dashboard exposes a workRoot-owned runtime activity projection for opened
+workRoots. Authenticated callers request it through
+`GET /api/dashboard/work-roots/{workRootId}/activity`. The projection summarizes
+read-only named-agent activity
 from daemon-owned wsstate and wsagent state without making browser callers read
 cache files or host paths directly.
 
-The projection will report bounded status for named agents, including identity,
+The projection reports bounded status for named agents, including identity,
 backend or model metadata when available, current-call state, last-call timing,
-and unavailable or diagnostic states for stale or malformed records. It will not
+and unavailable or diagnostic states for stale or malformed records. It does not
 provide agent control actions such as start, interrupt, cancel, erase, or retry.
 Running command activity remains absent until the async exec job model exists.
 
