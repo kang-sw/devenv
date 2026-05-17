@@ -9,9 +9,11 @@ related:
   260517-bug-ws-dashboard-dockview-dynamic-groups: dynamic split-group behavior should land before tab polish that depends on group placement and movement semantics
 spec:
   - 260516-ws-web-dashboard-workroot-workbench-substrate
+  - 260516-ws-web-dashboard-browser-ui-acceptance-gate
   - 260516-ws-web-dashboard-readonly-text-pane
   - 260516-ws-web-dashboard-file-open-placement-policy
   - 260516-ws-web-dashboard-terminal-tab-selection-and-empty-initial-state
+  - 260516-ws-web-dashboard-terminal-close-termination
 related-mental-model:
   - ws-web-dashboard
 ---
