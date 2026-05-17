@@ -847,6 +847,17 @@ button {
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
 }
 
+.dockview-workbench-layout .dv-tab {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+.dockview-workbench-layout .dv-tab:has(.dockview-workbench-tab-active) {
+  background: var(--ws-color-panel-selected);
+  box-shadow: inset 0 -2px 0 var(--ws-color-action);
+}
+
 .dockview-workbench-tab {
   display: flex;
   min-width: 0;
@@ -1192,8 +1203,8 @@ button {
 
 
 .dockview-workbench-tab-active {
-  background: var(--ws-color-panel-selected);
-  box-shadow: inset 0 -2px 0 var(--ws-color-action);
+  background: transparent;
+  box-shadow: none;
 }
 
 .workbench-tab-close {
