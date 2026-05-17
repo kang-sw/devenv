@@ -148,7 +148,6 @@ dropped tickets live in hidden archive dirs and git history.
 
 | Stem | Status | Summary |
 |------|--------|---------|
-| `260516-bug-ws-web-terminal-cross-platform-portability` | ready | Make dashboard terminal shell selection, PTY commands, browser harness behavior, and evidence cross-platform or explicitly OS-scoped |
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
@@ -161,6 +160,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
+| `260517-bug-ws-dashboard-windows-terminal-control-keys` | idea | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260515-bug-git-commit-rename-status-summary` | idea | Fix git.commit ticket-change summaries for edited ticket renames |
@@ -168,9 +168,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
 ## Ticket Queue
-
-`260516-bug-ws-web-terminal-cross-platform-portability` - make terminal endpoint harnessing, shell selection, command helpers, and Windows evidence honestly portable.
-
 
 ## Session Notes
 

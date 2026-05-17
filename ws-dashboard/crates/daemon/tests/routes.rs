@@ -39,6 +39,80 @@ use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TestShellProfile {
+    UnixSh,
+    CmdExe,
+    PowerShell,
+}
+
+struct TerminalTestCommands {
+    echo_and_exit: String,
+    exit: String,
+}
+
+fn posix_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn cmd_escape(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| match ch {
+            '&' | '<' | '>' | '|' | '^' | '%' => vec!['^', ch],
+            _ => vec![ch],
+        })
+        .collect()
+}
+
+fn terminal_test_commands(profile: TestShellProfile, marker: &str) -> TerminalTestCommands {
+    // CONTRACT: Backend terminal route tests must not embed POSIX command
+    // strings in shared behavior checks. This helper maps observable terminal
+    // intent to Unix shell, cmd.exe, and PowerShell command syntax.
+    match profile {
+        TestShellProfile::UnixSh => TerminalTestCommands {
+            echo_and_exit: format!("printf '%s\\n' {}\nexit\n", posix_single_quote(marker)),
+            exit: "exit\n".to_owned(),
+        },
+        TestShellProfile::CmdExe => TerminalTestCommands {
+            echo_and_exit: format!("echo {}\r\nexit\r\n", cmd_escape(marker)),
+            exit: "exit\r\n".to_owned(),
+        },
+        TestShellProfile::PowerShell => TerminalTestCommands {
+            echo_and_exit: format!("Write-Output '{}'\r\nexit\r\n", marker.replace('\'', "''")),
+            exit: "exit\r\n".to_owned(),
+        },
+    }
+}
+
+fn terminal_test_commands_for_current_platform(marker: &str) -> TerminalTestCommands {
+    // CONTRACT: Current-platform tests should use the same helper as explicit
+    // profile tests so native Windows evidence exercises cmd.exe/PowerShell
+    // syntax instead of POSIX-only commands.
+    let profile = if cfg!(windows) {
+        TestShellProfile::CmdExe
+    } else {
+        TestShellProfile::UnixSh
+    };
+    terminal_test_commands(profile, marker)
+}
+
+#[test]
+fn terminal_test_command_profiles_have_exit_sequences() {
+    for profile in [
+        TestShellProfile::UnixSh,
+        TestShellProfile::CmdExe,
+        TestShellProfile::PowerShell,
+    ] {
+        let commands = terminal_test_commands(profile, "PORTABLE-MARKER");
+        assert!(commands.echo_and_exit.contains("PORTABLE-MARKER"));
+        assert!(commands.echo_and_exit.contains("exit"));
+        assert!(commands.exit.contains("exit"));
+    }
+    let commands = terminal_test_commands_for_current_platform("CURRENT-MARKER");
+    assert!(commands.echo_and_exit.contains("CURRENT-MARKER"));
+}
+
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn app_state() -> AppState {
@@ -1530,7 +1604,7 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
                 .header(header::COOKIE, cookie.as_str())
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "data": "printf ws-terminal-test\\n; exit\\n" })
+                    serde_json::json!({ "data": terminal_test_commands_for_current_platform("ws-terminal-test").echo_and_exit })
                         .to_string(),
                 ))
                 .expect("input terminal request"),
@@ -1703,7 +1777,7 @@ async fn terminal_websocket_attaches_for_owner_and_forwards_io_and_resize() {
 
     socket
         .send(TungsteniteMessage::Text(
-            serde_json::json!({ "type": "input", "data": "printf WS-SOCKET-TEST\n; exit\n" })
+            serde_json::json!({ "type": "input", "data": terminal_test_commands_for_current_platform("WS-SOCKET-TEST").echo_and_exit })
                 .to_string()
                 .into(),
         ))

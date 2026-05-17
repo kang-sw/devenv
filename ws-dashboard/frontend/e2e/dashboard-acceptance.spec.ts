@@ -1,9 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { startDaemon, type DaemonHandle } from "./daemonHarness.js";
+import { terminalCommandPlanForPlatform, type TerminalCommandPlan } from "../src/terminalCommandPlan.js";
+import type { TerminalPortabilityEvidence } from "./terminalPortabilityEvidence.js";
 
 // Browser-level acceptance gate for the dashboard workRoot UI.
 //
@@ -17,6 +19,9 @@ const artifactsDir = path.join(here, ".artifacts");
 
 let daemon: DaemonHandle;
 let workRoot: string;
+let ownsWorkRoot = false;
+let commandPlan: TerminalCommandPlan;
+let portabilityEvidence: TerminalPortabilityEvidence | undefined;
 
 const evidence: string[] = [];
 function note(line: string) {
@@ -28,35 +33,89 @@ test.describe.configure({ mode: "serial" });
 test.beforeAll(async () => {
   mkdirSync(artifactsDir, { recursive: true });
 
-  // A deterministic temporary workRoot keeps explorer assertions stable.
-  workRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-gate-"));
-  writeFileSync(
-    path.join(workRoot, "gate-readme.txt"),
-    "ws-dashboard browser gate fixture\nsecond fixture line\n",
-  );
-  mkdirSync(path.join(workRoot, "gate-subdir"));
-  writeFileSync(path.join(workRoot, "gate-subdir", "nested.txt"), "nested gate file\n");
-
-  // Many root files make the explorer tree far taller than its pane so the
-  // viewport-containment assertion below is meaningful.
-  for (let index = 0; index < 80; index += 1) {
+  const externalWorkRoot = process.env.WS_DASHBOARD_TEST_WORKROOT;
+  if (externalWorkRoot) {
+    workRoot = externalWorkRoot;
+  } else {
+    // A deterministic temporary workRoot keeps explorer assertions stable.
+    workRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-gate-"));
+    ownsWorkRoot = true;
     writeFileSync(
-      path.join(workRoot, `gate-bulk-${String(index).padStart(3, "0")}.txt`),
-      `bulk gate fixture ${index}\n`,
+      path.join(workRoot, "gate-readme.txt"),
+      "ws-dashboard browser gate fixture\nsecond fixture line\n",
     );
+    mkdirSync(path.join(workRoot, "gate-subdir"));
+    writeFileSync(path.join(workRoot, "gate-subdir", "nested.txt"), "nested gate file\n");
+
+    // Many root files make the explorer tree far taller than its pane so the
+    // viewport-containment assertion below is meaningful.
+    for (let index = 0; index < 80; index += 1) {
+      writeFileSync(
+        path.join(workRoot, `gate-bulk-${String(index).padStart(3, "0")}.txt`),
+        `bulk gate fixture ${index}\n`,
+      );
+    }
   }
 
   daemon = await startDaemon();
+  const shellProfileHint = process.env.WS_DASHBOARD_TERMINAL_SHELL_PROFILE;
+  const targetPlatform = process.env.WS_DASHBOARD_TERMINAL_PLATFORM;
+  if (daemon.mode === "external" && !shellProfileHint && !targetPlatform) {
+    throw new Error(
+      "external daemon browser gate requires WS_DASHBOARD_TERMINAL_SHELL_PROFILE or WS_DASHBOARD_TERMINAL_PLATFORM so command helpers match the remote daemon shell",
+    );
+  }
+  commandPlan = terminalCommandPlanForPlatform(targetPlatform ?? process.platform, shellProfileHint);
+  portabilityEvidence = {
+    os: `${os.type()} ${os.release()}`,
+    platform: process.platform,
+    shellProfile: commandPlan.profile,
+    daemon: {
+      mode: daemon.mode,
+      command: daemon.command,
+      baseUrl: daemon.baseUrl,
+      pairingUrlSource: daemon.mode === "spawned" ? "scraped" : "provided",
+    },
+    forwarding: {
+      used: daemon.mode === "external",
+      kind: daemon.mode === "external" ? "ssh-local-forward" : undefined,
+      localEndpoint: daemon.mode === "external" ? new URL(daemon.baseUrl).host : undefined,
+      remoteEndpoint: daemon.mode === "external" ? "loopback-fixed-endpoint" : undefined,
+    },
+    readiness: {
+      signal: daemon.readinessSignal,
+      result: "pass",
+      detail: daemon.mode === "spawned" ? "pairing URL scraped and /healthz reachable" : "external /healthz reachable",
+    },
+    browserGate: {
+      result: "skipped",
+      commandProfile: commandPlan.profile,
+      limitations: [...commandPlan.limitations],
+    },
+  };
   note(`daemon base URL: ${daemon.baseUrl}`);
-  note(`temp workRoot: ${path.basename(workRoot)}`);
+  note(`terminal command profile: ${commandPlan.profile}`);
+  note(`test workRoot: ${workRootDisplayName(workRoot)}`);
+});
+
+test.afterEach(async ({}, testInfo) => {
+  if (portabilityEvidence && testInfo.status !== "passed") {
+    portabilityEvidence.browserGate.result = "fail";
+  }
 });
 
 test.afterAll(async () => {
   if (daemon) {
     await daemon.stop();
   }
-  if (workRoot) {
+  if (workRoot && ownsWorkRoot) {
     rmSync(workRoot, { recursive: true, force: true });
+  }
+  if (portabilityEvidence) {
+    writeFileSync(
+      path.join(artifactsDir, "terminal-portability-evidence.json"),
+      `${JSON.stringify(portabilityEvidence, null, 2)}\n`,
+    );
   }
   writeFileSync(path.join(artifactsDir, "evidence.txt"), `${evidence.join("\n")}\n`);
 });
@@ -66,6 +125,12 @@ async function terminalSurface(page: Page) {
   await expect(surface).toBeVisible();
   await expect(surface.locator(".xterm")).toBeVisible();
   return surface;
+}
+
+function workRootDisplayName(rootPath: string) {
+  const normalized = rootPath.replace(/[\\/]+$/, "");
+  const match = normalized.match(/[^\\/]+$/);
+  return match ? match[0] : normalized;
 }
 
 async function runInTerminal(page: Page, command: string) {
@@ -132,9 +197,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.locator("#open-work-root-path").fill(workRoot);
     await page.locator('[data-command-id="workRoot.open"]').click();
 
-    await expect(page.locator(".file-explorer-title")).toContainText(
-      path.basename(workRoot),
-    );
+    await expect(page.locator(".file-explorer-title")).toContainText(workRootDisplayName(workRoot));
     note("open workRoot: live opened workRoot is selected and shown in the explorer");
   });
 
@@ -234,17 +297,17 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     expect(terminalOutputPolls).toBe(pollsAfterSocket);
 
     const start = Date.now();
-    await runInTerminal(page, "printf 'GATEOUT-%s\n' 12345");
+    await runInTerminal(page, commandPlan.echo("GATEOUT-12345"));
     await expect(page.locator(".xterm-rows")).toContainText("GATEOUT-12345");
     const echoMs = Date.now() - start;
     expect(echoMs).toBeLessThan(2_000);
 
     await page.locator(".terminal-surface").click();
-    await page.keyboard.type("printf 'BACKSPACE-BAD");
+    await page.keyboard.type("echo BACKSPACE-BAD");
     await page.keyboard.press("Backspace");
     await page.keyboard.press("Backspace");
     await page.keyboard.press("Backspace");
-    await page.keyboard.type("OK\n'");
+    await page.keyboard.type("OK");
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("BACKSPACE-OK");
 
@@ -265,30 +328,30 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       return text.split("CURSOR-OK").length;
     }, { timeout: 5_000 }).toBeGreaterThan(historyBefore);
 
-    await page.keyboard.type("sleep 5");
+    await page.keyboard.type(commandPlan.longRunningCommand());
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(commandPlan.profile === "cmd-exe" ? 1_000 : 200);
     await page.keyboard.press("Control+C");
-    await page.keyboard.type("printf 'CTRL-C-OK\n'");
+    await page.keyboard.type(commandPlan.echo("CTRL-C-OK"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("CTRL-C-OK", { timeout: 2_000 });
 
     await page.locator(".terminal-surface").click();
-    await page.keyboard.type("clear; printf 'CTRL-L-OK\n'");
+    await page.keyboard.type(commandPlan.clearAndEcho("CTRL-L-OK"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("CTRL-L-OK");
 
     await page.locator(".terminal-surface").click();
-    await page.keyboard.type("printf 'BAD'");
+    await page.keyboard.type("echo BAD");
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
-    await page.keyboard.type("printf 'EDITED-OK\n'");
+    await page.keyboard.type(commandPlan.echo("EDITED-OK"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("EDITED-OK");
     await page.keyboard.press("ArrowUp");
     await page.keyboard.press("Control+C");
     await page.keyboard.insertText("\f");
     await page.locator(".terminal-surface").click();
-    await page.keyboard.insertText("printf 'PASTE-OK\n'");
+    await page.keyboard.insertText(commandPlan.echo("PASTE-OK"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
 
@@ -308,21 +371,26 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
   // --- ANSI color rendering -----------------------------------------------
   await test.step("ANSI color rendering", async () => {
-    await runInTerminal(page, "printf '\\033[32mGATE-GREEN\\033[0m\\n'");
-    // The output is rendered in a green (palette index 2) emulator span. A
-    // plain text check is intentionally avoided here: the PTY-echoed input
-    // line also contains `GATE-GREEN`, so only the colored span proves the SGR
-    // sequence was interpreted rather than printed raw.
-    await expect(
-      page.locator(".xterm-rows span.xterm-fg-2", { hasText: "GATE-GREEN" }),
-    ).toBeVisible();
+    await runInTerminal(page, commandPlan.ansiGreen("GATE-GREEN"));
+    if (commandPlan.profile === "cmd-exe") {
+      await expect(page.locator(".xterm-rows")).toContainText("GATE-GREEN");
+      note("ANSI: cmd.exe profile asserted visible text only; SGR color is recorded as a limitation");
+    } else {
+      // The output is rendered in a green (palette index 2) emulator span. A
+      // plain text check is intentionally avoided here: the PTY-echoed input
+      // line also contains `GATE-GREEN`, so only the colored span proves the SGR
+      // sequence was interpreted rather than printed raw.
+      await expect(
+        page.locator(".xterm-rows span.xterm-fg-2", { hasText: "GATE-GREEN" }),
+      ).toBeVisible();
+      note("ANSI: SGR color sequence rendered as terminal color (xterm-fg-2), not raw text");
+    }
     await page.screenshot({ path: path.join(artifactsDir, "terminal-emulator.png") });
-    note("ANSI: SGR color sequence rendered as terminal color (xterm-fg-2), not raw text");
   });
 
   // --- Scrolled terminal keeps the active bottom row visible ---------------
   await test.step("terminal scrolled bottom row remains visible", async () => {
-    await runInTerminal(page, "seq 1 80 | sed 's/^/SCROLL-LINE-/'");
+    await runInTerminal(page, commandPlan.scrollLines("SCROLL-LINE-", 80));
     await expect(page.locator(".xterm-rows")).toContainText("SCROLL-LINE-80");
 
     const bottomRowVisible = await page.evaluate(() => {
@@ -342,10 +410,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
   // --- Alternate-screen terminal apps fit inside the visible surface -------
   await test.step("terminal alternate-screen bottom row remains visible", async () => {
-    await runInTerminal(
-      page,
-      String.raw`rows=$(stty size | awk '{print $1}'); printf '\033[?1049h\033[H'; i=1; while [ $i -le $rows ]; do if [ $i -eq $rows ]; then printf 'TUIBOTTOM-%03d' $i; else printf 'TUIROW-%03d\r\n' $i; fi; i=$((i+1)); done; sleep 1; printf '\033[?1049l'`,
-    );
+    await runInTerminal(page, commandPlan.alternateScreenBottomRow("TUIBOTTOM"));
     await expect(page.locator(".xterm-rows")).toContainText("TUIBOTTOM");
 
     const bottomRowVisible = await page.evaluate(() => {
@@ -389,7 +454,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.locator('[data-command-id="terminal.create"]').click();
     await expect(terminalTabs(page)).toHaveCount(2);
     await terminalSurface(page);
-    await runInTerminal(page, "printf 'SECOND-%s\\n' MARKER");
+    await runInTerminal(page, commandPlan.echo("SECOND-MARKER"));
     await expect(page.locator(".xterm-rows")).toContainText("SECOND-MARKER");
 
     // Switch back to the first terminal tab and settle past a full output
@@ -424,7 +489,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   await test.step("refresh without mock surfaces", async () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.locator(".app-shell")).toBeVisible();
-    await expect(page.locator(".file-explorer-title")).toContainText(path.basename(workRoot));
+    await expect(page.locator(".file-explorer-title")).toContainText(workRootDisplayName(workRoot));
     // The daemon owns the terminal lifecycle, so the surviving session is
     // reconstructed as a selectable tab after reload.
     await expect(terminalTabs(page)).toHaveCount(1);
@@ -457,4 +522,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await page.setViewportSize({ width: 1440, height: 900 });
   });
+
+  if (portabilityEvidence) {
+    portabilityEvidence.browserGate.result = "pass";
+  }
 });
