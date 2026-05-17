@@ -206,6 +206,16 @@ panes prefer group 2, editor/file opens create group 2 when only group 1
 exists, and groups 3+ remain user-created groups without automatic placement
 unless the user explicitly targets them through later policy.
 
+> [!note] Planned 🚧
+> Workbench tabs will gain polished lifecycle affordances while keeping
+> Dockview as the visible tab owner: pinned/opened hierarchy will prefer
+> Dockview-native tab groups or chips, fall back to pinned-left metadata when
+> grouping is unsuitable, expose hover-only close buttons, and use a
+> cursor-near `Yes`/`No` confirmation popover only for live terminal or agent
+> closes. Reversible views such as read-only editor previews, diagnostics, and
+> resource views will close immediately and use the same deterministic focus
+> handoff as ordinary tab close.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
@@ -257,6 +267,15 @@ target creates or maps a dashboard group, the pane remains there after React
 synchronization, ordinary file/terminal interactions still work in the
 resulting layout, and opening a second workRoot does not leak the first
 workRoot's user-created groups or active panes.
+
+> [!note] Planned 🚧
+> Workbench tab polish evidence will be browser-level Playwright evidence
+> against the daemon-served frontend. It will cover hover-only close
+> affordances, terminal or agent close confirmation popover cancel/confirm
+> paths, immediate close for reversible panes, pinned/opened tab group or chip
+> presentation, and preview-to-pinned file behavior. A post-implementation
+> frontend-design verification and autonomous tweak pass will run before the
+> ordinary implementation review and rerun the relevant browser evidence.
 
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
@@ -391,6 +410,12 @@ file focuses the existing logical pane instead of duplicating it by default.
 The text pane does not provide save, dirty-state, formatting, rename, delete,
 move, copy, conflict handling, or language-server behavior.
 
+> [!note] Planned 🚧
+> File explorer single-click will open or replace one read-only preview tab for
+> the selected workRoot, while double-click will pin that file as a stable
+> opened tab that later preview opens do not replace. Reopening an already
+> pinned file will focus that pinned tab.
+
 ## File Open Placement Policy {#260516-ws-web-dashboard-file-open-placement-policy}
 
 File-open commands from the workRoot file explorer use workbench placement
@@ -509,6 +534,12 @@ Closing a terminal panel explicitly terminates its daemon-owned terminal
 session. The first terminal substrate keeps hidden detached restore UX absent;
 future confirmation or foreground-process checks may be added without changing
 the basic close-as-terminate contract.
+
+> [!note] Planned 🚧
+> User-initiated terminal tab close will require an inline `Yes`/`No`
+> confirmation popover near the close action before terminating the daemon-owned
+> terminal session. Cancel will leave the terminal open and focus coherent;
+> confirm will preserve the close-as-terminate behavior.
 
 ## WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
 
