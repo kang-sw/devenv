@@ -198,6 +198,15 @@ duplicate-open focus, placement, close behavior, restore sanitization, and the
 choice to flatten pinned/opened row concepts into Dockview-compatible tab
 metadata when a two-row custom tab shell would compete with Dockview ownership.
 
+> [!note] Planned 🚧
+> Dockview-created split drops will become durable dashboard workbench groups
+> instead of snapping back to a fixed `primary`/`support` pair. An opened
+> workRoot starts from two dynamic groups: terminals prefer group 1,
+> editor/read-only file panes prefer group 2, editor/file opens create group 2
+> when only group 1 exists, and groups 3+ remain user-created groups without
+> automatic placement unless the user explicitly targets them through later
+> policy.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
@@ -242,6 +251,13 @@ workbench is Dockview-backed rather than a parallel custom tab/split shell. The
 assertion checks for the dashboard's stable Dockview owner marker and Dockview
 DOM beneath it, and it rejects the retired `.workbench-splits > .workbench-group`
 layout as the visible workbench authority.
+
+> [!note] Planned 🚧
+> Workbench split browser evidence will verify that a Dockview split-drop
+> preview corresponds to durable dashboard behavior: dragging a tab into a new
+> split target creates or maps a dashboard group, the pane remains there after
+> React synchronization, and ordinary file/terminal interactions still work in
+> the resulting layout.
 
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
