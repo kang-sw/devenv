@@ -1,9 +1,10 @@
 ---
-title: ws dashboard editor scroll and IME verification follow-up
+title: ws dashboard editor scroll and terminal input fidelity follow-up
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260517-feat-ws-dashboard-workbench-tab-polish: introduced Dockview tab polish and the hotfix that added an IME fallback guard
   260516-epic-ws-web-dashboard-workbench-substrate: owns workbench pane lifecycle, focus, and browser evidence policy
+  260517-bug-ws-dashboard-windows-terminal-control-keys: related native-Windows terminal control-key gap noted during terminal portability dogfood
 spec:
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
   - 260516-ws-web-dashboard-readonly-text-pane
@@ -13,7 +14,7 @@ related-mental-model:
   - ws-web-dashboard
 ---
 
-# ws dashboard editor scroll and IME verification follow-up
+# ws dashboard editor scroll and terminal input fidelity follow-up
 
 ## Background
 
@@ -26,11 +27,13 @@ intends `.readonly-text-content` to own scrolling, and the tab polish design
 tweak made editor panes fill their Dockview area, but no browser evidence proves
 long-file wheel containment.
 
-Second, Korean IME input in terminal panes needs explicit verification. A
-hotfix added composition guards to the terminal window keydown fallback, but
-that is only a plausibility fix. IME composition behavior should be verified
-against the live xterm/WebSocket path and should not silently rely on ASCII
-keypress tests.
+Second, terminal input fidelity still does not match a native terminal. Korean
+IME input does not work in the browser terminal, and shell line-editing control
+keys such as `Ctrl-U` (clear line) and `Ctrl-W` (delete previous word) do not
+behave as they do in a native shell. A hotfix added composition guards to the
+terminal window keydown fallback, but that is only a plausibility fix. IME
+composition and shell control-key behavior should be verified against the live
+xterm/WebSocket path and should not silently rely on ASCII keypress tests.
 
 ## Decisions
 
@@ -39,9 +42,14 @@ keypress tests.
 - Do not fold this work into a richer editor replacement. Dedicated editor
   technology may arrive later, but current read-only pane containment still
   needs a regression check.
-- Do not treat Playwright ASCII keyboard tests as IME evidence. If browser
-  automation cannot synthesize a real Korean IME composition path, record a
-  manual verification artifact and keep the automated guard coverage explicit.
+- Do not treat Playwright ASCII keyboard tests as IME or native terminal
+  line-editing evidence. If browser automation cannot synthesize a real Korean
+  IME composition path, record a manual verification artifact and keep the
+  automated guard coverage explicit.
+- Treat native terminal behavior as the oracle for ordinary shell line editing:
+  `Ctrl-U` clears the current command line, `Ctrl-W` deletes the previous word,
+  and those controls must not be swallowed by browser focus handling,
+  Dockview-level shortcuts, or the window keydown fallback.
 
 ## Phases
 
@@ -57,15 +65,18 @@ including the Dockview editor pane after tab polish styling. If current behavior
 is broken, fix only the read-only pane containment chain and avoid introducing a
 new editor library in this ticket.
 
-### Phase 2: Verify terminal IME composition behavior
+### Phase 2: Verify terminal IME composition and shell control keys
 
-Validate terminal IME input against the live xterm path. The terminal should
-allow composed Korean input to reach the shell after composition commits, and
-the window keydown fallback must not send intermediate composition keystrokes as
-raw input. The fallback should remain available for the limited shortcuts it was
-added to preserve.
+Validate terminal input against the live xterm path. The terminal should allow
+composed Korean input to reach the shell after composition commits, and the
+window keydown fallback must not send intermediate composition keystrokes as raw
+input. Native shell line-editing controls such as `Ctrl-U` and `Ctrl-W` should
+reach the PTY and produce shell-visible effects. The fallback should remain
+available only for the limited shortcuts it was added to preserve and must not
+replace xterm's normal input/composition handling for focused terminal text.
 
 Success means the ticket records either automated browser evidence for
 composition behavior or a clearly scoped manual verification artifact when
-Playwright cannot drive the platform IME. Tests should include the fallback
-guard behavior so future changes do not reintroduce raw composition forwarding.
+Playwright cannot drive the platform IME. Tests should include fallback guard
+coverage and shell-visible `Ctrl-U` / `Ctrl-W` behavior so future changes do not
+reintroduce raw composition forwarding or swallowed line-editing controls.
