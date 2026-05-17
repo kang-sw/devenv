@@ -188,6 +188,24 @@ async function terminalInputTarget(page: Page) {
   return inputTarget;
 }
 
+async function expectTerminalInputFocused(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const element = document.activeElement;
+        return {
+          className:
+            typeof element?.className === "string" ? element.className : "",
+          tagName: element?.tagName ?? "",
+        };
+      }),
+    )
+    .toMatchObject({
+      className: expect.stringContaining("xterm-helper-textarea"),
+      tagName: "TEXTAREA",
+    });
+}
+
 function workRootDisplayName(rootPath: string) {
   const normalized = rootPath.replace(/[\\/]+$/, "");
   const match = normalized.match(/[^\\/]+$/);
@@ -768,14 +786,20 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.insertText("\f");
     const inputTarget = await terminalInputTarget(page);
     await inputTarget.focus();
+    await expectTerminalInputFocused(page);
     await page.keyboard.type(commandPlan.echo("PASTE-OK"));
+    await expectTerminalInputFocused(page);
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
+    await expectTerminalInputFocused(page);
 
     await inputTarget.focus();
+    await expectTerminalInputFocused(page);
     await page.keyboard.insertText(commandPlan.echo("한글-OK"));
+    await expectTerminalInputFocused(page);
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("한글-OK");
+    await expectTerminalInputFocused(page);
 
     // CONTRACT: Focused terminal panes preserve native shell line-editing
     // control bytes through the live xterm/WebSocket input path. `ctrl-u`
@@ -783,7 +807,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // Assert both terminal-visible shell effects and raw input frames so a
     // fallback handler cannot swallow or synthesize the wrong path.
     await inputTarget.focus();
+    await expectTerminalInputFocused(page);
     await page.keyboard.type(commandPlan.clearAndEcho("CTRL-U-START"));
+    await expectTerminalInputFocused(page);
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("CTRL-U-START");
     await page.keyboard.type(commandPlan.echo("CTRL-U-BAD"));

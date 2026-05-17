@@ -2051,12 +2051,20 @@ function TerminalPaneBody({
     null,
   );
   const socketRef = useRef<WebSocket | null>(null);
+  const keepTerminalFocusRef = useRef(false);
   const [displaySession, setDisplaySession] = useState(() => pane.session);
   // Latest pane/actions for emulator callbacks registered once at mount.
   const liveRef = useRef({ pane, actions });
   liveRef.current = { pane, actions };
 
   const terminalId = pane.session.terminalId;
+  const refocusActiveTerminal = () => {
+    window.setTimeout(() => {
+      if (keepTerminalFocusRef.current && containerRef.current?.offsetParent) {
+        terminalRef.current?.focus();
+      }
+    }, 0);
+  };
 
   useEffect(() => {
     setDisplaySession(pane.session);
@@ -2096,13 +2104,14 @@ function TerminalPaneBody({
     // Keyboard input originates from the focused emulator surface and reaches
     // the daemon terminal session.
     const sendInputBytes = (data: string) => {
-      liveRef.current.actions.onFocusInput(liveRef.current.pane);
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "input", data }));
+        refocusActiveTerminal();
         return;
       }
       liveRef.current.actions.onSendData(liveRef.current.pane, data);
+      refocusActiveTerminal();
     };
 
     const inputDisposable = terminal.onData(sendInputBytes);
@@ -2114,13 +2123,21 @@ function TerminalPaneBody({
       composingInput = false;
     };
     const markFocusedTerminal = () => {
+      keepTerminalFocusRef.current = true;
       liveRef.current.actions.onFocusInput(liveRef.current.pane);
       terminal.focus();
+    };
+    const clearFocusedTerminal = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && !container.contains(target)) {
+        keepTerminalFocusRef.current = false;
+      }
     };
     container.addEventListener("compositionstart", markComposing);
     container.addEventListener("compositionend", clearComposing);
     container.addEventListener("focusin", markFocusedTerminal);
     container.addEventListener("pointerdown", markFocusedTerminal);
+    window.addEventListener("pointerdown", clearFocusedTerminal, true);
 
     const keydownFallback = (event: KeyboardEvent) => {
       if (!container.offsetParent) {
@@ -2285,6 +2302,7 @@ function TerminalPaneBody({
       container.removeEventListener("compositionend", clearComposing);
       container.removeEventListener("focusin", markFocusedTerminal);
       container.removeEventListener("pointerdown", markFocusedTerminal);
+      window.removeEventListener("pointerdown", clearFocusedTerminal, true);
       inputDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
@@ -2323,6 +2341,9 @@ function TerminalPaneBody({
         if (message.type === "output") {
           terminalRef.current?.write(message.chunk.data);
           writtenLengthRef.current += message.chunk.data.length;
+          if (liveRef.current.actions.isActivePane(liveRef.current.pane)) {
+            refocusActiveTerminal();
+          }
         } else {
           setDisplaySession((current) => ({
             ...current,
