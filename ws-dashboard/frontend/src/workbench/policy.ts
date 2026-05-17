@@ -3,6 +3,7 @@ import {
   defaultSurfaceRegistry,
   type SurfaceKind,
   type SurfaceRegistry,
+  type WorkbenchCloseConfirmationPolicy,
   type WorkbenchClosePolicy,
   type WorkbenchRowPolicy,
 } from "./surfaceRegistry.js";
@@ -65,6 +66,13 @@ export type WorkbenchCloseDecision = {
     | "releaseProjection"
     | "deferToProvider";
   readonly terminateReservation: WorkbenchTerminateReservation | null;
+};
+
+export type WorkbenchCloseConfirmationDecision = {
+  readonly confirmationPolicy: WorkbenchCloseConfirmationPolicy;
+  readonly presentation: "none" | "cursorNearPopover";
+  readonly confirmLabel: "Yes" | null;
+  readonly cancelLabel: "No" | null;
 };
 
 export type WorkbenchTerminateReservation = {
@@ -219,6 +227,32 @@ export function decideSurfaceClose(
     closePolicy,
     behavior: closePolicy,
     terminateReservation: null,
+  };
+}
+
+export function decideSurfaceCloseConfirmation(
+  surfaceKind: SurfaceKind,
+  registry: SurfaceRegistry = defaultSurfaceRegistry(),
+): WorkbenchCloseConfirmationDecision {
+  // CONTRACT: Tab close confirmation is separate from close side effects.
+  // Agent and persistent terminal tabs require a cursor-near Yes/No popover
+  // before daemon-backed session close. Reversible views close immediately and
+  // must not show a browser-native modal or custom confirmation popover.
+  const confirmationPolicy = registry[surfaceKind].closeConfirmationPolicy;
+  if (confirmationPolicy === "confirmSessionClose") {
+    return {
+      confirmationPolicy,
+      presentation: "cursorNearPopover",
+      confirmLabel: "Yes",
+      cancelLabel: "No",
+    };
+  }
+
+  return {
+    confirmationPolicy,
+    presentation: "none",
+    confirmLabel: null,
+    cancelLabel: null,
   };
 }
 

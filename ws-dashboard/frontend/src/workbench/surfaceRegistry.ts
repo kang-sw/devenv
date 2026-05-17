@@ -23,12 +23,17 @@ export type WorkbenchClosePolicy =
   | "releaseProjection"
   | "deferToProvider";
 
+export type WorkbenchCloseConfirmationPolicy =
+  | "none"
+  | "confirmSessionClose";
+
 export type SurfaceRegistryEntry = {
   readonly kind: SurfaceKind;
   readonly label: string;
   readonly rowPolicy: WorkbenchRowPolicy;
   readonly lifecycleOwner: WorkbenchLifecycleOwner;
   readonly closePolicy: WorkbenchClosePolicy;
+  readonly closeConfirmationPolicy: WorkbenchCloseConfirmationPolicy;
 };
 
 export type SurfaceRegistry = Readonly<Record<SurfaceKind, SurfaceRegistryEntry>>;
@@ -40,6 +45,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "pinned",
     lifecycleOwner: "daemonProcess",
     closePolicy: "detachDaemonResource",
+    closeConfirmationPolicy: "confirmSessionClose",
   },
   persistentTerminal: {
     kind: "persistentTerminal",
@@ -47,6 +53,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "pinned",
     lifecycleOwner: "daemonProcess",
     closePolicy: "detachDaemonResource",
+    closeConfirmationPolicy: "confirmSessionClose",
   },
   editor: {
     kind: "editor",
@@ -54,6 +61,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "opened",
     lifecycleOwner: "documentProvider",
     closePolicy: "deferToProvider",
+    closeConfirmationPolicy: "none",
   },
   viewer: {
     kind: "viewer",
@@ -61,6 +69,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "opened",
     lifecycleOwner: "daemonProjection",
     closePolicy: "releaseProjection",
+    closeConfirmationPolicy: "none",
   },
   diff: {
     kind: "diff",
@@ -68,6 +77,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "opened",
     lifecycleOwner: "documentProvider",
     closePolicy: "deferToProvider",
+    closeConfirmationPolicy: "none",
   },
   diagnostics: {
     kind: "diagnostics",
@@ -75,6 +85,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "opened",
     lifecycleOwner: "daemonProjection",
     closePolicy: "releaseProjection",
+    closeConfirmationPolicy: "none",
   },
   eventsLog: {
     kind: "eventsLog",
@@ -82,6 +93,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "opened",
     lifecycleOwner: "daemonProjection",
     closePolicy: "releaseProjection",
+    closeConfirmationPolicy: "none",
   },
   taskView: {
     kind: "taskView",
@@ -89,6 +101,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "opened",
     lifecycleOwner: "daemonProjection",
     closePolicy: "releaseProjection",
+    closeConfirmationPolicy: "none",
   },
   inspector: {
     kind: "inspector",
@@ -96,6 +109,7 @@ const defaultSurfaceRegistryEntries = {
     rowPolicy: "opened",
     lifecycleOwner: "browserAttachment",
     closePolicy: "closeAttachment",
+    closeConfirmationPolicy: "none",
   },
 } as const satisfies SurfaceRegistry;
 

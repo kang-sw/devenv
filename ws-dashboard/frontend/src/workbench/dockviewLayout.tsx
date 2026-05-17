@@ -32,10 +32,19 @@ export type DockviewWorkbenchGroup = {
   readonly panes: readonly DockviewWorkbenchPane[];
 };
 
+export type DockviewTabCloseRequest = {
+  readonly groupId: string;
+  readonly paneId: string;
+  readonly surfaceKind: SurfaceKind;
+  readonly clientX: number;
+  readonly clientY: number;
+};
+
 export type DockviewWorkbenchLayoutProps = {
   readonly groups: readonly DockviewWorkbenchGroup[];
   readonly activePaneByGroup: Readonly<Record<string, string>>;
   readonly onSelectPane: (groupId: string, paneId: string) => void;
+  readonly onRequestClosePane?: (request: DockviewTabCloseRequest) => void;
   readonly onMovePane: (
     paneId: string,
     targetGroupId: string,
@@ -66,6 +75,7 @@ export function DockviewWorkbenchLayout({
   groups,
   activePaneByGroup,
   onMovePane,
+  onRequestClosePane,
   onSelectPane,
 }: DockviewWorkbenchLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null);
@@ -73,8 +83,8 @@ export function DockviewWorkbenchLayout({
   const dockGroupToWorkbenchGroupRef = useRef<ReadonlyMap<string, string>>(
     new Map(),
   );
-  const callbacksRef = useRef({ onMovePane, onSelectPane });
-  callbacksRef.current = { onMovePane, onSelectPane };
+  const callbacksRef = useRef({ onMovePane, onRequestClosePane, onSelectPane });
+  callbacksRef.current = { onMovePane, onRequestClosePane, onSelectPane };
 
   const components = useMemo(
     () => ({
@@ -242,6 +252,10 @@ function DockviewWorkbenchTab({
       {/* Dockview owns one deterministic tab strip per group in this slice.
           Dashboard row policy is retained as pane category metadata instead
           of rendering the retired two-row pinned/opened custom header. */}
+      {/* CONTRACT: Hover-only close UI belongs in this Dockview tab component.
+          Close clicks must call the dashboard callback with pane identity and
+          pointer coordinates so App policy can decide immediate close versus
+          cursor-near session confirmation without exposing Dockview handles. */}
       <span className="workbench-tab-kind">{registry.label}</span>
       <span className="workbench-tab-title">{api.title ?? params.title}</span>
     </div>

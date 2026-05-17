@@ -16,6 +16,12 @@ import type { TerminalPortabilityEvidence } from "./terminalPortabilityEvidence.
 // and checks the user-reported failure set: terminal tab selection, non-mock
 // initial workbench state, real terminal emulator rendering/input/sizing, and
 // conventional read-only file explorer affordances.
+//
+// CONTRACT: Workbench tab polish evidence belongs in this Playwright gate.
+// Coverage must drive hover-only tab close affordances, terminal/agent
+// cursor-near Yes/No confirmation popovers, immediate close for reversible
+// panes, pinned/opened tab group or chip presentation, and preview-to-pinned
+// file behavior against the daemon-served production frontend.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const artifactsDir = path.join(here, ".artifacts");

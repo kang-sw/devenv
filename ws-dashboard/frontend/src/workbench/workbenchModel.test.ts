@@ -27,6 +27,7 @@ import {
 } from "./layoutSerialization.js";
 import {
   decideSurfaceClose,
+  decideSurfaceCloseConfirmation,
   decideSurfaceOpen,
   decideSurfaceOpenWithDynamicGroups,
   defaultPtyLogicalSize,
@@ -936,6 +937,36 @@ assertDeepEqual(
     createdGroupId: null,
   },
   "dynamic placement sends terminals to group 1 even when group 2 is focused",
+);
+assertDeepEqual(
+  decideSurfaceCloseConfirmation("persistentTerminal"),
+  {
+    confirmationPolicy: "confirmSessionClose",
+    presentation: "cursorNearPopover",
+    confirmLabel: "Yes",
+    cancelLabel: "No",
+  },
+  "persistent terminal tab close requires cursor-near confirmation",
+);
+assertDeepEqual(
+  decideSurfaceCloseConfirmation("agent"),
+  {
+    confirmationPolicy: "confirmSessionClose",
+    presentation: "cursorNearPopover",
+    confirmLabel: "Yes",
+    cancelLabel: "No",
+  },
+  "agent tab close requires cursor-near confirmation",
+);
+assertDeepEqual(
+  decideSurfaceCloseConfirmation("diagnostics"),
+  {
+    confirmationPolicy: "none",
+    presentation: "none",
+    confirmLabel: null,
+    cancelLabel: null,
+  },
+  "reversible diagnostics tabs close immediately",
 );
 assertDeepEqual(
   decideSurfaceClose("persistentTerminal").terminateReservation?.commandId,
