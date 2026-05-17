@@ -1553,15 +1553,22 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     };
 
     const inputDisposable = terminal.onData(sendInputBytes);
-    const markFocusedTerminal = () => liveRef.current.actions.onFocusInput(liveRef.current.pane);
+    const markFocusedTerminal = () => {
+      liveRef.current.actions.onFocusInput(liveRef.current.pane);
+      terminal.focus();
+    };
     container.addEventListener("focusin", markFocusedTerminal);
     container.addEventListener("pointerdown", markFocusedTerminal);
 
     const keydownFallback = (event: KeyboardEvent) => {
-      if (!container.offsetParent || container.contains(document.activeElement)) {
+      if (!container.offsetParent) {
         return;
       }
       if (!liveRef.current.actions.isActivePane(liveRef.current.pane)) {
+        return;
+      }
+      const isMetaLineStart = event.metaKey && event.key.toLowerCase() === "a";
+      if (container.contains(document.activeElement) && !isMetaLineStart) {
         return;
       }
       const target = event.target as HTMLElement | null;
