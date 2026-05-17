@@ -1222,6 +1222,7 @@ button {
   opacity: 0;
   padding: 0;
   line-height: 1;
+  transition: opacity 0.12s ease;
 }
 
 .dockview-workbench-tab:hover .workbench-tab-close,
@@ -1259,4 +1260,34 @@ button {
   display: flex;
   justify-content: flex-end;
   gap: var(--ws-space-04);
+}
+
+/* The editor surface (read-only file viewer) owns its own header and scroll
+   region. Strip the outer pane-body padding and suppress the redundant detail
+   <p> so the ReadOnlyTextPane fills the pane edge-to-edge. */
+.workbench-pane[data-surface-kind="editor"] .workbench-pane-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.workbench-pane[data-surface-kind="editor"] .workbench-pane-body > p {
+  display: none;
+}
+
+.workbench-pane[data-surface-kind="editor"] .workbench-pane-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin-top: 0;
+}
+
+.workbench-pane[data-surface-kind="editor"] .readonly-text-pane {
+  flex: 1 1 auto;
+}
+
+.workbench-pane[data-surface-kind="editor"] .readonly-text-content {
+  flex: 1 1 auto;
 }

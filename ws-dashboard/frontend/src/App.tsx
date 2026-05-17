@@ -2456,7 +2456,9 @@ function readOnlyWorkbenchPane(
   return {
     id: pane.id,
     kind: "editor",
-    category: "opened",
+    // Pinned files get the left-border accent matching other stable/pinned
+    // surfaces (agent, terminal). Preview files stay in the opened chip style.
+    category: pane.mode === "pinned" ? "pinned" : "opened",
     title: pane.title,
     detail: pane.path,
     state,
