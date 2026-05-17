@@ -55,6 +55,13 @@ test.beforeAll(async () => {
       path.join(workRoot, "gate-readme.txt"),
       "ws-dashboard browser gate fixture\nsecond fixture line\n",
     );
+    writeFileSync(
+      path.join(workRoot, "gate-long-readonly.txt"),
+      Array.from(
+        { length: 220 },
+        (_, index) => `readonly scroll containment line ${index + 1}`,
+      ).join("\n") + "\n",
+    );
     mkdirSync(path.join(workRoot, "gate-subdir"));
     writeFileSync(
       path.join(workRoot, "gate-subdir", "nested.txt"),
@@ -575,6 +582,46 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  await test.step("long read-only file scroll stays inside the pane", async () => {
+    // CONTRACT: Long read-only file content must own its scroll container.
+    // Scrolling over `.readonly-text-content` must not move the top-level
+    // browser document, displace dashboard chrome, or depend on a future
+    // editor-library replacement.
+    // HINT: Keep this browser-level assertion next to the existing preview and
+    // pin flow so Dockview pane styling and file-open placement are both active.
+    const longFileRow = page.locator(".file-explorer-row", {
+      hasText: "gate-long-readonly.txt",
+    });
+    await longFileRow.click();
+    await expectDockviewWorkbench(page);
+
+    const content = page.locator(".readonly-text-content");
+    await expect(content).toContainText(
+      "readonly scroll containment line 220",
+    );
+    const scrollBox = await content.boundingBox();
+    expect(scrollBox).not.toBeNull();
+    await expect
+      .poll(() =>
+        content.evaluate((node) => node.scrollHeight > node.clientHeight),
+      )
+      .toBe(true);
+
+    const beforeDocumentScroll = await documentScrolls(page);
+    await content.hover();
+    await page.mouse.wheel(0, 900);
+    await expect
+      .poll(() => content.evaluate((node) => node.scrollTop), {
+        timeout: 3_000,
+      })
+      .toBeGreaterThan(0);
+    expect(await documentScrolls(page)).toBe(beforeDocumentScroll);
+    expect(beforeDocumentScroll).toBe(false);
+    note(
+      "read-only file: long file scroll stayed inside the pane without creating top-level document scroll",
+    );
+  });
+
   // --- Dynamic workbench state remains per workRoot ------------------------
   await test.step("dynamic split state is isolated per opened workRoot", async () => {
     if (!secondWorkRoot) {
@@ -711,9 +758,50 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
 
+    // CONTRACT: Focused terminal panes preserve native shell line-editing
+    // control bytes through the live xterm/WebSocket input path. `ctrl-u`
+    // clears the current command line and `ctrl-w` deletes the previous word.
+    // HINT: Assert both terminal-visible shell effects and raw input frames so
+    // a fallback handler cannot swallow or synthesize the wrong path.
+    await page.locator(".terminal-surface").click();
+    await page.keyboard.type(commandPlan.clearAndEcho("CTRL-U-START"));
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("CTRL-U-START");
+    await page.keyboard.type(commandPlan.echo("CTRL-U-BAD"));
+    await page.keyboard.press("Control+U");
+    await page.keyboard.type(commandPlan.echo("CTRL-U-OK"));
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("CTRL-U-OK");
+
+    await page.locator(".terminal-surface").click();
+    await page.keyboard.type(commandPlan.echo("CTRL-W-BAD"));
+    await page.keyboard.press("Control+W");
+    await page.keyboard.type("CTRL-W-OK");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("CTRL-W-OK");
+
+    // CONTRACT: Browser fallback key handling must not forward IME
+    // composition-in-progress keystrokes as raw terminal bytes. Real Korean IME
+    // commit evidence may be manual when Playwright cannot drive platform IME,
+    // but this synthetic guard keeps fallback behavior observable.
+    // HOLE: Normalize event dispatch to the project-local terminal focus helper
+    // if xterm requires the composition events on its helper textarea rather
+    // than the terminal surface container.
+    const framesBeforeComposition = terminalSocketFrames.length;
+    await page.locator(".terminal-surface").dispatchEvent("compositionstart");
+    await page.keyboard.press("Process");
+    await page.locator(".terminal-surface").dispatchEvent("compositionend");
+    expect(terminalSocketFrames.length).toBe(framesBeforeComposition);
+
     expect(
       terminalSocketFrames.some((frame) => frame.includes('"type":"input"')),
     ).toBe(true);
+    expect(terminalSocketFrames.some((frame) => frame.includes("\\u0015"))).toBe(
+      true,
+    );
+    expect(terminalSocketFrames.some((frame) => frame.includes("\\u0017"))).toBe(
+      true,
+    );
     expect(
       terminalSocketFrames.some((frame) => frame.includes('"type":"resize"')),
     ).toBe(true);
