@@ -657,10 +657,19 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     expect(await visibleWorkbenchGroupIds(page)).toEqual(["group-1", "group-2"]);
 
     await selectWorkRootInBrowser(page, workRoot);
-    await expect(
-      page.locator('.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]'),
-    ).toHaveAttribute("data-workbench-group-id", "group-2");
+    const pinnedReadOnlyTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
+    );
+    await expect(pinnedReadOnlyTab).toHaveAttribute(
+      "data-workbench-group-id",
+      "group-2",
+    );
     expect(await visibleWorkbenchGroupIds(page)).toContain("group-2");
+    // The preceding scroll-containment step left a long-file preview pane as
+    // this workRoot's active group-2 pane (per-workRoot active state is
+    // preserved by design), so activate the pinned tab before inspecting the
+    // pinned file content.
+    await pinnedReadOnlyTab.click();
     await expect(page.locator(".readonly-text-pane")).toContainText(
       "ws-dashboard browser gate fixture",
     );
@@ -780,7 +789,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(page.locator(".xterm-rows")).not.toContainText("CTRL-U-BAD");
 
     await inputTarget.focus();
-    await page.keyboard.type(commandPlan.echo("CTRL-W-BAD"));
+    await page.keyboard.type(commandPlan.trailingWordEcho("CTRL-W-BAD"));
     await page.keyboard.press("Control+W");
     await page.keyboard.type("CTRL-W-OK");
     await page.keyboard.press("Enter");

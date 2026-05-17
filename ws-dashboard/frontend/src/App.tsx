@@ -2152,6 +2152,12 @@ function TerminalPaneBody({
         if (key === "c") data = "\x03";
         if (key === "l") data = "\x0c";
         if (key === "a") data = "\x01";
+        // Native shell line-editing controls: ctrl-u clears the current line
+        // and ctrl-w deletes the previous word. Dockview does not reliably keep
+        // the xterm helper textarea focused, so this fallback forwards the same
+        // raw control bytes xterm's onData path would send when it is focused.
+        if (key === "u") data = "\x15";
+        if (key === "w") data = "\x17";
       } else if (event.key.length === 1) {
         data = event.key;
       } else if (event.key === "Enter") {

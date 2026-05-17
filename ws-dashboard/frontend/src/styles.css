@@ -1264,6 +1264,15 @@ button {
 /* The editor surface (read-only file viewer) owns its own header and scroll
    region. Strip the outer pane-body padding and suppress the redundant detail
    <p> so the ReadOnlyTextPane fills the pane edge-to-edge. */
+/* The editor pane must fill its Dockview panel host so the flex chain down to
+   `.readonly-text-content` has a bounded height. Without this the grid pane
+   grows to the natural height of long file content and `.readonly-text-content`
+   never becomes its own scroll container, letting long files push page chrome
+   off-screen. */
+.workbench-pane[data-surface-kind="editor"] {
+  height: 100%;
+}
+
 .workbench-pane[data-surface-kind="editor"] .workbench-pane-body {
   display: flex;
   flex-direction: column;

@@ -40,6 +40,8 @@ assertIncludes(unix.scrollLines("LINE-", 3), "LINE-", "Unix scroll includes pref
 assertIncludes(unix.scrollLines("LINE-", 3), "-le 3", "Unix scroll bounds count");
 assertIncludes(unix.alternateScreenBottomRow("BOTTOM"), "BOTTOM", "Unix alternate fixture includes marker");
 assertIncludes(unix.clearAndEcho("CLEAR-OK"), "clear", "Unix clear command clears first");
+assertIncludes(unix.trailingWordEcho("WORD-OK"), "WORD-OK", "Unix trailing word echo includes marker");
+assertThrows(() => unix.trailingWordEcho("bad word"), "Unix trailing word rejects spaces");
 assertIncludes(unix.longRunningCommand(), "sleep", "Unix long-running command uses built-in sleep");
 assertThrows(() => unix.scrollLines("BAD", 0), "Unix rejects zero count");
 
@@ -51,6 +53,7 @@ assertIncludes(cmd.echo("A&B|C%D^E"), "A^&B^|C^%D^^E", "cmd metacharacters are e
 assertIncludes(cmd.scrollLines("LINE-", 3), "for /L", "cmd scroll uses built-in loop");
 assertIncludes(cmd.scrollLines("LINE-", 3), "(1,1,3)", "cmd scroll bounds count");
 assertIncludes(cmd.clearAndEcho("CLEAR-OK"), "cls", "cmd clear command clears first");
+assertIncludes(cmd.trailingWordEcho("WORD-OK"), "WORD-OK", "cmd trailing word echo includes marker");
 assertIncludes(cmd.longRunningCommand(), "ping", "cmd long-running command uses built-in command");
 assertThrows(() => cmd.scrollLines("BAD", 501), "cmd rejects excessive count");
 
@@ -65,4 +68,5 @@ assertIncludes(powershell.ansiGreen("PS-GREEN"), "`e[32m", "PowerShell ANSI emit
 assertIncludes(powershell.ansiGreen("PS-GREEN"), "PS-GREEN", "PowerShell ANSI includes marker");
 assertIncludes(powershell.ansiGreen("dollar$marker;ok"), "'dollar$marker;ok'", "PowerShell ANSI single-quotes shell metacharacters");
 assertIncludes(powershell.scrollLines("LINE-", 3), "ForEach-Object", "PowerShell scroll uses pipeline loop");
+assertIncludes(powershell.trailingWordEcho("WORD-OK"), "WORD-OK", "PowerShell trailing word echo includes marker");
 assertIncludes(powershell.longRunningCommand(), "Start-Sleep", "PowerShell long-running command uses built-in command");
