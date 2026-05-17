@@ -177,6 +177,21 @@ assertEqual(
   "blocked agents render the attention tone",
 );
 
+const unavailableCountBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({ summary: { total: 3, unavailable: 2 } }),
+});
+assertEqual(
+  unavailableCountBadge.tone,
+  "attention",
+  "unavailable agent rows render the attention tone",
+);
+assertEqual(
+  unavailableCountBadge.summary,
+  "2 unavailable",
+  "unavailable agent rows are included in the compact summary",
+);
+
 const degradedBadge = workRootActivityBadge({
   phase: "ready",
   view: activityView({ status: "degraded", summary: { total: 2, active: 1 } }),
@@ -191,8 +206,27 @@ assertEqual(
   true,
   "a degraded projection notes degradation in the bounded title",
 );
+
+const longTitleBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({
+    status: "degraded",
+    summary: {
+      total: 999_999_999_999_999,
+      active: 999_999_999_999_999,
+      blocked: 999_999_999_999_999,
+      failed: 999_999_999_999_999,
+      unavailable: 999_999_999_999_999,
+    },
+  }),
+});
 assertEqual(
-  degradedBadge.title.length <= 120,
+  longTitleBadge.title.length,
+  120,
+  "an over-limit activity badge title is truncated to the limit",
+);
+assertEqual(
+  longTitleBadge.title.endsWith("…"),
   true,
-  "the activity badge title stays bounded",
+  "an over-limit activity badge title ends with an ellipsis",
 );

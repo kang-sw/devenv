@@ -1057,8 +1057,12 @@ function WorkbenchShell({
   const focusedTerminalPaneIdRef = useRef<string | null>(null);
   focusedTerminalPaneIdRef.current = focusedTerminalPaneId;
   // Selected-workRoot named-agent activity for the compact top-bar badge.
-  const [workRootActivity, setWorkRootActivity] =
-    useState<WorkRootActivityBadgeInput>({ phase: "loading" });
+  // Keep the owning root id beside the fetch state so a root switch never
+  // renders the previous root's activity for a frame before the effect resets.
+  const [workRootActivityState, setWorkRootActivityState] = useState<{
+    rootId: string | null;
+    activity: WorkRootActivityBadgeInput;
+  }>({ rootId: null, activity: { phase: "loading" } });
   const selectedWorkRootId = selection?.root.id ?? null;
   const workbenchGroups = selectedWorkRootId
     ? (workbenchGroupsByRoot[selectedWorkRootId] ?? initialWorkbenchGroups)
@@ -1167,16 +1171,19 @@ function WorkbenchShell({
       return;
     }
     let cancelled = false;
-    setWorkRootActivity({ phase: "loading" });
+    setWorkRootActivityState({ rootId, activity: { phase: "loading" } });
     void fetchWorkRootActivity(rootId)
       .then((view) => {
         if (!cancelled) {
-          setWorkRootActivity({ phase: "ready", view });
+          setWorkRootActivityState({
+            rootId,
+            activity: { phase: "ready", view },
+          });
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setWorkRootActivity({ phase: "error" });
+          setWorkRootActivityState({ rootId, activity: { phase: "error" } });
         }
       });
     return () => {
@@ -1629,7 +1636,11 @@ function WorkbenchShell({
   }
 
   const { workspace, root } = workbenchModel;
-  const activityBadge = workRootActivityBadge(workRootActivity);
+  const activityBadge = workRootActivityBadge(
+    workRootActivityState.rootId === root.id
+      ? workRootActivityState.activity
+      : { phase: "loading" },
+  );
 
   return (
     <div className="workbench-shell">
@@ -2202,11 +2213,18 @@ function TerminalPaneBody({
         keepTerminalFocusRef.current = false;
       }
     };
+    const clearFocusedTerminalOnOutsideFocus = (event: FocusEvent) => {
+      const target = event.target as Node | null;
+      if (target && !container.contains(target)) {
+        keepTerminalFocusRef.current = false;
+      }
+    };
     container.addEventListener("compositionstart", markComposing);
     container.addEventListener("compositionend", clearComposing);
     container.addEventListener("focusin", markFocusedTerminal);
     container.addEventListener("pointerdown", markFocusedTerminal);
     window.addEventListener("pointerdown", clearFocusedTerminal, true);
+    window.addEventListener("focusin", clearFocusedTerminalOnOutsideFocus, true);
 
     const keydownFallback = (event: KeyboardEvent) => {
       if (!container.offsetParent) {
@@ -2388,6 +2406,11 @@ function TerminalPaneBody({
       container.removeEventListener("focusin", markFocusedTerminal);
       container.removeEventListener("pointerdown", markFocusedTerminal);
       window.removeEventListener("pointerdown", clearFocusedTerminal, true);
+      window.removeEventListener(
+        "focusin",
+        clearFocusedTerminalOnOutsideFocus,
+        true,
+      );
       inputDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;

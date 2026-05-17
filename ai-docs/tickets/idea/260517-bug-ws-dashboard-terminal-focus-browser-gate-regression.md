@@ -17,10 +17,12 @@ failed later in the existing terminal input focus step. The focused terminal
 helper textarea became `BODY` after typed input.
 
 The same failure reproduced on the pre-Phase-2 baseline commit `0bb994e`, so it
-is not caused by the activity badge UI. It still blocks UI-facing dashboard
-verification because `npm run test:browser` cannot pass while this regression is
-present.
+was not caused by the activity badge UI. A narrow watchdog hotfix was applied on
+the WorkRoot Activity branch to restore `.xterm-helper-textarea` focus after
+ordinary terminal input/output churn and unblock the Phase 2 browser gate.
 
-Investigate why the earlier terminal focus retention behavior regressed or
-remains flaky in the daemon-served Playwright gate, then restore stable
-`.xterm-helper-textarea` focus across ordinary input/output turns.
+This ticket remains as follow-up because the hotfix was made under a gate
+pressure path rather than a dedicated terminal-focus slice. Stabilize the
+terminal focus model and its Playwright coverage so the watchdog cannot steal
+focus after intentional outside focus movement, and so future terminal changes
+do not rely on an incidental acceptance-gate fix.

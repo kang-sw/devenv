@@ -433,6 +433,18 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         toolbarBox: toolbarBox!,
       };
     };
+    const activitySummaryDisplay = async () =>
+      page.evaluate(() => {
+        const badgeNode = document.querySelector(".workbench-activity-badge");
+        if (!badgeNode) return "missing";
+        const probe = document.createElement("span");
+        probe.className = "workbench-activity-badge-summary";
+        probe.textContent = "probe";
+        badgeNode.appendChild(probe);
+        const display = window.getComputedStyle(probe).display;
+        probe.remove();
+        return display;
+      });
 
     const assertSingleLineMetaRow = (
       measured: Awaited<ReturnType<typeof measureToolbar>>,
@@ -458,6 +470,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     const wide = await measureToolbar();
     assertSingleLineMetaRow(wide, "1440px viewport");
+    expect(await activitySummaryDisplay()).not.toBe("none");
     const wideToolbarHeight = wide.toolbarBox.height;
 
     // Constrained width: the badge compacts/clips instead of wrapping the
@@ -465,6 +478,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.setViewportSize({ width: 480, height: 900 });
     await expect(badge).toBeVisible();
     assertSingleLineMetaRow(await measureToolbar(), "480px viewport");
+    expect(await activitySummaryDisplay()).toBe("none");
 
     await page.setViewportSize({ width: 1440, height: 900 });
     const restored = await measureToolbar();
@@ -943,6 +957,22 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       ),
     );
     expect(terminalSocketFrames.length).toBe(framesBeforeComposition);
+
+    // CONTRACT: The terminal focus watchdog may restore focus after terminal
+    // input/output churn, but it must not steal focus back after an intentional
+    // outside focus move.
+    await page.locator('[data-command-id="terminal.create"]').focus();
+    await page.waitForTimeout(250);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const element = document.activeElement;
+          return element instanceof HTMLElement
+            ? element.dataset.commandId
+            : "";
+        }),
+      )
+      .toBe("terminal.create");
 
     expect(
       terminalSocketFrames.some((frame) => frame.includes('"type":"input"')),
