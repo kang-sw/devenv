@@ -48,6 +48,11 @@ export type WorkbenchPlacementDecision =
       readonly rowPolicy: WorkbenchRowPolicy;
     };
 
+export type WorkbenchDynamicPlacementDecision = WorkbenchPlacementDecision & {
+  readonly nextState: WorkbenchPlacementState;
+  readonly createdGroupId: WorkbenchGroupId | null;
+};
+
 export type WorkbenchCloseDecision = {
   readonly closePolicy: WorkbenchClosePolicy;
   readonly behavior: "detach" | "closeAttachment" | "releaseProjection" | "deferToProvider";
@@ -121,6 +126,24 @@ export function decideSurfaceOpen(
     logicalKey: request.logicalKey,
     rowPolicy: registryEntry.rowPolicy,
   };
+}
+
+export function decideSurfaceOpenWithDynamicGroups(
+  _state: WorkbenchPlacementState,
+  _request: OpenSurfaceRequest,
+  _registry: SurfaceRegistry = defaultSurfaceRegistry(),
+): WorkbenchDynamicPlacementDecision {
+  // CONTRACT: Dynamic placement is the caller-facing policy for Dockview-backed
+  // workbenches. Existing logical keys still focus their attachment. New
+  // persistent terminal panes prefer group 1. New editor/read-only file panes
+  // prefer group 2, creating group 2 when only group 1 exists. Groups 3+ are
+  // user-created groups and are not automatic placement targets.
+  // HINT: Reuse decideSurfaceOpen duplicate-focus behavior and selectTargetGroup
+  // row-policy intent, but return nextState so App.tsx can persist created group
+  // ids instead of hard-coding primary/support.
+  // HOLE: Define the generated group id seed so it remains stable within the
+  // current browser workRoot state without leaking Dockview raw group handles.
+  throw new Error("dynamic workbench placement is not implemented");
 }
 
 export function decideSurfaceClose(

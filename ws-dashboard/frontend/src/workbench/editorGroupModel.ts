@@ -30,6 +30,20 @@ export type WorkbenchPaneMoveResult<TGroup extends WorkbenchEditorGroupRef = Wor
   readonly activePaneByGroup: WorkbenchActivePaneState;
 };
 
+export type WorkbenchDynamicGroupRequest = {
+  readonly targetGroupId: string;
+  readonly targetGroupLabel?: string;
+};
+
+export type WorkbenchDynamicPaneMove = WorkbenchPaneMove & {
+  readonly dynamicTargetGroup?: WorkbenchDynamicGroupRequest;
+};
+
+export type WorkbenchDynamicPaneMoveResult<TGroup extends WorkbenchEditorGroupRef = WorkbenchEditorGroupRef> =
+  WorkbenchPaneMoveResult<TGroup> & {
+    readonly createdGroupId: string | null;
+  };
+
 
 export function partitionWorkbenchPanesByCategory<TPane extends WorkbenchCategorizedPaneRef>(
   panes: readonly TPane[],
@@ -203,4 +217,21 @@ export function commitWorkbenchPaneMove<TGroup extends WorkbenchEditorGroupRef>(
     paneOrderByGroup: deriveWorkbenchPaneOrder(movedGroups),
     activePaneByGroup,
   };
+}
+
+export function commitWorkbenchPaneMoveIntoDynamicGroup<TGroup extends WorkbenchEditorGroupRef>(
+  _groups: readonly TGroup[],
+  _currentActivePaneByGroup: WorkbenchActivePaneState,
+  _move: WorkbenchDynamicPaneMove,
+): WorkbenchDynamicPaneMoveResult<TGroup> {
+  // CONTRACT: Dockview-created split drops are represented in dashboard state
+  // by creating or mapping a dashboard group id before committing the move.
+  // The function returns the same serialized pane order and active-pane state
+  // as commitWorkbenchPaneMove plus the id of a newly-created dashboard group,
+  // if the Dockview target group was not already known.
+  // HINT: Preserve commitWorkbenchPaneMove semantics for existing groups, and
+  // synthesize an empty group when dynamicTargetGroup names an unknown target.
+  // HOLE: Decide whether targetGroupLabel is stored on the group object or
+  // remains Dockview-only metadata after App.tsx adopts dynamic group state.
+  throw new Error("dynamic workbench group moves are not implemented");
 }

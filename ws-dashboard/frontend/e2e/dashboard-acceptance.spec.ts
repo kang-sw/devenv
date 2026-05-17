@@ -152,6 +152,19 @@ async function expectDockviewWorkbench(page: Page) {
   await expect(page.locator(".workbench-splits > .workbench-group")).toHaveCount(0);
 }
 
+async function expectDurableDockviewSplitDrop(_page: Page) {
+  // CONTRACT: Browser acceptance must prove that a Dockview split-drop preview
+  // creates or maps a durable dashboard group. After dragging a workbench tab
+  // into a new split target, the moved pane keeps a distinct
+  // `data-workbench-group-id` after React synchronization, and file/terminal
+  // interactions still work in the resulting split layout.
+  // HINT: Reuse `.dockview-workbench-tab`, `data-workbench-pane-id`,
+  // `data-workbench-group-id`, expectDockviewWorkbench, and settlePastPollCycle.
+  // HOLE: Normalize the exact Playwright drag coordinates against Dockview's
+  // overlay target once dynamic group mapping is implemented.
+  throw new Error("durable Dockview split-drop browser evidence is not implemented");
+}
+
 // The terminal pane footer renders `<status> · <columns>x<rows>` from the
 // daemon-confirmed session size, so it reflects forwarded PTY resizes.
 async function terminalColumns(page: Page): Promise<number> {
@@ -284,6 +297,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(pane.locator(".readonly-text-pane-badges")).toContainText("read-only");
     await expect(page.locator(".workbench-pane-header")).toHaveCount(0);
     await expect(page.locator(".workbench-pane-status")).toHaveCount(0);
+    await expectDurableDockviewSplitDrop(page);
     note("read-only file: previewable file opens a read-only text pane with content and no generic pane chrome");
   });
 

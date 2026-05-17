@@ -7,6 +7,7 @@ import { defaultSurfaceKinds, defaultSurfaceRegistry } from "./surfaceRegistry.j
 import {
   applyWorkbenchPaneOrder,
   commitWorkbenchPaneMove,
+  commitWorkbenchPaneMoveIntoDynamicGroup,
   deriveWorkbenchPaneOrder,
   moveWorkbenchPane,
   partitionWorkbenchPanesByCategory,
@@ -24,6 +25,7 @@ import {
 import {
   decideSurfaceClose,
   decideSurfaceOpen,
+  decideSurfaceOpenWithDynamicGroups,
   defaultPtyLogicalSize,
   preservePtyLogicalSize,
   reserveTerminateCommand,
@@ -394,6 +396,37 @@ assertDeepEqual(
   "visible workbench move commit covers drag move, serialized group membership, and active body reconciliation",
 );
 
+assertDeepEqual(
+  commitWorkbenchPaneMoveIntoDynamicGroup(
+    editorGroups,
+    { primary: "terminal", support: "editor" },
+    {
+      paneId: "viewer",
+      targetGroupId: "split-3",
+      dynamicTargetGroup: { targetGroupId: "split-3", targetGroupLabel: "Group 3" },
+    },
+  ),
+  {
+    groups: [
+      { id: "primary", panes: [{ id: "agent" }, { id: "terminal" }] },
+      { id: "support", panes: [{ id: "editor" }, { id: "tasks" }, { id: "diagnostics" }] },
+      { id: "split-3", panes: [{ id: "viewer" }] },
+    ],
+    paneOrderByGroup: {
+      primary: ["agent", "terminal"],
+      support: ["editor", "tasks", "diagnostics"],
+      "split-3": ["viewer"],
+    },
+    activePaneByGroup: {
+      primary: "terminal",
+      support: "editor",
+      "split-3": "viewer",
+    },
+    createdGroupId: "split-3",
+  },
+  "dynamic workbench move commit creates a dashboard group for a Dockview split drop",
+);
+
 const addedPanels: unknown[] = [];
 let addedGroupCount = 0;
 let focusNextCount = 0;
@@ -616,6 +649,52 @@ assertDeepEqual(
   },
   "new read-only file panes fall back to the first split when it is the only group",
 );
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    { groups: [{ groupId: groupOne }], attachments: [] },
+    {
+      surfaceKind: "editor",
+      logicalKey: nestedFileKey,
+      attachmentId: attachmentId("att-main-rs"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-main-rs",
+    groupId: "group-2",
+    logicalKey: "editor/root-local-abc/src/main.rs",
+    rowPolicy: "opened",
+    nextState: {
+      groups: [{ groupId: "group-1" }, { groupId: "group-2" }],
+      attachments: [],
+    },
+    createdGroupId: "group-2",
+  },
+  "dynamic placement creates group 2 for editor/file opens when only group 1 exists",
+);
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    { groups: [{ groupId: groupOne }, { groupId: groupTwo }, { groupId: workbenchGroupId("group-3") }], attachments: [] },
+    {
+      surfaceKind: "editor",
+      logicalKey: surfaceLogicalKey("editor", "root-local-abc", "src/lib.rs"),
+      attachmentId: attachmentId("att-lib-rs"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-lib-rs",
+    groupId: "group-2",
+    logicalKey: "editor/root-local-abc/src/lib.rs",
+    rowPolicy: "opened",
+    nextState: {
+      groups: [{ groupId: "group-1" }, { groupId: "group-2" }, { groupId: "group-3" }],
+      attachments: [],
+    },
+    createdGroupId: null,
+  },
+  "dynamic placement does not auto-target user-created group 3 for editor/file opens",
+);
 assert(readmeFileKey !== nestedFileKey, "different read-only file paths open distinct logical panes");
 assert(!String(readmeFileKey).includes("/Users/"), "read-only logical key omits raw host paths");
 
@@ -666,6 +745,30 @@ assertDeepEqual(
     rowPolicy: "pinned",
   },
   "persistent terminal opens into the focused group",
+);
+assertDeepEqual(
+  decideSurfaceOpenWithDynamicGroups(
+    { groups: [{ groupId: groupOne }, { groupId: groupTwo }], focusedGroupId: groupTwo, attachments: [] },
+    {
+      surfaceKind: "persistentTerminal",
+      logicalKey: terminalSessionKey,
+      attachmentId: attachmentId("att-terminal-new"),
+    },
+  ),
+  {
+    type: "openNew",
+    attachmentId: "att-terminal-new",
+    groupId: "group-1",
+    logicalKey: "persistentTerminal/root-local-abc/term_abc",
+    rowPolicy: "pinned",
+    nextState: {
+      groups: [{ groupId: "group-1" }, { groupId: "group-2" }],
+      focusedGroupId: "group-2",
+      attachments: [],
+    },
+    createdGroupId: null,
+  },
+  "dynamic placement sends new terminal panes to group 1 instead of the focused support group",
 );
 assertDeepEqual(
   decideSurfaceClose("persistentTerminal").terminateReservation?.commandId,
@@ -719,4 +822,3 @@ assertDeepEqual(
   "visual split size is recorded without rewriting PTY logical dimensions",
 );
 assert(resizeDecision.logicalSize === defaultPtyLogicalSize, "PTY logical size object is preserved");
-
