@@ -511,6 +511,9 @@ text reaches the shell through the live terminal path,
 composition-in-progress keystrokes are not forwarded as raw bytes by fallback
 browser handlers, and shell editing controls such as `ctrl-u` and `ctrl-w`
 produce their native shell-visible effects through the live terminal path.
+Focused terminal panes keep browser focus on the xterm input target across
+ordinary input, Enter, shell output, and committed text input unless the owner
+interacts outside the terminal surface.
 {#260517-ws-dashboard-terminal-ime-and-line-editing-fidelity}
 
 ## Terminal Shell Selection Portability {#260516-ws-web-dashboard-terminal-shell-selection-portability}

@@ -103,3 +103,14 @@ composition-in-progress fallback keydown events remain ignored. Browser
 evidence now proves shell-visible `ctrl-u` and `ctrl-w` behavior, WebSocket
 input frames for those controls, committed Hangul text reaching the shell, and
 synthetic IME composition guard behavior.
+
+#### Edition (2d390a5) - 2026-05-17
+
+Fixed a focus regression discovered after the initial input fidelity pass:
+terminal input reached the shell, but the xterm helper textarea lost browser
+focus after typed input and shell output. The terminal now tracks local focus
+intent, avoids React focus-state churn on every xterm `onData` byte, refocuses
+the active xterm surface after input/output turns, and clears the intent on
+outside pointer interaction. Browser evidence now asserts that the xterm helper
+textarea remains focused across typed input, Enter, shell output, and committed
+Hangul input.
