@@ -919,8 +919,8 @@ function WorkbenchShell({
     SetStateAction<Record<string, WorkbenchPaneOrder>>
   >;
 }) {
-  const [activePaneByGroup, setActivePaneByGroup] = useState<
-    Record<string, string>
+  const [activePaneByRoot, setActivePaneByRoot] = useState<
+    Record<string, Record<string, string>>
   >({});
   const [terminalPanes, setTerminalPanes] = useState<
     Record<string, TerminalPaneState>
@@ -946,6 +946,26 @@ function WorkbenchShell({
   const paneOrderByGroup = selectedWorkRootId
     ? (paneOrderByRoot[selectedWorkRootId] ?? {})
     : {};
+  const activePaneByGroup = selectedWorkRootId
+    ? (activePaneByRoot[selectedWorkRootId] ?? {})
+    : {};
+
+  const setActivePaneByGroupForSelected = (
+    next:
+      | Record<string, string>
+      | ((current: Record<string, string>) => Record<string, string>),
+  ) => {
+    if (!selectedWorkRootId) {
+      return;
+    }
+    setActivePaneByRoot((currentByRoot) => {
+      const current = currentByRoot[selectedWorkRootId] ?? {};
+      return {
+        ...currentByRoot,
+        [selectedWorkRootId]: typeof next === "function" ? next(current) : next,
+      };
+    });
+  };
 
   const workbenchModel =
     resources && selection
@@ -1126,7 +1146,7 @@ function WorkbenchShell({
     }
 
     focusedReadOnlyRequest.current = activeReadOnlyFilePaneRequest.sequence;
-    setActivePaneByGroup((current) =>
+    setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(
         current,
         targetGroup.id,
@@ -1154,7 +1174,7 @@ function WorkbenchShell({
     }
     focusedTerminalRequest.current = activeTerminalPaneRequest.sequence;
     setFocusedTerminalPaneId(activeTerminalPaneRequest.paneId);
-    setActivePaneByGroup((current) =>
+    setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(
         current,
         targetGroup.id,
@@ -1344,7 +1364,7 @@ function WorkbenchShell({
         [workbenchModel.root.id]: result.paneOrderByGroup,
       }));
     }
-    setActivePaneByGroup(result.activePaneByGroup);
+    setActivePaneByGroupForSelected(result.activePaneByGroup);
   };
 
   const selectPane = (groupId: string, paneId: string) => {
@@ -1354,7 +1374,7 @@ function WorkbenchShell({
     setFocusedTerminalPaneId(
       pane?.kind === "persistentTerminal" ? paneId : null,
     );
-    setActivePaneByGroup((current) =>
+    setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(current, groupId, paneId),
     );
   };

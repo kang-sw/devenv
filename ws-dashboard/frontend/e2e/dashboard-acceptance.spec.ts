@@ -22,7 +22,9 @@ const artifactsDir = path.join(here, ".artifacts");
 
 let daemon: DaemonHandle;
 let workRoot: string;
+let secondWorkRoot: string;
 let ownsWorkRoot = false;
+let ownsSecondWorkRoot = false;
 let commandPlan: TerminalCommandPlan;
 let portabilityEvidence: TerminalPortabilityEvidence | undefined;
 
@@ -62,6 +64,13 @@ test.beforeAll(async () => {
       );
     }
   }
+
+  secondWorkRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-gate-second-"));
+  ownsSecondWorkRoot = true;
+  writeFileSync(
+    path.join(secondWorkRoot, "second-readme.txt"),
+    "second ws-dashboard browser gate fixture\n",
+  );
 
   daemon = await startDaemon();
   const shellProfileHint = process.env.WS_DASHBOARD_TERMINAL_SHELL_PROFILE;
@@ -125,6 +134,9 @@ test.afterAll(async () => {
   if (workRoot && ownsWorkRoot) {
     rmSync(workRoot, { recursive: true, force: true });
   }
+  if (secondWorkRoot && ownsSecondWorkRoot) {
+    rmSync(secondWorkRoot, { recursive: true, force: true });
+  }
   if (portabilityEvidence) {
     writeFileSync(
       path.join(artifactsDir, "terminal-portability-evidence.json"),
@@ -171,7 +183,9 @@ async function expectDockviewWorkbench(page: Page) {
   ).toHaveCount(0);
 }
 
-async function expectDurableDockviewSplitDrop(page: Page) {
+async function expectDurableDockviewSplitDrop(
+  page: Page,
+): Promise<{ paneId: string; groupId: string }> {
   // CONTRACT: Browser acceptance must prove that a Dockview split-drop preview
   // creates or maps a durable dashboard group. After dragging a workbench tab
   // into a new split target, the moved pane keeps a distinct
@@ -219,12 +233,10 @@ async function expectDurableDockviewSplitDrop(page: Page) {
     })
     .not.toBe(originalGroupId);
   await settlePastPollCycle(page);
-  await expect(
-    page.locator(`.dockview-workbench-tab[data-workbench-pane-id="${paneId}"]`),
-  ).toHaveAttribute(
-    "data-workbench-group-id",
-    /group-[3-9][0-9]*|group-[1-9][0-9]+/,
-  );
+  const movedGroupId = await page
+    .locator(`.dockview-workbench-tab[data-workbench-pane-id="${paneId}"]`)
+    .getAttribute("data-workbench-group-id");
+  expect(movedGroupId).toMatch(/group-[3-9][0-9]*|group-[1-9][0-9]+/);
   await expectDockviewWorkbench(page);
   await expect(page.locator(".readonly-text-pane")).toBeVisible();
   expect(
@@ -236,6 +248,44 @@ async function expectDurableDockviewSplitDrop(page: Page) {
         ),
     ).size,
   ).toBeGreaterThanOrEqual(3);
+  return { paneId: paneId!, groupId: movedGroupId! };
+}
+
+async function visibleWorkbenchGroupIds(page: Page): Promise<string[]> {
+  return page
+    .locator(".dockview-workbench-tab")
+    .evaluateAll((tabs) =>
+      Array.from(
+        new Set(
+          tabs
+            .map((tab) => tab.getAttribute("data-workbench-group-id"))
+            .filter((groupId): groupId is string => Boolean(groupId)),
+        ),
+      ).sort(),
+    );
+}
+
+async function openWorkRootInBrowser(page: Page, rootPath: string) {
+  await expect(page.locator("#open-work-root-path")).toBeVisible();
+  await page.locator("#open-work-root-path").fill(rootPath);
+  await page.locator('[data-command-id="workRoot.open"]').click();
+  await expect(page.locator(".file-explorer-title")).toContainText(
+    workRootDisplayName(rootPath),
+  );
+  await expectDockviewWorkbench(page);
+}
+
+async function selectWorkRootInBrowser(page: Page, rootPath: string) {
+  await page
+    .locator('.resource-row[data-command-id="resource.select"]', {
+      has: page.locator(".row-eyebrow", { hasText: "workRoot" }),
+      hasText: workRootDisplayName(rootPath),
+    })
+    .click();
+  await expect(page.locator(".file-explorer-title")).toContainText(
+    workRootDisplayName(rootPath),
+  );
+  await expectDockviewWorkbench(page);
 }
 
 // The terminal pane footer renders `<status> · <columns>x<rows>` from the
@@ -264,6 +314,7 @@ async function documentScrolls(page: Page): Promise<boolean> {
 }
 
 test("dashboard workRoot UI browser acceptance", async ({ page }) => {
+  let splitEvidence: { paneId: string; groupId: string } | null = null;
   const terminalSocketUrls: string[] = [];
   const terminalSocketFrames: string[] = [];
   let terminalOutputPolls = 0;
@@ -294,14 +345,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
   // --- Open a real workRoot through the raw path opener -------------------
   await test.step("open real workRoot", async () => {
-    await expect(page.locator("#open-work-root-path")).toBeVisible();
-    await page.locator("#open-work-root-path").fill(workRoot);
-    await page.locator('[data-command-id="workRoot.open"]').click();
-
-    await expect(page.locator(".file-explorer-title")).toContainText(
-      workRootDisplayName(workRoot),
-    );
-    await expectDockviewWorkbench(page);
+    await openWorkRootInBrowser(page, workRoot);
     note(
       "open workRoot: live opened workRoot is selected and shown in the explorer",
     );
@@ -402,9 +446,56 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expect(page.locator(".workbench-pane-header")).toHaveCount(0);
     await expect(page.locator(".workbench-pane-status")).toHaveCount(0);
-    await expectDurableDockviewSplitDrop(page);
+    splitEvidence = await expectDurableDockviewSplitDrop(page);
     note(
       "read-only file: previewable file opens a read-only text pane with content and no generic pane chrome",
+    );
+  });
+
+  // --- Dynamic workbench state remains per workRoot ------------------------
+  await test.step("dynamic split state is isolated per opened workRoot", async () => {
+    expect(splitEvidence).not.toBeNull();
+    await openWorkRootInBrowser(page, secondWorkRoot);
+    expect(await visibleWorkbenchGroupIds(page)).toEqual([
+      "group-1",
+      "group-2",
+    ]);
+
+    const secondFileRow = page.locator(".file-explorer-row", {
+      hasText: "second-readme.txt",
+    });
+    await expect(secondFileRow).toHaveAttribute(
+      "data-command-id",
+      "fileExplorer.openFile",
+    );
+    await secondFileRow.click();
+    await expect(page.locator(".readonly-text-pane")).toContainText(
+      "second ws-dashboard browser gate fixture",
+    );
+    await expect(
+      page.locator(
+        '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"]',
+      ),
+    ).toHaveAttribute("data-workbench-group-id", "group-2");
+    expect(await visibleWorkbenchGroupIds(page)).toEqual([
+      "group-1",
+      "group-2",
+    ]);
+
+    await selectWorkRootInBrowser(page, workRoot);
+    await expect(
+      page.locator(
+        `.dockview-workbench-tab[data-workbench-pane-id="${splitEvidence!.paneId}"]`,
+      ),
+    ).toHaveAttribute("data-workbench-group-id", splitEvidence!.groupId);
+    expect(await visibleWorkbenchGroupIds(page)).toContain(
+      splitEvidence!.groupId,
+    );
+    await expect(page.locator(".readonly-text-pane")).toContainText(
+      "ws-dashboard browser gate fixture",
+    );
+    note(
+      "dynamic groups: split group persisted for the first workRoot and did not leak into a second opened workRoot",
     );
   });
 
@@ -661,9 +752,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   await test.step("refresh without mock surfaces", async () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.locator(".app-shell")).toBeVisible();
-    await expect(page.locator(".file-explorer-title")).toContainText(
-      workRootDisplayName(workRoot),
-    );
+    await selectWorkRootInBrowser(page, workRoot);
     // The daemon owns the terminal lifecycle, so the surviving session is
     // reconstructed as a selectable tab after reload.
     await expect(terminalTabs(page)).toHaveCount(1);
