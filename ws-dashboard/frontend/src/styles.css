@@ -852,9 +852,9 @@ button {
   min-width: 0;
   height: 100%;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   color: var(--ws-color-text-secondary);
-  padding: 0 9px;
+  padding: 0 6px;
   font-size: var(--ws-font-size-02);
   line-height: var(--ws-line-height-02);
 }
@@ -863,13 +863,6 @@ button {
   color: var(--ws-color-text-primary);
 }
 
-
-.workbench-tab-kind {
-  flex: 0 0 auto;
-  color: var(--ws-color-text-tertiary);
-  font-size: var(--ws-font-size-01);
-  text-transform: uppercase;
-}
 
 .workbench-tab-title {
   min-width: 0;
@@ -1197,11 +1190,6 @@ button {
   border-left: var(--ws-border-width-state-rail) solid var(--ws-color-action);
 }
 
-.dockview-workbench-tab[data-workbench-pane-category="opened"] .workbench-tab-kind {
-  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
-  background: var(--ws-color-panel-subtle);
-  padding: 1px 4px;
-}
 
 .dockview-workbench-tab-active {
   background: var(--ws-color-panel-selected);
@@ -1210,8 +1198,8 @@ button {
 
 .workbench-tab-close {
   display: inline-flex;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
@@ -1294,8 +1282,8 @@ button {
 
 .workbench-tab-icon {
   position: relative;
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   flex: 0 0 auto;
   border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
   background: var(--ws-color-panel-subtle);

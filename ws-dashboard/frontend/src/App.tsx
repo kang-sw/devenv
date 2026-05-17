@@ -2093,10 +2093,19 @@ function TerminalPaneBody({
     };
 
     const inputDisposable = terminal.onData(sendInputBytes);
+    let composingInput = false;
+    const markComposing = () => {
+      composingInput = true;
+    };
+    const clearComposing = () => {
+      composingInput = false;
+    };
     const markFocusedTerminal = () => {
       liveRef.current.actions.onFocusInput(liveRef.current.pane);
       terminal.focus();
     };
+    container.addEventListener("compositionstart", markComposing);
+    container.addEventListener("compositionend", clearComposing);
     container.addEventListener("focusin", markFocusedTerminal);
     container.addEventListener("pointerdown", markFocusedTerminal);
 
@@ -2105,6 +2114,9 @@ function TerminalPaneBody({
         return;
       }
       if (!liveRef.current.actions.isActivePane(liveRef.current.pane)) {
+        return;
+      }
+      if (event.isComposing || event.key === "Process" || composingInput) {
         return;
       }
       const isMetaLineStart = event.metaKey && event.key.toLowerCase() === "a";
@@ -2250,6 +2262,8 @@ function TerminalPaneBody({
         window.clearTimeout(resizeTimer);
       }
       window.removeEventListener("keydown", keydownFallback);
+      container.removeEventListener("compositionstart", markComposing);
+      container.removeEventListener("compositionend", clearComposing);
       container.removeEventListener("focusin", markFocusedTerminal);
       container.removeEventListener("pointerdown", markFocusedTerminal);
       inputDisposable.dispose();

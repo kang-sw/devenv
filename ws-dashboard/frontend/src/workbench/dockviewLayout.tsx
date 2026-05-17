@@ -281,7 +281,6 @@ function DockviewWorkbenchTab({
         className="workbench-tab-icon"
         data-workbench-tab-icon={params.surfaceKind}
       />
-      <span className="workbench-tab-kind">{registry.label}</span>
       <span className="workbench-tab-title">{api.title ?? params.title}</span>
       <button
         aria-label={`Close ${api.title ?? params.title}`}
