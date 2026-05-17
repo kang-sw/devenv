@@ -1113,9 +1113,15 @@ button {
 }
 
 
-/* The terminal surface is a real emulator and fills the workbench pane body. */
+/* The terminal surface is a real emulator and fills the Dockview pane body. */
+.workbench-pane[data-surface-kind="persistentTerminal"] {
+  height: 100%;
+}
+
 .workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-body {
   display: flex;
+  width: 100%;
+  height: 100%;
   flex-direction: column;
   overflow: hidden;
   padding: 0;
@@ -1130,6 +1136,7 @@ button {
 
 .workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-content {
   display: flex;
+  width: 100%;
   min-height: 0;
   flex: 1 1 auto;
   margin-top: 0;
@@ -1137,6 +1144,7 @@ button {
 
 .terminal-pane {
   display: flex;
+  width: 100%;
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
@@ -1145,6 +1153,7 @@ button {
 }
 
 .terminal-surface {
+  width: 100%;
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
@@ -1154,6 +1163,7 @@ button {
 }
 
 .terminal-surface .xterm {
+  width: 100%;
   height: 100%;
 }
 

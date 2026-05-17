@@ -704,20 +704,39 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   // --- Terminal fills the pane --------------------------------------------
   await test.step("terminal fills the pane", async () => {
     // Compare the emulator surface against the height of its actual containing
-    // workbench pane body, not a fixed constant: a partially filled terminal
-    // must fail this regardless of viewport size.
+    // Dockview workbench pane body, not a fixed constant: a partially filled
+    // terminal must fail this regardless of viewport size.
     const paneBody = page.locator(
       '.workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-body',
     );
+    const terminalPane = page.locator(".terminal-pane");
+    const surface = page.locator(".terminal-surface");
+    const controls = page.locator(".terminal-controls");
     const bodyBox = await paneBody.boundingBox();
-    const surfaceBox = await page.locator(".terminal-surface").boundingBox();
+    const terminalBox = await terminalPane.boundingBox();
+    const surfaceBox = await surface.boundingBox();
+    const controlsBox = await controls.boundingBox();
     expect(bodyBox).not.toBeNull();
+    expect(terminalBox).not.toBeNull();
     expect(surfaceBox).not.toBeNull();
-    // The surface occupies the bulk of the pane body; the remainder is only
-    // the thin terminal controls bar.
-    expect(surfaceBox!.height).toBeGreaterThan(bodyBox!.height * 0.7);
+    expect(controlsBox).not.toBeNull();
+
+    const filledHeight = surfaceBox!.height + controlsBox!.height;
+    expect(Math.abs(terminalBox!.height - bodyBox!.height)).toBeLessThanOrEqual(
+      1,
+    );
+    expect(Math.abs(filledHeight - bodyBox!.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(terminalBox!.width - bodyBox!.width)).toBeLessThanOrEqual(
+      1,
+    );
+    expect(Math.abs(surfaceBox!.width - bodyBox!.width)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(
+        controlsBox!.y + controlsBox!.height - (bodyBox!.y + bodyBox!.height),
+      ),
+    ).toBeLessThanOrEqual(1);
     note(
-      `pane fill: terminal surface ${Math.round(surfaceBox!.height)}px of ` +
+      `pane fill: terminal surface+controls ${Math.round(filledHeight)}px of ` +
         `${Math.round(bodyBox!.height)}px containing pane body`,
     );
   });
