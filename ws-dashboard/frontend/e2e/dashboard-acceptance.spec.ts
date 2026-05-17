@@ -560,10 +560,100 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(activityPane).toHaveCount(0);
     await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
 
+    await page.route(
+      /\/api\/dashboard\/work-roots\/.*\/activity$/,
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            workRootId: "browser-gate-root",
+            status: "degraded",
+            summary: {
+              total: 1,
+              active: 1,
+              blocked: 0,
+              failed: 0,
+              unavailable: 0,
+            },
+            agents: [
+              {
+                agentId: "agent-alpha",
+                name: "agent-alpha",
+                backend: "claude",
+                harness: "codex",
+                tier: "core",
+                model: "opus",
+                effort: "high",
+                status: "running",
+                lastCallAt: "2026-05-17T11:58:00Z",
+                sessionPresent: true,
+                currentCall: {
+                  status: "running",
+                  active: true,
+                  terminal: false,
+                  executionId: "exec-alpha",
+                  startedAt: "2026-05-17T11:57:00Z",
+                  updatedAt: "2026-05-17T11:58:00Z",
+                  finishedAt: null,
+                  cleanupNeeded: false,
+                  error: "bounded diagnostic",
+                },
+                detailHints: ["review output ready"],
+                diagnostics: ["cache row degraded"],
+              },
+            ],
+          }),
+        });
+      },
+    );
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await openWorkRootInBrowser(page, workRoot);
+    await expect(opener).toContainText("1 agent");
+
+    await opener.click();
+    await expect(activityPane).toHaveCount(1);
+    await expect(activityPane).toHaveAttribute(
+      "data-workbench-group-id",
+      "group-1",
+    );
+    await expect(activityTab).toHaveCount(1);
+    await expect(activityTab).toHaveAttribute("aria-selected", "true");
+
+    const populatedBody = activityPane.locator(".workroot-activity-pane");
+    await expect(
+      populatedBody.locator('[data-running-commands-state="empty"]'),
+    ).toBeVisible();
+    await expect(
+      populatedBody.locator(".workroot-activity-agent", {
+        hasText: "agent-alpha",
+      }),
+    ).toBeVisible();
+    await expect(populatedBody).toContainText("running");
+    await expect(populatedBody).toContainText("session");
+    await expect(populatedBody).toContainText("claude · codex · opus · high");
+    await expect(populatedBody).toContainText("exec exec-alpha");
+    await expect(populatedBody).toContainText("bounded diagnostic");
+    await expect(populatedBody).toContainText("review output ready");
+    await expect(populatedBody).toContainText("cache row degraded");
+
+    await opener.click();
+    await expect(activityPane).toHaveCount(1);
+    await expect(activityTab).toHaveCount(1);
+    await expect(activityTab).toHaveAttribute("aria-selected", "true");
+
+    await activityTab.hover();
+    await activityTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    await expect(activityPane).toHaveCount(0);
+    await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
+
     note(
       "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
-        "a second click focused it without duplicating, and hover-only close " +
-        "removed it immediately with no confirmation popover",
+        "empty and populated named-agent projections rendered, a second click " +
+        "focused it without duplicating, and hover-only close removed it " +
+        "immediately with no confirmation popover",
     );
   });
 
