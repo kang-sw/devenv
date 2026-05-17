@@ -228,6 +228,11 @@ export async function startDaemon(config: DaemonHarnessConfig = parseDaemonHarne
   const command = [daemonBin, ...args];
   const child = spawn(daemonBin, args, {
     cwd: repoRoot,
+    env: {
+      ...process.env,
+      WS_DASHBOARD_E2E_AGENT_FIXTURE:
+        process.env.WS_DASHBOARD_E2E_AGENT_FIXTURE ?? "1",
+    },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });

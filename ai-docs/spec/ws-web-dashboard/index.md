@@ -155,8 +155,8 @@ mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
 
 The dashboard frontend presents a `left nav | workRoot workbench` shell. The
 left navigation selects server, workspace, and concrete workRoot locations,
-while each opened workRoot owns a constrained workbench area backed by a
-dashboard-owned adapter over the selected layout library.
+while each opened workRoot owns a constrained Dockview-backed workbench area
+behind a dashboard-owned adapter.
 
 The workbench uses sibling split groups with compact editor-like tab strips and
 dominant pane bodies. Pinned and opened concepts remain dashboard model
@@ -177,9 +177,10 @@ surface-specific status.
 Layout attachment identity stays separate from daemon resource identity. Layout
 state records arrangement only; daemon APIs and `/servers/:serverId/...`
 browser routes keep authoritative server, workspace, workRoot, and instance
-identity. Panel close detaches the frontend view by default, while explicit
-terminate commands own daemon-backed lifecycle shutdown. PTY/TUI logical
-columns do not continuously follow visual drag resizing.
+identity. Panel close follows dashboard surface policy: reversible browser
+views detach immediately, while live terminal or agent tab closes require
+explicit confirmation before invoking their daemon-backed lifecycle behavior.
+PTY/TUI logical columns do not continuously follow visual drag resizing.
 
 Surface opening follows dashboard-owned placement policy: already-open logical
 surface keys focus their existing attachment, opened/support surfaces prefer the
@@ -192,13 +193,28 @@ changes browser arrangement state only: floating/popout groups stay disabled,
 daemon-backed lifecycle stays separate, and PTY/TUI logical dimensions do not
 continuously follow visual drag resizing.
 
-> [!note] Planned 🚧
-> The visible workbench layout will be corrected so the selected layout library
-> is the rendered layout owner for workbench groups, tabs, split sizing, and
-> pane attachment. Dashboard-owned policy will still own surface identity,
-> duplicate-open focus, placement, close behavior, and restore sanitization.
-> Browser acceptance must distinguish "tabs appear" from "the selected layout
-> substrate owns the visible workbench layout."
+Dockview owns the visible workbench group, tab, split-sizing, and pane
+attachment layout. Dashboard-owned policy still owns surface identity,
+duplicate-open focus, placement, close behavior, restore sanitization, and the
+choice to flatten pinned/opened row concepts into Dockview-compatible tab
+metadata when a two-row custom tab shell would compete with Dockview ownership.
+
+Dockview-created split drops become durable dashboard workbench groups instead
+of snapping back to a fixed `primary`/`support` pair. Each opened workRoot owns
+its own dynamic group, pane-order, and active-pane state. An opened workRoot
+starts from two dynamic groups: terminals prefer group 1, editor/read-only file
+panes prefer group 2, editor/file opens create group 2 when only group 1
+exists, and groups 3+ remain user-created groups without automatic placement
+unless the user explicitly targets them through later policy.
+
+Workbench tabs provide polished lifecycle affordances while keeping Dockview as
+the visible tab owner. Pinned/opened hierarchy is visible through
+Dockview-compatible tab metadata and pinned-left badge or chip presentation.
+Tabs expose hover-only close buttons. Live terminal or agent closes use a
+cursor-near `Yes`/`No` confirmation popover; reversible views such as read-only
+editor previews, diagnostics, and resource views close immediately and use the
+same deterministic focus handoff as ordinary tab close. Opened workRoots do
+not show mock or default panes when no live or user-opened surface exists.
 
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
@@ -239,6 +255,36 @@ reconstruction, and timing evidence showing local keystroke echo is no longer
 bounded by the former polling interval.
 {#260516-ws-web-dashboard-terminal-websocket-browser-gate}
 
+For workbench layout changes, the browser gate also proves that the visible
+workbench is Dockview-backed rather than a parallel custom tab/split shell. The
+assertion checks for the dashboard's stable Dockview owner marker and Dockview
+DOM beneath it, and it rejects the retired `.workbench-splits > .workbench-group`
+layout as the visible workbench authority.
+
+Workbench split browser evidence verifies that a Dockview split-drop preview
+corresponds to durable dashboard behavior: dragging a tab into a new split
+target creates or maps a dashboard group, the pane remains there after React
+synchronization, ordinary file/terminal interactions still work in the
+resulting layout, and opening a second workRoot does not leak the first
+workRoot's user-created groups or active panes.
+
+Workbench tab polish evidence is browser-level Playwright evidence against the
+daemon-served frontend. It covers hover-only close affordances, terminal and
+agent close confirmation popover cancel/confirm paths, immediate close for
+reversible panes, pinned/opened badge or chip presentation, preview-to-pinned
+file behavior, and default spawned-daemon agent close coverage. The
+implementation workflow also runs a post-implementation frontend-design
+verification and autonomous tweak pass before ordinary implementation review,
+then reruns the relevant browser evidence.
+
+Read-only text pane scroll containment and terminal input fidelity evidence are
+browser-level Playwright evidence against the daemon-served frontend. The gate
+covers long read-only file scrolling without top-level document scroll,
+shell-visible `ctrl-u` and `ctrl-w` line-editing behavior, WebSocket input
+frames for those controls, committed Hangul text input reaching the shell, and
+a synthetic IME composition guard proving that composition-in-progress fallback
+keystrokes are not forwarded as raw terminal input.
+
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
 automated browser tooling cannot run, the verification artifact records exact
@@ -257,7 +303,11 @@ attach the browser gate to an already-running base or pairing URL through
 `WS_DASHBOARD_DAEMON_BASE_URL` or `WS_DASHBOARD_DAEMON_PAIRING_URL`. When the
 daemon runs on a different host from Playwright, the gate can use
 `WS_DASHBOARD_TEST_WORKROOT` to open a fixture path that exists on the daemon
-host instead of creating a local Playwright-host temporary directory.
+host instead of creating a local Playwright-host temporary directory. Browser
+checks that need a second opened workRoot can use
+`WS_DASHBOARD_TEST_SECOND_WORKROOT`; when attaching to an external daemon
+without that second reachable path, only the second-root isolation substep is
+skipped while the rest of the browser gate still runs.
 
 The same browser acceptance flow can target a native Windows daemon running on
 remote loopback behind SSH local forwarding. The harness waits for an owner
@@ -364,9 +414,18 @@ The dashboard workbench can open a read-only text pane for a previewable file
 under the selected workRoot. The pane renders file content as an inspectable
 viewer/editor body and clearly indicates read-only status. Opening the same
 file focuses the existing logical pane instead of duplicating it by default.
+File explorer single-click opens or replaces one read-only preview tab for the
+selected workRoot. Double-click pins that file as a stable opened tab that
+later preview opens do not replace. Reopening an already pinned file focuses
+that pinned tab.
 
 The text pane does not provide save, dirty-state, formatting, rename, delete,
 move, copy, conflict handling, or language-server behavior.
+
+Long read-only file content scrolls inside the text pane without moving the
+top-level browser document, displacing dashboard chrome, or requiring a future
+editor replacement to prove containment.
+{#260517-ws-dashboard-readonly-text-scroll-containment}
 
 ## File Open Placement Policy {#260516-ws-web-dashboard-file-open-placement-policy}
 
@@ -446,6 +505,17 @@ where safe, Ctrl-L or clear-screen behavior, paste, and ordinary prompt editing
 inside a real shell.
 {#260516-ws-web-dashboard-terminal-websocket-input-fidelity}
 
+Focused terminal panes preserve native terminal input fidelity for committed
+Hangul text, IME fallback guarding, and shell line editing. Committed Hangul
+text reaches the shell through the live terminal path,
+composition-in-progress keystrokes are not forwarded as raw bytes by fallback
+browser handlers, and shell editing controls such as `ctrl-u` and `ctrl-w`
+produce their native shell-visible effects through the live terminal path.
+Focused terminal panes keep browser focus on the xterm input target across
+ordinary input, Enter, shell output, and committed text input unless the owner
+interacts outside the terminal surface.
+{#260517-ws-dashboard-terminal-ime-and-line-editing-fidelity}
+
 ## Terminal Shell Selection Portability {#260516-ws-web-dashboard-terminal-shell-selection-portability}
 
 Dashboard terminal spawning has an explicit, testable shell-selection contract
@@ -483,9 +553,9 @@ otherwise exceed the available surface.
 ## Terminal Close Terminates Session {#260516-ws-web-dashboard-terminal-close-termination}
 
 Closing a terminal panel explicitly terminates its daemon-owned terminal
-session. The first terminal substrate keeps hidden detached restore UX absent;
-future confirmation or foreground-process checks may be added without changing
-the basic close-as-terminate contract.
+session after inline `Yes`/`No` confirmation near the close action. Cancel
+leaves the terminal open and focus coherent; confirm preserves the
+close-as-terminate behavior. Hidden detached restore UX remains absent.
 
 ## WorkRoot IO Restore Model {#260516-ws-web-dashboard-workroot-io-restore-model}
 

@@ -13,6 +13,7 @@ import {
   workRootFilesEndpoint,
   readOnlyFilePaneId,
   readOnlyFilePaneLogicalKey,
+  readOnlyFilePaneModeForOpenGesture,
   type DirectoryLoadState,
 } from "./workRootFiles.js";
 
@@ -65,9 +66,24 @@ assertEqual(
   "read endpoint encodes opaque workRootId and spaced relative path",
 );
 assertEqual(
+  readOnlyFilePaneModeForOpenGesture("singleClick"),
+  "preview",
+  "single-click file open selects replaceable preview mode",
+);
+assertEqual(
+  readOnlyFilePaneModeForOpenGesture("doubleClick"),
+  "pinned",
+  "double-click file open selects stable pinned mode",
+);
+assertEqual(
   readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs"),
   "editor/root-local-abc/src/main.rs",
   "read-only logical key is scoped by workRootId and relative path",
+);
+assertEqual(
+  readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs", "preview"),
+  "editor-preview/root-local-abc",
+  "preview logical key is a replaceable workRoot-scoped surface",
 );
 assertEqual(
   readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs") ===
@@ -85,6 +101,11 @@ assertEqual(
   readOnlyFilePaneId("root/local abc", "docs/read me.md"),
   "readonly:root%2Flocal%20abc:docs%2Fread%20me.md",
   "pane id encodes scoped file identity without host paths",
+);
+assertEqual(
+  readOnlyFilePaneId("root/local abc", "docs/read me.md", "preview"),
+  "readonly-preview:root%2Flocal%20abc",
+  "preview pane id is one replaceable pane per workRoot",
 );
 
 
@@ -260,6 +281,12 @@ assertEqual(
 const loadingPane = createLoadingReadOnlyFilePane("root-local-abc", "src/main.rs");
 assertEqual(loadingPane.status, "loading", "new read-only pane starts loading");
 assertEqual(loadingPane.title, "main.rs", "new read-only pane derives basename title");
+assertEqual(loadingPane.mode, "pinned", "default read-only pane is pinned");
+assertEqual(
+  createLoadingReadOnlyFilePane("root-local-abc", "src/main.rs", "preview").mode,
+  "preview",
+  "preview read-only pane mode is explicit",
+);
 const loadedPane = applyReadOnlyFilePaneContent(loadingPane, {
   workRootId: "root-local-abc",
   path: "src/main.rs",

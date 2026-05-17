@@ -823,120 +823,57 @@ button {
   text-transform: lowercase;
 }
 
-.workbench-splits {
-  display: grid;
+.dockview-workbench-layout {
+  display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-  gap: 0;
   border-top: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  background: var(--ws-color-panel);
 }
 
-.workbench-group {
-  display: grid;
+.dockview-workbench-layout .dv-dockview {
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
-  border-right: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  flex: 1 1 auto;
+}
+
+.dockview-workbench-layout .dv-groupview {
   background: var(--ws-color-panel);
 }
 
-.workbench-group:last-child {
-  border-right: 0;
-}
-
-.workbench-tab-header {
-  display: grid;
-  min-width: 0;
-  grid-template-rows: auto auto;
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
+.dockview-workbench-layout .dv-tabs-and-actions-container {
   background: var(--ws-color-panel-raised);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
 }
 
-.workbench-tab-lane {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 48px minmax(0, 1fr);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+.dockview-workbench-layout .dv-tab {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
 }
 
-.workbench-tab-lane:last-child {
-  border-bottom: 0;
+.dockview-workbench-layout .dv-tab:has(.dockview-workbench-tab-active) {
+  background: var(--ws-color-panel-selected);
+  box-shadow: inset 0 -2px 0 var(--ws-color-action);
 }
 
-.workbench-tab-lane-label {
-  display: flex;
-  align-items: center;
-  border-right: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  color: var(--ws-color-text-tertiary);
-  padding: 0 6px;
-  font-size: var(--ws-font-size-01);
-  line-height: var(--ws-line-height-01);
-  text-transform: uppercase;
-}
-
-.workbench-tab-strip {
+.dockview-workbench-tab {
   display: flex;
   min-width: 0;
-  min-height: 28px;
-  align-items: stretch;
-  overflow-x: auto;
-  background: transparent;
-}
-
-.workbench-tab-strip-empty {
-  border-bottom-style: dashed;
-}
-
-.workbench-tab-drop-hint {
-  align-self: center;
-  color: var(--ws-color-text-disabled);
-  padding: 0 8px;
-  font-size: var(--ws-font-size-01);
-  line-height: var(--ws-line-height-01);
-  text-transform: uppercase;
-}
-
-.workbench-tab {
-  display: flex;
-  min-width: 118px;
-  max-width: 210px;
+  height: 100%;
   align-items: center;
-  gap: 6px;
-  border: 0;
-  border-right: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  border-bottom: var(--ws-border-width-state-rail) solid transparent;
-  background: transparent;
+  gap: 4px;
   color: var(--ws-color-text-secondary);
-  padding: 5px 9px 4px;
-  font: inherit;
+  padding: 0 6px;
   font-size: var(--ws-font-size-02);
   line-height: var(--ws-line-height-02);
-  text-align: left;
 }
 
-.workbench-tab:hover,
-.workbench-tab:focus-visible {
-  background: var(--ws-color-panel-subtle);
+.dockview-workbench-tab-active {
   color: var(--ws-color-text-primary);
 }
 
-.workbench-tab-active {
-  border-bottom-color: var(--ws-color-action);
-  background: var(--ws-color-panel);
-  color: var(--ws-color-text-primary);
-}
-
-.workbench-tab-dragging {
-  opacity: 0.55;
-}
-
-.workbench-tab-kind {
-  flex: 0 0 auto;
-  color: var(--ws-color-text-tertiary);
-  font-size: var(--ws-font-size-01);
-  text-transform: uppercase;
-}
 
 .workbench-tab-title {
   min-width: 0;
@@ -1137,20 +1074,8 @@ button {
 }
 
 @media (max-width: 960px) {
-  .shell-grid-workbench,
-  .workbench-splits {
-    grid-template-columns: 1fr;
-  }
-
-  .workbench-shell,
-  .workbench-group {
+  .workbench-shell {
     min-height: auto;
-  }
-
-  .workbench-group {
-    min-height: 360px;
-    border-right: 0;
-    border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
   }
 
   .workbench-pane-body {
@@ -1192,9 +1117,15 @@ button {
 }
 
 
-/* The terminal surface is a real emulator and fills the workbench pane body. */
+/* The terminal surface is a real emulator and fills the Dockview pane body. */
+.workbench-pane[data-surface-kind="persistentTerminal"] {
+  height: 100%;
+}
+
 .workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-body {
   display: flex;
+  width: 100%;
+  height: 100%;
   flex-direction: column;
   overflow: hidden;
   padding: 0;
@@ -1209,6 +1140,7 @@ button {
 
 .workbench-pane[data-surface-kind="persistentTerminal"] .workbench-pane-content {
   display: flex;
+  width: 100%;
   min-height: 0;
   flex: 1 1 auto;
   margin-top: 0;
@@ -1216,6 +1148,7 @@ button {
 
 .terminal-pane {
   display: flex;
+  width: 100%;
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
@@ -1224,6 +1157,7 @@ button {
 }
 
 .terminal-surface {
+  width: 100%;
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
@@ -1233,6 +1167,7 @@ button {
 }
 
 .terminal-surface .xterm {
+  width: 100%;
   height: 100%;
 }
 
@@ -1260,4 +1195,140 @@ button {
   background: var(--ws-color-notice-error);
   color: var(--ws-color-state-error-text);
   padding: var(--ws-space-06);
+}
+
+.dockview-workbench-tab[data-workbench-tab-category-presentation="pinned-left-badge-fallback"] {
+  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-action);
+}
+
+
+.dockview-workbench-tab-active {
+  background: transparent;
+  box-shadow: none;
+}
+
+.workbench-tab-close {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: var(--ws-border-width-hairline) solid transparent;
+  background: transparent;
+  color: var(--ws-color-text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  padding: 0;
+  line-height: 1;
+  transition: opacity 0.12s ease;
+}
+
+.dockview-workbench-tab:hover .workbench-tab-close,
+.dockview-workbench-tab:focus-within .workbench-tab-close {
+  opacity: 1;
+}
+
+.workbench-tab-close:hover,
+.workbench-tab-close:focus-visible {
+  border-color: var(--ws-color-state-error-strong);
+  color: var(--ws-color-state-error-text);
+  outline: none;
+}
+
+.workbench-close-popover {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  gap: var(--ws-space-06);
+  min-width: 148px;
+  transform: translate(8px, 8px);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel-raised);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+  padding: var(--ws-space-07);
+}
+
+.workbench-close-popover-title {
+  color: var(--ws-color-text-primary);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-03);
+}
+
+.workbench-close-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ws-space-04);
+}
+
+/* The editor surface (read-only file viewer) owns its own header and scroll
+   region. Strip the outer pane-body padding and suppress the redundant detail
+   <p> so the ReadOnlyTextPane fills the pane edge-to-edge. */
+/* The editor pane must fill its Dockview panel host so the flex chain down to
+   `.readonly-text-content` has a bounded height. Without this the grid pane
+   grows to the natural height of long file content and `.readonly-text-content`
+   never becomes its own scroll container, letting long files push page chrome
+   off-screen. */
+.workbench-pane[data-surface-kind="editor"] {
+  height: 100%;
+}
+
+.workbench-pane[data-surface-kind="editor"] .workbench-pane-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.workbench-pane[data-surface-kind="editor"] .workbench-pane-body > p {
+  display: none;
+}
+
+.workbench-pane[data-surface-kind="editor"] .workbench-pane-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin-top: 0;
+}
+
+.workbench-pane[data-surface-kind="editor"] .readonly-text-pane {
+  flex: 1 1 auto;
+}
+
+.workbench-pane[data-surface-kind="editor"] .readonly-text-content {
+  flex: 1 1 auto;
+}
+
+.workbench-tab-icon {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  background: var(--ws-color-panel-subtle);
+}
+
+.workbench-tab-icon::after {
+  position: absolute;
+  inset: 2px;
+  content: "";
+  background: var(--ws-color-text-tertiary);
+}
+
+.workbench-tab-icon[data-workbench-tab-icon="agent"]::after {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: var(--ws-color-state-info);
+}
+
+.workbench-tab-icon[data-workbench-tab-icon="persistentTerminal"]::after {
+  inset: 3px 2px;
+  background: transparent;
+  border-right: 2px solid var(--ws-color-state-success);
+  border-bottom: 2px solid var(--ws-color-state-success);
+}
+
+.workbench-tab-icon[data-workbench-tab-icon="editor"]::after {
+  inset: 2px 3px;
+  background: var(--ws-color-action);
 }

@@ -30,9 +30,13 @@ export type WorkRootTextFileView = {
   extension: string | null;
 };
 
+export type ReadOnlyFilePaneMode = "preview" | "pinned";
+export type ReadOnlyFileOpenGesture = "singleClick" | "doubleClick";
+
 export type ReadOnlyFilePane = {
   id: string;
   logicalKey: string;
+  mode: ReadOnlyFilePaneMode;
   workRootId: string;
   path: string;
   title: string;
@@ -105,18 +109,49 @@ export async function fetchWorkRootTextFile(
   return (await response.json()) as WorkRootTextFileView;
 }
 
-export function readOnlyFilePaneLogicalKey(workRootId: string, path: string) {
+export function readOnlyFilePaneModeForOpenGesture(
+  gesture: ReadOnlyFileOpenGesture,
+): ReadOnlyFilePaneMode {
+  return gesture === "singleClick" ? "preview" : "pinned";
+}
+
+export function readOnlyFilePaneLogicalKey(
+  workRootId: string,
+  path: string,
+  mode: ReadOnlyFilePaneMode = "pinned",
+) {
+  if (mode === "preview") {
+    return ["editor-preview", workRootId].join("/");
+  }
+
   return ["editor", workRootId, path].join("/");
 }
 
-export function readOnlyFilePaneId(workRootId: string, path: string) {
+export function readOnlyFilePaneId(
+  workRootId: string,
+  path: string,
+  mode: ReadOnlyFilePaneMode = "pinned",
+) {
+  if (mode === "preview") {
+    return `readonly-preview:${encodeURIComponent(workRootId)}`;
+  }
+
   return `readonly:${encodeURIComponent(workRootId)}:${encodeURIComponent(path)}`;
 }
 
-export function createLoadingReadOnlyFilePane(workRootId: string, path: string): ReadOnlyFilePane {
+export function createLoadingReadOnlyFilePane(
+  workRootId: string,
+  path: string,
+  mode: ReadOnlyFilePaneMode = "pinned",
+): ReadOnlyFilePane {
+  // CONTRACT: Preview panes are one replaceable logical surface per workRoot;
+  // pinned panes remain file-path-addressed stable tabs. App-level single-click
+  // and double-click handlers must choose the mode, then placement policy
+  // focuses existing pinned files or replaces the preview pane.
   return {
-    id: readOnlyFilePaneId(workRootId, path),
-    logicalKey: readOnlyFilePaneLogicalKey(workRootId, path),
+    id: readOnlyFilePaneId(workRootId, path, mode),
+    logicalKey: readOnlyFilePaneLogicalKey(workRootId, path, mode),
+    mode,
     workRootId,
     path,
     title: fileNameFromPath(path),

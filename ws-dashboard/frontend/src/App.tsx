@@ -1,24 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
 import {
   decideSurfaceClose,
-  decideSurfaceOpen,
-  defaultSurfaceRegistry,
+  decideWorkbenchTabClosePresentation,
+  decideSurfaceOpenWithDynamicGroups,
   applyWorkbenchPaneOrder,
-  commitWorkbenchPaneMove,
-  partitionWorkbenchPanesByCategory,
-  resolveWorkbenchPaneDrop,
+  commitWorkbenchPaneMoveIntoDynamicGroup,
+  reconcileActiveWorkbenchPanes,
+  reconcileDashboardGroupsForPlacement,
   selectWorkbenchPane,
-  workbenchPaneDragMimeType,
   surfaceLogicalKey,
   workbenchGroupId,
+  DockviewWorkbenchLayout,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
+  type DockviewTabCloseRequest,
   type WorkbenchPlacementState,
 } from "./workbench";
 import {
@@ -34,6 +35,9 @@ import {
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
   type DirectoryLoadState,
+  readOnlyFilePaneLogicalKey,
+  readOnlyFilePaneModeForOpenGesture,
+  type ReadOnlyFileOpenGesture,
   type ReadOnlyFilePane,
   type WorkRootFileEntryView,
 } from "./workRootFiles";
@@ -107,19 +111,35 @@ const resourceEndpoint = "/api/dashboard/resources";
 // immediately). A snappy interval keeps keystroke echo latency low; idle polls
 // are guarded below so they do not re-render the workbench.
 const terminalOutputPollIntervalMs = 120;
+const initialWorkbenchGroups = [
+  { id: "group-1", label: "group 1" },
+  { id: "group-2", label: "group 2" },
+] as const;
 
 export function App() {
-  const [resources, setResources] = useState<DashboardResourcesView | null>(null);
+  const [resources, setResources] = useState<DashboardResourcesView | null>(
+    null,
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
-  const [readOnlyFilePanes, setReadOnlyFilePanes] = useState<Record<string, ReadOnlyFilePane>>({});
-  const [activeReadOnlyFilePaneRequest, setActiveReadOnlyFilePaneRequest] = useState<{
-    paneId: string;
-    sequence: number;
-  } | null>(null);
-  const [readOnlyFilePaneOrderByGroup, setReadOnlyFilePaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
+  const [readOnlyFilePanes, setReadOnlyFilePanes] = useState<
+    Record<string, ReadOnlyFilePane>
+  >({});
+  const [activeReadOnlyFilePaneRequest, setActiveReadOnlyFilePaneRequest] =
+    useState<{
+      paneId: string;
+      sequence: number;
+    } | null>(null);
+  const [readOnlyFilePaneOrderByGroup, setReadOnlyFilePaneOrderByGroup] =
+    useState<WorkbenchPaneOrder>({});
+  const [workbenchGroupsByRoot, setWorkbenchGroupsByRoot] = useState<
+    Record<string, ReadonlyArray<{ id: string; label: string }>>
+  >({});
+  const [paneOrderByRoot, setPaneOrderByRoot] = useState<
+    Record<string, WorkbenchPaneOrder>
+  >({});
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
 
@@ -139,7 +159,9 @@ export function App() {
       const nextResources = (await response.json()) as DashboardResourcesView;
       setResources(nextResources);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "request failed");
+      setError(
+        nextError instanceof Error ? nextError.message : "request failed",
+      );
     } finally {
       setLoading(false);
     }
@@ -159,7 +181,8 @@ export function App() {
           .map((entity) => entity.id),
       );
       const openedWorkRootId = flattenEntities(openedView).find(
-        (entity) => entity.type === "workRoot" && !priorWorkRootIds.has(entity.id),
+        (entity) =>
+          entity.type === "workRoot" && !priorWorkRootIds.has(entity.id),
       )?.id;
 
       // Reconcile immediately with the aggregated open response and select the
@@ -201,55 +224,138 @@ export function App() {
     [resources, selectedId],
   );
 
-
   const openReadOnlyFile = useCallback(
-    (workRoot: WorkRootView, entry: WorkRootFileEntryView) => {
-      const pane = createLoadingReadOnlyFilePane(workRoot.id, entry.path);
-      const placement = decideSurfaceOpen(readOnlyFilePlacementState(readOnlyFilePanes), {
-        surfaceKind: "editor",
-        logicalKey: surfaceLogicalKey("editor", workRoot.id, entry.path),
-      });
-      const focusPane = () =>
+    (
+      workRoot: WorkRootView,
+      entry: WorkRootFileEntryView,
+      gesture: ReadOnlyFileOpenGesture = "singleClick",
+    ) => {
+      const mode = readOnlyFilePaneModeForOpenGesture(gesture);
+      const pane = createLoadingReadOnlyFilePane(
+        workRoot.id,
+        entry.path,
+        mode,
+      );
+      const pinnedLogicalKey = readOnlyFilePaneLogicalKey(
+        workRoot.id,
+        entry.path,
+        "pinned",
+      );
+      const previewLogicalKey = readOnlyFilePaneLogicalKey(
+        workRoot.id,
+        entry.path,
+        "preview",
+      );
+      const existingPinnedPane = readOnlyFilePanes[pinnedLogicalKey];
+      const focusPane = (paneId: string) =>
         setActiveReadOnlyFilePaneRequest({
-          paneId: pane.id,
+          paneId,
           sequence: fileOpenSequence.current++,
         });
 
-      if (readOnlyFilePanes[pane.logicalKey]) {
-        focusPane();
+      if (mode === "pinned" && existingPinnedPane) {
+        setReadOnlyFilePanes((current) => {
+          const next = { ...current };
+          delete next[previewLogicalKey];
+          return next;
+        });
+        setReadOnlyFilePaneOrderByGroup((current) =>
+          removePaneFromOrder(current, readOnlyFilePanes[previewLogicalKey]?.id),
+        );
+        focusPane(existingPinnedPane.id);
         return;
       }
 
-      setReadOnlyFilePanes((current) => ({
-        ...current,
-        [pane.logicalKey]: pane,
-      }));
-      if (placement.type === "openNew") {
-        setReadOnlyFilePaneOrderByGroup((current) => ({
+      const groupsForPlacement =
+        workbenchGroupsByRoot[workRoot.id] ?? initialWorkbenchGroups;
+      const placement = decideSurfaceOpenWithDynamicGroups(
+        readOnlyFilePlacementState(
+          readOnlyFilePanes,
+          groupsForPlacement,
+          paneOrderByRoot[workRoot.id] ?? {},
+          readOnlyFilePaneOrderByGroup,
+        ),
+        {
+          surfaceKind: "editor",
+          logicalKey: surfaceLogicalKey(...pane.logicalKey.split("/")),
+          attachmentId:
+            pane.id as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+        },
+      );
+
+      if (placement.type === "openNew" && placement.createdGroupId) {
+        setWorkbenchGroupsByRoot((current) => ({
           ...current,
-          [placement.groupId]: [...(current[placement.groupId] ?? []), pane.id],
+          [workRoot.id]: reconcileDashboardGroupsForPlacement(
+            current[workRoot.id] ?? groupsForPlacement,
+            placement,
+          ),
         }));
       }
-      focusPane();
+
+      setReadOnlyFilePanes((current) => {
+        const next = { ...current };
+        if (mode === "pinned") {
+          delete next[previewLogicalKey];
+        }
+        next[pane.logicalKey] = pane;
+        return next;
+      });
+      setReadOnlyFilePaneOrderByGroup((current) => {
+        let next = mode === "pinned"
+          ? removePaneFromOrder(current, readOnlyFilePanes[previewLogicalKey]?.id)
+          : current;
+        if (placement.type === "openNew") {
+          next = {
+            ...next,
+            [placement.groupId]: [
+              ...(next[placement.groupId] ?? []).filter((id) => id !== pane.id),
+              pane.id,
+            ],
+          };
+        }
+        return next;
+      });
+      focusPane(pane.id);
 
       void fetchWorkRootTextFile(workRoot.id, entry.path)
         .then((file) => {
-          setReadOnlyFilePanes((current) => ({
-            ...current,
-            [pane.logicalKey]: applyReadOnlyFilePaneContent(current[pane.logicalKey] ?? pane, file),
-          }));
+          setReadOnlyFilePanes((current) => {
+            const currentPane = current[pane.logicalKey];
+            if (!sameReadOnlyOpenRequest(currentPane, pane)) {
+              return current;
+            }
+            return {
+              ...current,
+              [pane.logicalKey]: applyReadOnlyFilePaneContent(
+                currentPane,
+                file,
+              ),
+            };
+          });
         })
         .catch((error) => {
-          setReadOnlyFilePanes((current) => ({
-            ...current,
-            [pane.logicalKey]: applyReadOnlyFilePaneError(
-              current[pane.logicalKey] ?? pane,
-              error instanceof Error ? error.message : "file read failed",
-            ),
-          }));
+          setReadOnlyFilePanes((current) => {
+            const currentPane = current[pane.logicalKey];
+            if (!sameReadOnlyOpenRequest(currentPane, pane)) {
+              return current;
+            }
+            return {
+              ...current,
+              [pane.logicalKey]: applyReadOnlyFilePaneError(
+                currentPane,
+                error instanceof Error ? error.message : "file read failed",
+              ),
+            };
+          });
         });
     },
-    [readOnlyFilePanes],
+    [
+      paneOrderByRoot,
+      readOnlyFilePaneOrderByGroup,
+      readOnlyFilePanes,
+      workbenchGroupsByRoot,
+    ],
   );
 
   const executeCommand = useCallback(
@@ -292,7 +398,10 @@ export function App() {
             entityId={resources?.server.id ?? "server"}
             onCommand={executeCommand}
           />
-          <OpenWorkRootControl onOpened={handleWorkRootOpened} onCommand={executeCommand} />
+          <OpenWorkRootControl
+            onOpened={handleWorkRootOpened}
+            onCommand={executeCommand}
+          />
           <ResourceNavigation
             resources={resources}
             loading={loading}
@@ -304,7 +413,10 @@ export function App() {
           />
         </aside>
 
-        <section className="shell-panel shell-panel-workbench" aria-label="WorkRoot workbench">
+        <section
+          className="shell-panel shell-panel-workbench"
+          aria-label="WorkRoot workbench"
+        >
           <WorkbenchShell
             commandLog={commandLog}
             error={error}
@@ -312,10 +424,16 @@ export function App() {
             resources={resources}
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
+            workbenchGroupsByRoot={workbenchGroupsByRoot}
+            paneOrderByRoot={paneOrderByRoot}
             onCommand={executeCommand}
+            onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
+            onPaneOrderByRootChange={setPaneOrderByRoot}
             readOnlyFilePanes={Object.values(readOnlyFilePanes)}
             readOnlyFilePaneOrderByGroup={readOnlyFilePaneOrderByGroup}
             activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
+            onReadOnlyFilePanesChange={setReadOnlyFilePanes}
+            onReadOnlyFilePaneOrderByGroupChange={setReadOnlyFilePaneOrderByGroup}
           />
         </section>
       </div>
@@ -438,7 +556,9 @@ function OpenWorkRootControl({
           {pending ? "Opening" : "Open"}
         </button>
       </div>
-      {error ? <InlineNotice tone="error" title="Open failed" detail={error} /> : null}
+      {error ? (
+        <InlineNotice tone="error" title="Open failed" detail={error} />
+      ) : null}
     </form>
   );
 }
@@ -458,7 +578,11 @@ function ResourceNavigation({
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
   onCommand: (commandId: string, payload: CommandPayload) => void;
-  onOpenFile: (workRoot: WorkRootView, entry: WorkRootFileEntryView) => void;
+  onOpenFile: (
+    workRoot: WorkRootView,
+    entry: WorkRootFileEntryView,
+    gesture: ReadOnlyFileOpenGesture,
+  ) => void;
 }) {
   if (loading && !resources) {
     return <StatusPane title="Loading" detail="resources" />;
@@ -490,8 +614,12 @@ function ResourceNavigation({
   return (
     <div className="nav-stack">
       <div className="resource-list resource-list-region">
-        {error ? <InlineNotice tone="error" title="Refresh failed" detail={error} /> : null}
-        {loading ? <InlineNotice tone="info" title="Refreshing" detail="resources" /> : null}
+        {error ? (
+          <InlineNotice tone="error" title="Refresh failed" detail={error} />
+        ) : null}
+        {loading ? (
+          <InlineNotice tone="info" title="Refreshing" detail="resources" />
+        ) : null}
         {resources.workspaces.map((workspace) => (
           <WorkspaceRows
             key={workspace.id}
@@ -501,7 +629,11 @@ function ResourceNavigation({
           />
         ))}
       </div>
-      <WorkRootFileExplorer workRoot={selectedWorkRoot} onCommand={onCommand} onOpenFile={onOpenFile} />
+      <WorkRootFileExplorer
+        workRoot={selectedWorkRoot}
+        onCommand={onCommand}
+        onOpenFile={onOpenFile}
+      />
     </div>
   );
 }
@@ -513,11 +645,19 @@ function WorkRootFileExplorer({
 }: {
   workRoot: WorkRootView | null;
   onCommand: (commandId: string, payload: CommandPayload) => void;
-  onOpenFile: (workRoot: WorkRootView, entry: WorkRootFileEntryView) => void;
+  onOpenFile: (
+    workRoot: WorkRootView,
+    entry: WorkRootFileEntryView,
+    gesture: ReadOnlyFileOpenGesture,
+  ) => void;
 }) {
-  const [snapshots, setSnapshots] = useState<Record<string, WorkRootExplorerSnapshot>>({});
+  const [snapshots, setSnapshots] = useState<
+    Record<string, WorkRootExplorerSnapshot>
+  >({});
 
-  const snapshot = workRoot ? snapshots[workRoot.id] ?? initialExplorerSnapshot() : null;
+  const snapshot = workRoot
+    ? (snapshots[workRoot.id] ?? initialExplorerSnapshot())
+    : null;
 
   const updateSnapshot = useCallback(
     (
@@ -606,7 +746,10 @@ function WorkRootFileExplorer({
   });
 
   const selectEntry = (entry: WorkRootFileEntryView) => {
-    updateSnapshot(workRoot.id, (current) => ({ ...current, selectedPath: entry.path }));
+    updateSnapshot(workRoot.id, (current) => ({
+      ...current,
+      selectedPath: entry.path,
+    }));
     onCommand("fileExplorer.selectEntry", {
       type: "action",
       label: entry.name,
@@ -632,14 +775,20 @@ function WorkRootFileExplorer({
     }
   };
 
-  const openFile = (entry: WorkRootFileEntryView) => {
-    updateSnapshot(workRoot.id, (current) => ({ ...current, selectedPath: entry.path }));
+  const openFile = (
+    entry: WorkRootFileEntryView,
+    gesture: ReadOnlyFileOpenGesture = "singleClick",
+  ) => {
+    updateSnapshot(workRoot.id, (current) => ({
+      ...current,
+      selectedPath: entry.path,
+    }));
     onCommand("fileExplorer.openFile", {
       type: "action",
       label: entry.name,
       entityId: workRoot.id,
     });
-    onOpenFile(workRoot, entry);
+    onOpenFile(workRoot, entry, gesture);
   };
 
   const refreshExplorer = () => {
@@ -648,14 +797,19 @@ function WorkRootFileExplorer({
       label: "Refresh files",
       entityId: workRoot.id,
     });
-    const paths = workRootExplorerRefreshPaths(snapshot?.expandedPaths ?? new Set([""]));
+    const paths = workRootExplorerRefreshPaths(
+      snapshot?.expandedPaths ?? new Set([""]),
+    );
     for (const path of paths) {
       void loadDirectory(workRoot.id, path);
     }
   };
 
   return (
-    <section className="file-explorer" aria-label={`Files for ${workRoot.label}`}>
+    <section
+      className="file-explorer"
+      aria-label={`Files for ${workRoot.label}`}
+    >
       <div className="file-explorer-header">
         <div className="file-explorer-heading">
           <div className="section-label">Files</div>
@@ -672,7 +826,11 @@ function WorkRootFileExplorer({
           Refresh
         </button>
       </div>
-      <div className="file-explorer-body" role="tree" aria-label="WorkRoot file tree">
+      <div
+        className="file-explorer-body"
+        role="tree"
+        aria-label="WorkRoot file tree"
+      >
         {rows.length === 0 ? (
           <div className="file-explorer-state">Loading</div>
         ) : (
@@ -719,7 +877,7 @@ function FileExplorerRow({
   selected: boolean;
   onSelect: (entry: WorkRootFileEntryView) => void;
   onToggleDirectory: (entry: WorkRootFileEntryView) => void;
-  onOpenFile: (entry: WorkRootFileEntryView) => void;
+  onOpenFile: (entry: WorkRootFileEntryView, gesture: ReadOnlyFileOpenGesture) => void;
 }) {
   const isDirectory = entry.kind === "directory";
   const isOk = entry.status === "ok";
@@ -739,7 +897,7 @@ function FileExplorerRow({
     if (isDirectory) {
       onToggleDirectory(entry);
     } else if (canOpen) {
-      onOpenFile(entry);
+      onOpenFile(entry, "singleClick");
     } else {
       onSelect(entry);
     }
@@ -766,6 +924,11 @@ function FileExplorerRow({
       style={{ "--depth": depth } as CSSProperties}
       title={title}
       onClick={activate}
+      onDoubleClick={() => {
+        if (canOpen) {
+          onOpenFile(entry, "doubleClick");
+        }
+      }}
     >
       <span className="file-explorer-twisty" aria-hidden="true">
         {isDirectory ? (expanded ? "▾" : "▸") : ""}
@@ -774,7 +937,9 @@ function FileExplorerRow({
         {entry.name}
         {isDirectory ? "/" : ""}
       </span>
-      {!isOk ? <span className="file-explorer-row-status">{entry.status}</span> : null}
+      {!isOk ? (
+        <span className="file-explorer-row-status">{entry.status}</span>
+      ) : null}
       {canOpen ? (
         <span className="file-explorer-row-hint" aria-hidden="true">
           open
@@ -820,6 +985,12 @@ function WorkbenchShell({
   readOnlyFilePanes,
   readOnlyFilePaneOrderByGroup,
   activeReadOnlyFilePaneRequest,
+  workbenchGroupsByRoot,
+  paneOrderByRoot,
+  onWorkbenchGroupsByRootChange,
+  onPaneOrderByRootChange,
+  onReadOnlyFilePanesChange,
+  onReadOnlyFilePaneOrderByGroupChange,
 }: {
   resources: DashboardResourcesView | null;
   selection: WorkbenchSelection | null;
@@ -831,47 +1002,124 @@ function WorkbenchShell({
   readOnlyFilePanes: ReadOnlyFilePane[];
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder;
   activeReadOnlyFilePaneRequest: { paneId: string; sequence: number } | null;
+  workbenchGroupsByRoot: Record<
+    string,
+    ReadonlyArray<{ id: string; label: string }>
+  >;
+  paneOrderByRoot: Record<string, WorkbenchPaneOrder>;
+  onWorkbenchGroupsByRootChange: Dispatch<
+    SetStateAction<Record<string, ReadonlyArray<{ id: string; label: string }>>>
+  >;
+  onPaneOrderByRootChange: Dispatch<
+    SetStateAction<Record<string, WorkbenchPaneOrder>>
+  >;
+  onReadOnlyFilePanesChange: Dispatch<
+    SetStateAction<Record<string, ReadOnlyFilePane>>
+  >;
+  onReadOnlyFilePaneOrderByGroupChange: Dispatch<
+    SetStateAction<WorkbenchPaneOrder>
+  >;
 }) {
-  const [activePaneByGroup, setActivePaneByGroup] = useState<Record<string, string>>({});
-  const [paneOrderByGroup, setPaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
-  const [draggedPaneId, setDraggedPaneId] = useState<string | null>(null);
-  const [terminalPanes, setTerminalPanes] = useState<Record<string, TerminalPaneState>>({});
-  const [activeTerminalPaneRequest, setActiveTerminalPaneRequest] = useState<{ paneId: string; sequence: number } | null>(null);
-  const [terminalPaneOrderByGroup, setTerminalPaneOrderByGroup] = useState<WorkbenchPaneOrder>({});
+  const [activePaneByRoot, setActivePaneByRoot] = useState<
+    Record<string, Record<string, string>>
+  >({});
+  const [terminalPanes, setTerminalPanes] = useState<
+    Record<string, TerminalPaneState>
+  >({});
+  const [activeTerminalPaneRequest, setActiveTerminalPaneRequest] = useState<{
+    paneId: string;
+    sequence: number;
+  } | null>(null);
+  const [terminalPaneOrderByGroup, setTerminalPaneOrderByGroup] =
+    useState<WorkbenchPaneOrder>({});
+  const [pendingCloseRequest, setPendingCloseRequest] = useState<
+    | (DockviewTabCloseRequest & {
+        readonly anchor: { clientX: number; clientY: number };
+        readonly workRootId: string;
+      })
+    | null
+  >(null);
+  const [closedAgentPaneByRoot, setClosedAgentPaneByRoot] = useState<
+    Record<string, readonly string[]>
+  >({});
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
+  const [focusedTerminalPaneId, setFocusedTerminalPaneId] = useState<
+    string | null
+  >(null);
+  const focusedTerminalPaneIdRef = useRef<string | null>(null);
+  focusedTerminalPaneIdRef.current = focusedTerminalPaneId;
+  const selectedWorkRootId = selection?.root.id ?? null;
+  const workbenchGroups = selectedWorkRootId
+    ? (workbenchGroupsByRoot[selectedWorkRootId] ?? initialWorkbenchGroups)
+    : initialWorkbenchGroups;
+  const paneOrderByGroup = selectedWorkRootId
+    ? (paneOrderByRoot[selectedWorkRootId] ?? {})
+    : {};
+  const activePaneByGroup = selectedWorkRootId
+    ? (activePaneByRoot[selectedWorkRootId] ?? {})
+    : {};
 
-  const workbenchModel = resources && selection
-    ? (() => {
-        const { workspace, root, mainInstance, selectedInstance } = selection;
-        const supportEntity = selectedEntity ?? resourceEntityForWorkRoot(root);
-        const editorGroups = applyWorkbenchPaneOrder(
-          buildWorkbenchEditorGroups(
+  const setActivePaneByGroupForSelected = (
+    next:
+      | Record<string, string>
+      | ((current: Record<string, string>) => Record<string, string>),
+  ) => {
+    if (!selectedWorkRootId) {
+      return;
+    }
+    setActivePaneByRoot((currentByRoot) => {
+      const current = currentByRoot[selectedWorkRootId] ?? {};
+      return {
+        ...currentByRoot,
+        [selectedWorkRootId]: typeof next === "function" ? next(current) : next,
+      };
+    });
+  };
+
+  const workbenchModel =
+    resources && selection
+      ? (() => {
+          const { workspace, root, mainInstance, selectedInstance } = selection;
+          const supportEntity =
+            selectedEntity ?? resourceEntityForWorkRoot(root);
+          const editorGroups = applyWorkbenchPaneOrder(
+            buildWorkbenchEditorGroups(
+              root,
+              workbenchGroups,
+              mainInstance,
+              selectedInstance,
+              supportEntity,
+              readOnlyFilePanes,
+              readOnlyFilePaneOrderByGroup,
+              Object.values(terminalPanes),
+              terminalPaneOrderByGroup,
+              {
+                onSendData: sendTerminalData,
+                onClose: closeTerminalPane,
+                onResize: forwardTerminalResize,
+                onSocketStatus: updateTerminalSocketStatus,
+                onSocketMessage: applyTerminalSocketMessage,
+                onSocketResize: acceptTerminalSocketResize,
+                onFocusInput: (pane) => setFocusedTerminalPaneId(pane.paneId),
+                isActivePane: (pane) =>
+                  focusedTerminalPaneIdRef.current === pane.paneId,
+              },
+              closedAgentPaneByRoot[root.id] ?? [],
+            ),
+            paneOrderByGroup,
+          );
+          return {
+            workspace,
             root,
             mainInstance,
             selectedInstance,
-            supportEntity,
-            readOnlyFilePanes,
-            readOnlyFilePaneOrderByGroup,
-            Object.values(terminalPanes),
-            terminalPaneOrderByGroup,
-            {
-              onSendData: sendTerminalData,
-              onClose: closeTerminalPane,
-              onResize: forwardTerminalResize,
-              onSocketStatus: updateTerminalSocketStatus,
-              onSocketMessage: applyTerminalSocketMessage,
-              onSocketResize: acceptTerminalSocketResize,
-            },
-          ),
-          paneOrderByGroup,
-        );
-        return { workspace, root, mainInstance, selectedInstance, editorGroups };
-      })()
-    : null;
+            editorGroups,
+          };
+        })()
+      : null;
   const editorGroups = workbenchModel?.editorGroups ?? [];
-
 
   useEffect(() => {
     if (!workbenchModel) {
@@ -881,9 +1129,22 @@ function WorkbenchShell({
     void listTerminals(workbenchModel.root.id)
       .then((sessions) => {
         setTerminalPanes((current) =>
-          reconcileListedTerminalSessions(current, workbenchModel.root.id, sessions, listStartedAtMs),
+          reconcileListedTerminalSessions(
+            current,
+            workbenchModel.root.id,
+            sessions,
+            listStartedAtMs,
+          ),
         );
-        setTerminalPaneOrderByGroup((current) => placeTerminalSessions(current, terminalPanes, sessions));
+        setTerminalPaneOrderByGroup((current) =>
+          placeTerminalSessions(
+            current,
+            terminalPanes,
+            sessions,
+            workbenchGroups,
+            paneOrderByGroup,
+          ),
+        );
       })
       .catch(() => undefined);
   }, [workbenchModel?.root.id]);
@@ -960,7 +1221,10 @@ function WorkbenchShell({
               if (!existing || existing.error === message) {
                 return current;
               }
-              return { ...current, [pane.logicalKey]: { ...existing, error: message } };
+              return {
+                ...current,
+                [pane.logicalKey]: { ...existing, error: message },
+              };
             });
           })
           .finally(() => {
@@ -985,15 +1249,21 @@ function WorkbenchShell({
     }
 
     const targetGroup = editorGroups.find((group) =>
-      group.panes.some((pane) => pane.id === activeReadOnlyFilePaneRequest.paneId),
+      group.panes.some(
+        (pane) => pane.id === activeReadOnlyFilePaneRequest.paneId,
+      ),
     );
     if (!targetGroup) {
       return;
     }
 
     focusedReadOnlyRequest.current = activeReadOnlyFilePaneRequest.sequence;
-    setActivePaneByGroup((current) =>
-      selectWorkbenchPane(current, targetGroup.id, activeReadOnlyFilePaneRequest.paneId),
+    setActivePaneByGroupForSelected((current) =>
+      selectWorkbenchPane(
+        current,
+        targetGroup.id,
+        activeReadOnlyFilePaneRequest.paneId,
+      ),
     );
   }, [activeReadOnlyFilePaneRequest, editorGroups]);
 
@@ -1015,8 +1285,13 @@ function WorkbenchShell({
       return;
     }
     focusedTerminalRequest.current = activeTerminalPaneRequest.sequence;
-    setActivePaneByGroup((current) =>
-      selectWorkbenchPane(current, targetGroup.id, activeTerminalPaneRequest.paneId),
+    setFocusedTerminalPaneId(activeTerminalPaneRequest.paneId);
+    setActivePaneByGroupForSelected((current) =>
+      selectWorkbenchPane(
+        current,
+        targetGroup.id,
+        activeTerminalPaneRequest.paneId,
+      ),
     );
   }, [activeTerminalPaneRequest, editorGroups]);
 
@@ -1027,9 +1302,24 @@ function WorkbenchShell({
     void createTerminal(workbenchModel.root.id)
       .then((session) => {
         const pane = terminalPaneFromSession(session);
-        setTerminalPanes((current) => ({ ...current, [pane.logicalKey]: pane }));
-        setTerminalPaneOrderByGroup((current) => placeTerminalSessions(current, terminalPanes, [session]));
-        setActiveTerminalPaneRequest({ paneId: pane.paneId, sequence: terminalOpenSequence.current++ });
+        setTerminalPanes((current) => ({
+          ...current,
+          [pane.logicalKey]: pane,
+        }));
+        setTerminalPaneOrderByGroup((current) =>
+          placeTerminalSessions(
+            current,
+            terminalPanes,
+            [session],
+            workbenchGroups,
+            paneOrderByGroup,
+          ),
+        );
+        setFocusedTerminalPaneId(pane.paneId);
+        setActiveTerminalPaneRequest({
+          paneId: pane.paneId,
+          sequence: terminalOpenSequence.current++,
+        });
       })
       .catch(() => undefined);
   }
@@ -1041,20 +1331,43 @@ function WorkbenchShell({
   ) {
     setTerminalPanes((current) =>
       current[pane.logicalKey]
-        ? { ...current, [pane.logicalKey]: markTerminalSocketStatus(current[pane.logicalKey], socketStatus, error) }
+        ? {
+            ...current,
+            [pane.logicalKey]: markTerminalSocketStatus(
+              current[pane.logicalKey],
+              socketStatus,
+              error,
+            ),
+          }
         : current,
     );
   }
 
-  function applyTerminalSocketMessage(pane: TerminalPaneState, message: TerminalWebSocketServerMessage) {
+  function applyTerminalSocketMessage(
+    pane: TerminalPaneState,
+    message: TerminalWebSocketServerMessage,
+  ) {
+    if (message.type === "output") {
+      return;
+    }
     setTerminalPanes((current) =>
       current[pane.logicalKey]
-        ? { ...current, [pane.logicalKey]: appendTerminalWebSocketMessage(current[pane.logicalKey], message) }
+        ? {
+            ...current,
+            [pane.logicalKey]: appendTerminalWebSocketMessage(
+              current[pane.logicalKey],
+              message,
+            ),
+          }
         : current,
     );
   }
 
-  function acceptTerminalSocketResize(pane: TerminalPaneState, columns: number, rows: number) {
+  function acceptTerminalSocketResize(
+    pane: TerminalPaneState,
+    columns: number,
+    rows: number,
+  ) {
     setTerminalPanes((current) =>
       current[pane.logicalKey]
         ? {
@@ -1078,7 +1391,10 @@ function WorkbenchShell({
               ...current,
               [pane.logicalKey]: {
                 ...current[pane.logicalKey],
-                error: error instanceof Error ? error.message : "terminal input failed",
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "terminal input failed",
               },
             }
           : current,
@@ -1095,18 +1411,27 @@ function WorkbenchShell({
     // calling this, so logical PTY columns/rows are not rewritten on every
     // visual drag frame. The rejection is propagated (not swallowed) so the
     // caller does not record a failed resize as the last forwarded size.
-    return resizeTerminal(pane.session.terminalId, columns, rows).then((session) => {
-      setTerminalPanes((current) =>
-        current[pane.logicalKey]
-          ? { ...current, [pane.logicalKey]: { ...current[pane.logicalKey], session } }
-          : current,
-      );
-    });
+    return resizeTerminal(pane.session.terminalId, columns, rows).then(
+      (session) => {
+        setTerminalPanes((current) =>
+          current[pane.logicalKey]
+            ? {
+                ...current,
+                [pane.logicalKey]: { ...current[pane.logicalKey], session },
+              }
+            : current,
+        );
+      },
+    );
   }
 
   function closeTerminalPane(pane: TerminalPaneState) {
     void closeTerminal(pane.session.terminalId)
-      .then(() => setTerminalPanes((current) => removeClosedTerminalPane(current, pane.logicalKey)))
+      .then(() =>
+        setTerminalPanes((current) =>
+          removeClosedTerminalPane(current, pane.logicalKey),
+        ),
+      )
       .catch((error) => {
         setTerminalPanes((current) =>
           markTerminalPaneCloseError(
@@ -1118,10 +1443,137 @@ function WorkbenchShell({
       });
   }
 
-  const movePane = (paneId: string, targetGroupId: string, beforePaneId?: string) => {
-    const result = commitWorkbenchPaneMove(editorGroups, activePaneByGroup, { paneId, targetGroupId, beforePaneId });
-    setPaneOrderByGroup(result.paneOrderByGroup);
-    setActivePaneByGroup(result.activePaneByGroup);
+  function closeReadOnlyFilePane(paneId: string) {
+    onReadOnlyFilePanesChange((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([, pane]) => pane.id !== paneId),
+      ),
+    );
+    onReadOnlyFilePaneOrderByGroupChange((current) =>
+      removePaneFromOrder(current, paneId),
+    );
+  }
+
+  function closeAgentPane(paneId: string) {
+    if (!selectedWorkRootId) {
+      return;
+    }
+    setClosedAgentPaneByRoot((current) => ({
+      ...current,
+      [selectedWorkRootId]: [
+        ...new Set([...(current[selectedWorkRootId] ?? []), paneId]),
+      ],
+    }));
+  }
+
+  function performWorkbenchPaneClose(
+    request: DockviewTabCloseRequest & { readonly workRootId?: string },
+  ) {
+    if (request.workRootId && request.workRootId !== selectedWorkRootId) {
+      return;
+    }
+    const pane = editorGroups
+      .flatMap((group) => group.panes)
+      .find((candidate) => candidate.id === request.paneId);
+    if (!pane) {
+      return;
+    }
+
+    const closeDecision = decideSurfaceClose(pane.kind);
+    if (pane.kind === "persistentTerminal") {
+      const terminalPane = Object.values(terminalPanes).find(
+        (candidate) => candidate.paneId === pane.id,
+      );
+      if (terminalPane) {
+        closeTerminalPane(terminalPane);
+      }
+    } else if (pane.kind === "editor") {
+      closeReadOnlyFilePane(pane.id);
+    } else if (pane.kind === "agent") {
+      closeAgentPane(pane.id);
+    }
+
+    if (closeDecision.terminateReservation) {
+      setFocusedTerminalPaneId((current) =>
+        current === pane.id ? null : current,
+      );
+    }
+    setActivePaneByGroupForSelected((current) =>
+      reconcileActiveWorkbenchPanes(
+        editorGroups.map((group) => ({
+          ...group,
+          panes: group.panes.filter((candidate) => candidate.id !== pane.id),
+        })),
+        current,
+      ),
+    );
+  }
+
+  function requestWorkbenchPaneClose(request: DockviewTabCloseRequest) {
+    const decision = decideWorkbenchTabClosePresentation(request.surfaceKind, {
+      clientX: request.clientX,
+      clientY: request.clientY,
+    });
+    if (decision.type === "requestConfirmation") {
+      if (!selectedWorkRootId) {
+        return;
+      }
+      setPendingCloseRequest({
+        ...request,
+        anchor: decision.anchor,
+        workRootId: selectedWorkRootId,
+      });
+      return;
+    }
+    performWorkbenchPaneClose(request);
+  }
+
+  const movePane = (
+    paneId: string,
+    targetGroupId: string,
+    beforePaneId?: string,
+    dynamicTargetGroup?: { targetGroupId: string; targetGroupLabel?: string },
+  ) => {
+    const result = commitWorkbenchPaneMoveIntoDynamicGroup(
+      editorGroups,
+      activePaneByGroup,
+      {
+        paneId,
+        targetGroupId,
+        beforePaneId,
+        dynamicTargetGroup,
+      },
+    );
+    if (workbenchModel) {
+      onWorkbenchGroupsByRootChange((currentByRoot) => ({
+        ...currentByRoot,
+        [workbenchModel.root.id]: result.groups.map((group, index) => ({
+          id: group.id,
+          label:
+            group.label ??
+            workbenchGroups.find((candidate) => candidate.id === group.id)
+              ?.label ??
+            `group ${index + 1}`,
+        })),
+      }));
+      onPaneOrderByRootChange((currentByRoot) => ({
+        ...currentByRoot,
+        [workbenchModel.root.id]: result.paneOrderByGroup,
+      }));
+    }
+    setActivePaneByGroupForSelected(result.activePaneByGroup);
+  };
+
+  const selectPane = (groupId: string, paneId: string) => {
+    const pane = editorGroups
+      .flatMap((group) => group.panes)
+      .find((candidate) => candidate.id === paneId);
+    setFocusedTerminalPaneId(
+      pane?.kind === "persistentTerminal" ? paneId : null,
+    );
+    setActivePaneByGroupForSelected((current) =>
+      selectWorkbenchPane(current, groupId, paneId),
+    );
   };
 
   if (loading && !resources) {
@@ -1133,7 +1585,12 @@ function WorkbenchShell({
   }
 
   if (!resources || !workbenchModel) {
-    return <StatusPane title="No workRoot" detail="select a workRoot or main instance" />;
+    return (
+      <StatusPane
+        title="No workRoot"
+        detail="select a workRoot or main instance"
+      />
+    );
   }
 
   const { workspace, root } = workbenchModel;
@@ -1149,23 +1606,77 @@ function WorkbenchShell({
         onCommand={onCommand}
         onCreateTerminal={createTerminalPane}
       />
-      {error ? <InlineNotice tone="error" title="Refresh failed" detail={error} /> : null}
-      {loading ? <InlineNotice tone="info" title="Refreshing" detail="resources" /> : null}
-      <div className="workbench-splits" aria-label="Default two-split workbench preset">
-        {editorGroups.map((group) => (
-          <WorkbenchEditorGroup
-            activePaneId={activePaneByGroup[group.id]}
-            draggedPaneId={draggedPaneId}
-            group={group}
-            key={group.id}
-            onDragEnd={() => setDraggedPaneId(null)}
-            onDragStart={(paneId) => setDraggedPaneId(paneId)}
-            onMovePane={movePane}
-            onSelectPane={(paneId) =>
-              setActivePaneByGroup((current) => selectWorkbenchPane(current, group.id, paneId))
-            }
-          />
-        ))}
+      {error ? (
+        <InlineNotice tone="error" title="Refresh failed" detail={error} />
+      ) : null}
+      {loading ? (
+        <InlineNotice tone="info" title="Refreshing" detail="resources" />
+      ) : null}
+      <DockviewWorkbenchLayout
+        activePaneByGroup={activePaneByGroup}
+        groups={editorGroups}
+        onMovePane={movePane}
+        onRequestClosePane={requestWorkbenchPaneClose}
+        onSelectPane={selectPane}
+      />
+      {pendingCloseRequest ? (
+        <WorkbenchClosePopover
+          request={pendingCloseRequest}
+          onCancel={() => {
+            setPendingCloseRequest(null);
+          }}
+          onConfirm={() => {
+            const request = pendingCloseRequest;
+            setPendingCloseRequest(null);
+            performWorkbenchPaneClose(request);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function WorkbenchClosePopover({
+  request,
+  onCancel,
+  onConfirm,
+}: {
+  request: DockviewTabCloseRequest & {
+    readonly anchor: { readonly clientX: number; readonly clientY: number };
+    readonly workRootId: string;
+  };
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="workbench-close-popover"
+      data-workbench-close-popover="cursor-near"
+      data-workbench-pane-id={request.paneId}
+      role="dialog"
+      style={{
+        left: request.anchor.clientX,
+        top: request.anchor.clientY,
+      }}
+    >
+      <div className="workbench-close-popover-title">Close session?</div>
+      <div className="workbench-close-popover-actions">
+        <button
+          className="action-button"
+          data-command-id="workbench.tab.close.cancel"
+          type="button"
+          onClick={onCancel}
+        >
+          No
+        </button>
+        <button
+          className="action-button action-button-primary"
+          data-command-id="workbench.tab.close.confirm"
+          type="button"
+          onClick={onConfirm}
+        >
+          Yes
+        </button>
       </div>
     </div>
   );
@@ -1188,7 +1699,13 @@ function WorkbenchToolbar({
   onCommand: (commandId: string, payload: CommandPayload) => void;
   onCreateTerminal: () => void;
 }) {
-  const toggles = ["viewer", "task", "diagnostics", "events", "layout"] as const;
+  const toggles = [
+    "viewer",
+    "task",
+    "diagnostics",
+    "events",
+    "layout",
+  ] as const;
 
   return (
     <div className="workbench-toolbar">
@@ -1201,9 +1718,14 @@ function WorkbenchToolbar({
         <StateBadge state={root.state} />
         <span className="meta-chip">{kindLabel(root.kind)}</span>
         <span className="meta-chip">{root.status}</span>
-        {commandLog[0] ? <span className="meta-chip">last: {commandLog[0].commandId}</span> : null}
+        {commandLog[0] ? (
+          <span className="meta-chip">last: {commandLog[0].commandId}</span>
+        ) : null}
       </div>
-      <div className="workbench-toolbar-actions" aria-label="Workbench toggles and actions">
+      <div
+        className="workbench-toolbar-actions"
+        aria-label="Workbench toggles and actions"
+      >
         {toolbarActions(root, selectedEntity).map(({ action, entityId }) => (
           <button
             className="action-button"
@@ -1227,7 +1749,11 @@ function WorkbenchToolbar({
           data-command-id="terminal.create"
           type="button"
           onClick={() => {
-            onCommand("terminal.create", { type: "action", label: "Create terminal", entityId: root.id });
+            onCommand("terminal.create", {
+              type: "action",
+              label: "Create terminal",
+              entityId: root.id,
+            });
             onCreateTerminal();
           }}
         >
@@ -1255,7 +1781,10 @@ function WorkbenchToolbar({
   );
 }
 
-function toolbarActions(root: WorkRootView, selectedEntity: ResourceEntity | null) {
+function toolbarActions(
+  root: WorkRootView,
+  selectedEntity: ResourceEntity | null,
+) {
   const actions = root.actions.map((action) => ({ action, entityId: root.id }));
 
   if (selectedEntity && selectedEntity.id !== root.id) {
@@ -1289,6 +1818,7 @@ type WorkbenchEditorGroupModel = {
 
 function buildWorkbenchEditorGroups(
   root: WorkRootView,
+  groups: ReadonlyArray<{ id: string; label: string }>,
   mainInstance: InstanceView | null,
   selectedInstance: InstanceView | null,
   supportEntity: ResourceEntity | null,
@@ -1297,105 +1827,77 @@ function buildWorkbenchEditorGroups(
   terminalPanes: TerminalPaneState[],
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
+  closedAgentPaneIds: readonly string[] = [],
 ): WorkbenchEditorGroupModel[] {
-  const readOnlyPanesByGroup = readOnlyWorkbenchPanesByGroup(root, readOnlyFilePanes, readOnlyFilePaneOrderByGroup);
+  void selectedInstance;
+  void supportEntity;
+  const dashboardGroups = groups.length > 0 ? groups : initialWorkbenchGroups;
+  const readOnlyPanesByGroup = readOnlyWorkbenchPanesByGroup(
+    root,
+    readOnlyFilePanes,
+    readOnlyFilePaneOrderByGroup,
+    dashboardGroups,
+  );
   const terminalPanesByGroup = terminalWorkbenchPanesByGroup(
     root,
     terminalPanes,
     terminalPaneOrderByGroup,
     terminalActions,
+    dashboardGroups,
   );
-  return [
-    {
-      id: "primary",
-      label: "workRoot",
-      panes: [
-        {
-          id: "main-agent",
-          kind: "agent",
-          category: "pinned",
-          title: mainInstance?.label ?? "Main agent",
-          detail: mainInstance ? instanceSummary(mainInstance) : "Waiting for a main instance.",
-          state: mainInstance?.state ?? root.state,
-          meta: mainInstance
-            ? [mainInstance.kind, mainInstance.interactionMode, closeContractLabel("agent")]
-            : [kindLabel(root.kind), closeContractLabel("agent")],
-        },
-        ...(terminalPanesByGroup.primary ?? []),
-        {
-          id: "selected-viewer",
-          kind: "viewer",
-          category: "opened",
-          title: selectedInstance?.label ?? root.label,
-          detail: "Selected resource projection.",
-          state: selectedInstance?.state ?? root.state,
-          meta: [selectedInstance?.role ?? "workRoot", selectedInstance?.kind ?? root.status],
-          body: <SubInstancePane mainInstance={mainInstance} />,
-        },
-        ...(readOnlyPanesByGroup.primary ?? []),
-      ],
-    },
-    {
-      id: "support",
-      label: "inspect",
-      panes: [
-        {
-          id: "editor-detail",
-          kind: "editor",
-          category: "opened",
-          title: "Editor / detail",
-          detail: supportEntity ? `${supportEntity.type}: ${supportEntity.label}` : "No selection.",
-          state: supportEntity?.state ?? root.state,
-          meta: ["fixture data"],
-          body: supportEntity ? <ResourceSummary entity={supportEntity} /> : undefined,
-        },
-        {
-          id: "task-view",
-          kind: "taskView",
-          category: "opened",
-          title: "Tasks",
-          detail: "WorkRoot-scoped task surface reserved.",
-          state: root.state,
-          meta: [`${root.mainInstances.length} main`],
-        },
-        {
-          id: "diagnostics-events",
-          kind: "diagnostics",
-          category: "opened",
-          title: "Diagnostics",
-          detail: root.state.error ?? "Resource and command events.",
-          state: root.state,
-          meta: [root.state.stale ? "stale" : "current"],
-        },
-        {
-          id: "inspector",
-          kind: "inspector",
-          category: "opened",
-          title: "Inspector",
-          detail: "Dashboard-owned metadata surface.",
-          state: supportEntity?.state ?? root.state,
-          meta: [supportEntity?.type ?? "workRoot"],
-        },
-        ...(readOnlyPanesByGroup.support ?? []),
-      ],
-    },
-  ];
+  const closedAgentPaneIdSet = new Set(closedAgentPaneIds);
+  const agentPane: WorkbenchPane[] =
+    mainInstance && !closedAgentPaneIdSet.has("main-agent")
+      ? [
+          {
+            id: "main-agent",
+            kind: "agent",
+            category: "pinned",
+            title: mainInstance.label,
+            detail: instanceSummary(mainInstance),
+            state: mainInstance.state,
+            meta: [
+              mainInstance.kind,
+              mainInstance.interactionMode,
+              closeContractLabel("agent"),
+            ],
+          },
+        ]
+      : [];
+
+  return dashboardGroups.map((group, index) => ({
+    id: group.id,
+    label: group.label,
+    panes: [
+      ...(index === 0 ? agentPane : []),
+      ...(terminalPanesByGroup[group.id] ?? []),
+      ...(readOnlyPanesByGroup[group.id] ?? []),
+    ],
+  }));
 }
-
-
-
 
 function placeTerminalSessions(
   current: WorkbenchPaneOrder,
   existingPanes: Record<string, TerminalPaneState>,
   sessions: TerminalSessionView[],
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
 ): WorkbenchPaneOrder {
   let next = { ...current };
-  let placementState = terminalPlacementState(existingPanes);
+  let placementState = terminalPlacementState(
+    existingPanes,
+    groups,
+    workbenchPaneOrderByGroup,
+    current,
+  );
   for (const session of sessions) {
-    const decision = decideSurfaceOpen(placementState, {
+    const decision = decideSurfaceOpenWithDynamicGroups(placementState, {
       surfaceKind: "persistentTerminal",
-      logicalKey: surfaceLogicalKey("persistentTerminal", session.workRootId, session.terminalId),
+      logicalKey: surfaceLogicalKey(
+        "persistentTerminal",
+        session.workRootId,
+        session.terminalId,
+      ),
     });
     if (decision.type === "openNew") {
       const pane = terminalPaneFromSession(session);
@@ -1408,7 +1910,8 @@ function placeTerminalSessions(
         attachments: [
           ...placementState.attachments,
           {
-            attachmentId: pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+            attachmentId:
+              pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
             groupId: decision.groupId,
             surfaceKind: "persistentTerminal",
             logicalKey: decision.logicalKey,
@@ -1420,15 +1923,33 @@ function placeTerminalSessions(
   return next;
 }
 
-function terminalPlacementState(panesByLogicalKey: Record<string, TerminalPaneState>): WorkbenchPlacementState {
+function terminalPlacementState(
+  panesByLogicalKey: Record<string, TerminalPaneState>,
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
+  terminalPaneOrderByGroup: WorkbenchPaneOrder,
+): WorkbenchPlacementState {
+  const firstGroupId = groups[0]?.id ?? "group-1";
   return {
-    groups: [{ groupId: workbenchGroupId("primary") }, { groupId: workbenchGroupId("support") }],
-    focusedGroupId: workbenchGroupId("primary"),
+    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
+    focusedGroupId: workbenchGroupId(firstGroupId),
     attachments: Object.values(panesByLogicalKey).map((pane) => ({
-      attachmentId: pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId("primary"),
+      attachmentId:
+        pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+      groupId: workbenchGroupId(
+        groupIdForPaneOrder(
+          pane.paneId,
+          workbenchPaneOrderByGroup,
+          terminalPaneOrderByGroup,
+          firstGroupId,
+        ),
+      ),
       surfaceKind: "persistentTerminal",
-      logicalKey: surfaceLogicalKey("persistentTerminal", pane.session.workRootId, pane.session.terminalId),
+      logicalKey: surfaceLogicalKey(
+        "persistentTerminal",
+        pane.session.workRootId,
+        pane.session.terminalId,
+      ),
     })),
   };
 }
@@ -1438,14 +1959,17 @@ function terminalWorkbenchPanesByGroup(
   terminalPanes: TerminalPaneState[],
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
+  groups: ReadonlyArray<{ id: string; label: string }>,
 ): Record<string, WorkbenchPane[]> {
   const panes = terminalPanes
     .filter((pane) => pane.session.workRootId === root.id)
     .map((pane) => terminalWorkbenchPane(pane, terminalActions));
   const paneById = new Map(panes.map((pane) => [pane.id, pane]));
   const consumed = new Set<string>();
-  const byGroup: Record<string, WorkbenchPane[]> = { primary: [], support: [] };
-  for (const groupId of ["primary", "support"]) {
+  const byGroup: Record<string, WorkbenchPane[]> = Object.fromEntries(
+    groups.map((group) => [group.id, []]),
+  );
+  for (const groupId of groups.map((group) => group.id)) {
     for (const paneId of terminalPaneOrderByGroup[groupId] ?? []) {
       const pane = paneById.get(paneId);
       if (pane && !consumed.has(paneId)) {
@@ -1455,7 +1979,8 @@ function terminalWorkbenchPanesByGroup(
     }
   }
   for (const pane of panes) {
-    if (!consumed.has(pane.id)) byGroup.primary.push(pane);
+    if (!consumed.has(pane.id))
+      (byGroup[groups[0]?.id ?? "group-1"] ??= []).push(pane);
   }
   return byGroup;
 }
@@ -1463,13 +1988,33 @@ function terminalWorkbenchPanesByGroup(
 type TerminalPaneActions = {
   onSendData: (pane: TerminalPaneState, data: string) => void;
   onClose: (pane: TerminalPaneState) => void;
-  onResize: (pane: TerminalPaneState, columns: number, rows: number) => Promise<void>;
-  onSocketStatus: (pane: TerminalPaneState, socketStatus: TerminalPaneState["socketStatus"], error?: string | null) => void;
-  onSocketMessage: (pane: TerminalPaneState, message: TerminalWebSocketServerMessage) => void;
-  onSocketResize: (pane: TerminalPaneState, columns: number, rows: number) => void;
+  onResize: (
+    pane: TerminalPaneState,
+    columns: number,
+    rows: number,
+  ) => Promise<void>;
+  onSocketStatus: (
+    pane: TerminalPaneState,
+    socketStatus: TerminalPaneState["socketStatus"],
+    error?: string | null,
+  ) => void;
+  onSocketMessage: (
+    pane: TerminalPaneState,
+    message: TerminalWebSocketServerMessage,
+  ) => void;
+  onSocketResize: (
+    pane: TerminalPaneState,
+    columns: number,
+    rows: number,
+  ) => void;
+  onFocusInput: (pane: TerminalPaneState) => void;
+  isActivePane: (pane: TerminalPaneState) => boolean;
 };
 
-function terminalWorkbenchPane(pane: TerminalPaneState, actions: TerminalPaneActions): WorkbenchPane {
+function terminalWorkbenchPane(
+  pane: TerminalPaneState,
+  actions: TerminalPaneActions,
+): WorkbenchPane {
   const state: ViewState = {
     status: pane.session.status,
     loading: pane.session.status === "starting",
@@ -1483,22 +2028,47 @@ function terminalWorkbenchPane(pane: TerminalPaneState, actions: TerminalPaneAct
     title: pane.session.title,
     detail: pane.session.terminalId,
     state,
-    meta: [pane.session.status, pane.socketStatus, `${pane.session.columns}x${pane.session.rows}`],
+    meta: [
+      pane.session.status,
+      pane.socketStatus,
+      `${pane.session.columns}x${pane.session.rows}`,
+    ],
     body: <TerminalPaneBody key={pane.paneId} pane={pane} actions={actions} />,
   };
 }
 
-function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions: TerminalPaneActions }) {
+function TerminalPaneBody({
+  pane,
+  actions,
+}: {
+  pane: TerminalPaneState;
+  actions: TerminalPaneActions;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const writtenLengthRef = useRef(0);
-  const lastForwardedSizeRef = useRef<{ columns: number; rows: number } | null>(null);
+  const lastForwardedSizeRef = useRef<{ columns: number; rows: number } | null>(
+    null,
+  );
   const socketRef = useRef<WebSocket | null>(null);
+  const keepTerminalFocusRef = useRef(false);
+  const [displaySession, setDisplaySession] = useState(() => pane.session);
   // Latest pane/actions for emulator callbacks registered once at mount.
   const liveRef = useRef({ pane, actions });
   liveRef.current = { pane, actions };
 
   const terminalId = pane.session.terminalId;
+  const refocusActiveTerminal = () => {
+    window.setTimeout(() => {
+      if (keepTerminalFocusRef.current && containerRef.current?.offsetParent) {
+        terminalRef.current?.focus();
+      }
+    }, 0);
+  };
+
+  useEffect(() => {
+    setDisplaySession(pane.session);
+  }, [pane.session]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1533,14 +2103,100 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
 
     // Keyboard input originates from the focused emulator surface and reaches
     // the daemon terminal session.
-    const inputDisposable = terminal.onData((data) => {
+    const sendInputBytes = (data: string) => {
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "input", data }));
+        refocusActiveTerminal();
         return;
       }
       liveRef.current.actions.onSendData(liveRef.current.pane, data);
-    });
+      refocusActiveTerminal();
+    };
+
+    const inputDisposable = terminal.onData(sendInputBytes);
+    let composingInput = false;
+    const markComposing = () => {
+      composingInput = true;
+    };
+    const clearComposing = () => {
+      composingInput = false;
+    };
+    const markFocusedTerminal = () => {
+      keepTerminalFocusRef.current = true;
+      liveRef.current.actions.onFocusInput(liveRef.current.pane);
+      terminal.focus();
+    };
+    const clearFocusedTerminal = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && !container.contains(target)) {
+        keepTerminalFocusRef.current = false;
+      }
+    };
+    container.addEventListener("compositionstart", markComposing);
+    container.addEventListener("compositionend", clearComposing);
+    container.addEventListener("focusin", markFocusedTerminal);
+    container.addEventListener("pointerdown", markFocusedTerminal);
+    window.addEventListener("pointerdown", clearFocusedTerminal, true);
+
+    const keydownFallback = (event: KeyboardEvent) => {
+      if (!container.offsetParent) {
+        return;
+      }
+      if (!liveRef.current.actions.isActivePane(liveRef.current.pane)) {
+        return;
+      }
+      if (event.isComposing || event.key === "Process" || composingInput) {
+        return;
+      }
+      const isMetaLineStart = event.metaKey && event.key.toLowerCase() === "a";
+      if (container.contains(document.activeElement) && !isMetaLineStart) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName.toLowerCase();
+      if (
+        target?.isContentEditable ||
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select"
+      ) {
+        return;
+      }
+      let data: string | null = null;
+      if (event.ctrlKey || event.metaKey) {
+        const key = event.key.toLowerCase();
+        if (key === "c") data = "\x03";
+        if (key === "l") data = "\x0c";
+        if (key === "a") data = "\x01";
+        // Native shell line-editing controls: ctrl-u clears the current line
+        // and ctrl-w deletes the previous word. Dockview does not reliably keep
+        // the xterm helper textarea focused, so this fallback forwards the same
+        // raw control bytes xterm's onData path would send when it is focused.
+        if (key === "u") data = "\x15";
+        if (key === "w") data = "\x17";
+      } else if (event.key.length === 1) {
+        data = event.key;
+      } else if (event.key === "Enter") {
+        data = "\r";
+      } else if (event.key === "Backspace") {
+        data = "\x7f";
+      } else if (event.key === "ArrowLeft") {
+        data = "\x1b[D";
+      } else if (event.key === "ArrowRight") {
+        data = "\x1b[C";
+      } else if (event.key === "ArrowUp") {
+        data = "\x1b[A";
+      } else if (event.key === "ArrowDown") {
+        data = "\x1b[B";
+      }
+      if (data !== null) {
+        event.preventDefault();
+        liveRef.current.actions.onFocusInput(liveRef.current.pane);
+        sendInputBytes(data);
+      }
+    };
+    window.addEventListener("keydown", keydownFallback);
 
     const fitNow = () => {
       try {
@@ -1562,8 +2218,21 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
 
     const forwardSize = () => {
       // The emulator grid is already capped to the PTY bounds by fitNow, so
-      // this size is always inside the daemon resize contract.
-      const next = clampTerminalSize(terminal.cols, terminal.rows);
+      // this size is always inside the daemon resize contract. When Dockview is
+      // stacked below the fold in a narrow viewport, its internal cached width
+      // may lag the viewport; still bound the PTY columns to the viewport so
+      // the daemon-visible logical size follows responsive relayout.
+      const viewportColumns = Math.max(
+        1,
+        Math.floor((window.innerWidth - 32) / 8),
+      );
+      const next = clampTerminalSize(
+        Math.min(terminal.cols, viewportColumns),
+        terminal.rows,
+      );
+      if (next.columns !== terminal.cols || next.rows !== terminal.rows) {
+        terminal.resize(next.columns, next.rows);
+      }
       const prev = lastForwardedSizeRef.current;
       if (prev && prev.columns === next.columns && prev.rows === next.rows) {
         return;
@@ -1572,8 +2241,23 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       // resize must stay retryable rather than being suppressed as a no-op.
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "resize", columns: next.columns, rows: next.rows }));
-        liveRef.current.actions.onSocketResize(liveRef.current.pane, next.columns, next.rows);
+        socket.send(
+          JSON.stringify({
+            type: "resize",
+            columns: next.columns,
+            rows: next.rows,
+          }),
+        );
+        setDisplaySession((current) => ({
+          ...current,
+          columns: next.columns,
+          rows: next.rows,
+        }));
+        liveRef.current.actions.onSocketResize(
+          liveRef.current.pane,
+          next.columns,
+          next.rows,
+        );
         lastForwardedSizeRef.current = next;
         return;
       }
@@ -1593,7 +2277,7 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     // to the daemon is debounced so visual split drag does not continuously
     // rewrite logical PTY dimensions.
     let resizeTimer: number | null = null;
-    const observer = new ResizeObserver(() => {
+    const scheduleResizeForward = () => {
       fitNow();
       if (resizeTimer !== null) {
         window.clearTimeout(resizeTimer);
@@ -1602,14 +2286,23 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
         resizeTimer = null;
         forwardSize();
       }, 250);
-    });
+    };
+    const observer = new ResizeObserver(scheduleResizeForward);
     observer.observe(container);
+    window.addEventListener("resize", scheduleResizeForward);
 
     return () => {
       observer.disconnect();
+      window.removeEventListener("resize", scheduleResizeForward);
       if (resizeTimer !== null) {
         window.clearTimeout(resizeTimer);
       }
+      window.removeEventListener("keydown", keydownFallback);
+      container.removeEventListener("compositionstart", markComposing);
+      container.removeEventListener("compositionend", clearComposing);
+      container.removeEventListener("focusin", markFocusedTerminal);
+      container.removeEventListener("pointerdown", markFocusedTerminal);
+      window.removeEventListener("pointerdown", clearFocusedTerminal, true);
       inputDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
@@ -1618,31 +2311,66 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
 
   useEffect(() => {
     let disposed = false;
-    const socket = new WebSocket(terminalWebSocketUrl(terminalId, terminalWebSocketCursor(liveRef.current.pane)));
+    const socket = new WebSocket(
+      terminalWebSocketUrl(
+        terminalId,
+        terminalWebSocketCursor(liveRef.current.pane),
+      ),
+    );
     socketRef.current = socket;
-    liveRef.current.actions.onSocketStatus(liveRef.current.pane, "connecting", null);
+    liveRef.current.actions.onSocketStatus(
+      liveRef.current.pane,
+      "connecting",
+      null,
+    );
 
     socket.addEventListener("open", () => {
-      if (!disposed) liveRef.current.actions.onSocketStatus(liveRef.current.pane, "connected", null);
+      if (!disposed)
+        liveRef.current.actions.onSocketStatus(
+          liveRef.current.pane,
+          "connected",
+          null,
+        );
     });
     socket.addEventListener("message", (event) => {
       if (disposed || typeof event.data !== "string") return;
       try {
-        liveRef.current.actions.onSocketMessage(
-          liveRef.current.pane,
-          JSON.parse(event.data) as TerminalWebSocketServerMessage,
-        );
+        const message = JSON.parse(
+          event.data,
+        ) as TerminalWebSocketServerMessage;
+        if (message.type === "output") {
+          terminalRef.current?.write(message.chunk.data);
+          writtenLengthRef.current += message.chunk.data.length;
+          if (liveRef.current.actions.isActivePane(liveRef.current.pane)) {
+            refocusActiveTerminal();
+          }
+        } else {
+          setDisplaySession((current) => ({
+            ...current,
+            status: message.status,
+          }));
+        }
+        liveRef.current.actions.onSocketMessage(liveRef.current.pane, message);
       } catch {
         // Ignore malformed daemon frames and allow the socket close/fallback path to recover.
       }
     });
     socket.addEventListener("error", () => {
       if (!disposed) {
-        liveRef.current.actions.onSocketStatus(liveRef.current.pane, "fallback", "terminal WebSocket failed");
+        liveRef.current.actions.onSocketStatus(
+          liveRef.current.pane,
+          "fallback",
+          "terminal WebSocket failed",
+        );
       }
     });
     socket.addEventListener("close", () => {
-      if (!disposed) liveRef.current.actions.onSocketStatus(liveRef.current.pane, "fallback", null);
+      if (!disposed)
+        liveRef.current.actions.onSocketStatus(
+          liveRef.current.pane,
+          "fallback",
+          null,
+        );
     });
 
     return () => {
@@ -1679,7 +2407,8 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       {pane.error ? <div className="terminal-error">{pane.error}</div> : null}
       <div className="terminal-controls">
         <span className="terminal-status-line">
-          {pane.session.status} · {pane.session.columns}x{pane.session.rows}
+          {displaySession.status} · {displaySession.columns}x
+          {displaySession.rows}
         </span>
         <button
           className="action-button"
@@ -1694,7 +2423,6 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
   );
 }
 
-
 function terminalScreenFitsVisibleBox(container: HTMLElement) {
   const screen = container.querySelector<HTMLElement>(".xterm-screen");
   if (!screen) {
@@ -1707,31 +2435,90 @@ function terminalScreenFitsVisibleBox(container: HTMLElement) {
 
 function readOnlyFilePlacementState(
   panesByLogicalKey: Record<string, ReadOnlyFilePane>,
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
+  readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
 ): WorkbenchPlacementState {
+  const fallbackGroupId = groups[1]?.id ?? groups[0]?.id ?? "group-2";
   return {
-    groups: [{ groupId: workbenchGroupId("primary") }, { groupId: workbenchGroupId("support") }],
+    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
     attachments: Object.values(panesByLogicalKey).map((pane) => ({
-      attachmentId: pane.id as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId("support"),
+      attachmentId:
+        pane.id as WorkbenchPlacementState["attachments"][number]["attachmentId"],
+      groupId: workbenchGroupId(
+        groupIdForPaneOrder(
+          pane.id,
+          workbenchPaneOrderByGroup,
+          readOnlyFilePaneOrderByGroup,
+          fallbackGroupId,
+        ),
+      ),
       surfaceKind: "editor",
-      logicalKey: surfaceLogicalKey("editor", pane.workRootId, pane.path),
+      logicalKey: surfaceLogicalKey(...pane.logicalKey.split("/")),
     })),
   };
+}
+
+function sameReadOnlyOpenRequest(
+  current: ReadOnlyFilePane | undefined,
+  requested: ReadOnlyFilePane,
+): current is ReadOnlyFilePane {
+  return (
+    current !== undefined &&
+    current.workRootId === requested.workRootId &&
+    current.path === requested.path &&
+    current.mode === requested.mode
+  );
+}
+
+function removePaneFromOrder(
+  orderByGroup: WorkbenchPaneOrder,
+  paneId: string | undefined,
+): WorkbenchPaneOrder {
+  if (!paneId) {
+    return orderByGroup;
+  }
+  return Object.fromEntries(
+    Object.entries(orderByGroup).map(([groupId, paneIds]) => [
+      groupId,
+      paneIds.filter((candidate) => candidate !== paneId),
+    ]),
+  );
+}
+
+function groupIdForPaneOrder(
+  paneId: string,
+  primaryOrderByGroup: WorkbenchPaneOrder,
+  fallbackOrderByGroup: WorkbenchPaneOrder,
+  fallbackGroupId: string,
+): string {
+  return (
+    Object.entries(primaryOrderByGroup).find(([, paneIds]) =>
+      paneIds.includes(paneId),
+    )?.[0] ??
+    Object.entries(fallbackOrderByGroup).find(([, paneIds]) =>
+      paneIds.includes(paneId),
+    )?.[0] ??
+    fallbackGroupId
+  );
 }
 
 function readOnlyWorkbenchPanesByGroup(
   root: WorkRootView,
   readOnlyFilePanes: ReadOnlyFilePane[],
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
+  groups: ReadonlyArray<{ id: string; label: string }>,
 ): Record<string, WorkbenchPane[]> {
   const panes = readOnlyFilePanes
     .filter((pane) => pane.workRootId === root.id)
     .map((pane) => readOnlyWorkbenchPane(root, pane));
   const paneById = new Map(panes.map((pane) => [pane.id, pane]));
   const consumed = new Set<string>();
-  const byGroup: Record<string, WorkbenchPane[]> = { primary: [], support: [] };
+  const byGroup: Record<string, WorkbenchPane[]> = Object.fromEntries(
+    groups.map((group) => [group.id, []]),
+  );
 
-  for (const groupId of ["primary", "support"]) {
+  for (const groupId of groups.map((group) => group.id)) {
     for (const paneId of readOnlyFilePaneOrderByGroup[groupId] ?? []) {
       const pane = paneById.get(paneId);
       if (pane && !consumed.has(paneId)) {
@@ -1743,14 +2530,17 @@ function readOnlyWorkbenchPanesByGroup(
 
   for (const pane of panes) {
     if (!consumed.has(pane.id)) {
-      byGroup.support.push(pane);
+      (byGroup[groups[1]?.id ?? groups[0]?.id ?? "group-2"] ??= []).push(pane);
     }
   }
 
   return byGroup;
 }
 
-function readOnlyWorkbenchPane(root: WorkRootView, pane: ReadOnlyFilePane): WorkbenchPane {
+function readOnlyWorkbenchPane(
+  root: WorkRootView,
+  pane: ReadOnlyFilePane,
+): WorkbenchPane {
   const state: ViewState = {
     status: pane.status,
     loading: pane.status === "loading",
@@ -1758,6 +2548,7 @@ function readOnlyWorkbenchPane(root: WorkRootView, pane: ReadOnlyFilePane): Work
     error: pane.error,
   };
   const meta = [
+    pane.mode,
     "read-only",
     pane.languageHint ?? pane.extension ?? "text",
     pane.sizeBytes === null ? "pending" : `${pane.sizeBytes} bytes`,
@@ -1766,7 +2557,9 @@ function readOnlyWorkbenchPane(root: WorkRootView, pane: ReadOnlyFilePane): Work
   return {
     id: pane.id,
     kind: "editor",
-    category: "opened",
+    // Pinned files get the left-border accent matching other stable/pinned
+    // surfaces (agent, terminal). Preview files stay in the opened chip style.
+    category: pane.mode === "pinned" ? "pinned" : "opened",
     title: pane.title,
     detail: pane.path,
     state,
@@ -1775,7 +2568,13 @@ function readOnlyWorkbenchPane(root: WorkRootView, pane: ReadOnlyFilePane): Work
   };
 }
 
-function ReadOnlyTextPane({ pane, root }: { pane: ReadOnlyFilePane; root: WorkRootView }) {
+function ReadOnlyTextPane({
+  pane,
+  root,
+}: {
+  pane: ReadOnlyFilePane;
+  root: WorkRootView;
+}) {
   return (
     <div className="readonly-text-pane">
       <div className="readonly-text-pane-header">
@@ -1786,8 +2585,11 @@ function ReadOnlyTextPane({ pane, root }: { pane: ReadOnlyFilePane; root: WorkRo
           </div>
         </div>
         <div className="readonly-text-pane-badges">
+          <span className="meta-chip">{pane.mode}</span>
           <span className="meta-chip">read-only</span>
-          <span className="meta-chip">{pane.languageHint ?? pane.extension ?? "text"}</span>
+          <span className="meta-chip">
+            {pane.languageHint ?? pane.extension ?? "text"}
+          </span>
         </div>
       </div>
       {pane.status === "loading" ? (
@@ -1805,231 +2607,17 @@ function ReadOnlyTextPane({ pane, root }: { pane: ReadOnlyFilePane; root: WorkRo
   );
 }
 
-function WorkbenchEditorGroup({
-  group,
-  activePaneId,
-  draggedPaneId,
-  onDragEnd,
-  onDragStart,
-  onMovePane,
-  onSelectPane,
+function SubInstancePane({
+  mainInstance,
 }: {
-  group: WorkbenchEditorGroupModel;
-  activePaneId: string | undefined;
-  draggedPaneId: string | null;
-  onDragEnd: () => void;
-  onDragStart: (paneId: string) => void;
-  onMovePane: (paneId: string, targetGroupId: string, beforePaneId?: string) => void;
-  onSelectPane: (paneId: string) => void;
+  mainInstance: InstanceView | null;
 }) {
-  const activePane = group.panes.find((pane) => pane.id === activePaneId) ?? group.panes[0];
-  const panesByCategory = partitionWorkbenchPanesByCategory(group.panes);
-
-  if (!activePane) {
-    return (
-      <section className="workbench-group" aria-label={`${group.label} editor group`}>
-        <div className="workbench-tab-header workbench-tab-header-empty" aria-label={group.label}>
-          <WorkbenchTabLane
-            activePaneId={undefined}
-            category="pinned"
-            draggedPaneId={draggedPaneId}
-            groupId={group.id}
-            panes={panesByCategory.pinned}
-            onDragEnd={onDragEnd}
-            onDragStart={onDragStart}
-            onMovePane={onMovePane}
-            onSelectPane={onSelectPane}
-          />
-          <WorkbenchTabLane
-            activePaneId={undefined}
-            category="opened"
-            draggedPaneId={draggedPaneId}
-            groupId={group.id}
-            panes={panesByCategory.opened}
-            onDragEnd={onDragEnd}
-            onDragStart={onDragStart}
-            onMovePane={onMovePane}
-            onSelectPane={onSelectPane}
-          />
-        </div>
-        <article
-          className="workbench-pane workbench-pane-empty-state"
-          role="status"
-          onDragOver={(event) => {
-            if (draggedPaneId) {
-              event.preventDefault();
-            }
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            const move = resolveWorkbenchPaneDrop({
-              dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-              fallbackPaneId: draggedPaneId,
-              targetGroupId: group.id,
-            });
-            if (move) {
-              onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-            }
-            onDragEnd();
-          }}
-        >
-          <div className="workbench-pane-body">
-            <p>Drop a tab here to add a pane to this split.</p>
-          </div>
-        </article>
-      </section>
-    );
-  }
-
-  const activeRegistry = defaultSurfaceRegistry()[activePane.kind];
-
-  return (
-    <section className="workbench-group" aria-label={`${group.label} editor group`}>
-      <div className="workbench-tab-header" aria-label={group.label}>
-        <WorkbenchTabLane
-          activePaneId={activePane.id}
-          category="pinned"
-          draggedPaneId={draggedPaneId}
-          groupId={group.id}
-          panes={panesByCategory.pinned}
-          onDragEnd={onDragEnd}
-          onDragStart={onDragStart}
-          onMovePane={onMovePane}
-          onSelectPane={onSelectPane}
-        />
-        <WorkbenchTabLane
-          activePaneId={activePane.id}
-          category="opened"
-          draggedPaneId={draggedPaneId}
-          groupId={group.id}
-          panes={panesByCategory.opened}
-          onDragEnd={onDragEnd}
-          onDragStart={onDragStart}
-          onMovePane={onMovePane}
-          onSelectPane={onSelectPane}
-        />
-      </div>
-      <article
-        aria-label={`${activeRegistry.label}: ${activePane.title}`}
-        className="workbench-pane"
-        data-surface-kind={activePane.kind}
-        id={`pane-${group.id}-${activePane.id}`}
-        role="tabpanel"
-      >
-        <div className="workbench-pane-body">
-          <p>{activePane.detail}</p>
-          {activePane.body ? <div className="workbench-pane-content">{activePane.body}</div> : null}
-        </div>
-      </article>
-    </section>
-  );
-}
-
-function WorkbenchTabLane({
-  activePaneId,
-  category,
-  draggedPaneId,
-  groupId,
-  panes,
-  onDragEnd,
-  onDragStart,
-  onMovePane,
-  onSelectPane,
-}: {
-  activePaneId: string | undefined;
-  category: WorkbenchPaneCategory;
-  draggedPaneId: string | null;
-  groupId: string;
-  panes: readonly WorkbenchPane[];
-  onDragEnd: () => void;
-  onDragStart: (paneId: string) => void;
-  onMovePane: (paneId: string, targetGroupId: string, beforePaneId?: string) => void;
-  onSelectPane: (paneId: string) => void;
-}) {
-  const label = category === "pinned" ? "pinned" : "opened";
-
-  return (
-    <div className={`workbench-tab-lane workbench-tab-lane-${category}`}>
-      <span className="workbench-tab-lane-label">{label}</span>
-      <div
-        className={`workbench-tab-strip ${panes.length === 0 ? "workbench-tab-strip-empty" : ""}`}
-        role="tablist"
-        aria-label={`${label} panes`}
-        onDragOver={(event) => {
-          if (draggedPaneId) {
-            event.preventDefault();
-          }
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          const move = resolveWorkbenchPaneDrop({
-            dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-            fallbackPaneId: draggedPaneId,
-            targetGroupId: groupId,
-          });
-          if (move) {
-            onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-          }
-          onDragEnd();
-        }}
-      >
-        {panes.length === 0 ? <span className="workbench-tab-drop-hint">drop</span> : null}
-        {panes.map((pane) => {
-          const selected = pane.id === activePaneId;
-          const registry = defaultSurfaceRegistry()[pane.kind];
-
-          return (
-            <button
-              aria-controls={`pane-${groupId}-${pane.id}`}
-              aria-selected={selected}
-              className={`workbench-tab ${selected ? "workbench-tab-active" : ""} ${
-                draggedPaneId === pane.id ? "workbench-tab-dragging" : ""
-              }`}
-              draggable
-              key={pane.id}
-              role="tab"
-              title="Drag to reorder or move to another split"
-              type="button"
-              onClick={() => onSelectPane(pane.id)}
-              onDragEnd={onDragEnd}
-              onDragOver={(event) => {
-                if (draggedPaneId && draggedPaneId !== pane.id) {
-                  event.preventDefault();
-                }
-              }}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData(workbenchPaneDragMimeType, pane.id);
-                onDragStart(pane.id);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                const move = resolveWorkbenchPaneDrop({
-                  dataTransferPaneId: event.dataTransfer.getData(workbenchPaneDragMimeType),
-                  fallbackPaneId: draggedPaneId,
-                  targetGroupId: groupId,
-                  beforePaneId: pane.id,
-                });
-                if (move) {
-                  onMovePane(move.paneId, move.targetGroupId, move.beforePaneId);
-                }
-                onDragEnd();
-              }}
-            >
-              <span className="workbench-tab-kind">{registry.label}</span>
-              <span className="workbench-tab-title">{pane.title}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function SubInstancePane({ mainInstance }: { mainInstance: InstanceView | null }) {
   if (!mainInstance || mainInstance.subInstances.length === 0) {
-    return <p className="workbench-pane-empty">No sub instances attached to this main surface.</p>;
+    return (
+      <p className="workbench-pane-empty">
+        No sub instances attached to this main surface.
+      </p>
+    );
   }
 
   return (
@@ -2049,8 +2637,12 @@ function ResourceSummary({ entity }: { entity: ResourceEntity }) {
     <dl className="resource-summary">
       <DetailItem label="id" value={entity.id} />
       <DetailItem label="status" value={entity.state.status} />
-      {entity.type === "workRoot" ? <DetailItem label="workRoot" value={entity.path.workRootId} /> : null}
-      {entity.type === "instance" ? <DetailItem label="instance" value={entity.path.instanceId ?? ""} /> : null}
+      {entity.type === "workRoot" ? (
+        <DetailItem label="workRoot" value={entity.path.workRootId} />
+      ) : null}
+      {entity.type === "instance" ? (
+        <DetailItem label="instance" value={entity.path.instanceId ?? ""} />
+      ) : null}
     </dl>
   );
 }
@@ -2076,7 +2668,11 @@ function WorkspaceRows({
           state={compactMain.root.state}
           depth={0}
           selected={selectedId === compactMain.root.id}
-          meta={[kindLabel(compactMain.root.kind), compactMain.root.status, compactMain.instance.kind]}
+          meta={[
+            kindLabel(compactMain.root.kind),
+            compactMain.root.status,
+            compactMain.instance.kind,
+          ]}
           onCommand={onCommand}
         />
       </div>
@@ -2109,7 +2705,8 @@ function WorkspaceRows({
           />
           {root.mainInstances.length > 0 ? (
             <div className="nav-secondary-context">
-              {root.mainInstances.length} pinned main surface{root.mainInstances.length === 1 ? "" : "s"}
+              {root.mainInstances.length} pinned main surface
+              {root.mainInstances.length === 1 ? "" : "s"}
             </div>
           ) : null}
         </div>
@@ -2143,7 +2740,9 @@ function ResourceRow({
       data-command-id="resource.select"
       style={{ "--depth": depth } as CSSProperties}
       type="button"
-      onClick={() => onCommand("resource.select", { type: "select", entityId: id })}
+      onClick={() =>
+        onCommand("resource.select", { type: "select", entityId: id })
+      }
     >
       <span className="resource-row-main">
         <span className="row-eyebrow">{eyebrow}</span>
@@ -2199,15 +2798,24 @@ function ResourceDetail({
         <DetailItem label="stale" value={String(entity.state.stale)} />
         {entity.type === "workspace" ? (
           <>
-            <DetailItem label="compactable" value={String(entity.compactable)} />
-            <DetailItem label="workRoots" value={String(entity.workRootCount)} />
+            <DetailItem
+              label="compactable"
+              value={String(entity.compactable)}
+            />
+            <DetailItem
+              label="workRoots"
+              value={String(entity.workRootCount)}
+            />
           </>
         ) : null}
         {entity.type === "workRoot" ? (
           <>
             <DetailItem label="kind" value={kindLabel(entity.kind)} />
             <DetailItem label="workRootStatus" value={entity.status} />
-            <DetailItem label="instances" value={String(entity.instanceCount)} />
+            <DetailItem
+              label="instances"
+              value={String(entity.instanceCount)}
+            />
             <DetailItem label="workRootId" value={entity.path.workRootId} />
           </>
         ) : null}
@@ -2216,8 +2824,14 @@ function ResourceDetail({
             <DetailItem label="role" value={entity.role} />
             <DetailItem label="kind" value={entity.kind} />
             <DetailItem label="mode" value={entity.interactionMode} />
-            <DetailItem label="subInstances" value={String(entity.subInstanceCount)} />
-            <DetailItem label="instanceId" value={entity.path.instanceId ?? ""} />
+            <DetailItem
+              label="subInstances"
+              value={String(entity.subInstanceCount)}
+            />
+            <DetailItem
+              label="instanceId"
+              value={entity.path.instanceId ?? ""}
+            />
           </>
         ) : null}
       </dl>
@@ -2330,7 +2944,10 @@ function normalizeServerRoute(serverId: string) {
     return;
   }
 
-  const normalizedPath = normalizeServerRouteLocation(window.location, serverId);
+  const normalizedPath = normalizeServerRouteLocation(
+    window.location,
+    serverId,
+  );
   if (normalizedPath) {
     window.history.replaceState(null, "", normalizedPath);
   }
@@ -2349,7 +2966,12 @@ function resolveWorkbenchSelection(
   for (const workspace of resources.workspaces) {
     for (const root of workspace.workRoots) {
       const mainInstance = root.mainInstances[0] ?? null;
-      const rootSelection = { workspace, root, mainInstance, selectedInstance: mainInstance };
+      const rootSelection = {
+        workspace,
+        root,
+        mainInstance,
+        selectedInstance: mainInstance,
+      };
       fallback ??= rootSelection;
 
       if (selectedId === workspace.id || selectedId === root.id) {
@@ -2368,7 +2990,10 @@ function resolveWorkbenchSelection(
   return fallback;
 }
 
-function findInstanceById(instance: InstanceView, selectedId: string | null): InstanceView | null {
+function findInstanceById(
+  instance: InstanceView,
+  selectedId: string | null,
+): InstanceView | null {
   if (!selectedId) {
     return null;
   }

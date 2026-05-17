@@ -10,7 +10,9 @@ export type WorkbenchCategorizedPaneRef = WorkbenchEditorPaneRef & {
   readonly category: WorkbenchPaneCategory;
 };
 
-export type WorkbenchEditorGroupRef<TPane extends WorkbenchEditorPaneRef = WorkbenchEditorPaneRef> = {
+export type WorkbenchEditorGroupRef<
+  TPane extends WorkbenchEditorPaneRef = WorkbenchEditorPaneRef,
+> = {
   readonly id: string;
   readonly panes: readonly TPane[];
 };
@@ -24,16 +26,33 @@ export type WorkbenchPaneMove = {
   readonly beforePaneId?: string;
 };
 
-export type WorkbenchPaneMoveResult<TGroup extends WorkbenchEditorGroupRef = WorkbenchEditorGroupRef> = {
+export type WorkbenchPaneMoveResult<
+  TGroup extends WorkbenchEditorGroupRef = WorkbenchEditorGroupRef,
+> = {
   readonly groups: readonly TGroup[];
   readonly paneOrderByGroup: WorkbenchPaneOrder;
   readonly activePaneByGroup: WorkbenchActivePaneState;
 };
 
+export type WorkbenchDynamicGroupRequest = {
+  readonly targetGroupId: string;
+  /** Dockview display metadata only; dashboard group state persists ids and panes. */
+  readonly targetGroupLabel?: string;
+};
 
-export function partitionWorkbenchPanesByCategory<TPane extends WorkbenchCategorizedPaneRef>(
-  panes: readonly TPane[],
-): Record<WorkbenchPaneCategory, TPane[]> {
+export type WorkbenchDynamicPaneMove = WorkbenchPaneMove & {
+  readonly dynamicTargetGroup?: WorkbenchDynamicGroupRequest;
+};
+
+export type WorkbenchDynamicPaneMoveResult<
+  TGroup extends WorkbenchEditorGroupRef = WorkbenchEditorGroupRef,
+> = WorkbenchPaneMoveResult<TGroup> & {
+  readonly createdGroupId: string | null;
+};
+
+export function partitionWorkbenchPanesByCategory<
+  TPane extends WorkbenchCategorizedPaneRef,
+>(panes: readonly TPane[]): Record<WorkbenchPaneCategory, TPane[]> {
   return {
     pinned: panes.filter((pane) => pane.category === "pinned"),
     opened: panes.filter((pane) => pane.category === "opened"),
@@ -74,7 +93,11 @@ export function applyWorkbenchPaneOrder<TGroup extends WorkbenchEditorGroupRef>(
   return arrangedGroups.map((group) => {
     const remainingOriginalPanes = groups
       .find((sourceGroup) => sourceGroup.id === group.id)
-      ?.panes.filter((pane) => originalGroupByPaneId.get(pane.id) === group.id && !consumedPaneIds.has(pane.id));
+      ?.panes.filter(
+        (pane) =>
+          originalGroupByPaneId.get(pane.id) === group.id &&
+          !consumedPaneIds.has(pane.id),
+      );
 
     return {
       ...group,
@@ -83,8 +106,12 @@ export function applyWorkbenchPaneOrder<TGroup extends WorkbenchEditorGroupRef>(
   });
 }
 
-export function deriveWorkbenchPaneOrder(groups: readonly WorkbenchEditorGroupRef[]): Record<string, string[]> {
-  return Object.fromEntries(groups.map((group) => [group.id, group.panes.map((pane) => pane.id)]));
+export function deriveWorkbenchPaneOrder(
+  groups: readonly WorkbenchEditorGroupRef[],
+): Record<string, string[]> {
+  return Object.fromEntries(
+    groups.map((group) => [group.id, group.panes.map((pane) => pane.id)]),
+  );
 }
 
 export function moveWorkbenchPane<TGroup extends WorkbenchEditorGroupRef>(
@@ -107,7 +134,10 @@ export function moveWorkbenchPane<TGroup extends WorkbenchEditorGroupRef>(
     };
   });
 
-  if (!movedPane || !withoutMovedPane.some((group) => group.id === move.targetGroupId)) {
+  if (
+    !movedPane ||
+    !withoutMovedPane.some((group) => group.id === move.targetGroupId)
+  ) {
     return groups.slice();
   }
 
@@ -194,13 +224,64 @@ export function commitWorkbenchPaneMove<TGroup extends WorkbenchEditorGroupRef>(
   move: WorkbenchPaneMove,
 ): WorkbenchPaneMoveResult<TGroup> {
   const movedGroups = moveWorkbenchPane(groups, move);
-  const activePaneByGroup = reconcileActiveWorkbenchPanes(movedGroups, currentActivePaneByGroup, {
-    [move.targetGroupId]: move.paneId,
-  });
+  const activePaneByGroup = reconcileActiveWorkbenchPanes(
+    movedGroups,
+    currentActivePaneByGroup,
+    {
+      [move.targetGroupId]: move.paneId,
+    },
+  );
 
   return {
     groups: movedGroups,
     paneOrderByGroup: deriveWorkbenchPaneOrder(movedGroups),
     activePaneByGroup,
+  };
+}
+
+export function commitWorkbenchPaneMoveIntoDynamicGroup<
+  TGroup extends WorkbenchEditorGroupRef,
+>(
+  groups: readonly TGroup[],
+  currentActivePaneByGroup: WorkbenchActivePaneState,
+  move: WorkbenchDynamicPaneMove,
+): WorkbenchDynamicPaneMoveResult<TGroup> {
+  // CONTRACT: Dockview-created split drops are represented in dashboard state
+  // by creating or mapping a dashboard group id before committing the move.
+  // The function returns the same serialized pane order and active-pane state
+  // as commitWorkbenchPaneMove plus the id of a newly-created dashboard group,
+  // if the Dockview target group was not already known.
+  // Existing-group moves must preserve commitWorkbenchPaneMove semantics. Unknown
+  // dynamicTargetGroup ids must synthesize an empty dashboard group before the
+  // move, while targetGroupLabel remains Dockview-only metadata.
+  const targetGroupExists = groups.some(
+    (group) => group.id === move.targetGroupId,
+  );
+  const createdGroupId = targetGroupExists
+    ? null
+    : (move.dynamicTargetGroup?.targetGroupId ?? null);
+  const groupsWithDynamicTarget = targetGroupExists
+    ? groups
+    : createdGroupId
+      ? [
+          ...groups,
+          {
+            id: createdGroupId,
+            ...(move.dynamicTargetGroup?.targetGroupLabel
+              ? { label: move.dynamicTargetGroup.targetGroupLabel }
+              : {}),
+            panes: [],
+          } as unknown as TGroup,
+        ]
+      : groups;
+
+  const committed = commitWorkbenchPaneMove(
+    groupsWithDynamicTarget,
+    currentActivePaneByGroup,
+    move,
+  );
+  return {
+    ...committed,
+    createdGroupId,
   };
 }

@@ -10,6 +10,7 @@ export type TerminalCommandPlan = {
   scrollLines(prefix: string, count: number): string;
   alternateScreenBottomRow(marker: string): string;
   clearAndEcho(marker: string): string;
+  trailingWordEcho(marker: string): string;
   longRunningCommand(): string;
 };
 
@@ -30,6 +31,18 @@ function boundedCount(count: number): number {
     throw new Error(`terminal command count must be an integer from 1 to 500, got ${count}`);
   }
   return count;
+}
+
+function bareWord(value: string): string {
+  // `trailingWordEcho` intentionally leaves the marker unquoted so a single
+  // shell backward-kill-word (`ctrl-w`) erases exactly the marker rather than a
+  // surrounding quote. Require a shell-safe bare word so that contract holds.
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
+    throw new Error(
+      `terminal trailing-word marker must be a bare shell word, got ${value}`,
+    );
+  }
+  return value;
 }
 
 function runtimePlatform(): TerminalCommandPlatform {
@@ -69,6 +82,7 @@ export function terminalCommandPlanForPlatform(
       scrollLines: (prefix, count) => `1..${boundedCount(count)} | ForEach-Object { Write-Output ${quotePowerShellSingle(prefix)}$_ }`,
       alternateScreenBottomRow: (marker) => `Write-Output ${quotePowerShellSingle(marker)}`,
       clearAndEcho: (marker) => `Clear-Host; Write-Output ${quotePowerShellSingle(marker)}`,
+      trailingWordEcho: (marker) => `Write-Output ${bareWord(marker)}`,
       longRunningCommand: () => "Start-Sleep -Seconds 30",
     };
   }
@@ -85,6 +99,7 @@ export function terminalCommandPlanForPlatform(
       scrollLines: (prefix, count) => `for /L %i in (1,1,${boundedCount(count)}) do @echo ${cmdLiteral(prefix)}%i`,
       alternateScreenBottomRow: (marker) => `echo ${cmdLiteral(marker)}`,
       clearAndEcho: (marker) => `cls & echo ${cmdLiteral(marker)}`,
+      trailingWordEcho: (marker) => `echo ${bareWord(marker)}`,
       longRunningCommand: () => "ping -n 30 127.0.0.1 > nul",
     };
   }
@@ -97,6 +112,7 @@ export function terminalCommandPlanForPlatform(
     scrollLines: (prefix, count) => `i=1; while [ $i -le ${boundedCount(count)} ]; do printf '%s%s\\n' ${quoteSingle(prefix)} "$i"; i=$((i+1)); done`,
     alternateScreenBottomRow: (marker) => `printf '%s\\n' ${quoteSingle(marker)}`,
     clearAndEcho: (marker) => `clear; printf '%s\\n' ${quoteSingle(marker)}`,
+    trailingWordEcho: (marker) => `printf '%s\\n' ${bareWord(marker)}`,
     longRunningCommand: () => "sleep 30",
   };
 }
