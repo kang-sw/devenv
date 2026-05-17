@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use ws_dashboard_core::{
-    ActionHint, DashboardResourcesView, OpaqueId, ResourcePath, ServerView, ViewState,
-    WorkRootKind, WorkRootStatus, WorkRootView, WorkspaceView,
+    ActionHint, DashboardResourcesView, InstanceKind, InstanceRole, InstanceView,
+    InteractionMode, OpaqueId, ResourcePath, ServerView, ViewState, WorkRootKind,
+    WorkRootStatus, WorkRootView, WorkspaceView,
 };
 
 use crate::resources::DashboardResourcesProvider;
@@ -104,14 +106,21 @@ impl WorkspaceBuilder {
             OpaqueId::from(format!("root-local-{}", stable_path_hash(&discovered.path)));
         let enabled = discovered.status == WorkRootStatus::Online;
 
+        let resource_path = ResourcePath {
+            server_id: self.server_id.clone(),
+            workspace_id: self.id.clone(),
+            work_root_id: work_root_id.clone(),
+            instance_id: None,
+        };
+        let main_instances = if enabled && env::var_os("WS_DASHBOARD_E2E_AGENT_FIXTURE").is_some() {
+            vec![e2e_agent_fixture_instance(&resource_path)]
+        } else {
+            Vec::new()
+        };
+
         self.work_roots.push(WorkRootView {
-            id: work_root_id.clone(),
-            resource_path: ResourcePath {
-                server_id: self.server_id.clone(),
-                workspace_id: self.id.clone(),
-                work_root_id,
-                instance_id: None,
-            },
+            id: work_root_id,
+            resource_path,
             label: label_for_path(&discovered.path),
             kind: discovered.kind,
             status: discovered.status,
@@ -122,7 +131,7 @@ impl WorkspaceBuilder {
                 error: discovered.error,
             },
             compactable: false,
-            main_instances: Vec::new(),
+            main_instances,
             actions: vec![ActionHint {
                 id: if enabled { "openRoot" } else { "reconnect" }.to_owned(),
                 label: if enabled { "Open root" } else { "Reconnect" }.to_owned(),
@@ -154,6 +163,34 @@ impl WorkspaceBuilder {
                 enabled: true,
             }],
         }
+    }
+}
+
+fn e2e_agent_fixture_instance(resource_path: &ResourcePath) -> InstanceView {
+    let instance_id = OpaqueId::from(format!(
+        "instance-e2e-agent-{}",
+        resource_path.work_root_id.as_str()
+    ));
+    InstanceView {
+        id: instance_id.clone(),
+        resource_path: ResourcePath {
+            server_id: resource_path.server_id.clone(),
+            workspace_id: resource_path.workspace_id.clone(),
+            work_root_id: resource_path.work_root_id.clone(),
+            instance_id: Some(instance_id),
+        },
+        role: InstanceRole::Main,
+        kind: InstanceKind::Agent,
+        interaction_mode: InteractionMode::Direct,
+        label: "E2E agent".to_owned(),
+        state: ViewState {
+            status: "ready".to_owned(),
+            loading: false,
+            stale: false,
+            error: None,
+        },
+        sub_instances: Vec::new(),
+        actions: Vec::new(),
     }
 }
 

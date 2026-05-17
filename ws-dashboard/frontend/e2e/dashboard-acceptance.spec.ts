@@ -416,12 +416,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       '.dockview-workbench-tab[data-workbench-close-confirmation="confirmSessionClose"]',
       { hasText: "Agent" },
     );
-    if ((await agentTab.count()) === 0) {
+    if (daemon.mode === "external" && (await agentTab.count()) === 0) {
       note(
-        "agent close: skipped because the daemon fixture exposed no live main agent tab",
+        "agent close: skipped because the external daemon exposed no live main agent tab",
       );
       return;
     }
+    await expect(agentTab).toHaveCount(1);
 
     await agentTab.first().hover();
     await agentTab
@@ -583,7 +584,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       return;
     }
     await openWorkRootInBrowser(page, secondWorkRoot);
-    expect(await visibleWorkbenchGroupIds(page)).toEqual([]);
+    expect(await visibleWorkbenchGroupIds(page)).toEqual(["group-1"]);
 
     const secondFileRow = page.locator(".file-explorer-row", {
       hasText: "second-readme.txt",
@@ -601,7 +602,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
       ),
     ).toHaveAttribute("data-workbench-group-id", "group-2");
-    expect(await visibleWorkbenchGroupIds(page)).toEqual(["group-2"]);
+    expect(await visibleWorkbenchGroupIds(page)).toEqual(["group-1", "group-2"]);
 
     await selectWorkRootInBrowser(page, workRoot);
     await expect(
