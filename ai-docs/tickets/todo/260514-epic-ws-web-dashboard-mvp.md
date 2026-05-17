@@ -107,6 +107,9 @@ The MVP should cover:
   close affordances, insertion/focus policy, empty-state cleanup, and
   preview-to-pinned read-only file behavior after Dockview workbench parity is
   restored and before introducing a richer editor library.
+- `260517-bug-ws-dashboard-editor-scroll-ime-verification` - todo; follow up
+  read-only editor scroll containment and terminal IME composition verification
+  after the tab polish hotfix.
 
 ## Cross-Child Decisions
 

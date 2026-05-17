@@ -135,6 +135,16 @@ without fake default panes. The final implementation includes in-repo visual
 tab icons and pinned/opened badge/accent metadata, preserves close-as-terminate
 for confirmed terminal closes, and keeps cancel paths focus-stable.
 
+#### Edition (bbfeee62) - 2026-05-17
+
+Removed redundant uppercase surface-kind text such as `TERMINAL` and `EDITOR`
+from Dockview workbench tabs so icon plus title carries tab identity, tightened
+local tab spacing, and guarded the terminal keydown fallback against active IME
+composition (`isComposing`, `Process`, and composition lifecycle state). The
+hotfix preserved existing printable fallback behavior because removing it
+regressed browser terminal input. Verification passed `npm run test:terminals`,
+`npm run build`, and `npm run test:browser`.
+
 ### Phase 2: Stabilize tab insertion and focus policy
 
 Define where newly opened file and terminal tabs appear. New tabs should not
