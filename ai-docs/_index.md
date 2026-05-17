@@ -161,6 +161,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | idea | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
+| `260517-feat-ws-dashboard-workroot-activity-live-refresh` | idea | Replace WorkRoot Activity polling hotfix with workRoot-scoped SSE/filewatch refresh |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | idea | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260517-bug-lead-proceed-overbroad-slice` | idea | Investigate conservative lead-proceed implementation slice routing when phase blast radii differ |
 | `260517-bug-ws-dashboard-terminal-focus-browser-gate-regression` | idea | Investigate terminal helper textarea focus loss blocking dashboard browser gate |

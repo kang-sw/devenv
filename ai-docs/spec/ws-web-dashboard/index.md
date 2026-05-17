@@ -260,6 +260,11 @@ The pane displays named-agent projection rows and an explicit empty Running
 Commands section. Real running-command rows remain absent until the async exec
 job model exists.
 
+While the Activity pane is open, the dashboard refreshes recently updated
+named-agent rows and merges them into the existing projection so newly
+registered or called agents appear without a browser reload. The full projection
+remains available for the initial selected-workRoot fetch.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
