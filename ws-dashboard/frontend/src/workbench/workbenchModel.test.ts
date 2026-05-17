@@ -30,6 +30,7 @@ import {
   decideSurfaceCloseConfirmation,
   decideSurfaceOpen,
   decideSurfaceOpenWithDynamicGroups,
+  decideWorkbenchTabClosePresentation,
   defaultPtyLogicalSize,
   preservePtyLogicalSize,
   reserveTerminateCommand,
@@ -967,6 +968,36 @@ assertDeepEqual(
     cancelLabel: null,
   },
   "reversible diagnostics tabs close immediately",
+);
+assertDeepEqual(
+  decideWorkbenchTabClosePresentation("persistentTerminal", {
+    clientX: 320,
+    clientY: 80,
+  }),
+  {
+    type: "requestConfirmation",
+    confirmation: {
+      confirmationPolicy: "confirmSessionClose",
+      presentation: "cursorNearPopover",
+      confirmLabel: "Yes",
+      cancelLabel: "No",
+    },
+    anchor: { clientX: 320, clientY: 80 },
+  },
+  "terminal tab close requests a cursor-anchored confirmation presentation",
+);
+assertDeepEqual(
+  decideWorkbenchTabClosePresentation("viewer", { clientX: 12, clientY: 34 }),
+  {
+    type: "closeImmediately",
+    confirmation: {
+      confirmationPolicy: "none",
+      presentation: "none",
+      confirmLabel: null,
+      cancelLabel: null,
+    },
+  },
+  "reversible viewer tab close has no confirmation presentation",
 );
 assertDeepEqual(
   decideSurfaceClose("persistentTerminal").terminateReservation?.commandId,

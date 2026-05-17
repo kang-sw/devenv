@@ -68,12 +68,28 @@ export type WorkbenchCloseDecision = {
   readonly terminateReservation: WorkbenchTerminateReservation | null;
 };
 
+export type WorkbenchCloseAnchor = {
+  readonly clientX: number;
+  readonly clientY: number;
+};
+
 export type WorkbenchCloseConfirmationDecision = {
   readonly confirmationPolicy: WorkbenchCloseConfirmationPolicy;
   readonly presentation: "none" | "cursorNearPopover";
   readonly confirmLabel: "Yes" | null;
   readonly cancelLabel: "No" | null;
 };
+
+export type WorkbenchTabClosePresentationDecision =
+  | {
+      readonly type: "closeImmediately";
+      readonly confirmation: WorkbenchCloseConfirmationDecision;
+    }
+  | {
+      readonly type: "requestConfirmation";
+      readonly confirmation: WorkbenchCloseConfirmationDecision;
+      readonly anchor: WorkbenchCloseAnchor;
+    };
 
 export type WorkbenchTerminateReservation = {
   readonly commandId: "workbench.lifecycle.terminate";
@@ -253,6 +269,26 @@ export function decideSurfaceCloseConfirmation(
     presentation: "none",
     confirmLabel: null,
     cancelLabel: null,
+  };
+}
+
+export function decideWorkbenchTabClosePresentation(
+  surfaceKind: SurfaceKind,
+  anchor: WorkbenchCloseAnchor,
+  registry: SurfaceRegistry = defaultSurfaceRegistry(),
+): WorkbenchTabClosePresentationDecision {
+  const confirmation = decideSurfaceCloseConfirmation(surfaceKind, registry);
+  if (confirmation.presentation === "cursorNearPopover") {
+    return {
+      type: "requestConfirmation",
+      confirmation,
+      anchor,
+    };
+  }
+
+  return {
+    type: "closeImmediately",
+    confirmation,
   };
 }
 

@@ -31,6 +31,7 @@ export type WorkRootTextFileView = {
 };
 
 export type ReadOnlyFilePaneMode = "preview" | "pinned";
+export type ReadOnlyFileOpenGesture = "singleClick" | "doubleClick";
 
 export type ReadOnlyFilePane = {
   id: string;
@@ -106,6 +107,12 @@ export async function fetchWorkRootTextFile(
   }
 
   return (await response.json()) as WorkRootTextFileView;
+}
+
+export function readOnlyFilePaneModeForOpenGesture(
+  gesture: ReadOnlyFileOpenGesture,
+): ReadOnlyFilePaneMode {
+  return gesture === "singleClick" ? "preview" : "pinned";
 }
 
 export function readOnlyFilePaneLogicalKey(

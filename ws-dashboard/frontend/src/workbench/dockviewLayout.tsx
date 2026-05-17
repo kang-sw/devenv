@@ -71,6 +71,18 @@ type DockviewWorkbenchPanelParams = WorkbenchDockviewPanelParams & {
 const workbenchDockviewComponent = "workbenchPane";
 const workbenchDockviewTabComponent = "workbenchTab";
 
+export type DockviewTabCategoryPresentation =
+  | "dockview-category-chip"
+  | "pinned-left-badge-fallback";
+
+export function dockviewTabCategoryPresentation(
+  category: WorkbenchPaneCategory,
+): DockviewTabCategoryPresentation {
+  return category === "pinned"
+    ? "pinned-left-badge-fallback"
+    : "dockview-category-chip";
+}
+
 export function DockviewWorkbenchLayout({
   groups,
   activePaneByGroup,
@@ -244,6 +256,11 @@ function DockviewWorkbenchTab({
       aria-selected={selected}
       className={`dockview-workbench-tab ${selected ? "dockview-workbench-tab-active" : ""}`}
       data-workbench-pane-category={params.category}
+      data-workbench-tab-category-presentation={dockviewTabCategoryPresentation(
+        params.category,
+      )}
+      data-workbench-tab-close-affordance="hover-only"
+      data-workbench-close-confirmation={registry.closeConfirmationPolicy}
       data-workbench-group-id={params.groupId}
       data-workbench-pane-id={params.paneId}
       role="tab"

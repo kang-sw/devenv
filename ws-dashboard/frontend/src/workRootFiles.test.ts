@@ -13,6 +13,7 @@ import {
   workRootFilesEndpoint,
   readOnlyFilePaneId,
   readOnlyFilePaneLogicalKey,
+  readOnlyFilePaneModeForOpenGesture,
   type DirectoryLoadState,
 } from "./workRootFiles.js";
 
@@ -63,6 +64,16 @@ assertEqual(
   workRootFileReadEndpoint("root/local abc", "docs/read me.md"),
   "/api/dashboard/work-roots/root%2Flocal%20abc/files/read?path=docs%2Fread+me.md",
   "read endpoint encodes opaque workRootId and spaced relative path",
+);
+assertEqual(
+  readOnlyFilePaneModeForOpenGesture("singleClick"),
+  "preview",
+  "single-click file open selects replaceable preview mode",
+);
+assertEqual(
+  readOnlyFilePaneModeForOpenGesture("doubleClick"),
+  "pinned",
+  "double-click file open selects stable pinned mode",
 );
 assertEqual(
   readOnlyFilePaneLogicalKey("root-local-abc", "src/main.rs"),
