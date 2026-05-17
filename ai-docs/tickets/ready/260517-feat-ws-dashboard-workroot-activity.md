@@ -8,6 +8,8 @@ spec:
   - 260517-ws-dashboard-workroot-activity-projection
   - 260517-ws-dashboard-workroot-activity-topbar-badge
   - 260517-ws-dashboard-workroot-activity-pane
+skeletons:
+  phase-1: 43049cb
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
