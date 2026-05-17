@@ -14,9 +14,11 @@ skeletons:
 plans:
   phase-1: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-1
   phase-2: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-2
+  phase-3: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-3
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
+completed: 2026-05-17
 ---
 
 # ws dashboard WorkRoot Activity projection
@@ -153,3 +155,25 @@ ordinary close behavior.
 
 Running-command rows should remain absent or explicitly empty until
 `260513-feat-async-exec-output-reader` lands.
+
+### Result (d025d9d) - 2026-05-17
+
+Implemented the reversible WorkRoot Activity workbench pane. The top-bar
+activity badge now opens or focuses one selected-workRoot Activity pane through
+the dashboard workbench placement policy. New Activity panes default to group 1,
+duplicate badge clicks focus the existing pane without creating duplicates, and
+close detaches the browser view immediately with no confirmation or daemon
+named-agent side effect.
+
+The pane renders the read-only Phase 1 named-agent projection, including summary
+counts, agent status/session/model/current-call metadata, bounded hints and
+diagnostics, empty/no-agent state, and an explicit empty Running Commands
+section. Real running-command rows and agent controls remain deferred to their
+own future tickets.
+
+Verification covered workbench policy, activity helpers, production build, and
+the daemon-served browser gate. Browser evidence covers empty and populated
+Activity pane projections, group-1 placement, duplicate focus/no duplicate,
+immediate close/no confirmation, and the existing terminal/browser acceptance
+flow. One browser-gate run failed later in the known terminal IME area and the
+immediate rerun passed; the Activity pane assertions passed on the green run.

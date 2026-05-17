@@ -110,7 +110,7 @@ The MVP should cover:
 - `260517-bug-ws-dashboard-editor-scroll-ime-verification` - done; follow up
   read-only editor scroll containment plus terminal IME and shell control-key
   fidelity after the tab polish hotfix.
-- `260517-feat-ws-dashboard-workroot-activity` - todo; add a workRoot-owned
+- `260517-feat-ws-dashboard-workroot-activity` - done; add a workRoot-owned
   runtime activity projection with a compact top-bar badge and group-1
   reversible detail pane, starting with read-only named-agent state and
   reserving running commands for the async exec output reader.

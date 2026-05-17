@@ -235,8 +235,7 @@ Running command activity remains absent until the async exec job model exists.
 
 Opened workRoot top bars show a compact activity badge in the existing badge
 row. The badge summarizes named-agent activity counts for the selected workRoot
-and remains a bounded summary-only surface until the detailed WorkRoot Activity
-pane is implemented.
+and opens or focuses the detailed WorkRoot Activity pane.
 
 Adding activity summary does not add a new top-bar row or increase the top-bar
 height. Under constrained widths the badge compacts, truncates, or hides
@@ -244,18 +243,22 @@ secondary text rather than wrapping the toolbar and reducing workbench body
 space. Switching workRoots must not briefly render the previous workRoot's
 activity state.
 
-### 🚧 WorkRoot Activity Pane {#260517-ws-dashboard-workroot-activity-pane}
+### WorkRoot Activity Pane {#260517-ws-dashboard-workroot-activity-pane}
 
-The WorkRoot Activity pane will be a reversible workbench surface showing the
-selected workRoot's detailed runtime activity projection. Closing it will detach
+The WorkRoot Activity pane is a reversible workbench surface showing the
+selected workRoot's detailed runtime activity projection. Closing it detaches
 the browser view immediately without confirmation and without changing daemon
 agent state.
 
-Opening the activity detail from the top-bar badge will focus an existing
-activity pane for the selected workRoot or create one in group 1, the
-agent/terminal-side split. This group-1 placement is an explicit exception for a
-reversible projection surface; general opened/support surfaces continue to use
+Opening the activity detail from the top-bar badge focuses an existing activity
+pane for the selected workRoot or creates one in group 1, the
+agent/terminal-side split. This group-1 placement is an explicit exception for
+a reversible projection surface; general opened/support surfaces continue to use
 their existing support-group placement policy.
+
+The pane displays named-agent projection rows and an explicit empty Running
+Commands section. Real running-command rows remain absent until the async exec
+job model exists.
 
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
