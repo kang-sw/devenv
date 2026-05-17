@@ -163,6 +163,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | idea | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | idea | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
+| `260517-bug-lead-proceed-overbroad-slice` | idea | Investigate conservative lead-proceed implementation slice routing when phase blast radii differ |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260515-bug-git-commit-rename-status-summary` | idea | Fix git.commit ticket-change summaries for edited ticket renames |
