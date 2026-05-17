@@ -1618,6 +1618,18 @@ function WorkbenchShell({
     );
   };
 
+  function openWorkRootActivityPane() {
+    if (!workbenchModel) {
+      return;
+    }
+    // CONTRACT: The top-bar Activity badge is the selected-workRoot entrypoint
+    // for one reversible WorkRoot Activity pane. The implementation slice must
+    // feed this logical key into decideSurfaceOpenWithDynamicGroups so duplicate
+    // opens focus the existing pane and new opens use policy-owned group-1
+    // placement.
+    void workRootActivityPaneLogicalKey(workbenchModel.root.id);
+  }
+
   if (loading && !resources) {
     return <StatusPane title="Loading" detail="workbench resources" />;
   }
@@ -1652,6 +1664,7 @@ function WorkbenchShell({
         server={resources.server}
         workspace={workspace}
         onCommand={onCommand}
+        onOpenActivity={openWorkRootActivityPane}
         onCreateTerminal={createTerminalPane}
       />
       {error ? (
@@ -1738,6 +1751,7 @@ function WorkbenchToolbar({
   commandLog,
   activity,
   onCommand,
+  onOpenActivity,
   onCreateTerminal,
 }: {
   server: ServerView;
@@ -1747,6 +1761,7 @@ function WorkbenchToolbar({
   commandLog: CommandEntry[];
   activity: WorkRootActivityBadgeView;
   onCommand: (commandId: string, payload: CommandPayload) => void;
+  onOpenActivity: () => void;
   onCreateTerminal: () => void;
 }) {
   const toggles = [
@@ -1766,7 +1781,17 @@ function WorkbenchToolbar({
       </div>
       <div className="workbench-toolbar-meta">
         <StateBadge state={root.state} />
-        <WorkbenchActivityBadge activity={activity} />
+        <WorkbenchActivityBadge
+          activity={activity}
+          onOpenActivity={() => {
+            onCommand("workbench.openActivity", {
+              type: "action",
+              label: "Open WorkRoot Activity",
+              entityId: root.id,
+            });
+            onOpenActivity();
+          }}
+        />
         <span className="meta-chip">{kindLabel(root.kind)}</span>
         <span className="meta-chip">{root.status}</span>
         {commandLog[0] ? (
@@ -1834,8 +1859,10 @@ function WorkbenchToolbar({
 
 function WorkbenchActivityBadge({
   activity,
+  onOpenActivity,
 }: {
   activity: WorkRootActivityBadgeView;
+  onOpenActivity: () => void;
 }) {
   // CONTRACT: Phase 2 renders a compact named-agent summary chip inside the
   // existing toolbar metadata row. It is a summary/entrypoint only: no detail
@@ -1844,13 +1871,15 @@ function WorkbenchActivityBadge({
   // selected-workRoot Activity pane. The click handler must route through
   // dashboard workbench placement policy, focus duplicate panes, and keep the
   // pane reversible/read-only.
-  // HOLE: onOpenActivity callback and button semantics.
   return (
-    <span
+    <button
       className={`meta-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
+      data-command-id="workbench.openActivity"
       data-activity-tone={activity.tone}
+      type="button"
       title={activity.title}
-      aria-label={`Agent activity: ${activity.title}`}
+      aria-label={`Open WorkRoot Activity: ${activity.title}`}
+      onClick={onOpenActivity}
     >
       <span className="workbench-activity-badge-dot" aria-hidden="true" />
       <span className="workbench-activity-badge-label">{activity.label}</span>
@@ -1859,8 +1888,12 @@ function WorkbenchActivityBadge({
           {activity.summary}
         </span>
       ) : null}
-    </span>
+    </button>
   );
+}
+
+function workRootActivityPaneLogicalKey(workRootId: string) {
+  return surfaceLogicalKey("workRootActivity", workRootId);
 }
 
 function toolbarActions(

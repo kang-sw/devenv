@@ -500,10 +500,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   // duplicate badge clicks do not create duplicate panes, the pane closes
   // immediately with no confirmation popover, and running-command rows are
   // absent or explicitly empty until the async exec source exists.
-  // HINT: Assert Dockview markers
-  // `[data-surface-kind="workRootActivity"]` and
-  // `[data-workbench-group-id="group-1"]` rather than raw Dockview internals.
-  // HOLE: final pane title/body selectors.
+  // Browser-gate selectors for the implementation slice:
+  // - opener: `[data-command-id="workbench.openActivity"].workbench-activity-badge`
+  // - pane: `[data-surface-kind="workRootActivity"][data-workbench-group-id="group-1"]`
+  // - tab/title: `.workbench-tab-title`, `aria-label="Activity: WorkRoot Activity"`
+  // - body: `.workroot-activity-pane`
+  // - empty running commands: `[data-running-commands-state="empty"]`
 
   // --- Long explorer content stays inside its pane, not the document -----
   await test.step("long explorer content stays within the viewport", async () => {
