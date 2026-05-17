@@ -10,6 +10,10 @@ spec:
   - 260516-ws-web-dashboard-file-open-placement-policy
   - 260516-ws-web-dashboard-terminal-tab-selection-and-empty-initial-state
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
+skeletons:
+  phase-1: 9c6e642
+  phase-2: 9c6e642
+  phase-3: 9c6e642
 related-mental-model:
   - ws-web-dashboard
 ---
