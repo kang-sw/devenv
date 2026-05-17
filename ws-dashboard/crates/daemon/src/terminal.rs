@@ -39,6 +39,8 @@ pub enum TerminalPlatform {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalShellSource {
     ShellEnv,
+    PwshPath,
+    WindowsPowerShellPath,
     ComspecEnv,
     Fallback,
 }
@@ -54,27 +56,80 @@ pub fn select_terminal_shell(
     platform: TerminalPlatform,
     env: impl Fn(&str) -> Option<std::ffi::OsString>,
 ) -> TerminalShellSelection {
+    select_terminal_shell_with_detector(platform, &env, |program| {
+        windows_program_on_path(program, &env)
+    })
+}
+
+fn select_terminal_shell_with_detector<E, D>(
+    platform: TerminalPlatform,
+    env: &E,
+    windows_program_on_path: D,
+) -> TerminalShellSelection
+where
+    E: Fn(&str) -> Option<std::ffi::OsString>,
+    D: Fn(&str) -> Option<PathBuf>,
+{
     // CONTRACT: Shell selection must be explicit and testable for Unix and
     // Windows without relying on compile-time cfg branches inside tests.
-    // HINT: Unix uses SHELL then /bin/sh; Windows uses COMSPEC then cmd.exe.
-    let (key, source, fallback) = match platform {
-        TerminalPlatform::Unix => ("SHELL", TerminalShellSource::ShellEnv, "/bin/sh"),
-        TerminalPlatform::Windows => ("COMSPEC", TerminalShellSource::ComspecEnv, "cmd.exe"),
-    };
+    // HINT: Unix uses SHELL then /bin/sh; Windows prefers PowerShell, then
+    // COMSPEC/cmd.exe for compatibility.
+    if platform == TerminalPlatform::Unix {
+        if let Some(program) = env("SHELL").filter(|value| !value.is_empty()) {
+            return TerminalShellSelection {
+                platform,
+                program: PathBuf::from(program),
+                source: TerminalShellSource::ShellEnv,
+            };
+        }
 
-    if let Some(program) = env(key).filter(|value| !value.is_empty()) {
+        return TerminalShellSelection {
+            platform,
+            program: PathBuf::from("/bin/sh"),
+            source: TerminalShellSource::Fallback,
+        };
+    }
+
+    if let Some(program) = windows_program_on_path("pwsh.exe") {
+        return TerminalShellSelection {
+            platform,
+            program,
+            source: TerminalShellSource::PwshPath,
+        };
+    }
+
+    if let Some(program) = windows_program_on_path("powershell.exe") {
+        return TerminalShellSelection {
+            platform,
+            program,
+            source: TerminalShellSource::WindowsPowerShellPath,
+        };
+    }
+
+    if let Some(program) = env("COMSPEC").filter(|value| !value.is_empty()) {
         return TerminalShellSelection {
             platform,
             program: PathBuf::from(program),
-            source,
+            source: TerminalShellSource::ComspecEnv,
         };
     }
 
     TerminalShellSelection {
         platform,
-        program: PathBuf::from(fallback),
+        program: PathBuf::from("cmd.exe"),
         source: TerminalShellSource::Fallback,
     }
+}
+
+fn windows_program_on_path<E>(program: &str, env: &E) -> Option<PathBuf>
+where
+    E: Fn(&str) -> Option<std::ffi::OsString>,
+{
+    env("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|directory| directory.join(program))
+            .find(|candidate| candidate.is_file())
+    })
 }
 
 #[derive(Clone, Default)]
@@ -751,7 +806,7 @@ mod terminal_portability_skeleton_tests {
 
     #[test]
     fn terminal_shell_selection_contract_targets() {
-        // CONTRACT: Fill executable assertions for SHELL, COMSPEC, Unix
+        // CONTRACT: Fill executable assertions for SHELL, PowerShell, COMSPEC, Unix
         // fallback, Windows fallback, invalid/missing env values where
         // practical, and spawn cwd diagnostics.
         let unix_env = |key: &str| (key == "SHELL").then(|| std::ffi::OsString::from("/bin/zsh"));
@@ -768,7 +823,40 @@ mod terminal_portability_skeleton_tests {
             (key == "COMSPEC").then(|| std::ffi::OsString::from(r"C:\Windows\System32\cmd.exe"))
         };
         assert_eq!(
-            select_terminal_shell(TerminalPlatform::Windows, windows_env),
+            select_terminal_shell_with_detector(
+                TerminalPlatform::Windows,
+                &windows_env,
+                |program| {
+                    (program == "pwsh.exe")
+                        .then(|| PathBuf::from(r"C:\Program Files\PowerShell\7\pwsh.exe"))
+                }
+            ),
+            TerminalShellSelection {
+                platform: TerminalPlatform::Windows,
+                program: PathBuf::from(r"C:\Program Files\PowerShell\7\pwsh.exe"),
+                source: TerminalShellSource::PwshPath,
+            }
+        );
+        assert_eq!(
+            select_terminal_shell_with_detector(
+                TerminalPlatform::Windows,
+                &windows_env,
+                |program| {
+                    (program == "powershell.exe").then(|| {
+                        PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+                    })
+                }
+            ),
+            TerminalShellSelection {
+                platform: TerminalPlatform::Windows,
+                program: PathBuf::from(
+                    r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+                ),
+                source: TerminalShellSource::WindowsPowerShellPath,
+            }
+        );
+        assert_eq!(
+            select_terminal_shell_with_detector(TerminalPlatform::Windows, &windows_env, |_| None),
             TerminalShellSelection {
                 platform: TerminalPlatform::Windows,
                 program: PathBuf::from(r"C:\Windows\System32\cmd.exe"),

@@ -47,7 +47,7 @@ function profileFor(platform: TerminalCommandPlatform, shellHint?: string): Term
   if (normalized.includes("cmd.exe") || normalized === "cmd" || normalized === "cmd-exe") {
     return "cmd-exe";
   }
-  return platform === "win32" ? "cmd-exe" : "unix-sh";
+  return platform === "win32" ? "powershell" : "unix-sh";
 }
 
 export function terminalCommandPlanForPlatform(

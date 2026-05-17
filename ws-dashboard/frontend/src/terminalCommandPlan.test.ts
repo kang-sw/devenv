@@ -54,6 +54,9 @@ assertIncludes(cmd.clearAndEcho("CLEAR-OK"), "cls", "cmd clear command clears fi
 assertIncludes(cmd.longRunningCommand(), "ping", "cmd long-running command uses built-in command");
 assertThrows(() => cmd.scrollLines("BAD", 501), "cmd rejects excessive count");
 
+const defaultWindows = terminalCommandPlanForPlatform("win32");
+assertEqual(defaultWindows.profile, "powershell", "Windows profile defaults to PowerShell");
+
 const powershell = terminalCommandPlanForPlatform("win32", "PowerShell");
 assertEqual(powershell.profile, "powershell", "PowerShell profile selected");
 assertIncludes(powershell.echo("PS-MARKER"), "PS-MARKER", "PowerShell echo includes marker");
