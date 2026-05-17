@@ -281,9 +281,9 @@ Read-only text pane scroll containment and terminal input fidelity evidence are
 browser-level Playwright evidence against the daemon-served frontend. The gate
 covers long read-only file scrolling without top-level document scroll,
 shell-visible `ctrl-u` and `ctrl-w` line-editing behavior, WebSocket input
-frames for those controls, and a synthetic IME composition guard proving that
-composition-in-progress fallback keystrokes are not forwarded as raw terminal
-input.
+frames for those controls, committed Hangul text input reaching the shell, and
+a synthetic IME composition guard proving that composition-in-progress fallback
+keystrokes are not forwarded as raw terminal input.
 
 Pure TypeScript helper tests, Vite builds, route tests, curl evidence, and
 fixture-only dogfood do not by themselves close UI-facing dashboard work. When
@@ -505,11 +505,12 @@ where safe, Ctrl-L or clear-screen behavior, paste, and ordinary prompt editing
 inside a real shell.
 {#260516-ws-web-dashboard-terminal-websocket-input-fidelity}
 
-Focused terminal panes preserve native terminal input fidelity for IME fallback
-guarding and shell line editing. Composition-in-progress keystrokes are not
-forwarded as raw bytes by fallback browser handlers, and shell editing controls
-such as `ctrl-u` and `ctrl-w` produce their native shell-visible effects through
-the live terminal path.
+Focused terminal panes preserve native terminal input fidelity for committed
+Hangul text, IME fallback guarding, and shell line editing. Committed Hangul
+text reaches the shell through the live terminal path,
+composition-in-progress keystrokes are not forwarded as raw bytes by fallback
+browser handlers, and shell editing controls such as `ctrl-u` and `ctrl-w`
+produce their native shell-visible effects through the live terminal path.
 {#260517-ws-dashboard-terminal-ime-and-line-editing-fidelity}
 
 ## Terminal Shell Selection Portability {#260516-ws-web-dashboard-terminal-shell-selection-portability}
