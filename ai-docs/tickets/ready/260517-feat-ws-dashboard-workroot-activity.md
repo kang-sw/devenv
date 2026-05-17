@@ -12,6 +12,7 @@ skeletons:
   phase-1: 43049cb
 plans:
   phase-1: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-1
+  phase-2: 2026-05/17-260517-feat-ws-dashboard-workroot-activity-phase-2
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
@@ -122,6 +123,21 @@ The top bar must keep its current height. Add browser evidence that the badge
 does not introduce a new row, does not wrap the toolbar under the covered
 viewports, and does not reduce terminal/workbench usable height beyond the
 existing toolbar footprint.
+
+### Result (7d22fa3) - 2026-05-17
+
+Implemented the compact selected-workRoot named-agent badge in the existing
+toolbar metadata row. The frontend consumes the Phase 1 activity route, renders
+bounded loading/error/ready summaries, keeps the badge summary-only, and avoids
+stale prior-workRoot activity during root switches.
+
+The browser gate now asserts that the badge stays inside the existing metadata
+row, preserves toolbar height at wide and constrained widths, and hides
+secondary badge text at 480px instead of wrapping. A pre-existing terminal focus
+browser-gate failure reproduced on the Phase 2 baseline; the branch includes a
+narrow terminal focus watchdog hotfix and follow-up ticket reconciliation so the
+full dashboard browser gate can pass while preserving the remaining terminal
+focus stabilization work as follow-up.
 
 ### Phase 3: Add WorkRoot Activity workbench pane
 

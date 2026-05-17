@@ -231,16 +231,18 @@ and unavailable or diagnostic states for stale or malformed records. It does not
 provide agent control actions such as start, interrupt, cancel, erase, or retry.
 Running command activity remains absent until the async exec job model exists.
 
-### 🚧 WorkRoot Activity Top-Bar Badge {#260517-ws-dashboard-workroot-activity-topbar-badge}
+### WorkRoot Activity Top-Bar Badge {#260517-ws-dashboard-workroot-activity-topbar-badge}
 
-Opened workRoot top bars will show a compact activity badge in the existing
-badge row. The badge will summarize named-agent activity counts and act as an
-entrypoint to the detailed WorkRoot Activity pane.
+Opened workRoot top bars show a compact activity badge in the existing badge
+row. The badge summarizes named-agent activity counts for the selected workRoot
+and remains a bounded summary-only surface until the detailed WorkRoot Activity
+pane is implemented.
 
-Adding activity summary must not add a new top-bar row or increase the top-bar
-height. Under constrained widths the badge may compact, truncate, or hide
+Adding activity summary does not add a new top-bar row or increase the top-bar
+height. Under constrained widths the badge compacts, truncates, or hides
 secondary text rather than wrapping the toolbar and reducing workbench body
-space.
+space. Switching workRoots must not briefly render the previous workRoot's
+activity state.
 
 ### 🚧 WorkRoot Activity Pane {#260517-ws-dashboard-workroot-activity-pane}
 

@@ -173,9 +173,10 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260517-feat-ws-dashboard-workroot-activity` - implement Phase 1 first:
-  done. Next slice is Phase 2: top-bar activity badge projection using the
-  daemon projection from Phase 1 while preserving toolbar height.
+- `260517-feat-ws-dashboard-workroot-activity` - Phase 1 and Phase 2 are done.
+  Next slice is Phase 3: add the reversible WorkRoot Activity workbench pane,
+  badge click/focus behavior, group-1 placement, duplicate-open focus, and
+  close-without-confirmation browser evidence.
 
 ## Session Notes
 
