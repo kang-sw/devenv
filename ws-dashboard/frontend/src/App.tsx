@@ -2128,6 +2128,9 @@ function TerminalPaneBody({
     window.setTimeout(() => {
       if (keepTerminalFocusRef.current && containerRef.current?.offsetParent) {
         terminalRef.current?.focus();
+        containerRef.current
+          ?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+          ?.focus();
       }
     }, 0);
   };
@@ -2356,10 +2359,26 @@ function TerminalPaneBody({
     const observer = new ResizeObserver(scheduleResizeForward);
     observer.observe(container);
     window.addEventListener("resize", scheduleResizeForward);
+    const focusWatchdog = window.setInterval(() => {
+      if (!keepTerminalFocusRef.current) {
+        return;
+      }
+      if (!container.offsetParent) {
+        return;
+      }
+      if (!liveRef.current.actions.isActivePane(liveRef.current.pane)) {
+        return;
+      }
+      if (container.contains(document.activeElement)) {
+        return;
+      }
+      refocusActiveTerminal();
+    }, 100);
 
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", scheduleResizeForward);
+      window.clearInterval(focusWatchdog);
       if (resizeTimer !== null) {
         window.clearTimeout(resizeTimer);
       }
