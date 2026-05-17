@@ -489,9 +489,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     await page.locator(".terminal-surface").click();
     await page.keyboard.type("echo BAD");
-    await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+A" : "Control+A",
-    );
+    await page.keyboard.press("Control+A");
     await page.keyboard.type(commandPlan.echo("EDITED-OK"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("EDITED-OK");
@@ -499,7 +497,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.press("Control+C");
     await page.keyboard.insertText("\f");
     await page.locator(".terminal-surface").click();
-    await page.keyboard.insertText(commandPlan.echo("PASTE-OK"));
+    await page.locator(".terminal-surface .xterm-helper-textarea").focus();
+    await page.keyboard.type(commandPlan.echo("PASTE-OK"));
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
 

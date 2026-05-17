@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -127,6 +127,12 @@ export function App() {
     } | null>(null);
   const [readOnlyFilePaneOrderByGroup, setReadOnlyFilePaneOrderByGroup] =
     useState<WorkbenchPaneOrder>({});
+  const [workbenchGroupsByRoot, setWorkbenchGroupsByRoot] = useState<
+    Record<string, ReadonlyArray<{ id: string; label: string }>>
+  >({});
+  const [paneOrderByRoot, setPaneOrderByRoot] = useState<
+    Record<string, WorkbenchPaneOrder>
+  >({});
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
 
@@ -215,7 +221,12 @@ export function App() {
     (workRoot: WorkRootView, entry: WorkRootFileEntryView) => {
       const pane = createLoadingReadOnlyFilePane(workRoot.id, entry.path);
       const placement = decideSurfaceOpenWithDynamicGroups(
-        readOnlyFilePlacementState(readOnlyFilePanes),
+        readOnlyFilePlacementState(
+          readOnlyFilePanes,
+          workbenchGroupsByRoot[workRoot.id] ?? initialWorkbenchGroups,
+          paneOrderByRoot[workRoot.id] ?? {},
+          readOnlyFilePaneOrderByGroup,
+        ),
         {
           surfaceKind: "editor",
           logicalKey: surfaceLogicalKey("editor", workRoot.id, entry.path),
@@ -264,7 +275,12 @@ export function App() {
           }));
         });
     },
-    [readOnlyFilePanes],
+    [
+      paneOrderByRoot,
+      readOnlyFilePaneOrderByGroup,
+      readOnlyFilePanes,
+      workbenchGroupsByRoot,
+    ],
   );
 
   const executeCommand = useCallback(
@@ -333,7 +349,11 @@ export function App() {
             resources={resources}
             selectedEntity={selectedEntity}
             selection={workbenchSelection}
+            workbenchGroupsByRoot={workbenchGroupsByRoot}
+            paneOrderByRoot={paneOrderByRoot}
             onCommand={executeCommand}
+            onWorkbenchGroupsByRootChange={setWorkbenchGroupsByRoot}
+            onPaneOrderByRootChange={setPaneOrderByRoot}
             readOnlyFilePanes={Object.values(readOnlyFilePanes)}
             readOnlyFilePaneOrderByGroup={readOnlyFilePaneOrderByGroup}
             activeReadOnlyFilePaneRequest={activeReadOnlyFilePaneRequest}
@@ -872,6 +892,10 @@ function WorkbenchShell({
   readOnlyFilePanes,
   readOnlyFilePaneOrderByGroup,
   activeReadOnlyFilePaneRequest,
+  workbenchGroupsByRoot,
+  paneOrderByRoot,
+  onWorkbenchGroupsByRootChange,
+  onPaneOrderByRootChange,
 }: {
   resources: DashboardResourcesView | null;
   selection: WorkbenchSelection | null;
@@ -883,16 +907,21 @@ function WorkbenchShell({
   readOnlyFilePanes: ReadOnlyFilePane[];
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder;
   activeReadOnlyFilePaneRequest: { paneId: string; sequence: number } | null;
-}) {
-  const [workbenchGroups, setWorkbenchGroups] = useState<
+  workbenchGroupsByRoot: Record<
+    string,
     ReadonlyArray<{ id: string; label: string }>
-  >(initialWorkbenchGroups);
+  >;
+  paneOrderByRoot: Record<string, WorkbenchPaneOrder>;
+  onWorkbenchGroupsByRootChange: Dispatch<
+    SetStateAction<Record<string, ReadonlyArray<{ id: string; label: string }>>>
+  >;
+  onPaneOrderByRootChange: Dispatch<
+    SetStateAction<Record<string, WorkbenchPaneOrder>>
+  >;
+}) {
   const [activePaneByGroup, setActivePaneByGroup] = useState<
     Record<string, string>
   >({});
-  const [paneOrderByGroup, setPaneOrderByGroup] = useState<WorkbenchPaneOrder>(
-    {},
-  );
   const [terminalPanes, setTerminalPanes] = useState<
     Record<string, TerminalPaneState>
   >({});
@@ -910,6 +939,13 @@ function WorkbenchShell({
   >(null);
   const focusedTerminalPaneIdRef = useRef<string | null>(null);
   focusedTerminalPaneIdRef.current = focusedTerminalPaneId;
+  const selectedWorkRootId = selection?.root.id ?? null;
+  const workbenchGroups = selectedWorkRootId
+    ? (workbenchGroupsByRoot[selectedWorkRootId] ?? initialWorkbenchGroups)
+    : initialWorkbenchGroups;
+  const paneOrderByGroup = selectedWorkRootId
+    ? (paneOrderByRoot[selectedWorkRootId] ?? {})
+    : {};
 
   const workbenchModel =
     resources && selection
@@ -969,7 +1005,13 @@ function WorkbenchShell({
           ),
         );
         setTerminalPaneOrderByGroup((current) =>
-          placeTerminalSessions(current, terminalPanes, sessions),
+          placeTerminalSessions(
+            current,
+            terminalPanes,
+            sessions,
+            workbenchGroups,
+            paneOrderByGroup,
+          ),
         );
       })
       .catch(() => undefined);
@@ -1133,7 +1175,13 @@ function WorkbenchShell({
           [pane.logicalKey]: pane,
         }));
         setTerminalPaneOrderByGroup((current) =>
-          placeTerminalSessions(current, terminalPanes, [session]),
+          placeTerminalSessions(
+            current,
+            terminalPanes,
+            [session],
+            workbenchGroups,
+            paneOrderByGroup,
+          ),
         );
         setFocusedTerminalPaneId(pane.paneId);
         setActiveTerminalPaneRequest({
@@ -1279,16 +1327,23 @@ function WorkbenchShell({
         dynamicTargetGroup,
       },
     );
-    setWorkbenchGroups((current) =>
-      result.groups.map((group, index) => ({
-        id: group.id,
-        label:
-          group.label ??
-          current.find((candidate) => candidate.id === group.id)?.label ??
-          `group ${index + 1}`,
-      })),
-    );
-    setPaneOrderByGroup(result.paneOrderByGroup);
+    if (workbenchModel) {
+      onWorkbenchGroupsByRootChange((currentByRoot) => ({
+        ...currentByRoot,
+        [workbenchModel.root.id]: result.groups.map((group, index) => ({
+          id: group.id,
+          label:
+            group.label ??
+            workbenchGroups.find((candidate) => candidate.id === group.id)
+              ?.label ??
+            `group ${index + 1}`,
+        })),
+      }));
+      onPaneOrderByRootChange((currentByRoot) => ({
+        ...currentByRoot,
+        [workbenchModel.root.id]: result.paneOrderByGroup,
+      }));
+    }
     setActivePaneByGroup(result.activePaneByGroup);
   };
 
@@ -1617,9 +1672,16 @@ function placeTerminalSessions(
   current: WorkbenchPaneOrder,
   existingPanes: Record<string, TerminalPaneState>,
   sessions: TerminalSessionView[],
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
 ): WorkbenchPaneOrder {
   let next = { ...current };
-  let placementState = terminalPlacementState(existingPanes);
+  let placementState = terminalPlacementState(
+    existingPanes,
+    groups,
+    workbenchPaneOrderByGroup,
+    current,
+  );
   for (const session of sessions) {
     const decision = decideSurfaceOpenWithDynamicGroups(placementState, {
       surfaceKind: "persistentTerminal",
@@ -1655,17 +1717,25 @@ function placeTerminalSessions(
 
 function terminalPlacementState(
   panesByLogicalKey: Record<string, TerminalPaneState>,
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
+  terminalPaneOrderByGroup: WorkbenchPaneOrder,
 ): WorkbenchPlacementState {
+  const firstGroupId = groups[0]?.id ?? "group-1";
   return {
-    groups: [
-      { groupId: workbenchGroupId("group-1") },
-      { groupId: workbenchGroupId("group-2") },
-    ],
-    focusedGroupId: workbenchGroupId("group-1"),
+    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
+    focusedGroupId: workbenchGroupId(firstGroupId),
     attachments: Object.values(panesByLogicalKey).map((pane) => ({
       attachmentId:
         pane.paneId as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId("group-1"),
+      groupId: workbenchGroupId(
+        groupIdForPaneOrder(
+          pane.paneId,
+          workbenchPaneOrderByGroup,
+          terminalPaneOrderByGroup,
+          firstGroupId,
+        ),
+      ),
       surfaceKind: "persistentTerminal",
       logicalKey: surfaceLogicalKey(
         "persistentTerminal",
@@ -2116,20 +2186,45 @@ function terminalScreenFitsVisibleBox(container: HTMLElement) {
 
 function readOnlyFilePlacementState(
   panesByLogicalKey: Record<string, ReadOnlyFilePane>,
+  groups: ReadonlyArray<{ id: string; label: string }>,
+  workbenchPaneOrderByGroup: WorkbenchPaneOrder,
+  readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
 ): WorkbenchPlacementState {
+  const fallbackGroupId = groups[1]?.id ?? groups[0]?.id ?? "group-2";
   return {
-    groups: [
-      { groupId: workbenchGroupId("group-1") },
-      { groupId: workbenchGroupId("group-2") },
-    ],
+    groups: groups.map((group) => ({ groupId: workbenchGroupId(group.id) })),
     attachments: Object.values(panesByLogicalKey).map((pane) => ({
       attachmentId:
         pane.id as WorkbenchPlacementState["attachments"][number]["attachmentId"],
-      groupId: workbenchGroupId("group-2"),
+      groupId: workbenchGroupId(
+        groupIdForPaneOrder(
+          pane.id,
+          workbenchPaneOrderByGroup,
+          readOnlyFilePaneOrderByGroup,
+          fallbackGroupId,
+        ),
+      ),
       surfaceKind: "editor",
       logicalKey: surfaceLogicalKey("editor", pane.workRootId, pane.path),
     })),
   };
+}
+
+function groupIdForPaneOrder(
+  paneId: string,
+  primaryOrderByGroup: WorkbenchPaneOrder,
+  fallbackOrderByGroup: WorkbenchPaneOrder,
+  fallbackGroupId: string,
+): string {
+  return (
+    Object.entries(primaryOrderByGroup).find(([, paneIds]) =>
+      paneIds.includes(paneId),
+    )?.[0] ??
+    Object.entries(fallbackOrderByGroup).find(([, paneIds]) =>
+      paneIds.includes(paneId),
+    )?.[0] ??
+    fallbackGroupId
+  );
 }
 
 function readOnlyWorkbenchPanesByGroup(
