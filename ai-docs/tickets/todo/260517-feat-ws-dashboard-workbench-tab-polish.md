@@ -6,6 +6,7 @@ related:
   260516-epic-ws-web-dashboard-workroot-io-substrate: introduced read-only file panes and live terminal panes under opened workRoots
   260516-bug-ws-web-dashboard-ui-acceptance-recovery: recovered baseline terminal/file explorer usability and browser visual gates
   260517-bug-ws-dashboard-dockview-workbench-parity: prerequisite corrective work to make Dockview the visible workbench layout substrate before further tab polish
+  260517-bug-ws-dashboard-dockview-dynamic-groups: dynamic split-group behavior should land before tab polish that depends on group placement and movement semantics
 spec:
   - 260516-ws-web-dashboard-workroot-workbench-substrate
   - 260516-ws-web-dashboard-readonly-text-pane
@@ -35,6 +36,9 @@ This ticket depends on `260517-bug-ws-dashboard-dockview-workbench-parity`.
 Do not implement these polish behaviors on top of the current custom
 React/CSS/HTML5-drag tab engine; first correct the substrate so Dockview owns
 the visible workbench groups, tabs, and pane layout behind dashboard policy.
+It also depends on `260517-bug-ws-dashboard-dockview-dynamic-groups` for split
+group semantics: tab polish should not encode fixed `primary`/`support`
+assumptions if Dockview dynamic groups are still missing.
 
 ## Decisions
 
@@ -46,6 +50,9 @@ the visible workbench groups, tabs, and pane layout behind dashboard policy.
 - Treat Dockview parity as a hard prerequisite. This ticket should extend the
   Dockview-backed shell, not preserve or further entrench the custom tab/split
   implementation.
+- Treat dynamic group support as a prerequisite for placement-sensitive tab
+  polish. Close, insertion, and preview behavior should operate on the dynamic
+  group model rather than on fixed primary/support group names.
 - Treat preview mode as frontend workbench policy: a single-click preview may be
   replaced by the next preview open, while a double-click pins the file as a
   normal opened tab.

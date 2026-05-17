@@ -100,6 +100,9 @@ The MVP should cover:
 - `260517-bug-ws-dashboard-dockview-workbench-parity` - done; corrective
   substrate work to make Dockview the visible workbench layout owner while
   preserving recovered file and terminal pane behavior.
+- `260517-bug-ws-dashboard-dockview-dynamic-groups` - todo; make Dockview split
+  drops create durable dynamic dashboard groups, with initial two-group defaults
+  and constrained automatic placement policy.
 - `260517-feat-ws-dashboard-workbench-tab-polish` - todo; polish workbench tab
   close affordances, insertion/focus policy, empty-state cleanup, and
   preview-to-pinned read-only file behavior after Dockview workbench parity is
