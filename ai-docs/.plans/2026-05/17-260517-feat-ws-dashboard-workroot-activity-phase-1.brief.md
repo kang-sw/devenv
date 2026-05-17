@@ -87,7 +87,7 @@ Required route:
 Required verification:
 - `cargo check -p ws-dashboard-daemon`
 - `cargo test -p ws-dashboard-core activity::tests::work_root_activity_view_serializes_camel_case_without_host_internals`
-- `cargo test -p ws-dashboard-daemon work_root_activity_route`
+- `cargo test -p ws-dashboard-daemon work_root_activity`
 - `npm run test:work-root-activity`
 - `git diff --check`
 
