@@ -772,6 +772,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await page.keyboard.press("Enter");
     await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
 
+    await inputTarget.focus();
+    await page.keyboard.insertText(commandPlan.echo("한글-OK"));
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".xterm-rows")).toContainText("한글-OK");
+
     // CONTRACT: Focused terminal panes preserve native shell line-editing
     // control bytes through the live xterm/WebSocket input path. `ctrl-u`
     // clears the current command line and `ctrl-w` deletes the previous word.
@@ -852,7 +857,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note(
       `terminal WebSocket: ${terminalSocketUrls[0]} connected; HTTP output polls stayed at ` +
         `${pollsAfterSocket} while connected; input/echo rendered in ${echoMs}ms with Backspace, cursor movement, edit, history, ` +
-        "Ctrl-C, ctrl-u, ctrl-w, clear-screen control rendering/recovery, paste, IME composition guard, and no document scroll",
+        "Ctrl-C, ctrl-u, ctrl-w, clear-screen control rendering/recovery, paste, committed Hangul input, IME composition guard, and no document scroll",
     );
   });
 
