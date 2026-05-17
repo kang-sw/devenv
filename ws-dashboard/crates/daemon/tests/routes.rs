@@ -1177,6 +1177,18 @@ fn run_git(path: &Path, args: &[&str]) {
 
 fn init_git_repo(path: &Path) {
     run_git(path, &["init"]);
+    run_git(path, &["config", "user.email", "ws-dashboard@example.local"]);
+    run_git(path, &["config", "user.name", "ws dashboard"]);
+}
+
+fn skip_without_git(test_name: &str) -> bool {
+    if git_available() {
+        return false;
+    }
+    // Visible signal so a git-less environment does not hide this coverage
+    // behind a silently-green result.
+    eprintln!("SKIP {test_name}: the `git` binary is unavailable");
+    true
 }
 
 fn write_agent_metadata(agents_dir: &Path, agent_key: &str, agent_json: &serde_json::Value) {
@@ -1228,7 +1240,7 @@ async fn fetch_work_root_activity(
 
 #[tokio::test]
 async fn work_root_activity_route_projects_named_agent_records() {
-    if !git_available() {
+    if skip_without_git("work_root_activity_route_projects_named_agent_records") {
         return;
     }
     let root = temp_fixture_path("work-root-activity-records");
@@ -1289,6 +1301,29 @@ async fn work_root_activity_route_projects_named_agent_records() {
 
     write_agent_metadata(
         &agents_dir,
+        "planner",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "planner",
+            "backend": "codex",
+            "status": "blocked",
+            "last_call_at": "2026-05-17T09:30:00Z"
+        }),
+    );
+
+    write_agent_metadata(
+        &agents_dir,
+        "retired",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "retired",
+            "backend": "gemini",
+            "status": "erased"
+        }),
+    );
+
+    write_agent_metadata(
+        &agents_dir,
         "tester",
         &serde_json::json!({
             "schema_version": 1,
@@ -1332,51 +1367,64 @@ async fn work_root_activity_route_projects_named_agent_records() {
     assert_eq!(
         value["summary"],
         serde_json::json!({
-            "total": 3,
+            "total": 5,
             "active": 1,
-            "blocked": 0,
+            "blocked": 1,
             "failed": 1,
             "unavailable": 0
         })
     );
 
     let agents = value["agents"].as_array().expect("activity agents array");
-    assert_eq!(agents.len(), 3);
+    assert_eq!(agents.len(), 5);
+    let agent_row = |agent_id: &str| -> &serde_json::Value {
+        agents
+            .iter()
+            .find(|agent| agent["agentId"] == agent_id)
+            .unwrap_or_else(|| panic!("missing agent row {agent_id}"))
+    };
 
-    // Rows are ordered by opaque agent id: builder, reviewer, tester.
-    assert_eq!(agents[0]["agentId"], "builder");
-    assert_eq!(agents[0]["status"], "running");
-    assert_eq!(agents[0]["sessionPresent"], true);
-    assert_eq!(agents[0]["currentCall"]["status"], "running");
-    assert_eq!(agents[0]["currentCall"]["active"], true);
-    assert_eq!(agents[0]["currentCall"]["terminal"], false);
-    assert_eq!(agents[0]["currentCall"]["executionId"], "000123");
-    assert!(agents[0]["diagnostics"]
+    let builder = agent_row("builder");
+    assert_eq!(builder["status"], "running");
+    assert_eq!(builder["sessionPresent"], true);
+    assert_eq!(builder["currentCall"]["status"], "running");
+    assert_eq!(builder["currentCall"]["active"], true);
+    assert_eq!(builder["currentCall"]["terminal"], false);
+    assert_eq!(builder["currentCall"]["executionId"], "000123");
+    assert!(builder["diagnostics"]
         .as_array()
         .expect("builder diagnostics array")
         .is_empty());
 
-    assert_eq!(agents[1]["agentId"], "reviewer");
-    assert_eq!(agents[1]["status"], "idle");
-    assert_eq!(agents[1]["backend"], "codex");
-    assert_eq!(agents[1]["model"], "gpt-5.3-codex");
-    assert_eq!(agents[1]["lastCallAt"], "2026-05-17T09:00:00Z");
-    assert_eq!(agents[1]["sessionPresent"], true);
-    assert!(agents[1]["currentCall"].is_null());
-    assert!(agents[1]["detailHints"]
+    let reviewer = agent_row("reviewer");
+    assert_eq!(reviewer["status"], "idle");
+    assert_eq!(reviewer["backend"], "codex");
+    assert_eq!(reviewer["model"], "gpt-5.3-codex");
+    assert_eq!(reviewer["lastCallAt"], "2026-05-17T09:00:00Z");
+    assert_eq!(reviewer["sessionPresent"], true);
+    assert!(reviewer["currentCall"].is_null());
+    assert!(reviewer["detailHints"]
         .as_array()
         .expect("reviewer detail hints array")
         .iter()
         .any(|hint| hint == "recent output available"));
 
-    assert_eq!(agents[2]["agentId"], "tester");
-    assert_eq!(agents[2]["status"], "failed");
-    assert_eq!(agents[2]["currentCall"]["status"], "failed");
-    assert_eq!(agents[2]["currentCall"]["active"], false);
-    assert_eq!(agents[2]["currentCall"]["terminal"], true);
-    assert_eq!(agents[2]["currentCall"]["cleanupNeeded"], true);
+    let planner = agent_row("planner");
+    assert_eq!(planner["status"], "blocked");
+    assert_eq!(planner["sessionPresent"], false);
+    assert!(planner["currentCall"].is_null());
+
+    let retired = agent_row("retired");
+    assert_eq!(retired["status"], "erased");
+
+    let tester = agent_row("tester");
+    assert_eq!(tester["status"], "failed");
+    assert_eq!(tester["currentCall"]["status"], "failed");
+    assert_eq!(tester["currentCall"]["active"], false);
+    assert_eq!(tester["currentCall"]["terminal"], true);
+    assert_eq!(tester["currentCall"]["cleanupNeeded"], true);
     assert_eq!(
-        agents[2]["currentCall"]["error"],
+        tester["currentCall"]["error"],
         "backend exited with status 1"
     );
 
@@ -1405,7 +1453,7 @@ async fn work_root_activity_route_projects_named_agent_records() {
 
 #[tokio::test]
 async fn work_root_activity_route_degrades_malformed_records() {
-    if !git_available() {
+    if skip_without_git("work_root_activity_route_degrades_malformed_records") {
         return;
     }
     let root = temp_fixture_path("work-root-activity-malformed");
@@ -1429,6 +1477,9 @@ async fn work_root_activity_route_degrades_malformed_records() {
 
     // Malformed agent.json must degrade only its own row.
     write_agent_metadata_raw(&agents_dir, "broken-meta", "{ this is not valid json");
+
+    // Agent directory with no agent.json file at all.
+    fs::create_dir_all(agents_dir.join("missing-meta")).expect("create missing-meta agent dir");
 
     // Valid metadata but unreadable current-call state.
     write_agent_metadata(
@@ -1458,38 +1509,49 @@ async fn work_root_activity_route_degrades_malformed_records() {
         serde_json::from_str(&body_text).expect("degraded activity JSON");
 
     assert_eq!(value["status"], "degraded");
-    assert_eq!(value["summary"]["total"], 3);
-    assert_eq!(value["summary"]["unavailable"], 1);
+    assert_eq!(value["summary"]["total"], 4);
+    assert_eq!(value["summary"]["unavailable"], 2);
 
     let agents = value["agents"].as_array().expect("activity agents array");
-    assert_eq!(agents.len(), 3);
+    assert_eq!(agents.len(), 4);
+    let agent_row = |agent_id: &str| -> &serde_json::Value {
+        agents
+            .iter()
+            .find(|agent| agent["agentId"] == agent_id)
+            .unwrap_or_else(|| panic!("missing agent row {agent_id}"))
+    };
+    let diagnostics_of = |agent: &serde_json::Value| -> Vec<String> {
+        agent["diagnostics"]
+            .as_array()
+            .expect("diagnostics array")
+            .iter()
+            .map(|entry| entry.as_str().expect("diagnostic string").to_owned())
+            .collect()
+    };
 
-    // Rows sorted by opaque agent id: broken-call, broken-meta, healthy.
-    let broken_call = &agents[0];
-    assert_eq!(broken_call["agentId"], "broken-call");
+    // Valid metadata, but the current-call record cannot be parsed.
+    let broken_call = agent_row("broken-call");
     assert_eq!(broken_call["status"], "running");
     assert!(broken_call["currentCall"].is_null());
-    assert!(!broken_call["diagnostics"]
-        .as_array()
-        .expect("broken-call diagnostics array")
-        .is_empty());
+    assert!(!diagnostics_of(broken_call).is_empty());
 
-    let broken_meta = &agents[1];
-    assert_eq!(broken_meta["agentId"], "broken-meta");
+    // Unreadable agent.json degrades the row to unavailable.
+    let broken_meta = agent_row("broken-meta");
     assert_eq!(broken_meta["status"], "unavailable");
     assert!(broken_meta["name"].is_null());
-    assert!(!broken_meta["diagnostics"]
-        .as_array()
-        .expect("broken-meta diagnostics array")
-        .is_empty());
+    assert!(!diagnostics_of(broken_meta).is_empty());
 
-    let healthy = &agents[2];
-    assert_eq!(healthy["agentId"], "healthy");
+    // Missing agent.json also degrades the row to unavailable.
+    let missing_meta = agent_row("missing-meta");
+    assert_eq!(missing_meta["status"], "unavailable");
+    assert!(missing_meta["name"].is_null());
+    assert!(missing_meta["currentCall"].is_null());
+    assert!(!diagnostics_of(missing_meta).is_empty());
+
+    // The healthy row is unaffected by sibling degradation.
+    let healthy = agent_row("healthy");
     assert_eq!(healthy["status"], "idle");
-    assert!(healthy["diagnostics"]
-        .as_array()
-        .expect("healthy diagnostics array")
-        .is_empty());
+    assert!(diagnostics_of(healthy).is_empty());
 
     for forbidden in [
         root.display().to_string(),
@@ -1506,6 +1568,150 @@ async fn work_root_activity_route_degrades_malformed_records() {
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_returns_empty_for_git_workroot_without_agents_dir() {
+    if skip_without_git("work_root_activity_route_returns_empty_for_git_workroot_without_agents_dir")
+    {
+        return;
+    }
+    // A Git workRoot resolves a wsstate layout, but no `agents/` directory has
+    // been created yet: `scan_named_agents` must short-circuit to an empty,
+    // healthy projection rather than fail.
+    let root = temp_fixture_path("work-root-activity-no-agents");
+    let cache_home = temp_fixture_path("work-root-activity-no-agents-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    fs::create_dir_all(&cache_home).expect("create activity cache fixture root");
+    init_git_repo(&root);
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) =
+        fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("git no-agents activity JSON");
+
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["summary"]["total"], 0);
+    assert_eq!(
+        value["agents"]
+            .as_array()
+            .expect("activity agents array")
+            .len(),
+        0
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[test]
+fn work_root_activity_resolves_git_primary_and_linked_worktree_layout() {
+    if skip_without_git("work_root_activity_resolves_git_primary_and_linked_worktree_layout") {
+        return;
+    }
+    // Independently verify the wsstate layout derivation (not just route
+    // self-consistency): the agents directory is `<cache>/proj/<key>/agents`,
+    // the primary key is an 8-hex project key, and the linked-worktree key is
+    // `<projectKey>@<worktreeId>` sharing that same project key.
+    let base = temp_fixture_path("work-root-activity-layout");
+    let cache_home = base.join("cache");
+    let primary = base.join("primary");
+    let linked = base.join("linked");
+    fs::create_dir_all(&primary).expect("create primary workRoot");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "layout fixture\n").expect("write seed file");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    run_git(
+        &primary,
+        &["worktree", "add", linked.to_str().expect("linked path utf-8")],
+    );
+
+    let primary_dir = resolve_work_root_agents_dir(&cache_home, &primary)
+        .expect("resolve primary worktree layout");
+    let linked_dir = resolve_work_root_agents_dir(&cache_home, &linked)
+        .expect("resolve linked worktree layout");
+
+    // Layout shape: `<cache>/proj/<key>/agents`.
+    assert!(primary_dir.starts_with(&cache_home));
+    assert_eq!(primary_dir.file_name().expect("agents leaf"), "agents");
+    let primary_key_dir = primary_dir.parent().expect("primary key dir");
+    assert_eq!(
+        primary_key_dir
+            .parent()
+            .expect("proj dir")
+            .file_name()
+            .expect("proj leaf"),
+        "proj"
+    );
+
+    let primary_key = primary_key_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("primary key utf-8")
+        .to_owned();
+    assert_eq!(primary_key.len(), 8, "project key is an 8-hex digest prefix");
+    assert!(
+        primary_key.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "project key is hex: {primary_key}"
+    );
+
+    let linked_key = linked_dir
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str())
+        .expect("linked key utf-8")
+        .to_owned();
+    let (linked_project, linked_worktree) = linked_key
+        .split_once('@')
+        .expect("linked worktree key joins project and worktree ids with '@'");
+    assert_eq!(
+        linked_project, primary_key,
+        "linked worktree key shares the primary project key"
+    );
+    assert_eq!(linked_worktree.len(), 8, "worktree id is an 8-hex prefix");
+    assert!(linked_worktree.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert_ne!(
+        linked_worktree, primary_key,
+        "linked worktree id differs from the project key"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[test]
+fn work_root_activity_rejects_non_git_and_bare_repository_layout() {
+    if skip_without_git("work_root_activity_rejects_non_git_and_bare_repository_layout") {
+        return;
+    }
+    let base = temp_fixture_path("work-root-activity-reject");
+    let cache_home = base.join("cache");
+    let plain = base.join("plain");
+    let bare = base.join("bare.git");
+    fs::create_dir_all(&plain).expect("create plain dir");
+    fs::create_dir_all(&bare).expect("create bare dir");
+
+    // A plain non-Git directory has no wsstate layout.
+    assert!(
+        resolve_work_root_agents_dir(&cache_home, &plain).is_none(),
+        "non-Git directory must not resolve a wsstate agents dir"
+    );
+
+    // A bare repository is not a usable worktree and is rejected.
+    run_git(&bare, &["init", "--bare"]);
+    assert!(
+        resolve_work_root_agents_dir(&cache_home, &bare).is_none(),
+        "bare repository must not resolve a wsstate agents dir"
+    );
+
+    remove_static_fixture(&base);
 }
 
 #[tokio::test]

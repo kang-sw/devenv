@@ -13,8 +13,9 @@ use ws_dashboard_core::{
 
 use crate::router::AppState;
 
-/// Upper bound for daemon-derived diagnostic and backend-error strings so a
-/// single oversized cache record cannot bloat the projection response.
+/// Upper bound applied to the wsagent-reported backend-error string so an
+/// oversized `current/state.json` error cannot bloat the projection response.
+/// Daemon-emitted diagnostics are fixed short constants and need no bounding.
 const MAX_BOUNDED_TEXT: usize = 280;
 
 const DIAG_METADATA_MISSING: &str = "agent metadata missing";
@@ -108,16 +109,17 @@ fn activity_error(status: StatusCode, message: &str) -> Response {
 /// This mirrors `agents-plugin-tool/internal/wsstate` layout derivation: the
 /// canonical Git worktree root and common root select a worktree key, and
 /// agents live at `<cacheHome>/proj/<worktreeKey>/agents`. Returns `None` when
-/// the workRoot is not a resolvable non-bare Git worktree, which is the
-/// "no wsstate layout, no agents" case. Exposed so daemon route tests can seed
+/// the `git` binary is unavailable or the workRoot is not a resolvable
+/// non-bare Git worktree; all of those collapse to the same "no wsstate
+/// layout, no agents" empty projection. Exposed so daemon route tests can seed
 /// fixture cache trees at the same location the projector reads.
 pub fn resolve_work_root_agents_dir(cache_home: &Path, root_path: &Path) -> Option<PathBuf> {
     let identity = git_identity(root_path)?;
-    let project_key = short_hash(&path_string(&identity.common_root));
+    let project_key = short_hash(&canonical_path_bytes(&identity.common_root));
     let worktree_key = if identity.worktree_root == identity.common_root {
         project_key
     } else {
-        let worktree_id = short_hash(&path_string(&identity.worktree_root));
+        let worktree_id = short_hash(&canonical_path_bytes(&identity.worktree_root));
         format!("{project_key}@{worktree_id}")
     };
     Some(
@@ -344,7 +346,8 @@ struct GitIdentity {
 }
 
 /// Discover the canonical Git worktree root and common root for `root_path`,
-/// matching `wsstate.gitIdentity`. Returns `None` for non-Git or bare repos.
+/// matching `wsstate.gitIdentity`. Returns `None` when the `git` binary is
+/// unavailable, the path is not in a Git repository, or the repository is bare.
 fn git_identity(root_path: &Path) -> Option<GitIdentity> {
     let toplevel = git_output(root_path, &["rev-parse", "--show-toplevel"])?;
     let common_git_dir = git_output(
@@ -382,14 +385,39 @@ fn git_output(repo: &Path, args: &[&str]) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-fn path_string(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+/// Byte representation of a canonical path used as the SHA-256 hashing input
+/// for wsstate project/worktree keys.
+///
+/// `wsstate.shortHash` hashes the raw bytes of a `filepath`-cleaned path. To
+/// stay key-compatible this:
+/// - strips the Windows `\\?\` / `\\?\UNC\` verbatim prefix that
+///   `std::fs::canonicalize` adds (Go's `filepath` produces no such prefix);
+/// - on Unix hashes the raw `OsStr` bytes rather than a lossy UTF-8 string, so
+///   a non-UTF-8 path still derives the same key as the Go tool.
+fn canonical_path_bytes(path: &Path) -> Vec<u8> {
+    #[cfg(windows)]
+    {
+        let raw = path.to_string_lossy();
+        let normalized = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{rest}")
+        } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            rest.to_owned()
+        } else {
+            raw.into_owned()
+        };
+        normalized.into_bytes()
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes().to_vec()
+    }
 }
 
 /// First eight lowercase hex characters of the SHA-256 digest of `value`,
 /// matching `wsstate.shortHash` used for project and worktree keys.
-fn short_hash(value: &str) -> String {
-    let digest = sha256(value.as_bytes());
+fn short_hash(value: &[u8]) -> String {
+    let digest = sha256(value);
     let mut hex = String::with_capacity(8);
     for byte in &digest[..4] {
         hex.push_str(&format!("{byte:02x}"));
@@ -544,19 +572,82 @@ struct CurrentCallState {
 mod tests {
     use super::*;
 
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn sha256_matches_known_answer_vectors() {
+        // FIPS 180-4 / NIST known-answer vectors. The 56-byte and one-million
+        // byte inputs both span multiple 64-byte blocks, exercising the
+        // `chunks_exact(64)` loop and the full 32-byte digest, not just the
+        // single-block path or the leading bytes used by `short_hash`.
+        assert_eq!(
+            hex(&sha256(b"abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            hex(&sha256(b"")),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        // 56 bytes -> two blocks after padding.
+        assert_eq!(
+            hex(&sha256(
+                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+            )),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+        // One million 'a' bytes -> many blocks.
+        let million_a = vec![b'a'; 1_000_000];
+        assert_eq!(
+            hex(&sha256(&million_a)),
+            "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+        );
+    }
+
     #[test]
     fn short_hash_matches_known_sha256_prefix() {
         // SHA-256("abc") = ba7816bf8f01cfea...; wsstate keys take the first
         // eight hex characters.
-        assert_eq!(short_hash("abc"), "ba7816bf");
+        assert_eq!(short_hash(b"abc"), "ba7816bf");
         // SHA-256("") = e3b0c44298fc1c14...
-        assert_eq!(short_hash(""), "e3b0c442");
+        assert_eq!(short_hash(b""), "e3b0c442");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn canonical_path_bytes_uses_raw_unix_bytes() {
+        // On Unix the hashing input is the exact path bytes, no verbatim
+        // prefix and no lossy UTF-8 substitution.
+        assert_eq!(
+            canonical_path_bytes(Path::new("/tmp/ws-root")),
+            b"/tmp/ws-root".to_vec()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_path_bytes_strips_windows_verbatim_prefix() {
+        // `std::fs::canonicalize` emits `\\?\` verbatim paths; wsstate's
+        // `filepath`-based path has no such prefix, so it must be stripped
+        // before hashing or Windows keys diverge from the Go tool.
+        assert_eq!(
+            canonical_path_bytes(Path::new(r"\\?\C:\repo")),
+            br"C:\repo".to_vec()
+        );
+        assert_eq!(
+            canonical_path_bytes(Path::new(r"\\?\UNC\server\share")),
+            br"\\server\share".to_vec()
+        );
     }
 
     #[test]
     fn agent_status_maps_known_and_degraded_values() {
         assert_eq!(agent_status("idle"), ("idle".to_owned(), None));
         assert_eq!(agent_status("running"), ("running".to_owned(), None));
+        assert_eq!(agent_status("blocked"), ("blocked".to_owned(), None));
+        assert_eq!(agent_status("failed"), ("failed".to_owned(), None));
+        assert_eq!(agent_status("erased"), ("erased".to_owned(), None));
         assert_eq!(
             agent_status(""),
             (STATUS_UNAVAILABLE.to_owned(), Some(DIAG_STATUS_UNAVAILABLE))
@@ -575,5 +666,28 @@ mod tests {
         let long = "x".repeat(MAX_BOUNDED_TEXT + 50);
         assert_eq!(bounded(&long).chars().count(), MAX_BOUNDED_TEXT);
         assert_eq!(bounded("short"), "short");
+    }
+
+    #[test]
+    fn resolve_cache_root_prefers_explicit_override_then_env() {
+        // Explicit daemon override wins and is returned verbatim.
+        let override_root = PathBuf::from("/fixture/cache-home");
+        assert_eq!(
+            resolve_cache_root(Some(override_root.as_path())),
+            Some(override_root.clone())
+        );
+
+        // With no override, `WS_CACHE_HOME` is honored. No other test reads
+        // this variable, so the set/clear stays self-contained.
+        let previous = std::env::var_os("WS_CACHE_HOME");
+        std::env::set_var("WS_CACHE_HOME", "/fixture/env-cache");
+        assert_eq!(
+            resolve_cache_root(None),
+            Some(PathBuf::from("/fixture/env-cache"))
+        );
+        match previous {
+            Some(value) => std::env::set_var("WS_CACHE_HOME", value),
+            None => std::env::remove_var("WS_CACHE_HOME"),
+        }
     }
 }
