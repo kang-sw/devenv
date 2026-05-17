@@ -16,12 +16,12 @@ import {
   workbenchPaneDragMimeType,
   surfaceLogicalKey,
   workbenchGroupId,
-  DockviewWorkbenchLayout,
   type SurfaceKind,
   type WorkbenchPaneCategory,
   type WorkbenchPaneOrder,
   type WorkbenchPlacementState,
 } from "./workbench";
+import { DockviewWorkbenchLayout } from "./workbench/dockviewLayout.js";
 import {
   applyReadOnlyFilePaneContent,
   applyReadOnlyFilePaneError,
@@ -1048,6 +1048,9 @@ function WorkbenchShell({
   }
 
   function applyTerminalSocketMessage(pane: TerminalPaneState, message: TerminalWebSocketServerMessage) {
+    if (message.type === "output") {
+      return;
+    }
     setTerminalPanes((current) =>
       current[pane.logicalKey]
         ? { ...current, [pane.logicalKey]: appendTerminalWebSocketMessage(current[pane.logicalKey], message) }
@@ -1487,11 +1490,16 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
   const writtenLengthRef = useRef(0);
   const lastForwardedSizeRef = useRef<{ columns: number; rows: number } | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const [displaySession, setDisplaySession] = useState(() => pane.session);
   // Latest pane/actions for emulator callbacks registered once at mount.
   const liveRef = useRef({ pane, actions });
   liveRef.current = { pane, actions };
 
   const terminalId = pane.session.terminalId;
+
+  useEffect(() => {
+    setDisplaySession(pane.session);
+  }, [pane.session]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1526,14 +1534,58 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
 
     // Keyboard input originates from the focused emulator surface and reaches
     // the daemon terminal session.
-    const inputDisposable = terminal.onData((data) => {
+    const sendInputBytes = (data: string) => {
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "input", data }));
         return;
       }
       liveRef.current.actions.onSendData(liveRef.current.pane, data);
-    });
+    };
+
+    const inputDisposable = terminal.onData(sendInputBytes);
+
+    const keydownFallback = (event: KeyboardEvent) => {
+      if (!container.offsetParent || container.contains(document.activeElement)) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName.toLowerCase();
+      if (
+        target?.isContentEditable ||
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select"
+      ) {
+        return;
+      }
+      let data: string | null = null;
+      if (event.ctrlKey || event.metaKey) {
+        const key = event.key.toLowerCase();
+        if (key === "c") data = "\x03";
+        if (key === "l") data = "\x0c";
+        if (key === "a") data = "\x01";
+      } else if (event.key.length === 1) {
+        data = event.key;
+      } else if (event.key === "Enter") {
+        data = "\r";
+      } else if (event.key === "Backspace") {
+        data = "\x7f";
+      } else if (event.key === "ArrowLeft") {
+        data = "\x1b[D";
+      } else if (event.key === "ArrowRight") {
+        data = "\x1b[C";
+      } else if (event.key === "ArrowUp") {
+        data = "\x1b[A";
+      } else if (event.key === "ArrowDown") {
+        data = "\x1b[B";
+      }
+      if (data !== null) {
+        event.preventDefault();
+        sendInputBytes(data);
+      }
+    };
+    window.addEventListener("keydown", keydownFallback);
 
     const fitNow = () => {
       try {
@@ -1555,8 +1607,15 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
 
     const forwardSize = () => {
       // The emulator grid is already capped to the PTY bounds by fitNow, so
-      // this size is always inside the daemon resize contract.
-      const next = clampTerminalSize(terminal.cols, terminal.rows);
+      // this size is always inside the daemon resize contract. When Dockview is
+      // stacked below the fold in a narrow viewport, its internal cached width
+      // may lag the viewport; still bound the PTY columns to the viewport so
+      // the daemon-visible logical size follows responsive relayout.
+      const viewportColumns = Math.max(1, Math.floor((window.innerWidth - 32) / 8));
+      const next = clampTerminalSize(Math.min(terminal.cols, viewportColumns), terminal.rows);
+      if (next.columns !== terminal.cols || next.rows !== terminal.rows) {
+        terminal.resize(next.columns, next.rows);
+      }
       const prev = lastForwardedSizeRef.current;
       if (prev && prev.columns === next.columns && prev.rows === next.rows) {
         return;
@@ -1566,6 +1625,7 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "resize", columns: next.columns, rows: next.rows }));
+        setDisplaySession((current) => ({ ...current, columns: next.columns, rows: next.rows }));
         liveRef.current.actions.onSocketResize(liveRef.current.pane, next.columns, next.rows);
         lastForwardedSizeRef.current = next;
         return;
@@ -1586,7 +1646,7 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     // to the daemon is debounced so visual split drag does not continuously
     // rewrite logical PTY dimensions.
     let resizeTimer: number | null = null;
-    const observer = new ResizeObserver(() => {
+    const scheduleResizeForward = () => {
       fitNow();
       if (resizeTimer !== null) {
         window.clearTimeout(resizeTimer);
@@ -1595,14 +1655,18 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
         resizeTimer = null;
         forwardSize();
       }, 250);
-    });
+    };
+    const observer = new ResizeObserver(scheduleResizeForward);
     observer.observe(container);
+    window.addEventListener("resize", scheduleResizeForward);
 
     return () => {
       observer.disconnect();
+      window.removeEventListener("resize", scheduleResizeForward);
       if (resizeTimer !== null) {
         window.clearTimeout(resizeTimer);
       }
+      window.removeEventListener("keydown", keydownFallback);
       inputDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
@@ -1621,10 +1685,15 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     socket.addEventListener("message", (event) => {
       if (disposed || typeof event.data !== "string") return;
       try {
-        liveRef.current.actions.onSocketMessage(
-          liveRef.current.pane,
-          JSON.parse(event.data) as TerminalWebSocketServerMessage,
-        );
+        const message = JSON.parse(event.data) as TerminalWebSocketServerMessage;
+        if (message.type === "output") {
+          terminalRef.current?.write(message.chunk.data);
+          terminalRef.current?.focus();
+          writtenLengthRef.current += message.chunk.data.length;
+        } else {
+          setDisplaySession((current) => ({ ...current, status: message.status }));
+        }
+        liveRef.current.actions.onSocketMessage(liveRef.current.pane, message);
       } catch {
         // Ignore malformed daemon frames and allow the socket close/fallback path to recover.
       }
@@ -1655,10 +1724,16 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
     if (pane.output.length > writtenLengthRef.current) {
       terminal.write(pane.output.slice(writtenLengthRef.current));
       writtenLengthRef.current = pane.output.length;
+      if (containerRef.current?.offsetParent) {
+        requestAnimationFrame(() => terminal.focus());
+      }
     } else if (pane.output.length < writtenLengthRef.current) {
       terminal.clear();
       terminal.write(pane.output);
       writtenLengthRef.current = pane.output.length;
+      if (containerRef.current?.offsetParent) {
+        requestAnimationFrame(() => terminal.focus());
+      }
     }
   }, [pane.output]);
 
@@ -1672,7 +1747,7 @@ function TerminalPaneBody({ pane, actions }: { pane: TerminalPaneState; actions:
       {pane.error ? <div className="terminal-error">{pane.error}</div> : null}
       <div className="terminal-controls">
         <span className="terminal-status-line">
-          {pane.session.status} · {pane.session.columns}x{pane.session.rows}
+          {displaySession.status} · {displaySession.columns}x{displaySession.rows}
         </span>
         <button
           className="action-button"

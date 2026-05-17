@@ -9,7 +9,10 @@ import {
   type IDockviewPanelProps,
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
-import { dockviewBridgeOptions, type WorkbenchDockviewPanelParams } from "./dockviewBridge.js";
+import {
+  dockviewBridgeOptions,
+  type WorkbenchDockviewPanelParams,
+} from "./dockviewBridge.js";
 import type { WorkbenchPaneCategory } from "./editorGroupModel.js";
 import { defaultSurfaceRegistry, type SurfaceKind } from "./surfaceRegistry.js";
 
@@ -33,7 +36,11 @@ export type DockviewWorkbenchLayoutProps = {
   readonly groups: readonly DockviewWorkbenchGroup[];
   readonly activePaneByGroup: Readonly<Record<string, string>>;
   readonly onSelectPane: (groupId: string, paneId: string) => void;
-  readonly onMovePane: (paneId: string, targetGroupId: string, beforePaneId?: string) => void;
+  readonly onMovePane: (
+    paneId: string,
+    targetGroupId: string,
+    beforePaneId?: string,
+  ) => void;
 };
 
 type DockviewWorkbenchPanelParams = WorkbenchDockviewPanelParams & {
@@ -59,6 +66,9 @@ export function DockviewWorkbenchLayout({
 }: DockviewWorkbenchLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null);
   const syncingRef = useRef(false);
+  const dockGroupToWorkbenchGroupRef = useRef<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const callbacksRef = useRef({ onMovePane, onSelectPane });
   callbacksRef.current = { onMovePane, onSelectPane };
 
@@ -81,7 +91,11 @@ export function DockviewWorkbenchLayout({
     }
     syncingRef.current = true;
     try {
-      syncDockviewWorkbench(apiRef.current, groups, activePaneByGroup);
+      dockGroupToWorkbenchGroupRef.current = syncDockviewWorkbench(
+        apiRef.current,
+        groups,
+        activePaneByGroup,
+      );
     } finally {
       queueMicrotask(() => {
         syncingRef.current = false;
@@ -99,19 +113,46 @@ export function DockviewWorkbenchLayout({
         if (syncingRef.current) {
           return;
         }
-        const params = panel?.params as DockviewWorkbenchPanelParams | undefined;
+        if (!panel) {
+          return;
+        }
+        const params = panel.params as DockviewWorkbenchPanelParams | undefined;
         if (params) {
-          callbacksRef.current.onSelectPane(params.groupId, params.paneId);
+          callbacksRef.current.onSelectPane(
+            dockGroupToWorkbenchGroupRef.current.get(panel.group.id) ??
+              params.groupId,
+            params.paneId,
+          );
         }
       });
       event.api.onDidMovePanel((move) => {
         if (syncingRef.current) {
           return;
         }
-        const params = move.panel.params as DockviewWorkbenchPanelParams | undefined;
-        if (params) {
-          callbacksRef.current.onMovePane(params.paneId, params.groupId);
+        const params = move.panel.params as
+          | DockviewWorkbenchPanelParams
+          | undefined;
+        const targetGroupId = dockGroupToWorkbenchGroupRef.current.get(
+          move.panel.group.id,
+        );
+        if (!params || !targetGroupId) {
+          return;
         }
+        const siblingAfterMoved = move.panel.group.panels
+          .slice(
+            move.panel.group.panels.findIndex(
+              (panel) => panel.id === move.panel.id,
+            ) + 1,
+          )
+          .map(
+            (panel) => panel.params as DockviewWorkbenchPanelParams | undefined,
+          )
+          .find((panelParams) => panelParams?.paneId);
+        callbacksRef.current.onMovePane(
+          params.paneId,
+          targetGroupId,
+          siblingAfterMoved?.paneId,
+        );
       });
       syncPanels();
     },
@@ -142,7 +183,9 @@ export function DockviewWorkbenchLayout({
   );
 }
 
-function DockviewWorkbenchPanel({ params }: IDockviewPanelProps<DockviewWorkbenchPanelParams>) {
+function DockviewWorkbenchPanel({
+  params,
+}: IDockviewPanelProps<DockviewWorkbenchPanelParams>) {
   const registry = defaultSurfaceRegistry()[params.surfaceKind];
 
   return (
@@ -156,7 +199,9 @@ function DockviewWorkbenchPanel({ params }: IDockviewPanelProps<DockviewWorkbenc
     >
       <div className="workbench-pane-body">
         <p>{params.detail}</p>
-        {params.body ? <div className="workbench-pane-content">{params.body}</div> : null}
+        {params.body ? (
+          <div className="workbench-pane-content">{params.body}</div>
+        ) : null}
       </div>
     </article>
   );
@@ -189,37 +234,144 @@ function syncDockviewWorkbench(
   api: DockviewApi,
   groups: readonly DockviewWorkbenchGroup[],
   activePaneByGroup: Readonly<Record<string, string>>,
-) {
-  // Stub-only synchronization: rebuild the Dockview surface from dashboard
-  // groups/panes so the visible owner is Dockview while the full incremental
-  // reconciliation policy remains a future implementation concern.
-  api.clear();
-
-  const dockGroupByWorkbenchGroup = new Map<string, string>();
-  let firstDockGroupId: string | null = null;
-
-  for (const group of groups) {
-    const activePaneId = activePaneByGroup[group.id] ?? group.panes[0]?.id;
-    for (const [index, pane] of group.panes.entries()) {
-      const existingDockGroupId = dockGroupByWorkbenchGroup.get(group.id);
-      const panel: IDockviewPanel = api.addPanel<DockviewWorkbenchPanelParams>({
-        id: pane.id,
-        component: workbenchDockviewComponent,
-        tabComponent: workbenchDockviewTabComponent,
-        title: pane.title,
-        params: toDockviewWorkbenchPanelParams(group, pane),
-        inactive: pane.id !== activePaneId,
-        ...(existingDockGroupId
-          ? { position: { referenceGroup: existingDockGroupId, direction: "within", index } }
-          : firstDockGroupId
-            ? { position: { referenceGroup: firstDockGroupId, direction: "right" } }
-            : {}),
-      });
-
-      dockGroupByWorkbenchGroup.set(group.id, panel.group.id);
-      firstDockGroupId ??= panel.group.id;
+): ReadonlyMap<string, string> {
+  const desiredPaneIds = new Set(
+    groups.flatMap((group) => group.panes.map((pane) => pane.id)),
+  );
+  for (const panel of [...api.panels]) {
+    if (!desiredPaneIds.has(panel.id)) {
+      api.removePanel(panel);
     }
   }
+
+  const dockGroupByWorkbenchGroup = new Map<string, IDockviewPanel["group"]>();
+  for (const group of groups) {
+    const existingPanel = group.panes
+      .map((pane) => api.getPanel(pane.id))
+      .find((panel): panel is IDockviewPanel => Boolean(panel));
+    if (existingPanel) {
+      dockGroupByWorkbenchGroup.set(group.id, existingPanel.group);
+    }
+  }
+
+  let firstDockGroup = api.groups[0] ?? null;
+
+  for (const [groupIndex, group] of groups.entries()) {
+    let targetDockGroup = dockGroupByWorkbenchGroup.get(group.id) ?? null;
+    const activePaneId = activePaneByGroup[group.id] ?? group.panes[0]?.id;
+
+    for (const [index, pane] of group.panes.entries()) {
+      const params = toDockviewWorkbenchPanelParams(group, pane);
+      const existingPanel = api.getPanel(pane.id);
+
+      if (!existingPanel) {
+        const panel = api.addPanel<DockviewWorkbenchPanelParams>({
+          id: pane.id,
+          component: workbenchDockviewComponent,
+          tabComponent: workbenchDockviewTabComponent,
+          title: pane.title,
+          params,
+          inactive: pane.id !== activePaneId,
+          ...(targetDockGroup
+            ? {
+                position: {
+                  referenceGroup: targetDockGroup,
+                  direction: "within" as const,
+                  index,
+                },
+              }
+            : firstDockGroup
+              ? {
+                  position: {
+                    referenceGroup: firstDockGroup,
+                    direction:
+                      groupIndex === 0
+                        ? ("within" as const)
+                        : ("right" as const),
+                    index,
+                  },
+                }
+              : {}),
+        });
+        targetDockGroup = panel.group;
+        dockGroupByWorkbenchGroup.set(group.id, panel.group);
+        firstDockGroup ??= panel.group;
+        continue;
+      }
+
+      existingPanel.setTitle(pane.title);
+      const currentParams = existingPanel.params as
+        | DockviewWorkbenchPanelParams
+        | undefined;
+      if (shouldUpdateDockviewWorkbenchPanelParams(currentParams, params)) {
+        existingPanel.api.updateParameters(params);
+      }
+
+      if (targetDockGroup && existingPanel.group.id !== targetDockGroup.id) {
+        existingPanel.api.moveTo({
+          group: targetDockGroup,
+          index,
+          skipSetActive: true,
+        });
+      } else if (targetDockGroup) {
+        const currentIndex = targetDockGroup.panels.findIndex(
+          (panel) => panel.id === pane.id,
+        );
+        if (currentIndex !== index) {
+          existingPanel.api.moveTo({
+            group: targetDockGroup,
+            index,
+            skipSetActive: true,
+          });
+        }
+      } else {
+        targetDockGroup = existingPanel.group;
+        dockGroupByWorkbenchGroup.set(group.id, existingPanel.group);
+        firstDockGroup ??= existingPanel.group;
+      }
+
+      if (pane.id === activePaneId && !existingPanel.api.isActive) {
+        existingPanel.api.setActive();
+      }
+    }
+  }
+
+  const workbenchGroupByDockGroup = new Map<string, string>();
+  for (const [workbenchGroupId, dockGroup] of dockGroupByWorkbenchGroup) {
+    workbenchGroupByDockGroup.set(dockGroup.id, workbenchGroupId);
+  }
+  return workbenchGroupByDockGroup;
+}
+
+function shouldUpdateDockviewWorkbenchPanelParams(
+  current: DockviewWorkbenchPanelParams | undefined,
+  next: DockviewWorkbenchPanelParams,
+) {
+  if (!current) {
+    return true;
+  }
+  if (
+    current.groupId !== next.groupId ||
+    current.groupLabel !== next.groupLabel ||
+    current.paneId !== next.paneId ||
+    current.category !== next.category ||
+    current.surfaceKind !== next.surfaceKind ||
+    current.title !== next.title ||
+    current.detail !== next.detail
+  ) {
+    return true;
+  }
+  // Connected terminals stream directly into their mounted xterm instance.
+  // Avoid Dockview parameter churn for output/socket metadata so ordinary
+  // command output does not blur the emulator between keystrokes.
+  if (next.surfaceKind === "persistentTerminal") {
+    const socketStatus = next.meta[1];
+    return socketStatus !== "connecting" && socketStatus !== "connected";
+  }
+  return (
+    current.body !== next.body ||
+    current.meta.join("\0") !== next.meta.join("\0")
+  );
 }
 
 function toDockviewWorkbenchPanelParams(
