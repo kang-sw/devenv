@@ -18,6 +18,7 @@ skeletons:
   phase-3: 3c75198
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-17
 ---
 
 # ws dashboard Dockview workbench parity
@@ -89,6 +90,18 @@ Success means inspection of the render tree and code confirms Dockview is the
 layout authority for workbench groups/tabs/panes, while the dashboard still owns
 surface identity, duplicate-open focusing, close policy, and placement intent.
 
+### Result (5633cc23) - 2026-05-17
+
+The visible workbench now mounts Dockview as the layout owner under the stable
+`data-workbench-layout-owner="dockview"` marker. The retired custom
+`WorkbenchEditorGroup`/`WorkbenchTabLane` render path and old split/tab CSS were
+removed from the visible workbench authority. Dashboard state still owns surface
+identity, placement, selection, close policy, and logical group intent.
+
+The implementation uses a Dockview-compatible flattened tab policy while keeping
+pane category metadata available for later tab polish. Raw Dockview handles stay
+inside the adapter boundary.
+
 ### Phase 2: Preserve file and terminal pane parity
 
 Reattach existing pane contents to the Dockview-backed shell without regressing
@@ -109,6 +122,19 @@ Success means current file-open and terminal browser interactions pass on the
 Dockview-backed shell, and the implementation no longer depends on the custom
 CSS grid split and tab lane as the authoritative workbench layout.
 
+### Result (5633cc23) - 2026-05-17
+
+Read-only file panes and terminal panes were reattached to the Dockview-backed
+shell without regressing browser behavior. Terminal xterm surfaces are kept
+stable under Dockview, WebSocket output is streamed into the mounted emulator,
+and fallback keyboard routing is scoped to the single actually focused terminal
+pane. Follow-up review fixed focus clearing for non-terminal selection and
+macOS edit shortcut handling so input is not broadcast or stolen by inactive
+terminals.
+
+Verification passed for workbench, workRoot file, terminal, build, and browser
+acceptance gates on the final branch head.
+
 ### Phase 3: Add substrate assertions and visual acceptance
 
 Extend automated verification so this failure mode cannot recur. Tests must
@@ -126,3 +152,15 @@ attribute or Dockview DOM marker owned by the dashboard adapter.
 Success means `npm run test:browser` or an equivalent recorded browser gate
 would fail if the workbench silently returned to a custom non-Dockview tab/split
 implementation.
+
+### Result (5633cc23) - 2026-05-17
+
+Browser acceptance now asserts the Dockview owner marker, Dockview DOM beneath
+that marker, and absence of the retired `.workbench-splits > .workbench-group`
+custom shell. The final lead-run verification passed:
+
+- `npm run test:workbench`
+- `npm run test:work-root-files`
+- `npm run test:terminals`
+- `npm run build`
+- `npm run test:browser`
