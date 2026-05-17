@@ -80,6 +80,12 @@ import {
   type WorkspaceView,
 } from "./resourceModel";
 import { requestOpenWorkRoot } from "./openWorkRoot";
+import {
+  fetchWorkRootActivity,
+  workRootActivityBadge,
+  type WorkRootActivityBadgeInput,
+  type WorkRootActivityBadgeView,
+} from "./workRootActivity";
 
 type CommandPayload =
   | { type: "select"; entityId: string }
@@ -1050,6 +1056,9 @@ function WorkbenchShell({
   >(null);
   const focusedTerminalPaneIdRef = useRef<string | null>(null);
   focusedTerminalPaneIdRef.current = focusedTerminalPaneId;
+  // Selected-workRoot named-agent activity for the compact top-bar badge.
+  const [workRootActivity, setWorkRootActivity] =
+    useState<WorkRootActivityBadgeInput>({ phase: "loading" });
   const selectedWorkRootId = selection?.root.id ?? null;
   const workbenchGroups = selectedWorkRootId
     ? (workbenchGroupsByRoot[selectedWorkRootId] ?? initialWorkbenchGroups)
@@ -1147,6 +1156,32 @@ function WorkbenchShell({
         );
       })
       .catch(() => undefined);
+  }, [workbenchModel?.root.id]);
+
+  // Fetch named-agent activity for the selected workRoot through the Phase 1
+  // protected route. Loading/error are bounded badge states; a failure never
+  // breaks the workbench.
+  useEffect(() => {
+    const rootId = workbenchModel?.root.id;
+    if (!rootId) {
+      return;
+    }
+    let cancelled = false;
+    setWorkRootActivity({ phase: "loading" });
+    void fetchWorkRootActivity(rootId)
+      .then((view) => {
+        if (!cancelled) {
+          setWorkRootActivity({ phase: "ready", view });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkRootActivity({ phase: "error" });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [workbenchModel?.root.id]);
 
   // The output poll reads live terminal sessions from a ref so the polling
@@ -1594,10 +1629,12 @@ function WorkbenchShell({
   }
 
   const { workspace, root } = workbenchModel;
+  const activityBadge = workRootActivityBadge(workRootActivity);
 
   return (
     <div className="workbench-shell">
       <WorkbenchToolbar
+        activity={activityBadge}
         commandLog={commandLog}
         root={root}
         selectedEntity={selectedEntity}
@@ -1688,6 +1725,7 @@ function WorkbenchToolbar({
   root,
   selectedEntity,
   commandLog,
+  activity,
   onCommand,
   onCreateTerminal,
 }: {
@@ -1696,6 +1734,7 @@ function WorkbenchToolbar({
   root: WorkRootView;
   selectedEntity: ResourceEntity | null;
   commandLog: CommandEntry[];
+  activity: WorkRootActivityBadgeView;
   onCommand: (commandId: string, payload: CommandPayload) => void;
   onCreateTerminal: () => void;
 }) {
@@ -1716,6 +1755,7 @@ function WorkbenchToolbar({
       </div>
       <div className="workbench-toolbar-meta">
         <StateBadge state={root.state} />
+        <WorkbenchActivityBadge activity={activity} />
         <span className="meta-chip">{kindLabel(root.kind)}</span>
         <span className="meta-chip">{root.status}</span>
         {commandLog[0] ? (
@@ -1778,6 +1818,32 @@ function WorkbenchToolbar({
         ))}
       </div>
     </div>
+  );
+}
+
+function WorkbenchActivityBadge({
+  activity,
+}: {
+  activity: WorkRootActivityBadgeView;
+}) {
+  // CONTRACT: Phase 2 renders a compact named-agent summary chip inside the
+  // existing toolbar metadata row. It is a summary/entrypoint only: no detail
+  // pane, agent controls, or row diagnostics live here.
+  return (
+    <span
+      className={`meta-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
+      data-activity-tone={activity.tone}
+      title={activity.title}
+      aria-label={`Agent activity: ${activity.title}`}
+    >
+      <span className="workbench-activity-badge-dot" aria-hidden="true" />
+      <span className="workbench-activity-badge-label">{activity.label}</span>
+      {activity.summary ? (
+        <span className="workbench-activity-badge-summary">
+          {activity.summary}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

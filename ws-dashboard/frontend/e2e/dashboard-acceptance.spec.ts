@@ -400,6 +400,87 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  // --- Top-bar WorkRoot Activity badge sits in the existing metadata row --
+  await test.step("activity badge renders in the toolbar metadata row without growing it", async () => {
+    const metaRow = page.locator(".workbench-toolbar-meta");
+    const badge = page.locator(
+      ".workbench-toolbar-meta .workbench-activity-badge",
+    );
+    const stateBadge = page.locator(".workbench-toolbar-meta .state-badge");
+
+    // CONTRACT: the badge is a single named-agent summary chip inside the
+    // existing metadata row; it must not add a second badge or a new toolbar
+    // row.
+    await expect(badge).toHaveCount(1);
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText(/agent/i);
+
+    const measureToolbar = async () => {
+      const metaBox = await metaRow.boundingBox();
+      const badgeBox = await badge.boundingBox();
+      const stateBadgeBox = await stateBadge.boundingBox();
+      const toolbarBox = await page
+        .locator(".workbench-toolbar")
+        .boundingBox();
+      expect(metaBox).not.toBeNull();
+      expect(badgeBox).not.toBeNull();
+      expect(stateBadgeBox).not.toBeNull();
+      expect(toolbarBox).not.toBeNull();
+      return {
+        metaBox: metaBox!,
+        badgeBox: badgeBox!,
+        stateBadgeBox: stateBadgeBox!,
+        toolbarBox: toolbarBox!,
+      };
+    };
+
+    const assertSingleLineMetaRow = (
+      measured: Awaited<ReturnType<typeof measureToolbar>>,
+      label: string,
+    ) => {
+      // The metadata row stays one chip line tall. A wrapped row or a stacked
+      // badge would make this a multiple of the chip height.
+      expect(
+        measured.metaBox.height,
+        `${label}: metadata row stays a single chip line`,
+      ).toBeLessThanOrEqual(measured.stateBadgeBox.height + 2);
+      // The activity badge is vertically inside the metadata row, not a new
+      // toolbar row above or below it.
+      expect(
+        measured.badgeBox.y,
+        `${label}: badge starts inside the metadata row`,
+      ).toBeGreaterThanOrEqual(measured.metaBox.y - 1);
+      expect(
+        measured.badgeBox.y + measured.badgeBox.height,
+        `${label}: badge ends inside the metadata row`,
+      ).toBeLessThanOrEqual(measured.metaBox.y + measured.metaBox.height + 1);
+    };
+
+    const wide = await measureToolbar();
+    assertSingleLineMetaRow(wide, "1440px viewport");
+    const wideToolbarHeight = wide.toolbarBox.height;
+
+    // Constrained width: the badge compacts/clips instead of wrapping the
+    // metadata row or adding a toolbar row.
+    await page.setViewportSize({ width: 480, height: 900 });
+    await expect(badge).toBeVisible();
+    assertSingleLineMetaRow(await measureToolbar(), "480px viewport");
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const restored = await measureToolbar();
+    assertSingleLineMetaRow(restored, "restored 1440px viewport");
+    expect(
+      Math.abs(restored.toolbarBox.height - wideToolbarHeight),
+      "toolbar height does not increase across the viewport change",
+    ).toBeLessThanOrEqual(1);
+
+    note(
+      "activity badge: named-agent summary chip renders inside " +
+        ".workbench-toolbar-meta; the metadata row stays a single chip line " +
+        "at 1440px and 480px without adding a toolbar row",
+    );
+  });
+
   // --- Long explorer content stays inside its pane, not the document -----
   await test.step("long explorer content stays within the viewport", async () => {
     // The fixture root holds 80+ files, so the explorer tree is far taller

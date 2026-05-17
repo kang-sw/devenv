@@ -1,6 +1,8 @@
 import {
   fetchWorkRootActivity,
+  workRootActivityBadge,
   workRootActivityEndpoint,
+  type WorkRootActivitySummary,
   type WorkRootActivityView,
 } from "./workRootActivity.js";
 
@@ -72,3 +74,125 @@ try {
 } finally {
   globalThis.fetch = originalFetch;
 }
+
+// --- Top-bar activity badge formatting -----------------------------------
+
+function activitySummary(
+  partial: Partial<WorkRootActivitySummary> = {},
+): WorkRootActivitySummary {
+  return { total: 0, active: 0, blocked: 0, failed: 0, unavailable: 0, ...partial };
+}
+
+function activityView(
+  partial: Partial<Omit<WorkRootActivityView, "summary">> & {
+    summary?: Partial<WorkRootActivitySummary>;
+  } = {},
+): WorkRootActivityView {
+  return {
+    workRootId: partial.workRootId ?? "root-local-abc",
+    status: partial.status ?? "ok",
+    summary: activitySummary(partial.summary),
+    agents: partial.agents ?? [],
+  };
+}
+
+const loadingBadge = workRootActivityBadge({ phase: "loading" });
+assertEqual(loadingBadge.tone, "loading", "loading badge uses the loading tone");
+assertEqual(loadingBadge.label, "agents", "loading badge keeps a compact label");
+assertEqual(loadingBadge.summary, "loading", "loading badge marks the loading state");
+
+const errorBadge = workRootActivityBadge({ phase: "error" });
+assertEqual(errorBadge.tone, "error", "error badge uses the error tone");
+assertEqual(
+  errorBadge.summary,
+  "unavailable",
+  "error badge collapses to a bounded unavailable state",
+);
+
+const unavailableBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({ status: "unavailable" }),
+});
+assertEqual(
+  unavailableBadge.tone,
+  "error",
+  "unavailable projection status renders the error tone",
+);
+assertEqual(
+  unavailableBadge.summary,
+  "unavailable",
+  "unavailable projection status renders a bounded summary",
+);
+
+const emptyBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({ summary: { total: 0 } }),
+});
+assertEqual(emptyBadge.tone, "idle", "no agents renders the idle tone");
+assertEqual(emptyBadge.label, "no agents", "no agents renders a compact label");
+assertEqual(emptyBadge.summary, "", "no agents renders no secondary text");
+
+const singleIdleBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({ summary: { total: 1 } }),
+});
+assertEqual(
+  singleIdleBadge.label,
+  "1 agent",
+  "a single agent uses the singular agent label",
+);
+assertEqual(singleIdleBadge.tone, "idle", "all-idle agents render the idle tone");
+assertEqual(singleIdleBadge.summary, "idle", "all-idle agents render an idle summary");
+
+const activeBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({ summary: { total: 3, active: 2 } }),
+});
+assertEqual(activeBadge.label, "3 agents", "multiple agents use the plural label");
+assertEqual(activeBadge.tone, "active", "active agents render the active tone");
+assertEqual(activeBadge.summary, "2 active", "active agents summarize the active count");
+
+const failedBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({ summary: { total: 4, active: 1, failed: 1 } }),
+});
+assertEqual(
+  failedBadge.tone,
+  "attention",
+  "failed agents render the attention tone",
+);
+assertEqual(
+  failedBadge.summary,
+  "1 active · 1 failed",
+  "failed agents summarize active and failed counts compactly",
+);
+
+const blockedBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({ summary: { total: 2, blocked: 1 } }),
+});
+assertEqual(
+  blockedBadge.tone,
+  "attention",
+  "blocked agents render the attention tone",
+);
+
+const degradedBadge = workRootActivityBadge({
+  phase: "ready",
+  view: activityView({ status: "degraded", summary: { total: 2, active: 1 } }),
+});
+assertEqual(
+  degradedBadge.tone,
+  "attention",
+  "a degraded projection renders the attention tone",
+);
+assertEqual(
+  degradedBadge.title.includes("(degraded)"),
+  true,
+  "a degraded projection notes degradation in the bounded title",
+);
+assertEqual(
+  degradedBadge.title.length <= 120,
+  true,
+  "the activity badge title stays bounded",
+);

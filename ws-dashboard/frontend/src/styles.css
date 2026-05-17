@@ -545,6 +545,65 @@ button {
   background: var(--ws-color-state-error-strong);
 }
 
+/* Compact named-agent activity badge in the workbench toolbar metadata row.
+   It reuses the `.meta-chip` base (max-width, ellipsis, nowrap) so it stays a
+   bounded single-line summary chip. */
+.workbench-activity-badge {
+  flex: 0 1 auto;
+}
+
+.workbench-activity-badge-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  background: var(--ws-color-text-disabled);
+}
+
+.workbench-activity-badge-label,
+.workbench-activity-badge-summary {
+  min-width: 0;
+  overflow: hidden;
+  flex: 0 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-activity-badge-summary {
+  color: var(--ws-color-text-tertiary);
+}
+
+.workbench-activity-badge-summary::before {
+  content: "·";
+  margin-right: 4px;
+  color: var(--ws-color-text-disabled);
+}
+
+.workbench-activity-badge-active,
+.workbench-activity-badge-loading {
+  border-color: var(--ws-color-state-info);
+}
+
+.workbench-activity-badge-active .workbench-activity-badge-dot,
+.workbench-activity-badge-loading .workbench-activity-badge-dot {
+  background: var(--ws-color-state-info);
+}
+
+.workbench-activity-badge-attention {
+  border-color: var(--ws-color-state-warning);
+}
+
+.workbench-activity-badge-attention .workbench-activity-badge-dot {
+  background: var(--ws-color-state-warning);
+}
+
+.workbench-activity-badge-error {
+  border-color: var(--ws-color-state-error-strong);
+}
+
+.workbench-activity-badge-error .workbench-activity-badge-dot {
+  background: var(--ws-color-state-error-strong);
+}
+
 .detail-body,
 .viewer-body {
   height: calc(100vh - 48px);
@@ -809,7 +868,11 @@ button {
 
 .workbench-toolbar-meta {
   grid-column: 1;
-  flex-wrap: wrap;
+  /* The metadata row stays a single chip line at every width: adding the
+     activity badge must compact/clip chips, never wrap into a new toolbar
+     row or grow the top-bar height. */
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .workbench-toolbar-actions {
@@ -1096,11 +1159,17 @@ button {
 
 @media (max-width: 560px) {
   .workbench-breadcrumb,
-  .workbench-toolbar-meta,
   .workbench-toolbar-actions,
   .workbench-pane-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  /* The metadata row keeps a single horizontal clipping line under
+     constrained width: the activity badge compacts and the secondary text is
+     hidden rather than stacking chips and growing the toolbar. */
+  .workbench-activity-badge-summary {
+    display: none;
   }
 
   .resource-summary {
