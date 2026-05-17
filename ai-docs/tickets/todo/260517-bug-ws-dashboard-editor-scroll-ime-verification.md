@@ -29,7 +29,7 @@ long-file wheel containment.
 
 Second, terminal input fidelity still does not match a native terminal. Korean
 IME input does not work in the browser terminal, and shell line-editing control
-keys such as `Ctrl-U` (clear line) and `Ctrl-W` (delete previous word) do not
+keys such as `ctrl-u` (clear line) and `ctrl-w` (delete previous word) do not
 behave as they do in a native shell. A hotfix added composition guards to the
 terminal window keydown fallback, but that is only a plausibility fix. IME
 composition and shell control-key behavior should be verified against the live
@@ -47,7 +47,7 @@ xterm/WebSocket path and should not silently rely on ASCII keypress tests.
   IME composition path, record a manual verification artifact and keep the
   automated guard coverage explicit.
 - Treat native terminal behavior as the oracle for ordinary shell line editing:
-  `Ctrl-U` clears the current command line, `Ctrl-W` deletes the previous word,
+  `ctrl-u` clears the current command line, `ctrl-w` deletes the previous word,
   and those controls must not be swallowed by browser focus handling,
   Dockview-level shortcuts, or the window keydown fallback.
 
@@ -70,7 +70,7 @@ new editor library in this ticket.
 Validate terminal input against the live xterm path. The terminal should allow
 composed Korean input to reach the shell after composition commits, and the
 window keydown fallback must not send intermediate composition keystrokes as raw
-input. Native shell line-editing controls such as `Ctrl-U` and `Ctrl-W` should
+input. Native shell line-editing controls such as `ctrl-u` and `ctrl-w` should
 reach the PTY and produce shell-visible effects. The fallback should remain
 available only for the limited shortcuts it was added to preserve and must not
 replace xterm's normal input/composition handling for focused terminal text.
@@ -78,5 +78,5 @@ replace xterm's normal input/composition handling for focused terminal text.
 Success means the ticket records either automated browser evidence for
 composition behavior or a clearly scoped manual verification artifact when
 Playwright cannot drive the platform IME. Tests should include fallback guard
-coverage and shell-visible `Ctrl-U` / `Ctrl-W` behavior so future changes do not
+coverage and shell-visible `ctrl-u` / `ctrl-w` behavior so future changes do not
 reintroduce raw composition forwarding or swallowed line-editing controls.
