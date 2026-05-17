@@ -1008,6 +1008,19 @@ async fn work_root_file_listing_routes_reports_unknown_work_root() {
     assert_eq!(value["error"], "unknown workRoot");
 }
 
+// CONTRACT: WorkRoot Activity Phase 1 route tests should cover:
+// - unauthenticated `/api/dashboard/work-roots/{workRootId}/activity` rejects
+//   before reading wsstate or opened workRoot state;
+// - unknown opened workRoot ids return 404 `{ "error": "unknown workRoot" }`;
+// - an opened workRoot with no wsstate agents returns `status: "ok"` and an
+//   empty `agents` list;
+// - fixture wsstate with idle/running/failed agent records returns summary
+//   counts and bounded row data;
+// - malformed agent/current-call JSON degrades individual rows instead of
+//   failing the whole route;
+// - response bodies never contain host paths, cache paths, session ids, pids,
+//   stdout/stderr paths, `agent.json`, or `current/state.json`.
+
 #[tokio::test]
 async fn work_root_file_listing_routes_reports_non_directory_target() {
     let root = temp_fixture_path("work-root-non-dir");
