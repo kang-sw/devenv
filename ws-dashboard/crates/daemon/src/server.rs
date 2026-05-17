@@ -8,6 +8,7 @@ use crate::auth::OwnerAuthState;
 use crate::config::ServeConfig;
 use crate::router::{build_router, AppState};
 use crate::terminal::TerminalRegistry;
+use crate::work_root_activity::WorkRootActivityProjector;
 use crate::work_root_files::OpenedWorkRoots;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,6 +44,7 @@ where
         auth,
         opened_work_roots: OpenedWorkRoots::default(),
         terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
     });
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)

@@ -37,6 +37,9 @@ use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
 use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
+use ws_dashboard_daemon::work_root_activity::{
+    WorkRootActivityProjectionConfig, WorkRootActivityProjector,
+};
 use ws_dashboard_daemon::work_root_files::OpenedWorkRoots;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -121,6 +124,7 @@ fn app_state() -> AppState {
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
     }
 }
 
@@ -133,6 +137,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
     }
 }
 
@@ -349,6 +354,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         opened_work_roots: OpenedWorkRoots::default(),
         terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::default(),
     };
     let expired_token = expired_state
         .auth
@@ -1020,6 +1026,131 @@ async fn work_root_file_listing_routes_reports_unknown_work_root() {
 //   failing the whole route;
 // - response bodies never contain host paths, cache paths, session ids, pids,
 //   stdout/stderr paths, `agent.json`, or `current/state.json`.
+
+fn app_state_with_activity_cache_home(cache_home: PathBuf) -> AppState {
+    AppState {
+        config: ServeConfig::default_loopback(),
+        auth: OwnerAuthState::new_ephemeral(),
+        opened_work_roots: OpenedWorkRoots::default(),
+        terminals: TerminalRegistry::default(),
+        work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
+            cache_home: Some(cache_home),
+        }),
+    }
+}
+
+#[tokio::test]
+async fn work_root_activity_route_is_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/activity")
+                .body(Body::empty())
+                .expect("unauthenticated workRoot activity request"),
+        )
+        .await
+        .expect("unauthenticated workRoot activity response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_reports_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/activity")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown workRoot activity request"),
+        )
+        .await
+        .expect("unknown workRoot activity response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unknown activity body bytes");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unknown activity JSON");
+    assert_eq!(value["error"], "unknown workRoot");
+}
+
+#[tokio::test]
+async fn work_root_activity_route_returns_empty_named_agent_projection() {
+    let root = temp_fixture_path("work-root-activity-empty");
+    let cache_home = temp_fixture_path("work-root-activity-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    fs::create_dir_all(&cache_home).expect("create activity cache fixture root");
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{work_root_id}/activity"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("empty workRoot activity request"),
+        )
+        .await
+        .expect("empty workRoot activity response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("empty activity body bytes");
+    let body_text = String::from_utf8(body.to_vec()).expect("empty activity body is UTF-8");
+    let value: serde_json::Value = serde_json::from_str(&body_text).expect("empty activity JSON");
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["status"], "ok");
+    assert_eq!(
+        value["summary"],
+        serde_json::json!({
+            "total": 0,
+            "active": 0,
+            "blocked": 0,
+            "failed": 0,
+            "unavailable": 0
+        })
+    );
+    assert_eq!(
+        value["agents"]
+            .as_array()
+            .expect("activity agents array")
+            .len(),
+        0
+    );
+    assert!(value.get("work_root_id").is_none());
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "agent.json".to_owned(),
+        "current/state.json".to_owned(),
+        "session_id".to_owned(),
+        "stdout".to_owned(),
+        "stderr".to_owned(),
+        "pid".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "activity response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
 
 #[tokio::test]
 async fn work_root_file_listing_routes_reports_non_directory_target() {

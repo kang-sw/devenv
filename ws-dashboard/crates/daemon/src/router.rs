@@ -18,7 +18,7 @@ use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
     terminal_resize, terminal_websocket, TerminalRegistry,
 };
-use crate::work_root_activity::work_root_activity;
+use crate::work_root_activity::{work_root_activity, WorkRootActivityProjector};
 use crate::work_root_files::{list_work_root_files, read_work_root_file, OpenedWorkRoots};
 
 #[derive(Clone)]
@@ -27,6 +27,7 @@ pub struct AppState {
     pub auth: OwnerAuthState,
     pub opened_work_roots: OpenedWorkRoots,
     pub terminals: TerminalRegistry,
+    pub work_root_activity: WorkRootActivityProjector,
 }
 
 pub fn build_router(state: AppState) -> Router {
