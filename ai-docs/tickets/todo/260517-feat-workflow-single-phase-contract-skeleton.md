@@ -1,9 +1,10 @@
 ---
-title: Workflow single-phase proceed and contract skeleton cleanup
+title: Workflow phase-unit proceed and contract skeleton cleanup
 related:
   260517-bug-lead-proceed-overbroad-slice: dogfood evidence that autonomous broad slice selection can hide distinct implementation blast radii
   260517-bug-ws-agent-empty-result-after-tool-use: adjacent runtime lifecycle bug; do not solve with workflow timeout policy in this ticket
 spec:
+  - 260505-planning-workflow-skills
   - 260505-proceed-routing-pipeline
   - 260510-skeleton-contract-populator-flow
   - 260505-implementation-workflow-skills
@@ -13,20 +14,24 @@ related-mental-model:
   - named-agent-runtime
 ---
 
-# Workflow single-phase proceed and contract skeleton cleanup
+# Workflow phase-unit proceed and contract skeleton cleanup
 
 ## Background
 
 Recent dashboard dogfood exposed repeated workflow drift: `lead-proceed`
-selected an overbroad implementation slice, `lead-write-skeleton` currently
-encourages compile-clean population before real implementation, and discussion
-around named-agent hangs risked turning runtime bugs into workflow policy.
+selected an overbroad implementation slice, `lead-write-ticket` currently
+encourages phase granularity that would become too small under single-phase
+proceed routing, `lead-write-skeleton` currently encourages compile-clean
+population before real implementation, and discussion around named-agent hangs
+risked turning runtime bugs into workflow policy.
 
 This ticket captures the settled terminology and implementation direction:
 
 - use `non-working contract skeleton`, not "brain sketch";
 - use `single-phase proceed policy` and
   `1 proceed = 1 ticket phase implementation unit`;
+- define ticket phases as complete implementation units, not granular task
+  checklist items;
 - use `pre-implementation survey pass` as the descriptive term while keeping
   existing prompt names such as `project-survey` and `plan-populator-survey`;
 - prefer `ad hoc implementation shortcut risk`, `mock-data wiring`, and
@@ -39,6 +44,8 @@ This ticket captures the settled terminology and implementation direction:
 - Do not rename `lead-write-skeleton`; redefine its contract.
 - Do not use `multi-phase` or `phase-wise implementation` terminology for the
   `lead-proceed` change.
+- Prefer fewer complete ticket phases over granular setup/API/UI/test phases
+  when authoring actionable child tickets.
 - Do not make documentation checkpoint cadence changes in this ticket. The
   current doc pipeline is noisy, but it also prevents drift. Keep cadence as a
   separate policy discussion.
@@ -48,14 +55,29 @@ This ticket captures the settled terminology and implementation direction:
 
 ## Phases
 
-### Phase 1: Single-phase proceed policy
+### Phase 1: Ticket phase units and single-phase proceed policy
 
-Change `lead-proceed` so one proceed invocation selects exactly one ticket phase
-as the implementation unit when the target has phases.
+Change `lead-write-ticket` and `lead-proceed` so ticket phases are complete
+implementation units, and one proceed invocation selects exactly one ticket
+phase as the implementation unit when the target has phases.
 
 Requirements:
 
+- Define a ticket phase as one complete implementation unit for one
+  `lead-proceed` run: after the phase, the targeted caller-visible behavior is
+  working, reviewable, and verifiable without temporary behavior.
 - Define `1 proceed = 1 ticket phase implementation unit`.
+- Update `lead-write-ticket` phase authoring so it prefers fewer complete
+  phases over granular task phases.
+- In `lead-write-ticket`, use multiple phases only for sequential complete
+  increments with distinct success criteria; split unrelated complete
+  increments into child tickets.
+- In `lead-write-ticket`, do not create phases for isolated setup, API-only,
+  UI-only, test-only, skeleton-only, or investigation tasks unless that step is
+  itself the completed deliverable.
+- Require each non-epic actionable phase to state its completion boundary: what
+  behavior is done after the phase, what remains deferred, and what
+  verification proves the phase complete.
 - Honor an explicit user-named phase exactly.
 - Without an explicit phase, select the first unfinished phase by default.
 - Do not autonomously group adjacent unfinished phases as the broadest cohesive
@@ -65,8 +87,9 @@ Requirements:
 - Preserve whole-target handling only for targets without phase sections and
   for narrow inline work that does not need durable phase tracking.
 - Update ws and wsflow skill surfaces consistently where applicable.
-- Update spec and mental-model text that currently describes "broadest cohesive
-  unfinished slice" selection.
+- Update ticket conventions, spec, and mental-model text that currently
+  describe "broadest cohesive unfinished slice" selection or granular phase
+  preference.
 
 ### Phase 2: Non-working contract skeleton
 
