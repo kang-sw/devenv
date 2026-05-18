@@ -3,7 +3,7 @@ title: ws dashboard Activity Console
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260517-feat-ws-dashboard-workroot-activity: completed first read-only named-agent projection, badge, and pane substrate
-  260517-feat-ws-dashboard-workroot-activity-live-refresh: narrow polling-replacement idea absorbed into the Activity Feed stream child
+  260517-feat-ws-dashboard-workroot-activity-live-refresh: narrow polling-replacement idea absorbed into Activity Console live update children
   260513-feat-async-exec-output-reader: future exec jobs should become feed items and transcript sources
 related-mental-model:
   - ws-web-dashboard
@@ -15,23 +15,23 @@ related-mental-model:
 
 ## Scope
 
-Promote WorkRoot Activity from a read-only named-agent list into a reusable
+Promote WorkRoot Activity from a read-only named-agent list into a full-scale
 read-only Activity Console for live/latest workRoot activity. The console
 centers on a compact activity ribbon and a selected transcript viewer rather
 than a vertically dumped list of agent cards.
 
 The milestone covers:
 
-- A workRoot-scoped Activity Feed snapshot API that generalizes the current
-  named-agent projection into selectable activity items.
-- A cross-platform daemon watch and stream path so live/latest feed state
-  updates without browser reloads or repeated full-list polling.
-- A selected Activity Transcript API that returns normalized transcript blocks
-  from daemon-owned sources without exposing cache, session, process, or host
-  paths.
-- A reusable frontend Activity Console made from an Activity Ribbon and a
-  Transcript Block viewer, usable inside the WorkRoot Activity pane now and
-  popup-style main-agent surfaces later.
+- A backend Activity Read Model that combines the Activity Feed snapshot and
+  selected transcript backfill needed by the console.
+- A polished reusable Activity Console UI shell with an Activity Ribbon and
+  Transcript Block viewer inside the WorkRoot Activity pane.
+- A cross-platform daemon watch and read-only stream path for live Activity
+  Feed and transcript invalidation events.
+- Frontend live update adoption that merges daemon stream events without stale
+  workRoot updates or always-on full-list polling.
+- Transcript source expansion beyond the MVP ws named-agent backfill, starting
+  with native Codex session resolver support where stable evidence exists.
 
 ## Non-Scope
 
@@ -44,18 +44,20 @@ The milestone covers:
 
 ## Child Tickets
 
-- `260518-feat-ws-dashboard-activity-feed-api` - todo; define and implement the
-  Activity Feed snapshot model, item identity, ordering semantics, and
-  compatibility path from the current WorkRoot Activity projection.
-- `260518-feat-ws-dashboard-activity-watch-stream` - todo; replace the bounded
-  polling hotfix with a workRoot-scoped cross-platform watcher plus feed event
-  stream and fallback mode.
-- `260518-feat-ws-dashboard-activity-transcript-api` - todo; resolve selected
-  activity items to normalized transcript blocks, starting from ws named-agent
-  state and preparing backend-native Codex/Claude/Gemini adapters.
+- `260518-feat-ws-dashboard-activity-read-model` - todo; implement the backend
+  feed snapshot plus selected transcript backfill contract that the console
+  reads.
 - `260518-feat-ws-dashboard-activity-console-ui` - todo; build the reusable
-  Activity Ribbon and Transcript Block viewer and migrate the WorkRoot Activity
-  pane to the Activity Console shape.
+  Activity Ribbon, Transcript Block viewer, and WorkRoot Activity pane shell
+  against the read model.
+- `260518-feat-ws-dashboard-activity-watch-stream` - todo; implement the
+  daemon-side cross-platform watcher, SSE feed event stream, and fallback mode.
+- `260518-feat-ws-dashboard-activity-live-ux` - todo; adopt the live stream in
+  the Activity Console frontend with merge, stale-root, transcript-refresh, and
+  fallback behavior.
+- `260518-feat-ws-dashboard-activity-transcript-api` - todo; expand transcript
+  sources and block-level live transcript behavior after the read model and
+  live update foundation are in place.
 
 ## Cross-Child Decisions
 
@@ -86,9 +88,10 @@ The milestone covers:
 
 - Done: selected workRoot activity renders as a reusable Activity Console with a
   horizontal live/latest ribbon, selected transcript blocks, live update
-  behavior, and browser-level verification.
+  behavior, browser-level verification, and at least one native transcript
+  source expansion beyond the basic ws named-agent read model.
 - Dropped: dashboard activity visibility moves to a different primary UX
   concept and the ribbon/transcript model is no longer desired.
 - Deferred: agent controls, broad exec job support, main-agent popup
-  integration, and backend adapters beyond the accepted transcript source scope
-  may continue in later children.
+  integration, and backend adapters beyond accepted transcript source scope may
+  continue in later epics or children.
