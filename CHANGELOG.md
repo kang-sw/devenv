@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.26.6 - 2026-05-18
+
+### Added
+- Add the ws web dashboard workRoot IO substrate: file listing, read-only file
+  panes, daemon-owned terminal sessions, terminal websocket transport,
+  workbench integration, Dockview layout ownership, tab polish, and WorkRoot
+  Activity projection, badge, and pane.
+
+### Changed
+- Teach `lead-write-ticket` to preserve settled local and cross-ticket
+  decisions before pruning ticket length, and to review related-ticket
+  decisions by default for actionable ticket creation and edits.
+- Record workflow follow-up tickets for single-phase `lead-proceed`
+  implementation units, non-working contract skeleton semantics,
+  pre-implementation survey guardrails, and named-agent empty-result lifecycle
+  recovery.
+
+### Fixed
+- Harden dashboard resource routing, terminal session lifecycle, terminal
+  websocket behavior, Windows terminal portability, editor scroll and terminal
+  input fidelity, Dockview dynamic groups, terminal focus retention, and
+  WorkRoot Activity live refresh.
+
 ## v0.26.5 - 2026-05-16
 
 ### Changed
