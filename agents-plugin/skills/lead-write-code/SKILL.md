@@ -9,19 +9,30 @@ Target: user request
 
 ## Invariants
 
+Branch
 - Operate on current branch; caller owns branch creation.
+
+Context
 - Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
+- Honor caller-provided scope or phase slices as hard implementation boundaries.
+
+Brief
 - Implementer reads only the brief, plus plan when provided; never the ticket directly.
 - Brief strips ticket noise, never selected-scope binding decisions.
 - Brief includes concrete contract and integration-test instructions for public or cross-module changes.
+
+Review
 - Fit reviewer reads the ticket when ticket-driven; correctness/test reviewers may not.
-- Honor caller-provided scope or phase slices as hard implementation boundaries.
-- Lead puts ancestor-loading rule in implementer prompt.
 - Reviewers write findings to files and return summaries only.
 - Lead relays review file paths, not findings content, to implementer.
-- Implementer and reviewer sessions persist through `ws/agents.call` auto-resume.
 - Relay cap is 3 cycles; lead adjudicates at cycle 2; caller escalation at cycle 3.
 - Delete review path files before returning.
+
+Agents
+- Lead puts ancestor-loading rule in implementer prompt.
+- Implementer and reviewer sessions persist through `ws/agents.call` auto-resume.
+
+Output
 - Output commit range, test status, and brief path in completion format.
 
 ## On: invoke
@@ -179,61 +190,7 @@ Full review: reserve for risks spanning correctness, fit, and tests.
 
 ## Templates
 
-### Plan population prompt
-
-```text
-Brief path: <brief-path>
-Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
-```
-
-### Reviewer partition table
-
-| Partition | Reviewer name | Prompts | Output path | Required check |
-|-----------|---------------|---------|-------------|----------------|
-| Correctness | `reviewer-correctness` | `["code-reviewer", "code-review-correctness"]` | `<correctness-path>` | Verify correctness invariants. |
-| Fit | `reviewer-fit` | `["code-reviewer", "code-review-fit"]` | `<fit-path>` | Verify brief contract instructions, future-phase fit, and ticket-driven binding decisions. |
-| Test | `reviewer-test` | `["code-reviewer", "code-review-test"]` | `<test-path>` | Verify coverage, assertions, and brief integration-test instructions. |
-
-### Reviewer prompt frame
-
-```text
-Review partition: <Correctness|Fit|Test>
-Diff range: <first-commit>..<last-commit>
-<if Fit:> Brief path: <brief-path>
-<if Fit and ticket-driven:> Ticket path: <ticket-path>
-Findings path: <partition-output-path>
-
-Review focus:
-- <2-4 partition-specific risks>
-
-Required checks:
-- <required check from Reviewer partition table>
-- <if Fit and ticket-driven:> Report any selected-scope binding decision omitted from the brief or violated by the implementation.
-
-Instructions:
-- Ignore outside this partition unless directly broken by the diff.
-- Write full findings to the findings path.
-- Return only: [clean|non-clean]: <one-line summary of most significant issues>
-```
-
-### Review relay prompt
-
-```text
-Review cycle <N>: <non-clean review paths only>. Read each file directly.
-For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
-Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
-Won't-fix not allowed: correctness, security, or contract violations - fix or escalate these.
-```
-
-### Re-review prompt
-
-```text
-Re-review. Updated diff: <diff>
-Implementer won't-fix items: <list with reasons>
-For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
-```
-
-### Brief format
+### Brief Template
 
 Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 
@@ -290,7 +247,67 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 - `ai-docs/mental-model/<path>` - <relevance>
 ```
 
-### Completion report format
+### Plan Template
+
+#### Plan population prompt
+
+```text
+Brief path: <brief-path>
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
+```
+
+### Review Templates
+
+#### Reviewer partition table
+
+| Partition | Reviewer name | Prompts | Output path | Required check |
+|-----------|---------------|---------|-------------|----------------|
+| Correctness | `reviewer-correctness` | `["code-reviewer", "code-review-correctness"]` | `<correctness-path>` | Verify correctness invariants. |
+| Fit | `reviewer-fit` | `["code-reviewer", "code-review-fit"]` | `<fit-path>` | Verify brief contract instructions, future-phase fit, and ticket-driven binding decisions. |
+| Test | `reviewer-test` | `["code-reviewer", "code-review-test"]` | `<test-path>` | Verify coverage, assertions, and brief integration-test instructions. |
+
+#### Reviewer prompt frame
+
+```text
+Review partition: <Correctness|Fit|Test>
+Diff range: <first-commit>..<last-commit>
+<if Fit:> Brief path: <brief-path>
+<if Fit and ticket-driven:> Ticket path: <ticket-path>
+Findings path: <partition-output-path>
+
+Review focus:
+- <2-4 partition-specific risks>
+
+Required checks:
+- <required check from Reviewer partition table>
+- <if Fit and ticket-driven:> Report any selected-scope binding decision omitted from the brief or violated by the implementation.
+
+Instructions:
+- Ignore outside this partition unless directly broken by the diff.
+- Write full findings to the findings path.
+- Return only: [clean|non-clean]: <one-line summary of most significant issues>
+```
+
+#### Review relay prompt
+
+```text
+Review cycle <N>: <non-clean review paths only>. Read each file directly.
+For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
+Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
+Won't-fix not allowed: correctness, security, or contract violations - fix or escalate these.
+```
+
+#### Re-review prompt
+
+```text
+Re-review. Updated diff: <diff>
+Implementer won't-fix items: <list with reasons>
+For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+```
+
+### Report Template
+
+#### Completion report format
 
 ```text
 Implementation complete.
