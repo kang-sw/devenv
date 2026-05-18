@@ -114,6 +114,10 @@ The MVP should cover:
   runtime activity projection with a compact top-bar badge and group-1
   reversible detail pane, starting with read-only named-agent state and
   reserving running commands for the async exec output reader.
+- `260518-epic-ws-dashboard-activity-console` - todo; promote WorkRoot Activity
+  from a named-agent list into a reusable read-only Activity Console with a
+  live/latest ribbon, selected transcript blocks, cross-platform watcher-backed
+  feed updates, and backend-owned transcript source resolution.
 
 ## Cross-Child Decisions
 
@@ -211,6 +215,10 @@ The MVP should cover:
 - For frontend UI implementation delegated through ws named agents, register the
   implementer and reviewer with `model: "opus"` unless the user overrides that
   choice for a specific child ticket.
+- Activity visibility remains read-only. Control actions such as start,
+  interrupt, cancel, erase, and retry stay out of the dashboard Activity
+  Console; any future terminate affordance requires a separate high-friction
+  control ticket.
 
 ## Completion Criteria
 
