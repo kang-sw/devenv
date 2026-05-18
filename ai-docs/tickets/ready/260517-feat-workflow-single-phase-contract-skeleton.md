@@ -32,8 +32,9 @@ This ticket captures the settled terminology and implementation direction:
   `1 proceed = 1 ticket phase implementation unit`;
 - define ticket phases as complete implementation units, not granular task
   checklist items;
-- use `pre-implementation survey pass` as the descriptive term while keeping
-  existing prompt names such as `project-survey` and `plan-populator-survey`;
+- strengthen the existing plan-populator prompts as the pre-implementation
+  context and planning pass; do not rename prompts unless there is a separate
+  migration reason;
 - prefer `ad hoc implementation shortcut risk`, `mock-data wiring`, and
   `fallback or temporary implementation logic` over informal "duct tape"
   wording in durable docs;
@@ -249,25 +250,38 @@ Verification repeated:
 - `python3 -m unittest discover agents-plugin-wsflow/tests`
 - `git diff --check -- agents-plugin/skills/lead-write-code/SKILL.md`
 
-### Phase 3: Pre-implementation survey pass guardrails
+### Phase 3: Plan-populator guardrails
 
-Strengthen implementation routing so the survey step catches contract and reuse
-risks before code is written.
+Strengthen implementation routing so the existing plan-populator prompts catch
+contract, reuse, and shortcut risks before code is written. This is not a new
+workflow route or prompt rename; it is a guardrail pass inside the existing
+`survey` and `research` plan-depth paths.
 
 Requirements:
 
 - Keep existing prompt names unless there is a separate migration reason.
-- Describe the behavior as a `pre-implementation survey pass`.
-- Ensure the pass looks for public contract violations, missed reuse of existing
-  project mechanisms, ad hoc implementation shortcut risk, mock-data wiring, and
-  fallback or temporary implementation logic.
+- Treat `plan-populator-survey` and `plan-populator-research` as the two
+  implementation surfaces for this phase.
+- Describe their behavior as a pre-implementation context and planning pass, not
+  as a new route.
+- Ensure both prompts look for public contract violations, missed reuse of
+  existing project mechanisms, ad hoc implementation shortcut risk, mock-data
+  wiring, and fallback or temporary implementation logic.
 - Treat duplicated glue code, test-passing code that bypasses existing project
   mechanisms, and fallback-based behavior as examples of ad hoc implementation
   shortcut risk.
-- Ensure selected-slice binding decisions remain visible to implementers and fit
+- Ensure selected-scope binding decisions remain visible to implementers and fit
   reviewers.
-- Prefer reusing existing `project-survey` and `plan-populator-survey`
-  mechanisms before adding a new prompt.
+- For `plan-populator-survey`, surface the risks as reference-map entries,
+  constraints, and opinion notes that help implementers avoid exploratory
+  misses without turning the survey into an implementation plan.
+- For `plan-populator-research`, reflect the risks in the self-contained plan:
+  context, ordered steps, testing, and success criteria must preserve contract
+  and integration-test instructions from the brief.
+- Remove or reframe skeleton-era plan-populator wording around the brief's
+  `Contract Instructions` and `Integration Test Instructions`; keep
+  backward-compatible artifact interpretation only when an older brief actually
+  provides such artifacts.
 
 ### Phase 4: Documentation cadence and runtime lifecycle boundaries
 
