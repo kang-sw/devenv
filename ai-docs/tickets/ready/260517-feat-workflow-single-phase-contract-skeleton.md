@@ -325,6 +325,26 @@ Verification:
 - `ws/spec_index.verify`
 - `git diff --check`
 
+#### Edition (f509d510) - 2026-05-18
+
+Corrected plan-populator routing after the initial Phase 3 implementation
+introduced an unapproved research-suffixed plan artifact convention. Survey and
+research are now either/or plan-depth modes: `plan-populator-survey` may exit
+with `[escalate-to-research]` when a reference map cannot safely support
+implementation, and `lead-write-code` routes to `plan-populator-research`
+before spawning the implementer.
+
+The research route keeps the existing plan artifact path and replaces survey
+output with the research plan. It does not create `.research.md` files and does
+not append a `## Research` section to survey output.
+
+Verification repeated:
+
+- `go test ./...` from `agents-plugin-tool/`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `ws/spec_index.verify`
+- `git diff --check`
+
 ### Phase 4: Documentation cadence and runtime lifecycle boundaries
 
 Record boundaries without changing the behavior yet.
