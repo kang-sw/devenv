@@ -164,7 +164,7 @@ is too underspecified to spec. Queue entries are maintained for `ready/` work
 only.
 
 `lead-write-ticket` preserves epics as lightweight milestone boards. When
-detailed discussion, implementation phases, or slice-specific decisions arise
+detailed discussion, implementation phases, or phase-specific decisions arise
 while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
 they form sequential complete implementation units. Actionable child-ticket
@@ -240,45 +240,27 @@ whether a design discussion still has user-blocking blockers. It does not edit f
 classifies remaining work into user-blocking design questions, ticket or spec
 capture gaps, autonomous code-hygiene items, and proceed readiness.
 
-`lead-write-skeleton` optionally locks high-risk caller-visible contracts before
-implementation when the scope needs a separate reviewable checkpoint. It
-uses deep insertion-point research, then the lead writes a low-resolution source
-draft with language-neutral `CONTRACT:`, `HINT:`, and `HOLE:` comment markers.
-The lead-authored draft may be non-compiling only before populator handoff.
-`CONTRACT:` marks binding public shape and behavior targets, `HINT:` marks
-approximate references for source discovery, and `HOLE:` marks unknown concrete
-types, imports, fixtures, helpers, or harnesses. A `skeleton-populator` delegate
-researches and normalizes hints, fills clear holes, converts the draft into
-compile-clean stubs and build-valid test scaffolding, and escalates missing or
-conflicting contract elements instead of silently changing public shape. A
-read-only `skeleton-reviewer` delegate checks contract preservation, marker
-resolution, stub-only scope, and build or syntax evidence before lead commit.
-The skeleton review loop stays lightweight: one reviewer, one amendment round,
-then stop and report if still non-clean. The lead makes contract amendments,
-verifies build or syntax checks, commits the final skeleton, and links generated
-skeleton artifacts to the ticket. {#260510-skeleton-contract-populator-flow}
+`lead-write-skeleton` is deprecated from normal implementation routing. The
+skill file remains available for compatibility, but `lead-implement` no longer
+invokes it and absence of ticket `skeletons:` frontmatter does not create a
+skeleton obligation. {#260510-skeleton-contract-populator-flow}
 
-> [!note] Planned 🚧
-> `lead-write-skeleton` will become a non-working contract skeleton step. It
-> will lock public contracts, module or file boundaries, type or function
-> signatures, stubs, and intent comments before implementation. It may leave
-> non-compiling source when that source clearly records contracts and
-> boundaries. It will not add behavior implementation, mock-data wiring,
-> fallback or temporary implementation logic, visual polish, or temporarily
-> working feature code. Implementers will use the optional plan plus skeleton
-> diff as design input, then replace or complete the skeleton with real working
-> behavior.
+`lead-write-code` absorbs the useful skeleton role through brief authoring.
+For public interface, cross-module boundary, or new type contract changes, the
+brief includes concrete `Contract Instructions`: expected files or modules,
+public types/functions/handlers/tools, visibility, call shape, input/output
+shape, lifecycle boundaries, existing mechanisms to reuse, and forbidden
+temporary, fallback, or mock-data wiring. It also includes concrete
+`Integration Test Instructions`: the required boundary type such as parser,
+CLI, MCP tool, doc convention, skill routing, runtime lifecycle, or agent
+relay; whether to extend existing tests or create new integration tests; and
+observable pass criteria. Implementers treat both sections as acceptance
+criteria, and fit/test reviewers compare the implementation against them.
+{#260512-skeleton-inside-implement-branch}
 
-`lead-implement` owns skeleton decisions and execution inside the implementation
-branch lifecycle. `lead-proceed` only routes implementation-ready targets to
-`lead-implement`; it does not decide skeleton need or invoke
-`lead-write-skeleton` before implementation. {#260512-skeleton-inside-implement-branch}
-
-`lead-write-skeleton` preserves both authoring boundaries as commits on the
-current branch: a lead-authored skeleton draft commit, followed by a final
-populated skeleton commit after populator and reviewer checks. Ticket
-`skeletons:` frontmatter records only the final skeleton commit hash, not the
-draft checkpoint. {#260512-skeleton-draft-and-final-commits}
+Ticket `skeletons:` frontmatter is a backward-compatible legacy artifact map.
+Existing entries may still document old skeleton artifact commits, but normal
+workflow routing does not create new skeleton artifacts. {#260512-skeleton-draft-and-final-commits}
 
 ## Implementation Workflow Skills {#260505-implementation-workflow-skills}
 
@@ -295,16 +277,17 @@ route to another implementation slice or sprint and are captured in tickets as
 append-only Result editions for already completed phases.
 
 `lead-edit` performs a narrow direct edit in the lead session. It honors
-existing skeleton artifacts and caller-provided scope boundaries, verifies the
-change, uses one reviewer for correctness and fit, escalates if the scope grows,
-and reports the commit range and test status to its caller.
+caller-provided scope boundaries, verifies the change, uses one reviewer for
+correctness and fit, escalates if the scope grows, and reports the commit range
+and test status to its caller.
 
 `lead-write-code` delegates an implementation target through an implementer
 agent, optional plan, partitioned reviewers, bounded fix relay, cleanup, and
-completion report. It honors existing skeleton artifacts and caller-provided
-scope boundaries but does not require missing skeletons. When workflow primitive
-context is not already active, it loads `lead-workflow-manual` before
-registering delegates or reviewers.
+completion report. Its brief preserves caller-provided scope boundaries and
+selected binding decisions, and it carries concrete contract and integration
+test instructions when the target changes public or cross-module contracts.
+When workflow primitive context is not already active, it loads
+`lead-workflow-manual` before registering delegates or reviewers.
 
 > [!note] Planned 🚧
 > Implementation routing will include a pre-implementation survey pass that
@@ -315,12 +298,12 @@ registering delegates or reviewers.
 > reviewers.
 
 The implementation brief is the implementer's sole context source, but it is
-not a lossy ticket summary. For the selected implementation slice, the brief
+not a lossy ticket summary. For the selected implementation scope, the brief
 records every settled caller-visible contract, implementation strategy decision,
 rejected alternative, and verification expectation from the target, or marks it
 explicitly deferred or out of scope. Ticket noise such as background discussion,
 unsettled options, and unrelated future phases is stripped. In ticket-driven
-runs, the fit reviewer reads the ticket and treats selected-slice binding
+runs, the fit reviewer reads the ticket and treats selected-scope binding
 decisions omitted from the brief or violated by the implementation as blocking
 findings. Correctness and test reviewers remain scoped to the diff and their
 assigned partitions.
@@ -384,12 +367,12 @@ the ticket, it routes through `lead-write-ticket` edit, re-reads the refreshed
 ticket, and then continues scope resolution.
 {#260513-proceed-ticket-freshness-gate}
 
-Implementation always routes through `lead-implement` with the selected slice as
+Implementation always routes through `lead-implement` with the selected scope as
 a hard scope boundary. `lead-proceed` does not rejudge ticket quality, demand
-ticket splitting, mutate ticket structure, decide skeleton need, or invoke
-`lead-write-skeleton` before implementation. When a separate contract checkpoint
-may be needed before implementation, `lead-implement` decides whether to run
-`lead-write-skeleton` before edit/write-code.
+ticket splitting, mutate ticket structure, decide contract-brief depth, or
+invoke implementation primitives before `lead-implement`. Public or
+cross-module contract checkpoints are expressed as `lead-write-code` brief
+contract and integration-test instructions.
 
 ## Sprint Session Container {#260505-sprint-session-container}
 
@@ -494,8 +477,8 @@ step.
 ## Delegate Prompt Boundaries {#260505-workflow-delegate-prompt-boundaries}
 
 Workflow skills use embedded prompt chains for named delegates such as
-implementers, reviewers, skeleton populators, survey workers, and documentation
-updaters. Public named-agent registrations receive delegate-orientation
+implementers, reviewers, survey workers, and documentation updaters. Public
+named-agent registrations receive delegate-orientation
 instructions before role-specific prompt material.
 
 Delegate orientation reserves lifecycle orchestration, reviewer fanout,

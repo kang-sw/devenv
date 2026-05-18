@@ -25,7 +25,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 ## Epic Tickets
 
 - Epic bodies preserve board-level context: scope, non-scope, child ticket board, cross-child invariant decisions, and done/drop/defer criteria.
-- Detailed discussion, implementation approaches, constraints, and slice-specific decisions belong in child tickets, not in the epic body.
+- Detailed discussion, implementation approaches, constraints, and phase-specific decisions belong in child tickets, not in the epic body.
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
 - A single child ticket may carry multiple phases when they form sequential complete implementation units.
 
@@ -33,7 +33,7 @@ Canonical reference for ticket structure, naming, and lifecycle.
 
 - Phase numbers are sequential and **stable** — mark dropped phases `[dropped]`, never renumber.
 - One phase is one complete behavior a future fresh session can finish, review, verify, and hand off cleanly.
-- Setup, API, UI, tests, skeletons, and investigation are phase ingredients unless one is the reviewable deliverable.
+- Setup, API, UI, tests, legacy skeleton artifacts, and investigation are phase ingredients unless one is the reviewable deliverable.
 - Each phase states its completed behavior, deferred scope, and verification boundary.
 - Structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
 
@@ -66,7 +66,7 @@ spec-remove:         # optional; list of spec-stems this ticket's implementation
 parent:              # optional; epic stem (e.g., 260401-epic-auth-rewrite)
 plans:               # maps phases to plan path stems under ai-docs/.plans/ (without .md)
   phase-1: 2026-03/28-1430.event-serialization
-skeletons:           # maps phases to skeleton commit hashes
+skeletons:           # legacy: maps phases to skeleton artifact commit hashes
   phase-1: abc1234
 related-mental-model:  # optional; mental-model stems (filename without .md) consulted
   - workflow-routing   #   during ticket authoring — recovery hint for future sessions
@@ -74,7 +74,7 @@ completed:           # YYYY-MM-DD, added on move to .done/
 ---
 ```
 
-Both `plans:` and `skeletons:` list only phases that have artifacts — omit phases without a plan or skeleton (no null placeholders). Absence means "not yet created" or "not needed."
+Both `plans:` and legacy `skeletons:` list only phases that have artifacts — omit phases without an artifact (no null placeholders). Absence of `skeletons:` means "not needed"; normal implementation routing does not create new skeleton artifacts.
 
 ### Body (actionable: `feat`, `bug`, `refactor`, `chore`)
 

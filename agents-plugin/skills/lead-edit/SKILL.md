@@ -11,7 +11,6 @@ Target: user request
 
 Scope
 - Lead edits directly; do not delegate implementation.
-- Honor existing skeleton contracts and integration tests as acceptance criteria.
 - Honor caller-provided scope or phase slices as hard edit boundaries.
 - Escalate to `ws:lead-write-code` if scope becomes multi-file with new public API or cross-module new pattern.
 
@@ -36,10 +35,10 @@ Output
 
 ### 1. Prepare
 
-1. Parse ticket path or inline brief.
+1. Parse ticket path or inline request.
 2. Record `<start-commit>` with `git rev-parse HEAD`.
-3. If ticket-driven: read ticket; collect existing skeleton references and caller-provided scope boundary.
-4. Treat collected skeleton references and scope boundary as acceptance criteria.
+3. If ticket-driven: read ticket and caller-provided scope boundary.
+4. Treat the caller-provided scope boundary as acceptance criteria.
 5. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 6. Call `ws/infra.read(name: "impl-playbook")`.
 7. Identify integration test paths and run command.
@@ -68,7 +67,7 @@ Output
 
 ```text
 Diff range: <start-commit>..HEAD
-Scope: direct-edit - <brief scope description>
+Scope: direct-edit - <scope description>
 
 Review for correctness and fit.
 Review focus:
@@ -83,7 +82,7 @@ Return only: [clean|non-clean]: <one-line summary>
 8. If `[non-clean]`, read `<review-path>` and classify findings:
    - Fix: correctness, security, contract, regression.
    - Reject: style-only conflict with local patterns.
-   - Reject: scope expansion beyond brief.
+   - Reject: scope expansion beyond request.
 9. Apply fixes, keep rejected list with reasons, re-verify.
 10. Re-call reviewer:
 

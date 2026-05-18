@@ -20,10 +20,9 @@ Target: user request
 ### 1. Assess
 
 1. Parse target: ticket path or inline description.
-2. If ticket-driven: read ticket; extract scope, stem, artifacts, existing skeletons, and caller-provided slice.
-3. Apply `judge: needs-skeleton`.
-4. Apply `judge: execution-mode`.
-5. Apply `judge: branch-mode`.
+2. If ticket-driven: read ticket; extract scope, stem, artifacts, and caller-provided slice.
+3. Apply `judge: execution-mode`.
+4. Apply `judge: branch-mode`.
 
 ### 2. Prepare
 
@@ -36,7 +35,6 @@ Target: user request
 ```text
 [ ] Confirm scope boundary - preserve caller-provided slice or whole-target scope
 [ ] Prepare branch - create, continue, or safely rename the implementation branch
-[ ] Resolve skeleton need - invoke ws:lead-write-skeleton on the implementation branch when required
 [ ] Execute - invoke ws:lead-edit or ws:lead-write-code; capture commit range and result commit
 [ ] Doc pre-pass - update-spec then mental-model-updater; commit each
 [ ] Doc commit gate - refresh ai-docs/_index.md, ticket status, then commit docs
@@ -48,15 +46,11 @@ Target: user request
 
 1. Record `<implementation-start>` before creating or editing source.
 2. Delegated outside `implement/*`: create `implement/<scope>` before any source edit.
-3. If skeleton is required:
-   a. Invoke `ws:lead-write-skeleton` with the target and skeleton reason.
-   b. Capture the final skeleton commit hash from its completion output.
-   c. Continue implementation on the same branch.
-4. Execute the selected implementation mode:
+3. Execute the selected implementation mode:
    - Direct edit: invoke `ws:lead-edit` with the target and scope boundary on the current branch.
-   - Delegated: invoke `ws:lead-write-code` with the target and scope boundary.
-5. Capture commit range from `<implementation-start>..HEAD` plus the edit/write-code completion report.
-6. Capture `<result-commit>` as current source HEAD before documentation updates.
+   - Delegated: invoke `ws:lead-write-code` with the target, scope boundary, and any public contract or integration-test concerns found during assessment.
+4. Capture commit range from `<implementation-start>..HEAD` plus the edit/write-code completion report.
+5. Capture `<result-commit>` as current source HEAD before documentation updates.
 
 ### 4. Doc Pre-Pass
 
@@ -78,7 +72,6 @@ Run mental-model-updater after update-spec so it sees implemented-marker changes
 
 Report:
 
-- skeleton draft/final commit hashes and ticket-skeleton update status when skeleton ran;
 - implemented changes from edit/write-code output;
 - documentation updates and ticket Result hash;
 - review result from edit `Review:` or write-code reviewer summaries;
@@ -107,16 +100,8 @@ Write the merge commit per CLAUDE.md.
 | Decision | When |
 |----------|------|
 | Direct edit -> `ws:lead-edit` | Single file, internal-only, no callers affected, no new public symbols, no new test files, and no explicit delegation request |
-| Delegated -> `ws:lead-write-code` | Skeleton is required |
+| Delegated -> `ws:lead-write-code` | Public interface, cross-module boundary, or new type contract changes require concrete contract and integration-test instructions |
 | Delegated -> `ws:lead-write-code` | Any direct-edit condition is unmet |
-
-### judge: needs-skeleton
-
-| Decision | When |
-|----------|------|
-| Skip | Ticket `skeletons:` already records a skeleton for this phase or scope |
-| Skip | Small isolated change: single file, no new public contracts |
-| Required | Public interface, cross-module boundary, or new type contract changes |
 
 ### judge: branch-mode
 

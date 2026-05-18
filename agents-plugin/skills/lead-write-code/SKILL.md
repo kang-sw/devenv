@@ -12,9 +12,9 @@ Target: user request
 - Operate on current branch; caller owns branch creation.
 - Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Implementer reads only the brief, plus plan when provided; never the ticket directly.
-- Brief strips ticket noise, never selected-slice binding decisions.
+- Brief strips ticket noise, never selected-scope binding decisions.
+- Brief includes concrete contract and integration-test instructions for public or cross-module changes.
 - Fit reviewer reads the ticket when ticket-driven; correctness/test reviewers may not.
-- Honor existing skeleton contracts and integration tests as acceptance criteria.
 - Honor caller-provided scope or phase slices as hard implementation boundaries.
 - Lead puts ancestor-loading rule in implementer prompt.
 - Reviewers write findings to files and return summaries only.
@@ -42,10 +42,12 @@ ws/agents.call(name: "project-survey", prompt: <ticket path or inline descriptio
 ### 2. Write Brief
 
 1. Write `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` with the brief template.
-2. Strip ticket noise; preserve every selected-slice binding decision in the brief.
+2. Strip ticket noise; preserve every selected-scope binding decision in the brief.
 3. Populate `## References` from project-survey output.
-4. Audit the brief against the target; every settled caller-visible contract, implementation strategy decision, rejected alternative, and verification expectation must appear in the brief or be explicitly out of scope/deferred.
-5. Commit the brief before plan-depth.
+4. Populate `## Contract Instructions` with concrete files/modules, public surface, call shapes, boundaries, reuse targets, and forbidden temporary wiring.
+5. Populate `## Integration Test Instructions` with the required boundary type, test location strategy, and pass criteria.
+6. Audit the brief against the target; every settled caller-visible contract, implementation strategy decision, rejected alternative, and verification expectation must appear in the brief or be explicitly out of scope/deferred.
+7. Commit the brief before plan-depth.
 
 ### 3. Plan Depth
 
@@ -66,14 +68,13 @@ Commit the plan file before Prepare.
 
 ### 4. Prepare
 
-1. Collect existing skeleton references from frontmatter, integration tests, or stubs: `todo!()`, `unimplemented`, `NotImplementedError`.
-2. Identify integration test paths and run command.
-3. Include skeleton test paths only when skeleton references exist.
-4. Register implementer:
+1. Identify integration test paths and verification command from the brief's integration-test instructions.
+2. Run baseline verification only when the referenced tests or command already exist.
+3. Register implementer:
    `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
-5. Generate review paths:
+4. Generate review paths:
    `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
-6. Store `<correctness-path>`, `<fit-path>`, `<test-path>`.
+5. Store `<correctness-path>`, `<fit-path>`, `<test-path>`.
 
 ### 5. Spawn Implementer
 
@@ -88,8 +89,8 @@ Read only the brief (and plan if provided). Do not read the ticket directly.
 Implement only the brief's scope boundary; leave later ticket phases untouched.
 
 Acceptance criteria:
-<if skeleton exists:> Existing skeleton contracts must be satisfied, and skeleton integration tests must pass.
-<if no skeleton exists:> Brief-scoped implementation tests must pass.
+- Brief `## Contract Instructions` must be implemented or explicitly escalated.
+- Brief `## Integration Test Instructions` must be satisfied.
 - Test files: <integration test paths>
 - Run: <command to execute them>
 
@@ -98,6 +99,7 @@ read `ai-docs/mental-model/<domain>/index.md` first.
 
 Instructions:
 - Verify integration tests pass before reporting completion and after each fix.
+- Do not replace brief contract instructions with temporary, fallback, or mock-data behavior.
 - Report completion in plain text. Include test results.
 - For fix cycles, a follow-up call will arrive with review findings; fix and report back.
 - Commit logical checkpoints on the current branch.
@@ -148,8 +150,8 @@ Brief path: <brief-path>
 Instructions:
 - Review focus: <2-4 fit or architecture concerns to verify>.
 - Ignore outside this partition unless directly broken by the diff.
-- Judge whether the implementation achieves the brief and leaves room for future phases.
-<if ticket-driven:> Read the ticket at <ticket-path>; report any selected-slice binding decision omitted from the brief or violated by the implementation.
+- Judge whether the implementation satisfies brief contract instructions and leaves room for future phases.
+<if ticket-driven:> Read the ticket at <ticket-path>; report any selected-scope binding decision omitted from the brief or violated by the implementation.
 - Write your full findings to: <fit-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
 ```
@@ -160,7 +162,8 @@ Test:
 Diff range: <first-commit>..<last-commit>
 
 Instructions:
-- Review focus: <2-4 coverage or assertion risks to verify>.
+- Review focus: <2-4 coverage or assertion risks to verify, including brief integration-test instructions>.
+- Judge whether required integration tests exist and prove the specified boundary.
 - Ignore outside this partition unless directly broken by the diff.
 - Write your full findings to: <test-path>
 - Return only: [clean|non-clean]: <one-line summary of most significant issues>
@@ -258,6 +261,18 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 <observable behavior, public API/protocol/UI/doc output/lifecycle contract>
 <write "None beyond existing behavior" only when the target is internal-only>
 
+## Contract Instructions
+<files/modules that must change; public types/functions/handlers/tools; visibility; call shape; input/output shape; lifecycle boundaries>
+<existing mechanisms to reuse before adding new paths>
+<temporary, fallback, or mock-data wiring that is forbidden>
+<write "None beyond Caller-Visible Contract" only when no public or cross-module contract is introduced>
+
+## Integration Test Instructions
+<required boundary type: parser, CLI, MCP tool, doc convention, skill routing, runtime lifecycle, agent relay, or other>
+<existing test to extend or new integration test file to create>
+<assertions or observable pass criteria that prove the contract works>
+<write "Existing verification only" only when no new integration boundary is introduced>
+
 ## Implementation Strategy Decisions
 <settled approach, optimization, reuse, abstraction, or boundary choices the implementer must not reopen>
 
@@ -275,7 +290,7 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 
 ## Details
 <interface specs, data types, public contracts at ticket-level resolution>
-<required when no skeleton references exist; may be omitted when skeleton provides contracts>
+<supporting detail that does not fit Contract Instructions>
 
 ## Verification Contract
 <tests, probes, screenshots, command outputs, compatibility checks, or review gates required for acceptance>
@@ -299,7 +314,8 @@ Test status: pass | fail | skipped
 ## Doctrine
 
 Write-code optimizes for **brief-to-commit fidelity within a branch**. The
-brief isolates executable decisions, persistent agents carry implementation and
-review state, file paths keep findings out of lead context, and cleanup closes
-the loop. When a rule is ambiguous, preserve selected-slice decisions without
-widening the implementer's coordination surface.
+brief isolates executable contract, test, and implementation decisions;
+persistent agents carry implementation and review state; file paths keep
+findings out of lead context; cleanup closes the loop. When a rule is
+ambiguous, preserve selected-scope decisions without widening the implementer's
+coordination surface.

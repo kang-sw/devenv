@@ -34,7 +34,7 @@ Output
 
 ### 1. Prepare
 
-1. Parse ticket path or inline brief.
+1. Parse ticket path or inline request.
 2. Record `<start-commit>` with `git rev-parse HEAD`.
 3. If ticket-driven: read ticket and caller-provided scope boundary.
 4. Call `wsflow/mental_models.find(query: <target or domain>)` or `wsflow/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
@@ -63,7 +63,7 @@ Output
 
 ```text
 Review diff range: <start-commit>..HEAD
-Scope: direct edit - <brief scope description>
+Scope: direct edit - <scope description>
 Use wsflow read tools if useful: wsflow/git.diff, wsflow/git.log, wsflow/specs.*, wsflow/tickets.*, wsflow/mental_models.*.
 Review for correctness, contracts, regressions, and local fit.
 Ignore broad style or unrelated architecture unless directly broken by the diff.
@@ -77,7 +77,7 @@ Return:
 4. Classify findings:
    - Fix: correctness, security, contract, regression.
    - Reject: style-only conflict with local patterns.
-   - Reject: scope expansion beyond brief.
+   - Reject: scope expansion beyond request.
 
 5. Apply fixes, re-run verification, and perform one focused re-review of fixed areas.
 6. Stop after one re-review cycle and report any remaining open issues.
