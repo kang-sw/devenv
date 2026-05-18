@@ -223,6 +223,20 @@ Verification:
 - `ws/spec_index.verify`
 - `git diff --check`
 
+#### Edition (4bf38f10) - 2026-05-18
+
+Streamlined `lead-write-code` within the existing single skill file after
+contract and integration-test instructions moved into the brief. Review
+orchestration now uses short handlers for allocation, reviewer spawning, and
+relay control. Reviewer calls share one prompt frame plus a partition table,
+and plan/review prompts moved into templates. `judge: plan-depth` and
+`judge: partition-allocation` now use labeled decision lines.
+
+Verification repeated:
+
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check -- agents-plugin/skills/lead-write-code/SKILL.md`
+
 ### Phase 3: Pre-implementation survey pass guardrails
 
 Strengthen implementation routing so the survey step catches contract and reuse
