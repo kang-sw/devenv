@@ -167,7 +167,9 @@ only.
 detailed discussion, implementation phases, or slice-specific decisions arise
 while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
-they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundary}
+they form one cohesive reviewable unit. Non-epic actionable ticket phases are
+reviewable implementation slices rather than task checklists; a single-slice
+ticket uses `Phase 1`. {#260508-write-ticket-epic-child-boundary}
 
 `lead-write-ticket` treats tickets as recoverability artifacts before compact
 summaries. Non-epic actionable tickets preserve caller-visible contracts,

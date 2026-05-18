@@ -26,7 +26,7 @@ Target: user request
    b. Choose initial status directory (`idea/` for vague, `todo/` for accepted actionable backlog - see `judge: initial-status`).
    c. Write the ticket using the **frontmatter template** and a clear problem/goal statement. Populate `related-mental-model` with the mental-model stems (filename without `.md`) that were consulted or arose during the current session - recovery hint for future sessions, not a validated link. Omit if no mental-model docs were relevant.
    d. If category is `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria; reference existing/planned children and start a separate `wsflow:lead-write-ticket` invocation for any child creation or child edit.
-   e. If category is not `epic` and multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
+   e. If category is not `epic`, write one phase per reviewable implementation slice; use `Phase 1` for a single-slice ticket.
    f. After drafting, verify scope - see `judge: ticket-scope`.
    g. If status is `ready/`: defer queue entry until after **Spec-stem check** passes.
 5. **Edit** (existing ticket):
@@ -103,7 +103,7 @@ Review scope by artifact role, not length. Tickets keep decisions, constraints, 
 
 ### judge: phase-need
 
-Applies only to non-epic actionable tickets. Prefer more phases over fewer inside one cohesive child ticket; split unrelated reviewable units into separate child tickets. Single-component, single-concern work may be one phase.
+Size phases as reviewable implementation slices, not task checklists. One phase should normally fit one plan/implement/review/verify loop; split only when review, verification, rollback, or dependency boundaries differ.
 
 ### judge: missing-spec-entry
 
