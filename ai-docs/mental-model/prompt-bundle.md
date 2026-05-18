@@ -37,6 +37,7 @@ related:
 - Release asset builds rewrite runtime prompt metadata from the built binary.
 - Skills and API docs code name prompt stems directly; renaming stems requires updating those callers.
 - Legacy skeleton prompt stems may remain bundled for compatibility; normal implementation routing does not register `skeleton-populator` or `skeleton-reviewer`.
+- `plan-populator-survey` and `plan-populator-research` are stable prompt stems with different responsibilities: survey collects evidence-only risk signals, research makes planner judgments and escalation calls.
 - `prompts` is canonical while `prompt_refs` is a migration alias; when both are present, `prompts` wins.
 
 ## Extension Points & Change Recipes

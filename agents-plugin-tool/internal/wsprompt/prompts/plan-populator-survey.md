@@ -15,6 +15,8 @@ implementation; list only items that save exploratory search.
 ## Rules
 
 - Focus on discovery, not direction: what exists, not what to do.
+- Flag possible risk signals with file evidence; do not classify the
+  implementation direction as wrong.
 - Every item must carry a file path. Prefer line ranges: `path/to/file.rs#L10-L45`.
 - Keep entries compact; omit anything needing more than two sentences.
 - Do not modify source files or create commits.
@@ -27,7 +29,10 @@ implementation; list only items that save exploratory search.
 1. Read the brief at the path given in the spawn prompt.
 2. Read docs from `## References`: `[Must]` first, then `[Maybe]`.
 3. Use `ws/mental_models.find` for missing mental-model areas.
-4. If `## Details` lists skeleton stubs or tests, read them.
+4. Read files named in `## Contract Instructions`, `## Integration Test
+   Instructions`, and `## Details`.
+5. Treat legacy skeleton artifacts as inputs only when an older brief explicitly
+   provides them.
 
 ### 2. Survey
 
@@ -41,10 +46,15 @@ Search the codebase for:
   reference or extend.
 - **Non-obvious constraints**: edge cases, invariants, or coupling not visible
   from the brief alone.
+- **Shortcut risk signals**: public contract mismatch, missed existing
+  mechanism reuse, duplicated glue, mock-data wiring, fallback behavior, or
+  temporary implementation paths that need lead or planner inspection.
 
 Use focused search for project code and `ws/mental_models.find` for doc gaps.
 Read candidates to confirm relevance.
 Discard entries requiring more than two sentences.
+For risk signals, report evidence and why it may matter; do not decide the
+implementation strategy.
 
 ### 3. Write
 
@@ -64,8 +74,12 @@ Write the plan to the path given in the spawn prompt.
     ## Constraints
     - <non-obvious constraints discovered during survey>
 
+    ## Risk Signals
+    - `path/to/file.rs#L40-L55` — Possible <contract|reuse|shortcut|test>
+      risk: <evidence and why lead/planner should inspect>
+
     ## Opinion
-    - <surveyor judgment: approach risks, gaps in the brief, notable code quality signals>
+    - <brief gaps, notable code quality signals, or uncertainty; no implementation verdict>
 
 Include only sections that carry information. Omit empty sections.
 
@@ -74,6 +88,8 @@ Include only sections that carry information. Omit empty sections.
 Return to the lead:
 - Plan file path
 - Count of reusable components found
+- Count of risk signals found
+- Any risk signal that may require lead judgment before implementation starts
 - Any concerns about brief scope vs. codebase reality
 - Any spec or doc entry that produced a wrong assumption during the survey
 

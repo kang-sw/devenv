@@ -289,13 +289,21 @@ test instructions when the target changes public or cross-module contracts.
 When workflow primitive context is not already active, it loads
 `lead-workflow-manual` before registering delegates or reviewers.
 
-> [!note] Planned 🚧
-> Implementation routing will include a pre-implementation survey pass that
-> checks public contract violations, missed reuse of existing project
-> mechanisms, ad hoc implementation shortcut risk, mock-data wiring, and
-> fallback or temporary implementation logic before source work begins. The
-> selected phase or scope binding will remain visible to implementers and fit
-> reviewers.
+When plan depth is `survey`, `plan-populator-survey` produces file-backed
+reference-map evidence and possible risk signals without deciding that the
+implementation direction is wrong. When plan depth is `research`,
+`plan-populator-research` makes planner judgments: it chooses clean existing
+mechanisms when they fit the brief, preserves contract and integration-test
+guardrails in the plan, rejects temporary, fallback, mock-data, and
+duplicated-glue paths, and escalates when no clean plan can satisfy the brief.
+
+Before spawning the implementer, `lead-write-code` evaluates plan-populator risk
+signals. It may rerun survey output through `plan-populator-research`; it stops
+and escalates when implementation would likely pursue a wrong contract, bypass
+existing project mechanisms, or rely on a shortcut path. Review remains an
+enforcement step: reviewers compare the implementation against brief and plan
+guardrails and catch implementation-time shortcut drift, but known plan-time
+risks are handled before source work begins.
 
 The implementation brief is the implementer's sole context source, but it is
 not a lossy ticket summary. For the selected implementation scope, the brief

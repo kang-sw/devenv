@@ -21,6 +21,9 @@ Brief
 - Brief strips ticket noise, never selected-scope binding decisions.
 - Brief includes concrete contract and integration-test instructions for public or cross-module changes.
 
+Plan
+- Lead evaluates plan-populator risk signals before spawning the implementer.
+
 Review
 - Fit reviewer reads the ticket when ticket-driven; correctness/test reviewers may not.
 - Reviewers write findings to files and return summaries only.
@@ -69,7 +72,20 @@ ws/agents.call(name: "project-survey", prompt: <ticket path or inline descriptio
 5. For `survey` or `research`, use **Plan population prompt**.
 6. Commit the plan file before Prepare.
 
-### 4. Prepare
+### 4. Plan Risk Gate
+
+1. If no plan file exists, continue to Prepare.
+2. Read the plan file and plan-populator report.
+3. If `survey` risk signals need planner judgment, rerun plan population with
+   `plan-populator-research` and a new research plan path, commit the research
+   plan, set it as `<plan-path>`, and repeat this gate.
+4. If risk signals show wrong contract, existing mechanism bypass,
+   temporary/fallback/mock-data behavior, or duplicated-glue implementation
+   would be likely, stop and escalate to the caller.
+5. If a clean path is available inside the current scope, continue and carry the risk signals into implementer and reviewer focus.
+6. If the brief conflicts with codebase reality, stop and escalate instead of inventing a workaround.
+
+### 5. Prepare
 
 1. Identify integration test paths and verification command from the brief's integration-test instructions.
 2. Run baseline verification only when the referenced tests or command already exist.
@@ -79,7 +95,7 @@ ws/agents.call(name: "project-survey", prompt: <ticket path or inline descriptio
    `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
 5. Store `<correctness-path>`, `<fit-path>`, `<test-path>`.
 
-### 5. Spawn Implementer
+### 6. Spawn Implementer
 
 Call `ws/agents.call(name: "implementer", prompt: <block below>)`.
 Read `ws/agents.result(name: "implementer", timeout_seconds: 600)` only if async result lacks usable summary.
@@ -103,6 +119,7 @@ read `ai-docs/mental-model/<domain>/index.md` first.
 Instructions:
 - Verify integration tests pass before reporting completion and after each fix.
 - Do not replace brief contract instructions with temporary, fallback, or mock-data behavior.
+- Respect plan risk signals; escalate instead of implementing a known wrong contract, existing-mechanism bypass, or duplicated-glue shortcut.
 - Report completion in plain text. Include test results.
 - For fix cycles, a follow-up call will arrive with review findings; fix and report back.
 - Commit logical checkpoints on the current branch.
@@ -110,11 +127,11 @@ Instructions:
 
 Capture `<first-commit>..<last-commit>` from implementer output.
 
-### 6. Review
+### 7. Review
 
 Run **Review Relay**.
 
-### 7. Cleanup
+### 8. Cleanup
 
 ```text
 rm -f <correctness-path> <fit-path> <test-path>
@@ -256,6 +273,14 @@ Brief path: <brief-path>
 Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
 ```
 
+For survey risk-gate reruns:
+
+```text
+Brief path: <brief-path>
+Survey path: <survey-plan-path>
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.research.md
+```
+
 ### Review Templates
 
 #### Reviewer partition table
@@ -272,6 +297,7 @@ Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
 Review partition: <Correctness|Fit|Test>
 Diff range: <first-commit>..<last-commit>
 <if Fit:> Brief path: <brief-path>
+<if plan exists:> Plan path: <plan-path>
 <if Fit and ticket-driven:> Ticket path: <ticket-path>
 Findings path: <partition-output-path>
 
@@ -280,6 +306,7 @@ Review focus:
 
 Required checks:
 - <required check from Reviewer partition table>
+- <if plan exists:> Verify plan guardrails and risk signals were not bypassed.
 - <if Fit and ticket-driven:> Report any selected-scope binding decision omitted from the brief or violated by the implementation.
 
 Instructions:
