@@ -197,6 +197,32 @@ Requirements:
 - Update specs and mental models so `lead-write-skeleton` is deprecated from
   normal workflow routing without deleting the skill or bundled legacy prompt.
 
+### Result (8306418a) - 2026-05-18
+
+Deprecated skeleton artifact generation from the normal implementation workflow
+without editing `lead-write-skeleton` itself. `lead-implement` no longer checks
+for skeleton need or invokes `lead-write-skeleton`; public interface,
+cross-module boundary, and new type contract work routes to `lead-write-code`
+so the implementation brief can carry contract and integration-test detail.
+
+`lead-write-code` briefs now include concrete `Contract Instructions` and
+`Integration Test Instructions`. Implementers treat those sections as
+acceptance criteria, fit reviewers compare implementation against contract
+instructions, and test reviewers check that required integration tests exist
+and prove the specified boundary.
+
+`lead-edit` and its wsflow mirror no longer interpret skeleton artifacts or
+plan-style briefs; they remain narrow direct edit primitives bound by caller
+scope and local verification. Ticket `skeletons:` frontmatter is now documented
+as a legacy artifact map whose absence does not trigger skeleton creation.
+
+Verification:
+
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `go test ./...` from `agents-plugin-tool/`
+- `ws/spec_index.verify`
+- `git diff --check`
+
 ### Phase 3: Pre-implementation survey pass guardrails
 
 Strengthen implementation routing so the survey step catches contract and reuse
