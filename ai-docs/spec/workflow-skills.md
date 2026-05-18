@@ -169,6 +169,16 @@ while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
 they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundary}
 
+> [!note] Planned 🚧
+> `lead-write-ticket` will author actionable child-ticket phases from a
+> fresh-session completion view. Each phase will describe the next complete
+> behavior a future `lead-proceed` run can finish, review, verify, and hand off
+> cleanly. Setup, API, UI, tests, skeletons, and investigation remain available
+> as phase ingredients; they become standalone phases only when they are the
+> reviewable deliverable. Each non-epic actionable phase will state what
+> behavior is complete, what remains deferred, and what verification proves the
+> phase complete.
+
 `lead-write-ticket` treats tickets as recoverability artifacts before compact
 summaries. Non-epic actionable tickets preserve caller-visible contracts,
 constraints, rationale, implementation strategy decisions, rejected
@@ -251,6 +261,17 @@ then stop and report if still non-clean. The lead makes contract amendments,
 verifies build or syntax checks, commits the final skeleton, and links generated
 skeleton artifacts to the ticket. {#260510-skeleton-contract-populator-flow}
 
+> [!note] Planned 🚧
+> `lead-write-skeleton` will become a non-working contract skeleton step. It
+> will lock public contracts, module or file boundaries, type or function
+> signatures, stubs, and intent comments before implementation. It may leave
+> non-compiling source when that source clearly records contracts and
+> boundaries. It will not add behavior implementation, mock-data wiring,
+> fallback or temporary implementation logic, visual polish, or temporarily
+> working feature code. Implementers will use the optional plan plus skeleton
+> diff as design input, then replace or complete the skeleton with real working
+> behavior.
+
 `lead-implement` owns skeleton decisions and execution inside the implementation
 branch lifecycle. `lead-proceed` only routes implementation-ready targets to
 `lead-implement`; it does not decide skeleton need or invoke
@@ -287,6 +308,14 @@ completion report. It honors existing skeleton artifacts and caller-provided
 scope boundaries but does not require missing skeletons. When workflow primitive
 context is not already active, it loads `lead-workflow-manual` before
 registering delegates or reviewers.
+
+> [!note] Planned 🚧
+> Implementation routing will include a pre-implementation survey pass that
+> checks public contract violations, missed reuse of existing project
+> mechanisms, ad hoc implementation shortcut risk, mock-data wiring, and
+> fallback or temporary implementation logic before source work begins. The
+> selected phase or scope binding will remain visible to implementers and fit
+> reviewers.
 
 The implementation brief is the implementer's sole context source, but it is
 not a lossy ticket summary. For the selected implementation slice, the brief
@@ -330,6 +359,15 @@ that can be implemented and reviewed together. It chooses a narrower slice when
 later phases introduce a separate public contract, independent skeleton need, or
 separately reviewable security boundary. Compatibility phrasing such as
 `auto-slice` remains accepted as the same default autonomous slice policy.
+
+> [!note] Planned 🚧
+> When the target has phase sections, `lead-proceed` will use one ticket phase
+> as the implementation unit for one invocation. It will honor explicit
+> user-named phases exactly. Without an explicit phase, it will select the first
+> unfinished phase by default instead of grouping adjacent unfinished phases as
+> the broadest cohesive slice. If a phase is too large or crosses unrelated
+> implementation surfaces, `lead-proceed` will stop for conservative phase or
+> ticket slicing rather than split the phase internally.
 
 Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
