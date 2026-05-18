@@ -11,7 +11,7 @@ Target: user request
 
 - Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
 - Read only ticket files selected as edit targets; use `ws/tickets.*`, `ws/references.trace`, or `ws/subquery` for graph discovery.
-- Preserve settled decisions before pruning ticket length.
+- Preserve settled decisions, contracts, and agreed API/type/event/UI sketches before pruning.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
 
@@ -34,9 +34,10 @@ Target: user request
    b. Apply the requested changes (update phase, move status).
    c. If the target is an epic, keep edits at board level; for detailed implementation discussion, stop after the epic edit and start a separate `ws:lead-write-ticket` invocation for the child ticket.
    d. For moves, use native `git mv` and add `completed:` date in frontmatter (-> `.done/`).
-6. **Phase content** - for non-epic actionable tickets, capture goals, caller-visible contracts, constraints, rationale, implementation strategy decisions, rejected alternatives, forward-compatibility contracts, verification expectations, and suggested approaches. Leave codebase-derived details (paths, type reuse, integration patterns, signatures, testing classifications) to the plan.
+6. **Phase content** - for non-epic actionable tickets, capture goals, contracts, constraints, rationale, rejected alternatives, forward-compatibility notes, verification expectations, and suggested strategy. Include agreed API/type/event/UI sketches. Exclude source-local edit notes unless settled constraints.
 7. **Intent review** - re-read the written/edited ticket against the preceding conversation and cross-ticket decision review:
    - Are decisions, constraints, rejected alternatives, forward-compatibility contracts, verification expectations, and suggested approaches captured?
+   - Are agreed API/type/event/UI sketches preserved literally, not prose-flattened?
    - Does the ticket distort or omit any discussed intent?
    - Does the ticket omit any related-ticket decision that constrains this implementation slice?
    - If the ticket is an epic, did detailed implementation material stay out of the epic and get routed to a separate child-ticket invocation?
@@ -98,7 +99,7 @@ Does not fire merely because a ticket has `related:` links or because default cr
 
 ### judge: ticket-scope
 
-Over ~200 lines is a soft signal; over 300 lines, act. First, prune plan-level detail (file paths, function signatures, integration specifics) - that belongs in a plan document. Do not prune settled local or cross-ticket decisions; move them into the relevant child ticket or phase. If an epic is still large, move details into child tickets; if a non-epic is still large, introduce an epic and split into child tickets.
+Review scope by artifact role, not length. Tickets keep decisions, constraints, and agreed API/type/event/UI sketches. Exclude source-local edit notes unless settled constraints. Split only when board, ticket, and implementation-unit roles are mixed.
 
 ### judge: phase-need
 

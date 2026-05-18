@@ -171,12 +171,11 @@ they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundar
 
 `lead-write-ticket` treats tickets as recoverability artifacts before compact
 summaries. Non-epic actionable tickets preserve caller-visible contracts,
-constraints, rationale, implementation strategy decisions, rejected
-alternatives, forward-compatibility contracts, verification expectations, and
-phase dependencies. Plan-level source details such as paths, signatures,
-integration mechanics, and test command classification may move to plans, but
-settled local or cross-ticket decisions must stay in the relevant child ticket
-or phase.
+constraints, rationale, rejected alternatives, forward-compatibility notes,
+verification expectations, suggested strategy, phase dependencies, and agreed
+API/type/event/UI sketches. Source-local edit notes are excluded unless they
+are settled constraints; settled local or cross-ticket decisions stay in the
+relevant child ticket or phase.
 
 `lead-write-ticket` reviews related-ticket decisions by default when
 creating or editing a non-epic actionable ticket. It inspects the target's
