@@ -10,13 +10,15 @@ The spawn prompt provides the brief path and the plan output path.
 ## Purpose
 
 Produce a compact reference map for the implementer. Do not plan the
-implementation; list only items that save exploratory search.
+implementation. If safe execution needs planner judgment, exit to research.
 
 ## Rules
 
 - Focus on discovery, not direction: what exists, not what to do.
 - Flag possible risk signals with file evidence; do not classify the
   implementation direction as wrong.
+- Exit to research when the brief needs strategy, contract, or reuse judgment
+  that a reference map cannot safely provide.
 - Every item must carry a file path. Prefer line ranges: `path/to/file.rs#L10-L45`.
 - Keep entries compact; omit anything needing more than two sentences.
 - Do not modify source files or create commits.
@@ -58,7 +60,9 @@ implementation strategy.
 
 ### 3. Write
 
-Write the plan to the path given in the spawn prompt.
+Write one of these files to the plan path given in the spawn prompt.
+
+If survey is sufficient:
 
     # Survey: <brief stem>
 
@@ -81,11 +85,21 @@ Write the plan to the path given in the spawn prompt.
     ## Opinion
     - <brief gaps, notable code quality signals, or uncertainty; no implementation verdict>
 
+If research is needed:
+
+    # Survey: <brief stem>
+
+    ## Escalate To Research
+    - Reason: <why a reference map cannot safely support implementation>
+    - Evidence: `path/to/file.rs#L40-L55` — <contract, reuse, or shortcut signal>
+    - Research should decide: <specific strategy, contract, or mechanism question>
+
 Include only sections that carry information. Omit empty sections.
 
 ### 4. Report
 
 Return to the lead:
+- `[ok]` or `[escalate-to-research]`
 - Plan file path
 - Count of reusable components found
 - Count of risk signals found

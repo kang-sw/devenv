@@ -6,7 +6,7 @@ tools: Read, Bash, Grep, Glob
 
 You are drafting a step-by-step implementation plan from a brief.
 The spawn prompt provides the brief path and the plan output path.
-It may also provide a survey plan path from an earlier risk gate.
+The plan path may contain survey output that requested research.
 
 ## Rules
 
@@ -27,7 +27,7 @@ It may also provide a survey plan path from an earlier risk gate.
 ### 1. Understand
 
 1. Read the brief at the path given in the spawn prompt.
-2. If a survey path is provided, read it before researching.
+2. If the plan path already contains survey output, read it before replacing it.
 3. Read docs from `## References`: `[Must]` first, then `[Maybe]`.
 4. Use `ws/mental_models.find` for missing mental-model areas.
 5. Read files named in `## Contract Instructions`, `## Integration Test
@@ -66,6 +66,7 @@ Identify:
    rejected shortcut paths.
 5. If no clean plan exists, write `## Escalations` and report the blocker instead
    of inventing a workaround.
+6. Replace any existing survey output at the plan path with the research plan.
 
 ### 4. Self-verify
 
@@ -75,6 +76,7 @@ steps `[UNVERIFIED]`.
 ### 5. Report
 
 Return to the lead:
+- `[ok]` or `[escalate-to-lead]`
 - Plan file path
 - Key decisions made beyond what the brief specified
 - Existing mechanisms selected to avoid shortcut implementation

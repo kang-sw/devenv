@@ -289,21 +289,28 @@ test instructions when the target changes public or cross-module contracts.
 When workflow primitive context is not already active, it loads
 `lead-workflow-manual` before registering delegates or reviewers.
 
-When plan depth is `survey`, `plan-populator-survey` produces file-backed
-reference-map evidence and possible risk signals without deciding that the
-implementation direction is wrong. When plan depth is `research`,
-`plan-populator-research` makes planner judgments: it chooses clean existing
-mechanisms when they fit the brief, preserves contract and integration-test
-guardrails in the plan, rejects temporary, fallback, mock-data, and
-duplicated-glue paths, and escalates when no clean plan can satisfy the brief.
+Plan population is an either/or depth choice. When plan depth is `survey`,
+`plan-populator-survey` produces file-backed reference-map evidence and possible
+risk signals without deciding that the implementation direction is wrong. If
+survey cannot safely support implementation without strategy, contract, or
+reuse judgment, it returns `[escalate-to-research]` instead of forcing a survey
+plan. `lead-write-code` then routes to `plan-populator-research` before
+spawning the implementer.
 
-Before spawning the implementer, `lead-write-code` evaluates plan-populator risk
-signals. It may rerun survey output through `plan-populator-research`; it stops
-and escalates when implementation would likely pursue a wrong contract, bypass
-existing project mechanisms, or rely on a shortcut path. Review remains an
-enforcement step: reviewers compare the implementation against brief and plan
-guardrails and catch implementation-time shortcut drift, but known plan-time
-risks are handled before source work begins.
+When plan depth is `research`, `plan-populator-research` makes planner
+judgments: it chooses clean existing mechanisms when they fit the brief,
+preserves contract and integration-test guardrails in the plan, rejects
+temporary, fallback, mock-data, and duplicated-glue paths, and escalates when no
+clean plan can satisfy the brief. A survey-to-research route replaces the same
+plan artifact path with the research plan; it does not create a research-suffixed
+plan filename or append research to a survey plan.
+
+Before spawning the implementer, `lead-write-code` handles plan-populator exit
+signals. It stops and escalates when implementation would likely pursue a wrong
+contract, bypass existing project mechanisms, or rely on a shortcut path. Review
+remains an enforcement step: reviewers compare the implementation against brief
+and plan guardrails and catch implementation-time shortcut drift, but known
+plan-time risks are handled before source work begins.
 
 The implementation brief is the implementer's sole context source, but it is
 not a lossy ticket summary. For the selected implementation scope, the brief

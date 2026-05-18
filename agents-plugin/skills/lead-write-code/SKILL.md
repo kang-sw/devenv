@@ -22,7 +22,7 @@ Brief
 - Brief includes concrete contract and integration-test instructions for public or cross-module changes.
 
 Plan
-- Lead evaluates plan-populator risk signals before spawning the implementer.
+- Plan population is either survey or research; survey may exit to research.
 
 Review
 - Fit reviewer reads the ticket when ticket-driven; correctness/test reviewers may not.
@@ -67,23 +67,20 @@ ws/agents.call(name: "project-survey", prompt: <ticket path or inline descriptio
 
 1. Apply `judge: plan-depth`.
 2. If `as-is`: continue to Prepare.
-3. If `survey`: register/call `plan-surveyor` with `prompts: ["plan-populator-survey"]`.
-4. If `research`: register/call `plan-researcher` with `prompts: ["plan-populator-research"]`.
-5. For `survey` or `research`, use **Plan population prompt**.
-6. Commit the plan file before Prepare.
+3. If `survey`: register/call `plan-surveyor` with `prompts: ["plan-populator-survey"]`; use **Survey plan prompt**.
+4. If `survey`: read the survey report; if it returns `[escalate-to-research]`, run **Research Route**.
+5. If `research`: register/call `plan-researcher` with `prompts: ["plan-populator-research"]`; use **Research plan prompt**.
+6. Read the final plan-populator report.
+7. If it returns `[escalate-to-lead]`, stop and escalate to the caller.
+8. Commit the final plan file before Prepare.
 
-### 4. Plan Risk Gate
+### 4. Research Route
 
-1. If no plan file exists, continue to Prepare.
-2. Read the plan file and plan-populator report.
-3. If `survey` risk signals need planner judgment, rerun plan population with
-   `plan-populator-research` and a new research plan path, commit the research
-   plan, set it as `<plan-path>`, and repeat this gate.
-4. If risk signals show wrong contract, existing mechanism bypass,
-   temporary/fallback/mock-data behavior, or duplicated-glue implementation
-   would be likely, stop and escalate to the caller.
-5. If a clean path is available inside the current scope, continue and carry the risk signals into implementer and reviewer focus.
-6. If the brief conflicts with codebase reality, stop and escalate instead of inventing a workaround.
+1. Register/call `plan-researcher` with `prompts: ["plan-populator-research"]`.
+2. Use **Research route prompt** with the same `<plan-path>`.
+3. Require the researcher to read the existing survey output, then replace it with the research plan.
+4. Treat the resulting research file as the final `<plan-path>`.
+5. If the research report returns `[escalate-to-lead]`, stop and escalate to the caller.
 
 ### 5. Prepare
 
@@ -266,19 +263,27 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 
 ### Plan Template
 
-#### Plan population prompt
+#### Survey plan prompt
 
 ```text
 Brief path: <brief-path>
 Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
 ```
 
-For survey risk-gate reruns:
+#### Research plan prompt
 
 ```text
 Brief path: <brief-path>
-Survey path: <survey-plan-path>
-Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.research.md
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
+```
+
+#### Research route prompt
+
+```text
+Brief path: <brief-path>
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
+The existing plan file contains survey output that requested research.
+Read it, then replace the file with a research plan.
 ```
 
 ### Review Templates
