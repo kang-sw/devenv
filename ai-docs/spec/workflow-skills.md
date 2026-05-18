@@ -348,14 +348,14 @@ spec -> ticket -> implementation
 ```
 
 Existing non-epic `ready/` ticket paths skip ticket creation and become
-implementation targets after `lead-proceed` selects an implementation slice.
+implementation targets after `lead-proceed` resolves implementation scope.
 Targets without phase sections use the whole target. When the user names one
 phase, that explicit request is honored exactly. When the user does not name a
 phase, `lead-proceed` selects the first unfinished phase by default. One proceed
-invocation selects one ticket phase when the target has phases. If a request
-names multiple phases, or if the selected phase is too large or crosses
-unrelated implementation surfaces, `lead-proceed` stops for conservative phase
-or ticket slicing rather than splitting the phase internally.
+invocation carries one ticket phase when the target has phases. If a request
+names multiple phases, or if the selected phase is plainly too broad from ticket
+text, `lead-proceed` stops for conservative phase or ticket slicing rather than
+splitting the phase internally.
 Compatibility phrasing such as `auto-slice` remains accepted as the same default
 phase-selection policy.
 
@@ -364,7 +364,7 @@ Epic ticket paths are milestone-board artifacts, not implementation targets;
 child ready promotion, or proceeding a ready child ticket. Existing `todo/`
 ticket paths are treated as implementation intent: `lead-proceed` continues
 through `lead-write-ticket` with carried context for autonomous `todo/` ->
-`ready/` promotion before slice selection, and escalates to `lead-discuss` only
+`ready/` promotion before scope resolution, and escalates to `lead-discuss` only
 when promotion or implementation scope exposes unresolved design decisions,
 unclear completion criteria, user trade-offs, or missing spec coverage that
 cannot be created.
@@ -381,7 +381,7 @@ Warm discussion state with an existing related ticket uses a ticket freshness
 gate. Before implementation routing, `lead-proceed` compares the active
 conversation and ticket artifact only; when settled decisions are missing from
 the ticket, it routes through `lead-write-ticket` edit, re-reads the refreshed
-ticket, and then continues slice selection.
+ticket, and then continues scope resolution.
 {#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected slice as

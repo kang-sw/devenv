@@ -57,7 +57,12 @@ Routing
 9. If `target-kind=inline` and `actionable=yes`: apply `judge: needs-ticket`.
 10. Classify warmth from conversation state.
 11. If `has-ticket=yes` and warmth is warm: apply `judge: ticket-freshness`.
-12. Detect explicit phase constraints or autonomous phase-selection phrasing.
+12. Resolve implementation scope for ready tickets:
+   - No phase sections -> whole target.
+   - One explicit phase -> that phase.
+   - Multiple explicit phases -> stop for phase or ticket slicing.
+   - No explicit phase -> first unfinished phase.
+   - Selected phase is plainly too broad from ticket text -> stop for phase or ticket slicing.
 
 ### 2. Select Route
 
@@ -68,7 +73,7 @@ Routing
 | `discussion-needed=yes` | Continue through `ws:lead-discuss`; carry the blocker; stop. |
 | `has-ticket=yes` and status is `todo/` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; carry `promote-context`; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and freshness is missing settled decisions | Continue through `ws:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready/` | Apply `judge: implementation-slice`; continue through `ws:lead-implement`; carry scope: implement `<slice>` only. |
+| `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`; carry resolved scope only. |
 | `has-ticket=no` and `needs-ticket=yes` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; carry `create-context`; capture `Ticket:` and re-route. |
 | `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`; carry inline target and no-ticket scope. |
 
@@ -149,21 +154,6 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 | No | Inline target is narrow, routine, fully scoped, and commit `AI Context` is enough traceability |
 | No | Work is internal hygiene with no useful phase tracking and no unresolved user decision |
 
-### judge: implementation-slice
-
-| Decision | When |
-|----------|------|
-| Whole target | Ready target has no phase sections |
-| User-requested phase | User explicitly named one phase to implement |
-| First unfinished phase | User did not name a phase |
-| Stop for slicing | User named multiple phases, or the next phase is too broad or crosses unrelated implementation surfaces |
-
-One proceed invocation selects one ticket phase when the target has phases.
-Autonomous phase selection is the default when the user does not name a phase.
-Choose the first unfinished phase. If that phase cannot be completed, reviewed,
-and verified as one implementation unit, stop for conservative phase or ticket
-slicing instead of splitting the phase inside `lead-proceed`.
-
 ### judge: ticket-freshness
 
 | Decision | When |
@@ -175,7 +165,7 @@ slicing instead of splitting the phase inside `lead-proceed`.
 
 Proceed optimizes for **full-pipeline routing accuracy**. Conversation state and
 artifacts are the finite signal: use them to choose readiness stages, not to
-perform code-editing stages. Warmth sharpens routing; slice selection bounds
+perform code-editing stages. Warmth sharpens routing; scope resolution bounds
 execution without replacing ticket authoring. When a rule is ambiguous, apply
 whichever interpretation better preserves the user's ability to intervene at any
 pipeline stage.
