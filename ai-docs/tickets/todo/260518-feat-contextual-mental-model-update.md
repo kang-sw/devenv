@@ -1,5 +1,7 @@
 ---
 title: Contextual mental-model update via commit annotations and brief detection
+spec:
+  - 260518-mental-model-update-context-annotation
 related-mental-model:
   - workflow-skills
   - prompt-bundle

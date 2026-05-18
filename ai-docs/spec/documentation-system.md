@@ -118,6 +118,36 @@ visible before work begins.
 references, snippets, and hierarchy hints without requiring callers to scan the
 tree manually.
 
+## 🚧 Mental-Model Update Context Annotation {#260518-mental-model-update-context-annotation}
+
+Implementers annotate commits with a `### Mental Model Notes` sub-section
+under `## AI Context` when the implementation creates a non-obvious invariant,
+ordering constraint, lifecycle assumption, or cross-module contract not directly
+visible from the code. The annotation is optional; absence means no implicit
+contracts were introduced, not a violation.
+
+```markdown
+## AI Context
+- <decision rationale>
+
+### Mental Model Notes
+- <implicit contract or invariant not visible in code>
+```
+
+This is a workflow-internal convention: defined in the implementation playbook
+(`ws/infra.read("impl-playbook")`), consumed by `mental-model-updater`. It does
+not appear in AGENTS.md or project-wide commit conventions.
+
+`mental-model-updater` reads `### Mental Model Notes` entries from commit bodies
+as primary intent context before processing code diffs. Notes are extracted via
+`ws/git.log` with `include_body: true`; diffs serve as secondary verification.
+When no notes are present, the updater falls back to diff-only analysis.
+
+> [!note] Constraints
+> - `### Mental Model Notes` does not replace `## AI Context`; it is a
+>   sub-section of it.
+> - Updater fallback to diff-only analysis is required when notes are absent.
+
 ## Documentation Reference Tracing {#260505-documentation-reference-tracing}
 
 `ws/references.trace` returns the documentation graph reachable from exactly one
