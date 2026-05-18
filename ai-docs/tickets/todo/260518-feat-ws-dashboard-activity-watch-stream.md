@@ -41,6 +41,55 @@ the ribbon and selected transcript can update as local wsagent files change.
 - Stream events must remain owner-authenticated and must not begin before
   route auth succeeds.
 
+## API Sketch
+
+The feed stream should be a read-only workRoot-scoped endpoint:
+
+```text
+GET /api/dashboard/work-roots/{workRootId}/activity/events?after={cursor}
+```
+
+SSE is the preferred transport unless implementation finds a concrete
+bidirectional need. Candidate event payloads:
+
+```ts
+type ActivityFeedEvent =
+  | {
+      type: "itemUpserted";
+      cursor: string;
+      item: ActivityItem;
+    }
+  | {
+      type: "itemRemoved";
+      cursor: string;
+      activityId: string;
+    }
+  | {
+      type: "transcriptUpdated";
+      cursor: string;
+      activityId: string;
+      transcriptCursor: string | null;
+    }
+  | {
+      type: "snapshotInvalidated";
+      cursor: string;
+      reason: "overflow" | "watchReset" | "fallback" | string;
+    }
+  | {
+      type: "modeChanged";
+      cursor: string;
+      updateMode: "watch" | "pollFallback" | "snapshot";
+    }
+  | {
+      type: "heartbeat";
+      cursor: string;
+    };
+```
+
+The event stream may intentionally ask the browser to refetch the snapshot when
+events were missed or coalesced. It must not stream raw filesystem paths,
+backend-native transcript records, or cache file contents.
+
 ## Phases
 
 ### Phase 1: Add watcher abstraction and fallback mode

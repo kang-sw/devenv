@@ -49,6 +49,69 @@ backend-native file formats.
   formats are not yet documented, but the resolver interface must not assume
   Codex-only semantics.
 
+## API Sketch
+
+Selected activity transcript backfill:
+
+```text
+GET /api/dashboard/work-roots/{workRootId}/activity/items/{activityId}/transcript?after={cursor}&limit={n}
+```
+
+Candidate response shape:
+
+```ts
+type ActivityTranscript = {
+  workRootId: string;
+  activityId: string;
+  status: "live" | "complete" | "unavailable" | "degraded" | string;
+  sourceStatus: "ok" | "missing" | "unsupported" | "degraded" | string;
+  blocks: TranscriptBlock[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  live: boolean;
+};
+
+type TranscriptBlock = {
+  blockId: string;
+  cursor: string;
+  timestamp: string | null;
+  kind:
+    | "user"
+    | "assistant"
+    | "toolCall"
+    | "toolResult"
+    | "status"
+    | "error"
+    | "output"
+    | string;
+  title: string | null;
+  text: string | null;
+  data: Record<string, unknown> | null;
+  degraded: boolean;
+};
+```
+
+Selected activity transcript live append:
+
+```text
+GET /api/dashboard/work-roots/{workRootId}/activity/items/{activityId}/transcript/events?after={cursor}
+```
+
+Candidate SSE payloads:
+
+```ts
+type ActivityTranscriptEvent =
+  | { type: "blockAppended"; cursor: string; block: TranscriptBlock }
+  | { type: "blockUpdated"; cursor: string; block: TranscriptBlock }
+  | { type: "statusChanged"; cursor: string; status: ActivityTranscript["status"] }
+  | { type: "snapshotInvalidated"; cursor: string; reason: string }
+  | { type: "end"; cursor: string };
+```
+
+The implementation may first ship `transcriptUpdated` feed events plus bounded
+backfill polling for the selected item, but the durable UX target is block-level
+live append.
+
 ## Phases
 
 ### Phase 1: Define transcript source and block contracts
