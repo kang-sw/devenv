@@ -44,8 +44,8 @@ This ticket captures the settled terminology and implementation direction:
 - Do not rename `lead-write-skeleton`; redefine its contract.
 - Do not use `multi-phase` or `phase-wise implementation` terminology for the
   `lead-proceed` change.
-- Prefer fewer complete ticket phases over granular setup/API/UI/test phases
-  when authoring actionable child tickets.
+- Author actionable child-ticket phases from a fresh-session view: each phase
+  should be the next complete behavior a future `lead-proceed` run can finish.
 - Do not make documentation checkpoint cadence changes in this ticket. The
   current doc pipeline is noisy, but it also prevents drift. Keep cadence as a
   separate policy discussion.
@@ -67,14 +67,15 @@ Requirements:
   `lead-proceed` run: after the phase, the targeted caller-visible behavior is
   working, reviewable, and verifiable without temporary behavior.
 - Define `1 proceed = 1 ticket phase implementation unit`.
-- Update `lead-write-ticket` phase authoring so it prefers fewer complete
-  phases over granular task phases.
+- Update `lead-write-ticket` phase authoring so it asks what complete behavior
+  the next fresh session should finish, not how to serialize internal tasks.
 - In `lead-write-ticket`, use multiple phases only for sequential complete
   increments with distinct success criteria; split unrelated complete
   increments into child tickets.
-- In `lead-write-ticket`, do not create phases for isolated setup, API-only,
-  UI-only, test-only, skeleton-only, or investigation tasks unless that step is
-  itself the completed deliverable.
+- In `lead-write-ticket`, treat setup, API, UI, tests, skeletons, and
+  investigation as phase ingredients by default; elevate one to a phase only
+  when it leaves a reviewable deliverable that a fresh session can complete and
+  hand off cleanly.
 - Require each non-epic actionable phase to state its completion boundary: what
   behavior is done after the phase, what remains deferred, and what
   verification proves the phase complete.
