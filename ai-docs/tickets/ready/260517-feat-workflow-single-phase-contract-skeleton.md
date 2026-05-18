@@ -294,6 +294,37 @@ Requirements:
   backward-compatible artifact interpretation only when an older brief actually
   provides such artifacts.
 
+### Result (c4c652c) - 2026-05-18
+
+Implemented plan-populator guardrails without adding new prompt stems or routes.
+`plan-populator-survey` now collects file-backed reuse, contract, and shortcut
+risk signals as evidence only; it does not classify the implementation
+direction as wrong or write an implementation plan.
+
+`plan-populator-research` now owns planner judgment. It preserves brief
+`Contract Instructions` and `Integration Test Instructions` as plan guardrails,
+chooses clean existing mechanisms when they fit, rejects temporary, fallback,
+mock-data, and duplicated-glue paths, and reports escalations when no clean plan
+can satisfy the brief.
+
+`lead-write-code` now runs a plan risk gate before spawning the implementer. It
+can rerun survey output through `plan-populator-research`, carries risk signals
+into implementation and review focus, and stops for caller escalation when the
+plan would pursue a wrong contract, bypass existing project mechanisms, or rely
+on shortcut behavior. Review remains enforcement against the brief and plan
+guardrails rather than the primary discovery point for known plan-time risks.
+
+The workflow spec and workflow-skills/prompt-bundle mental models now describe
+the implemented responsibility split, and `agents-plugin/runtime.json` carries
+the updated prompt bundle hash.
+
+Verification:
+
+- `go test ./...` from `agents-plugin-tool/`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `ws/spec_index.verify`
+- `git diff --check`
+
 ### Phase 4: Documentation cadence and runtime lifecycle boundaries
 
 Record boundaries without changing the behavior yet.
