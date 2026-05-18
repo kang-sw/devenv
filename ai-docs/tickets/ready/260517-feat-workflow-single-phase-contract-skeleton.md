@@ -252,10 +252,10 @@ Verification repeated:
 
 ### Phase 3: Plan-populator guardrails
 
-Strengthen implementation routing so the existing plan-populator prompts catch
-contract, reuse, and shortcut risks before code is written. This is not a new
-workflow route or prompt rename; it is a guardrail pass inside the existing
-`survey` and `research` plan-depth paths.
+Strengthen implementation routing so plan population surfaces contract, reuse,
+and shortcut risks before code is written. This is not a new workflow route or
+prompt rename; it is a guardrail pass inside the existing `survey` and
+`research` plan-depth paths.
 
 Requirements:
 
@@ -264,20 +264,31 @@ Requirements:
   implementation surfaces for this phase.
 - Describe their behavior as a pre-implementation context and planning pass, not
   as a new route.
-- Ensure both prompts look for public contract violations, missed reuse of
-  existing project mechanisms, ad hoc implementation shortcut risk, mock-data
-  wiring, and fallback or temporary implementation logic.
+- Detect public contract violations, missed reuse of existing project
+  mechanisms, ad hoc implementation shortcut risk, mock-data wiring, and
+  fallback or temporary implementation logic before implementation proceeds.
 - Treat duplicated glue code, test-passing code that bypasses existing project
   mechanisms, and fallback-based behavior as examples of ad hoc implementation
   shortcut risk.
 - Ensure selected-scope binding decisions remain visible to implementers and fit
   reviewers.
-- For `plan-populator-survey`, surface the risks as reference-map entries,
-  constraints, and opinion notes that help implementers avoid exploratory
-  misses without turning the survey into an implementation plan.
-- For `plan-populator-research`, reflect the risks in the self-contained plan:
-  context, ordered steps, testing, and success criteria must preserve contract
-  and integration-test instructions from the brief.
+- For `plan-populator-survey`, collect evidence only: surface possible shortcut
+  risk signals as file-backed reference-map entries, constraints, and opinion
+  notes. Do not classify the implementation direction as wrong or turn the
+  survey into an implementation plan.
+- For `plan-populator-research`, make the planner judgment: use survey/research
+  evidence to choose the clean existing mechanism when available, preserve
+  contract and integration-test instructions in context, ordered steps, testing,
+  and success criteria, and avoid encoding temporary, fallback, mock-data, or
+  duplicated-glue paths as the plan.
+- Update `lead-write-code` so the lead evaluates surveyor-flagged risk signals
+  before implementation starts. If the issue would make the implementation
+  pursue a wrong contract, bypass existing project mechanisms, or rely on a
+  shortcut path, stop and elevate instead of letting a bad implementation run
+  through to review.
+- Keep implementation review as enforcement: reviewers compare the result
+  against the brief and plan guardrails, and catch implementation-time shortcut
+  drift, but they are not the primary discovery point for known plan-time risks.
 - Remove or reframe skeleton-era plan-populator wording around the brief's
   `Contract Instructions` and `Integration Test Instructions`; keep
   backward-compatible artifact interpretation only when an older brief actually
