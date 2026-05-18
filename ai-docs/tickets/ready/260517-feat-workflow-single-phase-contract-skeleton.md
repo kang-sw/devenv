@@ -145,6 +145,18 @@ Verification repeated:
 - `python3 -m unittest discover agents-plugin-wsflow/tests`
 - `git diff --check -- agents-plugin/skills/lead-write-ticket/SKILL.md agents-plugin-wsflow/skills/lead-write-ticket/SKILL.md`
 
+#### Edition (bbe8a802) - 2026-05-18
+
+Tightened the `lead-write-ticket` judgment section and wsflow mirror after the
+handler restructure. Prose-shaped judgments now use labeled decision lines for
+ready spec gates, initial status, cascade edits, ticket size, phase need, and
+missing spec coverage, while preserving the same triggers and stop conditions.
+
+Verification repeated:
+
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check -- agents-plugin/skills/lead-write-ticket/SKILL.md agents-plugin-wsflow/skills/lead-write-ticket/SKILL.md`
+
 ### Phase 2: Non-working contract skeleton
 
 Redefine `lead-write-skeleton` as a non-working contract skeleton step instead
