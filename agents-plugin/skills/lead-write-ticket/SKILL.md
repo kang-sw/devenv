@@ -122,36 +122,51 @@ Target: user request
 
 ### judge: spec-gate
 
-Fires on any non-`epic`, non-`research` action that creates or moves a ticket into `ready/`.
-`idea/` creation and `idea/` -> `todo/` triage are ungated.
-Identify the relevant spec file for the topic.
-Use `ws/specs.find` or `ws/specs.status` when a relevant spec file or stem is identifiable.
-If no relevant spec file exists or no entry covers this behavior, continue through `ws:lead-write-spec`; carry context:
+Trigger: non-`epic`, non-`research` ticket creation or move into `ready/`.
+Ungated: `idea/` creation and `idea/` -> `todo/` triage.
+Find coverage: identify the relevant spec file; use `ws/specs.find` or `ws/specs.status` when a file or stem is identifiable.
+Missing coverage: no relevant spec file exists or no entry covers behavior; continue through `ws:lead-write-spec`; carry context:
 `Chained from ws:lead-write-ticket - create planned coverage for this ready ticket without asking; ticket frontmatter will be populated from the follow-up coverage check.`
-After `ws:lead-write-spec` returns, re-check coverage through `ws/specs.find` or `ws/specs.status`.
-Stop only when coverage is still missing after the attempt, `ws:lead-write-spec` failed, or the behavior is too underspecified to spec. Name the blocker.
+Re-check: after `ws:lead-write-spec` returns, use `ws/specs.find` or `ws/specs.status`.
+Stop: coverage is still missing, `ws:lead-write-spec` failed, or the behavior is too underspecified; name the blocker.
 
 ### judge: initial-status
 
-Place in `idea/` when the topic is exploratory or underspecified; place in `todo/` when the scope and goal are accepted actionable backlog. `todo/` `spec:` links are optional recovery hints; `ready/` is the spec-gated implementation queue. When uncertain, prefer `idea/` - triage is cheap.
+`idea/`: topic is exploratory or underspecified.
+`todo/`: scope and goal are accepted actionable backlog.
+`ready/`: spec-gated implementation queue.
+`todo/` `spec:` links: optional recovery hints.
+Uncertain: prefer `idea/`.
 
 ### judge: cascade-ticket-edit
 
-Fires when the user asks to cascade broadly, reorganize a board and its children, or update parent and child tickets together beyond decisions that constrain the current target.
-
-Does not fire merely because a ticket has `related:` links or because default cross-ticket decision review applies.
+Trigger: user asks to cascade broadly, reorganize a board and children, or update parent and child tickets beyond target-constraining decisions.
+Do not trigger: a ticket merely has `related:` links or default cross-ticket decision review applies.
 
 ### judge: ticket-scope
 
-Over ~200 lines is a soft signal; over 300 lines, act. First, prune plan-level detail (file paths, function signatures, integration specifics) - that belongs in a plan document. Do not prune settled local or cross-ticket decisions; move them into the relevant child ticket or phase. If an epic is still large, move details into child tickets; if a non-epic is still large, introduce an epic and split into child tickets.
+Soft signal: ticket is over ~200 lines.
+Act: ticket is over 300 lines.
+First prune: plan-level detail such as file paths, function signatures, and integration specifics.
+Do not prune: settled local decisions or cross-ticket decisions.
+Move decisions: put them into the relevant child ticket or phase.
+Epic still large: move details into child tickets.
+Non-epic still large: introduce an epic and split into child tickets.
 
 ### judge: phase-need
 
-Applies only to non-epic actionable tickets. A phase is one complete behavior a future fresh session can finish, review, verify, and hand off cleanly. Treat setup, API, UI, tests, skeletons, and investigation as phase ingredients unless one is the reviewable deliverable. Use multiple phases only for sequential complete increments with distinct success criteria. Split unrelated complete increments into child tickets.
+Applies only: non-epic actionable tickets.
+Phase unit: one complete behavior a future fresh session can finish, review, verify, and hand off cleanly.
+Phase ingredients: setup, API, UI, tests, skeletons, and investigation unless one is the reviewable deliverable.
+Multiple phases: sequential complete increments with distinct success criteria.
+Unrelated increments: split into child tickets.
 
 ### judge: missing-spec-entry
 
-Fires when a phase implements caller-visible behavior with no entry in any spec file after **judge: spec-gate** has invoked `ws:lead-write-spec` and re-checked coverage. Stop the authoring flow, tell the user which phase remains uncovered, and name the blocker. Skipping this loses traceability for the new behavior and bypasses the canonical chain's spec-impact gate.
+Trigger: a phase implements caller-visible behavior with no spec entry after `judge: spec-gate` runs `ws:lead-write-spec` and re-checks coverage.
+Action: stop the authoring flow.
+Report: name the uncovered phase and blocker.
+Blocker: missing spec traceability for caller-visible behavior.
 
 ## Doctrine
 
