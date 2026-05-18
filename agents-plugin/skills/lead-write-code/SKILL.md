@@ -51,20 +51,12 @@ ws/agents.call(name: "project-survey", prompt: <ticket path or inline descriptio
 
 ### 3. Plan Depth
 
-Apply `judge: plan-depth`; default to survey when uncertain between as-is and survey.
-
-- **as-is:** continue to Prepare.
-- **survey:** register/call `plan-surveyor` with `prompts: ["plan-populator-survey"]`.
-- **research:** register/call `plan-researcher` with `prompts: ["plan-populator-research"]`.
-
-Population prompt:
-
-```text
-Brief path: <brief-path>
-Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
-```
-
-Commit the plan file before Prepare.
+1. Apply `judge: plan-depth`.
+2. If `as-is`: continue to Prepare.
+3. If `survey`: register/call `plan-surveyor` with `prompts: ["plan-populator-survey"]`.
+4. If `research`: register/call `plan-researcher` with `prompts: ["plan-populator-research"]`.
+5. For `survey` or `research`, use **Plan population prompt**.
+6. Commit the plan file before Prepare.
 
 ### 4. Prepare
 
@@ -105,105 +97,11 @@ Instructions:
 - Commit logical checkpoints on the current branch.
 ```
 
-Capture commit range from implementer output.
+Capture `<first-commit>..<last-commit>` from implementer output.
 
 ### 6. Review
 
-#### 6a. Allocate
-
-Apply `judge: partition-allocation` from implementer report and changed files.
-Choose the smallest reviewer set that covers material risk.
-Record skipped partitions with one-line rationale.
-Prepare 2-4 review focus bullets for each selected partition.
-
-#### 6b. Spawn Reviewers
-
-For each selected partition, call `ws/agents.register(name: <Reviewer name>, prompts: <Prompts>)` from the table:
-
-| Partition | Reviewer name | Prompts | Output path |
-|-----------|---------------|---------|-------------|
-| Correctness | `reviewer-correctness` | `["code-reviewer", "code-review-correctness"]` | `<correctness-path>` |
-| Fit | `reviewer-fit` | `["code-reviewer", "code-review-fit"]` | `<fit-path>` |
-| Test | `reviewer-test` | `["code-reviewer", "code-review-test"]` | `<test-path>` |
-
-Call selected reviewers in parallel with `ws/agents.call`.
-Read `ws/agents.result(name: "<reviewer-name>", timeout_seconds: 600)` only if needed.
-
-Correctness:
-
-```text
-Diff range: <first-commit>..<last-commit>
-
-Instructions:
-- Review focus: <2-4 correctness invariants to verify>.
-- Ignore outside this partition unless directly broken by the diff.
-- Write your full findings to: <correctness-path>
-- Return only: [clean|non-clean]: <one-line summary of most significant issues>
-```
-
-Fit:
-
-```text
-Diff range: <first-commit>..<last-commit>
-Brief path: <brief-path>
-
-Instructions:
-- Review focus: <2-4 fit or architecture concerns to verify>.
-- Ignore outside this partition unless directly broken by the diff.
-- Judge whether the implementation satisfies brief contract instructions and leaves room for future phases.
-<if ticket-driven:> Read the ticket at <ticket-path>; report any selected-scope binding decision omitted from the brief or violated by the implementation.
-- Write your full findings to: <fit-path>
-- Return only: [clean|non-clean]: <one-line summary of most significant issues>
-```
-
-Test:
-
-```text
-Diff range: <first-commit>..<last-commit>
-
-Instructions:
-- Review focus: <2-4 coverage or assertion risks to verify, including brief integration-test instructions>.
-- Judge whether required integration tests exist and prove the specified boundary.
-- Ignore outside this partition unless directly broken by the diff.
-- Write your full findings to: <test-path>
-- Return only: [clean|non-clean]: <one-line summary of most significant issues>
-```
-
-#### 6c. Relay Loop
-
-Start relay cycle count at 0.
-
-- All `[clean]`: exit loop.
-- Any `[non-clean]`: increment cycle before relay.
-
-Relay prompt:
-
-```text
-Review cycle <N>: <non-clean review paths only>. Read each file directly.
-For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
-Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
-Won't-fix not allowed: correctness, security, or contract violations - fix or escalate these.
-```
-
-After implementer returns, extract won't-fix list and re-review only partitions that returned `[non-clean]`.
-Clean partitions remain accepted unless the fix commit touched their owned surface.
-Reviewers overwrite their own files.
-
-Re-review prompt:
-
-```text
-Re-review. Updated diff: <diff>
-Implementer won't-fix items: <list with reasons>
-For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
-```
-
-Branch:
-
-- All `[clean]`: exit loop.
-- Cycle <= 2 and non-clean: relay again.
-- Cycle = 2 and maintained items exist: lead reads review files; accept won't-fix or override.
-- Overrides count as cycle 3 relay.
-- Cycle = 3 and non-clean remains: collect unresolved findings and continue to cleanup.
+Run **Review Relay**.
 
 ### 7. Cleanup
 
@@ -214,11 +112,48 @@ rm -f <correctness-path> <fit-path> <test-path>
 Agent registry entries need no teardown; `ws/agents.register` creates fresh task slots per run.
 Output completion report.
 
+## On: Review Relay
+
+1. Run **Allocate Review**.
+2. Run **Spawn Reviewers**.
+3. Run **Relay Loop**.
+
+## On: Allocate Review
+
+1. Apply `judge: partition-allocation` from implementer report and changed files.
+2. Choose the smallest reviewer set that covers material risk.
+3. Record skipped partitions with one-line rationale.
+4. Prepare 2-4 review focus bullets for each selected partition.
+
+## On: Spawn Reviewers
+
+1. For each selected partition, register the reviewer from **Reviewer partition table**.
+2. Call selected reviewers in parallel with `ws/agents.call`.
+3. Use **Reviewer prompt frame** for every reviewer.
+4. Read `ws/agents.result(name: "<reviewer-name>", timeout_seconds: 600)` only if needed.
+
+## On: Relay Loop
+
+1. Start relay cycle count at 0.
+2. If all reviewers return `[clean]`, exit.
+3. If any reviewer returns `[non-clean]`, increment cycle before relay.
+4. Call implementer with **Review relay prompt**.
+5. After implementer returns, extract won't-fix list.
+6. Re-review only partitions that returned `[non-clean]`.
+7. Keep clean partitions accepted unless the fix commit touched their owned surface.
+8. Call reviewers with **Re-review prompt**; reviewers overwrite their own files.
+9. If all reviewers return `[clean]`, exit.
+10. If cycle < 2 and non-clean remains, repeat relay.
+11. If cycle = 2 and non-clean remains, lead reads review files; accept won't-fix or override.
+12. If lead overrides, run one final cycle 3 relay.
+13. If cycle = 3 and non-clean remains, collect unresolved findings and continue to cleanup.
+
 ## Judgments
 
 ### judge: plan-depth
 
-Default to survey when uncertain between as-is and survey.
+Default: `survey` when uncertain between `as-is` and `survey`.
+Output: `as-is`, `survey`, or `research`.
 
 | Signal | Suggests |
 |--------|----------|
@@ -228,9 +163,9 @@ Default to survey when uncertain between as-is and survey.
 
 ### judge: partition-allocation
 
-Soft judgment. Prefer the smallest partition set that covers material risk.
-When uncertain, add one secondary partition rather than defaulting to all three.
-Full review is reserved for risks spanning correctness, fit, and tests.
+Goal: choose the smallest partition set that covers material risk.
+Uncertain: add one secondary partition rather than defaulting to all three.
+Full review: reserve for risks spanning correctness, fit, and tests.
 
 | Partition | Assign when |
 |-----------|-------------|
@@ -244,6 +179,60 @@ Full review is reserved for risks spanning correctness, fit, and tests.
 
 ## Templates
 
+### Plan population prompt
+
+```text
+Brief path: <brief-path>
+Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
+```
+
+### Reviewer partition table
+
+| Partition | Reviewer name | Prompts | Output path | Required check |
+|-----------|---------------|---------|-------------|----------------|
+| Correctness | `reviewer-correctness` | `["code-reviewer", "code-review-correctness"]` | `<correctness-path>` | Verify correctness invariants. |
+| Fit | `reviewer-fit` | `["code-reviewer", "code-review-fit"]` | `<fit-path>` | Verify brief contract instructions, future-phase fit, and ticket-driven binding decisions. |
+| Test | `reviewer-test` | `["code-reviewer", "code-review-test"]` | `<test-path>` | Verify coverage, assertions, and brief integration-test instructions. |
+
+### Reviewer prompt frame
+
+```text
+Review partition: <Correctness|Fit|Test>
+Diff range: <first-commit>..<last-commit>
+<if Fit:> Brief path: <brief-path>
+<if Fit and ticket-driven:> Ticket path: <ticket-path>
+Findings path: <partition-output-path>
+
+Review focus:
+- <2-4 partition-specific risks>
+
+Required checks:
+- <required check from Reviewer partition table>
+- <if Fit and ticket-driven:> Report any selected-scope binding decision omitted from the brief or violated by the implementation.
+
+Instructions:
+- Ignore outside this partition unless directly broken by the diff.
+- Write full findings to the findings path.
+- Return only: [clean|non-clean]: <one-line summary of most significant issues>
+```
+
+### Review relay prompt
+
+```text
+Review cycle <N>: <non-clean review paths only>. Read each file directly.
+For each finding respond with a disposition: [fixed], [won't fix: <reason>], or [deferred: <reason>].
+Won't-fix allowed: style suggestions conflicting with established codebase patterns; suggestions that expand scope beyond the brief.
+Won't-fix not allowed: correctness, security, or contract violations - fix or escalate these.
+```
+
+### Re-review prompt
+
+```text
+Re-review. Updated diff: <diff>
+Implementer won't-fix items: <list with reasons>
+For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
+```
+
 ### Brief format
 
 Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
@@ -255,7 +244,7 @@ Path: `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md`
 <what this achieves - one paragraph>
 
 ## Scope Boundary
-<selected slice and explicit deferred or excluded ticket scope>
+<selected scope and explicit deferred or excluded ticket scope>
 
 ## Caller-Visible Contract
 <observable behavior, public API/protocol/UI/doc output/lifecycle contract>
