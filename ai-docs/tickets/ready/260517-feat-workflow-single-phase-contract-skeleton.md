@@ -237,6 +237,18 @@ Verification repeated:
 - `python3 -m unittest discover agents-plugin-wsflow/tests`
 - `git diff --check -- agents-plugin/skills/lead-write-code/SKILL.md`
 
+#### Edition (854111c2) - 2026-05-18
+
+Applied the skill-authoring Markdown hierarchy guidance to `lead-write-code`.
+The invariant list now uses Branch, Context, Brief, Review, Agents, and Output
+groups, and templates are grouped under Brief, Plan, Review, and Report
+sections. Behavior remains unchanged from the prior structure cleanup.
+
+Verification repeated:
+
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check -- agents-plugin/skills/lead-write-code/SKILL.md`
+
 ### Phase 3: Pre-implementation survey pass guardrails
 
 Strengthen implementation routing so the survey step catches contract and reuse
