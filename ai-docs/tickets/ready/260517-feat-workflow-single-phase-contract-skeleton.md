@@ -132,6 +132,19 @@ resolution instead of slice selection. Verification repeated:
 - `go test ./...` from `agents-plugin-tool/`
 - `ws/spec_index.verify`
 
+#### Edition (18450413) - 2026-05-18
+
+Restructured `lead-write-ticket` and its wsflow mirror after the phase-unit
+policy landed. The edit preserves ticket creation, edit, ready-gate, commit,
+and handoff semantics while splitting the long invoke flow into short handlers:
+create ticket, edit ticket, apply ticket content, intent review, spec-stem
+check, and output handoff.
+
+Verification repeated:
+
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `git diff --check -- agents-plugin/skills/lead-write-ticket/SKILL.md agents-plugin-wsflow/skills/lead-write-ticket/SKILL.md`
+
 ### Phase 2: Non-working contract skeleton
 
 Redefine `lead-write-skeleton` as a non-working contract skeleton step instead
