@@ -157,27 +157,45 @@ Verification repeated:
 - `python3 -m unittest discover agents-plugin-wsflow/tests`
 - `git diff --check -- agents-plugin/skills/lead-write-ticket/SKILL.md agents-plugin-wsflow/skills/lead-write-ticket/SKILL.md`
 
-### Phase 2: Non-working contract skeleton
+### Phase 2: Contract brief instead of skeleton artifacts
 
-Redefine `lead-write-skeleton` as a non-working contract skeleton step instead
-of a populated, compile-clean stub flow.
+Remove skeleton artifact generation from the normal implementation workflow.
+Keep `lead-write-skeleton` itself untouched for backward compatibility, but stop
+routing new implementation work through it. Absorb the useful skeleton role into
+`lead-write-code` brief authoring: the brief must state concrete contract and
+integration-test instructions before implementers write code.
 
 Requirements:
 
-- Keep the skill name `lead-write-skeleton`.
-- Allow non-compiling source when it clearly records contracts and boundaries.
-- Allow public contracts, module/file boundaries, type or function signatures,
-  stubs, and intent comments.
-- Forbid behavior implementation, mock-data wiring, fallback or temporary
-  implementation logic, visual polish or presentational completion, and
-  temporarily working feature code.
-- Remove or replace the `skeleton-populator` population requirement from this
-  skill's normal flow.
-- Remove compile-clean/build-valid stub requirements from the skeleton contract.
-- Clarify that implementers use the optional plan plus skeleton diff as design
-  input, then replace or complete the skeleton with real working behavior.
-- Revisit ticket `skeletons:` frontmatter semantics if the recorded artifact is
-  no longer a final populated skeleton hash.
+- Do not edit `agents-plugin/skills/lead-write-skeleton/SKILL.md` in this
+  phase.
+- Remove normal-route references from other workflow skills that invoke or
+  require `lead-write-skeleton`.
+- Keep `skeletons:` ticket frontmatter backward-compatible as a legacy artifact
+  map; absence must not imply that a missing skeleton should be created.
+- Change `lead-implement` so public interface, cross-module boundary, and new
+  type contract work routes to `lead-write-code` with contract-brief
+  expectations, not to `lead-write-skeleton`.
+- Keep `lead-edit` narrow: direct lead edits honor caller scope and local
+  verification only; remove skeleton or plan artifact interpretation from
+  `lead-edit` and its wsflow mirror.
+- Extend `lead-write-code` brief authoring so it absorbs the useful skeleton
+  role with concrete `Contract Instructions` and `Integration Test
+  Instructions`.
+- `Contract Instructions` must name expected files/modules, public
+  types/functions/handlers/tools, visibility, call shape, input/output shape,
+  lifecycle boundaries, existing mechanisms to reuse, and forbidden temporary,
+  fallback, or mock-data wiring.
+- `Integration Test Instructions` must name the required test boundary type
+  such as parser, CLI, MCP tool, doc convention, skill routing, runtime
+  lifecycle, or agent relay; state whether to extend existing tests or create
+  new integration tests.
+- Implementer prompts must treat brief contract and integration-test
+  instructions as acceptance criteria.
+- Fit and test reviewers must compare the implementation against the brief's
+  contract and integration-test instructions.
+- Update specs and mental models so `lead-write-skeleton` is deprecated from
+  normal workflow routing without deleting the skill or bundled legacy prompt.
 
 ### Phase 3: Pre-implementation survey pass guardrails
 
