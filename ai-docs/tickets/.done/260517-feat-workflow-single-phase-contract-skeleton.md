@@ -358,3 +358,13 @@ Requirements:
   named-agent hang and empty-result lifecycle.
 - Do not mask named-agent runtime bugs with broad workflow takeover rules before
   the runtime lifecycle is understood.
+
+### Result (b76809c4) - 2026-05-18
+
+Boundaries confirmed with no behavior changes:
+- Documentation checkpoint cadence deferred; separate policy discussion needed.
+- Result/Edition post-implementation doc pipeline preserved unchanged.
+- `260517-bug-ws-agent-empty-result-after-tool-use` remains a separate runtime
+  lifecycle investigation; no workflow takeover rules added in this ticket.
+- Named-agent hang behavior stays a runtime bug target, not a workflow policy
+  target.
