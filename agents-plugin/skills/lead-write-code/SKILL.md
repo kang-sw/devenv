@@ -18,7 +18,7 @@ Context
 
 Brief
 - Implementer reads only the brief, plus plan when provided; never the ticket directly.
-- Brief strips ticket noise, never selected-scope binding decisions.
+- Brief omits ticket noise; preserve every selected-scope binding decision.
 - Brief includes concrete contract and integration-test instructions for public or cross-module changes.
 
 Plan
@@ -76,11 +76,7 @@ ws/agents.call(name: "project-survey", prompt: <ticket path or inline descriptio
 
 ### 4. Research Route
 
-1. Register/call `plan-researcher` with `prompts: ["plan-populator-research"]`.
-2. Use **Research route prompt** with the same `<plan-path>`.
-3. Require the researcher to read the existing survey output, then replace it with the research plan.
-4. Treat the resulting research file as the final `<plan-path>`.
-5. If the research report returns `[escalate-to-lead]`, stop and escalate to the caller.
+Run **Research Route**.
 
 ### 5. Prepare
 
@@ -96,32 +92,7 @@ ws/agents.call(name: "project-survey", prompt: <ticket path or inline descriptio
 
 Call `ws/agents.call(name: "implementer", prompt: <block below>)`.
 Read `ws/agents.result(name: "implementer", timeout_seconds: 600)` only if async result lacks usable summary.
-
-```text
-Brief path: <brief-path>
-<if plan exists:> Plan path: <plan-path>
-
-Read only the brief (and plan if provided). Do not read the ticket directly.
-Implement only the brief's scope boundary; leave later ticket phases untouched.
-
-Acceptance criteria:
-- Brief `## Contract Instructions` must be implemented or explicitly escalated.
-- Brief `## Integration Test Instructions` must be satisfied.
-- Test files: <integration test paths>
-- Run: <command to execute them>
-
-Ancestor loading: when you read `ai-docs/mental-model/<domain>/<sub>.md`,
-read `ai-docs/mental-model/<domain>/index.md` first.
-
-Instructions:
-- Verify integration tests pass before reporting completion and after each fix.
-- Do not replace brief contract instructions with temporary, fallback, or mock-data behavior.
-- Respect plan risk signals; escalate instead of implementing a known wrong contract, existing-mechanism bypass, or duplicated-glue shortcut.
-- Report completion in plain text. Include test results.
-- For fix cycles, a follow-up call will arrive with review findings; fix and report back.
-- Commit logical checkpoints on the current branch.
-```
-
+Use **Implementer spawn prompt**.
 Capture `<first-commit>..<last-commit>` from implementer output.
 
 ### 7. Review
@@ -168,10 +139,18 @@ Output completion report.
 7. Keep clean partitions accepted unless the fix commit touched their owned surface.
 8. Call reviewers with **Re-review prompt**; reviewers overwrite their own files.
 9. If all reviewers return `[clean]`, exit.
-10. If cycle < 2 and non-clean remains, repeat relay.
+10. If cycle < 2 and non-clean remains, go to step 3.
 11. If cycle = 2 and non-clean remains, lead reads review files; accept won't-fix or override.
 12. If lead overrides, run one final cycle 3 relay.
 13. If cycle = 3 and non-clean remains, collect unresolved findings and continue to cleanup.
+
+## On: Research Route
+
+1. Register/call `plan-researcher` with `prompts: ["plan-populator-research"]`.
+2. Use **Research route prompt** with the same `<plan-path>`.
+3. Require the researcher to read the existing survey output, then replace it with the research plan.
+4. Treat the resulting research file as the final `<plan-path>`.
+5. If the research report returns `[escalate-to-lead]`, stop and escalate to the caller.
 
 ## Judgments
 
@@ -284,6 +263,33 @@ Brief path: <brief-path>
 Plan path: ai-docs/.plans/YYYY-MM/DD-<stem>.md
 The existing plan file contains survey output that requested research.
 Read it, then replace the file with a research plan.
+```
+
+### Implementer Spawn Prompt
+
+```text
+Brief path: <brief-path>
+<if plan exists:> Plan path: <plan-path>
+
+Read only the brief (and plan if provided). Do not read the ticket directly.
+Implement only the brief's scope boundary; leave later ticket phases untouched.
+
+Acceptance criteria:
+- Brief `## Contract Instructions` must be implemented or explicitly escalated.
+- Brief `## Integration Test Instructions` must be satisfied.
+- Test files: <integration test paths>
+- Run: <command to execute them>
+
+Ancestor loading: when you read `ai-docs/mental-model/<domain>/<sub>.md`,
+read `ai-docs/mental-model/<domain>/index.md` first.
+
+Instructions:
+- Verify integration tests pass before reporting completion and after each fix.
+- Do not replace brief contract instructions with temporary, fallback, or mock-data behavior.
+- Respect plan risk signals; escalate instead of implementing a known wrong contract, existing-mechanism bypass, or duplicated-glue shortcut.
+- Report completion in plain text. Include test results.
+- For fix cycles, a follow-up call will arrive with review findings; fix and report back.
+- Commit logical checkpoints on the current branch.
 ```
 
 ### Review Templates
