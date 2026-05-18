@@ -92,6 +92,30 @@ Requirements:
   describe "broadest cohesive unfinished slice" selection or granular phase
   preference.
 
+### Result (a0df5510) - 2026-05-18
+
+Implemented phase-unit ticket authoring and proceed routing for ws and wsflow.
+`lead-write-ticket` now frames non-epic actionable phases as complete
+fresh-session implementation units with completion, deferred-scope, and
+verification boundaries. Runtime ticket conventions use the same phase-unit
+definition.
+
+`lead-proceed` now selects one explicitly named phase or, by default, the first
+unfinished phase. It stops when one proceed request names multiple phases or
+when the selected phase is too broad or crosses unrelated implementation
+surfaces, instead of grouping adjacent unfinished phases.
+
+The `workflow-skills` spec now records the implemented phase-unit behavior and
+removes the Phase 1 planned callouts. The workflow-skills and
+documentation-system mental models now describe one selected phase as the hard
+downstream scope.
+
+Verification:
+
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `go test ./...` from `agents-plugin-tool/`
+- `ws/spec_index.verify`
+
 ### Phase 2: Non-working contract skeleton
 
 Redefine `lead-write-skeleton` as a non-working contract skeleton step instead
