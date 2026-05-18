@@ -116,6 +116,22 @@ Verification:
 - `go test ./...` from `agents-plugin-tool/`
 - `ws/spec_index.verify`
 
+#### Edition (09399724) - 2026-05-18
+
+Collapsed `lead-proceed` scope selection from a separate
+`judge: implementation-slice` section into a mechanical ready-ticket scope
+resolution step. Ready tickets now continue to implementation with resolved
+scope only: whole target for tickets without phases, one explicitly named
+phase, or the first unfinished phase by default. Multiple explicit phases and
+plainly too-broad phase text stop for phase or ticket slicing.
+
+The workflow spec and workflow-skills mental model now describe scope
+resolution instead of slice selection. Verification repeated:
+
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- `go test ./...` from `agents-plugin-tool/`
+- `ws/spec_index.verify`
+
 ### Phase 2: Non-working contract skeleton
 
 Redefine `lead-write-skeleton` as a non-working contract skeleton step instead
