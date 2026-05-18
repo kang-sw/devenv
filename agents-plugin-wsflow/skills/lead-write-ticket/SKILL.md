@@ -26,7 +26,7 @@ Target: user request
    b. Choose initial status directory (`idea/` for vague, `todo/` for accepted actionable backlog - see `judge: initial-status`).
    c. Write the ticket using the **frontmatter template** and a clear problem/goal statement. Populate `related-mental-model` with the mental-model stems (filename without `.md`) that were consulted or arose during the current session - recovery hint for future sessions, not a validated link. Omit if no mental-model docs were relevant.
    d. If category is `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria; reference existing/planned children and start a separate `wsflow:lead-write-ticket` invocation for any child creation or child edit.
-   e. If category is not `epic` and multiple phases are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
+   e. If category is not `epic` and multiple complete phase units are warranted (see `judge: phase-need`), structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
    f. After drafting, verify scope - see `judge: ticket-scope`.
    g. If status is `ready/`: defer queue entry until after **Spec-stem check** passes.
 5. **Edit** (existing ticket):
@@ -34,9 +34,9 @@ Target: user request
    b. Apply the requested changes (update phase, move status).
    c. If the target is an epic, keep edits at board level; for detailed implementation discussion, stop after the epic edit and start a separate `wsflow:lead-write-ticket` invocation for the child ticket.
    d. For moves, use native `git mv` and add `completed:` date in frontmatter (-> `.done/`).
-6. **Phase content** - for non-epic actionable tickets, capture goals, caller-visible contracts, constraints, rationale, implementation strategy decisions, rejected alternatives, forward-compatibility contracts, verification expectations, and suggested approaches. Leave codebase-derived details (paths, type reuse, integration patterns, signatures, testing classifications) to the plan.
+6. **Phase content** - for non-epic actionable tickets, capture goals, caller-visible contracts, completion boundary, deferred scope, constraints, rationale, implementation strategy decisions, rejected alternatives, forward-compatibility contracts, verification expectations, and suggested approaches. Leave codebase-derived details (paths, type reuse, integration patterns, signatures, testing classifications) to the plan.
 7. **Intent review** - re-read the written/edited ticket against the preceding conversation and cross-ticket decision review:
-   - Are decisions, constraints, rejected alternatives, forward-compatibility contracts, verification expectations, and suggested approaches captured?
+   - Are completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility contracts, verification expectations, and suggested approaches captured?
    - Does the ticket distort or omit any discussed intent?
    - Does the ticket omit any related-ticket decision that constrains this implementation slice?
    - If the ticket is an epic, did detailed implementation material stay out of the epic and get routed to a separate child-ticket invocation?
@@ -102,7 +102,7 @@ Over ~200 lines is a soft signal; over 300 lines, act. First, prune plan-level d
 
 ### judge: phase-need
 
-Applies only to non-epic actionable tickets. Prefer more phases over fewer inside one cohesive child ticket; split unrelated reviewable units into separate child tickets. Single-component, single-concern work may be one phase.
+Applies only to non-epic actionable tickets. A phase is one complete behavior a future fresh session can finish, review, verify, and hand off cleanly. Treat setup, API, UI, tests, skeletons, and investigation as phase ingredients unless one is the reviewable deliverable. Use multiple phases only for sequential complete increments with distinct success criteria. Split unrelated complete increments into child tickets.
 
 ### judge: missing-spec-entry
 

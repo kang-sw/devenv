@@ -36,9 +36,11 @@ Route Context
 Routing
 - Use the first matching route row.
 - Captured `Ticket:` paths re-enter route context before implementation.
-- Honor explicit phase names or ranges exactly.
-- When the user does not name phases, autonomously choose the broadest cohesive unfinished slice.
-- Accept `--auto-slice`, `auto-slice`, and equivalent phrasing as the same default autonomous slice policy.
+- Honor one explicit phase name exactly.
+- Stop when one proceed request names multiple phases.
+- When the user does not name a phase, select the first unfinished phase.
+- Stop when the next phase is too broad for one complete implementation unit.
+- Accept `--auto-slice`, `auto-slice`, and equivalent phrasing as the same default phase-selection policy.
 
 ## On: invoke
 
@@ -55,7 +57,7 @@ Routing
 9. If `target-kind=inline` and `actionable=yes`: apply `judge: needs-ticket`.
 10. Classify warmth from conversation state.
 11. If `has-ticket=yes` and warmth is warm: apply `judge: ticket-freshness`.
-12. Detect explicit phase constraints or autonomous slice phrasing.
+12. Detect explicit phase constraints or autonomous phase-selection phrasing.
 
 ### 2. Select Route
 
@@ -79,7 +81,7 @@ Routing
 - **Warmth**: <warm | cold> - <evidence from conversation state>
 - **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
 - **Discussion**: <not needed | needed - blocker>
-- **Slice**: <Phase N[: title] | Phase N-M[: title summary] | whole target - no phases>
+- **Slice**: <Phase N[: title] | whole target - no phases>
 - **Execution**: ws:lead-implement - owns skeleton decisions, code-editing stages, and branch lifecycle
 - **Carried context**: downstream stages receive route constraints.
 
@@ -152,16 +154,15 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 | Decision | When |
 |----------|------|
 | Whole target | Ready target has no phase sections |
-| User-requested phase range | User explicitly named phases to implement |
-| Inseparable phase range | Adjacent phases cannot be verified separately from ticket artifacts |
-| Default phase range | User did not name phases and adjacent unfinished phases form one cohesive implementation/review slice |
-| First unfinished phase | The first unfinished phase is the only cohesive implementation/review slice |
+| User-requested phase | User explicitly named one phase to implement |
+| First unfinished phase | User did not name a phase |
+| Stop for slicing | User named multiple phases, or the next phase is too broad or crosses unrelated implementation surfaces |
 
-Autonomous slice selection is the default when the user does not name phases.
-Prefer grouping adjacent phases when they share one implementation/review surface
-or when a later phase only verifies the immediately preceding implementation.
-Choose a narrower slice when later phases introduce a separate public contract,
-independent skeleton need, or separately reviewable security boundary.
+One proceed invocation selects one ticket phase when the target has phases.
+Autonomous phase selection is the default when the user does not name a phase.
+Choose the first unfinished phase. If that phase cannot be completed, reviewed,
+and verified as one implementation unit, stop for conservative phase or ticket
+slicing instead of splitting the phase inside `lead-proceed`.
 
 ### judge: ticket-freshness
 

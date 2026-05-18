@@ -27,13 +27,14 @@ Canonical reference for ticket structure, naming, and lifecycle.
 - Epic bodies preserve board-level context: scope, non-scope, child ticket board, cross-child invariant decisions, and done/drop/defer criteria.
 - Detailed discussion, implementation approaches, constraints, and slice-specific decisions belong in child tickets, not in the epic body.
 - Epic tickets do not use implementation phases; child tickets carry phases when needed.
-- A single child ticket may carry multiple phases when they form one cohesive reviewable unit.
+- A single child ticket may carry multiple phases when they form sequential complete implementation units.
 
 ## Phases
 
 - Phase numbers are sequential and **stable** — mark dropped phases `[dropped]`, never renumber.
-- One phase touches **one cohesive component** unless the change is inherently cross-component.
-- Each phase has its own success criteria or test surface.
+- One phase is one complete behavior a future fresh session can finish, review, verify, and hand off cleanly.
+- Setup, API, UI, tests, skeletons, and investigation are phase ingredients unless one is the reviewable deliverable.
+- Each phase states its completed behavior, deferred scope, and verification boundary.
 - Structure as `### Phase N: <title>` sections. Note inter-phase dependencies explicitly.
 
 ## Stems

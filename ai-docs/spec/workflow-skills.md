@@ -167,17 +167,14 @@ only.
 detailed discussion, implementation phases, or slice-specific decisions arise
 while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
-they form one cohesive reviewable unit. {#260508-write-ticket-epic-child-boundary}
-
-> [!note] Planned 🚧
-> `lead-write-ticket` will author actionable child-ticket phases from a
-> fresh-session completion view. Each phase will describe the next complete
-> behavior a future `lead-proceed` run can finish, review, verify, and hand off
-> cleanly. Setup, API, UI, tests, skeletons, and investigation remain available
-> as phase ingredients; they become standalone phases only when they are the
-> reviewable deliverable. Each non-epic actionable phase will state what
-> behavior is complete, what remains deferred, and what verification proves the
-> phase complete.
+they form sequential complete implementation units. Actionable child-ticket
+phases are authored from a fresh-session completion view: each phase describes
+the next complete behavior a future `lead-proceed` run can finish, review,
+verify, and hand off cleanly. Setup, API, UI, tests, skeletons, and
+investigation are phase ingredients unless one is the reviewable deliverable.
+Each non-epic actionable phase states what behavior is complete, what remains
+deferred, and what verification proves the phase complete.
+{#260508-write-ticket-epic-child-boundary}
 
 `lead-write-ticket` treats tickets as recoverability artifacts before compact
 summaries. Non-epic actionable tickets preserve caller-visible contracts,
@@ -352,22 +349,15 @@ spec -> ticket -> implementation
 
 Existing non-epic `ready/` ticket paths skip ticket creation and become
 implementation targets after `lead-proceed` selects an implementation slice.
-Targets without phase sections use the whole target. When the user names phases,
-that explicit request is honored exactly. When the user does not name phases,
-`lead-proceed` autonomously selects the broadest cohesive unfinished phase range
-that can be implemented and reviewed together. It chooses a narrower slice when
-later phases introduce a separate public contract, independent skeleton need, or
-separately reviewable security boundary. Compatibility phrasing such as
-`auto-slice` remains accepted as the same default autonomous slice policy.
-
-> [!note] Planned 🚧
-> When the target has phase sections, `lead-proceed` will use one ticket phase
-> as the implementation unit for one invocation. It will honor explicit
-> user-named phases exactly. Without an explicit phase, it will select the first
-> unfinished phase by default instead of grouping adjacent unfinished phases as
-> the broadest cohesive slice. If a phase is too large or crosses unrelated
-> implementation surfaces, `lead-proceed` will stop for conservative phase or
-> ticket slicing rather than split the phase internally.
+Targets without phase sections use the whole target. When the user names one
+phase, that explicit request is honored exactly. When the user does not name a
+phase, `lead-proceed` selects the first unfinished phase by default. One proceed
+invocation selects one ticket phase when the target has phases. If a request
+names multiple phases, or if the selected phase is too large or crosses
+unrelated implementation surfaces, `lead-proceed` stops for conservative phase
+or ticket slicing rather than splitting the phase internally.
+Compatibility phrasing such as `auto-slice` remains accepted as the same default
+phase-selection policy.
 
 Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
