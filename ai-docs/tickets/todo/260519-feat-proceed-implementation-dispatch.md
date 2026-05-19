@@ -16,11 +16,16 @@ for the implementation stage to shortcut a caller-visible or cross-module
 change into direct editing even when the correct route is delegated
 `lead-write-code`.
 
-The desired behavior is for `lead-proceed` to decide the implementation dispatch
-from the same conversation and artifact evidence it already uses for routing,
-then carry that dispatch as a hard downstream constraint. `lead-implement` may
-escalate a direct-edit dispatch to write-code if later evidence requires it, but
-must not downgrade a proceed-selected write-code dispatch to direct edit.
+The desired behavior in full ws is for `lead-proceed` to decide the
+implementation dispatch from the same conversation and artifact evidence it
+already uses for routing, then carry that dispatch as a hard downstream
+constraint. `lead-implement` may escalate a direct-edit dispatch to write-code
+if later evidence requires it, but must not downgrade a proceed-selected
+write-code dispatch to direct edit.
+
+The wsflow package has a different implementation surface: `lead-write-code` is
+excluded and `lead-implement` routes through `lead-edit`. wsflow should therefore
+mirror the routing clarity goal, not the full ws dispatch enum.
 
 This work also absorbs the stale standalone skeleton-routing capture. Normal
 implementation routing no longer creates generated skeleton artifacts;
@@ -36,6 +41,8 @@ contract-heavy work is handled through `lead-write-code` briefs.
   edit versus write-code; contract-brief depth belongs inside write-code.
 - Direct edit is allowed only when all direct-edit predicates are known true
   from ticket or conversation artifacts.
+- For wsflow, do not introduce `write-code` wording or a full ws dispatch enum;
+  express the precheck as execution path, complexity/risk flag, and branch mode.
 
 ## Phases
 
@@ -57,10 +64,10 @@ Acceptance criteria:
 
 ### Phase 2: Add proceed dispatch precheck
 
-Teach `lead-proceed` to select implementation dispatch before the
-`lead-implement` handoff.
+Teach `lead-proceed` to select a conservative implementation dispatch before
+the `lead-implement` handoff in full ws.
 
-The proceed announcement should include:
+The full ws proceed announcement should include:
 
 - `Implementation Dispatch`: `direct-edit` or `write-code`.
 - `Dispatch Reason`: the predicate that selected the dispatch.
@@ -81,5 +88,18 @@ Dispatch rules:
   `lead-implement` may escalate direct-edit to write-code, but must not
   downgrade write-code to direct-edit.
 
-Verification should cover at least one ready-ticket caller-visible workflow
-change where proceed selects write-code even before source inspection.
+The wsflow proceed announcement should not mention `write-code`. It should
+instead include:
+
+- `Execution Path`: `wsflow:lead-implement -> wsflow:lead-edit`.
+- `Complexity Flag`: narrow, broad, caller-visible, or cross-module based on
+  ticket and conversation artifacts.
+- `Branch Mode`: continue current branch, create branch when explicitly
+  requested or repository rules require it, or sprint blocked.
+
+Verification should cover:
+
+- full ws: at least one ready-ticket caller-visible workflow change where
+  proceed selects write-code even before source inspection;
+- wsflow: the same kind of task receives a caller-visible or broad complexity
+  flag without introducing unavailable `lead-write-code` routing.
