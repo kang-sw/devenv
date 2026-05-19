@@ -159,7 +159,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
-| `260513-feat-tolerant-doc-find-queries` | todo | Make documentation lookup queries and convention aliases tolerant candidate discovery |
+| `260513-feat-tolerant-doc-find-queries` | ready | Make documentation lookup queries and convention aliases tolerant candidate discovery |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
@@ -178,7 +178,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- No ready tickets.
+- `260513-feat-tolerant-doc-find-queries` - Make broad documentation lookup
+  queries return tolerant document-grouped evidence and add common convention
+  aliases.
 
 ## Session Notes
 
