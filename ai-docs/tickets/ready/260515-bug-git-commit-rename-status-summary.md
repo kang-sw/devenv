@@ -1,5 +1,7 @@
 ---
 title: git.commit rename status summary mismatch
+spec:
+  - 260519-git-commit-add-delete-ticket-move-summary
 related-mental-model:
   - git-workflow-tools
   - documentation-system
