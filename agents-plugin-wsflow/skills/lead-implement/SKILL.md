@@ -12,6 +12,7 @@ Target: user request
 - Lead-owned harness only: route, run doc pipeline, report, and gate continuation.
 - Execute code changes through `wsflow:lead-edit`; `lead-edit` owns the implementation strategy.
 - Honor caller-provided scope or phase slices as hard implementation boundaries.
+- Preserve caller-provided execution path, complexity flag, and branch mode.
 - Do not route to excluded workflow skills.
 - Create the task list at prepare; every task is mandatory and ordered.
 - Commit logical units per repository commit rules with `## AI Context`.
@@ -22,8 +23,9 @@ Target: user request
 
 1. Parse target: ticket path or inline description.
 2. If ticket-driven: read ticket; extract scope, stem, caller-provided slice, and phase results.
-3. Record `<implementation-start>` with `git rev-parse HEAD`.
-4. Apply `judge: branch-mode`.
+3. Extract caller-provided execution path, complexity flag, and branch mode when present.
+4. Record `<implementation-start>` with `git rev-parse HEAD`.
+5. Apply `judge: branch-mode`.
 
 ### 2. Prepare
 
@@ -31,6 +33,7 @@ Create and maintain this task list:
 
 ```text
 [ ] Confirm scope boundary - preserve caller-provided slice or whole-target scope
+[ ] Confirm execution context - preserve caller-provided complexity flag and branch mode
 [ ] Prepare branch - continue current branch or create an implementation branch when requested
 [ ] Execute - invoke wsflow:lead-edit; capture commit range and result commit
 [ ] Doc pre-pass - invoke wsflow:lead-update-spec; update mental models directly when source changes require it
@@ -41,7 +44,7 @@ Create and maintain this task list:
 ### 3. Execute
 
 1. If branch preparation is needed, perform it before source edits.
-2. Invoke `wsflow:lead-edit` with the target and scope boundary.
+2. Invoke `wsflow:lead-edit` with the target, scope boundary, complexity flag, and branch mode.
 3. Capture commit range from `<implementation-start>..HEAD`.
 4. Capture `<result-commit>` as current source HEAD before documentation updates.
 
@@ -78,7 +81,9 @@ implementation slice; completed ticket Results are frozen.
 
 | Decision | When |
 |----------|------|
+| Stop | Caller-provided branch mode is `sprint blocked` |
 | Stop | Current branch starts with `sprint/`; route sprint-scoped implementation through `wsflow:lead-sprint` or ask the user for an explicit non-sprint target branch. |
+| Create implementation branch | Caller-provided branch mode is `create branch` |
 | Continue current branch | Current branch is suitable for direct edits or already matches the requested implementation scope. |
 | Create implementation branch | The user explicitly asks for branch isolation or repository rules require it. |
 

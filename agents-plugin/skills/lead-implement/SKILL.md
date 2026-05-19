@@ -14,6 +14,7 @@ Target: user request
 - Merge commits follow CLAUDE.md commit rules and include `## AI Context`.
 - Create the task list at prepare; every task is mandatory and ordered.
 - Honor caller-provided scope or phase slices as hard implementation boundaries.
+- Honor caller-provided `write-code` dispatch as a hard lower bound.
 
 ## On: invoke
 
@@ -21,8 +22,9 @@ Target: user request
 
 1. Parse target: ticket path or inline description.
 2. If ticket-driven: read ticket; extract scope, stem, artifacts, and caller-provided slice.
-3. Apply `judge: execution-mode`.
-4. Apply `judge: branch-mode`.
+3. Extract caller-provided implementation dispatch, dispatch reason, and branch mode when present.
+4. Apply `judge: execution-mode`.
+5. Apply `judge: branch-mode`.
 
 ### 2. Prepare
 
@@ -34,6 +36,7 @@ Target: user request
 
 ```text
 [ ] Confirm scope boundary - preserve caller-provided slice or whole-target scope
+[ ] Confirm dispatch boundary - preserve caller-provided write-code lower bound
 [ ] Prepare branch - create, continue, or safely rename the implementation branch
 [ ] Execute - invoke ws:lead-edit or ws:lead-write-code; capture commit range and result commit
 [ ] Doc pre-pass - update-spec then mental-model-updater; commit each
@@ -99,6 +102,7 @@ Write the merge commit per CLAUDE.md.
 
 | Decision | When |
 |----------|------|
+| Delegated -> `ws:lead-write-code` | Caller-provided implementation dispatch is `write-code` |
 | Direct edit -> `ws:lead-edit` | Single file, internal-only, no callers affected, no new public symbols, no new test files, and no explicit delegation request |
 | Delegated -> `ws:lead-write-code` | Public interface, cross-module boundary, or new type contract changes require concrete contract and integration-test instructions |
 | Delegated -> `ws:lead-write-code` | Any direct-edit condition is unmet |
@@ -109,8 +113,11 @@ Pick the first matching decision.
 
 | Decision | When |
 |----------|------|
+| Stop or route sprint | Caller-provided branch mode is `sprint blocked` |
 | Stop or route sprint | Current branch starts with `sprint/` |
+| Continue implementation branch | Caller-provided branch mode is `continue implement/*` |
 | Continue implementation branch | Current branch starts with `implement/` |
+| Create implementation branch | Caller-provided branch mode is `create implement/<scope>` |
 | Create implementation branch | Delegated path outside `implement/` |
 | Direct current branch | Direct-edit path |
 

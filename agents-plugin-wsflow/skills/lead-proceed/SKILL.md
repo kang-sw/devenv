@@ -23,6 +23,7 @@ Pipeline
 Execution
 - Announce routing before execution; chain stages without pausing for confirmation.
 - Handoff stages receive carried gate-suppression context.
+- Implementation handoff carries execution path, complexity flag, and branch mode.
 - Warmth is current-session context, not target identity.
 
 ## Route Rules
@@ -32,6 +33,7 @@ Route Context
 - `discussion-needed` blocks every implementation route.
 - `needs-ticket` applies only to actionable inline targets without a ticket.
 - `ticket-freshness` applies only when `has-ticket=yes` and warmth is warm.
+- `complexity-flag` applies only from conversation and workflow artifacts.
 
 Routing
 - Use the first matching route row.
@@ -63,6 +65,9 @@ Routing
    - Multiple explicit phases -> stop for phase or ticket slicing.
    - No explicit phase -> first unfinished phase.
    - Selected phase is plainly too broad from ticket text -> stop for phase or ticket slicing.
+13. For implementation routes, set `execution-path=wsflow:lead-implement -> wsflow:lead-edit`.
+14. For implementation routes, apply `judge: complexity-flag`.
+15. For implementation routes, apply `judge: branch-mode`.
 
 ### 2. Select Route
 
@@ -73,9 +78,9 @@ Routing
 | `discussion-needed=yes` | Continue through `wsflow:lead-discuss`; carry the blocker; stop. |
 | `has-ticket=yes` and status is `todo/` | Continue through `wsflow:lead-write-spec`, then `wsflow:lead-write-ticket`; carry `promote-context`; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and freshness is missing settled decisions | Continue through `wsflow:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready/` | Continue through `wsflow:lead-implement`; carry resolved scope only. |
+| `has-ticket=yes` and status is `ready/` | Continue through `wsflow:lead-implement`; carry resolved scope, execution path, complexity flag, and branch mode. |
 | `has-ticket=no` and `needs-ticket=yes` | Continue through `wsflow:lead-write-spec`, then `wsflow:lead-write-ticket`; carry `create-context`; capture `Ticket:` and re-route. |
-| `has-ticket=no` and `needs-ticket=no` | Continue through `wsflow:lead-implement`; carry inline target and no-ticket scope. |
+| `has-ticket=no` and `needs-ticket=no` | Continue through `wsflow:lead-implement`; carry inline target, no-ticket scope, execution path, complexity flag, and branch mode. |
 
 ### 3. Announce
 
@@ -87,6 +92,9 @@ Routing
 - **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | whole target - no phases>
+- **Execution Path**: wsflow:lead-implement -> wsflow:lead-edit
+- **Complexity Flag**: <narrow | broad | caller-visible | cross-module>
+- **Branch Mode**: <continue current branch | create branch | sprint blocked>
 - **Execution**: wsflow:lead-implement - owns direct execution, documentation, and final reporting
 - **Carried context**: downstream stages receive route constraints.
 
@@ -112,6 +120,9 @@ Do not ask for confirmation; the user can interrupt.
 
 `gate-suppression-context`:
 Carry: this is an autonomous proceed chain; downstream stages do not pause for approvals that this route already grants.
+
+`execution-context`:
+Carry: `execution-path`, `complexity-flag`, and `branch-mode`; `wsflow:lead-implement` preserves the flag as routing context for `wsflow:lead-edit`.
 
 `create-context`:
 Carry `spec-context` and `gate-suppression-context`, then continue through `wsflow:lead-write-ticket`.
@@ -160,6 +171,31 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 |----------|------|
 | Refresh ticket | Active conversation since ticket capture settled decisions, constraints, rejected alternatives, or scope boundaries that are absent from the ticket |
 | Continue | The ticket already captures the active conversation's settled implementation intent, or the conversation only adds autonomous hygiene or implementation-detail work |
+
+### judge: complexity-flag
+
+Use only conversation state, ticket text, frontmatter, phase text, status,
+category, spec links, and captured plan metadata. Do not inspect source, source
+stubs, tests, broad docs, or implementation plans.
+
+Pick the strongest matching flag.
+
+| Decision | When |
+|----------|------|
+| `cross-module` | Artifacts show cross-skill routing, cross-module boundary, public contract, or integration boundary changes |
+| `caller-visible` | Artifacts show user-visible output, CLI, MCP, documented behavior, ticket queue, branch behavior, or spec-linked behavior changes |
+| `broad` | Artifacts show multi-file work, expected tests, ready-ticket work with unknown narrowness, or any unknown narrow predicate |
+| `narrow` | Artifacts explicitly show single-file scope, internal-only behavior, no caller-visible behavior change, no public contract change, no new public symbols, no new tests expected, and no explicit delegation request |
+
+### judge: branch-mode
+
+Pick the first matching decision.
+
+| Decision | When |
+|----------|------|
+| `sprint blocked` | Current branch starts with `sprint/` |
+| `create branch` | User explicitly requests branch isolation or repository rules require it |
+| `continue current branch` | Current branch is suitable or already matches the requested implementation scope |
 
 ## Doctrine
 
