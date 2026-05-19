@@ -195,7 +195,8 @@ message fields. It stages only the requested paths and formats commit messages
 with required AI Context and optional ticket, spec, or mental-model update
 sections. Ticket update detection recognizes added `### Result` headings and
 added `#### Edition` headings so commit summaries can report first completion
-records and later append-only tweak records.
+records and later append-only tweak records. The default response is a compact
+readable commit summary; callers can request structured JSON explicitly.
 When an explicit commit path names an old root from a rename or a deleted root,
 `git.commit` stages the concrete removed paths reported by Git status rather
 than passing the missing root to `git add`; requested roots with live changes

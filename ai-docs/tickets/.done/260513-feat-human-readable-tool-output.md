@@ -3,6 +3,7 @@ title: Human-readable workflow tool output
 parent: 260513-epic-workflow-question-loop-hygiene
 spec:
   - 260519-workflow-command-readable-output-defaults
+completed: 2026-05-19
 related-mental-model:
   - git-workflow-tools
   - mcp-runtime
@@ -35,6 +36,16 @@ Acceptance criteria:
 - Record which surfaces should remain JSON because they are protocol payloads,
   cache files, or internal state files rather than interactive output.
 
+### Result (3f52c36) - 2026-05-19
+
+Audited and updated the remaining workflow output surfaces named by the ticket:
+`git.commit` MCP output, Git CLI mirrors, `config show`, ticket/spec/mental-model
+discovery CLI mirrors, and `references trace`.
+
+Protocol and compatibility surfaces remain structured: MCP response envelopes,
+runtime capability/metadata payloads, API async job state, agent runtime state,
+cache files, and explicit `format=json` / `--format json` paths.
+
 ### Phase 2: Add human-readable defaults
 
 Implement text defaults for the audited workflow command surfaces while keeping
@@ -50,3 +61,15 @@ Acceptance criteria:
   instead of wrapping native Git output in ws-specific JSON by default.
 - Tests cover both default text output and explicit JSON output.
 - Specs and mental models describe the default text / explicit JSON rule.
+
+### Result (3f52c36) - 2026-05-19
+
+Implemented readable defaults for the audited surfaces. `git.commit` now returns
+a compact text summary by default and structured JSON only when requested.
+`ws-mcp` CLI mirrors for Git, `config show`, ticket/spec/mental-model discovery,
+and reference tracing now default to text and keep `--format json` compatibility.
+
+Git CLI read mirrors preserve native Git text where practical: `status`, `log`,
+and `merge-base` print direct Git output by default, while `diff` keeps the
+existing diff output path including the workflow's range-less untracked-file
+behavior. Tests cover text defaults and JSON compatibility.

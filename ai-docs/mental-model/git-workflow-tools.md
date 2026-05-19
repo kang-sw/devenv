@@ -26,6 +26,7 @@ related:
 - Path filters are appended after `--`; commit paths reject absolute paths, `..`, and option-like values.
 - `git.commit` stages only explicit paths, expands ticket moves by stem, rejects unrelated staged paths, detects ticket Result and Edition additions from cached diffs, builds a structured message, then commits.
 - Commit staging is based on pre-status: requested roots that exist only as deleted or renamed-old paths stage concrete removals with `git rm --cached`, while roots with any live/addable status still stage through `git add -A -- <root>`. {#260513-git-commit-result-edition-detection}
+- Git CLI mirrors default to readable text while preserving explicit `--format json`; for native Git read commands, prefer the original Git text shape where practical instead of formatting parsed structs back into ws-specific summaries. {#260519-workflow-command-readable-output-defaults}
 
 ## Coupling
 
@@ -39,6 +40,7 @@ related:
 - **Add a diff mode**: add constants, `DiffArgs`, MCP enum, CLI help/default handling, tests, and documentation.
 - **Add a write Git operation**: decide optional profile access explicitly; prompt-level role rules remain the primary containment mechanism.
 - **Change commit message format**: update structured message builder, ticket update detection, commit rules, and tests.
+- **Change Git CLI output**: preserve native Git text shape for read mirrors unless a workflow-specific addition such as range-less untracked diff output is intentional; keep JSON compatibility tests in the same change.
 
 ## Common Mistakes
 
