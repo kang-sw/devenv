@@ -54,6 +54,25 @@ diagnostics:
 - For convention lookup failures, report accepted convention names and common
   aliases instead of only returning the raw missing-file error.
 
+Default human-readable find output should behave like a compact grep-style hit
+list rather than a prose candidate catalog:
+
+- Start with a summary such as `4 hits in 2 candidate specs for query="..."`.
+- Render each hit as `<path>:<line>` followed by a snippet containing roughly N
+  surrounding tokens around the matched term or terms.
+- Include the matched terms for each hit when they are not obvious from the
+  snippet.
+- Group or order hits by candidate score and document path so the most likely
+  documents appear first while preserving line-level evidence.
+- Keep exact structured lookups free to use their existing status/list style;
+  the grep-style output applies to broad `query` discovery.
+
+JSON output should preserve the existing document-centered metadata and add
+line-level match evidence, for example a `matches` array with `line`,
+`matched_terms`, and `snippet` fields. A relative `match_score` field may be
+included for ordering, but callers should treat line evidence and matched terms
+as the stable explanation surface.
+
 Refresh workflow guidance if needed so skills treat zero-result find output as
 non-final for broad queries and fall back to shorter queries or list/status
 surfaces before concluding that no relevant document exists.
