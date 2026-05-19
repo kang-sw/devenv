@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.26.7 - 2026-05-19
+
+### Added
+- Add the ws dashboard Activity Console ticket cascade for the read model, UI
+  shell, backend watch stream, frontend live UX, and transcript expansion.
+- Add the planned `### Mental Model Notes` commit annotation convention for
+  improving mental-model updater context.
+
+### Changed
+- Make `lead-proceed` resolve at most one ticket phase per invocation, defaulting
+  to the first unfinished phase and stopping for conservative ticket or phase
+  slicing when scope is too broad.
+- Restructure `lead-write-ticket` into short handlers and preserve agreed
+  API/type/event/UI sketches, reviewable phase shape, and forward-compatibility
+  guardrails while keeping epics board-level.
+- Deprecate normal workflow routing through generated skeleton artifacts; carry
+  public contract and integration-test obligations through `lead-write-code`
+  briefs instead.
+- Strengthen plan-populator survey and research prompts so shortcut, mock-data,
+  fallback, and duplicated-glue risks are escalated before implementation.
+
+### Fixed
+- Disable Snacks smooth scrolling in the local Neovim configuration so editor
+  movement stays responsive.
+
 ## v0.26.6 - 2026-05-18
 
 ### Added
