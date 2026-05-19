@@ -41,7 +41,7 @@ This epic covers:
   sections receive append-only edition entries during tweak loops.
 - `260513-feat-human-readable-tool-output` - backlog the remaining JSON-default
   cleanup for MCP and CLI workflow tools.
-- `260513-feat-tolerant-doc-find-queries` - ready tolerant documentation
+- `260513-feat-tolerant-doc-find-queries` - done; added tolerant documentation
   lookup behavior for broad find queries and convention aliases.
 - `260519-feat-proceed-implementation-dispatch` - done; added proceed-side
   implementation dispatch precheck and removed stale skeleton-routing text.
