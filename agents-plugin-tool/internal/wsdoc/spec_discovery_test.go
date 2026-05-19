@@ -78,3 +78,24 @@ func TestSpecsStatusRequiresSpecStem(t *testing.T) {
 		t.Fatal("SpecsStatus accepted invalid spec_stem")
 	}
 }
+
+func TestSpecsFindToleratesBroadHumanQueryWithEvidence(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/plugin-runtime.md", "---\ntitle: Plugin Runtime\nsummary: Installer and marketplace packaging\n---\n# Plugin Runtime\n\n## Release {#260519-plugin-runtime}\n\nThe wsflow installer builds marketplace release packaging for plugin distribution.\nPackaging release notes mention marketplace installers.\n")
+	mustWrite(t, root, "ai-docs/spec/claude-compatibility.md", "---\ntitle: Claude Compatibility\nsummary: Marketplace packaging compatibility\n---\n# Compatibility\n\n## Compat {#260519-compat}\n\nMarketplace packaging is documented for compatibility.\n")
+	mustWrite(t, root, "ai-docs/spec/noise.md", "---\ntitle: Noise\n---\n# Noise\n\nInstaller only.\n")
+
+	got, err := SpecsFind(root, SpecFindOptions{Query: "wsflow installer marketplace release packaging"})
+	if err != nil {
+		t.Fatalf("SpecsFind returned error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("SpecsFind length = %d: %#v", len(got), got)
+	}
+	if got[0].Path != "ai-docs/spec/plugin-runtime.md" || got[0].MatchScore <= got[1].MatchScore {
+		t.Fatalf("ordering/scores = %#v", got)
+	}
+	if got[0].MatchScore == 0 || len(got[0].Matches) == 0 || got[0].Matches[0].Line == 0 || len(got[0].Matches[0].MatchedTerms) == 0 || got[0].Matches[0].Snippet == "" {
+		t.Fatalf("match evidence = %#v", got[0])
+	}
+}

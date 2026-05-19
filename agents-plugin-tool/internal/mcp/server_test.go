@@ -18,7 +18,25 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdoc"
 )
+
+func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
+	specs := []wsdoc.SpecInfo{{Path: "ai-docs/spec/plugin-runtime.md", MatchScore: 18, Matches: []wsdoc.MatchEvidence{{Line: 18, MatchedTerms: []string{"marketplace"}, Snippet: "marketplace release packaging"}}}}
+	text := formatSpecFind("wsflow installer marketplace release packaging", specs)
+	if !strings.Contains(text, `1 candidate spec for query="wsflow installer marketplace release packaging"`) || !strings.Contains(text, "ai-docs/spec/plugin-runtime.md	score=18	hits=1") || !strings.Contains(text, "  18: marketplace release packaging") {
+		t.Fatalf("spec find text = %q", text)
+	}
+	if strings.Contains(text, "matched:") {
+		t.Fatalf("spec find text included matched line: %q", text)
+	}
+
+	models := []wsdoc.MentalModelInfo{{Path: "ai-docs/mental-model/runtime.md", MatchScore: 9, Matches: []wsdoc.MatchEvidence{{Line: 7, MatchedTerms: []string{"runtime", "cli"}, Snippet: "runtime CLI mirror"}}}}
+	text = formatMentalModelFind("runtime readable CLI mirror", models)
+	if !strings.Contains(text, `1 candidate mental model for query="runtime readable CLI mirror"`) || !strings.Contains(text, "ai-docs/mental-model/runtime.md	score=9	hits=1") || !strings.Contains(text, "  7: runtime CLI mirror") {
+		t.Fatalf("mental model find text = %q", text)
+	}
+}
 
 func TestServeStdioToolsListAndCall(t *testing.T) {
 	useLeadProfile(t)
@@ -151,11 +169,11 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		t.Fatalf("tickets.find response missing mention result: %s", byID["10"])
 	}
 	specsText := toolText(t, byID["11"])
-	if !strings.Contains(specsText, "ai-docs/spec/demo.md") || !strings.Contains(specsText, "matches_spec_stem") || !strings.Contains(specsText, "matches_ticket_ref") {
+	if !strings.Contains(specsText, "1 candidate spec for query=\"discovery\"") || !strings.Contains(specsText, "ai-docs/spec/demo.md\tscore=") || strings.Contains(specsText, "matched:") {
 		t.Fatalf("specs.find response missing spec result: %s", byID["11"])
 	}
 	mentalModelsText := toolText(t, byID["12"])
-	if !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md") || !strings.Contains(mentalModelsText, "matches_spec_stem") || !strings.Contains(mentalModelsText, "matches_domain") {
+	if !strings.Contains(mentalModelsText, "1 candidate mental model for query=\"discovery\"") || !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md\tscore=") || strings.Contains(mentalModelsText, "matched:") {
 		t.Fatalf("mental_models.find response missing result: %s", byID["12"])
 	}
 	referencesText := toolText(t, byID["13"])

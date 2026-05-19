@@ -567,6 +567,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
+		if strings.TrimSpace(query) != "" {
+			return toolTextResponse(req.ID, formatSpecFind(query, result), err)
+		}
 		return toolTextResponse(req.ID, formatSpecs(result), err)
 	case "specs.status":
 		if hasTicketStemArgument(params.Arguments) {
@@ -603,6 +606,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		result, err := wsdoc.MentalModelsFind(root, wsdoc.MentalModelFindOptions{Query: query, SpecStem: specStem, Domain: domain})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
+		}
+		if strings.TrimSpace(query) != "" {
+			return toolTextResponse(req.ID, formatMentalModelFind(query, result), err)
 		}
 		return toolTextResponse(req.ID, formatMentalModels(result), err)
 	case "mental_models.status":
@@ -1182,6 +1188,41 @@ func formatSpecs(specs []wsdoc.SpecInfo) string {
 		writeIndentedLines(&b, "  snippet: ", spec.MatchingSnippets)
 		writeIndentedLines(&b, "  marker: ", spec.MarkerContexts)
 	}
+	return b.String()
+}
+
+func formatSpecFind(query string, specs []wsdoc.SpecInfo) string {
+	return formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
+		for _, spec := range specs {
+			writeDoc(spec.Path, spec.MatchScore, len(spec.Matches), spec.Matches)
+		}
+	})
+}
+
+func formatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string {
+	return formatDocumentFind(query, "mental model", "mental models", len(models), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
+		for _, model := range models {
+			writeDoc(model.Path, model.MatchScore, len(model.Matches), model.Matches)
+		}
+	})
+}
+
+func formatDocumentFind(query, singular, plural string, count int, each func(func(string, int, int, []wsdoc.MatchEvidence))) string {
+	var b strings.Builder
+	label := plural
+	if count == 1 {
+		label = singular
+	}
+	fmt.Fprintf(&b, "%d candidate %s for query=%q\n", count, label, query)
+	if count == 0 {
+		return b.String()
+	}
+	each(func(path string, score, hits int, matches []wsdoc.MatchEvidence) {
+		fmt.Fprintf(&b, "\n%s\tscore=%d\thits=%d\n", path, score, hits)
+		for _, match := range matches {
+			fmt.Fprintf(&b, "  %d: %s\n", match.Line, match.Snippet)
+		}
+	})
 	return b.String()
 }
 
