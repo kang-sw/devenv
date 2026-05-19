@@ -23,7 +23,6 @@ Pipeline
 Execution
 - Announce routing before execution; chain stages without pausing for confirmation.
 - Handoff stages receive carried gate-suppression context.
-- Implementation handoff carries dispatch, dispatch reason, and branch mode.
 - Warmth is current-session context, not target identity.
 
 ## Route Rules
@@ -33,7 +32,6 @@ Route Context
 - `discussion-needed` blocks every implementation route.
 - `needs-ticket` applies only to actionable inline targets without a ticket.
 - `ticket-freshness` applies only when `has-ticket=yes` and warmth is warm.
-- `implementation-dispatch` applies only from conversation and workflow artifacts.
 
 Routing
 - Use the first matching route row.
@@ -65,8 +63,8 @@ Routing
    - Multiple explicit phases -> stop for phase or ticket slicing.
    - No explicit phase -> first unfinished phase.
    - Selected phase is plainly too broad from ticket text -> stop for phase or ticket slicing.
-13. For implementation routes, apply `judge: implementation-dispatch`.
-14. For implementation routes, apply `judge: branch-mode`.
+13. For implementation routes, read `ws:lead-implement` skill text.
+14. For implementation routes, apply `lead-implement` `judge: execution-mode` and `judge: branch-mode` from route context only; unknown direct-edit predicates produce a delegated verdict.
 
 ### 2. Select Route
 
@@ -77,9 +75,9 @@ Routing
 | `discussion-needed=yes` | Continue through `ws:lead-discuss`; carry the blocker; stop. |
 | `has-ticket=yes` and status is `todo/` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; carry `promote-context`; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and freshness is missing settled decisions | Continue through `ws:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`; carry resolved scope, implementation dispatch, dispatch reason, and branch mode. |
+| `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`; carry resolved scope and implementation verdict. |
 | `has-ticket=no` and `needs-ticket=yes` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; carry `create-context`; capture `Ticket:` and re-route. |
-| `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`; carry inline target, no-ticket scope, implementation dispatch, dispatch reason, and branch mode. |
+| `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`; carry inline target, no-ticket scope, and implementation verdict. |
 
 ### 3. Announce
 
@@ -91,9 +89,8 @@ Routing
 - **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | whole target - no phases>
-- **Implementation Dispatch**: <direct-edit | write-code>
-- **Dispatch Reason**: <direct predicate satisfied | ready/spec/user-visible/cross-skill/multi-file/test-bearing/unknown predicate>
-- **Branch Mode**: <direct current branch | create implement/<scope> | continue implement/* | sprint blocked>
+- **Implementation Verdict**: <ws:lead-edit | ws:lead-write-code> via ws:lead-implement
+- **Verdict Basis**: lead-implement route contract; source-free; unknown direct-edit predicate -> delegated
 - **Execution**: ws:lead-implement - owns code-editing stages and branch lifecycle
 - **Carried context**: downstream stages receive route constraints.
 
@@ -120,8 +117,8 @@ Do not ask for confirmation; the user can interrupt.
 `gate-suppression-context`:
 Carry: this is an autonomous proceed chain; downstream stages do not pause for approvals that this route already grants.
 
-`implementation-dispatch-context`:
-Carry: `implementation-dispatch`, `dispatch-reason`, and `branch-mode` are a lower bound; `ws:lead-implement` may escalate `direct-edit` to `write-code`, but must not downgrade `write-code` to direct edit.
+`implementation-verdict-context`:
+Carry: verdict came from `ws:lead-implement` route contract, applied source-free before handoff.
 
 `create-context`:
 Carry `spec-context` and `gate-suppression-context`, then continue through `ws:lead-write-ticket`.
@@ -170,32 +167,6 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 |----------|------|
 | Refresh ticket | Active conversation since ticket capture settled decisions, constraints, rejected alternatives, or scope boundaries that are absent from the ticket |
 | Continue | The ticket already captures the active conversation's settled implementation intent, or the conversation only adds autonomous hygiene or implementation-detail work |
-
-### judge: implementation-dispatch
-
-Use only conversation state, ticket text, frontmatter, phase text, status,
-category, spec links, and captured plan metadata. Do not inspect source, source
-stubs, tests, broad docs, or implementation plans.
-
-| Decision | When |
-|----------|------|
-| `direct-edit` | Artifacts explicitly show single-file scope, internal-only behavior, no caller-visible behavior change, no public contract change, no new public symbols, no new tests expected, and no explicit delegation request |
-| `write-code` | Any direct-edit predicate is false or unknown |
-| `write-code` | Ready tickets, spec-linked changes, MCP/CLI/user-visible output changes, cross-skill routing changes, multi-file work, or test-bearing work unless every direct-edit predicate is explicitly true |
-
-`dispatch-reason` names the first false or unknown predicate, or
-`all direct-edit predicates explicitly true`.
-
-### judge: branch-mode
-
-Pick the first matching decision.
-
-| Decision | When |
-|----------|------|
-| `sprint blocked` | Current branch starts with `sprint/` |
-| `continue implement/*` | Current branch starts with `implement/` |
-| `create implement/<scope>` | `implementation-dispatch=write-code` |
-| `direct current branch` | `implementation-dispatch=direct-edit` |
 
 ## Doctrine
 

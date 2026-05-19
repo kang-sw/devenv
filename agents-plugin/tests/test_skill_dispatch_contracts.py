@@ -6,22 +6,22 @@ SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 
 
 class SkillDispatchContractsTest(unittest.TestCase):
-    def test_proceed_announces_source_free_implementation_dispatch(self):
+    def test_proceed_reads_implement_for_source_free_verdict(self):
         text = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("**Implementation Dispatch**", text)
-        self.assertIn("**Dispatch Reason**", text)
-        self.assertIn("**Branch Mode**", text)
-        self.assertIn("Do not inspect source, source", text)
-        self.assertIn("Any direct-edit predicate is false or unknown", text)
-        self.assertIn("Ready tickets, spec-linked changes", text)
+        self.assertIn("read `ws:lead-implement` skill text", text)
+        self.assertIn("**Implementation Verdict**", text)
+        self.assertIn("**Verdict Basis**", text)
+        self.assertIn("unknown direct-edit predicate -> delegated", text)
+        self.assertNotIn("### judge: implementation-dispatch", text)
 
-    def test_implement_preserves_write_code_lower_bound(self):
+    def test_implement_keeps_route_contract_owner(self):
         text = (SKILLS_DIR / "lead-implement" / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertIn("Honor caller-provided `write-code` dispatch as a hard lower bound.", text)
-        self.assertIn("Caller-provided implementation dispatch is `write-code`", text)
-        self.assertIn("Confirm dispatch boundary", text)
+        self.assertIn("### judge: execution-mode", text)
+        self.assertIn("Direct edit -> `ws:lead-edit`", text)
+        self.assertNotIn("caller-provided `write-code` dispatch", text)
+        self.assertNotIn("Confirm dispatch boundary", text)
 
 
 if __name__ == "__main__":
