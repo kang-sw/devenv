@@ -406,6 +406,7 @@ type CommitOptions struct {
 	Title               string   `json:"title"`
 	Description         string   `json:"description,omitempty"`
 	AIContext           []string `json:"ai_context"`
+	MentalModelNotes    []string `json:"mental_model_notes,omitempty"`
 	UpdatedTickets      []string `json:"updated_tickets,omitempty"`
 	UpdatedSpecs        []string `json:"updated_specs,omitempty"`
 	UpdatedMentalModels []string `json:"updated_mental_models,omitempty"`
@@ -472,6 +473,7 @@ func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 	opts.Title = strings.TrimSpace(opts.Title)
 	opts.Description = strings.TrimSpace(opts.Description)
 	opts.AIContext = trimStrings(opts.AIContext)
+	opts.MentalModelNotes = trimStrings(opts.MentalModelNotes)
 	opts.UpdatedTickets = trimStrings(opts.UpdatedTickets)
 	opts.UpdatedSpecs = trimStrings(opts.UpdatedSpecs)
 	opts.UpdatedMentalModels = trimStrings(opts.UpdatedMentalModels)
@@ -660,6 +662,7 @@ func CommitMessage(opts CommitOptions) string {
 	for _, item := range opts.AIContext {
 		fmt.Fprintf(&b, "- %s\n", item)
 	}
+	writeCommitSubsection(&b, "### Mental Model Notes", opts.MentalModelNotes)
 	writeCommitSection(&b, "## Updated Tickets", opts.UpdatedTickets)
 	writeCommitSection(&b, "## Updated Specs", opts.UpdatedSpecs)
 	writeCommitSection(&b, "## Updated Mental Models", opts.UpdatedMentalModels)
@@ -671,6 +674,18 @@ func writeCommitSection(b *strings.Builder, heading string, values []string) {
 		return
 	}
 	b.WriteString("\n\n")
+	writeCommitHeading(b, heading, values)
+}
+
+func writeCommitSubsection(b *strings.Builder, heading string, values []string) {
+	if len(values) == 0 {
+		return
+	}
+	b.WriteByte('\n')
+	writeCommitHeading(b, heading, values)
+}
+
+func writeCommitHeading(b *strings.Builder, heading string, values []string) {
 	b.WriteString(heading)
 	b.WriteByte('\n')
 	for _, value := range values {

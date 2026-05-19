@@ -422,6 +422,7 @@ Input schema:
     "title": { "type": "string" },
     "description": { "type": "string" },
     "ai_context": { "type": "array", "items": { "type": "string" } },
+    "mental_model_notes": { "type": "array", "items": { "type": "string" } },
     "updated_tickets": { "type": "array", "items": { "type": "string" } },
     "updated_specs": { "type": "array", "items": { "type": "string" } },
     "updated_mental_models": { "type": "array", "items": { "type": "string" } }
@@ -439,6 +440,8 @@ Behavior:
 - Refuses commits when unrelated staged paths exist.
 - Builds a commit message with title, optional description, `## AI Context`,
   and optional document-update sections.
+- When `mental_model_notes` is present and non-empty, renders those bullets as
+  `### Mental Model Notes` under `## AI Context`.
 - If `updated_tickets` is omitted, staged ticket moves and added `### Result`
   or `#### Edition` headings under `ai-docs/tickets/` are detected and
   summarized in `## Updated Tickets`.
@@ -449,6 +452,7 @@ Compatibility fallback:
 
 ```bash
 ws-mcp git commit --path <path> --title <title> --ai-context <bullet>
+ws-mcp git commit --path <path> --title <title> --ai-context <bullet> --mental-model-note <note>
 ```
 
 Constraints:
