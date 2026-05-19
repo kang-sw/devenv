@@ -169,14 +169,12 @@ dropped tickets live in hidden archive dirs and git history.
 | `260517-bug-ws-dashboard-terminal-focus-browser-gate-regression` | todo | Investigate terminal helper textarea focus loss blocking dashboard browser gate |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | todo | Investigate plugin-managed default root discovery |
-| `260515-bug-git-commit-rename-status-summary` | ready | Fix git.commit ticket-change summaries for edited ticket renames |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
 ## Ticket Queue
 
-- `260515-bug-git-commit-rename-status-summary` - Reconstruct unambiguous
-  add/delete-shaped ticket status moves in `git.commit` ticket summaries.
+- No ready tickets.
 
 ## Session Notes
 

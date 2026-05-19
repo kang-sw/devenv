@@ -705,36 +705,39 @@ func trimStrings(values []string) []string {
 }
 
 func detectTicketChanges(ctx context.Context, runner Runner, root string) []TicketChange {
-	changes := map[string]TicketChange{}
+	var changes []TicketChange
 	if out, err := runner.RunGit(ctx, root, "diff", "--cached", "--name-status", "--", "ai-docs/tickets"); err == nil {
-		for _, change := range parseTicketNameStatus(out) {
-			changes[ticketChangeKey(change)] = change
-		}
+		changes = append(changes, parseTicketNameStatus(out)...)
 	}
 	if out, err := runner.RunGit(ctx, root, "diff", "--cached", "--unified=0", "--", "ai-docs/tickets"); err == nil {
 		for _, change := range parseTicketResultAdditions(out) {
-			key := ticketChangeKey(change)
-			existing := changes[key]
-			if existing.Stem == "" {
-				existing = change
-			}
-			existing.ResultAdded = change.ResultAdded
-			existing.ResultHeading = change.ResultHeading
-			changes[key] = existing
+			changes = mergeTicketResultAddition(changes, change)
 		}
 	}
-	out := make([]TicketChange, 0, len(changes))
-	for _, change := range changes {
-		out = append(out, change)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return ticketChangeKey(out[i]) < ticketChangeKey(out[j])
+	sort.Slice(changes, func(i, j int) bool {
+		return ticketChangeSortKey(changes[i]) < ticketChangeSortKey(changes[j])
 	})
-	return out
+	return changes
+}
+
+func mergeTicketResultAddition(changes []TicketChange, result TicketChange) []TicketChange {
+	for i, change := range changes {
+		if change.Stem == result.Stem && change.Path == result.Path {
+			changes[i].ResultAdded = result.ResultAdded
+			changes[i].ResultHeading = result.ResultHeading
+			return changes
+		}
+	}
+	return append(changes, result)
 }
 
 func parseTicketNameStatus(out []byte) []TicketChange {
 	var changes []TicketChange
+	addsByStem := map[string][]TicketChange{}
+	deletesByStem := map[string][]TicketChange{}
+	explicitRenameStems := map[string]bool{}
+	var passthrough []TicketChange
+
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -758,8 +761,58 @@ func parseTicketNameStatus(out []byte) []TicketChange {
 			if oldChange, ok := ticketChangeForPath(oldPath); ok {
 				change.OldPath = oldPath
 				change.FromStatus = oldChange.ToStatus
+				explicitRenameStems[change.Stem] = true
 			}
+			changes = append(changes, change)
+			continue
 		}
+
+		switch code {
+		case "A":
+			addsByStem[change.Stem] = append(addsByStem[change.Stem], change)
+		case "D":
+			deletesByStem[change.Stem] = append(deletesByStem[change.Stem], change)
+		default:
+			passthrough = append(passthrough, change)
+		}
+	}
+
+	pairedAdds := map[string]bool{}
+	pairedDeletes := map[string]bool{}
+	for stem, adds := range addsByStem {
+		deletes := deletesByStem[stem]
+		if explicitRenameStems[stem] || len(adds) != 1 || len(deletes) != 1 {
+			continue
+		}
+		add := adds[0]
+		deleteChange := deletes[0]
+		if add.ToStatus == deleteChange.ToStatus {
+			continue
+		}
+		add.OldPath = deleteChange.Path
+		add.FromStatus = deleteChange.ToStatus
+		changes = append(changes, add)
+		pairedAdds[stem] = true
+		pairedDeletes[stem] = true
+	}
+
+	for stem, adds := range addsByStem {
+		if pairedAdds[stem] {
+			continue
+		}
+		for _, change := range adds {
+			changes = append(changes, change)
+		}
+	}
+	for stem, deletes := range deletesByStem {
+		if pairedDeletes[stem] {
+			continue
+		}
+		for _, change := range deletes {
+			changes = append(changes, change)
+		}
+	}
+	for _, change := range passthrough {
 		changes = append(changes, change)
 	}
 	return changes
@@ -823,11 +876,8 @@ func ticketStatusStem(path string) (string, string, bool) {
 	return status, stem, true
 }
 
-func ticketChangeKey(change TicketChange) string {
-	if change.Stem != "" {
-		return change.Stem
-	}
-	return change.Path
+func ticketChangeSortKey(change TicketChange) string {
+	return strings.Join([]string{change.Stem, change.Path, change.OldPath, change.FromStatus, change.ToStatus}, "\x00")
 }
 
 func ticketChangeSummaries(changes []TicketChange) []string {
