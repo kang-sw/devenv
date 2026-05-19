@@ -173,6 +173,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260515-bug-git-commit-rename-status-summary` | idea | Fix git.commit ticket-change summaries for edited ticket renames |
 | `260519-bug-git-commit-mental-model-notes` | idea | Add git.commit support for Mental Model Notes commit subsections |
+| `260519-bug-stale-skeleton-routing-skill-text` | idea | Remove stale normal-routing skeleton language from implementation skills |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
