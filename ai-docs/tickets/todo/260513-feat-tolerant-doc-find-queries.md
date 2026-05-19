@@ -54,16 +54,22 @@ diagnostics:
 - For convention lookup failures, report accepted convention names and common
   aliases instead of only returning the raw missing-file error.
 
-Default human-readable find output should behave like a compact grep-style hit
-list rather than a prose candidate catalog:
+Default human-readable find output should behave like document-grouped
+grep-style evidence rather than a prose candidate catalog:
 
-- Start with a summary such as `4 hits in 2 candidate specs for query="..."`.
-- Render each hit as `<path>:<line>` followed by a snippet containing roughly N
-  surrounding tokens around the matched term or terms.
-- Include the matched terms for each hit when they are not obvious from the
-  snippet.
-- Group or order hits by candidate score and document path so the most likely
-  documents appear first while preserving line-level evidence.
+- Start with a summary such as `2 candidate specs for query="..."`.
+- Render each document as `<path>\tscore=<score>\thits=<count>` so metadata is
+  visually separated without depending on fragile spacing.
+- Under each document, render line evidence as `  <line>: <snippet>` with a
+  snippet containing roughly N surrounding tokens around the matched term or
+  terms.
+- Omit separate `matched:` lines from default text output; the snippet itself is
+  the human evidence surface.
+- Sort document groups by aggregate score descending, then path. Within each
+  document, display selected hits in line-number order.
+- If results need truncation, choose the top scored documents or hits first,
+  then display the selected evidence in document and line order. The summary
+  should indicate when only a subset is shown.
 - Keep exact structured lookups free to use their existing status/list style;
   the grep-style output applies to broad `query` discovery.
 
