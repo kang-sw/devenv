@@ -5,8 +5,10 @@ spec:
   - 260519-proceed-implementation-dispatch-precheck
 plans:
   phase-1: 2026-05/19-260519-feat-proceed-implementation-dispatch.brief
+  phase-2: 2026-05/19-260519-feat-proceed-implementation-dispatch-phase-2.brief
 related-mental-model:
   - workflow-skills
+completed: 2026-05-19
 ---
 
 # Proceed implementation dispatch precheck
@@ -121,3 +123,22 @@ Verification should cover:
   proceed selects write-code even before source inspection;
 - wsflow: the same kind of task receives a caller-visible or broad complexity
   flag without introducing unavailable `lead-write-code` routing.
+
+### Result (2806122) - 2026-05-19
+
+Full ws `lead-proceed` now computes and announces `Implementation Dispatch`,
+`Dispatch Reason`, and `Branch Mode` for implementation routes from
+conversation and workflow artifacts only. Its dispatch rules choose
+`direct-edit` only when every direct-edit predicate is explicitly true, and
+choose `write-code` for false or unknown predicates, ready/spec-linked
+caller-visible work, cross-skill routing, multi-file work, or test-bearing work.
+
+Full ws `lead-implement` now extracts carried dispatch context and preserves a
+caller-provided `write-code` dispatch as a hard lower bound. It can still
+escalate later evidence to `write-code`, but it no longer has license to
+downgrade a proceed-selected `write-code` route to direct edit.
+
+wsflow `lead-proceed` mirrors the same source-free routing clarity as
+`Execution Path`, `Complexity Flag`, and `Branch Mode`; wsflow `lead-implement`
+preserves those carried values for `lead-edit`. The wsflow text avoids
+unavailable full ws implementation relay wording.
