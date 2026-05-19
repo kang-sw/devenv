@@ -1,5 +1,7 @@
 ---
 title: git.commit cannot emit Mental Model Notes subsection
+spec:
+  - 260519-git-commit-mental-model-notes
 related-mental-model:
   - git-workflow-tools
   - documentation-system
@@ -18,7 +20,9 @@ models.
 This means a caller that follows the preferred `ws/git.commit` path cannot
 produce the exact commit-body shape consumed by `mental-model-updater`.
 
-## Desired Direction
+## Phases
+
+### Phase 1: Add structured Mental Model Notes commit input
 
 Extend `ws/git.commit` with an explicit input for Mental Model Notes or another
 structured way to add H3 subsections under `## AI Context` without falling back

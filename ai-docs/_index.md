@@ -170,13 +170,14 @@ dropped tickets live in hidden archive dirs and git history.
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | todo | Investigate plugin-managed default root discovery |
 | `260515-bug-git-commit-rename-status-summary` | todo | Fix git.commit ticket-change summaries for edited ticket renames |
-| `260519-bug-git-commit-mental-model-notes` | todo | Add git.commit support for Mental Model Notes commit subsections |
+| `260519-bug-git-commit-mental-model-notes` | ready | Add git.commit support for Mental Model Notes commit subsections |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
 ## Ticket Queue
 
-- No ready tickets.
+- `260519-bug-git-commit-mental-model-notes` - Add structured
+  `git.commit` input for `### Mental Model Notes` under `## AI Context`.
 
 ## Session Notes
 
