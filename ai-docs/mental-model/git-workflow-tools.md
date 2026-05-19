@@ -26,6 +26,7 @@ related:
 - Path filters are appended after `--`; commit paths reject absolute paths, `..`, and option-like values.
 - `git.commit` stages only explicit paths, expands ticket moves by stem, rejects unrelated staged paths, detects ticket Result and Edition additions from cached diffs, builds a structured message, then commits.
 - Commit staging is based on pre-status: requested roots that exist only as deleted or renamed-old paths stage concrete removals with `git rm --cached`, while roots with any live/addable status still stage through `git add -A -- <root>`. {#260513-git-commit-result-edition-detection}
+- `git.commit` accepts `mental_model_notes` through MCP and `--mental-model-note` through the CLI mirror; populated notes render as `### Mental Model Notes` under `## AI Context`, while omitted or empty notes render no subsection. {#260519-git-commit-mental-model-notes}
 - Git CLI mirrors default to readable text while preserving explicit `--format json`; for native Git read commands, prefer the original Git text shape where practical instead of formatting parsed structs back into ws-specific summaries. {#260519-workflow-command-readable-output-defaults}
 
 ## Coupling
@@ -53,4 +54,3 @@ related:
 
 - Ticket Result detection is textual and narrow: only cached diff lines beginning `+### Result` or `+#### Edition` under tickets are summarized.
 - Revision validation mainly prevents option injection; it does not fully parse Git revision syntax.
-- `git.commit` cannot yet emit H3 subsections under `## AI Context`; native Git is required for exact `### Mental Model Notes` commits until `260519-bug-git-commit-mental-model-notes` is addressed.

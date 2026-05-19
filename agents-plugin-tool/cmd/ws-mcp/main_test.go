@@ -293,6 +293,44 @@ func TestGitCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	}
 }
 
+func TestGitCommitCLIRendersMentalModelNotes(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init")
+	runGit(t, root, "config", "core.autocrlf", "false")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin,
+		"git", "commit",
+		"--root", root,
+		"--path", "file.txt",
+		"--title", "test: cli mental model notes",
+		"--ai-context", "User intent: verify CLI commit notes.",
+		"--mental-model-note", "CLI forwards structured Mental Model Notes.",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp git commit failed: %v\n%s", err, string(out))
+	}
+	if text := string(out); !strings.Contains(text, "commit: ") || !strings.Contains(text, "title: test: cli mental model notes") {
+		t.Fatalf("git commit text response = %q", text)
+	}
+
+	commitBody := string(runGitOutput(t, root, "log", "-1", "--format=%B"))
+	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify CLI commit notes.\n\n### Mental Model Notes\n- CLI forwards structured Mental Model Notes.") {
+		t.Fatalf("commit body missing CLI Mental Model Notes subsection:\n%s", commitBody)
+	}
+}
+
 func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
