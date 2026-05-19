@@ -508,11 +508,13 @@ func gitCommit(args []string) {
 	format := fs.String("format", "", `output format: text or json`)
 	var paths multiFlag
 	var aiContext multiFlag
+	var mentalModelNotes multiFlag
 	var updatedTickets multiFlag
 	var updatedSpecs multiFlag
 	var updatedMentalModels multiFlag
 	fs.Var(&paths, "path", "path to stage and commit; may be repeated")
 	fs.Var(&aiContext, "ai-context", "AI Context bullet; may be repeated")
+	fs.Var(&mentalModelNotes, "mental-model-note", "Mental Model Notes bullet under AI Context; may be repeated")
 	fs.Var(&updatedTickets, "updated-ticket", "ticket update summary; may be repeated")
 	fs.Var(&updatedSpecs, "updated-spec", "spec update summary; may be repeated")
 	fs.Var(&updatedMentalModels, "updated-mental-model", "mental-model update summary; may be repeated")
@@ -532,6 +534,7 @@ func gitCommit(args []string) {
 		Title:               *title,
 		Description:         body,
 		AIContext:           aiContext,
+		MentalModelNotes:    mentalModelNotes,
 		UpdatedTickets:      updatedTickets,
 		UpdatedSpecs:        updatedSpecs,
 		UpdatedMentalModels: updatedMentalModels,

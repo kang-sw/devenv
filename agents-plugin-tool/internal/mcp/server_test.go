@@ -158,6 +158,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 			t.Fatalf("tools/list missing %s: %s", tool, byID["2"])
 		}
 	}
+	if !strings.Contains(byID["2"], `"mental_model_notes"`) {
+		t.Fatalf("tools/list missing git.commit mental_model_notes schema: %s", byID["2"])
+	}
 	if strings.Contains(byID["2"], "agents.recall") {
 		t.Fatalf("tools/list should not advertise agents.recall: %s", byID["2"])
 	}
@@ -1175,7 +1178,7 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 
 	out.Reset()
-	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."]}}}`
+	commitInput := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt","ai-docs/tickets/todo/260503-feat-demo.md"],"title":"test: mcp commit","ai_context":["User intent: verify git.commit.","Verification: server test."],"mental_model_notes":["git.commit accepts structured Mental Model Notes."]}}}`
 	if err := server.ServeStdio(context.Background(), strings.NewReader(commitInput), &out); err != nil {
 		t.Fatalf("ServeStdio commit returned error: %v", err)
 	}
@@ -1192,6 +1195,10 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 		!strings.Contains(commitText, "ticket_changes:") ||
 		strings.Contains(commitText, `"ticket_changes"`) {
 		t.Fatalf("git.commit text response = %q", commitText)
+	}
+	commitBody := string(runGitOutput(t, root, "log", "-1", "--format=%B"))
+	if !strings.Contains(commitBody, "## AI Context\n- User intent: verify git.commit.\n- Verification: server test.\n\n### Mental Model Notes\n- git.commit accepts structured Mental Model Notes.") {
+		t.Fatalf("git.commit message missing Mental Model Notes subsection:\n%s", commitBody)
 	}
 
 	mustWrite(t, root, "file.txt", "one\ntwo\nthree\n")

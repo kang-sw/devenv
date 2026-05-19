@@ -207,17 +207,15 @@ sections. Ticket update detection recognizes added `### Result` headings and
 added `#### Edition` headings so commit summaries can report first completion
 records and later append-only tweak records. The default response is a compact
 readable commit summary; callers can request structured JSON explicitly.
+`git.commit` also accepts structured Mental Model Notes input and renders it as
+a `### Mental Model Notes` sub-section under `## AI Context`, while preserving
+the existing `ai_context` bullet path and deterministic commit body shape.
+{#260519-git-commit-mental-model-notes}
 When an explicit commit path names an old root from a rename or a deleted root,
 `git.commit` stages the concrete removed paths reported by Git status rather
 than passing the missing root to `git add`; requested roots with live changes
 still stage through the explicit add path.
 {#260513-git-commit-result-edition-detection}
-
-> [!note] Planned 🚧
-> `git.commit` will accept structured Mental Model Notes input and render it as
-> a `### Mental Model Notes` sub-section under `## AI Context`, while preserving
-> the existing `ai_context` bullet path and deterministic commit body shape.
-> {#260519-git-commit-mental-model-notes}
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
