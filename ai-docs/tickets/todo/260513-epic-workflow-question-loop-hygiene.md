@@ -43,6 +43,8 @@ This epic covers:
   cleanup for MCP and CLI workflow tools.
 - `260513-feat-tolerant-doc-find-queries` - backlog tolerant documentation
   lookup behavior for broad find queries and convention aliases.
+- `260519-feat-proceed-implementation-dispatch` - backlog proceed-side
+  implementation dispatch precheck and stale skeleton-routing text cleanup.
 
 ## Cross-Child Decisions
 
@@ -54,6 +56,9 @@ This epic covers:
   hygiene, implementation detail, and cleanup work.
 - `lead-proceed` should fill missing ticket intent from the active conversation
   only, following the same conversation-capture spirit as `lead-write-ticket`.
+- `lead-proceed` may choose implementation dispatch from conversation and
+  ticket artifacts, but it must not inspect source or invoke implementation
+  primitives directly.
 - Ticket Result sections remain append-only after completion; tweak loops add
   edition entries rather than editing prior result text.
 

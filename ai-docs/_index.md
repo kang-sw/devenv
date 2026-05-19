@@ -160,6 +160,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260513-feat-tolerant-doc-find-queries` | todo | Make documentation lookup queries and convention aliases tolerant candidate discovery |
+| `260519-feat-proceed-implementation-dispatch` | todo | Add proceed-side implementation dispatch precheck and remove stale skeleton routing language |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
@@ -173,7 +174,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260505-bug-plugin-managed-default-root-discovery` | idea | Investigate plugin-managed default root discovery |
 | `260515-bug-git-commit-rename-status-summary` | idea | Fix git.commit ticket-change summaries for edited ticket renames |
 | `260519-bug-git-commit-mental-model-notes` | idea | Add git.commit support for Mental Model Notes commit subsections |
-| `260519-bug-stale-skeleton-routing-skill-text` | idea | Remove stale normal-routing skeleton language from implementation skills |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 

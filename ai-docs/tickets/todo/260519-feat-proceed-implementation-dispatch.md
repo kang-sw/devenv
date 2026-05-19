@@ -1,0 +1,85 @@
+---
+title: Proceed implementation dispatch precheck
+parent: 260513-epic-workflow-question-loop-hygiene
+related-mental-model:
+  - workflow-skills
+---
+
+# Proceed implementation dispatch precheck
+
+## Background
+
+Dogfooding a ready-ticket implementation showed that `lead-proceed` reliably
+chooses the high-level pipeline and slice, but does not settle the internal
+implementation dispatch before handing off to `lead-implement`. That leaves room
+for the implementation stage to shortcut a caller-visible or cross-module
+change into direct editing even when the correct route is delegated
+`lead-write-code`.
+
+The desired behavior is for `lead-proceed` to decide the implementation dispatch
+from the same conversation and artifact evidence it already uses for routing,
+then carry that dispatch as a hard downstream constraint. `lead-implement` may
+escalate a direct-edit dispatch to write-code if later evidence requires it, but
+must not downgrade a proceed-selected write-code dispatch to direct edit.
+
+This work also absorbs the stale standalone skeleton-routing capture. Normal
+implementation routing no longer creates generated skeleton artifacts;
+contract-heavy work is handled through `lead-write-code` briefs.
+
+## Constraints
+
+- Do not make `lead-proceed` inspect source code, source stubs, tests, broad
+  documentation, or implementation plans to choose dispatch.
+- Do not make `lead-proceed` invoke `lead-edit` or `lead-write-code` directly;
+  it still hands implementation work to `lead-implement`.
+- Do not reintroduce a skeleton branch into normal routing. Dispatch is direct
+  edit versus write-code; contract-brief depth belongs inside write-code.
+- Direct edit is allowed only when all direct-edit predicates are known true
+  from ticket or conversation artifacts.
+
+## Phases
+
+### Phase 1: Remove stale skeleton routing language
+
+Audit active ws and wsflow skill text for skeleton references that describe
+normal implementation routing. Remove or mark legacy-only wording so current
+skills align with the spec and mental model: `lead-write-skeleton` remains a
+compatibility artifact, but normal proceed/implement/write-ticket routing should
+not describe skeleton decisions as live routing branches.
+
+Acceptance criteria:
+
+- `lead-proceed`, `lead-implement`, and `lead-write-ticket` no longer present
+  skeleton decisions as part of normal implementation routing.
+- wsflow mirrors stay aligned where the affected skill text exists.
+- Specs and mental models continue to state that contract checkpoints live in
+  `lead-write-code` briefs, not generated skeleton artifacts.
+
+### Phase 2: Add proceed dispatch precheck
+
+Teach `lead-proceed` to select implementation dispatch before the
+`lead-implement` handoff.
+
+The proceed announcement should include:
+
+- `Implementation Dispatch`: `direct-edit` or `write-code`.
+- `Dispatch Reason`: the predicate that selected the dispatch.
+- `Branch Mode`: direct current branch, create `implement/<scope>`, continue
+  `implement/*`, or sprint blocked.
+
+Dispatch rules:
+
+- Select direct edit only when every predicate is known true from artifacts:
+  single-file scope, internal-only, no caller-visible behavior change, no public
+  contract change, no new public symbols, no new tests expected, and no explicit
+  delegation request.
+- Select write-code when any direct-edit predicate is false or unknown.
+- Treat ready tickets, spec-linked changes, MCP/CLI/user-visible output changes,
+  cross-skill routing changes, and multi-file or test-bearing work as write-code
+  unless the artifacts make the direct-edit predicates unambiguously true.
+- Carry the selected dispatch to `lead-implement` as a hard lower bound:
+  `lead-implement` may escalate direct-edit to write-code, but must not
+  downgrade write-code to direct-edit.
+
+Verification should cover at least one ready-ticket caller-visible workflow
+change where proceed selects write-code even before source inspection.
