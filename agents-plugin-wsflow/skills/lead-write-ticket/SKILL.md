@@ -37,11 +37,10 @@ Target: user request
 4. Populate `related-mental-model` with consulted or newly relevant mental-model stems, without `.md`; omit when none applied.
 5. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
 6. For `epic`: reference existing/planned children; start a separate `wsflow:lead-write-ticket` invocation for child creation or child edit.
-7. For non-epic actionable tickets, run **Apply Ticket Content**.
-8. For non-epic actionable tickets, write one phase per reviewable implementation slice; use `Phase 1` for a single-slice ticket.
+7. For non-epic actionable tickets, choose shape through `judge: ticket-shape`; default to one `Phase 1`.
+8. For each non-epic actionable phase, run **Apply Ticket Content**.
 9. Note inter-phase dependencies explicitly.
-10. Verify scope through `judge: ticket-scope`.
-11. For `ready/`, defer queue entry until **Spec-stem Check** passes.
+10. For `ready/`, defer queue entry until **Spec-stem Check** passes.
 
 ## On: Edit Ticket
 
@@ -51,7 +50,8 @@ Target: user request
 4. For `epic` implementation detail, stop after the epic edit and start a separate `wsflow:lead-write-ticket` invocation for the child ticket.
 5. For moves, use native `git mv`.
 6. For `.done/` moves, add `completed:` date in frontmatter.
-7. For non-epic actionable phase changes, run **Apply Ticket Content**.
+7. For non-epic actionable shape or phase changes, apply `judge: ticket-shape`.
+8. For each changed non-epic actionable phase, run **Apply Ticket Content**.
 
 ## On: Apply Ticket Content
 
@@ -60,14 +60,14 @@ Target: user request
 3. Capture constraints and rationale.
 4. Capture settled implementation strategy decisions and suggested strategy.
 5. Capture rejected alternatives.
-6. Capture forward-compatibility notes.
+6. Capture forward-compatibility guardrails.
 7. Capture verification expectations.
 8. Exclude source-local edit notes unless settled constraints.
 
 ## On: Intent Review
 
 1. Re-read the written/edited ticket against the conversation and cross-ticket decision review.
-2. Check completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility notes, verification expectations, and suggested strategy.
+2. Check completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility guardrails, verification expectations, and suggested strategy.
 3. Check whether agreed API/type/event/UI sketches were preserved literally, not prose-flattened.
 4. Check whether the ticket distorts or omits discussed intent.
 5. Check whether related-ticket decisions that constrain this implementation slice were captured.
@@ -102,7 +102,7 @@ Target: user request
 
 1. Identify the target's parent, containing epic, child board, explicitly related tickets, and active siblings when those links are available.
 2. Read only graph tickets that may contain decisions constraining the target's implementation scope.
-3. Record binding cross-ticket decisions in the target as scope, constraints, forward-compatibility contracts, rejected alternatives, verification expectations, or phase dependencies.
+3. Record binding cross-ticket decisions in the target as scope, constraints, forward-compatibility guardrails, rejected alternatives, verification expectations, or phase dependencies.
 4. Do not copy unrelated future-phase detail; preserve only decisions that the current implementation could violate or block.
 5. If the same decision changes another active ticket's role, include that ticket in this logical edit; otherwise leave related tickets untouched.
 6. Keep epics board-level; move implementation constraints into the relevant child ticket or phase.
@@ -144,21 +144,15 @@ Uncertain: prefer `idea/`.
 Trigger: user asks to cascade broadly, reorganize a board and children, or update parent and child tickets beyond target-constraining decisions.
 Do not trigger: a ticket merely has `related:` links or default cross-ticket decision review applies.
 
-### judge: ticket-scope
+### judge: ticket-shape
 
-Review basis: artifact role, not length.
-Keep: decisions, constraints, and agreed API/type/event/UI sketches.
-Exclude: source-local edit notes unless settled constraints.
-Split: only when board, ticket, and implementation-unit roles are mixed.
-
-### judge: phase-need
-
-Applies only: non-epic actionable tickets.
+Artifact role: keep epics board-level; put implementation detail in child tickets.
+Scope keep: decisions, constraints, and agreed API/type/event/UI sketches.
+Scope exclude: source-local edit notes unless settled constraints.
+Ticket split: only when board, ticket, and implementation-unit roles are mixed, or unrelated increments belong in separate child tickets.
+Phase default: non-epic actionable tickets use one `Phase 1`.
 Phase unit: one reviewable implementation slice a future fresh session can finish, review, verify, and hand off cleanly.
-Single-slice ticket: use `Phase 1`.
-Normal size: one plan/implement/review/verify loop.
-Split phases: review, verification, rollback, or dependency boundaries differ.
-Unrelated increments: split into child tickets.
+Phase split: add phases only when review, verification, rollback, or dependency boundaries differ.
 
 ### judge: missing-spec-entry
 

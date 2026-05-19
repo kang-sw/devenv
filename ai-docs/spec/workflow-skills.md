@@ -173,13 +173,15 @@ are authored from a fresh-session completion view: each phase describes the next
 complete behavior a future `lead-proceed` run can finish, review, verify, and
 hand off cleanly in one plan/implement/review/verify loop. Setup, API, UI,
 tests, skeletons, and investigation are phase ingredients unless one is the
-reviewable deliverable. Each non-epic actionable phase states what behavior is
-complete, what remains deferred, and what verification proves the phase
-complete. {#260508-write-ticket-epic-child-boundary}
+reviewable deliverable. Additional phases are added only when review,
+verification, rollback, or dependency boundaries differ. Each non-epic
+actionable phase states what behavior is complete, what remains deferred, and
+what verification proves the phase complete.
+{#260508-write-ticket-epic-child-boundary}
 
 `lead-write-ticket` treats tickets as recoverability artifacts before compact
 summaries. Non-epic actionable tickets preserve caller-visible contracts,
-constraints, rationale, rejected alternatives, forward-compatibility notes,
+constraints, rationale, rejected alternatives, forward-compatibility guardrails,
 verification expectations, suggested strategy, phase dependencies, and agreed
 API/type/event/UI sketches. Source-local edit notes are excluded unless they
 are settled constraints; settled local or cross-ticket decisions stay in the
@@ -190,7 +192,7 @@ creating or editing a non-epic actionable ticket. It inspects the target's
 parent, containing epic, child board, explicitly related tickets, and available
 active siblings only far enough to find settled decisions that constrain the
 current implementation slice. It records only binding decisions in the target
-as scope, constraints, forward-compatibility contracts, rejected alternatives,
+as scope, constraints, forward-compatibility guardrails, rejected alternatives,
 verification expectations, or phase dependencies, and avoids copying unrelated
 future-phase detail. Explicit "cascade" requests, board organization, or parent
 and child edits broaden this into a multi-ticket propagation pass: the skill
