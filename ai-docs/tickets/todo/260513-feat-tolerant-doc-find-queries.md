@@ -1,5 +1,6 @@
 ---
 title: Tolerant documentation lookup queries
+parent: 260513-epic-workflow-question-loop-hygiene
 related-mental-model:
   - documentation-system
   - mcp-runtime
