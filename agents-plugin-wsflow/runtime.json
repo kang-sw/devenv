@@ -10,7 +10,7 @@
   },
   "prompt_bundle": {
     "source_commit": "dev",
-    "content_sha256": "6ffd7bcb9b292a5ebc5e2aa1015230e446aed0f4c779fc147d45396ac99ee9f6",
+    "content_sha256": "5e5ff1e70624476cd08f2fc8785cf793c1431fe16e55ce0d1a602bebdba330cf",
     "prompts": [
       "api-doc-cargo-brief",
       "api-doc-manager",
