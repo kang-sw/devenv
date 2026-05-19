@@ -6,6 +6,7 @@ spec:
 related-mental-model:
   - documentation-system
   - mcp-runtime
+completed: 2026-05-19
 ---
 
 # Tolerant documentation lookup queries
@@ -84,3 +85,14 @@ as the stable explanation surface.
 Refresh workflow guidance if needed so skills treat zero-result find output as
 non-final for broad queries and fall back to shorter queries or list/status
 surfaces before concluding that no relevant document exists.
+
+### Result (72ea1f2) - 2026-05-19
+
+Implemented tolerant broad-query discovery for `specs.find` and
+`mental_models.find` while preserving exact structured selectors. Default text
+output now groups broad-query evidence by document with tab-separated
+score/hit metadata and line-number snippets, omits separate matched-term lines,
+and includes bounded output plus zero-result retry guidance. JSON output keeps
+document metadata and adds line-level match evidence. `convention.read` now
+accepts common aliases and reports accepted canonical names plus aliases on
+lookup failure.

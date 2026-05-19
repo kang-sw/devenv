@@ -127,16 +127,15 @@ summaries. Broad list/find calls avoid expanding every nested anchor, phase,
 related map, snippet, source, or spec-reference array unless callers request
 JSON output. {#260512-documentation-discovery-readable-output-defaults}
 
-> [!note] Planned 🚧
-> Documentation lookup tools will treat broad human `query` inputs as tolerant
-> candidate discovery while preserving exact structured selectors such as
-> `spec_stem`, `ticket_stem`, and `domain`. Default text output for broad
-> documentation queries will group evidence by document, render document
-> metadata as `<path>\tscore=<score>\thits=<count>`, and list selected
-> line-number snippets under each document. JSON output will keep
-> document-centered metadata and add line-level match evidence. Convention lookup
-> will accept common aliases such as `spec`, `ticket`, and `mental-model`.
-> {#260519-tolerant-documentation-lookup-query-evidence}
+Documentation lookup tools treat broad human `query` inputs as tolerant
+candidate discovery while preserving exact structured selectors such as
+`spec_stem`, `ticket_stem`, and `domain`. Default text output for broad
+documentation queries groups evidence by document, renders document metadata as
+`<path>\tscore=<score>\thits=<count>`, and lists selected line-number snippets
+under each document. JSON output keeps document-centered metadata and adds
+line-level match evidence. Convention lookup accepts common aliases such as
+`spec`, `ticket`, and `mental-model`.
+{#260519-tolerant-documentation-lookup-query-evidence}
 
 ## Ticket Discovery Tools {#260505-ticket-discovery-tools}
 

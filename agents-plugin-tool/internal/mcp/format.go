@@ -34,12 +34,20 @@ func FormatSpecStatus(status *wsdoc.SpecAnchorStatus) string {
 	return formatSpecStatus(status)
 }
 
+func FormatSpecFind(query string, specs []wsdoc.SpecInfo) string {
+	return formatSpecFind(query, specs)
+}
+
 func FormatTickets(tickets []wsdoc.TicketInfo) string {
 	return formatTickets(tickets)
 }
 
 func FormatMentalModels(models []wsdoc.MentalModelInfo) string {
 	return formatMentalModels(models)
+}
+
+func FormatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string {
+	return formatMentalModelFind(query, models)
 }
 
 func FormatReferenceTrace(trace *wsdoc.ReferenceTrace) string {

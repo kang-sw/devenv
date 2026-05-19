@@ -60,8 +60,21 @@ func TestReadConventionUsesBundledDocs(t *testing.T) {
 	if !strings.Contains(got, "# Ticket Conventions") {
 		t.Fatalf("ReadConvention returned unexpected text: %q", got[:min(len(got), 80)])
 	}
+	for _, name := range []string{"spec", "ticket", "mental-model"} {
+		got, err := ReadConvention(name)
+		if err != nil {
+			t.Fatalf("ReadConvention(%q) returned error: %v", name, err)
+		}
+		if !strings.Contains(got, "#") {
+			t.Fatalf("ReadConvention(%q) returned unexpected text: %q", name, got[:min(len(got), 80)])
+		}
+	}
 	if _, err := ReadConvention("../ticket-conventions"); err == nil {
 		t.Fatal("ReadConvention accepted path traversal")
+	}
+	_, err = ReadConvention("unknown")
+	if err == nil || !strings.Contains(err.Error(), "spec-conventions") || !strings.Contains(err.Error(), "ticket") || !strings.Contains(err.Error(), "mental-model") {
+		t.Fatalf("ReadConvention missing-name error = %v", err)
 	}
 }
 

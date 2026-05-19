@@ -155,11 +155,9 @@ dropped tickets live in hidden archive dirs and git history.
 | `260518-feat-ws-dashboard-activity-watch-stream` | todo | Add backend cross-platform watcher, SSE stream, and fallback mode for Activity Console updates |
 | `260518-feat-ws-dashboard-activity-live-ux` | todo | Adopt Activity Console live events in the frontend with merge, stale-root, transcript-refresh, and fallback behavior |
 | `260518-feat-ws-dashboard-activity-transcript-api` | todo | Expand Activity Console transcript sources and optional block-level live transcript behavior |
-| `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
-| `260513-feat-tolerant-doc-find-queries` | ready | Make documentation lookup queries and convention aliases tolerant candidate discovery |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
@@ -178,9 +176,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260513-feat-tolerant-doc-find-queries` - Make broad documentation lookup
-  queries return tolerant document-grouped evidence and add common convention
-  aliases.
+- No ready tickets.
 
 ## Session Notes
 

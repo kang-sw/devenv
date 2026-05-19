@@ -6,6 +6,7 @@ sources:
   - agents-plugin-tool/internal/wsdoc/
 related:
   workflow-skills: "planning skills enforce spec and ticket conventions before implementation."
+  mcp-runtime: "MCP and CLI adapters render wsdoc discovery results; wsdoc owns matching and metadata."
 ---
 
 # Documentation System
@@ -30,6 +31,8 @@ related:
 - The root `ai-docs/mental-model.md` may carry a compact project reading map for task/topic routing; it does not own behavior, status, queue, or source-derived claims. {#260505-mental-model-document-system}
 - `### Mental Model Notes` is an optional workflow-internal commit subsection under `## AI Context`; `mental-model-updater` treats those notes as primary intent and uses diffs for verification and fallback. {#260518-mental-model-update-context-annotation}
 - Infra and convention docs are embedded in the Go runtime; retired legacy copies do not affect `ws/infra.read` or `ws/convention.read`.
+- Broad `specs.find` and `mental_models.find` query matching is token-scored in shared wsdoc helpers, not per-discovery substring checks; exact selectors (`spec_stem`, `ticket_stem`, `domain`) still filter before query scoring. {#260519-tolerant-documentation-lookup-query-evidence}
+- Query evidence is body-line-only: metadata can raise a document score, but it must not create synthetic line evidence. This prevents text output from pointing callers at non-existent line zero hits. {#260519-tolerant-documentation-lookup-query-evidence}
 - `ai-docs/WORKFLOW.md` is bootstrap-installed explanatory documentation for plugin-less maintenance; wsdoc parsers and MCP tools do not treat it as convention, spec, ticket, or runtime input. {#260506-bootstrap-workflow-guide}
 
 ## Coupling
@@ -44,7 +47,7 @@ related:
 
 - **Add a convention**: add Markdown under `internal/wsdoc/conventions/`, then update any compatibility copy that remains authoritative for Claude fallbacks.
 - **Add a ticket status**: update status normalization, rank, scan defaults, project tree rendering, conventions, Git move detection, MCP schemas, prompts, and skills.
-- **Add doc discovery tools**: update MCP dispatch, tool schema, parameter validation, tests, and docs. {#260505-documentation-authoring-workflows}
+- **Add doc discovery tools**: update MCP dispatch, tool schema, parameter validation, tests, and docs; reuse shared query matching/evidence helpers when the tool accepts broad human `query` text. {#260505-documentation-authoring-workflows}
 
 ## Common Mistakes
 
@@ -54,6 +57,7 @@ related:
 - Changing workflow semantics in the downstream workflow guide instead of the canonical plugin/runtime, bundled conventions, or bootstrap templates.
 - Loading mental-model child docs without ancestors and missing inherited Domain Rules.
 - Moving current feature inventory or implementation status from `_index.md` into the project reading map instead of specs, tickets, source, or tests.
+- Replacing tolerant broad-query scoring with exact phrase matching; multi-word user questions should find candidates by shared terms while exact selectors remain exact filters.
 
 ## Technical Debt
 

@@ -697,6 +697,10 @@ func specsFind(args []string) {
 		printJSONOrFatal("specs find", result, err)
 		return
 	}
+	if strings.TrimSpace(*query) != "" {
+		printTextOrFatal("specs find", mcp.FormatSpecFind(*query, result), err)
+		return
+	}
 	printTextOrFatal("specs find", mcp.FormatSpecs(result), err)
 }
 
@@ -754,6 +758,10 @@ func mentalModelsFind(args []string) {
 	})
 	if outputJSON(*format) {
 		printJSONOrFatal("mental-models find", result, err)
+		return
+	}
+	if strings.TrimSpace(*query) != "" {
+		printTextOrFatal("mental-models find", mcp.FormatMentalModelFind(*query, result), err)
 		return
 	}
 	printTextOrFatal("mental-models find", mcp.FormatMentalModels(result), err)

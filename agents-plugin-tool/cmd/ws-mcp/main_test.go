@@ -302,8 +302,8 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 
 	root := t.TempDir()
 	mustWriteCLITest(t, filepath.Join(root, "ai-docs/tickets/todo/260504-demo-ticket.md"), "---\ntitle: Demo Ticket\nspec:\n  - 260504-demo-spec\n---\n# Demo Ticket\n")
-	mustWriteCLITest(t, filepath.Join(root, "ai-docs/spec/demo.md"), "---\ntitle: Demo Spec\nsummary: Demo summary\n---\n# Demo\n\n## Feature {#260504-demo-spec}\n\nDemo behavior.\n")
-	mustWriteCLITest(t, filepath.Join(root, "ai-docs/mental-model/demo.md"), "---\ndomain: demo\ndescription: Demo model\nsources:\n  - ai-docs/spec/demo.md#260504-demo-spec\n---\n# Demo\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/spec/demo.md"), "---\ntitle: Demo Spec\nsummary: Demo summary\n---\n# Demo\n\n## Feature {#260504-demo-spec}\n\nDemo installer marketplace release packaging behavior.\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/mental-model/demo.md"), "---\ndomain: demo\ndescription: Demo model\nsources:\n  - ai-docs/spec/demo.md#260504-demo-spec\n---\n# Demo\n\nRuntime readable CLI mirror behavior.\n")
 	runGit(t, root, "init")
 	runGit(t, root, "config", "core.autocrlf", "false")
 
@@ -337,6 +337,40 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 			var value any
 			mustUnmarshalCLIJSON(t, out, &value)
 		})
+	}
+
+	cmd := exec.Command(bin, "specs", "find", "--root", root, "--query", "installer marketplace release packaging")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp specs query failed: %v\n%s", err, string(out))
+	}
+	if text := string(out); !strings.Contains(text, "candidate spec for query=\"installer marketplace release packaging\"") || !strings.Contains(text, "ai-docs/spec/demo.md\tscore=") || !strings.Contains(text, "  ") || strings.Contains(text, "matched:") {
+		t.Fatalf("specs query text = %q", text)
+	}
+	cmd = exec.Command(bin, "specs", "find", "--root", root, "--query", "installer marketplace release packaging", "--format", "json")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp specs query json failed: %v\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), "\"matches\"") || !strings.Contains(string(out), "\"matched_terms\"") {
+		t.Fatalf("specs query json missing evidence: %s", string(out))
+	}
+
+	cmd = exec.Command(bin, "mental-models", "find", "--root", root, "--query", "runtime readable CLI mirror")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp mental-models query failed: %v\n%s", err, string(out))
+	}
+	if text := string(out); !strings.Contains(text, "candidate mental model for query=\"runtime readable CLI mirror\"") || !strings.Contains(text, "ai-docs/mental-model/demo.md\tscore=") || strings.Contains(text, "matched:") {
+		t.Fatalf("mental-models query text = %q", text)
+	}
+	cmd = exec.Command(bin, "mental-models", "find", "--root", root, "--query", "runtime readable CLI mirror", "--format", "json")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp mental-models query json failed: %v\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), "\"matches\"") || !strings.Contains(string(out), "\"matched_terms\"") {
+		t.Fatalf("mental-models query json missing evidence: %s", string(out))
 	}
 }
 

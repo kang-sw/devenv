@@ -62,3 +62,32 @@ func TestMentalModelsStatusRequiresDomainOrPath(t *testing.T) {
 		t.Fatal("MentalModelsStatus accepted path traversal")
 	}
 }
+
+func TestMentalModelsFindToleratesBroadHumanQueryWithEvidence(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/mental-model/runtime/index.md", "---\ndomain: runtime\ndescription: Runtime CLI mirror readable defaults\nsources:\n  - ai-docs/spec/mcp.md#260519-runtime-readable\n---\n# Runtime\n\nThe MCP runtime provides readable CLI mirror output with structured evidence.\nReadable runtime output includes CLI mirror diagnostics.\n")
+	mustWrite(t, root, "ai-docs/mental-model/runtime/agent.md", "---\ndomain: agent\ndescription: Runtime readable notes\n---\n# Agent\n\nRuntime readable notes are separate.\n")
+	mustWrite(t, root, "ai-docs/mental-model/noise.md", "---\ndomain: noise\n---\n# Noise\n\nRuntime only.\n")
+
+	got, err := MentalModelsFind(root, MentalModelFindOptions{Query: "runtime readable CLI mirror"})
+	if err != nil {
+		t.Fatalf("MentalModelsFind returned error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("MentalModelsFind length = %d: %#v", len(got), got)
+	}
+	if got[0].Path != "ai-docs/mental-model/runtime/index.md" || got[0].MatchScore <= got[1].MatchScore {
+		t.Fatalf("ordering/scores = %#v", got)
+	}
+	if len(got[0].Matches) == 0 || got[0].Matches[0].Line == 0 || joined(got[0].Matches[0].MatchedTerms) == "" || got[0].Matches[0].Snippet == "" {
+		t.Fatalf("match evidence = %#v", got[0])
+	}
+
+	narrowed, err := MentalModelsFind(root, MentalModelFindOptions{Domain: "agent", Query: "runtime readable CLI mirror"})
+	if err != nil {
+		t.Fatalf("MentalModelsFind narrowed returned error: %v", err)
+	}
+	if len(narrowed) != 1 || narrowed[0].Domain != "agent" || !narrowed[0].MatchesDomain {
+		t.Fatalf("domain filter changed = %#v", narrowed)
+	}
+}

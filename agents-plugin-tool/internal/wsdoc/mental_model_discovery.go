@@ -24,16 +24,18 @@ type MentalModelStatusOptions struct {
 }
 
 type MentalModelInfo struct {
-	Path             string   `json:"path"`
-	Domain           string   `json:"domain"`
-	Description      string   `json:"description,omitempty"`
-	Sources          []string `json:"sources,omitempty"`
-	SpecRefs         []string `json:"spec_refs,omitempty"`
-	AncestorHints    []string `json:"ancestor_hints,omitempty"`
-	IndexHints       []string `json:"index_hints,omitempty"`
-	MatchingSnippets []string `json:"matching_snippets,omitempty"`
-	MatchesSpecStem  bool     `json:"matches_spec_stem,omitempty"`
-	MatchesDomain    bool     `json:"matches_domain,omitempty"`
+	Path             string          `json:"path"`
+	Domain           string          `json:"domain"`
+	Description      string          `json:"description,omitempty"`
+	Sources          []string        `json:"sources,omitempty"`
+	SpecRefs         []string        `json:"spec_refs,omitempty"`
+	AncestorHints    []string        `json:"ancestor_hints,omitempty"`
+	IndexHints       []string        `json:"index_hints,omitempty"`
+	MatchingSnippets []string        `json:"matching_snippets,omitempty"`
+	MatchScore       int             `json:"match_score,omitempty"`
+	Matches          []MatchEvidence `json:"matches,omitempty"`
+	MatchesSpecStem  bool            `json:"matches_spec_stem,omitempty"`
+	MatchesDomain    bool            `json:"matches_domain,omitempty"`
 }
 
 func MentalModelsFind(root string, opts MentalModelFindOptions) ([]MentalModelInfo, error) {
@@ -62,10 +64,14 @@ func MentalModelsFind(root string, opts MentalModelFindOptions) ([]MentalModelIn
 			continue
 		}
 		if query != "" {
-			haystack := strings.Join([]string{model.Path, model.Domain, model.Description, strings.Join(model.Sources, "\n"), text}, "\n")
-			if !containsFold(haystack, query) {
+			fields := []string{model.Path, model.Domain, model.Description, strings.Join(model.Sources, "\n"), strings.Join(model.SpecRefs, "\n"), strings.Join(model.AncestorHints, "\n"), strings.Join(model.IndexHints, "\n")}
+			match, ok := matchDocumentQuery(query, docQueryCandidate{Path: model.Path, Fields: fields, BodyText: text})
+			if !ok {
 				continue
 			}
+			model.MatchScore = match.Score
+			model.Matches = match.Matches
+			sortMatchesByLine(model.Matches)
 			model.MatchingSnippets = snippets(text, query, 3)
 		}
 		if specStem != "" {
@@ -75,6 +81,14 @@ func MentalModelsFind(root string, opts MentalModelFindOptions) ([]MentalModelIn
 			model.MatchesDomain = true
 		}
 		out = append(out, model)
+	}
+	if query != "" {
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].MatchScore != out[j].MatchScore {
+				return out[i].MatchScore > out[j].MatchScore
+			}
+			return out[i].Path < out[j].Path
+		})
 	}
 	return out, nil
 }

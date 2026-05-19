@@ -4,6 +4,7 @@ related-mental-model:
   - workflow-skills
   - documentation-system
   - git-workflow-tools
+completed: 2026-05-19
 ---
 
 # Workflow question loop hygiene
@@ -39,9 +40,9 @@ This epic covers:
   ticket-refresh gate.
 - `260513-feat-ticket-result-editions` - done; completed ticket Result
   sections receive append-only edition entries during tweak loops.
-- `260513-feat-human-readable-tool-output` - backlog the remaining JSON-default
-  cleanup for MCP and CLI workflow tools.
-- `260513-feat-tolerant-doc-find-queries` - ready tolerant documentation
+- `260513-feat-human-readable-tool-output` - done; added readable defaults for
+  remaining MCP and CLI workflow tools.
+- `260513-feat-tolerant-doc-find-queries` - done; added tolerant documentation
   lookup behavior for broad find queries and convention aliases.
 - `260519-feat-proceed-implementation-dispatch` - done; added proceed-side
   implementation dispatch precheck and removed stale skeleton-routing text.

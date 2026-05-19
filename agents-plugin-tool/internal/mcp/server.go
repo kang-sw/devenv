@@ -567,6 +567,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
+		if strings.TrimSpace(query) != "" {
+			return toolTextResponse(req.ID, formatSpecFind(query, result), err)
+		}
 		return toolTextResponse(req.ID, formatSpecs(result), err)
 	case "specs.status":
 		if hasTicketStemArgument(params.Arguments) {
@@ -603,6 +606,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		result, err := wsdoc.MentalModelsFind(root, wsdoc.MentalModelFindOptions{Query: query, SpecStem: specStem, Domain: domain})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
+		}
+		if strings.TrimSpace(query) != "" {
+			return toolTextResponse(req.ID, formatMentalModelFind(query, result), err)
 		}
 		return toolTextResponse(req.ID, formatMentalModels(result), err)
 	case "mental_models.status":
@@ -1183,6 +1189,89 @@ func formatSpecs(specs []wsdoc.SpecInfo) string {
 		writeIndentedLines(&b, "  marker: ", spec.MarkerContexts)
 	}
 	return b.String()
+}
+
+func formatSpecFind(query string, specs []wsdoc.SpecInfo) string {
+	return formatDocumentFind(query, "spec", "specs", len(specs), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
+		for _, spec := range specs {
+			writeDoc(spec.Path, spec.MatchScore, len(spec.Matches), spec.Matches)
+		}
+	})
+}
+
+func formatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string {
+	return formatDocumentFind(query, "mental model", "mental models", len(models), func(writeDoc func(path string, score, hits int, matches []wsdoc.MatchEvidence)) {
+		for _, model := range models {
+			writeDoc(model.Path, model.MatchScore, len(model.Matches), model.Matches)
+		}
+	})
+}
+
+const (
+	maxFindTextDocuments      = 10
+	maxFindTextEvidencePerDoc = 3
+)
+
+func formatDocumentFind(query, singular, plural string, count int, each func(func(string, int, int, []wsdoc.MatchEvidence))) string {
+	type doc struct {
+		path    string
+		score   int
+		hits    int
+		matches []wsdoc.MatchEvidence
+	}
+	docs := []doc{}
+	each(func(path string, score, hits int, matches []wsdoc.MatchEvidence) {
+		docs = append(docs, doc{path: path, score: score, hits: hits, matches: matches})
+	})
+
+	var b strings.Builder
+	label := plural
+	if count == 1 {
+		label = singular
+	}
+	truncatedDocs := len(docs) > maxFindTextDocuments
+	truncatedHits := false
+	for _, d := range docs {
+		if len(d.matches) > maxFindTextEvidencePerDoc {
+			truncatedHits = true
+			break
+		}
+	}
+	fmt.Fprintf(&b, "%d candidate %s for query=%q", count, label, query)
+	if truncatedDocs || truncatedHits {
+		fmt.Fprintf(&b, " (showing subset: first %d documents, up to %d hits each)", maxFindTextDocuments, maxFindTextEvidencePerDoc)
+	}
+	b.WriteString("\n")
+	if count == 0 {
+		fmt.Fprintf(&b, "No candidates met the query threshold; retry with shorter noun phrases.\n")
+		return b.String()
+	}
+	if len(docs) > maxFindTextDocuments {
+		docs = docs[:maxFindTextDocuments]
+	}
+	for _, d := range docs {
+		matches := selectFindTextEvidence(d.matches)
+		fmt.Fprintf(&b, "\n%s\tscore=%d\thits=%d\n", d.path, d.score, d.hits)
+		for _, match := range matches {
+			fmt.Fprintf(&b, "  %d: %s\n", match.Line, match.Snippet)
+		}
+	}
+	return b.String()
+}
+
+func selectFindTextEvidence(matches []wsdoc.MatchEvidence) []wsdoc.MatchEvidence {
+	selected := append([]wsdoc.MatchEvidence(nil), matches...)
+	if len(selected) > maxFindTextEvidencePerDoc {
+		sort.SliceStable(selected, func(i, j int) bool {
+			if len(selected[i].MatchedTerms) != len(selected[j].MatchedTerms) {
+				return len(selected[i].MatchedTerms) > len(selected[j].MatchedTerms)
+			}
+			return selected[i].Line < selected[j].Line
+		})
+		selected = selected[:maxFindTextEvidencePerDoc]
+	}
+	sort.SliceStable(selected, func(i, j int) bool { return selected[i].Line < selected[j].Line })
+	return selected
 }
 
 func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {

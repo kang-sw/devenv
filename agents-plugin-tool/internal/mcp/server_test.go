@@ -18,7 +18,42 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdoc"
 )
+
+func TestFormatBroadDocumentationFindGroupsEvidence(t *testing.T) {
+	specs := []wsdoc.SpecInfo{{Path: "ai-docs/spec/plugin-runtime.md", MatchScore: 18, Matches: []wsdoc.MatchEvidence{{Line: 18, MatchedTerms: []string{"marketplace"}, Snippet: "marketplace release packaging"}}}}
+	text := formatSpecFind("wsflow installer marketplace release packaging", specs)
+	if !strings.Contains(text, `1 candidate spec for query="wsflow installer marketplace release packaging"`) || !strings.Contains(text, "ai-docs/spec/plugin-runtime.md	score=18	hits=1") || !strings.Contains(text, "  18: marketplace release packaging") {
+		t.Fatalf("spec find text = %q", text)
+	}
+	if strings.Contains(text, "matched:") {
+		t.Fatalf("spec find text included matched line: %q", text)
+	}
+
+	models := []wsdoc.MentalModelInfo{{Path: "ai-docs/mental-model/runtime.md", MatchScore: 9, Matches: []wsdoc.MatchEvidence{{Line: 7, MatchedTerms: []string{"runtime", "cli"}, Snippet: "runtime CLI mirror"}}}}
+	text = formatMentalModelFind("runtime readable CLI mirror", models)
+	if !strings.Contains(text, `1 candidate mental model for query="runtime readable CLI mirror"`) || !strings.Contains(text, "ai-docs/mental-model/runtime.md	score=9	hits=1") || !strings.Contains(text, "  7: runtime CLI mirror") {
+		t.Fatalf("mental model find text = %q", text)
+	}
+}
+
+func TestFormatBroadDocumentationFindBoundsEvidenceAndGuidesZeroResults(t *testing.T) {
+	matches := []wsdoc.MatchEvidence{}
+	for i := 1; i <= 5; i++ {
+		matches = append(matches, wsdoc.MatchEvidence{Line: i, MatchedTerms: []string{"workflow"}, Snippet: fmt.Sprintf("workflow line %d", i)})
+	}
+	specs := []wsdoc.SpecInfo{{Path: "ai-docs/spec/a.md", MatchScore: 5, Matches: matches}}
+	text := formatSpecFind("workflow", specs)
+	if !strings.Contains(text, "showing subset") || strings.Count(text, "workflow line") != maxFindTextEvidencePerDoc {
+		t.Fatalf("bounded spec find text = %q", text)
+	}
+
+	text = formatSpecFind("absent phrase", nil)
+	if !strings.Contains(text, "0 candidate specs") || !strings.Contains(text, "retry with shorter noun phrases") {
+		t.Fatalf("zero-result text = %q", text)
+	}
+}
 
 func TestServeStdioToolsListAndCall(t *testing.T) {
 	useLeadProfile(t)
@@ -44,7 +79,9 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tickets.find","arguments":{"mentions_ticket_stem":"260503-epic-demo"}}}`,
 		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"specs.find","arguments":{"spec_stem":"260503-spec-demo","ticket_stem":"260503-feat-demo","query":"discovery"}}}`,
 		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"spec_stem":"260503-spec-demo","domain":"workflow","query":"discovery"}}}`,
-		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"references.trace","arguments":{"spec_stem":"260503-spec-demo"}}}`,
+		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"specs.find","arguments":{"query":"discovery","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"mental_models.find","arguments":{"query":"discovery","format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"references.trace","arguments":{"spec_stem":"260503-spec-demo"}}}`,
 	}, "\n")
 
 	var out bytes.Buffer
@@ -54,8 +91,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 13 {
-		t.Fatalf("expected 13 responses, got %d\n%s", len(lines), out.String())
+	if len(lines) != 15 {
+		t.Fatalf("expected 15 responses, got %d\n%s", len(lines), out.String())
 	}
 	byID := responseLinesByID(t, lines)
 
@@ -151,16 +188,22 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 		t.Fatalf("tickets.find response missing mention result: %s", byID["10"])
 	}
 	specsText := toolText(t, byID["11"])
-	if !strings.Contains(specsText, "ai-docs/spec/demo.md") || !strings.Contains(specsText, "matches_spec_stem") || !strings.Contains(specsText, "matches_ticket_ref") {
+	if !strings.Contains(specsText, "1 candidate spec for query=\"discovery\"") || !strings.Contains(specsText, "ai-docs/spec/demo.md\tscore=") || strings.Contains(specsText, "matched:") {
 		t.Fatalf("specs.find response missing spec result: %s", byID["11"])
 	}
 	mentalModelsText := toolText(t, byID["12"])
-	if !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md") || !strings.Contains(mentalModelsText, "matches_spec_stem") || !strings.Contains(mentalModelsText, "matches_domain") {
+	if !strings.Contains(mentalModelsText, "1 candidate mental model for query=\"discovery\"") || !strings.Contains(mentalModelsText, "ai-docs/mental-model/workflow.md\tscore=") || strings.Contains(mentalModelsText, "matched:") {
 		t.Fatalf("mental_models.find response missing result: %s", byID["12"])
 	}
-	referencesText := toolText(t, byID["13"])
+	if !strings.Contains(byID["13"], "matches") || !strings.Contains(byID["13"], "matched_terms") {
+		t.Fatalf("specs.find json missing evidence: %s", byID["13"])
+	}
+	if !strings.Contains(byID["14"], "matches") || !strings.Contains(byID["14"], "matched_terms") {
+		t.Fatalf("mental_models.find json missing evidence: %s", byID["14"])
+	}
+	referencesText := toolText(t, byID["15"])
 	if !strings.Contains(referencesText, "input: spec") || !strings.Contains(referencesText, "tickets:") || !strings.Contains(referencesText, "mental_models:") {
-		t.Fatalf("references.trace response missing graph result: %s", byID["13"])
+		t.Fatalf("references.trace response missing graph result: %s", byID["15"])
 	}
 }
 

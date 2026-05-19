@@ -30,6 +30,8 @@ type SpecInfo struct {
 	TicketRefs       []string         `json:"ticket_refs,omitempty"`
 	MarkerContexts   []string         `json:"marker_contexts,omitempty"`
 	MatchingSnippets []string         `json:"matching_snippets,omitempty"`
+	MatchScore       int              `json:"match_score,omitempty"`
+	Matches          []MatchEvidence  `json:"matches,omitempty"`
 	MatchesSpecStem  bool             `json:"matches_spec_stem,omitempty"`
 	MatchesTicketRef bool             `json:"matches_ticket_ref,omitempty"`
 }
@@ -80,10 +82,17 @@ func SpecsFind(root string, opts SpecFindOptions) ([]SpecInfo, error) {
 			continue
 		}
 		if query != "" {
-			haystack := strings.Join([]string{spec.Path, spec.Filename, spec.Title, spec.Summary, text}, "\n")
-			if !containsFold(haystack, query) {
+			fields := []string{spec.Path, spec.Filename, spec.Title, spec.Summary, strings.Join(spec.TicketRefs, "\n"), strings.Join(spec.MarkerContexts, "\n")}
+			for _, anchor := range spec.Anchors {
+				fields = append(fields, anchor.SpecStem, anchor.Heading, anchor.MarkerContext)
+			}
+			match, ok := matchDocumentQuery(query, docQueryCandidate{Path: spec.Path, Fields: fields, BodyText: text})
+			if !ok {
 				continue
 			}
+			spec.MatchScore = match.Score
+			spec.Matches = match.Matches
+			sortMatchesByLine(spec.Matches)
 			spec.MatchingSnippets = snippets(text, query, 3)
 		}
 		if specStem != "" {
@@ -93,6 +102,14 @@ func SpecsFind(root string, opts SpecFindOptions) ([]SpecInfo, error) {
 			spec.MatchesTicketRef = true
 		}
 		out = append(out, spec)
+	}
+	if query != "" {
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].MatchScore != out[j].MatchScore {
+				return out[i].MatchScore > out[j].MatchScore
+			}
+			return out[i].Path < out[j].Path
+		})
 	}
 	return out, nil
 }
