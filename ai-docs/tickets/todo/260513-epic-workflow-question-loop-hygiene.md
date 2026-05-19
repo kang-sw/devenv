@@ -43,8 +43,8 @@ This epic covers:
   cleanup for MCP and CLI workflow tools.
 - `260513-feat-tolerant-doc-find-queries` - backlog tolerant documentation
   lookup behavior for broad find queries and convention aliases.
-- `260519-feat-proceed-implementation-dispatch` - backlog proceed-side
-  implementation dispatch precheck and stale skeleton-routing text cleanup.
+- `260519-feat-proceed-implementation-dispatch` - done; added proceed-side
+  implementation dispatch precheck and removed stale skeleton-routing text.
 
 ## Cross-Child Decisions
 

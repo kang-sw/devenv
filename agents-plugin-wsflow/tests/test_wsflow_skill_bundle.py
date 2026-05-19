@@ -72,6 +72,21 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertIn("Use subagents when a task benefits from scoped exploration", text)
         self.assertIn("The lead owns integration, verification, final judgment, and commits.", text)
 
+    def test_proceed_reads_implement_for_wsflow_verdict(self):
+        text = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("read `wsflow:lead-implement` skill text", text)
+        self.assertIn("**Implementation Verdict**", text)
+        self.assertIn("**Verdict Basis**", text)
+        self.assertNotIn("**Complexity Flag**", text)
+
+    def test_implement_keeps_wsflow_route_contract_owner(self):
+        text = (SKILLS_DIR / "lead-implement" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("### judge: branch-mode", text)
+        self.assertNotIn("Preserve caller-provided execution path", text)
+        self.assertNotIn("Confirm execution context", text)
+
     def test_bootstrap_template_uses_wsflow_local_version_lineage(self):
         text = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
         self.assertIn("<!-- Template Version: v0003 -->", text)

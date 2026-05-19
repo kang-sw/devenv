@@ -10,14 +10,14 @@ Target: user request
 ## Invariants
 
 Scope
-- Route only; do not implement, plan, or write skeletons here.
+- Route only; do not implement or plan here.
 - Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Assess from conversation state and artifacts only; do not read source code.
 - Do not rejudge ticket quality, demand ticket splitting, or mutate ticket structure.
 
 Pipeline
 - Handoff stage order is fixed when stages fire: spec -> ticket -> implementation.
-- Always route code-editing work through `ws:lead-implement`, including skeleton work.
+- Always route code-editing work through `ws:lead-implement`.
 - Proceed assumes implementation intent; stop only when the target is not actionable or user-blocking discussion remains.
 
 Execution
@@ -50,7 +50,7 @@ Routing
 2. Set `target-kind`: `ticket-path` or `inline`.
 3. Set `has-ticket=yes` for an existing ticket path or captured `Ticket:` path.
 4. If `has-ticket=yes`: read ticket; extract status, category, scope, phases, phase results, open questions, and `plans:`.
-5. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs, skeletons, or tests.
+5. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs or tests.
 6. If `target-kind=ticket-path`: set `actionable=yes`.
 7. If `target-kind=inline`: apply `judge: actionable`.
 8. Apply `judge: discussion-needed`.
@@ -63,6 +63,8 @@ Routing
    - Multiple explicit phases -> stop for phase or ticket slicing.
    - No explicit phase -> first unfinished phase.
    - Selected phase is plainly too broad from ticket text -> stop for phase or ticket slicing.
+13. For implementation routes, read `ws:lead-implement` skill text.
+14. For implementation routes, apply `lead-implement` `judge: execution-mode` and `judge: branch-mode` from route context only; unknown direct-edit predicates produce a delegated verdict.
 
 ### 2. Select Route
 
@@ -73,9 +75,9 @@ Routing
 | `discussion-needed=yes` | Continue through `ws:lead-discuss`; carry the blocker; stop. |
 | `has-ticket=yes` and status is `todo/` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; carry `promote-context`; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and freshness is missing settled decisions | Continue through `ws:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`; carry resolved scope only. |
+| `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`; carry resolved scope and implementation verdict. |
 | `has-ticket=no` and `needs-ticket=yes` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; carry `create-context`; capture `Ticket:` and re-route. |
-| `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`; carry inline target and no-ticket scope. |
+| `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`; carry inline target, no-ticket scope, and implementation verdict. |
 
 ### 3. Announce
 
@@ -87,7 +89,9 @@ Routing
 - **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | whole target - no phases>
-- **Execution**: ws:lead-implement - owns skeleton decisions, code-editing stages, and branch lifecycle
+- **Implementation Verdict**: <ws:lead-edit | ws:lead-write-code> via ws:lead-implement
+- **Verdict Basis**: lead-implement route contract; source-free; unknown direct-edit predicate -> delegated
+- **Execution**: ws:lead-implement - owns code-editing stages and branch lifecycle
 - **Carried context**: downstream stages receive route constraints.
 
 Proceeding.
@@ -112,6 +116,9 @@ Do not ask for confirmation; the user can interrupt.
 
 `gate-suppression-context`:
 Carry: this is an autonomous proceed chain; downstream stages do not pause for approvals that this route already grants.
+
+`implementation-verdict-context`:
+Carry: verdict came from `ws:lead-implement` route contract, applied source-free before handoff.
 
 `create-context`:
 Carry `spec-context` and `gate-suppression-context`, then continue through `ws:lead-write-ticket`.

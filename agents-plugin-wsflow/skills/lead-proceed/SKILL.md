@@ -63,6 +63,8 @@ Routing
    - Multiple explicit phases -> stop for phase or ticket slicing.
    - No explicit phase -> first unfinished phase.
    - Selected phase is plainly too broad from ticket text -> stop for phase or ticket slicing.
+13. For implementation routes, read `wsflow:lead-implement` skill text.
+14. For implementation routes, apply `lead-implement` `judge: branch-mode` from route context only.
 
 ### 2. Select Route
 
@@ -73,9 +75,9 @@ Routing
 | `discussion-needed=yes` | Continue through `wsflow:lead-discuss`; carry the blocker; stop. |
 | `has-ticket=yes` and status is `todo/` | Continue through `wsflow:lead-write-spec`, then `wsflow:lead-write-ticket`; carry `promote-context`; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and freshness is missing settled decisions | Continue through `wsflow:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready/` | Continue through `wsflow:lead-implement`; carry resolved scope only. |
+| `has-ticket=yes` and status is `ready/` | Continue through `wsflow:lead-implement`; carry resolved scope and implementation verdict. |
 | `has-ticket=no` and `needs-ticket=yes` | Continue through `wsflow:lead-write-spec`, then `wsflow:lead-write-ticket`; carry `create-context`; capture `Ticket:` and re-route. |
-| `has-ticket=no` and `needs-ticket=no` | Continue through `wsflow:lead-implement`; carry inline target and no-ticket scope. |
+| `has-ticket=no` and `needs-ticket=no` | Continue through `wsflow:lead-implement`; carry inline target, no-ticket scope, and implementation verdict. |
 
 ### 3. Announce
 
@@ -87,6 +89,8 @@ Routing
 - **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | whole target - no phases>
+- **Implementation Verdict**: wsflow:lead-implement -> wsflow:lead-edit
+- **Verdict Basis**: lead-implement route contract; source-free
 - **Execution**: wsflow:lead-implement - owns direct execution, documentation, and final reporting
 - **Carried context**: downstream stages receive route constraints.
 
@@ -112,6 +116,9 @@ Do not ask for confirmation; the user can interrupt.
 
 `gate-suppression-context`:
 Carry: this is an autonomous proceed chain; downstream stages do not pause for approvals that this route already grants.
+
+`implementation-verdict-context`:
+Carry: verdict came from `wsflow:lead-implement` route contract, applied source-free before handoff.
 
 `create-context`:
 Carry `spec-context` and `gate-suppression-context`, then continue through `wsflow:lead-write-ticket`.
