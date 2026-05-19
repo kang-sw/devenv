@@ -505,7 +505,10 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 			UpdatedSpecs:        stringList(params.Arguments["updated_specs"]),
 			UpdatedMentalModels: stringList(params.Arguments["updated_mental_models"]),
 		})
-		return toolJSONResponse(req.ID, result, err)
+		if wantsJSON(params.Arguments) {
+			return toolJSONResponse(req.ID, result, err)
+		}
+		return toolTextResponse(req.ID, formatGitCommit(result), err)
 	case "project_tree":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
 		if err != nil {
@@ -1117,6 +1120,38 @@ func formatMergeBase(result wsgit.MergeBaseResult) string {
 	return fmt.Sprintf("merge_base: %s (%s %s)\n", result.MergeBase, result.Base, result.Head)
 }
 
+func formatGitCommit(result wsgit.CommitResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "commit: %s\n", result.Hash)
+	fmt.Fprintf(&b, "title: %s\n", result.Title)
+	if len(result.Paths) > 0 {
+		b.WriteString("paths:\n")
+		for _, path := range result.Paths {
+			fmt.Fprintf(&b, "  - %s\n", path)
+		}
+	}
+	if len(result.TicketChanges) > 0 {
+		b.WriteString("ticket_changes:\n")
+		for _, change := range result.TicketChanges {
+			fmt.Fprintf(&b, "  - %s", change.Stem)
+			if change.FromStatus != "" || change.ToStatus != "" {
+				fmt.Fprintf(&b, " %s->%s", displayOrDash(change.FromStatus), displayOrDash(change.ToStatus))
+			}
+			if change.ResultAdded {
+				b.WriteString(" result")
+				if change.ResultHeading != "" {
+					fmt.Fprintf(&b, " %q", change.ResultHeading)
+				}
+			}
+			if change.Path != "" {
+				fmt.Fprintf(&b, " (%s)", change.Path)
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
 func formatSpecs(specs []wsdoc.SpecInfo) string {
 	var b strings.Builder
 	for _, spec := range specs {
@@ -1692,7 +1727,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.commit",
-			"description": "Create a workflow-aware Git commit from explicit paths and structured message fields.",
+			"description": "Create a workflow-aware Git commit from explicit paths and structured message fields. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1704,6 +1739,7 @@ func tools() []map[string]any {
 					"updated_tickets":       stringArrayProperty("Optional ticket update summaries. If omitted, staged ticket moves and Result/Edition headings are detected."),
 					"updated_specs":         stringArrayProperty("Optional spec update summaries."),
 					"updated_mental_models": stringArrayProperty("Optional mental-model update summaries."),
+					"format":                stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 				"required": []string{"paths", "title", "ai_context"},
 			},

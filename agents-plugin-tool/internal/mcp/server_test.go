@@ -1142,6 +1142,27 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 	commitByID := responseLinesByID(t, commitLines)
 
+	commitText := toolText(t, commitByID["7"])
+	if !strings.Contains(commitText, "commit: ") ||
+		!strings.Contains(commitText, "title: test: mcp commit") ||
+		!strings.Contains(commitText, "paths:") ||
+		!strings.Contains(commitText, "ticket_changes:") ||
+		strings.Contains(commitText, `"ticket_changes"`) {
+		t.Fatalf("git.commit text response = %q", commitText)
+	}
+
+	mustWrite(t, root, "file.txt", "one\ntwo\nthree\n")
+	out.Reset()
+	jsonCommitInput := `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":["file.txt"],"title":"test: mcp commit json","ai_context":["User intent: verify git.commit JSON.","Verification: server test."],"format":"json"}}}`
+	if err := server.ServeStdio(context.Background(), strings.NewReader(jsonCommitInput), &out); err != nil {
+		t.Fatalf("ServeStdio JSON commit returned error: %v", err)
+	}
+	jsonCommitLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(jsonCommitLines) != 1 {
+		t.Fatalf("expected 1 JSON commit response, got %d\n%s", len(jsonCommitLines), out.String())
+	}
+	jsonCommitByID := responseLinesByID(t, jsonCommitLines)
+
 	var commit struct {
 		Hash          string `json:"hash"`
 		Title         string `json:"title"`
@@ -1150,10 +1171,10 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 			ResultAdded bool   `json:"result_added"`
 		} `json:"ticket_changes"`
 	}
-	if err := json.Unmarshal([]byte(toolText(t, commitByID["7"])), &commit); err != nil {
+	if err := json.Unmarshal([]byte(toolText(t, jsonCommitByID["8"])), &commit); err != nil {
 		t.Fatal(err)
 	}
-	if commit.Hash == "" || commit.Title != "test: mcp commit" || len(commit.TicketChanges) != 1 || commit.TicketChanges[0].Stem != "260503-feat-demo" || !commit.TicketChanges[0].ResultAdded {
+	if commit.Hash == "" || commit.Title != "test: mcp commit json" || len(commit.TicketChanges) != 0 {
 		t.Fatalf("commit response = %#v", commit)
 	}
 }

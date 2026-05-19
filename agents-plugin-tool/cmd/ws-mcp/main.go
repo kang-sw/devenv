@@ -328,10 +328,15 @@ func configUsage() {
 
 func configShow(args []string) {
 	fs := flag.NewFlagSet("config show", flag.ExitOnError)
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	view, err := wsconfig.Show(wsconfig.Options{})
-	printJSONOrFatal("config show", view, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("config show", view, err)
+		return
+	}
+	printTextOrFatal("config show", mcp.FormatConfigView(view), err)
 }
 
 func configAgentsTier(args []string) {
@@ -421,10 +426,16 @@ func gitUsage() {
 func gitStatus(args []string) {
 	fs := flag.NewFlagSet("git status", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	result, err := wsgit.NewClient().Status(context.Background(), defaultRoot(*root))
-	printJSONOrFatal("git status", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("git status", result, err)
+		return
+	}
+	text, err := runNativeGitText(defaultRoot(*root), "status", "--short", "--branch")
+	printTextOrFatal("git status", text, err)
 }
 
 func gitDiff(args []string) {
@@ -432,13 +443,18 @@ func gitDiff(args []string) {
 	root := fs.String("root", ".", "repository root")
 	rangeValue := fs.String("range", "", "revision range")
 	mode := fs.String("mode", wsgit.DiffModeStat, "diff mode: full, stat, or name_only; defaults to stat")
+	format := fs.String("format", "", `output format: text or json`)
 	var paths multiFlag
 	fs.Var(&paths, "path", "path filter; may be repeated")
 	_ = fs.Parse(args)
 	paths = append(paths, fs.Args()...)
 
 	result, err := wsgit.NewClient().Diff(context.Background(), defaultRoot(*root), wsgit.DiffOptions{Range: *rangeValue, Mode: *mode, Paths: paths})
-	printJSONOrFatal("git diff", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("git diff", result, err)
+		return
+	}
+	printTextOrFatal("git diff", result.Output, err)
 }
 
 func gitLog(args []string) {
@@ -447,10 +463,16 @@ func gitLog(args []string) {
 	rangeValue := fs.String("range", "", "revision range")
 	limit := fs.Int("limit", 20, "maximum commits to return, capped at 100")
 	includeBody := fs.Bool("include-body", false, "include commit body")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	result, err := wsgit.NewClient().Log(context.Background(), defaultRoot(*root), wsgit.LogOptions{Range: *rangeValue, Limit: *limit, IncludeBody: *includeBody})
-	printJSONOrFatal("git log", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("git log", result, err)
+		return
+	}
+	text, err := runNativeGitLogText(defaultRoot(*root), *rangeValue, *limit)
+	printTextOrFatal("git log", text, err)
 }
 
 func gitMergeBase(args []string) {
@@ -458,6 +480,7 @@ func gitMergeBase(args []string) {
 	root := fs.String("root", ".", "repository root")
 	base := fs.String("base", "", "base revision")
 	head := fs.String("head", "", "head revision")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 	remaining := fs.Args()
 	if *base == "" && len(remaining) > 0 {
@@ -468,7 +491,12 @@ func gitMergeBase(args []string) {
 	}
 
 	result, err := wsgit.NewClient().MergeBase(context.Background(), defaultRoot(*root), *base, *head)
-	printJSONOrFatal("git merge-base", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("git merge-base", result, err)
+		return
+	}
+	text, err := runNativeGitText(defaultRoot(*root), "merge-base", *base, *head)
+	printTextOrFatal("git merge-base", text, err)
 }
 
 func gitCommit(args []string) {
@@ -477,6 +505,7 @@ func gitCommit(args []string) {
 	title := fs.String("title", "", "single-line commit title")
 	description := fs.String("description", "", "commit description body")
 	descriptionFile := fs.String("description-file", "", "commit description file; use - for stdin")
+	format := fs.String("format", "", `output format: text or json`)
 	var paths multiFlag
 	var aiContext multiFlag
 	var updatedTickets multiFlag
@@ -507,7 +536,11 @@ func gitCommit(args []string) {
 		UpdatedSpecs:        updatedSpecs,
 		UpdatedMentalModels: updatedMentalModels,
 	})
-	printJSONOrFatal("git commit", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("git commit", result, err)
+		return
+	}
+	printTextOrFatal("git commit", mcp.FormatGitCommit(result), err)
 }
 
 func ticketsCommand(args []string) {
@@ -537,6 +570,7 @@ func ticketsList(args []string) {
 	root := fs.String("root", ".", "repository root")
 	includeDone := fs.Bool("include-done", false, "include ai-docs/tickets/.done")
 	includeDropped := fs.Bool("include-dropped", false, "include ai-docs/tickets/.dropped")
+	format := fs.String("format", "", `output format: text or json`)
 	var statuses multiFlag
 	fs.Var(&statuses, "status", "ticket status to scan (ready, todo, idea; archives require include flags); may be repeated")
 	_ = fs.Parse(args)
@@ -546,7 +580,11 @@ func ticketsList(args []string) {
 		IncludeDone:    *includeDone,
 		IncludeDropped: *includeDropped,
 	})
-	printJSONOrFatal("tickets list", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("tickets list", result, err)
+		return
+	}
+	printTextOrFatal("tickets list", mcp.FormatTickets(result), err)
 }
 
 func ticketsFind(args []string) {
@@ -557,6 +595,7 @@ func ticketsFind(args []string) {
 	mentionsTicketStem := fs.String("mentions-ticket-stem", "", "ticket stem that result tickets must mention")
 	includeDone := fs.Bool("include-done", false, "include ai-docs/tickets/.done")
 	includeDropped := fs.Bool("include-dropped", false, "include ai-docs/tickets/.dropped")
+	format := fs.String("format", "", `output format: text or json`)
 	var statuses multiFlag
 	fs.Var(&statuses, "status", "ticket status to scan (ready, todo, idea; archives require include flags); may be repeated")
 	_ = fs.Parse(args)
@@ -569,7 +608,11 @@ func ticketsFind(args []string) {
 		TicketStem:         *ticketStem,
 		MentionsTicketStem: *mentionsTicketStem,
 	})
-	printJSONOrFatal("tickets find", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("tickets find", result, err)
+		return
+	}
+	printTextOrFatal("tickets find", mcp.FormatTickets(result), err)
 }
 
 func ticketsStatus(args []string) {
@@ -578,6 +621,7 @@ func ticketsStatus(args []string) {
 	ticketStem := fs.String("ticket-stem", "", "ticket stem to inspect")
 	includeDone := fs.Bool("include-done", false, "allow lookup under ai-docs/tickets/.done")
 	includeDropped := fs.Bool("include-dropped", false, "allow lookup under ai-docs/tickets/.dropped")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 	if *ticketStem == "" && len(fs.Args()) > 0 {
 		*ticketStem = fs.Args()[0]
@@ -588,7 +632,15 @@ func ticketsStatus(args []string) {
 		IncludeDone:    *includeDone,
 		IncludeDropped: *includeDropped,
 	})
-	printJSONOrFatal("tickets status", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("tickets status", result, err)
+		return
+	}
+	var tickets []wsdoc.TicketInfo
+	if result != nil {
+		tickets = append(tickets, *result)
+	}
+	printTextOrFatal("tickets status", mcp.FormatTickets(tickets), err)
 }
 
 func specsCommand(args []string) {
@@ -616,10 +668,15 @@ func specsUsage() {
 func specsList(args []string) {
 	fs := flag.NewFlagSet("specs list", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	result, err := wsdoc.SpecsList(defaultRoot(*root))
-	printJSONOrFatal("specs list", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("specs list", result, err)
+		return
+	}
+	printTextOrFatal("specs list", mcp.FormatSpecs(result), err)
 }
 
 func specsFind(args []string) {
@@ -628,6 +685,7 @@ func specsFind(args []string) {
 	query := fs.String("query", "", "case-insensitive text query")
 	specStem := fs.String("spec-stem", "", "exact spec anchor stem")
 	ticketStem := fs.String("ticket-stem", "", "ticket stem referenced by specs")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	result, err := wsdoc.SpecsFind(defaultRoot(*root), wsdoc.SpecFindOptions{
@@ -635,20 +693,29 @@ func specsFind(args []string) {
 		SpecStem:   *specStem,
 		TicketStem: *ticketStem,
 	})
-	printJSONOrFatal("specs find", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("specs find", result, err)
+		return
+	}
+	printTextOrFatal("specs find", mcp.FormatSpecs(result), err)
 }
 
 func specsStatus(args []string) {
 	fs := flag.NewFlagSet("specs status", flag.ExitOnError)
 	root := fs.String("root", ".", "repository root")
 	specStem := fs.String("spec-stem", "", "spec anchor stem to inspect")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 	if *specStem == "" && len(fs.Args()) > 0 {
 		*specStem = fs.Args()[0]
 	}
 
 	result, err := wsdoc.SpecsStatus(defaultRoot(*root), wsdoc.SpecStatusOptions{SpecStem: *specStem})
-	printJSONOrFatal("specs status", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("specs status", result, err)
+		return
+	}
+	printTextOrFatal("specs status", mcp.FormatSpecStatus(result), err)
 }
 
 func mentalModelsCommand(args []string) {
@@ -677,6 +744,7 @@ func mentalModelsFind(args []string) {
 	query := fs.String("query", "", "case-insensitive text query")
 	specStem := fs.String("spec-stem", "", "spec anchor stem referenced by mental models")
 	domain := fs.String("domain", "", "mental-model domain")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	result, err := wsdoc.MentalModelsFind(defaultRoot(*root), wsdoc.MentalModelFindOptions{
@@ -684,7 +752,11 @@ func mentalModelsFind(args []string) {
 		SpecStem: *specStem,
 		Domain:   *domain,
 	})
-	printJSONOrFatal("mental-models find", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("mental-models find", result, err)
+		return
+	}
+	printTextOrFatal("mental-models find", mcp.FormatMentalModels(result), err)
 }
 
 func mentalModelsStatus(args []string) {
@@ -692,13 +764,18 @@ func mentalModelsStatus(args []string) {
 	root := fs.String("root", ".", "repository root")
 	domain := fs.String("domain", "", "mental-model domain")
 	path := fs.String("path", "", "relative path under ai-docs/mental-model")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 	if *domain == "" && *path == "" && len(fs.Args()) > 0 {
 		*domain = fs.Args()[0]
 	}
 
 	result, err := wsdoc.MentalModelsStatus(defaultRoot(*root), wsdoc.MentalModelStatusOptions{Domain: *domain, Path: *path})
-	printJSONOrFatal("mental-models status", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("mental-models status", result, err)
+		return
+	}
+	printTextOrFatal("mental-models status", mcp.FormatMentalModels(result), err)
 }
 
 func referencesCommand(args []string) {
@@ -724,13 +801,18 @@ func referencesTrace(args []string) {
 	root := fs.String("root", ".", "repository root")
 	ticketStem := fs.String("ticket-stem", "", "ticket stem to trace")
 	specStem := fs.String("spec-stem", "", "spec anchor stem to trace")
+	format := fs.String("format", "", `output format: text or json`)
 	_ = fs.Parse(args)
 
 	result, err := wsdoc.ReferencesTrace(defaultRoot(*root), wsdoc.ReferenceTraceOptions{
 		TicketStem: *ticketStem,
 		SpecStem:   *specStem,
 	})
-	printJSONOrFatal("references trace", result, err)
+	if outputJSON(*format) {
+		printJSONOrFatal("references trace", result, err)
+		return
+	}
+	printTextOrFatal("references trace", mcp.FormatReferenceTrace(result), err)
 }
 
 func printJSONOrFatal(prefix string, value any, err error) {
@@ -742,6 +824,39 @@ func printJSONOrFatal(prefix string, value any, err error) {
 		fatal(prefix, err)
 	}
 	fmt.Println(string(encoded))
+}
+
+func printTextOrFatal(prefix, text string, err error) {
+	if err != nil {
+		fatal(prefix, err)
+	}
+	fmt.Print(text)
+}
+
+func outputJSON(format string) bool {
+	return strings.EqualFold(strings.TrimSpace(format), "json")
+}
+
+func runNativeGitText(root string, args ...string) (string, error) {
+	out, err := wsgit.ExecRunner{}.RunGit(context.Background(), root, args...)
+	return string(out), err
+}
+
+func runNativeGitLogText(root, rangeValue string, limit int) (string, error) {
+	if strings.HasPrefix(rangeValue, "-") {
+		return "", fmt.Errorf("range must be a revision or range, not a git option")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	args := []string{"log", "-n", fmt.Sprint(limit), "--date=iso-strict"}
+	if rangeValue != "" {
+		args = append(args, rangeValue)
+	}
+	return runNativeGitText(root, args...)
 }
 
 func agents(args []string) {

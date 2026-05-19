@@ -183,7 +183,7 @@ func TestSmokeCommandRunsExecutableChecksInOneProcess(t *testing.T) {
 	}
 }
 
-func TestGitCLICommandsReturnJSON(t *testing.T) {
+func TestGitCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	bin := wsMCPTestBin(t)
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -207,11 +207,18 @@ func TestGitCLICommandsReturnJSON(t *testing.T) {
 	head := stringsTrim(runGitOutput(t, root, "rev-parse", "HEAD"))
 
 	for _, tc := range []struct {
-		name  string
-		args  []string
-		check func(t *testing.T, out []byte)
+		name      string
+		args      []string
+		jsonArgs  []string
+		checkText func(t *testing.T, out []byte)
+		checkJSON func(t *testing.T, out []byte)
 	}{
-		{name: "status", args: []string{"git", "status", "--root", root}, check: func(t *testing.T, out []byte) {
+		{name: "status", args: []string{"git", "status", "--root", root}, jsonArgs: []string{"git", "status", "--root", root, "--format", "json"}, checkText: func(t *testing.T, out []byte) {
+			text := string(out)
+			if !strings.Contains(text, "file.txt") || !strings.Contains(text, "## ") || strings.HasPrefix(strings.TrimSpace(text), "{") {
+				t.Fatalf("status text = %q", text)
+			}
+		}, checkJSON: func(t *testing.T, out []byte) {
 			var got struct {
 				Clean        bool `json:"clean"`
 				ChangedFiles []struct {
@@ -223,7 +230,11 @@ func TestGitCLICommandsReturnJSON(t *testing.T) {
 				t.Fatalf("status JSON = %#v", got)
 			}
 		}},
-		{name: "diff", args: []string{"git", "diff", "--root", root, "--mode", "name_only", "file.txt"}, check: func(t *testing.T, out []byte) {
+		{name: "diff", args: []string{"git", "diff", "--root", root, "--mode", "name_only", "file.txt"}, jsonArgs: []string{"git", "diff", "--root", root, "--mode", "name_only", "--format", "json", "file.txt"}, checkText: func(t *testing.T, out []byte) {
+			if string(out) != "file.txt\n" {
+				t.Fatalf("diff text = %q", out)
+			}
+		}, checkJSON: func(t *testing.T, out []byte) {
 			var got struct {
 				Mode   string `json:"mode"`
 				Output string `json:"output"`
@@ -233,7 +244,12 @@ func TestGitCLICommandsReturnJSON(t *testing.T) {
 				t.Fatalf("diff JSON = %#v", got)
 			}
 		}},
-		{name: "log", args: []string{"git", "log", "--root", root, "--limit", "1"}, check: func(t *testing.T, out []byte) {
+		{name: "log", args: []string{"git", "log", "--root", root, "--limit", "1"}, jsonArgs: []string{"git", "log", "--root", root, "--limit", "1", "--format", "json"}, checkText: func(t *testing.T, out []byte) {
+			text := string(out)
+			if !strings.Contains(text, "commit "+head) || !strings.Contains(text, "initial") || strings.Contains(text, `"commits"`) {
+				t.Fatalf("log text = %q", text)
+			}
+		}, checkJSON: func(t *testing.T, out []byte) {
 			var got struct {
 				Limit   int `json:"limit"`
 				Commits []struct {
@@ -245,7 +261,11 @@ func TestGitCLICommandsReturnJSON(t *testing.T) {
 				t.Fatalf("log JSON = %#v", got)
 			}
 		}},
-		{name: "merge-base", args: []string{"git", "merge-base", "--root", root, "HEAD", "HEAD"}, check: func(t *testing.T, out []byte) {
+		{name: "merge-base", args: []string{"git", "merge-base", "--root", root, "HEAD", "HEAD"}, jsonArgs: []string{"git", "merge-base", "--root", root, "--format", "json", "HEAD", "HEAD"}, checkText: func(t *testing.T, out []byte) {
+			if string(out) != head+"\n" {
+				t.Fatalf("merge-base text = %q", out)
+			}
+		}, checkJSON: func(t *testing.T, out []byte) {
 			var got struct {
 				MergeBase string `json:"merge_base"`
 			}
@@ -261,7 +281,61 @@ func TestGitCLICommandsReturnJSON(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ws-mcp %v failed: %v\n%s", tc.args, err, string(out))
 			}
-			tc.check(t, out)
+			tc.checkText(t, out)
+
+			cmd = exec.Command(bin, tc.jsonArgs...)
+			out, err = cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("ws-mcp %v failed: %v\n%s", tc.jsonArgs, err, string(out))
+			}
+			tc.checkJSON(t, out)
+		})
+	}
+}
+
+func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
+	bin := wsMCPTestBin(t)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	root := t.TempDir()
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/tickets/todo/260504-demo-ticket.md"), "---\ntitle: Demo Ticket\nspec:\n  - 260504-demo-spec\n---\n# Demo Ticket\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/spec/demo.md"), "---\ntitle: Demo Spec\nsummary: Demo summary\n---\n# Demo\n\n## Feature {#260504-demo-spec}\n\nDemo behavior.\n")
+	mustWriteCLITest(t, filepath.Join(root, "ai-docs/mental-model/demo.md"), "---\ndomain: demo\ndescription: Demo model\nsources:\n  - ai-docs/spec/demo.md#260504-demo-spec\n---\n# Demo\n")
+	runGit(t, root, "init")
+	runGit(t, root, "config", "core.autocrlf", "false")
+
+	for _, tc := range []struct {
+		name     string
+		textArgs []string
+		jsonArgs []string
+		wantText string
+	}{
+		{name: "tickets list", textArgs: []string{"tickets", "list", "--root", root}, jsonArgs: []string{"tickets", "list", "--root", root, "--format", "json"}, wantText: "[todo] 260504-demo-ticket"},
+		{name: "specs status", textArgs: []string{"specs", "status", "--root", root, "260504-demo-spec"}, jsonArgs: []string{"specs", "status", "--root", root, "--format", "json", "260504-demo-spec"}, wantText: "spec_stem: 260504-demo-spec"},
+		{name: "mental-models find", textArgs: []string{"mental-models", "find", "--root", root, "--domain", "demo"}, jsonArgs: []string{"mental-models", "find", "--root", root, "--domain", "demo", "--format", "json"}, wantText: "ai-docs/mental-model/demo.md"},
+		{name: "references trace", textArgs: []string{"references", "trace", "--root", root, "--ticket-stem", "260504-demo-ticket"}, jsonArgs: []string{"references", "trace", "--root", root, "--ticket-stem", "260504-demo-ticket", "--format", "json"}, wantText: "input: ticket 260504-demo-ticket"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.textArgs...)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("ws-mcp %v failed: %v\n%s", tc.textArgs, err, string(out))
+			}
+			text := string(out)
+			if !strings.Contains(text, tc.wantText) || strings.HasPrefix(strings.TrimSpace(text), "{") || strings.HasPrefix(strings.TrimSpace(text), "[") && !strings.HasPrefix(tc.wantText, "[") {
+				t.Fatalf("%s text = %q", tc.name, text)
+			}
+
+			cmd = exec.Command(bin, tc.jsonArgs...)
+			out, err = cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("ws-mcp %v failed: %v\n%s", tc.jsonArgs, err, string(out))
+			}
+			var value any
+			mustUnmarshalCLIJSON(t, out, &value)
 		})
 	}
 }
@@ -366,7 +440,11 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 			} `json:"agents"`
 		} `json:"config"`
 	}
-	mustUnmarshalCLIJSON(t, show("config", "show"), &before)
+	beforeText := string(show("config", "show"))
+	if !strings.Contains(beforeText, "path: "+wantConfigPath()) || !strings.Contains(beforeText, "model_aliases:") || strings.HasPrefix(strings.TrimSpace(beforeText), "{") {
+		t.Fatalf("config show text = %q", beforeText)
+	}
+	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &before)
 	if before.Path != wantConfigPath() {
 		t.Fatalf("config show path = %q", before.Path)
 	}
@@ -402,7 +480,7 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 			} `json:"agents"`
 		} `json:"config"`
 	}
-	mustUnmarshalCLIJSON(t, show("config", "show"), &after)
+	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &after)
 	light := after.Config.Agents.Tiers["light"]
 	if after.Path != wantConfigPath() || light.Backend != "gemini" || light.Model != "gemini-3-1-pro" {
 		t.Fatalf("configured config show = path %q light %#v", after.Path, light)
@@ -420,14 +498,14 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 			} `json:"agents"`
 		} `json:"config"`
 	}
-	mustUnmarshalCLIJSON(t, show("config", "show"), &harnessAfter)
+	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &harnessAfter)
 	claudeCore := harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
 	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.4" || claudeCore.Effort != "medium" {
 		t.Fatalf("claude core alias = %#v", claudeCore)
 	}
 
 	show("config", "agents-tier", "--tier", "core", "--harness", "claude", "--backend", "codex", "--model", "gpt-5.5")
-	mustUnmarshalCLIJSON(t, show("config", "show"), &harnessAfter)
+	mustUnmarshalCLIJSON(t, show("config", "show", "--format", "json"), &harnessAfter)
 	claudeCore = harnessAfter.Config.Agents.ModelAliases["core"]["claude"]
 	if claudeCore.Backend != "codex" || claudeCore.Model != "gpt-5.5" || claudeCore.Effort != "" {
 		t.Fatalf("claude core alias after omitted effort update = %#v", claudeCore)
