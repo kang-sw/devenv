@@ -51,3 +51,4 @@ related:
 
 - Ticket Result detection is textual and narrow: only cached diff lines beginning `+### Result` or `+#### Edition` under tickets are summarized.
 - Revision validation mainly prevents option injection; it does not fully parse Git revision syntax.
+- `git.commit` cannot yet emit H3 subsections under `## AI Context`; native Git is required for exact `### Mental Model Notes` commits until `260519-bug-git-commit-mental-model-notes` is addressed.

@@ -32,7 +32,7 @@ related:
 
 ## Coupling
 
-- Prompt text, filenames, additions, deletions, and moves change the bundle hash; `agents-plugin/runtime.json` must be refreshed.
+- Prompt text, filenames, additions, deletions, and moves change the bundle hash; `agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json` must be refreshed.
 - Launcher fast-path and fallback checks must report the same prompt bundle hash: `runtime.capabilities`, `runtime.info`, and `runtime.json` drift makes otherwise compatible binaries fail validation.
 - Release asset builds rewrite runtime prompt metadata from the built binary.
 - Skills and API docs code name prompt stems directly; renaming stems requires updating those callers.

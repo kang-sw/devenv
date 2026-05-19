@@ -118,7 +118,7 @@ visible before work begins.
 references, snippets, and hierarchy hints without requiring callers to scan the
 tree manually.
 
-## 🚧 Mental-Model Update Context Annotation {#260518-mental-model-update-context-annotation}
+## Mental-Model Update Context Annotation {#260518-mental-model-update-context-annotation}
 
 Implementers annotate commits with a `### Mental Model Notes` sub-section
 under `## AI Context` when the implementation creates a non-obvious invariant,

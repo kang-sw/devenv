@@ -88,6 +88,25 @@ Verification:
 - Manual trace: a commit with `### Mental Model Notes` in body is prioritized
   over raw diff inference in updater output.
 
+### Result (cab3ef2f) - 2026-05-19
+
+Phase 1 added the implementation-playbook obligation to record non-obvious
+mental-model context under `## AI Context` -> `### Mental Model Notes`, updated
+`mental-model-updater` to read commit bodies with `ws/git.log(include_body:
+true)` before diff analysis, and refreshed both ws and wsflow prompt bundle
+hashes.
+
+Verification passed:
+
+- `go test ./...` from `agents-plugin-tool/`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- Manual trace: `ws/git.log(include_body: true)` over `cab3ef2f` surfaced the
+  `### Mental Model Notes` subsection for updater consumption.
+
+Dogfooding found that `ws/git.commit` cannot yet emit H3 subsections under
+`## AI Context`; follow-up ticket `260519-bug-git-commit-mental-model-notes`
+captures that gap. Phase 2 remains deferred.
+
 ### Phase 2: Updater brief self-detection
 
 Enhance `mental-model-updater` to detect and read brief files from the diff

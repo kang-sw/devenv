@@ -180,7 +180,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260518-feat-contextual-mental-model-update` - add `### Mental Model Notes` commit convention to impl-playbook and priority processing to mental-model-updater (Phase 1 only; Phase 2 brief self-detection deferred)
+- `260518-feat-contextual-mental-model-update` - Phase 2 brief self-detection remains deferred until brief commit-range inclusion is confirmed
 
 ## Session Notes
 

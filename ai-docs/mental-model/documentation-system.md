@@ -28,6 +28,7 @@ related:
 - Epic tickets are lightweight milestone boards for scope, child-ticket decomposition, cross-child decisions, and completion criteria; child tickets carry implementation detail and complete phase units. `lead-proceed` executes one selected phase without changing ticket decomposition. {#260508-lightweight-epic-ticket-conventions} {#260505-proceed-routing-pipeline}
 - Mental-model hierarchy is path-derived; subdomain callers must load parent `index.md` before child docs. {#260505-mental-model-document-system}
 - The root `ai-docs/mental-model.md` may carry a compact project reading map for task/topic routing; it does not own behavior, status, queue, or source-derived claims. {#260505-mental-model-document-system}
+- `### Mental Model Notes` is an optional workflow-internal commit subsection under `## AI Context`; `mental-model-updater` treats those notes as primary intent and uses diffs for verification and fallback. {#260518-mental-model-update-context-annotation}
 - Infra and convention docs are embedded in the Go runtime; retired legacy copies do not affect `ws/infra.read` or `ws/convention.read`.
 - `ai-docs/WORKFLOW.md` is bootstrap-installed explanatory documentation for plugin-less maintenance; wsdoc parsers and MCP tools do not treat it as convention, spec, ticket, or runtime input. {#260506-bootstrap-workflow-guide}
 
