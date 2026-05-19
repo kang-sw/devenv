@@ -93,7 +93,7 @@ Target: user request
 1. For `epic`, do not suggest proceeding on the epic path.
 2. For `epic`, suggest creating, promoting, or proceeding a child ticket.
 3. For non-epic tickets, suggest `ws:lead-proceed` unless `judge: missing-spec-entry` fired.
-4. State that proceed routes to implementation readiness; `ws:lead-implement` resolves skeleton, plan, or direct execution needs.
+4. State that proceed routes to implementation readiness; `ws:lead-implement` resolves plan depth and execution mode.
 5. Emit the created ticket path on its own final line: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
 6. For `epic`, state that the path is a board artifact, not an implementation target.
 7. Preserve the final `Ticket:` line; callers such as `ws:lead-proceed` capture this path from prefix-stage output.

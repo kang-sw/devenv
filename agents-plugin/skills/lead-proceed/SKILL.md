@@ -10,14 +10,14 @@ Target: user request
 ## Invariants
 
 Scope
-- Route only; do not implement, plan, or write skeletons here.
+- Route only; do not implement or plan here.
 - Invoke `ws:lead-workflow-manual` first when workflow primitives are not already in context.
 - Assess from conversation state and artifacts only; do not read source code.
 - Do not rejudge ticket quality, demand ticket splitting, or mutate ticket structure.
 
 Pipeline
 - Handoff stage order is fixed when stages fire: spec -> ticket -> implementation.
-- Always route code-editing work through `ws:lead-implement`, including skeleton work.
+- Always route code-editing work through `ws:lead-implement`.
 - Proceed assumes implementation intent; stop only when the target is not actionable or user-blocking discussion remains.
 
 Execution
@@ -50,7 +50,7 @@ Routing
 2. Set `target-kind`: `ticket-path` or `inline`.
 3. Set `has-ticket=yes` for an existing ticket path or captured `Ticket:` path.
 4. If `has-ticket=yes`: read ticket; extract status, category, scope, phases, phase results, open questions, and `plans:`.
-5. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs, skeletons, or tests.
+5. Check workflow artifacts: ticket frontmatter and `ai-docs/.plans/`; do not inspect source stubs or tests.
 6. If `target-kind=ticket-path`: set `actionable=yes`.
 7. If `target-kind=inline`: apply `judge: actionable`.
 8. Apply `judge: discussion-needed`.
@@ -87,7 +87,7 @@ Routing
 - **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | whole target - no phases>
-- **Execution**: ws:lead-implement - owns skeleton decisions, code-editing stages, and branch lifecycle
+- **Execution**: ws:lead-implement - owns code-editing stages and branch lifecycle
 - **Carried context**: downstream stages receive route constraints.
 
 Proceeding.
