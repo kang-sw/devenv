@@ -213,6 +213,12 @@ than passing the missing root to `git add`; requested roots with live changes
 still stage through the explicit add path.
 {#260513-git-commit-result-edition-detection}
 
+> [!note] Planned 🚧
+> `git.commit` will accept structured Mental Model Notes input and render it as
+> a `### Mental Model Notes` sub-section under `## AI Context`, while preserving
+> the existing `ai_context` bullet path and deterministic commit body shape.
+> {#260519-git-commit-mental-model-notes}
+
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
 `subquery` starts an asynchronous scoped codebase or documentation query and
