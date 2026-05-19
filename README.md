@@ -1,14 +1,19 @@
-# devenv — Personal Developer Environment
+# devenv
 
-A batteries-included developer workstation setup. One-shot bootstrap script for macOS, WSL, and Linux.
+Personal developer environment and local `ws` workflow workspace.
+
+This repo started as dotfiles and a workstation bootstrap script. It now also
+contains the local `ws` and `wsflow` plugin packages, the native `ws-mcp`
+runtime source, workflow docs, and the dashboard scaffold used while developing
+that system.
 
 ## Quick Start
 
 ```sh
 git clone https://github.com/kang-sw/devenv.git ~/devenv
 cd ~/devenv
-bash install.sh          # idempotent — safe to re-run
-bash install.sh --update # skip packages & sudo, refresh symlinks only
+bash install.sh          # idempotent; safe to re-run
+bash install.sh update   # skip packages & sudo, refresh config and symlinks
 ```
 
 > Neovim 0.10+ is required but not installed by the script.
@@ -16,39 +21,52 @@ bash install.sh --update # skip packages & sudo, refresh symlinks only
 ## What's Inside
 
 ```
-nvim/     Neovim config (LazyVim distro, language support, debugger, etc.)
-agents-plugin/   ws plugin package for Codex and Claude-compatible plugin installs
-agents-plugin-wsflow/   agentless wsflow plugin package for Codex and Claude-compatible installs
-agents-plugin-tool/   native ws MCP runtime and tooling source
-shell/    tmux, WezTerm, starship, zsh dotfiles, helper scripts
+nvim/                  Neovim config
+shell/                 tmux, WezTerm, Starship, zsh, helper scripts
+tools/                 local Claude session TUIs
+agents-plugin/         ws plugin package
+agents-plugin-wsflow/  agentless wsflow plugin package
+agents-plugin-tool/    native ws MCP runtime and tooling source
+ws-dashboard/          local web dashboard scaffold
+ai-docs/               workflow specs, tickets, mental models, references
 ```
 
-- **Neovim** — LazyVim-based config with LSP, formatter, DAP, and test runner support for Rust, C/C++, Python, Markdown, Typst. VSCode Dark+ colorscheme with semantic token overrides.
-- **ws plugin** — Codex-first workflow skills plus the native `ws-mcp` runtime. Claude Code compatibility uses the `agents-plugin/` package metadata, not a separate legacy source tree.
-- **wsflow plugin** — Agentless workflow skills that reuse the shared runtime without ws managed-agent orchestration.
-- **tmux** — Vim-aware pane navigation, cross-window jumping, vi copy-mode, platform-aware clipboard.
-- **WezTerm** — JetBrainsMono Nerd Font, tmux-style keybindings, IME auto-switching.
-- **Shell** — Starship prompt, eza, zoxide, delta, bat, fzf, zsh plugins.
+- **Workstation config**: Neovim, tmux, WezTerm, Starship, zsh, shell helpers,
+  and editor/tooling defaults for day-to-day development.
+- **Local TUIs**: `claude-watch` and `claude-dash` live under `tools/`.
+- **`ws` plugin**: Codex-first workflow skills plus the `ws-mcp` runtime.
+  Claude Code compatibility uses the `agents-plugin/` package metadata; there is
+  no live `claude-plugin/` source tree.
+- **`wsflow` plugin**: Agentless workflow skills that reuse the shared runtime
+  without ws managed-agent orchestration.
+- **Runtime source**: Go tooling and MCP server code under `agents-plugin-tool/`.
+- **Workflow docs**: specs, tickets, mental models, and references under
+  `ai-docs/`.
 
 ## install.sh
 
-Detects the platform and handles: Homebrew, CLI tools, zsh plugins, dotfile symlinks, and local ws plugin cache setup. Stale symlinks are cleaned up automatically.
+Detects macOS, WSL, and Linux. Full mode installs packages and writes config.
+`update` mode skips package installation and refreshes dotfiles, symlinks, and
+local plugin setup.
 
 ## ws Plugin
 
-The active ws plugin package lives in `agents-plugin/`. Local bootstrap
-registers a Claude-compatible snapshot from that package when Claude Code is
-available:
+The active `ws` plugin package lives in `agents-plugin/`.
+
+Codex installs use the repository marketplace entries under `.agents/plugins/`.
+Claude-compatible marketplace metadata lives under `.claude-plugin/`.
+
+Local bootstrap registers a Claude-compatible snapshot from `agents-plugin/`
+when Claude Code is available:
 
 ```sh
+claude plugin marketplace add kang-sw/devenv
 claude plugin install ws@kang-sw-devenv
 ```
 
-Codex installs use the repository marketplace entries under `.agents/plugins/`.
-Claude-compatible marketplace metadata lives under `.claude-plugin/`. The
-agentless wsflow package lives in `agents-plugin-wsflow/` for separate
-marketplace installation; `install.sh` does not install it into Claude.
+The agentless `wsflow` package lives in `agents-plugin-wsflow/` for separate
+marketplace installation. `install.sh` does not install `wsflow` into Claude.
 
 ## License
 
-Personal configuration — use freely, no warranty implied.
+Personal configuration. Use freely, no warranty implied.
