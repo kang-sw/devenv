@@ -391,15 +391,14 @@ invoke implementation primitives before `lead-implement`. Public or
 cross-module contract checkpoints are expressed as `lead-write-code` brief
 contract and integration-test instructions.
 
-> [!note] Planned 🚧
-> `lead-proceed` will select a conservative implementation dispatch before the
-> `lead-implement` handoff from conversation and workflow artifacts only. Full
-> ws announcements will report `Implementation Dispatch`, `Dispatch Reason`, and
-> `Branch Mode`; a proceed-selected `write-code` dispatch is a hard lower bound
-> that `lead-implement` cannot downgrade to direct edit. wsflow announcements
-> will mirror the same routing clarity as `Execution Path`, `Complexity Flag`,
-> and `Branch Mode` without introducing unavailable full ws `lead-write-code`
-> routing. {#260519-proceed-implementation-dispatch-precheck}
+Before implementation handoff, `lead-proceed` selects a conservative
+implementation dispatch from conversation and workflow artifacts only. Full ws
+announcements report `Implementation Dispatch`, `Dispatch Reason`, and
+`Branch Mode`; a proceed-selected `write-code` dispatch is a hard lower bound
+that `lead-implement` cannot downgrade to direct edit. wsflow announcements
+mirror the same routing clarity as `Execution Path`, `Complexity Flag`, and
+`Branch Mode` without introducing unavailable full ws `lead-write-code`
+routing. {#260519-proceed-implementation-dispatch-precheck}
 
 ## Sprint Session Container {#260505-sprint-session-container}
 
