@@ -1207,23 +1207,71 @@ func formatMentalModelFind(query string, models []wsdoc.MentalModelInfo) string 
 	})
 }
 
+const (
+	maxFindTextDocuments      = 10
+	maxFindTextEvidencePerDoc = 3
+)
+
 func formatDocumentFind(query, singular, plural string, count int, each func(func(string, int, int, []wsdoc.MatchEvidence))) string {
+	type doc struct {
+		path    string
+		score   int
+		hits    int
+		matches []wsdoc.MatchEvidence
+	}
+	docs := []doc{}
+	each(func(path string, score, hits int, matches []wsdoc.MatchEvidence) {
+		docs = append(docs, doc{path: path, score: score, hits: hits, matches: matches})
+	})
+
 	var b strings.Builder
 	label := plural
 	if count == 1 {
 		label = singular
 	}
-	fmt.Fprintf(&b, "%d candidate %s for query=%q\n", count, label, query)
+	truncatedDocs := len(docs) > maxFindTextDocuments
+	truncatedHits := false
+	for _, d := range docs {
+		if len(d.matches) > maxFindTextEvidencePerDoc {
+			truncatedHits = true
+			break
+		}
+	}
+	fmt.Fprintf(&b, "%d candidate %s for query=%q", count, label, query)
+	if truncatedDocs || truncatedHits {
+		fmt.Fprintf(&b, " (showing subset: first %d documents, up to %d hits each)", maxFindTextDocuments, maxFindTextEvidencePerDoc)
+	}
+	b.WriteString("\n")
 	if count == 0 {
+		fmt.Fprintf(&b, "No candidates met the query threshold; retry with shorter noun phrases.\n")
 		return b.String()
 	}
-	each(func(path string, score, hits int, matches []wsdoc.MatchEvidence) {
-		fmt.Fprintf(&b, "\n%s\tscore=%d\thits=%d\n", path, score, hits)
+	if len(docs) > maxFindTextDocuments {
+		docs = docs[:maxFindTextDocuments]
+	}
+	for _, d := range docs {
+		matches := selectFindTextEvidence(d.matches)
+		fmt.Fprintf(&b, "\n%s\tscore=%d\thits=%d\n", d.path, d.score, d.hits)
 		for _, match := range matches {
 			fmt.Fprintf(&b, "  %d: %s\n", match.Line, match.Snippet)
 		}
-	})
+	}
 	return b.String()
+}
+
+func selectFindTextEvidence(matches []wsdoc.MatchEvidence) []wsdoc.MatchEvidence {
+	selected := append([]wsdoc.MatchEvidence(nil), matches...)
+	if len(selected) > maxFindTextEvidencePerDoc {
+		sort.SliceStable(selected, func(i, j int) bool {
+			if len(selected[i].MatchedTerms) != len(selected[j].MatchedTerms) {
+				return len(selected[i].MatchedTerms) > len(selected[j].MatchedTerms)
+			}
+			return selected[i].Line < selected[j].Line
+		})
+		selected = selected[:maxFindTextEvidencePerDoc]
+	}
+	sort.SliceStable(selected, func(i, j int) bool { return selected[i].Line < selected[j].Line })
+	return selected
 }
 
 func formatSpecStatus(status *wsdoc.SpecAnchorStatus) string {

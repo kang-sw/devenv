@@ -54,9 +54,6 @@ func matchDocumentQuery(query string, candidate docQueryCandidate) (docQueryMatc
 		}
 	}
 	matches := lineMatches(candidate.BodyText, matchedTerms)
-	if len(matches) == 0 && fieldText != "" {
-		matches = fieldLineMatches(fieldText, matchedTerms)
-	}
 	return docQueryMatch{Score: score, Matches: matches, Terms: matchedTerms}, true
 }
 
@@ -94,18 +91,6 @@ func lineMatches(text string, terms []string) []MatchEvidence {
 	return out
 }
 
-func fieldLineMatches(text string, terms []string) []MatchEvidence {
-	out := []MatchEvidence{}
-	for _, line := range strings.Split(text, "\n") {
-		matched := matchedTermsInText(line, terms)
-		if len(matched) == 0 {
-			continue
-		}
-		out = append(out, MatchEvidence{Line: 0, MatchedTerms: matched, Snippet: compactSnippet(line, matched)})
-	}
-	return out
-}
-
 func matchedTermsInText(text string, terms []string) []string {
 	counts := tokenCounts(text)
 	matched := []string{}
@@ -122,10 +107,10 @@ func compactSnippet(line string, terms []string) string {
 	if len([]rune(trimmed)) <= snippetContextRunes*2 {
 		return trimmed
 	}
-	lower := strings.ToLower(trimmed)
+	lowerRunes := []rune(strings.ToLower(trimmed))
 	idx := -1
 	for _, term := range terms {
-		if pos := strings.Index(lower, term); pos >= 0 && (idx < 0 || pos < idx) {
+		if pos := runeIndex(lowerRunes, []rune(term)); pos >= 0 && (idx < 0 || pos < idx) {
 			idx = pos
 		}
 	}
@@ -149,6 +134,25 @@ func compactSnippet(line string, terms []string) string {
 		snippet += "..."
 	}
 	return snippet
+}
+
+func runeIndex(haystack, needle []rune) int {
+	if len(needle) == 0 || len(needle) > len(haystack) {
+		return -1
+	}
+	for i := 0; i <= len(haystack)-len(needle); i++ {
+		matched := true
+		for j := range needle {
+			if haystack[i+j] != needle[j] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return i
+		}
+	}
+	return -1
 }
 
 func sortMatchesByLine(matches []MatchEvidence) {

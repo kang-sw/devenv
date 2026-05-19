@@ -1,6 +1,9 @@
 package wsdoc
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSpecsListHandlesNestedSpecsAndDuplicateFilenames(t *testing.T) {
 	root := t.TempDir()
@@ -97,5 +100,31 @@ func TestSpecsFindToleratesBroadHumanQueryWithEvidence(t *testing.T) {
 	}
 	if got[0].MatchScore == 0 || len(got[0].Matches) == 0 || got[0].Matches[0].Line == 0 || len(got[0].Matches[0].MatchedTerms) == 0 || got[0].Matches[0].Snippet == "" {
 		t.Fatalf("match evidence = %#v", got[0])
+	}
+}
+
+func TestCompactSnippetUsesRuneOffsets(t *testing.T) {
+	line := strings.Repeat("한글", 80) + " marketplace release"
+	got := compactSnippet(line, []string{"marketplace"})
+	if !strings.Contains(got, "marketplace") {
+		t.Fatalf("snippet = %q", got)
+	}
+}
+
+func TestSpecsFindMetadataOnlyMatchHasNoSyntheticLineEvidence(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/spec/marketplace-installer.md", "---\ntitle: Other\n---\n# Other\n\nNo matching body terms.\n")
+
+	got, err := SpecsFind(root, SpecFindOptions{Query: "marketplace installer"})
+	if err != nil {
+		t.Fatalf("SpecsFind returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("SpecsFind length = %d: %#v", len(got), got)
+	}
+	for _, match := range got[0].Matches {
+		if match.Line == 0 {
+			t.Fatalf("synthetic line evidence = %#v", got[0].Matches)
+		}
 	}
 }

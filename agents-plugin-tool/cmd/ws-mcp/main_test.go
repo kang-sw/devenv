@@ -364,6 +364,14 @@ func TestDocumentationCLICommandsDefaultToTextAndKeepJSONFormat(t *testing.T) {
 	if text := string(out); !strings.Contains(text, "candidate mental model for query=\"runtime readable CLI mirror\"") || !strings.Contains(text, "ai-docs/mental-model/demo.md\tscore=") || strings.Contains(text, "matched:") {
 		t.Fatalf("mental-models query text = %q", text)
 	}
+	cmd = exec.Command(bin, "mental-models", "find", "--root", root, "--query", "runtime readable CLI mirror", "--format", "json")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ws-mcp mental-models query json failed: %v\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), "\"matches\"") || !strings.Contains(string(out), "\"matched_terms\"") {
+		t.Fatalf("mental-models query json missing evidence: %s", string(out))
+	}
 }
 
 func TestAgentsDebugCLICommandsReturnDiagnostics(t *testing.T) {
