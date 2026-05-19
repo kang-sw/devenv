@@ -3,6 +3,8 @@ title: Proceed implementation dispatch precheck
 parent: 260513-epic-workflow-question-loop-hygiene
 spec:
   - 260519-proceed-implementation-dispatch-precheck
+plans:
+  phase-1: 2026-05/19-260519-feat-proceed-implementation-dispatch.brief
 related-mental-model:
   - workflow-skills
 ---
@@ -63,6 +65,20 @@ Acceptance criteria:
 - wsflow mirrors stay aligned where the affected skill text exists.
 - Specs and mental models continue to state that contract checkpoints live in
   `lead-write-code` briefs, not generated skeleton artifacts.
+
+### Result (418d2fe) - 2026-05-19
+
+Removed stale normal-routing skeleton wording from `lead-proceed` and
+`lead-write-ticket`. `lead-proceed` now describes itself as route-only without
+claiming skeleton authoring or skeleton decisions, and its artifact check no
+longer names skeletons as a normal proceed input. `lead-write-ticket` now says
+`lead-implement` resolves plan depth and execution mode, rather than skeleton
+needs.
+
+`lead-implement` in the source tree already omitted skeleton routing language,
+and wsflow proceed/implement/write-ticket skills had no matching stale skeleton
+references. The spec and mental model still preserve legacy/deprecated skeleton
+artifact behavior and the `lead-write-code` brief-based contract checkpoint.
 
 ### Phase 2: Add proceed dispatch precheck
 
