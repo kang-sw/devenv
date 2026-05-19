@@ -5,6 +5,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - prompt-bundle
+completed: 2026-05-19
 ---
 
 # Contextual mental-model update via commit annotations and brief detection
@@ -107,7 +108,7 @@ Dogfooding found that `ws/git.commit` cannot yet emit H3 subsections under
 `## AI Context`; follow-up ticket `260519-bug-git-commit-mental-model-notes`
 captures that gap. Phase 2 remains deferred.
 
-### Phase 2: Updater brief self-detection
+### Phase 2: Updater brief self-detection [dropped]
 
 Enhance `mental-model-updater` to detect and read brief files from the diff
 stat when available, providing rich intent context for the delegated path
@@ -129,3 +130,13 @@ Verification:
 - `go test ./...` from `agents-plugin-tool/`
 - Manual trace: updater reads brief and targets only relevant domains rather
   than scanning all mental-model docs.
+
+### Result (dropped) - 2026-05-19
+
+Dropped as an explicit implementation phase. Brief and implementation plan files
+already appear in the commit-range diff on delegated workflow paths when
+`<implementation-start>` precedes `lead-write-code`; explicit brief parsing is
+therefore best-effort rather than required behavior for now.
+
+The remaining gap is recorded in spec
+`260518-mental-model-update-context-annotation` as an Implementation Gap.

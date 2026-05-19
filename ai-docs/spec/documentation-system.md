@@ -148,6 +148,13 @@ When no notes are present, the updater falls back to diff-only analysis.
 >   sub-section of it.
 > - Updater fallback to diff-only analysis is required when notes are absent.
 
+> [!note] Implementation Gap · 2026-05-19
+> Missing behavior: `mental-model-updater` does not explicitly read
+> implementation brief files from `ai-docs/.plans/`. This is accepted as
+> best-effort for now because implementation plans and briefs already appear in
+> the commit-range diff when workflow timing includes them; explicit brief
+> parsing can be revisited if notes plus diff evidence miss important intent.
+
 ## Documentation Reference Tracing {#260505-documentation-reference-tracing}
 
 `ws/references.trace` returns the documentation graph reachable from exactly one
