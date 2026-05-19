@@ -158,7 +158,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-epic-workflow-question-loop-hygiene` | todo | Coordinate finish-check, proceed freshness, Result edition, and readable-output workflow cleanup |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
-| `260513-feat-human-readable-tool-output` | todo | Backlog human-readable defaults for remaining MCP and CLI workflow tool outputs |
+| `260513-feat-human-readable-tool-output` | ready | Backlog human-readable defaults for remaining MCP and CLI workflow tool outputs |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260513-feat-tolerant-doc-find-queries` | todo | Make documentation lookup queries and convention aliases tolerant candidate discovery |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
@@ -179,7 +179,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- No ready tickets.
+- `260513-feat-human-readable-tool-output` - make remaining workflow MCP and CLI
+  tool surfaces default to compact readable text while preserving explicit JSON
+  compatibility and native Git mirror output shape.
 
 ## Session Notes
 

@@ -162,6 +162,15 @@ labeled text where no caller needs stable structured fields.
 Launcher-facing compatibility data remains available where required.
 {#260512-metadata-trace-readable-output-defaults}
 
+Interactive workflow command surfaces default to compact readable text when the
+caller has not explicitly requested structured JSON. Write-capable workflow
+tools summarize the completed action, affected paths or entities, and detected
+workflow annotations without forcing callers to parse JSON. CLI mirrors follow
+the same default where they are workflow-oriented wrappers, while Git command
+mirrors preserve the original Git command output shape rather than reserializing
+it into a ws-specific JSON envelope. Explicit JSON modes remain available for
+structured consumers. {#260519-workflow-command-readable-output-defaults}
+
 ## Git Workflow Tools {#260505-git-workflow-tools}
 
 `git.status` returns the current branch and worktree status.

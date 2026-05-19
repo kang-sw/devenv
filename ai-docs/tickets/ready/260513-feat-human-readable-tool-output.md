@@ -1,6 +1,8 @@
 ---
 title: Human-readable workflow tool output
 parent: 260513-epic-workflow-question-loop-hygiene
+spec:
+  - 260519-workflow-command-readable-output-defaults
 related-mental-model:
   - git-workflow-tools
   - mcp-runtime
@@ -44,5 +46,7 @@ Acceptance criteria:
   ticket-result or edition detections in compact text by default.
 - CLI mirrors print readable text by default and offer an explicit JSON mode
   where compatibility requires it.
+- Git CLI mirrors preserve the original Git output shape as much as practical
+  instead of wrapping native Git output in ws-specific JSON by default.
 - Tests cover both default text output and explicit JSON output.
 - Specs and mental models describe the default text / explicit JSON rule.
