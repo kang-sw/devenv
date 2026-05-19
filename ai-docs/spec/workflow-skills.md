@@ -399,7 +399,7 @@ contract and integration-test instructions.
 > that `lead-implement` cannot downgrade to direct edit. wsflow announcements
 > will mirror the same routing clarity as `Execution Path`, `Complexity Flag`,
 > and `Branch Mode` without introducing unavailable full ws `lead-write-code`
-> routing.
+> routing. {#260519-proceed-implementation-dispatch-precheck}
 
 ## Sprint Session Container {#260505-sprint-session-container}
 

@@ -1,6 +1,8 @@
 ---
 title: Proceed implementation dispatch precheck
 parent: 260513-epic-workflow-question-loop-hygiene
+spec:
+  - 260519-proceed-implementation-dispatch-precheck
 related-mental-model:
   - workflow-skills
 ---
