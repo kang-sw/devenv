@@ -216,14 +216,11 @@ When an explicit commit path names an old root from a rename or a deleted root,
 than passing the missing root to `git add`; requested roots with live changes
 still stage through the explicit add path.
 {#260513-git-commit-result-edition-detection}
-
-> [!note] Planned 🚧
-> `git.commit` ticket-change summaries will conservatively reconstruct an
-> unambiguous same-stem ticket status move even when native Git reports the
-> staged change as separate add/delete records instead of a rename. Ambiguous
-> add/delete sets remain non-move ticket changes rather than inventing a
-> destination status.
-> {#260519-git-commit-add-delete-ticket-move-summary}
+`git.commit` ticket-change summaries conservatively reconstruct an unambiguous
+same-stem ticket status move even when native Git reports the staged change as
+separate add/delete records instead of a rename. Ambiguous add/delete sets remain
+non-move ticket changes rather than inventing a destination status.
+{#260519-git-commit-add-delete-ticket-move-summary}
 
 ## Workflow State And Delegation Tools {#260505-workflow-state-delegation-tools}
 
