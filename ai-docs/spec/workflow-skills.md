@@ -167,23 +167,23 @@ only.
 detailed discussion, implementation phases, or phase-specific decisions arise
 while editing an epic, the skill creates or updates child tickets instead of
 expanding the epic body; a single child ticket may carry multiple phases when
-they form sequential complete implementation units. Actionable child-ticket
-phases are authored from a fresh-session completion view: each phase describes
-the next complete behavior a future `lead-proceed` run can finish, review,
-verify, and hand off cleanly. Setup, API, UI, tests, skeletons, and
-investigation are phase ingredients unless one is the reviewable deliverable.
-Each non-epic actionable phase states what behavior is complete, what remains
-deferred, and what verification proves the phase complete.
-{#260508-write-ticket-epic-child-boundary}
+they form cohesive sequential reviewable implementation slices rather than task
+checklists. A single-slice ticket uses `Phase 1`. Actionable child-ticket phases
+are authored from a fresh-session completion view: each phase describes the next
+complete behavior a future `lead-proceed` run can finish, review, verify, and
+hand off cleanly in one plan/implement/review/verify loop. Setup, API, UI,
+tests, skeletons, and investigation are phase ingredients unless one is the
+reviewable deliverable. Each non-epic actionable phase states what behavior is
+complete, what remains deferred, and what verification proves the phase
+complete. {#260508-write-ticket-epic-child-boundary}
 
 `lead-write-ticket` treats tickets as recoverability artifacts before compact
 summaries. Non-epic actionable tickets preserve caller-visible contracts,
-constraints, rationale, implementation strategy decisions, rejected
-alternatives, forward-compatibility contracts, verification expectations, and
-phase dependencies. Plan-level source details such as paths, signatures,
-integration mechanics, and test command classification may move to plans, but
-settled local or cross-ticket decisions must stay in the relevant child ticket
-or phase.
+constraints, rationale, rejected alternatives, forward-compatibility notes,
+verification expectations, suggested strategy, phase dependencies, and agreed
+API/type/event/UI sketches. Source-local edit notes are excluded unless they
+are settled constraints; settled local or cross-ticket decisions stay in the
+relevant child ticket or phase.
 
 `lead-write-ticket` reviews related-ticket decisions by default when
 creating or editing a non-epic actionable ticket. It inspects the target's

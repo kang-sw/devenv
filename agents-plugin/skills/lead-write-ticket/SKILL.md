@@ -11,8 +11,8 @@ Target: user request
 
 - Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
 - Read only ticket files selected as edit targets; use `ws/tickets.*`, `ws/references.trace`, or `ws/subquery` for graph discovery.
-- Preserve settled decisions before pruning ticket length.
-- Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and phase-specific decisions in child tickets.
+- Preserve settled decisions, contracts, and agreed API/type/event/UI sketches before pruning.
+- Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
 
 ## On: invoke
@@ -38,7 +38,7 @@ Target: user request
 5. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
 6. For `epic`: reference existing/planned children; start a separate `ws:lead-write-ticket` invocation for child creation or child edit.
 7. For non-epic actionable tickets, run **Apply Ticket Content**.
-8. If multiple complete phase units are warranted through `judge: phase-need`, use `### Phase N: <title>` sections.
+8. For non-epic actionable tickets, write one phase per reviewable implementation slice; use `Phase 1` for a single-slice ticket.
 9. Note inter-phase dependencies explicitly.
 10. Verify scope through `judge: ticket-scope`.
 11. For `ready/`, defer queue entry until **Spec-stem Check** passes.
@@ -55,24 +55,25 @@ Target: user request
 
 ## On: Apply Ticket Content
 
-1. Capture goals and caller-visible contracts.
+1. Capture goals, contracts, and agreed API/type/event/UI sketches.
 2. Capture completion boundary and deferred scope.
 3. Capture constraints and rationale.
-4. Capture implementation strategy decisions and suggested approaches.
+4. Capture settled implementation strategy decisions and suggested strategy.
 5. Capture rejected alternatives.
-6. Capture forward-compatibility contracts.
+6. Capture forward-compatibility notes.
 7. Capture verification expectations.
-8. Leave codebase-derived plan detail to the implementation plan: paths, type reuse, integration patterns, signatures, testing classifications.
+8. Exclude source-local edit notes unless settled constraints.
 
 ## On: Intent Review
 
 1. Re-read the written/edited ticket against the conversation and cross-ticket decision review.
-2. Check completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility contracts, verification expectations, and suggested approaches.
-3. Check whether the ticket distorts or omits discussed intent.
-4. Check whether related-ticket decisions that constrain this implementation scope were captured.
-5. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation.
-6. Fix gaps in-place.
-7. Present a brief correction summary, or confirm nothing was missed.
+2. Check completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility notes, verification expectations, and suggested strategy.
+3. Check whether agreed API/type/event/UI sketches were preserved literally, not prose-flattened.
+4. Check whether the ticket distorts or omits discussed intent.
+5. Check whether related-ticket decisions that constrain this implementation slice were captured.
+6. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation.
+7. Fix gaps in-place.
+8. Present a brief correction summary, or confirm nothing was missed.
 
 ## On: Spec-stem Check
 
@@ -145,20 +146,18 @@ Do not trigger: a ticket merely has `related:` links or default cross-ticket dec
 
 ### judge: ticket-scope
 
-Soft signal: ticket is over ~200 lines.
-Act: ticket is over 300 lines.
-First prune: plan-level detail such as file paths, function signatures, and integration specifics.
-Do not prune: settled local decisions or cross-ticket decisions.
-Move decisions: put them into the relevant child ticket or phase.
-Epic still large: move details into child tickets.
-Non-epic still large: introduce an epic and split into child tickets.
+Review basis: artifact role, not length.
+Keep: decisions, constraints, and agreed API/type/event/UI sketches.
+Exclude: source-local edit notes unless settled constraints.
+Split: only when board, ticket, and implementation-unit roles are mixed.
 
 ### judge: phase-need
 
 Applies only: non-epic actionable tickets.
-Phase unit: one complete behavior a future fresh session can finish, review, verify, and hand off cleanly.
-Phase ingredients: setup, API, UI, tests, skeletons, and investigation unless one is the reviewable deliverable.
-Multiple phases: sequential complete increments with distinct success criteria.
+Phase unit: one reviewable implementation slice a future fresh session can finish, review, verify, and hand off cleanly.
+Single-slice ticket: use `Phase 1`.
+Normal size: one plan/implement/review/verify loop.
+Split phases: review, verification, rollback, or dependency boundaries differ.
 Unrelated increments: split into child tickets.
 
 ### judge: missing-spec-entry

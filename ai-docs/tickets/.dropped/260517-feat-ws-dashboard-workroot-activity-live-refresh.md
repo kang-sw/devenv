@@ -2,6 +2,8 @@
 title: ws dashboard WorkRoot Activity SSE refresh
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
+  260518-epic-ws-dashboard-activity-console: broader Activity Console epic that absorbs this narrow refresh scope
+  260518-feat-ws-dashboard-activity-watch-stream: replacement child ticket for watcher and feed stream work
   260517-feat-ws-dashboard-workroot-activity: dogfood showed the implemented pane needs live refresh after named-agent cache changes
   260513-feat-async-exec-output-reader: future persisted command activity may share the same refresh/stream path
 related-mental-model:
@@ -37,3 +39,10 @@ Acceptance should prove that a newly registered named agent appears in the
 top-bar badge/detail pane without reloading the browser, call status transitions
 update while a call is running or completes, and the polling hotfix can be
 removed or reduced to a watcher fallback.
+
+## Dropped
+
+This narrow idea was absorbed into the broader Activity Console cascade. The
+durable work now lives in `260518-feat-ws-dashboard-activity-watch-stream`,
+which covers the same polling replacement plus the feed event stream needed by
+the reusable Activity Ribbon and selected transcript viewer.
