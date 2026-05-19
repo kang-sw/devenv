@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.26.8 - 2026-05-19
+
+### Added
+- Add `### Mental Model Notes` prompt context so commits can provide primary
+  intent for mental-model updater passes.
+
+### Changed
+- Make remaining workflow MCP and CLI command surfaces default to compact
+  readable text while preserving explicit JSON output and original Git command
+  mirror shapes.
+- Make broad `specs.find` and `mental_models.find` queries tolerant candidate
+  discovery with document-grouped line evidence, bounded snippets, JSON match
+  evidence, zero-result guidance, and common convention aliases.
+- Teach `lead-proceed` to derive implementation verdicts from the corresponding
+  `lead-implement` route contract before handoff, while removing stale skeleton
+  routing language from active workflow skills.
+
+### Fixed
+- Keep broad documentation query snippets rune-safe for non-ASCII text and avoid
+  synthetic line-zero evidence for metadata-only matches.
+- Disable Snacks smooth scrolling in the local Neovim configuration so editor
+  movement stays responsive.
+
 ## v0.26.7 - 2026-05-19
 
 ### Added
