@@ -735,6 +735,11 @@ func detectTicketChanges(ctx context.Context, runner Runner, root string) []Tick
 
 func parseTicketNameStatus(out []byte) []TicketChange {
 	var changes []TicketChange
+	addsByStem := map[string][]TicketChange{}
+	deletesByStem := map[string][]TicketChange{}
+	explicitRenameStems := map[string]bool{}
+	var passthrough []TicketChange
+
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -758,8 +763,58 @@ func parseTicketNameStatus(out []byte) []TicketChange {
 			if oldChange, ok := ticketChangeForPath(oldPath); ok {
 				change.OldPath = oldPath
 				change.FromStatus = oldChange.ToStatus
+				explicitRenameStems[change.Stem] = true
 			}
+			changes = append(changes, change)
+			continue
 		}
+
+		switch code {
+		case "A":
+			addsByStem[change.Stem] = append(addsByStem[change.Stem], change)
+		case "D":
+			deletesByStem[change.Stem] = append(deletesByStem[change.Stem], change)
+		default:
+			passthrough = append(passthrough, change)
+		}
+	}
+
+	pairedAdds := map[string]bool{}
+	pairedDeletes := map[string]bool{}
+	for stem, adds := range addsByStem {
+		deletes := deletesByStem[stem]
+		if explicitRenameStems[stem] || len(adds) != 1 || len(deletes) != 1 {
+			continue
+		}
+		add := adds[0]
+		deleteChange := deletes[0]
+		if add.ToStatus == deleteChange.ToStatus {
+			continue
+		}
+		add.OldPath = deleteChange.Path
+		add.FromStatus = deleteChange.ToStatus
+		changes = append(changes, add)
+		pairedAdds[stem] = true
+		pairedDeletes[stem] = true
+	}
+
+	for stem, adds := range addsByStem {
+		if pairedAdds[stem] {
+			continue
+		}
+		for _, change := range adds {
+			changes = append(changes, change)
+		}
+	}
+	for stem, deletes := range deletesByStem {
+		if pairedDeletes[stem] {
+			continue
+		}
+		for _, change := range deletes {
+			changes = append(changes, change)
+		}
+	}
+	for _, change := range passthrough {
 		changes = append(changes, change)
 	}
 	return changes
