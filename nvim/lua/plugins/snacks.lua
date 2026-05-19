@@ -19,6 +19,9 @@ return {
     },
   },
   opts = {
+    scroll = {
+      enabled = false,
+    },
     explorer = {
       -- 여기서 키 오버라이드
     },
