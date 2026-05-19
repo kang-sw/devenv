@@ -2,9 +2,12 @@
 title: git.commit cannot emit Mental Model Notes subsection
 spec:
   - 260519-git-commit-mental-model-notes
+plans:
+  phase-1: 2026-05/19-1642.git-commit-mental-model-notes
 related-mental-model:
   - git-workflow-tools
   - documentation-system
+completed: 2026-05-19
 ---
 
 # git.commit cannot emit Mental Model Notes subsection
@@ -30,3 +33,15 @@ to native Git message assembly.
 
 The implementation should preserve the existing simple `ai_context` path and
 keep generated commit bodies predictable for workflow parsing.
+
+### Result (2464c6f5) - 2026-05-19
+
+Implemented structured `mental_model_notes` input for `ws/git.commit`, wired it
+through the MCP schema/dispatch and the `ws-mcp git commit --mental-model-note`
+CLI mirror, and rendered populated notes as `### Mental Model Notes` under
+`## AI Context`.
+
+The implementation preserves required `ai_context` behavior, omits the subsection
+for empty notes, and keeps later workflow sections as top-level sections. Tests
+cover core commit-message rendering, MCP schema/dispatch, and CLI commit body
+behavior.
