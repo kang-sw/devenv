@@ -2,9 +2,12 @@
 title: git.commit rename status summary mismatch
 spec:
   - 260519-git-commit-add-delete-ticket-move-summary
+plans:
+  phase-1: 2026-05/19-1754.git-commit-rename-summary
 related-mental-model:
   - git-workflow-tools
   - documentation-system
+completed: 2026-05-19
 ---
 
 # git.commit rename status summary mismatch
@@ -62,3 +65,16 @@ Verification should cover:
 - the same add/delete shape with a `### Result` addition still reports
   `todo -> ready` and preserves `result_added`;
 - ambiguous same-stem add/delete sets are not reconstructed as a move.
+
+### Result (bbd9a376) - 2026-05-19
+
+Implemented conservative add/delete-shaped ticket move reconstruction in
+`ws/git.commit` ticket-change summaries. Unambiguous same-stem ticket add/delete
+pairs now report the destination status as a move, while ambiguous same-stem
+sets stay non-move evidence.
+
+Review cycle 1 found that parser-level ambiguity preservation was insufficient
+because `detectTicketChanges` still merged by stem. The final implementation
+preserves parsed ticket changes as separate records, merges Result/Edition
+evidence by exact destination path, and keeps explicit `R...` rename records
+from being overwritten by same-stem add/delete passthrough records.
