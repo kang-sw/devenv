@@ -142,3 +142,13 @@ wsflow `lead-proceed` mirrors the same source-free routing clarity as
 `Execution Path`, `Complexity Flag`, and `Branch Mode`; wsflow `lead-implement`
 preserves those carried values for `lead-edit`. The wsflow text avoids
 unavailable full ws implementation relay wording.
+
+#### Edition (bf26e4b) - 2026-05-19
+
+Reworked the Phase 2 shape to avoid duplicated routing tables between proceed
+and implement. `lead-implement` and `wsflow:lead-implement` return to owning
+their route contracts without carried-dispatch special cases. `lead-proceed`
+and `wsflow:lead-proceed` now read the relevant implement skill text at the
+implementation route boundary and announce an implementation verdict derived
+from that route contract using only source-free route context. Unknown full ws
+direct-edit predicates produce a delegated verdict.

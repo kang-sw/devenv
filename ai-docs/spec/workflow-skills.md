@@ -391,14 +391,14 @@ invoke implementation primitives before `lead-implement`. Public or
 cross-module contract checkpoints are expressed as `lead-write-code` brief
 contract and integration-test instructions.
 
-Before implementation handoff, `lead-proceed` selects a conservative
-implementation dispatch from conversation and workflow artifacts only. Full ws
-announcements report `Implementation Dispatch`, `Dispatch Reason`, and
-`Branch Mode`; a proceed-selected `write-code` dispatch is a hard lower bound
-that `lead-implement` cannot downgrade to direct edit. wsflow announcements
-mirror the same routing clarity as `Execution Path`, `Complexity Flag`, and
-`Branch Mode` without introducing unavailable full ws `lead-write-code`
-routing. {#260519-proceed-implementation-dispatch-precheck}
+Before implementation handoff, `lead-proceed` reads the corresponding
+`lead-implement` skill text and applies that implementation route contract from
+conversation and workflow artifacts only. Full ws announcements report an
+`Implementation Verdict` and `Verdict Basis`; unknown direct-edit predicates
+produce a delegated verdict. wsflow mirrors the same source-free precheck as an
+implementation verdict derived from `wsflow:lead-implement`, without
+introducing unavailable full ws implementation relay wording.
+{#260519-proceed-implementation-dispatch-precheck}
 
 ## Sprint Session Container {#260505-sprint-session-container}
 
