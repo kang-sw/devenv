@@ -25,6 +25,7 @@ related:
 - Range-less diffs append untracked files; ranged diffs do not. This is user-visible behavior.
 - Path filters are appended after `--`; commit paths reject absolute paths, `..`, and option-like values.
 - `git.commit` stages only explicit paths, expands ticket moves by stem, rejects unrelated staged paths, detects ticket Result and Edition additions from cached diffs, builds a structured message, then commits.
+- Ticket-change summaries preserve same-stem add/delete evidence: only one added and one deleted recognized ticket path with different statuses is reconstructed as a move, while ambiguous sets remain separate non-move changes and Result/Edition headings merge by exact destination path. {#260519-git-commit-add-delete-ticket-move-summary}
 - Commit staging is based on pre-status: requested roots that exist only as deleted or renamed-old paths stage concrete removals with `git rm --cached`, while roots with any live/addable status still stage through `git add -A -- <root>`. {#260513-git-commit-result-edition-detection}
 - `git.commit` accepts `mental_model_notes` through MCP and `--mental-model-note` through the CLI mirror; populated notes render as `### Mental Model Notes` under `## AI Context`, while omitted or empty notes render no subsection. {#260519-git-commit-mental-model-notes}
 - Git CLI mirrors default to readable text while preserving explicit `--format json`; for native Git read commands, prefer the original Git text shape where practical instead of formatting parsed structs back into ws-specific summaries. {#260519-workflow-command-readable-output-defaults}
@@ -48,6 +49,7 @@ related:
 - Assuming `git.diff` is just `git diff`; untracked files are appended for range-less calls.
 - Passing directories to `git.commit` while unrelated staged files already exist under that directory; validation treats requested paths as roots.
 - Using unconstrained staging; the primitive stages only requested path roots, with `git add -A -- <paths>` for live roots and explicit cached removal for deleted or rename-old roots.
+- Collapsing ticket changes by stem before ambiguity checks; that can turn multiple add/delete records into an invented status move or drop Result/Edition evidence.
 - Expecting general Git operations like reset, checkout, clean, merge, push, or arbitrary commit mutation; this is a constrained workflow wrapper.
 
 ## Technical Debt
