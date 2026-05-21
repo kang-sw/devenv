@@ -99,9 +99,15 @@ import {
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import { ActivityConsole } from "./ActivityConsole";
 import {
+  applyActivityConsoleEvent,
   fetchWorkRootActivity,
   mergeWorkRootActivityViews,
+  parseActivityConsoleEvent,
+  shouldApplyActivityStreamRequest,
   workRootActivityBadge,
+  workRootActivityEventsEndpoint,
+  type ActivityConsoleEvent,
+  type ActivityConsoleStreamRequest,
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
 } from "./workRootActivity";
@@ -1090,6 +1096,21 @@ function WorkbenchShell({
     rootId: string | null;
     activity: WorkRootActivityBadgeInput;
   }>({ rootId: null, activity: { phase: "loading" } });
+  const workRootActivityStateRef = useRef(workRootActivityState);
+  workRootActivityStateRef.current = workRootActivityState;
+  const activityStreamRequestSeq = useRef(0);
+  const currentActivityStreamRequest = useRef<ActivityConsoleStreamRequest>({
+    workRootId: "",
+    requestId: 0,
+  });
+  const activitySnapshotRequestSeq = useRef(0);
+  const [activityPollFallbackRootId, setActivityPollFallbackRootId] = useState<string | null>(null);
+  const [activityTranscriptRefresh, setActivityTranscriptRefresh] = useState<{
+    rootId: string;
+    activityId: string;
+    cursor: string | null;
+    sequence: number;
+  } | null>(null);
   // Whether the reversible WorkRoot Activity pane is open, scoped per workRoot
   // like terminal/read-only pane state. The badge entrypoint toggles this on;
   // immediate close toggles it off.
@@ -1160,6 +1181,9 @@ function WorkbenchShell({
               workRootActivityState.rootId === root.id
                 ? workRootActivityState.activity
                 : { phase: "loading" },
+              activityTranscriptRefresh?.rootId === root.id
+                ? activityTranscriptRefresh
+                : null,
               onCommand,
             ),
             paneOrderByGroup,
@@ -1232,13 +1256,170 @@ function WorkbenchShell({
     };
   }, [workbenchModel?.root.id]);
 
-  // Hotfix live refresh: while the Activity pane is open, poll only recently
-  // modified agent records and merge them into the full initial projection.
-  // This keeps newly registered/called agents visible without re-fetching a
-  // monotonically growing full list on every interval.
+  // Activity Console live stream: while the pane is open, subscribe to the
+  // daemon-owned source-neutral event stream for the selected workRoot. The
+  // older recent-list polling remains a bounded fallback only when the stream
+  // cannot be established or the daemon explicitly switches to pollFallback.
   useEffect(() => {
     const rootId = workbenchModel?.root.id;
     if (!rootId || !activityPaneOpenForSelected) {
+      currentActivityStreamRequest.current = {
+        workRootId: rootId ?? "",
+        requestId: activityStreamRequestSeq.current + 1,
+      };
+      activityStreamRequestSeq.current = currentActivityStreamRequest.current.requestId;
+      setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+      return;
+    }
+
+    const requestId = activityStreamRequestSeq.current + 1;
+    activityStreamRequestSeq.current = requestId;
+    const expected = { workRootId: rootId, requestId };
+    currentActivityStreamRequest.current = expected;
+    setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+
+    let cancelled = false;
+    let streamOpened = false;
+    let fallbackTimer: number | null = null;
+    const after =
+      workRootActivityStateRef.current.rootId === rootId &&
+      workRootActivityStateRef.current.activity.phase === "ready"
+        ? workRootActivityStateRef.current.activity.view.feedCursor
+        : null;
+    const source = new EventSource(workRootActivityEventsEndpoint(rootId, { after }));
+
+    const requestSnapshot = () => {
+      const snapshotRequestId = activitySnapshotRequestSeq.current + 1;
+      activitySnapshotRequestSeq.current = snapshotRequestId;
+      void fetchWorkRootActivity(rootId)
+        .then((view) => {
+          if (
+            cancelled ||
+            snapshotRequestId !== activitySnapshotRequestSeq.current ||
+            !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current) ||
+            view.workRootId !== rootId
+          ) {
+            return;
+          }
+          setWorkRootActivityState({ rootId, activity: { phase: "ready", view } });
+        })
+        .catch(() => {
+          if (
+            !cancelled &&
+            snapshotRequestId === activitySnapshotRequestSeq.current &&
+            shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+          ) {
+            setActivityPollFallbackRootId(rootId);
+          }
+        });
+    };
+
+    const applyStreamEvent = (event: ActivityConsoleEvent) => {
+      if (
+        cancelled ||
+        !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+      ) {
+        return;
+      }
+      if (event.type === "snapshotInvalidated") {
+        requestSnapshot();
+      }
+      if (event.type === "transcriptUpdated") {
+        setActivityTranscriptRefresh((current) => ({
+          rootId,
+          activityId: event.activityId,
+          cursor: event.transcriptCursor,
+          sequence: (current?.sequence ?? 0) + 1,
+        }));
+      } else if (event.type === "modeChanged" && event.updateMode === "pollFallback") {
+        setActivityPollFallbackRootId(rootId);
+      } else if (
+        event.type === "modeChanged" &&
+        (event.updateMode === "watch" || event.updateMode === "snapshot")
+      ) {
+        if (fallbackTimer !== null) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        setActivityPollFallbackRootId((fallbackRootId) =>
+          fallbackRootId === rootId ? null : fallbackRootId,
+        );
+      }
+      setWorkRootActivityState((current) => {
+        if (current.rootId !== rootId || current.activity.phase !== "ready") {
+          return current;
+        }
+        const result = applyActivityConsoleEvent(current.activity.view, event);
+        return { rootId, activity: { phase: "ready", view: result.view } };
+      });
+    };
+
+    source.onopen = () => {
+      streamOpened = true;
+      if (shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)) {
+        if (fallbackTimer !== null) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+      }
+    };
+    const handleActivityMessage = (message: MessageEvent) => {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(message.data);
+      } catch {
+        setActivityPollFallbackRootId(rootId);
+        return;
+      }
+      const event = parseActivityConsoleEvent(payload);
+      if (!event) {
+        setActivityPollFallbackRootId(rootId);
+        return;
+      }
+      applyStreamEvent(event);
+    };
+    source.addEventListener("activity", handleActivityMessage);
+    source.onmessage = handleActivityMessage;
+    source.onerror = () => {
+      if (
+        cancelled ||
+        !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+      ) {
+        return;
+      }
+      if (!streamOpened) {
+        setActivityPollFallbackRootId(rootId);
+        requestSnapshot();
+        return;
+      }
+      if (fallbackTimer !== null) {
+        window.clearTimeout(fallbackTimer);
+      }
+      fallbackTimer = window.setTimeout(() => {
+        if (
+          !cancelled &&
+          shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+        ) {
+          setActivityPollFallbackRootId(rootId);
+        }
+      }, 1_000);
+    };
+
+    return () => {
+      cancelled = true;
+      if (fallbackTimer !== null) {
+        window.clearTimeout(fallbackTimer);
+      }
+      source.removeEventListener("activity", handleActivityMessage);
+      source.close();
+      setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
+    };
+  }, [workbenchModel?.root.id, activityPaneOpenForSelected]);
+
+  useEffect(() => {
+    const rootId = workbenchModel?.root.id;
+    if (!rootId || !activityPaneOpenForSelected || activityPollFallbackRootId !== rootId) {
       return;
     }
 
@@ -1249,15 +1430,17 @@ function WorkbenchShell({
         return;
       }
       inFlight = true;
+      const snapshotRequestId = activitySnapshotRequestSeq.current + 1;
+      activitySnapshotRequestSeq.current = snapshotRequestId;
       void fetchWorkRootActivity(rootId, {
         recentLimit: workRootActivityRecentRefreshLimit,
       })
         .then((view) => {
-          if (cancelled) {
+          if (cancelled || snapshotRequestId !== activitySnapshotRequestSeq.current) {
             return;
           }
           setWorkRootActivityState((current) => {
-            if (current.rootId !== rootId) {
+            if (current.rootId !== rootId || view.workRootId !== rootId) {
               return current;
             }
             if (current.activity.phase !== "ready") {
@@ -1294,7 +1477,7 @@ function WorkbenchShell({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [workbenchModel?.root.id, activityPaneOpenForSelected]);
+  }, [workbenchModel?.root.id, activityPaneOpenForSelected, activityPollFallbackRootId]);
 
   // The output poll reads live terminal sessions from a ref so the polling
   // interval stays stable across renders. Depending the interval on
@@ -2080,6 +2263,7 @@ function workRootActivityPlacementState(
 function workRootActivityWorkbenchPane(
   root: WorkRootView,
   activity: WorkRootActivityBadgeInput,
+  transcriptRefresh: ActivityTranscriptRefreshSignal | null,
   onCommand: DashboardCommandDispatcher,
 ): WorkbenchPane {
   const ready = activity.phase === "ready" ? activity.view : null;
@@ -2110,16 +2294,31 @@ function workRootActivityWorkbenchPane(
     detail: `${root.label} activity console`,
     state,
     meta,
-    body: <WorkRootActivityPane activity={activity} onCommand={onCommand} />,
+    body: (
+      <WorkRootActivityPane
+        activity={activity}
+        onCommand={onCommand}
+        transcriptRefresh={transcriptRefresh}
+      />
+    ),
   };
 }
+
+type ActivityTranscriptRefreshSignal = {
+  readonly rootId: string;
+  readonly activityId: string;
+  readonly cursor: string | null;
+  readonly sequence: number;
+};
 
 function WorkRootActivityPane({
   activity,
   onCommand,
+  transcriptRefresh,
 }: {
   activity: WorkRootActivityBadgeInput;
   onCommand: DashboardCommandDispatcher;
+  transcriptRefresh: ActivityTranscriptRefreshSignal | null;
 }) {
   // CONTRACT: A reversible read-only Activity Console projection. It consumes
   // source-neutral feed items/transcripts, exposes command-routed controls, and
@@ -2135,7 +2334,11 @@ function WorkRootActivityPane({
           WorkRoot activity is unavailable
         </div>
       ) : (
-        <ActivityConsole view={activity.view} onCommand={onCommand} />
+        <ActivityConsole
+          view={activity.view}
+          onCommand={onCommand}
+          transcriptRefresh={transcriptRefresh}
+        />
       )}
     </section>
   );
@@ -2190,6 +2393,7 @@ function buildWorkbenchEditorGroups(
   closedAgentPaneIds: readonly string[] = [],
   activityPaneOpen = false,
   activityState: WorkRootActivityBadgeInput = { phase: "loading" },
+  activityTranscriptRefresh: ActivityTranscriptRefreshSignal | null,
   onCommand: DashboardCommandDispatcher,
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
@@ -2232,7 +2436,14 @@ function buildWorkbenchEditorGroups(
   // projection that defaults into group 1 (the agent/terminal-side split)
   // rather than the group-2 editor/read-only column.
   const activityPane: WorkbenchPane[] = activityPaneOpen
-    ? [workRootActivityWorkbenchPane(root, activityState, onCommand)]
+    ? [
+        workRootActivityWorkbenchPane(
+          root,
+          activityState,
+          activityTranscriptRefresh,
+          onCommand,
+        ),
+      ]
     : [];
 
   return dashboardGroups.map((group, index) => ({

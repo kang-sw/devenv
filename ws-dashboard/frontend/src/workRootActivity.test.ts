@@ -1,18 +1,23 @@
 import {
   acknowledgeActivityItem,
+  activityItemRevisionToken,
+  applyActivityConsoleEvent,
   defaultActivitySelection,
   fetchWorkRootActivity,
   fetchWorkRootActivityTranscript,
   initializeActivityDirtyItems,
   mergeWorkRootActivityViews,
   orderActivityItems,
+  parseActivityConsoleEvent,
   preserveActivitySelection,
+  shouldApplyActivityStreamRequest,
   shouldApplyActivityTranscriptResponse,
   shouldApplyActivityTranscriptRequest,
   shouldLoadMoreActivityTranscript,
   transcriptBlockView,
   workRootActivityBadge,
   workRootActivityEndpoint,
+  workRootActivityEventsEndpoint,
   workRootActivityTranscriptEndpoint,
   type ActivityItem,
   type NamedAgentActivityView,
@@ -67,6 +72,17 @@ assertEqual(
   }),
   "/api/dashboard/work-roots/root%2Flocal%20test/activity/items/agent%3Areviewer/transcript?cursor=2&limit=10",
   "transcript endpoint addresses encoded opaque ids and bounded query options",
+);
+
+assertEqual(
+  workRootActivityEventsEndpoint("root/local test", { after: "cursor:1/2" }),
+  "/api/dashboard/work-roots/root%2Flocal%20test/activity/events?after=cursor%3A1%2F2",
+  "activity event endpoint addresses an encoded opaque workRoot id and after cursor",
+);
+assertEqual(
+  workRootActivityEventsEndpoint("root-local-abc"),
+  "/api/dashboard/work-roots/root-local-abc/activity/events",
+  "activity event endpoint omits the after query when no cursor exists",
 );
 
 const originalFetch = globalThis.fetch;
@@ -239,6 +255,166 @@ function activityItem(partial: Partial<ActivityItem> & { id: string }): Activity
     metadata: partial.metadata ?? {},
   };
 }
+
+
+const parsedUpsert = parseActivityConsoleEvent({
+  type: "itemUpserted",
+  cursor: "event:1",
+  item: activityItem({ id: "agent:streamed", updatedAt: "2026-05-21T12:05:00Z" }),
+});
+assertEqual(parsedUpsert?.type, "itemUpserted", "itemUpserted events parse with source-neutral payloads");
+assertEqual(
+  parseActivityConsoleEvent({ type: "itemRemoved", cursor: "event:2", path: "/Users/nope" }),
+  null,
+  "activity events reject payloads without source-neutral activity ids",
+);
+assertEqual(
+  parseActivityConsoleEvent({
+    type: "modeChanged",
+    cursor: "event:mode",
+    updateMode: "pollFallback",
+  })?.type,
+  "modeChanged",
+  "modeChanged pollFallback events parse",
+);
+
+const eventBase = activityView({
+  selectedItemId: "agent:keep",
+  items: [
+    activityItem({ id: "agent:keep", label: "keep", updatedAt: "2026-05-21T12:00:00Z" }),
+    activityItem({ id: "agent:remove", label: "remove", updatedAt: "2026-05-21T11:00:00Z" }),
+  ],
+});
+const upsertedEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemUpserted",
+  cursor: "event:upsert",
+  item: activityItem({
+    id: "agent:new",
+    label: "new",
+    live: true,
+    updatedAt: "2026-05-21T12:10:00Z",
+  }),
+});
+assertDeepEqual(
+  upsertedEvent.view.items.map((item) => item.id),
+  ["agent:new", "agent:keep", "agent:remove"],
+  "itemUpserted merges the item into the ordered feed",
+);
+assertEqual(upsertedEvent.view.selectedItemId, "agent:keep", "itemUpserted preserves existing selection");
+assertEqual(upsertedEvent.view.summary.total, 3, "itemUpserted recomputes source-neutral summary totals");
+assertEqual(upsertedEvent.refetchSnapshot, false, "itemUpserted does not request snapshot refetch");
+
+const removedUnselectedEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemRemoved",
+  cursor: "event:remove-unselected",
+  activityId: "agent:remove",
+});
+assertDeepEqual(
+  removedUnselectedEvent.view.items.map((item) => item.id),
+  ["agent:keep"],
+  "itemRemoved removes unselected feed items",
+);
+assertEqual(
+  removedUnselectedEvent.view.selectedItemId,
+  "agent:keep",
+  "itemRemoved preserves selection when selected item still exists",
+);
+const removedSelectedEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemRemoved",
+  cursor: "event:remove-selected",
+  activityId: "agent:keep",
+});
+assertEqual(
+  removedSelectedEvent.view.selectedItemId,
+  "agent:remove",
+  "itemRemoved reconciles selection when selected item disappears",
+);
+
+const invalidatedEvent = applyActivityConsoleEvent(eventBase, {
+  type: "snapshotInvalidated",
+  cursor: "event:invalidated",
+  reason: "watchReset",
+});
+assertEqual(invalidatedEvent.refetchSnapshot, true, "snapshotInvalidated requests a read-model refetch");
+assertEqual(invalidatedEvent.view.feedCursor, "event:invalidated", "snapshotInvalidated advances the event cursor");
+
+const transcriptEvent = applyActivityConsoleEvent(eventBase, {
+  type: "transcriptUpdated",
+  cursor: "event:transcript",
+  activityId: "agent:keep",
+  transcriptCursor: "transcript:2",
+});
+assertEqual(
+  transcriptEvent.transcriptActivityId,
+  "agent:keep",
+  "transcriptUpdated exposes the activity id for selected-transcript refresh decisions",
+);
+assertEqual(
+  transcriptEvent.view.items.find((item) => item.id === "agent:keep")?.transcript.cursor,
+  "transcript:2",
+  "transcriptUpdated backfills the item transcript cursor without rebuilding transcript blocks",
+);
+
+const pollFallbackEvent = applyActivityConsoleEvent(eventBase, {
+  type: "modeChanged",
+  cursor: "event:poll",
+  updateMode: "pollFallback",
+});
+assertEqual(pollFallbackEvent.updateMode, "pollFallback", "modeChanged pollFallback activates fallback decisions");
+assertEqual(pollFallbackEvent.view.updateMode, "pollFallback", "modeChanged records the daemon update mode");
+const watchEvent = applyActivityConsoleEvent(eventBase, {
+  type: "modeChanged",
+  cursor: "event:watch",
+  updateMode: "watch",
+});
+assertEqual(watchEvent.updateMode, "watch", "modeChanged watch suppresses fallback polling decisions");
+const locallyAcknowledged = acknowledgeActivityItem({}, eventBase.items[0]!);
+const dirtyAfterStreamMerge = initializeActivityDirtyItems(
+  upsertedEvent.view.items,
+  locallyAcknowledged,
+  { "agent:keep": activityItemRevisionToken(eventBase.items[0]!) },
+);
+assertDeepEqual(
+  Array.from(dirtyAfterStreamMerge),
+  ["agent:new"],
+  "local dirty acknowledgements survive stream feed merges",
+);
+const selectedRevisionEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemUpserted",
+  cursor: "event:selected-revision",
+  item: activityItem({
+    id: "agent:keep",
+    label: "keep",
+    updatedAt: "2026-05-21T12:30:00Z",
+  }),
+});
+assertDeepEqual(
+  Array.from(
+    initializeActivityDirtyItems(selectedRevisionEvent.view.items, locallyAcknowledged, {
+      "agent:keep": activityItemRevisionToken(eventBase.items[0]!),
+    }),
+  ),
+  ["agent:keep"],
+  "a streamed revision change for the selected item remains dirty until explicit acknowledgement",
+);
+
+assertEqual(
+  shouldApplyActivityStreamRequest(
+    { workRootId: "root-a", requestId: 1 },
+    { workRootId: "root-a", requestId: 1 },
+  ),
+  true,
+  "matching activity stream request may update state",
+);
+assertEqual(
+  shouldApplyActivityStreamRequest(
+    { workRootId: "root-a", requestId: 1 },
+    { workRootId: "root-b", requestId: 2 },
+  ),
+  false,
+  "stale workRoot stream completions are ignored after root switch",
+);
+
 
 function activityAgent(
   partial: Partial<NamedAgentActivityView> & { agentId: string },

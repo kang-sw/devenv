@@ -57,14 +57,23 @@ type TranscriptRequestKey = {
   requestId: number;
 };
 
+export type ActivityTranscriptRefreshSignal = {
+  readonly rootId: string;
+  readonly activityId: string;
+  readonly cursor: string | null;
+  readonly sequence: number;
+};
+
 export function ActivityConsole({
   view,
   onCommand,
   loadTranscript = fetchWorkRootActivityTranscript,
+  transcriptRefresh = null,
 }: {
   view: WorkRootActivityView;
   onCommand: DashboardCommandDispatcher;
   loadTranscript?: ActivityTranscriptLoader;
+  transcriptRefresh?: ActivityTranscriptRefreshSignal | null;
 }) {
   const orderedItems = useMemo(
     () => orderActivityItems(view.items),
@@ -278,11 +287,24 @@ export function ActivityConsole({
       error: null,
       loadingMore: false,
     });
-    if (selectedItem) {
-      acknowledgeSelected(selectedItem);
-    }
     requestTranscript("replace");
   }, [view.workRootId, selectedItemId, selectedRevision]);
+
+  useEffect(() => {
+    if (
+      transcriptRefresh &&
+      transcriptRefresh.rootId === view.workRootId &&
+      transcriptRefresh.activityId === selectedItemId
+    ) {
+      requestTranscript("replace");
+    }
+  }, [
+    selectedItemId,
+    transcriptRefresh?.activityId,
+    transcriptRefresh?.rootId,
+    transcriptRefresh?.sequence,
+    view.workRootId,
+  ]);
 
   const handleSelect = (item: ActivityItem) => {
     onCommand(buildActivitySelectItemCommand(item.id), {

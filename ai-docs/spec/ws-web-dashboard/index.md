@@ -373,11 +373,11 @@ stdout/stderr paths, or file contents. The stream remains read-only and does
 not make the frontend responsible for consuming live updates; frontend merge
 and stale-root behavior belongs to the live UX feature.
 
-## 🚧 Activity Console Live UX {#260521-ws-dashboard-activity-console-live-ux}
+## Activity Console Live UX {#260521-ws-dashboard-activity-console-live-ux}
 
-The Activity Console frontend will subscribe to the workRoot activity event
+The Activity Console frontend subscribes to the workRoot activity event
 stream while the console is visible or otherwise actively used. Stream handling
-must merge source-neutral events into the route-backed Activity Console state
+merges source-neutral events into the route-backed Activity Console state
 without making browser state authoritative over daemon activity.
 
 `itemUpserted` and `itemRemoved` events update the current feed while preserving
@@ -388,16 +388,16 @@ the affected activity is the currently selected item. `modeChanged` transitions
 the frontend between stream-driven updates and bounded fallback polling; always
 on full-list polling is not the normal live mode.
 
-The frontend must ignore events for stale workRoots after the user switches
-roots or closes the console, tear down subscriptions when the console is no
+The frontend ignores events for stale workRoots after the user switches
+roots or closes the console, tears down subscriptions when the console is no
 longer visible, and keep the static UI shell usable when the stream is
 unavailable. Streamed or polled updates newer than the browser-local
 acknowledgement watermark may turn on the ribbon dirty cue; selecting or
 acknowledging an item clears only local dirty state and sends no daemon read
 receipt.
 
-Live UX adoption remains read-only. It must not expose raw SSE payloads,
-backend paths, cache paths, source ids, or control actions in browser UI state.
+Live UX adoption remains read-only. It does not expose raw SSE payloads, backend
+paths, cache paths, source ids, or control actions in browser UI state.
 
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 

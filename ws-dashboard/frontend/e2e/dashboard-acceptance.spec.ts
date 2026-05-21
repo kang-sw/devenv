@@ -34,6 +34,7 @@ let ownsSecondWorkRoot = false;
 let commandPlan: TerminalCommandPlan;
 let portabilityEvidence: TerminalPortabilityEvidence | undefined;
 let activityFixtureRootId: string | null = null;
+let activityRecentPollRequests = 0;
 
 const evidence: string[] = [];
 function note(line: string) {
@@ -566,6 +567,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         const requestedWorkRootId = match
           ? decodeURIComponent(match[1])
           : "browser-gate-root";
+        if (new URL(route.request().url()).searchParams.has("recentLimit")) {
+          activityRecentPollRequests += 1;
+        }
         if (!activityFixtureRootId) {
           activityFixtureRootId = requestedWorkRootId;
         }
@@ -720,6 +724,81 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       },
     );
     await page.route(
+      /\/api\/dashboard\/work-roots\/.*\/activity\/events(?:\?.*)?$/,
+      async (route) => {
+        const match = new URL(route.request().url()).pathname.match(
+          /\/api\/dashboard\/work-roots\/([^/]+)\/activity\/events$/,
+        );
+        const requestedWorkRootId = match
+          ? decodeURIComponent(match[1])
+          : (activityFixtureRootId ?? "browser-gate-root");
+        if (activityFixtureRootId && requestedWorkRootId !== activityFixtureRootId) {
+          await route.fulfill({
+            status: 200,
+            contentType: "text/event-stream",
+            body: `event: activity\ndata: ${JSON.stringify({
+              type: "heartbeat",
+              cursor: "browser:second:heartbeat",
+            })}\n\n`,
+            headers: { "cache-control": "no-cache" },
+          });
+          return;
+        }
+        const liveItem = {
+          id: "agent:streamed-live",
+          kind: "namedAgent",
+          label: "agent-streamed-live",
+          status: "running",
+          live: true,
+          attention: false,
+          startedAt: "2026-05-17T12:00:00Z",
+          updatedAt: "2026-05-17T12:01:00Z",
+          finishedAt: null,
+          source: {
+            kind: "namedAgent",
+            label: "codex",
+            backend: "codex",
+            harness: "codex",
+            tier: "core",
+            model: null,
+          },
+          transcript: {
+            status: "empty",
+            available: false,
+            cursor: null,
+          },
+          diagnostics: [],
+          metadata: {},
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: [
+            {
+              type: "itemUpserted",
+              cursor: "browser:stream:1",
+              item: liveItem,
+            },
+            {
+              type: "modeChanged",
+              cursor: "browser:stream:2",
+              updateMode: "watch",
+            },
+            {
+              type: "heartbeat",
+              cursor: "browser:stream:3",
+            },
+          ]
+            .map((event) => `event: activity\ndata: ${JSON.stringify(event)}\n\n`)
+            .join(""),
+          headers: {
+            "cache-control": "no-cache",
+            "x-workroot-fixture": requestedWorkRootId,
+          },
+        });
+      },
+    );
+    await page.route(
       /\/api\/dashboard\/work-roots\/.*\/activity\/items\/.*\/transcript(?:\?.*)?$/,
       async (route) => {
         const url = new URL(route.request().url());
@@ -831,7 +910,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(populatedBody.locator(".activity-console")).toBeVisible();
     await expect(populatedBody.locator(".activity-ribbon")).toBeVisible();
     const ribbonItems = populatedBody.locator(".activity-ribbon-item");
-    await expect(ribbonItems).toHaveCount(5);
+    await expect(ribbonItems).toHaveCount(6);
+    await expect(populatedBody).toContainText("agent-streamed-live");
+    await expect
+      .poll(() => activityRecentPollRequests, { timeout: 500 })
+      .toBe(0);
     await expect(ribbonItems.first()).toHaveCSS("min-width", "176px");
     await expect(populatedBody.locator(".activity-ribbon")).toHaveJSProperty(
       "scrollLeft",
@@ -839,7 +922,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expect(
       populatedBody.locator('[data-command-id="activity.selectItem"]'),
-    ).toHaveCount(5);
+    ).toHaveCount(6);
     await expect(
       populatedBody.locator('[data-command-id="activity.refresh"]'),
     ).toHaveCount(0);
@@ -920,8 +1003,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     note(
       "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
-        "empty and populated Activity Console projections rendered, selection, " +
-        "dirty acknowledgement, detail toggle, and load-more controls carried " +
+        "empty and populated Activity Console projections rendered, named live stream " +
+        "upsert appeared without reload and without healthy-mode recent polling, " +
+        "selection, dirty acknowledgement, " +
+        "detail toggle, and load-more controls carried " +
         "stable command ids, a second click focused it without duplicating, " +
         "and hover-only close removed it " +
         "immediately with no confirmation popover",
