@@ -27,6 +27,10 @@ EXPECTED_SKILLS = {
     "lead-write-ticket",
 }
 
+EXPECTED_WSFLOW_ONLY_SKILLS = {
+    "lead-edit",
+}
+
 FORBIDDEN_PATTERNS = {
     "full ws MCP notation": re.compile(r"\bws/"),
     "full ws skill namespace": re.compile(r"\bws:"),
@@ -48,12 +52,13 @@ class WsflowSkillBundleTest(unittest.TestCase):
 
     def test_full_skill_inventory_drift_is_visible(self):
         full_skills = {path.name for path in FULL_PLUGIN_SKILLS_DIR.iterdir() if path.is_dir()}
-        missing_full_counterparts = sorted(EXPECTED_SKILLS - full_skills)
+        missing_full_counterparts = sorted(EXPECTED_SKILLS - EXPECTED_WSFLOW_ONLY_SKILLS - full_skills)
         unexpected_wsflow_skills = sorted(
             {path.name for path in SKILLS_DIR.iterdir() if path.is_dir()} - EXPECTED_SKILLS
         )
 
         self.assertEqual(missing_full_counterparts, [])
+        self.assertEqual(sorted(EXPECTED_WSFLOW_ONLY_SKILLS), ["lead-edit"])
         self.assertEqual(unexpected_wsflow_skills, [])
 
     def test_skill_files_do_not_reference_full_ws_agent_surface(self):
