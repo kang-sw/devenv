@@ -77,12 +77,14 @@ selection and concrete provider names such as `gpt-5.5` or
 remains documented only as deprecated compatibility input.
 {#260508-workflow-model-alias-guidance}
 
-Workflow skill-authoring guidance treats skill-to-skill transitions as carried
-context, not API calls with arguments. Skill text says what context downstream
-workflow skills should carry; argument language is reserved for MCP tools, CLI
-commands, and structured templates. Dense routing or rule lists use Markdown
-hierarchy, named groups, fixed lookup tables, and command-shaped lists before
-inventing pseudo-code-like notation. {#260514-skill-authoring-carried-context}
+Workflow skill-to-skill handoffs share the active conversation; the receiving
+skill reads context from the conversation, not from a caller-emitted carry
+block. User-approval gates in skills fire only when the user invokes the skill
+directly; chained invocations pass through. Argument language is reserved for
+MCP tools, CLI commands, and structured templates. Dense routing or rule lists
+use Markdown hierarchy, named groups, fixed lookup tables, and command-shaped
+lists before inventing pseudo-code-like notation.
+{#260514-skill-authoring-carried-context}
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
 

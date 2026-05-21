@@ -130,6 +130,9 @@ Scope:
 - Update mental-model anchor `{#260514-skill-authoring-carried-context}` to
   reflect: carry blocks removed; chained-flow allowance encoded at each gate
   locally.
+- Sync the matching `ai-docs/spec/workflow-skills.md` paragraph carrying the
+  same anchor `{#260514-skill-authoring-carried-context}` so spec prose
+  describes the bare-handoff and chain-passthrough behavior canonically.
 
 Suggested approach:
 - Land the `ws:lead-skill-authoring` edit first (carry-guidance replacement
