@@ -123,6 +123,10 @@ Scope:
   <skill>; carry context: …`") with bare-handoff phrasing, and add one
   short principle: user-approval gates are written with the not-chained
   condition so chained flows pass through.
+- Regroup `ws:lead-skill-authoring`'s Principles section into five named
+  subsections (Reader model / Layout / Content rules / Iteration / Skill
+  semantics); semantics-preserving reorganization so downstream prune
+  patterns can mirror the layout.
 - Update mental-model anchor `{#260514-skill-authoring-carried-context}` to
   reflect: carry blocks removed; chained-flow allowance encoded at each gate
   locally.

@@ -13,25 +13,39 @@ Apply rules directly; add local procedure only when the target needs it.
 
 These apply to both skill and agent documents.
 
+### Reader model
+
 - The audience is the model re-reading under attention pressure, not a human reading fresh.
 - One-liners survive pressure; paragraphs dissolve. Every rule fits one line.
+- Preserve full grammar when compression could change order, ownership, or safety.
+
+### Layout
+
 - Directives at top, rationale (if any) as a single Doctrine paragraph at bottom. Never interleave.
-- Self-contained. Skills: no references to tickets, sessions, or sibling skills except plugin skill invocations such as `ws:` and host-specific slash forms. Agents: no references to session state or conversation history.
-- Repeatedly violated rule -> mechanize (structured output block at entry point), do not repeat louder.
 - Mechanical rules and soft judgments do not mix. Soft decision points must be separated and stated explicitly.
-- After restructuring, request an authorized fresh audit: contradictions, duplication, orphan references, closure gaps.
-- At every authoring turn's end, re-read additions and cut.
 - Use Markdown hierarchy to route attention before adding prose.
-- Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
 - Prefer command-shaped fragments over explanatory paragraphs.
 - For dense routing or rule lists, prefer short sections, named groups, fixed lookup tables, and command-shaped lists over long flat lists.
 - Do not invent a pseudo-code DSL when Markdown structure can express the route.
+
+### Content rules
+
+- Self-contained. Skills: no references to tickets, sessions, or sibling skills except plugin skill invocations such as `ws:` and host-specific slash forms. Agents: no references to session state or conversation history.
+- Use examples only when they prevent repeated wrong execution.
+- For user shorthand, name the general intent first and list shorthand only as trigger examples.
+
+### Iteration
+
+- Repeatedly violated rule -> mechanize (structured output block at entry point), do not repeat louder.
+- Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
+- At every authoring turn's end, re-read additions and cut.
+- After restructuring, request an authorized fresh audit: contradictions, duplication, orphan references, closure gaps.
+
+### Skill semantics
+
 - Skill-to-skill handoffs share the active conversation; write `Continue through <skill>` without a carry block.
 - User-approval gates fire only when the user invokes the skill directly; chained invocations pass through.
 - Reserve "arguments" for MCP tools, CLI commands, and structured templates.
-- Use examples only when they prevent repeated wrong execution.
-- Preserve full grammar when compression could change order, ownership, or safety.
-- For user shorthand, name the general intent first and list shorthand only as trigger examples.
 
 ### Invariant / Constraint checklist
 
