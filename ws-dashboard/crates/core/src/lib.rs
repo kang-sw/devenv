@@ -5,8 +5,9 @@ pub mod resources;
 pub mod view_model;
 
 pub use activity::{
-    NamedAgentActivityView, NamedAgentCallActivityView, WorkRootActivitySummary,
-    WorkRootActivityView,
+    ActivityFeed, ActivityItem, ActivitySourceDisplay, ActivityTranscript,
+    ActivityTranscriptAvailability, NamedAgentActivityView, NamedAgentCallActivityView,
+    TranscriptBlock, WorkRootActivitySummary, WorkRootActivityView,
 };
 pub use events::{
     InstanceEvent, InstanceEventCategory, InstanceEventFixtures, InstanceEventPayload,
