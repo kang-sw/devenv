@@ -45,7 +45,7 @@ Conversation
 
 ### 2. Route Intent
 
-1. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`; carry the current target and settled discussion context.
+1. If the user explicitly wants implementation to start, continue through `ws:lead-proceed`.
 2. Apply `judge: needs-intent-frame`; if it fires, emit an Intent Frame before advice.
 3. Apply `judge: needs-interview`; if it fires, enter Interview Workflow before proposing a settled direction.
 
@@ -87,23 +87,13 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 
 ## On: user signals done
 
-1. If the user wants implementation to start, continue through `ws:lead-proceed`; carry the current target and settled discussion context.
+1. If the user wants implementation to start, continue through `ws:lead-proceed`.
 2. For persistence without implementation, always suggest `ws:lead-write-spec` as the next step - write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
 3. Then offer ticket persistence:
    - **New ticket** - invoke `ws:lead-write-ticket`.
    - **Ticket update** - invoke `ws:lead-write-ticket`, then append design notes to an existing ticket phase.
 4. Apply **judge: needs-integration-tests** to ticket writes.
 5. Write only what the user approves. No artifact needed for exploratory discussions.
-
-## Context To Carry
-
-Discussion outputs feed downstream skills:
-- Continue through `ws:lead-write-spec`; carry approach direction.
-- Continue through `ws:lead-write-ticket`; carry scope, phases, and acceptance criteria.
-- Continue through `ws:lead-proceed`; carry implementation intent and settled discussion context.
-- Carry type shapes, module boundaries, and public API notes into implementation routing.
-
-Frame conclusions as directives the downstream consumer can execute.
 
 ## Judgments
 
