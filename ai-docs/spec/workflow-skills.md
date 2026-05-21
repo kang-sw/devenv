@@ -114,8 +114,9 @@ bootstrap, release, verification, and reconstruction workflows:
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
 preserves deferred documentation wrap-up and routes source changes through
-`lead-implement`. `lead-implement` handles both direct edits and delegated
-implementation while the sprint wrap-up keeps documentation integration,
+`lead-implement`. In the current wsflow package, `lead-implement` delegates
+source execution to `lead-edit`, and `lead-edit` chooses direct or scoped
+subagent execution while the sprint wrap-up keeps documentation integration,
 verification, and commit ownership explicit. {#260513-wsflow-sprint-skill}
 
 The wsflow package excludes skeleton flows, recovery orchestration, and
@@ -388,7 +389,7 @@ Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
 child ready promotion, or proceeding a ready child ticket. Existing `todo/`
 ticket paths are treated as implementation intent: `lead-proceed` continues
-through `lead-write-ticket` with carried context for autonomous `todo/` ->
+through `lead-write-spec` and `lead-write-ticket` for autonomous `todo/` ->
 `ready/` promotion before scope resolution, and escalates to `lead-discuss` only
 when promotion or implementation scope exposes unresolved design decisions,
 unclear completion criteria, user trade-offs, or missing spec coverage that
