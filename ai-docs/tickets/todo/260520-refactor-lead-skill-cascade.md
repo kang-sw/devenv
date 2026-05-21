@@ -157,58 +157,72 @@ Verification:
 - Chained invocation (e.g., lead-discuss → lead-write-ticket, lead-proceed →
   lead-write-spec) passes through gates without re-prompting.
 
-### Phase 2: R6 Lead two-hat ban — absorb lead-edit into lead-implement
+### Phase 2: R6 Unify implement spine — absorb lead-edit and lead-write-code review
 
-Goal: collapse the `lead-implement` → `lead-edit` shape into a single
-`lead-implement` that splits delegated work to `lead-write-code` and direct
-work inline.
+Goal: restructure `lead-implement` into a single unified spine where all
+stages (Route → Prep → Edit → Review → Doc → Final → Merge) run as one path.
+Direct-edit and delegated-edit are modes within the Edit stage; review is a
+single stage with `judge: review-allocation` deciding reviewer depth and
+partitions.
 
 Pre-step (load-bearing check, verdict: preserve):
 - Investigation 2026-05-21 found the "Review once" step's essence is `judge:
-  review-scope` (lead-only allowed for mechanical edits) plus a 1-reviewer
-  2-cycle relay cap; both are unique to direct-edit and are preserved inline
-  by Scope below.
+  review-scope` (lead-only for mechanical edits, 1-reviewer/2-cycle cap).
+  This essence maps to `judge: review-allocation` Tier 1 lead-only and
+  single-reviewer rows in the unified design.
 - Re-confirm via `git log --oneline --grep "lead-edit"` at implementation
   time if new commits landed against `lead-edit` after the verdict date.
 
 Scope:
-- Add an invariant to `ws:lead-skill-authoring`: a lead skill cannot also be
-  its own executor; routing to a sibling skill where the lead remains the
-  acting agent is a naming artifact, not an actor boundary.
-- Replace `lead-implement`'s `judge: execution-mode` with `judge:
-  needs-delegation` (top-level: direct in-place edit by the lead vs delegate
-  to `lead-write-code`).
-- Preserve `judge: review-scope` inline within the direct-edit `Execute`
-  block (lead-only vs one-reviewer, 2-cycle cap). This is the load-bearing
-  essence captured from the absorbed `lead-edit` review step.
-- Delete `ws:lead-edit` skill directory after dogfooding the absorbed flow.
-- Update `ai-docs/spec/workflow-skills.md` — remove `lead-edit` from the
-  lead skill inventory. (When this ticket promotes to `ready/`, frontmatter
-  `spec:` must include `workflow-skills`.)
-- Update mental-model anchor referencing `lead-edit` and
-  `lead-write-code` parity (currently the line: "`lead-edit` and
-  `lead-write-code` are code-and-review primitives; `lead-implement` and
-  `lead-sprint` own documentation pipeline timing") so `lead-edit` is removed
-  from the parity statement.
+- [done `009b1685`] Add invariant to `ws:lead-skill-authoring`:
+  lead-not-own-executor.
+- Restructure `lead-implement` into unified spine:
+  - `On: invoke` stages: Route → Prep → Edit → Review → Doc → Final → Merge.
+  - Replace `judge: execution-mode` with `judge: needs-delegation` (direct
+    vs delegate to implementer agent).
+  - Unify review into single `judge: review-allocation` with tiered decision:
+    Tier 1 picks depth (lead-only / single-reviewer / partitioned); Tier 2
+    picks partitions (correctness / fit / test) when partitioned.
+  - Inline direct-edit flow (load context, edit, verify) as the direct-edit
+    branch within the Edit stage.
+  - Inline delegated flow: register and call implementer agent directly from
+    the Edit stage (absorb `lead-write-code`'s implementer ceremony).
+  - Single Review stage handles 0/1/N reviewers; relay cap 2 cycles for
+    single reviewer, 3 cycles for partitioned.
+- Delete `ws:lead-edit` skill directory.
+- Delete `ws:lead-write-code` skill directory; implementer agent prompt
+  stays under `agents-plugin-tool/internal/wsprompt/prompts/`.
+- Update `ws:lead-sprint` routing table: replace `ws:lead-edit` and
+  `ws:lead-write-code` references with `ws:lead-implement` mode routing.
+- Update `ws:lead-write-skeleton` next-route references.
+- Update `ai-docs/spec/workflow-skills.md` — remove `lead-edit`, update
+  `lead-write-code` entry to reflect absorption into `lead-implement`.
+- Update mental-model anchors: drop `lead-edit` and `lead-write-code` from
+  the code-and-review parity statement; update documentation pipeline
+  ownership wording.
 
 Sequencing:
 - `260519-feat-implement-branch-squash-gate` touches `lead-implement`'s task
-  list (squash step before merge gate). Coordinate: land Phase 2 first so the
-  squash gate is added to the absorbed `lead-implement`, or rebase
-  squash-gate work on the absorbed skill. Document which sequencing is taken
-  in the phase Result.
+  list. Land Phase 2 first so squash gate is added to the unified spine.
 
 Rejected alternatives:
 - Keep `lead-edit` as a "mode marker" without execution semantics. Rejected:
-  if it has no execution semantics, it should not be a separate skill.
-- Route all implementation through `lead-write-code` regardless of size.
-  Rejected: round-trip cost for trivial single-file edits is unjustified.
+  naming artifact without actor boundary.
+- Route all implementation through delegated path. Rejected: round-trip cost
+  for trivial single-file edits.
+- Keep review bifurcated (`review-scope` in direct path, `partition-allocation`
+  in delegated path). Rejected: produces two-code-in-one-skill shape instead
+  of unified spine.
+- Keep `lead-write-code` as thin implementer-wrapper skill. Rejected:
+  implementer ceremony is short enough to inline; a wrapper skill with no
+  review stage is just indirection.
 
 Verification:
-- Dogfood at least one direct-edit task and one delegated task through the new
-  `lead-implement`; confirm both paths announce correctly.
-- Confirm `lead-edit` references are removed from `ai-docs/_index.md`,
-  `agents-plugin/skills/`, and the workflow-skills mental model.
+- Static review: zero orphan references to `ws:lead-edit` and
+  `ws:lead-write-code` across skills, spec, mental-model, and `_index.md`.
+- Confirm `judge: review-allocation` tiered table covers all prior review
+  scenarios (lead-only, single-reviewer, 2-partition, 3-partition).
+- Confirm `lead-sprint` routing table routes through `ws:lead-implement`.
 
 ### Phase 3: Batch — R1 invoke handler structure, R2 cross-skill judges ban, R4 negative-invariant evidence rule, R5 domain-inference subquery handoff
 
