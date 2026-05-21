@@ -341,6 +341,36 @@ bindings can invoke the same behavior. The shell remains read-only, does not add
 agent control buttons, and does not consume live SSE/watch streams until the
 live UX child implements that behavior.
 
+## 🚧 Activity Console Watch Stream {#260521-ws-dashboard-activity-console-watch-stream}
+
+The dashboard will expose a workRoot-scoped read-only Activity Console event
+stream for feed and transcript invalidations:
+
+```text
+GET /api/dashboard/work-roots/{workRootId}/activity/events?after={cursor}
+```
+
+The stream is owner-authenticated before any transport is accepted. SSE is the
+preferred transport because Activity Console updates are read-only; a different
+transport requires a recorded bidirectional need. Subscriptions are scoped to
+the selected or otherwise visible workRoot instead of every remembered or opened
+root, and unavailable platform watcher behavior degrades to bounded polling.
+
+Stream events carry source-neutral Activity Feed semantics rather than
+filesystem or backend-native payloads. Expected event categories include item
+upsert/removal, transcript invalidation with transcript cursor metadata,
+snapshot invalidation for overflow or watch resets, mode changes between watch
+and polling fallback, and heartbeats. Event cursors let reconnecting callers ask
+for events after the last observed cursor, but the stream may intentionally
+force a snapshot refetch when events were missed or coalesced.
+
+Watcher behavior must normalize atomic renames, nested current-output changes,
+missing directories, agent erasure, and recreated agent directories without
+leaking cache paths, raw file paths, backend-native transcript records, process
+ids, session ids, stdout/stderr paths, or file contents. The stream remains
+read-only and does not make the frontend responsible for consuming live updates;
+frontend merge and stale-root behavior belongs to the live UX feature.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
