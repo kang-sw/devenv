@@ -7,6 +7,7 @@ sources:
 related:
   mcp-runtime: "agents.* MCP and CLI handlers are thin wrappers around wsagent.Manager."
   prompt-bundle: "registration resolves embedded prompts into each agent system prompt."
+  ws-web-dashboard: "Activity Console reads agent metadata/current state/output/session records as daemon-private projection inputs."
 ---
 
 # Named Agent Runtime
@@ -45,7 +46,7 @@ related:
 - MCP and CLI wrappers mirror `Register`, `Call`, `Wait`, `Result`, `Status`, `Interrupt`, `Tail`, debug streams, `Cancel`, `Print`, and `Erase`; behavior changes require both surfaces.
 - Async worker subprocesses must re-resolve a usable runtime binary or launcher when the parent MCP process was started from a plugin cache path that has since been replaced.
 - `ToolProfile` flows into subprocess env as `WS_MCP_TOOL_PROFILE` when the host preserves it; MCP treats it as an optional profile filter, not an authority boundary.
-- Worktree scoping is shared by agents, generated review paths, and orchestrator locks; changing cache layout affects all three.
+- Worktree scoping is shared by agents, generated review paths, orchestrator locks, and dashboard Activity Console projection; changing cache layout, `agent.json` metadata semantics, or Codex `session_id` persistence affects dashboard feed/transcript behavior as well as agent tools.
 - Prompt registration is static: `system.md` is written at registration time and existing agents do not automatically pick up edited embedded prompts. {#260505-agent-prompt-registration-tier-resolution}
 - Agent status includes the detected harness when one influenced registration plus the resolved effort when an alias mapping supplied one; backend error diagnostics include the harness to make alias misrouting visible.
 - Registered effort is applied at call time through `RunnerRequest`: Codex emits `model_reasoning_effort`, Claude emits `--effort`, and empty/no-override effort emits no backend option. New backends must opt into their own mapping instead of assuming the manager path is sufficient. {#260505-codex-agent-session-jsonl-handling} {#260505-claude-agent-runner}
