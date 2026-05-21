@@ -41,6 +41,7 @@ These apply to both skill and agent documents.
 - Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
 - After each authoring pass, re-read additions and cut.
 - After skill, agent, or prompt edits, run a fresh-reader audit: context-dependent wording, contradictions, duplication, orphan references, missing end-state or output instructions.
+- After doctrine, terminology, routing, layout, or audit-gate edits, run a downstream consistency sweep across affected skill surfaces; conservative reviewers report findings only, then the lead classifies fixes.
 
 ### Skill semantics
 
@@ -87,6 +88,13 @@ Test: invariants should re-derive from the named resource.
 2. Report material execution blockers: wrong-behavior wording, contradictions, orphan references, or missing required output/end-state instructions.
 3. For each finding, include quote, issue, and suggested rewrite or delete.
 4. If no material issue remains, say so clearly.
+
+## On: Downstream Consistency Sweep
+
+1. Select affected skill, agent, prompt, spec, mental-model, test, and mirrored-package surfaces from the edited doctrine, terminology, route, layout, or audit gate.
+2. Use a conservative finding-only first pass for broad skill-surface scans.
+3. Classify each finding as `fix`, `intentional difference`, or `out of scope`.
+4. Edit only accepted `fix` findings; record intentional differences when drift would otherwise look stale.
 
 ## Skill Layout
 

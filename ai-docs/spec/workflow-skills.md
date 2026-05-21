@@ -88,6 +88,11 @@ contradictions, duplication, orphan references, and missing end-state or output
 instructions.
 Fresh-reader audit findings include the quote, issue, and suggested rewrite or
 delete, or state that no material issue remains.
+Doctrine, terminology, route, layout, and audit-gate edits also run a
+downstream consistency sweep across affected skill, prompt, spec, mental-model,
+test, and mirrored-package surfaces. The first pass may conservatively
+over-report findings; the lead classifies each as fix, intentional difference,
+or out of scope before editing.
 {#260514-skill-authoring-carried-context}
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
@@ -238,6 +243,9 @@ corrected assumptions, observations, reuse opportunities, and code-hygiene
 findings, checks for over-alignment signals such as weak premise handling or
 missing countercases, then steers the discussion toward the best-supported
 direction.
+It intentionally remains compact and frequent-use; downstream authoring sweeps
+must not force full workflow-skill ceremony onto this checkpoint unless its
+actual output or end state is unclear.
 {#260512-discussion-verification-skill}
 
 ### Check Blockers Checkpoint {#260513-check-blockers-skill}
@@ -246,6 +254,9 @@ direction.
 whether a design discussion still has user-blocking blockers. It does not edit files. It
 classifies remaining work into user-blocking design questions, ticket or spec
 capture gaps, autonomous code-hygiene items, and proceed readiness.
+It intentionally remains compact and frequent-use; downstream authoring sweeps
+must not force full workflow-skill ceremony onto this checkpoint unless its
+actual output or end state is unclear.
 
 `lead-write-skeleton` is deprecated from normal implementation routing. The
 skill file remains available for compatibility, but `lead-implement` no longer

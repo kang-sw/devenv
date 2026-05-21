@@ -65,6 +65,13 @@ anchors that codify the rules being removed. Sub-agent prompts under
   references, and missing end-state or output instructions.
 - Fresh-reader audit output names each quote, issue, and suggested rewrite or
   delete; when clean, it states that no material issue remains.
+- Downstream consistency sweep follows doctrine, terminology, route, layout,
+  or audit-gate edits: a conservative finding-only pass scans affected skill
+  surfaces, then the lead classifies findings as fix, intentional difference,
+  or out of scope before editing.
+- `lead-check-blockers` and `lead-verify-discussion` are intentional compact
+  fast-path checkpoints. Treat missing full workflow ceremony there as an
+  intentional difference unless the actual output or end state is unclear.
 
 ## Constraints
 
@@ -298,6 +305,11 @@ Skill-authoring wording cleanup:
   doctrine language: avoid negation-for-negation's-sake, hidden discussion
   shorthand, and unexplained internal terms.
 - Add `fresh-reader audit` as the post-edit skill audit gate.
+- Add `downstream consistency sweep` as the cross-surface follow-up gate for
+  doctrine, terminology, route, layout, and audit-gate edits.
+- Keep `lead-check-blockers` and `lead-verify-discussion` as compact fast-path
+  checkpoints; classify full-ceremony rewrites for those skills as intentional
+  differences unless output or end-state clarity is actually missing.
 
 R1 — `On: invoke` four-block structure:
 - Add to `ws:lead-skill-authoring`: `On: invoke` must be split into named
