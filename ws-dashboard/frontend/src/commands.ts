@@ -59,6 +59,67 @@ export type DashboardCommandDispatcher = (
   handlers?: DashboardCommandHandlers,
 ) => void;
 
+
+export function buildDashboardRefreshCommand(): DashboardCommand {
+  return { commandId: "dashboard.refresh", payload: { type: "refresh" } };
+}
+
+export function buildWorkRootOpenCommand(_submittedHostPath: string): DashboardCommand {
+  return { commandId: "workRoot.open", payload: { type: "workRoot.open" } };
+}
+
+export function buildFileExplorerRefreshCommand(workRootId: string): DashboardCommand {
+  return {
+    commandId: "fileExplorer.refresh",
+    payload: { type: "fileExplorer.refresh", workRootId },
+  };
+}
+
+export function buildFileExplorerToggleDirectoryCommand(
+  workRootId: string,
+  path: string,
+): DashboardCommand {
+  return {
+    commandId: "fileExplorer.toggleDirectory",
+    payload: { type: "fileExplorer.toggleDirectory", workRootId, path },
+  };
+}
+
+export function buildFileExplorerOpenFileCommand(
+  workRootId: string,
+  path: string,
+  gesture: "singleClick" | "doubleClick",
+): DashboardCommand {
+  return {
+    commandId: "fileExplorer.openFile",
+    payload: { type: "fileExplorer.openFile", workRootId, path, gesture },
+  };
+}
+
+export function buildFileExplorerSelectEntryCommand(
+  workRootId: string,
+  path: string,
+): DashboardCommand {
+  return {
+    commandId: "fileExplorer.selectEntry",
+    payload: { type: "fileExplorer.selectEntry", workRootId, path },
+  };
+}
+
+export function buildWorkbenchOpenActivityCommand(workRootId: string): DashboardCommand {
+  return {
+    commandId: "workbench.openActivity",
+    payload: { type: "workbench.openActivity", workRootId },
+  };
+}
+
+export function buildTerminalCreateCommand(workRootId: string): DashboardCommand {
+  return {
+    commandId: "terminal.create",
+    payload: { type: "terminal.create", workRootId },
+  };
+}
+
 export function dispatchDashboardCommand(
   command: DashboardCommand,
   options: {

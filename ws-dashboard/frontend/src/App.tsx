@@ -5,6 +5,14 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
 import {
+  buildDashboardRefreshCommand,
+  buildFileExplorerOpenFileCommand,
+  buildFileExplorerRefreshCommand,
+  buildFileExplorerSelectEntryCommand,
+  buildFileExplorerToggleDirectoryCommand,
+  buildTerminalCreateCommand,
+  buildWorkbenchOpenActivityCommand,
+  buildWorkRootOpenCommand,
   dashboardCommandLabel,
   dispatchDashboardCommand,
   type DashboardCommand,
@@ -520,7 +528,7 @@ function OpenWorkRootControl({
     }
 
     onCommand(
-      { commandId: "workRoot.open", payload: { type: "workRoot.open" } },
+      buildWorkRootOpenCommand(requestedPath),
       {
         "workRoot.open": () => {
           setPending(true);
@@ -616,7 +624,7 @@ function ResourceNavigation({
             className="action-button action-button-primary"
             data-command-id="dashboard.refresh"
             type="button"
-            onClick={() => onCommand({ commandId: "dashboard.refresh", payload: { type: "refresh" } })}
+            onClick={() => onCommand(buildDashboardRefreshCommand())}
           >
             Refresh
           </button>
@@ -765,14 +773,7 @@ function WorkRootFileExplorer({
 
   const selectEntry = (entry: WorkRootFileEntryView) => {
     onCommand(
-      {
-        commandId: "fileExplorer.selectEntry",
-        payload: {
-          type: "fileExplorer.selectEntry",
-          workRootId: workRoot.id,
-          path: entry.path,
-        },
-      },
+      buildFileExplorerSelectEntryCommand(workRoot.id, entry.path),
       {
         "fileExplorer.selectEntry": () => {
           updateSnapshot(workRoot.id, (current) => ({
@@ -787,14 +788,7 @@ function WorkRootFileExplorer({
   const toggleDirectory = (entry: WorkRootFileEntryView) => {
     const isExpanded = snapshot?.expandedPaths.has(entry.path) ?? false;
     onCommand(
-      {
-        commandId: "fileExplorer.toggleDirectory",
-        payload: {
-          type: "fileExplorer.toggleDirectory",
-          workRootId: workRoot.id,
-          path: entry.path,
-        },
-      },
+      buildFileExplorerToggleDirectoryCommand(workRoot.id, entry.path),
       {
         "fileExplorer.toggleDirectory": () => {
           updateSnapshot(workRoot.id, (current) => ({
@@ -816,15 +810,7 @@ function WorkRootFileExplorer({
     gesture: ReadOnlyFileOpenGesture = "singleClick",
   ) => {
     onCommand(
-      {
-        commandId: "fileExplorer.openFile",
-        payload: {
-          type: "fileExplorer.openFile",
-          workRootId: workRoot.id,
-          path: entry.path,
-          gesture,
-        },
-      },
+      buildFileExplorerOpenFileCommand(workRoot.id, entry.path, gesture),
       {
         "fileExplorer.openFile": () => {
           updateSnapshot(workRoot.id, (current) => ({
@@ -839,10 +825,7 @@ function WorkRootFileExplorer({
 
   const refreshExplorer = () => {
     onCommand(
-      {
-        commandId: "fileExplorer.refresh",
-        payload: { type: "fileExplorer.refresh", workRootId: workRoot.id },
-      },
+      buildFileExplorerRefreshCommand(workRoot.id),
       {
         "fileExplorer.refresh": () => {
           const paths = workRootExplorerRefreshPaths(
@@ -1950,10 +1933,7 @@ function WorkbenchToolbar({
           activity={activity}
           onOpenActivity={() => {
             onCommand(
-              {
-                commandId: "workbench.openActivity",
-                payload: { type: "workbench.openActivity", workRootId: root.id },
-              },
+              buildWorkbenchOpenActivityCommand(root.id),
               { "workbench.openActivity": onOpenActivity },
             );
           }}
@@ -1993,10 +1973,7 @@ function WorkbenchToolbar({
           type="button"
           onClick={() => {
             onCommand(
-              {
-                commandId: "terminal.create",
-                payload: { type: "terminal.create", workRootId: root.id },
-              },
+              buildTerminalCreateCommand(root.id),
               { "terminal.create": onCreateTerminal },
             );
           }}

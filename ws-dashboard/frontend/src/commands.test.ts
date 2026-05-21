@@ -1,4 +1,12 @@
 import {
+  buildDashboardRefreshCommand,
+  buildFileExplorerOpenFileCommand,
+  buildFileExplorerRefreshCommand,
+  buildFileExplorerSelectEntryCommand,
+  buildFileExplorerToggleDirectoryCommand,
+  buildTerminalCreateCommand,
+  buildWorkbenchOpenActivityCommand,
+  buildWorkRootOpenCommand,
   dashboardCommandLabel,
   dispatchDashboardCommand,
   type DashboardCommand,
@@ -18,69 +26,127 @@ function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
   }
 }
 
+function assertNotContains(value: string, forbidden: string, label: string) {
+  if (value.includes(forbidden)) {
+    throw new Error(`${label}: ${JSON.stringify(value)} contained ${JSON.stringify(forbidden)}`);
+  }
+}
+
+const workRootId = "workRoot:local";
+const filePath = "src/App.tsx";
+const migratedCommands = [
+  buildDashboardRefreshCommand(),
+  buildFileExplorerRefreshCommand(workRootId),
+  buildFileExplorerToggleDirectoryCommand(workRootId, "src"),
+  buildFileExplorerOpenFileCommand(workRootId, filePath, "singleClick"),
+  buildFileExplorerSelectEntryCommand(workRootId, "README.md"),
+  buildWorkbenchOpenActivityCommand(workRootId),
+  buildTerminalCreateCommand(workRootId),
+] as const;
+
+assertDeepEqual(
+  migratedCommands.map((command) => command.commandId),
+  [
+    "dashboard.refresh",
+    "fileExplorer.refresh",
+    "fileExplorer.toggleDirectory",
+    "fileExplorer.openFile",
+    "fileExplorer.selectEntry",
+    "workbench.openActivity",
+    "terminal.create",
+  ],
+  "real command builders preserve migrated command ids",
+);
+
+assertDeepEqual(
+  migratedCommands.map((command) => command.payload.type),
+  [
+    "refresh",
+    "fileExplorer.refresh",
+    "fileExplorer.toggleDirectory",
+    "fileExplorer.openFile",
+    "fileExplorer.selectEntry",
+    "workbench.openActivity",
+    "terminal.create",
+  ],
+  "real command builders emit executable payload variants",
+);
+
 const observed: string[] = [];
 const executed: string[] = [];
-const openFileCommand: DashboardCommand = {
-  commandId: "fileExplorer.openFile",
-  payload: {
-    type: "fileExplorer.openFile",
-    workRootId: "workRoot:local",
-    path: "src/App.tsx",
-    gesture: "singleClick",
-  },
-};
+for (const command of migratedCommands) {
+  dispatchDashboardCommand(command, {
+    observer: (observedCommand) => observed.push(observedCommand.commandId),
+    handlers: {
+      [command.commandId]: (handledCommand: DashboardCommand) => {
+        executed.push(`${handledCommand.commandId}:${handledCommand.payload.type}`);
+      },
+    },
+  });
+}
 
-dispatchDashboardCommand(openFileCommand, {
-  observer: (command) => observed.push(command.commandId),
+assertDeepEqual(
+  observed,
+  migratedCommands.map((command) => command.commandId),
+  "real migrated builders pass through command observer in order",
+);
+assertDeepEqual(
+  executed,
+  migratedCommands.map((command) => `${command.commandId}:${command.payload.type}`),
+  "programmatic dispatch executes handlers keyed by real migrated command ids",
+);
+
+const openFileCommand: DashboardCommand = buildFileExplorerOpenFileCommand(
+  workRootId,
+  filePath,
+  "singleClick",
+);
+assertEqual(dashboardCommandLabel(openFileCommand), "Open file", "open file label is stable");
+
+const submittedHostPath = "/Users/kang-sw/private/customer repo";
+const workRootOpenCommand = buildWorkRootOpenCommand(submittedHostPath);
+let loggableWorkRootOpenCommand: DashboardCommand | null = null;
+dispatchDashboardCommand(workRootOpenCommand, {
+  observer: (command) => {
+    loggableWorkRootOpenCommand = command;
+  },
   handlers: {
-    "fileExplorer.openFile": (command) => {
-      if (command.payload.type !== "fileExplorer.openFile") {
-        throw new Error("open file handler received wrong payload");
-      }
-      executed.push(`${command.payload.workRootId}:${command.payload.path}:${command.payload.gesture}`);
+    "workRoot.open": (command) => {
+      assertEqual(command.payload.type, "workRoot.open", "workRoot open handler receives logical payload");
     },
   },
 });
 
-assertDeepEqual(observed, ["fileExplorer.openFile"], "observer sees dispatched command id");
-assertDeepEqual(
-  executed,
-  ["workRoot:local:src/App.tsx:singleClick"],
-  "handler executes from the same dispatch path with logical file target",
+assertEqual(workRootOpenCommand.commandId, "workRoot.open", "submitted host path builds workRoot.open command");
+assertEqual(workRootOpenCommand.payload.type, "workRoot.open", "workRoot.open payload stays logical");
+const serializedPayload = JSON.stringify(workRootOpenCommand.payload);
+const serializedLoggableCommand = JSON.stringify(loggableWorkRootOpenCommand);
+assertNotContains(serializedPayload, submittedHostPath, "workRoot.open payload omits submitted host path");
+assertNotContains(
+  serializedLoggableCommand,
+  submittedHostPath,
+  "workRoot.open loggable command omits submitted host path",
 );
-assertEqual(dashboardCommandLabel(openFileCommand), "Open file", "open file label is stable");
-
-const workRootOpenCommand: DashboardCommand = {
-  commandId: "workRoot.open",
-  payload: { type: "workRoot.open" },
-};
 assertEqual(
   Object.prototype.hasOwnProperty.call(workRootOpenCommand.payload, "path"),
   false,
-  "workRoot.open command payload does not carry a host path",
+  "workRoot.open command payload does not carry a path field",
 );
 
 let terminalCreates = 0;
-const terminalCreateCommand: DashboardCommand = {
-  commandId: "terminal.create",
-  payload: { type: "terminal.create", workRootId: "workRoot:local" },
-};
-dispatchDashboardCommand(terminalCreateCommand, {
+dispatchDashboardCommand(buildTerminalCreateCommand(workRootId), {
   handlers: {
     "terminal.create": (command) => {
       if (command.payload.type !== "terminal.create") {
         throw new Error("terminal handler received wrong payload");
       }
-      terminalCreates += command.payload.workRootId === "workRoot:local" ? 1 : 0;
+      terminalCreates += command.payload.workRootId === workRootId ? 1 : 0;
     },
   },
 });
 assertEqual(terminalCreates, 1, "programmatic terminal.create dispatch reaches executable handler");
 assertEqual(
-  dashboardCommandLabel({
-    commandId: "workbench.openActivity",
-    payload: { type: "workbench.openActivity", workRootId: "workRoot:local" },
-  }),
+  dashboardCommandLabel(buildWorkbenchOpenActivityCommand(workRootId)),
   "Open WorkRoot Activity",
   "activity command label leaves an obvious later command surface",
 );
