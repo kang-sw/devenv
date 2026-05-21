@@ -163,7 +163,7 @@ Next: <caller-owned when invoked by ws:lead-implement | ws:lead-implement when i
 ```
 
 When invoked standalone, report next route as `ws:lead-implement`. Do not
-recommend `ws:lead-edit` or `ws:lead-write-code` directly from this skill.
+recommend direct-edit or delegated implementation directly from this skill.
 
 ## Judgments
 

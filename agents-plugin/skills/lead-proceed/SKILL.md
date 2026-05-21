@@ -63,7 +63,7 @@ Routing
    - No explicit phase -> first unfinished phase.
    - Selected phase is plainly too broad from ticket text -> stop for phase or ticket slicing.
 13. For implementation routes, read `ws:lead-implement` skill text.
-14. For implementation routes, apply `lead-implement` `judge: execution-mode` and `judge: branch-mode` from route context only; unknown direct-edit predicates produce a delegated verdict.
+14. For implementation routes, apply `lead-implement` `judge: needs-delegation` and `judge: branch-mode` from route context only; unknown direct-edit predicates produce a delegated verdict.
 
 ### 2. Select Route
 
@@ -88,8 +88,8 @@ Routing
 - **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | whole target - no phases>
-- **Implementation Verdict**: <ws:lead-edit | ws:lead-write-code> via ws:lead-implement
-- **Verdict Basis**: lead-implement route contract; source-free; unknown direct-edit predicate -> delegated
+- **Implementation Verdict**: <direct-edit | delegated> via ws:lead-implement
+- **Verdict Basis**: lead-implement judge: needs-delegation; source-free; unknown predicate -> delegated
 - **Execution**: ws:lead-implement - owns code-editing stages and branch lifecycle
 
 Proceeding.
