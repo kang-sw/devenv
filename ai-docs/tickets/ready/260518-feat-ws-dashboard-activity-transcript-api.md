@@ -1,6 +1,8 @@
 ---
 title: ws dashboard Activity Console transcript expansion
 parent: 260518-epic-ws-dashboard-activity-console
+spec:
+  - 260522-ws-dashboard-activity-console-transcript-expansion
 related:
   260518-feat-ws-dashboard-activity-read-model: supplies the MVP transcript backfill and resolver boundary
   260518-feat-ws-dashboard-activity-watch-stream: supplies transcript invalidation events

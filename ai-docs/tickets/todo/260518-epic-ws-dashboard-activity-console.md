@@ -59,7 +59,7 @@ The milestone covers:
 - `260518-feat-ws-dashboard-activity-live-ux` - done; adopted the live stream in
   the Activity Console frontend with merge, stale-root, transcript-refresh, and
   fallback behavior.
-- `260518-feat-ws-dashboard-activity-transcript-api` - todo; expand transcript
+- `260518-feat-ws-dashboard-activity-transcript-api` - ready; expand transcript
   sources and block-level live transcript behavior after the read model and
   live update foundation are in place.
 
