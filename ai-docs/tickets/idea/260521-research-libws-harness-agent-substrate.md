@@ -122,6 +122,25 @@ The harness should parse at newline boundaries and report a correlated system
 event even when the request loses a timing race and is queued, ignored, or
 rejected. This prevents "silently ignored" steering inputs.
 
+Model output itself should be framed in the JSONL stream. A model turn should
+emit an explicit output-start event, then one JSONL event per model output
+chunk, then an explicit output-end event. This mirrors stream-style backend
+interfaces such as a hypothetical `codex -p --stream` path without leaking
+backend-native chunk formats into the harness contract.
+
+Example model output frame:
+
+```json
+{"type":"model_output_started","run_id":"run_1","output_id":"out_1"}
+{"type":"model_output_delta","run_id":"run_1","output_id":"out_1","delta":"Hel"}
+{"type":"model_output_delta","run_id":"run_1","output_id":"out_1","delta":"lo"}
+{"type":"model_output_completed","run_id":"run_1","output_id":"out_1","finish_reason":"stop"}
+```
+
+Callers that want a continuous transcript can concatenate deltas within the
+frame. Callers that want exact event recovery should persist each delta as its
+own event. The harness should avoid emitting raw unframed model text on stdout.
+
 Example control input and acknowledgement:
 
 ```json
@@ -156,7 +175,9 @@ RunInput
 
 RunEvent
   RunStarted
-  ModelDelta
+  ModelOutputStarted
+  ModelOutputDelta
+  ModelOutputCompleted
   ToolCallRequested
   ToolCallCompleted
   ContextCompacted
