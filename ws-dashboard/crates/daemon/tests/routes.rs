@@ -1207,6 +1207,38 @@ async fn work_root_activity_events_streams_initial_fallback_snapshot_without_pri
 }
 
 #[tokio::test]
+async fn work_root_activity_events_streams_fallback_for_missing_agents_directory() {
+    if skip_without_git("work_root_activity_events_streams_fallback_for_missing_agents_directory") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-events-missing-agents");
+    let cache_home = temp_fixture_path("work-root-activity-events-missing-agents-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    fs::create_dir_all(&cache_home).expect("create activity cache root");
+    init_git_repo(&root);
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = fetch_work_root_activity_events(app, cookie.as_str(), &work_root_id, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let events = read_activity_sse_events(response, 3).await;
+
+    assert_eq!(events[0]["type"], "modeChanged");
+    assert_eq!(events[0]["updateMode"], "pollFallback");
+    assert_eq!(events[1]["type"], "snapshotInvalidated");
+    assert_eq!(events[1]["reason"], "fallback");
+    assert_eq!(events[2]["type"], "heartbeat");
+    assert!(!events.iter().any(|event| event["type"] == "itemUpserted"));
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
 async fn work_root_activity_events_reconnect_cursor_stays_bounded() {
     if skip_without_git("work_root_activity_events_reconnect_cursor_stays_bounded") {
         return;
@@ -1248,6 +1280,120 @@ async fn work_root_activity_events_reconnect_cursor_stays_bounded() {
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_events_poll_fallback_is_scoped_to_subscribed_work_root() {
+    if skip_without_git("work_root_activity_events_poll_fallback_is_scoped_to_subscribed_work_root")
+    {
+        return;
+    }
+    let base = temp_fixture_path("work-root-activity-events-scoped");
+    let root_a = base.join("root-a");
+    let root_b = base.join("root-b");
+    let cache_home = base.join("cache");
+    fs::create_dir_all(&root_a).expect("create activity workRoot A");
+    fs::create_dir_all(&root_b).expect("create activity workRoot B");
+    init_git_repo(&root_a);
+    init_git_repo(&root_b);
+    let agents_a = resolve_work_root_agents_dir(&cache_home, &root_a)
+        .expect("resolve wsstate agents dir for workRoot A");
+    let agents_b = resolve_work_root_agents_dir(&cache_home, &root_b)
+        .expect("resolve wsstate agents dir for workRoot B");
+    write_agent_metadata(
+        &agents_a,
+        "alpha",
+        &serde_json::json!({ "schema_version": 1, "name": "alpha", "status": "idle" }),
+    );
+    write_agent_metadata(
+        &agents_b,
+        "bravo",
+        &serde_json::json!({ "schema_version": 1, "name": "bravo", "status": "idle" }),
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_a = open_work_root_for_test(app.clone(), cookie.as_str(), &root_a).await;
+    let _work_root_b = open_work_root_for_test(app.clone(), cookie.as_str(), &root_b).await;
+
+    let response =
+        fetch_work_root_activity_events(app.clone(), cookie.as_str(), &work_root_a, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut stream = response.into_body().into_data_stream();
+    let mut buffer = String::new();
+    let mut seen = Vec::<serde_json::Value>::new();
+
+    timeout(Duration::from_secs(5), async {
+        while !seen
+            .iter()
+            .any(|event| event["type"] == "itemUpserted" && event["item"]["id"] == "agent:alpha")
+        {
+            let chunk = stream
+                .next()
+                .await
+                .expect("initial scoped SSE chunk")
+                .expect("initial scoped SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("initial scoped SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("initial scoped item event");
+
+    write_agent_metadata(
+        &agents_b,
+        "bravo",
+        &serde_json::json!({ "schema_version": 1, "name": "bravo", "status": "running" }),
+    );
+
+    let before_subscribed_change = seen.len();
+    timeout(Duration::from_millis(700), async {
+        while seen.len() < before_subscribed_change + 2 {
+            let chunk = stream
+                .next()
+                .await
+                .expect("cross-root scoped SSE chunk")
+                .expect("cross-root scoped SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("cross-root scoped SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .ok();
+    assert!(
+        !seen.iter().any(|event| {
+            event["type"] == "itemUpserted" && event["item"]["id"] == "agent:bravo"
+        }),
+        "subscribed workRoot stream must not emit sibling workRoot activity"
+    );
+
+    write_agent_metadata(
+        &agents_a,
+        "alpha",
+        &serde_json::json!({ "schema_version": 1, "name": "alpha", "status": "running" }),
+    );
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "itemUpserted"
+                && event["item"]["id"] == "agent:alpha"
+                && event["item"]["status"] == "running"
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("subscribed scoped SSE chunk")
+                .expect("subscribed scoped SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("subscribed scoped SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("subscribed workRoot update event");
+
+    remove_static_fixture(&base);
 }
 
 #[tokio::test]
@@ -1390,12 +1536,20 @@ fn drain_sse_events(buffer: &mut String, events: &mut Vec<serde_json::Value>) {
     while let Some(boundary) = buffer.find("\n\n") {
         let frame = buffer[..boundary].to_owned();
         *buffer = buffer[(boundary + 2)..].to_owned();
-        for line in frame.lines() {
-            if let Some(data) = line.strip_prefix("data: ") {
-                events.push(serde_json::from_str(data).expect("activity SSE data JSON"));
-            }
-        }
+        events.push(activity_sse_frame_data(&frame));
     }
+}
+
+fn activity_sse_frame_data(frame: &str) -> serde_json::Value {
+    assert!(
+        frame.lines().any(|line| line == "event: activity"),
+        "activity SSE frame must name event: activity; frame was {frame:?}"
+    );
+    let data = frame
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .expect("activity SSE frame data field");
+    serde_json::from_str(data).expect("activity SSE data JSON")
 }
 
 #[tokio::test]
@@ -1620,11 +1774,7 @@ async fn read_activity_sse_events(
             while let Some(boundary) = buffer.find("\n\n") {
                 let frame = buffer[..boundary].to_owned();
                 buffer = buffer[(boundary + 2)..].to_owned();
-                for line in frame.lines() {
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        events.push(serde_json::from_str(data).expect("activity SSE data JSON"));
-                    }
-                }
+                events.push(activity_sse_frame_data(&frame));
             }
         }
     })
