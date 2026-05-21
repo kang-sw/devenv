@@ -104,6 +104,177 @@ export type WorkRootActivityView = {
   agents: NamedAgentActivityView[];
 };
 
+
+export type ActivityConsoleUpdateMode = "watch" | "pollFallback" | "snapshot" | string;
+
+export type ActivityConsoleEvent =
+  | { type: "itemUpserted"; cursor: string; item: ActivityItem }
+  | { type: "itemRemoved"; cursor: string; activityId: string }
+  | {
+      type: "transcriptUpdated";
+      cursor: string;
+      activityId: string;
+      transcriptCursor: string | null;
+    }
+  | {
+      type: "snapshotInvalidated";
+      cursor: string;
+      reason: "overflow" | "watchReset" | "fallback" | string;
+    }
+  | { type: "modeChanged"; cursor: string; updateMode: ActivityConsoleUpdateMode }
+  | { type: "heartbeat"; cursor: string };
+
+export type ActivityConsoleEventApplication = {
+  readonly view: WorkRootActivityView;
+  readonly refetchSnapshot: boolean;
+  readonly transcriptActivityId: string | null;
+  readonly updateMode: ActivityConsoleUpdateMode | null;
+};
+
+export type ActivityConsoleStreamRequest = {
+  readonly workRootId: string;
+  readonly requestId: number;
+};
+
+export function workRootActivityEventsEndpoint(
+  workRootId: string,
+  options: { readonly after?: string | null } = {},
+) {
+  const path = `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activity/events`;
+  if (!options.after) {
+    return path;
+  }
+  const params = new URLSearchParams();
+  params.set("after", options.after);
+  return `${path}?${params.toString()}`;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+export function parseActivityConsoleEvent(value: unknown): ActivityConsoleEvent | null {
+  if (!isObject(value) || !isString(value.type) || !isString(value.cursor)) {
+    return null;
+  }
+  switch (value.type) {
+    case "itemUpserted":
+      return isObject(value.item) && isString(value.item.id)
+        ? ({ type: "itemUpserted", cursor: value.cursor, item: value.item as ActivityItem })
+        : null;
+    case "itemRemoved":
+      return isString(value.activityId)
+        ? { type: "itemRemoved", cursor: value.cursor, activityId: value.activityId }
+        : null;
+    case "transcriptUpdated":
+      return isString(value.activityId) && isNullableString(value.transcriptCursor)
+        ? {
+            type: "transcriptUpdated",
+            cursor: value.cursor,
+            activityId: value.activityId,
+            transcriptCursor: value.transcriptCursor,
+          }
+        : null;
+    case "snapshotInvalidated":
+      return isString(value.reason)
+        ? { type: "snapshotInvalidated", cursor: value.cursor, reason: value.reason }
+        : null;
+    case "modeChanged":
+      return isString(value.updateMode)
+        ? { type: "modeChanged", cursor: value.cursor, updateMode: value.updateMode }
+        : null;
+    case "heartbeat":
+      return { type: "heartbeat", cursor: value.cursor };
+    default:
+      return null;
+  }
+}
+
+function summarizeActivityItems(items: readonly ActivityItem[]): WorkRootActivitySummary {
+  return items.reduce<WorkRootActivitySummary>(
+    (summary, item) => {
+      summary.total += 1;
+      if (item.live) summary.active += 1;
+      if (item.attention) summary.blocked += 1;
+      const status = item.status.toLowerCase();
+      if (status.includes("fail") || status === "error") summary.failed += 1;
+      if (status === "unavailable") summary.unavailable += 1;
+      return summary;
+    },
+    { total: 0, active: 0, blocked: 0, failed: 0, unavailable: 0 },
+  );
+}
+
+function withEventCursor(view: WorkRootActivityView, cursor: string): WorkRootActivityView {
+  return { ...view, feedCursor: cursor };
+}
+
+export function applyActivityConsoleEvent(
+  current: WorkRootActivityView,
+  event: ActivityConsoleEvent,
+): ActivityConsoleEventApplication {
+  let view = withEventCursor(current, event.cursor);
+  let refetchSnapshot = false;
+  let transcriptActivityId: string | null = null;
+  let updateMode: ActivityConsoleUpdateMode | null = null;
+
+  if (event.type === "itemUpserted") {
+    const itemsById = new Map(current.items.map((item) => [item.id, item] as const));
+    itemsById.set(event.item.id, event.item);
+    const items = orderActivityItems(Array.from(itemsById.values()));
+    view = {
+      ...view,
+      items,
+      summary: summarizeActivityItems(items),
+      selectedItemId: preserveActivitySelection(items, current.selectedItemId),
+    };
+  } else if (event.type === "itemRemoved") {
+    const items = current.items.filter((item) => item.id !== event.activityId);
+    view = {
+      ...view,
+      items,
+      summary: summarizeActivityItems(items),
+      selectedItemId: preserveActivitySelection(items, current.selectedItemId),
+    };
+  } else if (event.type === "transcriptUpdated") {
+    transcriptActivityId = event.activityId;
+    const items = current.items.map((item) =>
+      item.id === event.activityId
+        ? {
+            ...item,
+            transcript: {
+              ...item.transcript,
+              cursor: event.transcriptCursor,
+            },
+          }
+        : item,
+    );
+    view = { ...view, items };
+  } else if (event.type === "snapshotInvalidated") {
+    refetchSnapshot = true;
+  } else if (event.type === "modeChanged") {
+    updateMode = event.updateMode;
+    view = { ...view, updateMode: event.updateMode };
+  }
+
+  return { view, refetchSnapshot, transcriptActivityId, updateMode };
+}
+
+export function shouldApplyActivityStreamRequest(
+  expected: ActivityConsoleStreamRequest,
+  current: { readonly workRootId: string | null; readonly requestId: number },
+): boolean {
+  return expected.workRootId === current.workRootId && expected.requestId === current.requestId;
+}
+
 export type WorkRootActivityFetchOptions = {
   readonly recentLimit?: number;
 };
