@@ -33,6 +33,7 @@ let ownsWorkRoot = false;
 let ownsSecondWorkRoot = false;
 let commandPlan: TerminalCommandPlan;
 let portabilityEvidence: TerminalPortabilityEvidence | undefined;
+let activityFixtureRootId: string | null = null;
 
 const evidence: string[] = [];
 function note(line: string) {
@@ -565,6 +566,32 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         const requestedWorkRootId = match
           ? decodeURIComponent(match[1])
           : "browser-gate-root";
+        if (!activityFixtureRootId) {
+          activityFixtureRootId = requestedWorkRootId;
+        }
+        if (requestedWorkRootId !== activityFixtureRootId) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              workRootId: requestedWorkRootId,
+              status: "ok",
+              updateMode: "snapshot",
+              feedCursor: "browser:second",
+              selectedItemId: null,
+              summary: {
+                total: 0,
+                active: 0,
+                blocked: 0,
+                failed: 0,
+                unavailable: 0,
+              },
+              items: [],
+              agents: [],
+            }),
+          });
+          return;
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -575,7 +602,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
             feedCursor: "browser:1",
             selectedItemId: null,
             summary: {
-              total: 2,
+              total: 5,
               active: 1,
               blocked: 1,
               failed: 0,
@@ -634,6 +661,32 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
                 diagnostics: [],
                 metadata: {},
               },
+              ...["gamma", "delta", "epsilon"].map((name, index) => ({
+                id: `agent:${name}`,
+                kind: "namedAgent",
+                label: `agent-${name}-long-ribbon-label-${index}`,
+                status: "completed",
+                live: false,
+                attention: false,
+                startedAt: "2026-05-17T10:00:00Z",
+                updatedAt: `2026-05-17T10:0${index}:00Z`,
+                finishedAt: `2026-05-17T10:0${index}:30Z`,
+                source: {
+                  kind: "namedAgent",
+                  label: "codex",
+                  backend: "codex",
+                  harness: "codex",
+                  tier: "core",
+                  model: null,
+                },
+                transcript: {
+                  status: "empty",
+                  available: false,
+                  cursor: null,
+                },
+                diagnostics: [],
+                metadata: {},
+              })),
             ],
             agents: [
               {
@@ -763,7 +816,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await page.reload({ waitUntil: "domcontentloaded" });
     await openWorkRootInBrowser(page, workRoot);
-    await expect(opener).toContainText("2 agents");
+    await expect(opener).toContainText("5 agents");
 
     await opener.click();
     await expect(activityPane).toHaveCount(1);
@@ -778,7 +831,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(populatedBody.locator(".activity-console")).toBeVisible();
     await expect(populatedBody.locator(".activity-ribbon")).toBeVisible();
     const ribbonItems = populatedBody.locator(".activity-ribbon-item");
-    await expect(ribbonItems).toHaveCount(2);
+    await expect(ribbonItems).toHaveCount(5);
     await expect(ribbonItems.first()).toHaveCSS("min-width", "176px");
     await expect(populatedBody.locator(".activity-ribbon")).toHaveJSProperty(
       "scrollLeft",
@@ -786,10 +839,35 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expect(
       populatedBody.locator('[data-command-id="activity.selectItem"]'),
-    ).toHaveCount(2);
+    ).toHaveCount(5);
     await expect(
       populatedBody.locator('[data-command-id="activity.refresh"]'),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await page.setViewportSize({ width: 760, height: 760 });
+    await page.waitForTimeout(100);
+    const ribbonMetrics = await populatedBody
+      .locator(".activity-ribbon")
+      .evaluate((node) => {
+        return {
+          clientWidth: node.clientWidth,
+          scrollWidth: node.scrollWidth,
+          childCount: node.children.length,
+          childWidths: Array.from(node.children).map(
+            (child) => (child as HTMLElement).getBoundingClientRect().width,
+          ),
+        };
+      });
+    expect(ribbonMetrics.scrollWidth, JSON.stringify(ribbonMetrics)).toBeGreaterThan(
+      ribbonMetrics.clientWidth,
+    );
+    const itemBox = await ribbonItems.first().boundingBox();
+    expect(itemBox?.width).toBeLessThanOrEqual(180);
+    const documentHorizontalOverflow = await page.evaluate(() => {
+      const root = document.scrollingElement ?? document.documentElement;
+      return root.scrollWidth > root.clientWidth + 1;
+    });
+    expect(documentHorizontalOverflow).toBe(false);
+    await page.setViewportSize({ width: 1440, height: 900 });
     await expect(populatedBody).toContainText("$ echo browser-gate");
     await expect(
       populatedBody.locator('[data-block-mode="terminal"]'),
@@ -798,18 +876,27 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(alphaItem).toHaveAttribute("data-dirty", "true");
     await alphaItem.click();
     await expect(alphaItem).toHaveAttribute("data-dirty", "false");
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: activity.selectItem",
+    );
     await expect(populatedBody).toContainText("selected transcript alpha");
     const detailToggle = populatedBody.locator(
       '[data-command-id="activity.detail.toggle"]',
     );
     await expect(detailToggle).toBeVisible();
     await detailToggle.click();
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: activity.detail.toggle",
+    );
     await expect(populatedBody).toContainText("tool details visible after expansion");
     const loadMore = populatedBody.locator(
       '[data-command-id="activity.transcript.loadMore"]',
     );
     await expect(loadMore).toBeVisible();
     await loadMore.click();
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: activity.transcript.loadMore",
+    );
     await expect(populatedBody).toContainText("loaded more transcript");
     const execItem = populatedBody.locator('[data-activity-id="exec:beta"]');
     await execItem.click();
@@ -1095,6 +1182,20 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     }
     await openWorkRootInBrowser(page, secondWorkRoot);
     expect(await visibleWorkbenchGroupIds(page)).toEqual(["group-1"]);
+    await page
+      .locator('[data-command-id="workbench.openActivity"].workbench-activity-badge')
+      .click();
+    const secondActivityPane = page.locator(
+      '[data-surface-kind="workRootActivity"]',
+    );
+    await expect(secondActivityPane).toHaveCount(1);
+    await expect(
+      secondActivityPane.locator('[data-activity-console-state="empty"]'),
+    ).toBeVisible();
+    await expect(secondActivityPane).not.toContainText("agent-alpha");
+    await expect(secondActivityPane).not.toContainText("exec-beta");
+    await expect(secondActivityPane).not.toContainText("selected transcript alpha");
+    await expect(secondActivityPane).not.toContainText("$ echo browser-gate");
 
     const secondFileRow = page.locator(".file-explorer-row", {
       hasText: "second-readme.txt",

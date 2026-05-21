@@ -8,6 +8,7 @@ import {
   orderActivityItems,
   preserveActivitySelection,
   shouldApplyActivityTranscriptResponse,
+  shouldApplyActivityTranscriptRequest,
   shouldLoadMoreActivityTranscript,
   transcriptBlockView,
   workRootActivityBadge,
@@ -507,12 +508,14 @@ assertDeepEqual(
       [
         { ...ackSource, updatedAt: "2026-05-21T12:01:00Z" },
         activityItem({ id: "attention-dirty", attention: true }),
+        activityItem({ id: "first-load-idle", updatedAt: "2026-05-21T12:02:00Z" }),
       ],
       acknowledgements,
+      { ackable: "2026-05-21T12:00:00Z", "first-load-idle": "2026-05-21T12:02:00Z" },
     ),
   ),
   ["ackable", "attention-dirty"],
-  "dirty initialization compares local acknowledgements with item revisions and attention",
+  "dirty initialization compares local acknowledgements and seen revisions without marking every first-load item dirty",
 );
 
 assertEqual(
@@ -532,6 +535,14 @@ assertEqual(
   ),
   false,
   "stale transcript response for an old root or request is ignored",
+);
+assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-b", activityId: "agent:a", requestId: 2 },
+  ),
+  false,
+  "error paths also require the expected workRoot/activity/request tuple",
 );
 assertEqual(
   shouldLoadMoreActivityTranscript(

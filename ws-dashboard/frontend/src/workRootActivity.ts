@@ -276,12 +276,18 @@ export function preserveActivitySelection(
 export function initializeActivityDirtyItems(
   items: readonly ActivityItem[],
   acknowledgements: ActivityAcknowledgements,
+  seenRevisions: ActivityAcknowledgements = {},
 ): Set<string> {
   const dirty = new Set<string>();
   for (const item of items) {
     const token = activityItemRevisionToken(item);
     const acknowledgedToken = acknowledgements[item.id];
-    if (acknowledgedToken !== token || (!acknowledgedToken && (item.live || item.attention))) {
+    const seenToken = seenRevisions[item.id];
+    if (
+      (!acknowledgedToken && (item.live || item.attention)) ||
+      (acknowledgedToken !== undefined && acknowledgedToken !== token) ||
+      (seenToken !== undefined && seenToken !== token)
+    ) {
       dirty.add(item.id);
     }
   }
@@ -303,12 +309,21 @@ export function shouldApplyActivityTranscriptResponse(
   response: { workRootId: string; activityId: string },
   current: { workRootId: string; activityId: string | null; requestId: number },
 ): boolean {
+  return shouldApplyActivityTranscriptRequest(expected, current, response);
+}
+
+export function shouldApplyActivityTranscriptRequest(
+  expected: { workRootId: string; activityId: string; requestId: number },
+  current: { workRootId: string; activityId: string | null; requestId: number },
+  response?: { workRootId: string; activityId: string },
+): boolean {
   return (
     expected.requestId === current.requestId &&
     expected.workRootId === current.workRootId &&
     expected.activityId === current.activityId &&
-    response.workRootId === current.workRootId &&
-    response.activityId === current.activityId
+    (response === undefined ||
+      (response.workRootId === current.workRootId &&
+        response.activityId === current.activityId))
   );
 }
 

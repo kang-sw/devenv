@@ -1395,6 +1395,7 @@ button {
 
 .workroot-activity-pane {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
@@ -1405,6 +1406,7 @@ button {
 
 .activity-console {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
@@ -1420,6 +1422,9 @@ button {
 
 .activity-ribbon {
   display: flex;
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 100%;
   flex: 0 0 auto;
   gap: var(--ws-space-04);
   overflow-x: auto;
@@ -1430,6 +1435,7 @@ button {
 .activity-ribbon-item {
   position: relative;
   display: grid;
+  flex: 0 0 176px;
   width: 176px;
   min-width: 176px;
   max-width: 176px;
@@ -1498,6 +1504,7 @@ button {
 
 .activity-transcript {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
