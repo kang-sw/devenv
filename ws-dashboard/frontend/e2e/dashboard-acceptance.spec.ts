@@ -34,6 +34,7 @@ let ownsSecondWorkRoot = false;
 let commandPlan: TerminalCommandPlan;
 let portabilityEvidence: TerminalPortabilityEvidence | undefined;
 let activityFixtureRootId: string | null = null;
+let activityRecentPollRequests = 0;
 
 const evidence: string[] = [];
 function note(line: string) {
@@ -566,6 +567,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         const requestedWorkRootId = match
           ? decodeURIComponent(match[1])
           : "browser-gate-root";
+        if (new URL(route.request().url()).searchParams.has("recentLimit")) {
+          activityRecentPollRequests += 1;
+        }
         if (!activityFixtureRootId) {
           activityFixtureRootId = requestedWorkRootId;
         }
@@ -732,7 +736,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
           await route.fulfill({
             status: 200,
             contentType: "text/event-stream",
-            body: `data: ${JSON.stringify({
+            body: `event: activity\ndata: ${JSON.stringify({
               type: "heartbeat",
               cursor: "browser:second:heartbeat",
             })}\n\n`,
@@ -785,7 +789,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
               cursor: "browser:stream:3",
             },
           ]
-            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .map((event) => `event: activity\ndata: ${JSON.stringify(event)}\n\n`)
             .join(""),
           headers: {
             "cache-control": "no-cache",
@@ -908,6 +912,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const ribbonItems = populatedBody.locator(".activity-ribbon-item");
     await expect(ribbonItems).toHaveCount(6);
     await expect(populatedBody).toContainText("agent-streamed-live");
+    await expect
+      .poll(() => activityRecentPollRequests, { timeout: 500 })
+      .toBe(0);
     await expect(ribbonItems.first()).toHaveCSS("min-width", "176px");
     await expect(populatedBody.locator(".activity-ribbon")).toHaveJSProperty(
       "scrollLeft",
@@ -996,8 +1003,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     note(
       "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
-        "empty and populated Activity Console projections rendered, live stream " +
-        "upsert appeared without reload, selection, dirty acknowledgement, " +
+        "empty and populated Activity Console projections rendered, named live stream " +
+        "upsert appeared without reload and without healthy-mode recent polling, " +
+        "selection, dirty acknowledgement, " +
         "detail toggle, and load-more controls carried " +
         "stable command ids, a second click focused it without duplicating, " +
         "and hover-only close removed it " +

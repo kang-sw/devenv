@@ -1280,6 +1280,7 @@ function WorkbenchShell({
 
     let cancelled = false;
     let streamOpened = false;
+    let fallbackTimer: number | null = null;
     const after =
       workRootActivityStateRef.current.rootId === rootId &&
       workRootActivityStateRef.current.activity.phase === "ready"
@@ -1336,6 +1337,10 @@ function WorkbenchShell({
         event.type === "modeChanged" &&
         (event.updateMode === "watch" || event.updateMode === "snapshot")
       ) {
+        if (fallbackTimer !== null) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
         setActivityPollFallbackRootId((fallbackRootId) =>
           fallbackRootId === rootId ? null : fallbackRootId,
         );
@@ -1352,10 +1357,14 @@ function WorkbenchShell({
     source.onopen = () => {
       streamOpened = true;
       if (shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)) {
+        if (fallbackTimer !== null) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
         setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
       }
     };
-    source.onmessage = (message) => {
+    const handleActivityMessage = (message: MessageEvent) => {
       let payload: unknown;
       try {
         payload = JSON.parse(message.data);
@@ -1370,20 +1379,39 @@ function WorkbenchShell({
       }
       applyStreamEvent(event);
     };
+    source.addEventListener("activity", handleActivityMessage);
+    source.onmessage = handleActivityMessage;
     source.onerror = () => {
       if (
-        !cancelled &&
-        shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+        cancelled ||
+        !shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
       ) {
-        setActivityPollFallbackRootId(rootId);
-        if (!streamOpened) {
-          requestSnapshot();
-        }
+        return;
       }
+      if (!streamOpened) {
+        setActivityPollFallbackRootId(rootId);
+        requestSnapshot();
+        return;
+      }
+      if (fallbackTimer !== null) {
+        window.clearTimeout(fallbackTimer);
+      }
+      fallbackTimer = window.setTimeout(() => {
+        if (
+          !cancelled &&
+          shouldApplyActivityStreamRequest(expected, currentActivityStreamRequest.current)
+        ) {
+          setActivityPollFallbackRootId(rootId);
+        }
+      }, 1_000);
     };
 
     return () => {
       cancelled = true;
+      if (fallbackTimer !== null) {
+        window.clearTimeout(fallbackTimer);
+      }
+      source.removeEventListener("activity", handleActivityMessage);
       source.close();
       setActivityPollFallbackRootId((current) => (current === rootId ? null : current));
     };

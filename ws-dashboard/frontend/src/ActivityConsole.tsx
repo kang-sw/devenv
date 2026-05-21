@@ -276,12 +276,6 @@ export function ActivityConsole({
   );
 
   useEffect(() => {
-    if (selectedItem) {
-      acknowledgeSelected(selectedItem);
-    }
-  }, [view.workRootId, selectedItemId]);
-
-  useEffect(() => {
     currentTranscriptRequest.current = {
       workRootId: view.workRootId,
       activityId: selectedItemId,

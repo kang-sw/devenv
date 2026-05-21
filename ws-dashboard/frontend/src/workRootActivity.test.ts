@@ -379,6 +379,24 @@ assertDeepEqual(
   ["agent:new"],
   "local dirty acknowledgements survive stream feed merges",
 );
+const selectedRevisionEvent = applyActivityConsoleEvent(eventBase, {
+  type: "itemUpserted",
+  cursor: "event:selected-revision",
+  item: activityItem({
+    id: "agent:keep",
+    label: "keep",
+    updatedAt: "2026-05-21T12:30:00Z",
+  }),
+});
+assertDeepEqual(
+  Array.from(
+    initializeActivityDirtyItems(selectedRevisionEvent.view.items, locallyAcknowledged, {
+      "agent:keep": activityItemRevisionToken(eventBase.items[0]!),
+    }),
+  ),
+  ["agent:keep"],
+  "a streamed revision change for the selected item remains dirty until explicit acknowledgement",
+);
 
 assertEqual(
   shouldApplyActivityStreamRequest(
