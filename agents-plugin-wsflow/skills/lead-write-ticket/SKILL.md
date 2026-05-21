@@ -11,7 +11,7 @@ Target: user request
 
 - Ticket conventions: call `wsflow/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
 - Read only ticket files selected as edit targets; use `wsflow/tickets.*`, `wsflow/references.trace`, or focused local search for graph discovery.
-- Preserve settled decisions, contracts, and agreed API/type/event/UI sketches before pruning.
+- Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
 
@@ -104,7 +104,8 @@ Target: user request
 5. Capture rejected alternatives.
 6. Capture forward-compatibility guardrails.
 7. Capture verification expectations.
-8. Exclude source-local edit notes unless settled constraints.
+8. Capture enough detail that a fresh implementer can build the intended result without filling settled gaps.
+9. Exclude source-local edit notes unless settled constraints.
 
 ## On: Intent Review
 
@@ -112,10 +113,11 @@ Target: user request
 2. Check completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility guardrails, verification expectations, and suggested strategy.
 3. Check whether agreed API/type/event/UI sketches were preserved literally, not prose-flattened.
 4. Check whether the ticket distorts or omits discussed intent.
-5. Check whether related-ticket decisions that constrain this implementation slice were captured.
-6. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation.
-7. Fix gaps in-place.
-8. Present a brief correction summary, or confirm nothing was missed.
+5. Check whether a fresh implementer could build a materially different result from this ticket without contradicting it; if yes, capture the missing settled decision.
+6. Check whether related-ticket decisions that constrain this implementation slice were captured.
+7. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation.
+8. Fix gaps in-place.
+9. Present a brief correction summary, or confirm nothing was missed.
 
 ## On: Spec-stem Check
 
@@ -226,5 +228,6 @@ Blocker: missing spec traceability for caller-visible behavior.
 
 A ticket is the primary context-recovery artifact. Every choice optimizes for
 **recoverability of intent**: capture decisions, constraints, and rejected
-alternatives when writing so downstream skills never re-derive settled context.
-When ambiguous, preserve recoverability.
+alternatives with enough settled detail that downstream skills do not fill gaps
+with a different product, workflow, API, or verification contract. When
+ambiguous, preserve recoverability.

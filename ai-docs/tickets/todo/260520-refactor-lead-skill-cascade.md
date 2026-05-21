@@ -310,6 +310,10 @@ Skill-authoring wording cleanup:
 - Keep `lead-check-blockers` and `lead-verify-discussion` as compact fast-path
   checkpoints; classify full-ceremony rewrites for those skills as intentional
   differences unless output or end-state clarity is actually missing.
+- Tighten `lead-write-ticket` recoverability: capture enough settled detail
+  that a fresh implementation session cannot produce a materially different
+  product, workflow, API, or verification contract without contradicting the
+  ticket.
 
 R1 — Handler structure policy:
 - Add to `ws:lead-skill-authoring`: use H3 sub-blocks when an `On:` handler

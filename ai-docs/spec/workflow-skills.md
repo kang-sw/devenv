@@ -201,6 +201,11 @@ verification expectations, suggested strategy, phase dependencies, and agreed
 API/type/event/UI sketches. Source-local edit notes are excluded unless they
 are settled constraints; settled local or cross-ticket decisions stay in the
 relevant child ticket or phase.
+Tickets capture enough settled detail for a fresh implementation session to
+recover the intended product, workflow, API, and verification contract without
+inventing missing decisions. Intent review checks whether the ticket permits a
+materially different result without contradiction and captures the missing
+settled decision when it does.
 
 `lead-write-ticket` reviews related-ticket decisions by default when
 creating or editing a non-epic actionable ticket. It inspects the target's
