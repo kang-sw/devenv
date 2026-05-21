@@ -1,6 +1,8 @@
 ---
 title: ws dashboard Activity Console read model
 parent: 260518-epic-ws-dashboard-activity-console
+spec:
+  - 260521-ws-dashboard-activity-console-read-model
 related:
   260517-feat-ws-dashboard-workroot-activity: source projection to generalize from named agents to feed items
   260518-feat-ws-dashboard-activity-feed-api: absorbed feed-only ticket scope into this read-model slice
@@ -155,5 +157,7 @@ handling needed by the static Activity Console UI shell.
 Verification should cover camelCase serialization, private-field redaction,
 ordering rules for live/failed/blocked/recent/idle items, primary and linked
 Git workRoots, malformed records, unknown activity ids, empty/unavailable
-transcripts, bounded backfill, and a mixed ordering case that would have
-rendered poorly under A-Z sorting.
+transcripts, bounded backfill, owner-auth rejection, and a mixed ordering case
+that would have rendered poorly under A-Z sorting. The implementation should
+also preserve the current WorkRoot Activity route compatibility or record any
+explicit response migration in tests and docs.
