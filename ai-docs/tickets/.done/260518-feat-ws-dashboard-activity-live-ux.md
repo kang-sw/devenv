@@ -3,6 +3,7 @@ title: ws dashboard Activity Console live UX
 parent: 260518-epic-ws-dashboard-activity-console
 spec:
   - 260521-ws-dashboard-activity-console-live-ux
+completed: 2026-05-21
 related:
   260518-feat-ws-dashboard-activity-console-ui: provides the static Activity Console shell to make live
   260518-feat-ws-dashboard-activity-watch-stream: supplies backend feed and transcript invalidation events
@@ -62,3 +63,23 @@ item, stale root updates are ignored after switching workRoots, fallback mode
 uses bounded polling, local dirty/acknowledgement state survives snapshot and
 stream merges correctly, the old always-on interval path is removed or limited
 to fallback mode, and desktop/constrained-width browser checks still pass.
+
+### Result (82b5c51f) - 2026-05-21
+
+Implemented frontend Activity Console live stream adoption for visible workRoot
+Activity panes. The browser subscribes with `EventSource`, consumes named
+`event: activity` frames, applies source-neutral item upsert/removal events,
+refetches snapshots on invalidation, refreshes selected transcripts only for
+matching transcript events, and tears down stale streams after root switches or
+pane close.
+
+The previous pane-open recent activity polling path is now fallback-only rather
+than the normal live path. Local dirty/acknowledgement state is preserved across
+stream and snapshot merges, and selected streamed revisions stay dirty until
+explicit acknowledgement. The implementation remains read-only and adds no
+agent controls, backend stream changes, exec source support, or transcript
+adapter expansion.
+
+Verification passed frontend helper tests, command tests, workbench tests,
+build, browser acceptance with real `event: activity` SSE fixture frames, and
+partitioned correctness/fit/test review relay.
