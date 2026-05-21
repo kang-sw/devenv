@@ -150,7 +150,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260518-epic-ws-dashboard-activity-console` | todo | Coordinate the full-scale read-only Activity Console with read model, UI shell, live stream, live UX, and transcript expansion children |
-| `260518-feat-ws-dashboard-activity-watch-stream` | todo | Add backend cross-platform watcher, SSE stream, and fallback mode for Activity Console updates |
+| `260518-feat-ws-dashboard-activity-watch-stream` | ready | Add backend cross-platform watcher, SSE stream, and fallback mode for Activity Console updates |
 | `260518-feat-ws-dashboard-activity-live-ux` | todo | Adopt Activity Console live events in the frontend with merge, stale-root, transcript-refresh, and fallback behavior |
 | `260518-feat-ws-dashboard-activity-transcript-api` | todo | Expand Activity Console transcript sources and optional block-level live transcript behavior |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
@@ -174,7 +174,10 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-No ready tickets.
+- `260518-feat-ws-dashboard-activity-watch-stream` - Backend Activity
+  Console watcher, owner-authenticated SSE event stream, event cursor/fallback
+  mode, and invalidation events; implements
+  `{#260521-ws-dashboard-activity-console-watch-stream}`.
 
 ## Session Notes
 

@@ -1,6 +1,8 @@
 ---
 title: ws dashboard Activity Console watch stream
 parent: 260518-epic-ws-dashboard-activity-console
+spec:
+  - 260521-ws-dashboard-activity-console-watch-stream
 related:
   260518-feat-ws-dashboard-activity-read-model: supplies feed item and transcript cursor contracts consumed by stream events
   260518-feat-ws-dashboard-activity-live-ux: consumes this backend stream in the frontend console
