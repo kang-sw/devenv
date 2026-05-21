@@ -8,6 +8,7 @@ related:
   260517-feat-ws-dashboard-workroot-activity: existing Activity pane entrypoint and live-refresh surface to preserve
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-21
 ---
 
 # ws dashboard command dispatch spine
@@ -83,3 +84,20 @@ Verification should cover command id and dispatch parity for the migrated
 controls, command log/observer behavior, no host/cache/session/path leakage in
 command payloads, and a browser-level check proving at least one click path and
 one programmatic dispatch path produce the same visible state change.
+
+### Result (79812f01) - 2026-05-21
+
+Phase 1 added a frontend dashboard command model and dispatch observer, then
+routed the representative refresh, workRoot open, file explorer, workbench
+activity, and terminal-create controls through the shared dispatch path.
+Programmatic dispatch and click handlers now share command ids and logical
+payloads through extracted command builders, and `workRoot.open` keeps the
+submitted host path inside the local handler closure instead of the emitted or
+loggable command payload.
+
+The phase intentionally left broader Dockview workbench close/select/move
+lifecycle callbacks as an audited follow-up because confirmation anchors and
+drag placement state require a larger lifecycle refactor than the Phase 0
+spine. Verification passed `npm run test:commands`,
+`npm run test:work-root-files`, `npm run test:workbench`, and `npm run build`;
+the production build kept the existing large-chunk warning.

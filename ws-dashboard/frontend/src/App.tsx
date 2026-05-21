@@ -5,6 +5,23 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
 import {
+  buildDashboardRefreshCommand,
+  buildFileExplorerOpenFileCommand,
+  buildFileExplorerRefreshCommand,
+  buildFileExplorerSelectEntryCommand,
+  buildFileExplorerToggleDirectoryCommand,
+  buildTerminalCreateCommand,
+  buildWorkbenchOpenActivityCommand,
+  buildWorkRootOpenCommand,
+  dashboardCommandLabel,
+  dispatchDashboardCommand,
+  type DashboardCommand,
+  type DashboardCommandDispatcher,
+  type DashboardCommandEntry,
+  type DashboardCommandHandlers,
+  type DashboardCommandPayload,
+} from "./commands";
+import {
   decideSurfaceClose,
   decideWorkbenchTabClosePresentation,
   decideSurfaceOpenWithDynamicGroups,
@@ -90,16 +107,8 @@ import {
   type WorkRootActivityView,
 } from "./workRootActivity";
 
-type CommandPayload =
-  | { type: "select"; entityId: string }
-  | { type: "action"; label: string; entityId: string }
-  | { type: "refresh" };
-
-type CommandEntry = {
-  id: number;
-  commandId: string;
-  label: string;
-};
+type CommandPayload = DashboardCommandPayload;
+type CommandEntry = DashboardCommandEntry;
 
 type WorkRootExplorerSnapshot = {
   expandedPaths: Set<string>;
@@ -369,31 +378,33 @@ export function App() {
     ],
   );
 
-  const executeCommand = useCallback(
-    (commandId: string, payload: CommandPayload) => {
-      if (payload.type === "select") {
-        setSelectedId(payload.entityId);
+  const executeCommand = useCallback<DashboardCommandDispatcher>(
+    (command: DashboardCommand, handlers: DashboardCommandHandlers = {}) => {
+      const executableHandlers: DashboardCommandHandlers = { ...handlers };
+      if (command.payload.type === "select") {
+        const { entityId } = command.payload;
+        executableHandlers[command.commandId] = () => setSelectedId(entityId);
+      } else if (command.payload.type === "refresh") {
+        executableHandlers[command.commandId] = () => {
+          void loadResources();
+        };
       }
 
-      if (payload.type === "refresh") {
-        void loadResources();
-      }
-
-      setCommandLog((entries) =>
-        [
-          {
-            id: commandSequence.current++,
-            commandId,
-            label:
-              payload.type === "action"
-                ? payload.label
-                : payload.type === "refresh"
-                  ? "Refresh"
-                  : "Select",
-          },
-          ...entries,
-        ].slice(0, 6),
-      );
+      dispatchDashboardCommand(command, {
+        handlers: executableHandlers,
+        observer: (observedCommand) => {
+          setCommandLog((entries) =>
+            [
+              {
+                id: commandSequence.current++,
+                commandId: observedCommand.commandId,
+                label: dashboardCommandLabel(observedCommand),
+              },
+              ...entries,
+            ].slice(0, 6),
+          );
+        },
+      });
     },
     [loadResources],
   );
@@ -463,7 +474,7 @@ function PanelHeader({
   state?: ViewState;
   actions?: ActionHint[];
   entityId?: string;
-  onCommand?: (commandId: string, payload: CommandPayload) => void;
+  onCommand?: DashboardCommandDispatcher;
 }) {
   return (
     <div className="panel-header">
@@ -482,10 +493,11 @@ function PanelHeader({
               title={action.label}
               type="button"
               onClick={() =>
-                onCommand(`resource.action.${action.id}`, {
-                  type: action.id === "refresh" ? "refresh" : "action",
-                  label: action.label,
-                  entityId,
+                onCommand({
+                  commandId: `resource.action.${action.id}`,
+                  payload: action.id === "refresh"
+                    ? { type: "refresh" }
+                    : { type: "action", label: action.label, entityId },
                 })
               }
             >
@@ -503,7 +515,7 @@ function OpenWorkRootControl({
   onCommand,
 }: {
   onOpened: (view: DashboardResourcesView) => void;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
 }) {
   const [path, setPath] = useState("");
   const [pending, setPending] = useState(false);
@@ -515,23 +527,26 @@ function OpenWorkRootControl({
       return;
     }
 
-    onCommand("workRoot.open", {
-      type: "action",
-      label: "Open workRoot",
-      entityId: "",
-    });
-    setPending(true);
-    setError(null);
-
-    try {
-      const openedView = await requestOpenWorkRoot(requestedPath);
-      setPath("");
-      onOpened(openedView);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "open failed");
-    } finally {
-      setPending(false);
-    }
+    onCommand(
+      buildWorkRootOpenCommand(requestedPath),
+      {
+        "workRoot.open": () => {
+          setPending(true);
+          setError(null);
+          void requestOpenWorkRoot(requestedPath)
+            .then((openedView) => {
+              setPath("");
+              onOpened(openedView);
+            })
+            .catch((nextError) => {
+              setError(nextError instanceof Error ? nextError.message : "open failed");
+            })
+            .finally(() => {
+              setPending(false);
+            });
+        },
+      },
+    );
   };
 
   return (
@@ -588,7 +603,7 @@ function ResourceNavigation({
   error: string | null;
   selectedId: string | null;
   selectedWorkRoot: WorkRootView | null;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
   onOpenFile: (
     workRoot: WorkRootView,
     entry: WorkRootFileEntryView,
@@ -609,7 +624,7 @@ function ResourceNavigation({
             className="action-button action-button-primary"
             data-command-id="dashboard.refresh"
             type="button"
-            onClick={() => onCommand("dashboard.refresh", { type: "refresh" })}
+            onClick={() => onCommand(buildDashboardRefreshCommand())}
           >
             Refresh
           </button>
@@ -655,7 +670,7 @@ function WorkRootFileExplorer({
   onOpenFile,
 }: {
   workRoot: WorkRootView | null;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
   onOpenFile: (
     workRoot: WorkRootView,
     entry: WorkRootFileEntryView,
@@ -757,63 +772,71 @@ function WorkRootFileExplorer({
   });
 
   const selectEntry = (entry: WorkRootFileEntryView) => {
-    updateSnapshot(workRoot.id, (current) => ({
-      ...current,
-      selectedPath: entry.path,
-    }));
-    onCommand("fileExplorer.selectEntry", {
-      type: "action",
-      label: entry.name,
-      entityId: workRoot.id,
-    });
+    onCommand(
+      buildFileExplorerSelectEntryCommand(workRoot.id, entry.path),
+      {
+        "fileExplorer.selectEntry": () => {
+          updateSnapshot(workRoot.id, (current) => ({
+            ...current,
+            selectedPath: entry.path,
+          }));
+        },
+      },
+    );
   };
 
   const toggleDirectory = (entry: WorkRootFileEntryView) => {
     const isExpanded = snapshot?.expandedPaths.has(entry.path) ?? false;
-    updateSnapshot(workRoot.id, (current) => ({
-      ...current,
-      expandedPaths: toggleExpandedPath(current.expandedPaths, entry.path),
-      selectedPath: entry.path,
-    }));
-    onCommand("fileExplorer.toggleDirectory", {
-      type: "action",
-      label: entry.name,
-      entityId: workRoot.id,
-    });
+    onCommand(
+      buildFileExplorerToggleDirectoryCommand(workRoot.id, entry.path),
+      {
+        "fileExplorer.toggleDirectory": () => {
+          updateSnapshot(workRoot.id, (current) => ({
+            ...current,
+            expandedPaths: toggleExpandedPath(current.expandedPaths, entry.path),
+            selectedPath: entry.path,
+          }));
 
-    if (workRootExplorerShouldLoadOnExpand(snapshot, entry.path, isExpanded)) {
-      void loadDirectory(workRoot.id, entry.path);
-    }
+          if (workRootExplorerShouldLoadOnExpand(snapshot, entry.path, isExpanded)) {
+            void loadDirectory(workRoot.id, entry.path);
+          }
+        },
+      },
+    );
   };
 
   const openFile = (
     entry: WorkRootFileEntryView,
     gesture: ReadOnlyFileOpenGesture = "singleClick",
   ) => {
-    updateSnapshot(workRoot.id, (current) => ({
-      ...current,
-      selectedPath: entry.path,
-    }));
-    onCommand("fileExplorer.openFile", {
-      type: "action",
-      label: entry.name,
-      entityId: workRoot.id,
-    });
-    onOpenFile(workRoot, entry, gesture);
+    onCommand(
+      buildFileExplorerOpenFileCommand(workRoot.id, entry.path, gesture),
+      {
+        "fileExplorer.openFile": () => {
+          updateSnapshot(workRoot.id, (current) => ({
+            ...current,
+            selectedPath: entry.path,
+          }));
+          onOpenFile(workRoot, entry, gesture);
+        },
+      },
+    );
   };
 
   const refreshExplorer = () => {
-    onCommand("fileExplorer.refresh", {
-      type: "action",
-      label: "Refresh files",
-      entityId: workRoot.id,
-    });
-    const paths = workRootExplorerRefreshPaths(
-      snapshot?.expandedPaths ?? new Set([""]),
+    onCommand(
+      buildFileExplorerRefreshCommand(workRoot.id),
+      {
+        "fileExplorer.refresh": () => {
+          const paths = workRootExplorerRefreshPaths(
+            snapshot?.expandedPaths ?? new Set([""]),
+          );
+          for (const path of paths) {
+            void loadDirectory(workRoot.id, path);
+          }
+        },
+      },
     );
-    for (const path of paths) {
-      void loadDirectory(workRoot.id, path);
-    }
   };
 
   return (
@@ -1009,7 +1032,7 @@ function WorkbenchShell({
   commandLog: CommandEntry[];
   loading: boolean;
   error: string | null;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
   readOnlyFilePanes: ReadOnlyFilePane[];
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder;
   activeReadOnlyFilePaneRequest: { paneId: string; sequence: number } | null;
@@ -1635,6 +1658,11 @@ function WorkbenchShell({
     );
   }
 
+  // Phase 1 command-spine audit: workbench close/select/move stay on the
+  // Dockview lifecycle callbacks for now. They carry confirmation anchors,
+  // drag placement details, and active-pane reconciliation state that would make
+  // this slice a larger lifecycle refactor; Activity Console is not blocked by
+  // these local callbacks.
   function requestWorkbenchPaneClose(request: DockviewTabCloseRequest) {
     const decision = decideWorkbenchTabClosePresentation(request.surfaceKind, {
       clientX: request.clientX,
@@ -1880,7 +1908,7 @@ function WorkbenchToolbar({
   selectedEntity: ResourceEntity | null;
   commandLog: CommandEntry[];
   activity: WorkRootActivityBadgeView;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
   onOpenActivity: () => void;
   onCreateTerminal: () => void;
 }) {
@@ -1904,12 +1932,10 @@ function WorkbenchToolbar({
         <WorkbenchActivityBadge
           activity={activity}
           onOpenActivity={() => {
-            onCommand("workbench.openActivity", {
-              type: "action",
-              label: "Open WorkRoot Activity",
-              entityId: root.id,
-            });
-            onOpenActivity();
+            onCommand(
+              buildWorkbenchOpenActivityCommand(root.id),
+              { "workbench.openActivity": onOpenActivity },
+            );
           }}
         />
         <span className="meta-chip">{kindLabel(root.kind)}</span>
@@ -1930,10 +1956,11 @@ function WorkbenchToolbar({
             key={`${entityId}:${action.id}`}
             type="button"
             onClick={() =>
-              onCommand(`resource.action.${action.id}`, {
-                type: action.id === "refresh" ? "refresh" : "action",
-                label: action.label,
-                entityId,
+              onCommand({
+                commandId: `resource.action.${action.id}`,
+                payload: action.id === "refresh"
+                  ? { type: "refresh" }
+                  : { type: "action", label: action.label, entityId },
               })
             }
           >
@@ -1945,12 +1972,10 @@ function WorkbenchToolbar({
           data-command-id="terminal.create"
           type="button"
           onClick={() => {
-            onCommand("terminal.create", {
-              type: "action",
-              label: "Create terminal",
-              entityId: root.id,
-            });
-            onCreateTerminal();
+            onCommand(
+              buildTerminalCreateCommand(root.id),
+              { "terminal.create": onCreateTerminal },
+            );
           }}
         >
           New terminal
@@ -1962,10 +1987,9 @@ function WorkbenchToolbar({
             key={toggle}
             type="button"
             onClick={() =>
-              onCommand(`workbench.toggle.${toggle}`, {
-                type: "action",
-                label: toggle,
-                entityId: root.id,
+              onCommand({
+                commandId: `workbench.toggle.${toggle}`,
+                payload: { type: "action", label: toggle, entityId: root.id },
               })
             }
           >
@@ -3136,7 +3160,7 @@ function WorkspaceRows({
 }: {
   workspace: WorkspaceView;
   selectedId: string | null;
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
 }) {
   const compactMain = compactMainInstance(workspace);
 
@@ -3214,7 +3238,7 @@ function ResourceRow({
   depth: number;
   selected: boolean;
   meta: string[];
-  onCommand: (commandId: string, payload: CommandPayload) => void;
+  onCommand: DashboardCommandDispatcher;
 }) {
   return (
     <button
@@ -3223,7 +3247,7 @@ function ResourceRow({
       style={{ "--depth": depth } as CSSProperties}
       type="button"
       onClick={() =>
-        onCommand("resource.select", { type: "select", entityId: id })
+        onCommand({ commandId: "resource.select", payload: { type: "select", entityId: id } })
       }
     >
       <span className="resource-row-main">

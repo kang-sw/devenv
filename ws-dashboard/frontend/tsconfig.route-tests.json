@@ -16,6 +16,8 @@
     "src/apiError.ts",
     "src/apiError.test.ts",
     "src/openWorkRoot.ts",
+    "src/commands.ts",
+    "src/commands.test.ts",
     "src/resourceModel.ts",
     "src/resourceModel.test.ts",
     "src/workRootFiles.ts",

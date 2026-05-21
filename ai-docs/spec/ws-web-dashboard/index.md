@@ -148,20 +148,16 @@ rows; and a reserved right-side viewer region without implementing the deferred
 viewer feature.
 
 User-visible dashboard controls expose stable command ids so later keyboard
-bindings can target the same behaviors. Command payloads use logical dashboard
-targets such as opaque resource ids, pane ids, logical surface keys, activity
-ids, or terminal ids; host paths, cache paths, stream paths, pids, and backend
-session paths are not command identity. Terminal raw byte input remains the
-narrow exception because shell input fidelity must not be forked through
+bindings can target the same behaviors. Representative visible controls route
+mouse or click behavior through a shared dashboard command dispatch path, with
+a command observer preserving recent-command evidence and programmatic dispatch
+using the same command ids as click handlers. Command payloads use logical
+dashboard targets such as opaque resource ids, pane ids, logical surface keys,
+activity ids, or terminal ids; host paths, cache paths, stream paths, pids, and
+backend session paths are not command identity. Terminal raw byte input remains
+the narrow exception because shell input fidelity must not be forked through
 dashboard commands. The shell reserves `^b` to mean ctrl plus lowercase `b`;
 full custom keybinding UI remains out of scope.
-
-> [!note] Planned 🚧
-> Visible dashboard controls will route mouse or click behavior through the
-> same dashboard command dispatch path that later keyboard bindings invoke.
-> This planned command spine preserves the current command ids and command log
-> while making command dispatch the executable behavior path rather than only a
-> DOM selector or log label.
 
 ## WorkRoot Workbench Substrate {#260516-ws-web-dashboard-workroot-workbench-substrate}
 
