@@ -52,6 +52,9 @@ anchors that codify the rules being removed. Sub-agent prompts under
   (none / brief / survey / research) that fires independently of delegation
   path. Brief is a self-anchoring scope record usable on any path; survey
   and research build on brief by adding plan-populator output.
+- Active-conversation freshness is lead-owned. `ws/subquery` agents do not
+  inherit the lead's conversation state, so they may verify self-contained
+  artifact or codebase evidence but must not infer hidden discussion context.
 - Mechanical rules belong in skill text; the doctrine paragraph stays the
   generator. The new doctrine clause: lead skills are router contracts with
   auditable announce + same-actor conversation carry, with actor-boundary
@@ -317,19 +320,26 @@ R4 — Negative-invariant evidence rule:
   here", "Source-free", "do not rejudge ticket quality") and either cite a
   failure or remove the line.
 
-R5 — Domain-inference subquery handoff:
-- Add to `ws:lead-skill-authoring`: free-prose judges that ask the model to
-  classify a domain ("is this caller-visible?", "is this a freshness drift?"
-  ) should be replaced by `ws/subquery` invocations when a single sub-agent
-  pass can return a categorical answer. The lead skill keeps the routing
-  table; the subquery owns the classification.
-- Remove `judge: ticket-freshness` and `warmth` classification from
-  `ws:lead-proceed`; replace with a single subquery call when freshness is
-  actually in question, or drop the gate entirely if the subquery shows it
-  rarely fires.
+R5 — Lead-owned freshness and self-contained subquery boundary:
+- Add to `ws:lead-skill-authoring`: active-conversation judgments stay
+  lead-owned. Use `ws/subquery` only when the prompt is self-contained and the
+  answer can be derived from explicit artifacts, source, specs, tickets, or
+  other file-backed evidence. Do not delegate classification that depends on
+  hidden conversation state.
+- Remove `warmth` classification from `ws:lead-proceed`; it is an imprecise
+  route variable. Replace `judge: ticket-freshness` with a lead-owned check:
+  if the active conversation has settled decisions, constraints, rejected
+  alternatives, or scope boundaries that are absent from the ticket, route
+  through `ws:lead-write-ticket`; if none are missing, continue.
+- If the lead cannot determine whether a decision is settled or missing from
+  the ticket, stop through `ws:lead-discuss` or `ws:lead-check-blockers`
+  instead of asking `ws/subquery` to infer unseen conversation context.
+- Allow `ws/subquery` only for explicit evidence questions inside this flow,
+  such as whether a ticket mentions a named contract, which spec anchor covers
+  a behavior, or whether source/spec evidence makes a behavior caller-visible.
 - Update mental-model anchor
-  `{#260513-proceed-ticket-freshness-gate}` to reflect the subquery-backed
-  replacement (or removal, if the gate is dropped).
+  `{#260513-proceed-ticket-freshness-gate}` to reflect the lead-owned
+  freshness check and the self-contained subquery boundary.
 
 Verification:
 - After all four sub-edits land, dogfood a discuss → proceed → write-ticket →
