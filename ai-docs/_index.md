@@ -165,6 +165,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
 | `260513-research-streamable-http-mcp-transport` | idea | Research Streamable HTTP transport and reconnect boundaries |
 | `260514-research-ws-web-dashboard-direction` | idea | Research dashboard resource model, document UX, harness-library direction, and absorbed child backlog |
+| `260521-research-libws-harness-agent-substrate` | idea | Research a JSONL-first libws-harness run substrate with canonical run records, ToolHost composition, compaction, and dashboard/MCP/CLI adapters |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260517-bug-lead-proceed-overbroad-slice` | todo | Investigate conservative lead-proceed implementation slice routing when phase blast radii differ |
