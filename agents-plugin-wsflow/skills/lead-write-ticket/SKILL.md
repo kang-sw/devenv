@@ -10,7 +10,7 @@ Target: user request
 ## Invariants
 
 - Ticket conventions: call `wsflow/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
-- Read only ticket files selected as edit targets; use `wsflow/tickets.*`, `wsflow/references.trace`, or focused local search for graph discovery.
+- Aside from required conventions and `ai-docs/_index.md` when the queue changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `wsflow/tickets.*`, `wsflow/references.trace`, or focused local search limited to ticket paths/metadata for graph discovery.
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
@@ -100,7 +100,7 @@ Target: user request
 1. Capture goals, contracts, and agreed API/type/event/UI sketches.
 2. Capture completion boundary and deferred scope.
 3. Capture constraints and rationale.
-4. Capture settled implementation strategy decisions and suggested strategy.
+4. Capture settled implementation strategy decisions; include suggested strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract.
 5. Capture rejected alternatives.
 6. Capture forward-compatibility guardrails.
 7. Capture verification expectations.
@@ -110,10 +110,10 @@ Target: user request
 ## On: Intent Review
 
 1. Re-read the written/edited ticket against the conversation and cross-ticket decision review.
-2. Check completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility guardrails, verification expectations, and suggested strategy.
+2. Check completion boundaries, decisions, constraints, rejected alternatives, forward-compatibility guardrails, verification expectations, and agreed strategy that constrains implementation.
 3. Check whether agreed API/type/event/UI sketches were preserved literally, not prose-flattened.
 4. Check whether the ticket distorts or omits discussed intent.
-5. Check whether a fresh implementer could build a materially different result from this ticket without contradicting it; if yes, capture the missing settled decision.
+5. Check whether a fresh implementer could build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket; if yes, capture the missing settled decision.
 6. Check whether related-ticket decisions that constrain this implementation slice were captured.
 7. For `epic`, check that detailed implementation material stayed out of the epic and moved to a child-ticket invocation.
 8. Fix gaps in-place.
@@ -229,5 +229,7 @@ Blocker: missing spec traceability for caller-visible behavior.
 A ticket is the primary context-recovery artifact. Every choice optimizes for
 **recoverability of intent**: capture decisions, constraints, and rejected
 alternatives with enough settled detail that downstream skills do not fill gaps
-with a different product, workflow, API, or verification contract. When
-ambiguous, preserve recoverability.
+with a different product, workflow, API, or verification contract. When unsure
+whether a settled decision is needed for recovery, preserve the decision in
+contract terms; do not preserve tentative discussion or source-local tactical
+notes unless they became constraints.
