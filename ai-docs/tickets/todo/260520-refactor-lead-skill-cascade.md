@@ -46,8 +46,8 @@ anchors that codify the rules being removed. Sub-agent prompts under
 - `ws:lead-edit` and `ws:lead-write-code` together produce a triple-execution
   shape where `lead-implement` routes to `lead-edit` and the lead simply starts
   editing without delegation. `lead-edit` is the lead wearing two hats, not a
-  real actor boundary. Absorb `lead-edit` into `lead-implement`; split routing
-  via `judge: needs-delegation` to `lead-write-code` only.
+  real actor boundary. Absorb both into `lead-implement` as a unified spine:
+  `judge: needs-delegation` gates direct-edit vs delegated within each stage.
 - Mechanical rules belong in skill text; the doctrine paragraph stays the
   generator. The new doctrine clause: lead skills are router contracts with
   auditable announce + same-actor conversation carry, with actor-boundary
@@ -189,6 +189,11 @@ Scope:
     the Edit stage (absorb `lead-write-code`'s implementer ceremony).
   - Single Review stage handles 0/1/N reviewers; relay cap 2 cycles for
     single reviewer, 3 cycles for partitioned.
+  - Flatten labeled structural sections into judge-gated linear steps;
+    each stage is a single numbered sequence, not forked by path.
+  - Merge `judge: needs-brief` into `judge: plan-depth` as 4-level cumulative
+    spectrum (none / brief / survey / research); brief fires on all paths
+    when complexity warrants self-anchoring.
 - Delete `ws:lead-edit` skill directory.
 - Delete `ws:lead-write-code` skill directory; implementer agent prompt
   stays under `agents-plugin-tool/internal/wsprompt/prompts/`.
@@ -246,7 +251,7 @@ R2 — Cross-skill judges banned:
   delegated decision (e.g., "verdict: delegated to lead-implement"); it may
   not compute the verdict itself.
 - Remove `lead-proceed` step 13–14 (which pre-applies `lead-implement`'s
-  `judge: execution-mode` and `judge: branch-mode`).
+  `judge: needs-delegation` and `judge: branch-mode`).
 - Remove `implementation-verdict-context` (already removed by Phase 1, but
   verify no straggler references).
 - Update mental-model anchor
