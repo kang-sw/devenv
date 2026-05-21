@@ -311,23 +311,14 @@ Skill-authoring wording cleanup:
   checkpoints; classify full-ceremony rewrites for those skills as intentional
   differences unless output or end-state clarity is actually missing.
 
-R1 — Handler label vocabulary:
-- Add to `ws:lead-skill-authoring`: when a handler needs sub-blocks, choose
-  names from a shared responsibility vocabulary before inventing new labels.
-  Candidate labels: `Load`, `Gather`, `Resolve`, `Classify`, `Decide`,
-  `Route`, `Draft`, `Edit`, `Write`, `Verify`, `Review`, `Audit`,
-  `Announce`, `Report`, `Handoff`, `Commit`, `Finalize`, `Cleanup`,
-  `Execute`, `Continue`, `Stop`.
-- Treat structure as conditional: use sub-blocks when a handler exceeds four
-  steps or mixes responsibilities; compact handlers may stay prose or short
-  lists when output and end state are obvious.
-- Later downstream sweeps may apply the vocabulary to long flat handlers such
-  as `ws:lead-write-ticket`, but this rule does not require a mechanical
-  four-block rewrite.
-- Apply the vocabulary to full/wsflow `lead-write-ticket` `On: invoke` by
-  splitting the previous flat list into `Resolve`, `Route`, `Load`, `Write`,
-  `Verify`, `Commit`, and `Handoff` sub-blocks without changing ticket
-  behavior.
+R1 — Handler structure policy:
+- Add to `ws:lead-skill-authoring`: use H3 sub-blocks when an `On:` handler
+  exceeds four steps and mixes responsibilities. Name each sub-block by the
+  responsibility it performs.
+- Do not split single-purpose checklists only because they are long. Compact
+  handlers may stay prose or short lists when output and end state are obvious.
+- Apply the policy to full/wsflow `lead-write-ticket` handlers where a flat
+  list hides distinct responsibilities, without changing ticket behavior.
 
 R2 — Cross-skill judges banned:
 - Add to `ws:lead-skill-authoring`: a lead skill applies only its own judges;

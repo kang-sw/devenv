@@ -51,27 +51,49 @@ Target: user request
 
 ## On: Create Ticket
 
+### 1. Classify
+
 1. Determine category from the topic.
 2. Choose the initial status directory through `judge: initial-status`.
-3. Write the ticket using the **frontmatter template** and a clear problem/goal statement.
-4. Populate `related-mental-model` with consulted or newly relevant mental-model stems, without `.md`; omit when none applied.
-5. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
-6. For `epic`: reference existing/planned children; start a separate `wsflow:lead-write-ticket` invocation for child creation or child edit.
-7. For non-epic actionable tickets, choose shape through `judge: ticket-shape`; default to one `Phase 1`.
-8. For each non-epic actionable phase, run **Apply Ticket Content**.
-9. Note inter-phase dependencies explicitly.
-10. For `ready/`, defer queue entry until **Spec-stem Check** passes.
+
+### 2. Draft
+
+1. Write the ticket using the **frontmatter template** and a clear problem/goal statement.
+2. Populate `related-mental-model` with consulted or newly relevant mental-model stems, without `.md`; omit when none applied.
+
+### 3. Shape
+
+1. For `epic`: write only scope, non-scope, child ticket board, cross-child decisions, and done/drop/defer criteria.
+2. For `epic`: reference existing/planned children; start a separate `wsflow:lead-write-ticket` invocation for child creation or child edit.
+3. For non-epic actionable tickets, choose shape through `judge: ticket-shape`; default to one `Phase 1`.
+4. For each non-epic actionable phase, run **Apply Ticket Content**.
+5. Note inter-phase dependencies explicitly.
+
+### 4. Ready Guard
+
+1. For `ready/`, defer queue entry until **Spec-stem Check** passes.
 
 ## On: Edit Ticket
 
+### 1. Load
+
 1. Read the ticket first when it was not already loaded.
-2. Apply the requested change: phase update, content update, or status move.
-3. For `epic`, keep edits board-level.
-4. For `epic` implementation detail, stop after the epic edit and start a separate `wsflow:lead-write-ticket` invocation for the child ticket.
-5. For moves, use native `git mv`.
-6. For `.done/` moves, add `completed:` date in frontmatter.
-7. For non-epic actionable shape or phase changes, apply `judge: ticket-shape`.
-8. For each changed non-epic actionable phase, run **Apply Ticket Content**.
+
+### 2. Apply Change
+
+1. Apply the requested change: phase update, content update, or status move.
+2. For `epic`, keep edits board-level.
+3. For `epic` implementation detail, stop after the epic edit and start a separate `wsflow:lead-write-ticket` invocation for the child ticket.
+
+### 3. Move
+
+1. For moves, use native `git mv`.
+2. For `.done/` moves, add `completed:` date in frontmatter.
+
+### 4. Shape
+
+1. For non-epic actionable shape or phase changes, apply `judge: ticket-shape`.
+2. For each changed non-epic actionable phase, run **Apply Ticket Content**.
 
 ## On: Apply Ticket Content
 
@@ -97,16 +119,27 @@ Target: user request
 
 ## On: Spec-stem Check
 
+### 1. Scope
+
 1. Skip `epic` and `research`.
 2. Apply `judge: spec-gate` before any `ready/` queue entry or commit.
-3. For `todo/`, preserve existing `spec:` links as optional recovery hints.
-4. For `todo/`, do not require stem discovery, do not fire `judge: missing-spec-entry`, and do not suppress the proceed prompt.
-5. For `ready/`, use `wsflow/specs.find` or `wsflow/specs.status` to confirm canonical stems.
-6. For `ready/`, ensure frontmatter `spec:` lists every stem the phases implement.
-7. For `ready/`, add missing stems.
-8. For a phase with no spec entry, apply `judge: missing-spec-entry`.
-9. For `ready/`, remind that implementation commits should include a `## Spec` section with those stems.
-10. For `ready/`, ensure `ai-docs/_index.md ## Ticket Queue` has `` `stem` - one-line purpose and dependency notes ``.
+
+### 2. Todo Handling
+
+1. For `todo/`, preserve existing `spec:` links as optional recovery hints.
+2. For `todo/`, do not require stem discovery, do not fire `judge: missing-spec-entry`, and do not suppress the proceed prompt.
+
+### 3. Ready Coverage
+
+1. For `ready/`, use `wsflow/specs.find` or `wsflow/specs.status` to confirm canonical stems.
+2. For `ready/`, ensure frontmatter `spec:` lists every stem the phases implement.
+3. For `ready/`, add missing stems.
+4. For a phase with no spec entry, apply `judge: missing-spec-entry`.
+
+### 4. Ready Queue
+
+1. For `ready/`, remind that implementation commits should include a `## Spec` section with those stems.
+2. For `ready/`, ensure `ai-docs/_index.md ## Ticket Queue` has `` `stem` - one-line purpose and dependency notes ``.
 
 ## On: Output Handoff
 
@@ -129,15 +162,23 @@ Target: user request
 
 ## On: Cascade Edit
 
+### 1. Select Targets
+
 1. Identify the impacted ticket graph: parent epic, containing epic, child tickets, related active tickets, and `_index.md` active inventory when it lists edited tickets.
 2. Select edit targets from that graph; do not edit merely-related tickets whose role is unaffected by the propagated decision.
 3. Read each selected target before editing.
-4. Keep epics to scope, non-scope, child ticket board, cross-child decisions, and completion criteria.
-5. Put implementation decisions, constraints, rejected alternatives, and phases into child tickets.
-6. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `wsflow:lead-proceed`.
-7. For any selected target entering `ready/`, run Spec-stem check before commit.
-8. Run Intent review across the edited set and commit one logical documentation unit when the edits are one decision propagation.
-9. Report edited ticket paths; if exactly one implementation child is the natural next target, emit its `Ticket:` line.
+
+### 2. Apply Propagation
+
+1. Keep epics to scope, non-scope, child ticket board, cross-child decisions, and completion criteria.
+2. Put implementation decisions, constraints, rejected alternatives, and phases into child tickets.
+3. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `wsflow:lead-proceed`.
+4. For any selected target entering `ready/`, run Spec-stem check before commit.
+
+### 3. Verify and Report
+
+1. Run Intent review across the edited set and commit one logical documentation unit when the edits are one decision propagation.
+2. Report edited ticket paths; if exactly one implementation child is the natural next target, emit its `Ticket:` line.
 
 ## Judgments
 
