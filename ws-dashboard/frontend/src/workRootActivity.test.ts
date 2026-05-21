@@ -252,6 +252,9 @@ function activityAgent(
 
 const mergedActivity = mergeWorkRootActivityViews(
   activityView({
+    updateMode: "snapshot",
+    feedCursor: "snapshot:old",
+    selectedItemId: "agent:agent-a",
     summary: { total: 2, active: 1 },
     items: [activityItem({ id: "agent:agent-a", status: "running", live: true })],
     agents: [
@@ -260,6 +263,9 @@ const mergedActivity = mergeWorkRootActivityViews(
     ],
   }),
   activityView({
+    updateMode: "snapshot",
+    feedCursor: "snapshot:new",
+    selectedItemId: "agent:agent-b",
     summary: { total: 2, blocked: 1, unavailable: 1 },
     items: [activityItem({ id: "agent:agent-b", status: "blocked", attention: true })],
     agents: [
@@ -295,6 +301,21 @@ assertDeepEqual(
   mergedActivity.items.map((item) => item.id),
   ["agent:agent-b"],
   "recent activity refresh carries the source-neutral feed items from the latest update",
+);
+assertEqual(
+  mergedActivity.feedCursor,
+  "snapshot:new",
+  "recent activity refresh carries the feed cursor from the latest update",
+);
+assertEqual(
+  mergedActivity.selectedItemId,
+  "agent:agent-b",
+  "recent activity refresh carries the selected item hint from the latest update",
+);
+assertEqual(
+  mergedActivity.updateMode,
+  "snapshot",
+  "recent activity refresh carries the update mode from the latest update",
 );
 
 const loadingBadge = workRootActivityBadge({ phase: "loading" });

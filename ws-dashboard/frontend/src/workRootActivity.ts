@@ -203,6 +203,9 @@ export function mergeWorkRootActivityViews(
     ...current,
     status:
       update.status === "unavailable" ? "unavailable" : degraded ? "degraded" : "ok",
+    updateMode: update.updateMode,
+    feedCursor: update.feedCursor,
+    selectedItemId: update.selectedItemId,
     summary,
     items: update.items.length > 0 ? update.items : current.items,
     agents,
