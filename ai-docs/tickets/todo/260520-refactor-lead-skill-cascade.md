@@ -163,22 +163,24 @@ Goal: collapse the `lead-implement` → `lead-edit` shape into a single
 `lead-implement` that splits delegated work to `lead-write-code` and direct
 work inline.
 
-Pre-step (load-bearing check):
-- Run `git log --oneline --grep "lead-edit"` and inspect recent merges for the
-  "Review once" mode-transition step in `lead-edit`. If that step is load-
-  bearing (it actually catches regressions a delegated reviewer would miss),
-  capture its essence as an inline review step inside the new
-  `lead-implement`. If it never fires in practice, drop it.
+Pre-step (load-bearing check, verdict: preserve):
+- Investigation 2026-05-21 found the "Review once" step's essence is `judge:
+  review-scope` (lead-only allowed for mechanical edits) plus a 1-reviewer
+  2-cycle relay cap; both are unique to direct-edit and are preserved inline
+  by Scope below.
+- Re-confirm via `git log --oneline --grep "lead-edit"` at implementation
+  time if new commits landed against `lead-edit` after the verdict date.
 
 Scope:
 - Add an invariant to `ws:lead-skill-authoring`: a lead skill cannot also be
   its own executor; routing to a sibling skill where the lead remains the
   acting agent is a naming artifact, not an actor boundary.
 - Replace `lead-implement`'s `judge: execution-mode` with `judge:
-  needs-delegation` (single decision: direct in-place edit by the lead, or
-  delegate to `lead-write-code`).
-- Move any preserved `lead-edit` review step inline into `lead-implement`'s
-  `Execute` block.
+  needs-delegation` (top-level: direct in-place edit by the lead vs delegate
+  to `lead-write-code`).
+- Preserve `judge: review-scope` inline within the direct-edit `Execute`
+  block (lead-only vs one-reviewer, 2-cycle cap). This is the load-bearing
+  essence captured from the absorbed `lead-edit` review step.
 - Delete `ws:lead-edit` skill directory after dogfooding the absorbed flow.
 - Update `ai-docs/spec/workflow-skills.md` — remove `lead-edit` from the
   lead skill inventory. (When this ticket promotes to `ready/`, frontmatter
