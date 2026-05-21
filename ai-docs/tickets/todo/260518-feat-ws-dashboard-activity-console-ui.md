@@ -44,6 +44,10 @@ placement or named-agent-specific metadata.
   mobile viewports; the ribbon scrolls horizontally rather than wrapping.
 - UI work must include browser-level visual and interaction verification
   against the daemon-served frontend, not only TypeScript tests.
+- Activity Ribbon selection, transcript viewer commands, pane open/focus, and
+  refresh or load-more controls must expose stable command ids and route through
+  the dashboard command dispatch path; the clicked behavior must be the same
+  behavior future tmux-like keybindings invoke.
 - Do not add agent control buttons. Future terminate behavior, if accepted,
   belongs to a separate ticket.
 - Live SSE consumption is out of scope for this shell ticket; it belongs to
@@ -62,5 +66,5 @@ latest item when no live item exists.
 Verification should cover ordering, selection preservation, horizontal
 overflow, active/live styling, long text wrapping, tool/status/output blocks,
 empty/degraded/running/completed states, duplicate pane focus, immediate close,
-root switching without stale activity, and desktop/mobile browser screenshots
-or DOM assertions.
+root switching without stale activity, command-id and dispatch parity for
+visible controls, and desktop/mobile browser screenshots or DOM assertions.

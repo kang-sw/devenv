@@ -147,9 +147,15 @@ sub-instance state; loading, empty, stale, and error states; compact singleton
 rows; and a reserved right-side viewer region without implementing the deferred
 viewer feature.
 
-Mouse-triggered navigation actions route through command ids so later keyboard
-bindings can call the same commands. The shell reserves `^b` to
-mean ctrl plus lowercase `b`; full custom keybinding UI remains out of scope.
+User-visible dashboard controls expose stable command ids and route mouse or
+click behavior through the same dashboard command dispatch path that later
+keyboard bindings can invoke. Command payloads use logical dashboard targets
+such as opaque resource ids, pane ids, logical surface keys, activity ids, or
+terminal ids; host paths, cache paths, stream paths, pids, and backend session
+paths are not command identity. Terminal raw byte input remains the narrow
+exception because shell input fidelity must not be forked through dashboard
+commands. The shell reserves `^b` to mean ctrl plus lowercase `b`; full custom
+keybinding UI remains out of scope.
 
 ## WorkRoot Workbench Substrate {#260516-ws-web-dashboard-workroot-workbench-substrate}
 

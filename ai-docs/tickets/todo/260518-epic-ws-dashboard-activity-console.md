@@ -80,6 +80,11 @@ The milestone covers:
 - The console component must not be named-agent-specific. Named agents are the
   first feed source; main agent sessions, exec jobs, diagnostics, and other
   runnable/readable activity must fit the same item and transcript contracts.
+- Activity Console controls must keep the dashboard command path intact:
+  ribbon selection, transcript refresh/load-more, pane open/focus, and any
+  future visible control need stable command ids that dispatch through the same
+  behavior future tmux-like keybindings will invoke. Background stream or
+  polling merges are data effects, not user commands.
 - Reuse the existing instance event envelope only where it clarifies stream
   shape. Do not expose the older `instance-events` scaffold name as the Activity
   Feed product vocabulary.
