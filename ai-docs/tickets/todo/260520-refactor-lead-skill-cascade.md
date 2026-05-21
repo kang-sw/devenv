@@ -1,7 +1,7 @@
 ---
 title: lead skill cascade pruning from skill-authoring doctrine
 related:
-  260517-bug-lead-proceed-overbroad-slice: shares lead-proceed surface; phase resolution stays domain complexity, sequence after Phase 3 lands
+  260517-bug-lead-proceed-overbroad-slice: shares lead-proceed surface; phase resolution stays domain complexity, sequence after Phase 3 lands; re-diagnose 260517 surface in Phase 3 Result since R2 removes lead-proceed steps 13-14
   260519-feat-implement-branch-squash-gate: shares lead-implement surface; sequence Phase 2 (R6) before or coordinate with squash-gate Phase 1
 related-mental-model:
   - workflow-skills
@@ -39,9 +39,10 @@ anchors that codify the rules being removed. Sub-agent prompts under
   boundaries (sub-agent invocations) still need explicit briefs at the call
   site, but that pattern already lives in `prompts/`.
 - Autonomous grant ("user has approved this chain — downstream stages do not
-  re-pause") must remain explicit after carried-context removal. It is lifted
-  to a continuous-grant invariant in `ws:lead-skill-authoring` rather than
-  re-declared per transition.
+  re-pause") stays implicit at the conversation level. Each user-approval
+  gate in a downstream skill is rewritten to fire only when the skill was not
+  entered from another skill's flow; chained flows pass through without
+  re-prompting.
 - `ws:lead-edit` and `ws:lead-write-code` together produce a triple-execution
   shape where `lead-implement` routes to `lead-edit` and the lead simply starts
   editing without delegation. `lead-edit` is the lead wearing two hats, not a
@@ -82,9 +83,10 @@ anchors that codify the rules being removed. Sub-agent prompts under
 
 ## Forward-compatibility
 
-- New lead skills added after this cascade must follow the four-block
-  `On: invoke` structure (Gather State / Decide / Announce / Execute) and must
-  not declare same-actor carry blocks.
+- New skills added after this cascade must follow the four-block
+  `On: invoke` structure (Gather State / Decide / Announce / Execute), must
+  not declare same-actor carry blocks, and must gate user-approval steps with
+  the not-chained condition.
 - Sub-agent invocations remain the only place where explicit context briefs are
   authored; that contract is unchanged.
 
@@ -102,35 +104,39 @@ anchors that codify the rules being removed. Sub-agent prompts under
 
 ### Phase 1: R3' Same-actor carried-context removal
 
-Goal: remove same-actor carried-context blocks from lead skill text and lift
-the autonomous-grant guarantee to a single continuous-grant invariant in
-`ws:lead-skill-authoring`.
+Goal: remove same-actor carry blocks from skill text and encode the
+autonomous-grant assumption as a not-chained condition at each downstream
+user-approval gate.
 
 Scope:
 - Delete `Carried Context` / `Context To Carry` sections from
   `ws:lead-proceed`, `ws:lead-discuss`, `ws:lead-write-ticket`, and any other
-  lead skill that declares same-actor carry blocks.
+  skill that declares same-actor carry blocks.
 - Replace inline "carry context: …" references in handler steps and the
   `Announce` template with bare `Continue through <skill>` phrasing.
-- Add to `ws:lead-skill-authoring`:
-  - Invariant: lead skill transitions share conversation; do not redeclare
-    same-actor carry; sub-agent invocations need explicit briefs at the call
-    site.
-  - Invariant: when invoked via another lead skill rather than direct user
-    request, treat the chain as a continuous grant unless a fresh
-    user-blocking decision arises.
+- Sweep each downstream skill for user-approval gates (pauses, confirms,
+  prompts that wait for user signal) and append a not-chained condition:
+  "If this skill was not entered from another skill's flow, …". Direct
+  invocation still hits the gate; chained flows pass through.
+- In `ws:lead-skill-authoring`, replace the carry-block guidance
+  ("Skill-to-skill transitions are context handoffs…", "`Continue through
+  <skill>; carry context: …`") with bare-handoff phrasing, and add one
+  short principle: user-approval gates are written with the not-chained
+  condition so chained flows pass through.
 - Update mental-model anchor `{#260514-skill-authoring-carried-context}` to
-  reflect the new rule.
+  reflect: carry blocks removed; chained-flow allowance encoded at each gate
+  locally.
 
 Suggested approach:
-- Land the `ws:lead-skill-authoring` invariant edit first (with the mental
-  model anchor update in the same commit) so downstream pruning has a stable
-  anchor to point at.
-- Then prune one downstream skill at a time; each downstream prune is its own
-  commit so a regression in one skill is independently revertible.
+- Land the `ws:lead-skill-authoring` edit first (carry-guidance replacement
+  plus the gate-condition principle, with the mental-model anchor update in
+  the same commit) so downstream pruning has a stable doctrine to point at.
+- Then prune one downstream skill at a time; each downstream prune is its
+  own commit so a regression in one skill is independently revertible.
 - Validate after each downstream prune by re-running the affected chain
-  (`lead-discuss → lead-proceed → lead-write-ticket → lead-proceed → …`) on a
-  trivial follow-up task.
+  (`lead-discuss → lead-proceed → lead-write-ticket → lead-proceed → …`) on
+  a trivial follow-up task; confirm gates still fire on direct invocation and
+  pass through on chained invocation.
 
 Rejected alternatives carried from discussion:
 - Carry-as-schema (formalize the five prose blocks into one structured carry).
@@ -138,11 +144,11 @@ Rejected alternatives carried from discussion:
   to remove, not the format.
 
 Verification:
-- After each prune, the `Announce` block of the affected skill still names the
-  next stage clearly enough for audit.
-- Continuous-grant invariant produces no observable change in downstream skill
-  behavior for known chained cases (proceed → write-ticket, discuss →
-  write-spec, etc.).
+- After each prune, the `Announce` block of the affected skill still names
+  the next stage clearly enough for audit.
+- Direct invocation of a pruned skill still hits its user-approval gates.
+- Chained invocation (e.g., lead-discuss → lead-write-ticket, lead-proceed →
+  lead-write-spec) passes through gates without re-prompting.
 
 ### Phase 2: R6 Lead two-hat ban — absorb lead-edit into lead-implement
 
@@ -167,6 +173,9 @@ Scope:
 - Move any preserved `lead-edit` review step inline into `lead-implement`'s
   `Execute` block.
 - Delete `ws:lead-edit` skill directory after dogfooding the absorbed flow.
+- Update `ai-docs/spec/workflow-skills.md` — remove `lead-edit` from the
+  lead skill inventory. (When this ticket promotes to `ready/`, frontmatter
+  `spec:` must include `workflow-skills`.)
 - Update mental-model anchor referencing `lead-edit` and
   `lead-write-code` parity (currently the line: "`lead-edit` and
   `lead-write-code` are code-and-review primitives; `lead-implement` and
