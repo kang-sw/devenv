@@ -1,17 +1,21 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
+use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use futures_util::stream::{self, Stream};
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{
-    ActivityFeed, ActivityItem, ActivitySourceDisplay, ActivityTranscript,
-    ActivityTranscriptAvailability, NamedAgentActivityView, NamedAgentCallActivityView,
-    TranscriptBlock, WorkRootActivitySummary, WorkRootActivityView, WorkRootId,
+    ActivityConsoleEvent, ActivityFeed, ActivityItem, ActivitySnapshotInvalidationReason,
+    ActivitySourceDisplay, ActivityTranscript, ActivityTranscriptAvailability, ActivityUpdateMode,
+    NamedAgentActivityView, NamedAgentCallActivityView, TranscriptBlock, WorkRootActivitySummary,
+    WorkRootActivityView, WorkRootId,
 };
 
 use crate::router::AppState;
@@ -51,6 +55,12 @@ pub struct WorkRootActivityQuery {
 pub struct ActivityTranscriptQuery {
     cursor: Option<String>,
     limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityEventsQuery {
+    after: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -136,6 +146,20 @@ impl WorkRootActivityProjector {
         .await
         .expect("workRoot activity transcript task panicked")
     }
+
+    async fn watch_snapshot(
+        &self,
+        work_root_id: WorkRootId,
+        root_path: &Path,
+    ) -> ActivityWatchSnapshot {
+        let cache_home = self.cache_home.clone();
+        let root_path = root_path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            watch_snapshot_blocking(work_root_id, &root_path, cache_home.as_deref())
+        })
+        .await
+        .expect("workRoot activity watch snapshot task panicked")
+    }
 }
 
 pub async fn work_root_activity(
@@ -185,6 +209,183 @@ pub async fn work_root_activity_transcript(
             .await,
     )
     .into_response()
+}
+
+pub async fn work_root_activity_events(
+    State(state): State<AppState>,
+    AxumPath(work_root_id): AxumPath<String>,
+    Query(query): Query<ActivityEventsQuery>,
+) -> Response {
+    let work_root_id = WorkRootId::from(work_root_id);
+    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
+        return activity_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    };
+
+    let snapshot = state
+        .work_root_activity
+        .watch_snapshot(work_root_id.clone(), &root_path)
+        .await;
+    let stream = ActivityEventPollStream::new(
+        state.work_root_activity.clone(),
+        work_root_id,
+        root_path,
+        query.after,
+        snapshot,
+    )
+    .into_stream();
+
+    Sse::new(stream).into_response()
+}
+
+#[derive(Clone, Debug)]
+struct ActivityWatchSnapshot {
+    items: BTreeMap<String, ActivityItem>,
+    item_versions: BTreeMap<String, String>,
+    transcript_cursors: BTreeMap<String, Option<String>>,
+}
+
+struct ActivityEventPollStream {
+    projector: WorkRootActivityProjector,
+    work_root_id: WorkRootId,
+    root_path: PathBuf,
+    previous: ActivityWatchSnapshot,
+    pending: VecDeque<ActivityConsoleEvent>,
+    next_cursor: u64,
+}
+
+impl ActivityEventPollStream {
+    fn new(
+        projector: WorkRootActivityProjector,
+        work_root_id: WorkRootId,
+        root_path: PathBuf,
+        after: Option<String>,
+        snapshot: ActivityWatchSnapshot,
+    ) -> Self {
+        let mut next_cursor = after
+            .as_deref()
+            .and_then(|cursor| cursor.parse::<u64>().ok())
+            .unwrap_or(0)
+            .saturating_add(1);
+        let mut pending = VecDeque::new();
+
+        if after.is_some() {
+            pending.push_back(ActivityConsoleEvent::SnapshotInvalidated {
+                cursor: cursor_string(&mut next_cursor),
+                reason: if after
+                    .as_deref()
+                    .and_then(|cursor| cursor.parse::<u64>().ok())
+                    .is_some()
+                {
+                    ActivitySnapshotInvalidationReason::WatchReset
+                } else {
+                    ActivitySnapshotInvalidationReason::Overflow
+                },
+            });
+        }
+
+        pending.push_back(ActivityConsoleEvent::ModeChanged {
+            cursor: cursor_string(&mut next_cursor),
+            update_mode: ActivityUpdateMode::PollFallback,
+        });
+        pending.push_back(ActivityConsoleEvent::SnapshotInvalidated {
+            cursor: cursor_string(&mut next_cursor),
+            reason: ActivitySnapshotInvalidationReason::Fallback,
+        });
+        for item in snapshot.items.values() {
+            pending.push_back(ActivityConsoleEvent::ItemUpserted {
+                cursor: cursor_string(&mut next_cursor),
+                item: item.clone(),
+            });
+        }
+        pending.push_back(ActivityConsoleEvent::Heartbeat {
+            cursor: cursor_string(&mut next_cursor),
+        });
+
+        Self {
+            projector,
+            work_root_id,
+            root_path,
+            previous: snapshot,
+            pending,
+            next_cursor,
+        }
+    }
+
+    fn into_stream(self) -> impl Stream<Item = Result<Event, Infallible>> {
+        stream::unfold(self, |mut state| async move {
+            if state.pending.is_empty() {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let next = state
+                    .projector
+                    .watch_snapshot(state.work_root_id.clone(), &state.root_path)
+                    .await;
+                state.enqueue_diff(next);
+            }
+
+            let event =
+                state
+                    .pending
+                    .pop_front()
+                    .unwrap_or_else(|| ActivityConsoleEvent::Heartbeat {
+                        cursor: cursor_string(&mut state.next_cursor),
+                    });
+            let data = serde_json::to_string(&event).expect("serialize activity event");
+            Some((Ok(Event::default().event("activity").data(data)), state))
+        })
+    }
+
+    fn enqueue_diff(&mut self, next: ActivityWatchSnapshot) {
+        for activity_id in self.previous.items.keys() {
+            if !next.items.contains_key(activity_id) {
+                self.pending.push_back(ActivityConsoleEvent::ItemRemoved {
+                    cursor: cursor_string(&mut self.next_cursor),
+                    activity_id: activity_id.clone(),
+                });
+            }
+        }
+
+        for (activity_id, item) in &next.items {
+            let changed_item = self.previous.items.get(activity_id) != Some(item)
+                || self.previous.item_versions.get(activity_id)
+                    != next.item_versions.get(activity_id);
+            if changed_item {
+                self.pending.push_back(ActivityConsoleEvent::ItemUpserted {
+                    cursor: cursor_string(&mut self.next_cursor),
+                    item: item.clone(),
+                });
+            }
+
+            if self.previous.transcript_cursors.get(activity_id)
+                != next.transcript_cursors.get(activity_id)
+                || self.previous.item_versions.get(activity_id)
+                    != next.item_versions.get(activity_id)
+            {
+                self.pending
+                    .push_back(ActivityConsoleEvent::TranscriptUpdated {
+                        cursor: cursor_string(&mut self.next_cursor),
+                        activity_id: activity_id.clone(),
+                        transcript_cursor: next
+                            .transcript_cursors
+                            .get(activity_id)
+                            .cloned()
+                            .unwrap_or(None),
+                    });
+            }
+        }
+
+        if self.pending.is_empty() {
+            self.pending.push_back(ActivityConsoleEvent::Heartbeat {
+                cursor: cursor_string(&mut self.next_cursor),
+            });
+        }
+        self.previous = next;
+    }
+}
+
+fn cursor_string(next_cursor: &mut u64) -> String {
+    let cursor = format!("{:016}", *next_cursor);
+    *next_cursor = next_cursor.saturating_add(1);
+    cursor
 }
 
 fn normalize_recent_activity_limit(limit: Option<usize>) -> Option<usize> {
@@ -261,6 +462,62 @@ fn project_blocking(
         items,
         agents,
     }
+}
+
+fn watch_snapshot_blocking(
+    work_root_id: WorkRootId,
+    root_path: &Path,
+    cache_home: Option<&Path>,
+) -> ActivityWatchSnapshot {
+    let view = project_blocking(work_root_id, root_path, cache_home, None);
+    let item_versions = activity_item_versions(root_path, cache_home);
+    let mut items = BTreeMap::new();
+    let mut transcript_cursors = BTreeMap::new();
+    for item in view.items {
+        transcript_cursors.insert(item.id.clone(), item.transcript.cursor.clone());
+        items.insert(item.id.clone(), item);
+    }
+
+    ActivityWatchSnapshot {
+        items,
+        item_versions,
+        transcript_cursors,
+    }
+}
+
+fn activity_item_versions(root_path: &Path, cache_home: Option<&Path>) -> BTreeMap<String, String> {
+    let Some(agents_dir) = resolve_cache_root(cache_home)
+        .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
+    else {
+        return BTreeMap::new();
+    };
+    let Ok(entries) = std::fs::read_dir(agents_dir) else {
+        return BTreeMap::new();
+    };
+
+    let mut versions = BTreeMap::new();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let agent_key = entry.file_name().to_string_lossy().into_owned();
+        if agent_key.is_empty() {
+            continue;
+        }
+        versions.insert(
+            named_agent_activity_id(&agent_key),
+            system_time_version(agent_record_modified_at(&entry.path())),
+        );
+    }
+    versions
+}
+
+fn system_time_version(value: SystemTime) -> String {
+    let duration = value.duration_since(UNIX_EPOCH).unwrap_or_default();
+    format!("{}.{:09}", duration.as_secs(), duration.subsec_nanos())
 }
 
 fn feed_cursor(items: &[ActivityItem]) -> String {

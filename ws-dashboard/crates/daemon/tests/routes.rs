@@ -32,6 +32,7 @@ use futures_util::{SinkExt, StreamExt};
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
 use tokio::net::TcpListener;
+use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
@@ -1084,6 +1085,320 @@ async fn work_root_activity_route_reports_unknown_work_root() {
 }
 
 #[tokio::test]
+async fn work_root_activity_events_route_is_owner_authenticated() {
+    let app = build_router(app_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/activity/events")
+                .body(Body::empty())
+                .expect("unauthenticated workRoot activity events request"),
+        )
+        .await
+        .expect("unauthenticated workRoot activity events response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn work_root_activity_events_route_reports_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/activity/events")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown workRoot activity events request"),
+        )
+        .await
+        .expect("unknown workRoot activity events response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unknown activity events body bytes");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("unknown activity events JSON");
+    assert_eq!(value["error"], "unknown workRoot");
+}
+
+#[tokio::test]
+async fn work_root_activity_events_streams_initial_fallback_snapshot_without_private_fields() {
+    if skip_without_git(
+        "work_root_activity_events_streams_initial_fallback_snapshot_without_private_fields",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-events-initial");
+    let cache_home = temp_fixture_path("work-root-activity-events-initial-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+    write_agent_metadata(
+        &agents_dir,
+        "reviewer",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "reviewer",
+            "backend": "codex",
+            "status": "running",
+            "session_id": "private-session",
+            "last_output_path": cache_home.join("proj/private/stdout").display().to_string()
+        }),
+    );
+    write_current_call(
+        &agents_dir,
+        "reviewer",
+        r#"{"status":"running","execution_id":"000123","pid":4242,"stdout_path":"/tmp/stdout","stderr_path":"/tmp/stderr"}"#,
+    );
+    write_agent_output(&agents_dir, "reviewer", "hello from output\n");
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = fetch_work_root_activity_events(app, cookie.as_str(), &work_root_id, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+    let events = read_activity_sse_events(response, 4).await;
+    assert_eq!(events[0]["type"], "modeChanged");
+    assert_eq!(events[0]["updateMode"], "pollFallback");
+    assert_eq!(events[1]["type"], "snapshotInvalidated");
+    assert_eq!(events[1]["reason"], "fallback");
+    assert!(events
+        .iter()
+        .any(|event| event["type"] == "itemUpserted" && event["item"]["id"] == "agent:reviewer"));
+    assert!(events.iter().any(|event| event["type"] == "heartbeat"));
+
+    let body_text = serde_json::to_string(&events).expect("events JSON string");
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "private-session".to_owned(),
+        "pid".to_owned(),
+        "stdout_path".to_owned(),
+        "stderr_path".to_owned(),
+        "agent.json".to_owned(),
+        "output.md".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "activity events response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_events_reconnect_cursor_stays_bounded() {
+    if skip_without_git("work_root_activity_events_reconnect_cursor_stays_bounded") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-events-cursor");
+    let cache_home = temp_fixture_path("work-root-activity-events-cursor-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+    write_agent_metadata(
+        &agents_dir,
+        "cursor",
+        &serde_json::json!({ "schema_version": 1, "name": "cursor", "status": "idle" }),
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response =
+        fetch_work_root_activity_events(app.clone(), cookie.as_str(), &work_root_id, "after=2")
+            .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let events = read_activity_sse_events(response, 3).await;
+    assert_eq!(events[0]["type"], "snapshotInvalidated");
+    assert_eq!(events[0]["reason"], "watchReset");
+    assert_eq!(events[0]["cursor"], "0000000000000003");
+
+    let overflow_response =
+        fetch_work_root_activity_events(app, cookie.as_str(), &work_root_id, "after=not-a-cursor")
+            .await;
+    assert_eq!(overflow_response.status(), StatusCode::OK);
+    let overflow = read_activity_sse_events(overflow_response, 1).await;
+    assert_eq!(overflow[0]["type"], "snapshotInvalidated");
+    assert_eq!(overflow[0]["reason"], "overflow");
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_events_poll_fallback_reports_agent_changes_and_deletions() {
+    if skip_without_git(
+        "work_root_activity_events_poll_fallback_reports_agent_changes_and_deletions",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-events-changes");
+    let cache_home = temp_fixture_path("work-root-activity-events-changes-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+    write_agent_metadata(
+        &agents_dir,
+        "delta",
+        &serde_json::json!({ "schema_version": 1, "name": "delta", "status": "idle" }),
+    );
+    write_agent_output(&agents_dir, "delta", "first\n");
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response =
+        fetch_work_root_activity_events(app.clone(), cookie.as_str(), &work_root_id, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut stream = response.into_body().into_data_stream();
+    let mut buffer = String::new();
+    let mut seen = Vec::<serde_json::Value>::new();
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| event["type"] == "itemUpserted") {
+            let chunk = stream
+                .next()
+                .await
+                .expect("initial SSE chunk")
+                .expect("initial SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("initial SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("initial item event");
+
+    write_current_call(
+        &agents_dir,
+        "delta",
+        r#"{"status":"running","execution_id":"run-1","started_at":"2026-05-21T00:00:00Z"}"#,
+    );
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "itemUpserted"
+                && event["item"]["id"] == "agent:delta"
+                && event["item"]["live"] == true
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("state change SSE chunk")
+                .expect("state change SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("state change SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("current state update event");
+
+    write_agent_output(&agents_dir, "delta", "first\nsecond\n");
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "transcriptUpdated" && event["activityId"] == "agent:delta"
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("change SSE chunk")
+                .expect("change SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("change SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("transcript update event");
+
+    fs::remove_dir_all(agents_dir.join("delta")).expect("remove agent dir");
+
+    timeout(Duration::from_secs(5), async {
+        while !seen
+            .iter()
+            .any(|event| event["type"] == "itemRemoved" && event["activityId"] == "agent:delta")
+        {
+            let chunk = stream
+                .next()
+                .await
+                .expect("remove SSE chunk")
+                .expect("remove SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("remove SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("item removal event");
+
+    write_agent_metadata(
+        &agents_dir,
+        "delta",
+        &serde_json::json!({ "schema_version": 1, "name": "delta", "status": "idle" }),
+    );
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "itemUpserted"
+                && event["item"]["id"] == "agent:delta"
+                && event["item"]["status"] == "idle"
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("recreate SSE chunk")
+                .expect("recreate SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("recreate SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("item recreate event");
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+fn drain_sse_events(buffer: &mut String, events: &mut Vec<serde_json::Value>) {
+    while let Some(boundary) = buffer.find("\n\n") {
+        let frame = buffer[..boundary].to_owned();
+        *buffer = buffer[(boundary + 2)..].to_owned();
+        for line in frame.lines() {
+            if let Some(data) = line.strip_prefix("data: ") {
+                events.push(serde_json::from_str(data).expect("activity SSE data JSON"));
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn work_root_activity_route_returns_empty_named_agent_projection() {
     let root = temp_fixture_path("work-root-activity-empty");
     let cache_home = temp_fixture_path("work-root-activity-cache");
@@ -1286,6 +1601,60 @@ async fn fetch_work_root_activity_transcript(
         ),
     )
     .await
+}
+
+async fn read_activity_sse_events(
+    response: axum::response::Response,
+    expected_count: usize,
+) -> Vec<serde_json::Value> {
+    let mut stream = response.into_body().into_data_stream();
+    let mut buffer = String::new();
+    let mut events = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while events.len() < expected_count {
+            let Some(chunk) = stream.next().await else {
+                break;
+            };
+            let chunk = chunk.expect("activity SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("activity SSE UTF-8"));
+            while let Some(boundary) = buffer.find("\n\n") {
+                let frame = buffer[..boundary].to_owned();
+                buffer = buffer[(boundary + 2)..].to_owned();
+                for line in frame.lines() {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        events.push(serde_json::from_str(data).expect("activity SSE data JSON"));
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .expect("timely activity SSE events");
+    events
+}
+
+async fn fetch_work_root_activity_events(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+    query: &str,
+) -> axum::response::Response {
+    let suffix = if query.is_empty() {
+        String::new()
+    } else {
+        format!("?{query}")
+    };
+    app.oneshot(
+        Request::builder()
+            .uri(format!(
+                "/api/dashboard/work-roots/{work_root_id}/activity/events{suffix}"
+            ))
+            .header(header::COOKIE, cookie)
+            .body(Body::empty())
+            .expect("workRoot activity events request"),
+    )
+    .await
+    .expect("workRoot activity events response")
 }
 
 #[tokio::test]
