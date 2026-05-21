@@ -1114,6 +1114,12 @@ async fn work_root_activity_route_returns_empty_named_agent_projection() {
     let value: serde_json::Value = serde_json::from_str(&body_text).expect("empty activity JSON");
     assert_eq!(value["workRootId"], work_root_id);
     assert_eq!(value["status"], "ok");
+    assert_eq!(value["updateMode"], "snapshot");
+    assert!(value["feedCursor"]
+        .as_str()
+        .expect("feed cursor")
+        .starts_with("snapshot:"));
+    assert!(value["selectedItemId"].is_null());
     assert_eq!(
         value["summary"],
         serde_json::json!({
@@ -1216,6 +1222,12 @@ fn write_current_call(agents_dir: &Path, agent_key: &str, raw: &str) {
     fs::write(current_dir.join("state.json"), raw).expect("write state.json fixture");
 }
 
+fn write_agent_output(agents_dir: &Path, agent_key: &str, raw: &str) {
+    let agent_dir = agents_dir.join(agent_key);
+    fs::create_dir_all(&agent_dir).expect("create agent output fixture dir");
+    fs::write(agent_dir.join("output.md"), raw).expect("write output.md fixture");
+}
+
 async fn fetch_work_root_activity(
     app: axum::Router,
     cookie: &str,
@@ -1254,6 +1266,28 @@ async fn fetch_work_root_activity_path(
     )
 }
 
+async fn fetch_work_root_activity_transcript(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+    activity_id: &str,
+    query: &str,
+) -> (StatusCode, String) {
+    let suffix = if query.is_empty() {
+        String::new()
+    } else {
+        format!("?{query}")
+    };
+    fetch_work_root_activity_path(
+        app,
+        cookie,
+        &format!(
+            "/api/dashboard/work-roots/{work_root_id}/activity/items/{activity_id}/transcript{suffix}"
+        ),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn work_root_activity_route_projects_named_agent_records() {
     if skip_without_git("work_root_activity_route_projects_named_agent_records") {
@@ -1284,6 +1318,12 @@ async fn work_root_activity_route_projects_named_agent_records() {
             "pid": 4242,
             "stdout_path": "/cache/agents/reviewer/current/stdout"
         }),
+    );
+
+    write_agent_output(
+        &agents_dir,
+        "reviewer",
+        "# Review result\nprivate paths stay daemon-side\n",
     );
 
     write_agent_metadata(
@@ -1379,6 +1419,12 @@ async fn work_root_activity_route_projects_named_agent_records() {
 
     assert_eq!(value["workRootId"], work_root_id);
     assert_eq!(value["status"], "ok");
+    assert_eq!(value["updateMode"], "snapshot");
+    assert!(value["feedCursor"]
+        .as_str()
+        .expect("feed cursor")
+        .starts_with("snapshot:"));
+    assert_eq!(value["selectedItemId"], "agent:builder");
     assert_eq!(
         value["summary"],
         serde_json::json!({
@@ -1389,6 +1435,21 @@ async fn work_root_activity_route_projects_named_agent_records() {
             "unavailable": 0
         })
     );
+
+    let items = value["items"].as_array().expect("activity items array");
+    assert_eq!(items.len(), 5);
+    assert_eq!(items[0]["id"], "agent:builder");
+    assert_eq!(items[0]["kind"], "namedAgent");
+    assert_eq!(items[0]["live"], true);
+    assert_eq!(items[0]["source"]["kind"], "namedAgent");
+    assert_eq!(items[0]["startedAt"], "2026-05-17T10:00:00Z");
+    let reviewer_item = items
+        .iter()
+        .find(|item| item["id"] == "agent:reviewer")
+        .expect("reviewer activity item");
+    assert_eq!(reviewer_item["transcript"]["status"], "available");
+    assert_eq!(reviewer_item["transcript"]["available"], true);
+    assert_eq!(reviewer_item["metadata"]["agentId"], "reviewer");
 
     let agents = value["agents"].as_array().expect("activity agents array");
     assert_eq!(agents.len(), 5);
@@ -1517,6 +1578,260 @@ async fn work_root_activity_route_limits_recent_agent_projection() {
 }
 
 #[tokio::test]
+async fn work_root_activity_transcript_route_auth_unknown_and_backfill_bounds() {
+    if skip_without_git("work_root_activity_transcript_route_auth_unknown_and_backfill_bounds") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-transcript");
+    let cache_home = temp_fixture_path("work-root-activity-transcript-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    write_agent_metadata(
+        &agents_dir,
+        "writer",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "writer",
+            "backend": "codex",
+            "status": "idle",
+            "last_output_path": "/private/cache/agents/writer/output.md",
+            "session_id": "session-secret"
+        }),
+    );
+    write_agent_output(
+        &agents_dir,
+        "writer",
+        "first block\nsecond block\nthird block\n",
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/activity/items/agent:writer/transcript")
+                .body(Body::empty())
+                .expect("unauthenticated transcript request"),
+        )
+        .await
+        .expect("unauthenticated transcript response");
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let missing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/root-local-unknown/activity/items/agent:writer/transcript")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("unknown transcript workRoot request"),
+        )
+        .await
+        .expect("unknown transcript workRoot response");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let (unknown_status, unknown_body) = fetch_work_root_activity_transcript(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "exec:missing",
+        "",
+    )
+    .await;
+    assert_eq!(unknown_status, StatusCode::NOT_FOUND);
+    assert!(unknown_body.contains("unknown activity"));
+
+    let (status, body_text) = fetch_work_root_activity_transcript(
+        app,
+        cookie.as_str(),
+        &work_root_id,
+        "agent:writer",
+        "limit=2&cursor=0",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("activity transcript JSON");
+    assert_eq!(value["workRootId"], work_root_id);
+    assert_eq!(value["activityId"], "agent:writer");
+    assert_eq!(value["status"], "available");
+    assert_eq!(value["sourceStatus"], "ok");
+    assert_eq!(value["source"]["kind"], "namedAgent");
+    assert_eq!(value["blocks"].as_array().expect("blocks").len(), 2);
+    assert_eq!(value["blocks"][0]["cursor"], "0");
+    assert_eq!(value["blocks"][0]["renderKind"], "markdown");
+    assert_eq!(value["blocks"][0]["text"], "first block");
+    assert_eq!(value["nextCursor"], "2");
+    assert_eq!(value["hasMore"], true);
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        "session-secret".to_owned(),
+        "session_id".to_owned(),
+        "output.md".to_owned(),
+        "agent.json".to_owned(),
+        "/private/cache".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "transcript response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_feed_orders_attention_before_alphabetical() {
+    if skip_without_git("work_root_activity_feed_orders_attention_before_alphabetical") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-ordering");
+    let cache_home = temp_fixture_path("work-root-activity-ordering-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    write_agent_metadata(
+        &agents_dir,
+        "z-live",
+        &serde_json::json!({ "schema_version": 1, "name": "z live", "status": "running" }),
+    );
+    write_current_call(
+        &agents_dir,
+        "z-live",
+        &serde_json::json!({
+            "schema_version": 1,
+            "status": "running",
+            "started_at": "2026-05-17T10:00:00Z",
+            "updated_at": "2026-05-17T10:00:01Z"
+        })
+        .to_string(),
+    );
+    write_agent_metadata(
+        &agents_dir,
+        "a-idle",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "a idle",
+            "status": "idle",
+            "last_call_at": "2026-05-17T11:00:00Z"
+        }),
+    );
+    write_agent_metadata(
+        &agents_dir,
+        "m-blocked",
+        &serde_json::json!({ "schema_version": 1, "name": "m blocked", "status": "blocked" }),
+    );
+    write_agent_metadata(
+        &agents_dir,
+        "b-failed",
+        &serde_json::json!({ "schema_version": 1, "name": "b failed", "status": "failed" }),
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity(app, cookie.as_str(), &work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_str(&body_text).expect("activity feed JSON");
+    let item_ids = value["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|item| item["id"].as_str().expect("item id").to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        item_ids,
+        vec![
+            "agent:z-live",
+            "agent:b-failed",
+            "agent:m-blocked",
+            "agent:a-idle"
+        ],
+        "live/attention items sort ahead of more recent alphabetical idle rows"
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_transcript_degrades_empty_and_unavailable_sources() {
+    if skip_without_git("work_root_activity_transcript_degrades_empty_and_unavailable_sources") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-transcript-empty");
+    let cache_home = temp_fixture_path("work-root-activity-transcript-empty-cache");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    write_agent_metadata(
+        &agents_dir,
+        "empty",
+        &serde_json::json!({ "schema_version": 1, "name": "empty", "status": "idle" }),
+    );
+    write_agent_metadata_raw(&agents_dir, "broken", "{ bad json");
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (empty_status, empty_body) = fetch_work_root_activity_transcript(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "agent:empty",
+        "",
+    )
+    .await;
+    assert_eq!(empty_status, StatusCode::OK);
+    let empty: serde_json::Value =
+        serde_json::from_str(&empty_body).expect("empty transcript JSON");
+    assert_eq!(empty["status"], "empty");
+    assert_eq!(empty["sourceStatus"], "missing");
+    assert_eq!(empty["blocks"].as_array().expect("blocks").len(), 0);
+    assert_eq!(empty["hasMore"], false);
+
+    let (broken_status, broken_body) = fetch_work_root_activity_transcript(
+        app,
+        cookie.as_str(),
+        &work_root_id,
+        "agent:broken",
+        "",
+    )
+    .await;
+    assert_eq!(broken_status, StatusCode::OK);
+    let broken: serde_json::Value =
+        serde_json::from_str(&broken_body).expect("broken transcript JSON");
+    assert_eq!(broken["status"], "unavailable");
+    assert_eq!(broken["sourceStatus"], "degraded");
+    assert!(broken["diagnostics"].as_array().expect("diagnostics").len() >= 1);
+    assert!(!broken_body.contains("agent.json"));
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
 async fn work_root_activity_route_degrades_malformed_records() {
     if skip_without_git("work_root_activity_route_degrades_malformed_records") {
         return;
@@ -1575,6 +1890,43 @@ async fn work_root_activity_route_degrades_malformed_records() {
     assert_eq!(value["status"], "degraded");
     assert_eq!(value["summary"]["total"], 4);
     assert_eq!(value["summary"]["unavailable"], 2);
+
+    let items = value["items"].as_array().expect("activity items array");
+    assert_eq!(items.len(), 4);
+    let item_row = |item_id: &str| -> &serde_json::Value {
+        items
+            .iter()
+            .find(|item| item["id"] == item_id)
+            .unwrap_or_else(|| panic!("missing activity item {item_id}"))
+    };
+    let item_diagnostics_of = |item: &serde_json::Value| -> Vec<String> {
+        item["diagnostics"]
+            .as_array()
+            .expect("item diagnostics array")
+            .iter()
+            .map(|entry| entry.as_str().expect("diagnostic string").to_owned())
+            .collect()
+    };
+    let broken_call_item = item_row("agent:broken-call");
+    assert_eq!(broken_call_item["status"], "running");
+    assert_eq!(broken_call_item["attention"], true);
+    assert_eq!(broken_call_item["transcript"]["status"], "empty");
+    assert!(!item_diagnostics_of(broken_call_item).is_empty());
+    let broken_meta_item = item_row("agent:broken-meta");
+    assert_eq!(broken_meta_item["status"], "unavailable");
+    assert_eq!(broken_meta_item["attention"], true);
+    assert_eq!(broken_meta_item["transcript"]["status"], "unavailable");
+    assert_eq!(broken_meta_item["transcript"]["available"], false);
+    assert!(!item_diagnostics_of(broken_meta_item).is_empty());
+    let missing_meta_item = item_row("agent:missing-meta");
+    assert_eq!(missing_meta_item["status"], "unavailable");
+    assert_eq!(missing_meta_item["attention"], true);
+    assert_eq!(missing_meta_item["transcript"]["status"], "unavailable");
+    assert!(!item_diagnostics_of(missing_meta_item).is_empty());
+    let healthy_item = item_row("agent:healthy");
+    assert_eq!(healthy_item["status"], "idle");
+    assert_eq!(healthy_item["attention"], false);
+    assert!(item_diagnostics_of(healthy_item).is_empty());
 
     let agents = value["agents"].as_array().expect("activity agents array");
     assert_eq!(agents.len(), 4);
@@ -1673,6 +2025,61 @@ async fn work_root_activity_route_returns_empty_for_git_workroot_without_agents_
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_route_projects_linked_git_workroot_feed() {
+    if skip_without_git("work_root_activity_route_projects_linked_git_workroot_feed") {
+        return;
+    }
+    let base = temp_fixture_path("work-root-activity-linked-route");
+    let cache_home = base.join("cache");
+    let primary = base.join("primary");
+    let linked = base.join("linked");
+    fs::create_dir_all(&primary).expect("create primary workRoot");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "layout fixture\n").expect("write seed file");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    run_git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            linked.to_str().expect("linked path utf-8"),
+        ],
+    );
+
+    let linked_agents_dir = resolve_work_root_agents_dir(&cache_home, &linked)
+        .expect("resolve linked wsstate agents dir");
+    write_agent_metadata(
+        &linked_agents_dir,
+        "linked-reviewer",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "linked reviewer",
+            "backend": "codex",
+            "status": "running",
+            "last_call_at": "2026-05-17T12:00:00Z"
+        }),
+    );
+
+    let state = app_state_with_activity_cache_home(cache_home.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let linked_work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &linked).await;
+
+    let (status, body_text) =
+        fetch_work_root_activity(app, cookie.as_str(), &linked_work_root_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_str(&body_text).expect("linked feed JSON");
+    assert_eq!(value["summary"]["total"], 1);
+    assert_eq!(value["items"][0]["id"], "agent:linked-reviewer");
+    assert_eq!(value["items"][0]["kind"], "namedAgent");
+    assert_eq!(value["agents"][0]["agentId"], "linked-reviewer");
+
+    remove_static_fixture(&base);
 }
 
 #[test]

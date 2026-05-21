@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -8,8 +9,9 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{
-    NamedAgentActivityView, NamedAgentCallActivityView, WorkRootActivitySummary,
-    WorkRootActivityView, WorkRootId,
+    ActivityFeed, ActivityItem, ActivitySourceDisplay, ActivityTranscript,
+    ActivityTranscriptAvailability, NamedAgentActivityView, NamedAgentCallActivityView,
+    TranscriptBlock, WorkRootActivitySummary, WorkRootActivityView, WorkRootId,
 };
 
 use crate::router::AppState;
@@ -27,6 +29,10 @@ const DIAG_CURRENT_CALL_UNREADABLE: &str = "current call state unreadable";
 
 const STATUS_UNAVAILABLE: &str = "unavailable";
 const MAX_RECENT_ACTIVITY_LIMIT: usize = 30;
+const DEFAULT_TRANSCRIPT_LIMIT: usize = 20;
+const MAX_TRANSCRIPT_LIMIT: usize = 100;
+const ACTIVITY_KIND_NAMED_AGENT: &str = "namedAgent";
+const ACTIVITY_ID_NAMED_AGENT_PREFIX: &str = "agent:";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +44,13 @@ struct WorkRootActivityError {
 #[serde(rename_all = "camelCase")]
 pub struct WorkRootActivityQuery {
     recent_limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityTranscriptQuery {
+    cursor: Option<String>,
+    limit: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -97,6 +110,32 @@ impl WorkRootActivityProjector {
         .await
         .expect("workRoot activity projection task panicked")
     }
+
+    pub async fn named_agent_transcript(
+        &self,
+        work_root_id: WorkRootId,
+        root_path: &Path,
+        activity_id: String,
+        agent_key: String,
+        cursor: Option<String>,
+        limit: Option<usize>,
+    ) -> ActivityTranscript {
+        let cache_home = self.cache_home.clone();
+        let root_path = root_path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            named_agent_transcript_blocking(
+                work_root_id,
+                &root_path,
+                cache_home.as_deref(),
+                activity_id,
+                &agent_key,
+                cursor.as_deref(),
+                normalize_transcript_limit(limit),
+            )
+        })
+        .await
+        .expect("workRoot activity transcript task panicked")
+    }
 }
 
 pub async fn work_root_activity(
@@ -113,6 +152,36 @@ pub async fn work_root_activity(
         state
             .work_root_activity
             .project_with_recent_limit(work_root_id, &root_path, query.recent_limit)
+            .await,
+    )
+    .into_response()
+}
+
+pub async fn work_root_activity_transcript(
+    State(state): State<AppState>,
+    AxumPath((work_root_id, activity_id)): AxumPath<(String, String)>,
+    Query(query): Query<ActivityTranscriptQuery>,
+) -> Response {
+    let work_root_id = WorkRootId::from(work_root_id);
+    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
+        return activity_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    };
+
+    let Some(agent_key) = named_agent_key_from_activity_id(&activity_id) else {
+        return activity_error(StatusCode::NOT_FOUND, "unknown activity");
+    };
+
+    Json(
+        state
+            .work_root_activity
+            .named_agent_transcript(
+                work_root_id,
+                &root_path,
+                activity_id,
+                agent_key,
+                query.cursor,
+                query.limit,
+            )
             .await,
     )
     .into_response()
@@ -162,20 +231,41 @@ fn project_blocking(
     cache_home: Option<&Path>,
     recent_limit: Option<usize>,
 ) -> WorkRootActivityView {
-    let agents = resolve_cache_root(cache_home)
+    let projections = resolve_cache_root(cache_home)
         .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
         .map(|agents_dir| scan_named_agents(&agents_dir, recent_limit))
         .unwrap_or_default();
 
+    let agents = projections
+        .iter()
+        .map(|projection| projection.row.clone())
+        .collect::<Vec<_>>();
     let summary = summarize(&agents);
     let degraded = agents.iter().any(|agent| !agent.diagnostics.is_empty());
+    let mut items = projections
+        .iter()
+        .map(named_agent_activity_item)
+        .collect::<Vec<_>>();
+    items.sort_by(activity_item_ordering);
 
-    WorkRootActivityView {
+    let selected_item_id = items.first().map(|item| item.id.clone());
+    let feed_cursor = Some(feed_cursor(&items));
+
+    ActivityFeed {
         work_root_id,
         status: if degraded { "degraded" } else { "ok" }.to_owned(),
+        update_mode: "snapshot".to_owned(),
+        feed_cursor,
+        selected_item_id,
         summary,
+        items,
         agents,
     }
+}
+
+fn feed_cursor(items: &[ActivityItem]) -> String {
+    let latest = items.iter().map(recent_value).max().unwrap_or("");
+    format!("snapshot:{}:{latest}", items.len())
 }
 
 fn summarize(agents: &[NamedAgentActivityView]) -> WorkRootActivitySummary {
@@ -197,10 +287,7 @@ fn summarize(agents: &[NamedAgentActivityView]) -> WorkRootActivitySummary {
 
 /// Scan `<worktree>/agents` for `agents/*/agent.json` plus optional
 /// `current/state.json`, mapping each directory into a bounded row.
-fn scan_named_agents(
-    agents_dir: &Path,
-    recent_limit: Option<usize>,
-) -> Vec<NamedAgentActivityView> {
+fn scan_named_agents(agents_dir: &Path, recent_limit: Option<usize>) -> Vec<NamedAgentProjection> {
     let Ok(entries) = std::fs::read_dir(agents_dir) else {
         // No agents directory yet (or unreadable): an empty, healthy
         // projection rather than a route failure.
@@ -242,9 +329,9 @@ fn scan_named_agents(
 
     let mut rows = agent_dirs
         .into_iter()
-        .map(|entry| named_agent_row(&entry.agent_dir, entry.agent_key))
+        .map(|entry| named_agent_projection(&entry.agent_dir, entry.agent_key))
         .collect::<Vec<_>>();
-    rows.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
+    rows.sort_by(|left, right| left.row.agent_id.cmp(&right.row.agent_id));
     rows
 }
 
@@ -252,6 +339,12 @@ struct RecentAgentDir {
     agent_key: String,
     agent_dir: PathBuf,
     modified_at: SystemTime,
+}
+
+#[derive(Clone, Debug)]
+struct NamedAgentProjection {
+    row: NamedAgentActivityView,
+    output_available: bool,
 }
 
 fn agent_record_modified_at(agent_dir: &Path) -> SystemTime {
@@ -278,7 +371,8 @@ fn modified_at(path: &Path) -> SystemTime {
         .unwrap_or(UNIX_EPOCH)
 }
 
-fn named_agent_row(agent_dir: &Path, agent_key: String) -> NamedAgentActivityView {
+fn named_agent_projection(agent_dir: &Path, agent_key: String) -> NamedAgentProjection {
+    let output_available = agent_dir.join("output.md").is_file();
     let metadata = match std::fs::read(agent_dir.join("agent.json")) {
         Ok(raw) => match serde_json::from_slice::<AgentMetadata>(&raw) {
             Ok(metadata) => Ok(metadata),
@@ -293,20 +387,23 @@ fn named_agent_row(agent_dir: &Path, agent_key: String) -> NamedAgentActivityVie
         Err(diagnostic) => {
             // CONTRACT: a malformed or missing record degrades only its own row
             // instead of failing the whole route.
-            return NamedAgentActivityView {
-                agent_id: agent_key,
-                name: None,
-                backend: None,
-                harness: None,
-                tier: None,
-                model: None,
-                effort: None,
-                status: STATUS_UNAVAILABLE.to_owned(),
-                last_call_at: None,
-                session_present: false,
-                current_call: None,
-                detail_hints: Vec::new(),
-                diagnostics: vec![diagnostic.to_owned()],
+            return NamedAgentProjection {
+                row: NamedAgentActivityView {
+                    agent_id: agent_key,
+                    name: None,
+                    backend: None,
+                    harness: None,
+                    tier: None,
+                    model: None,
+                    effort: None,
+                    status: STATUS_UNAVAILABLE.to_owned(),
+                    last_call_at: None,
+                    session_present: false,
+                    current_call: None,
+                    detail_hints: Vec::new(),
+                    diagnostics: vec![diagnostic.to_owned()],
+                },
+                output_available: false,
             };
         }
     };
@@ -328,22 +425,340 @@ fn named_agent_row(agent_dir: &Path, agent_key: String) -> NamedAgentActivityVie
         detail_hints.push("recent output available".to_owned());
     }
 
-    NamedAgentActivityView {
-        agent_id: agent_key,
-        name: non_empty(metadata.name),
-        backend: non_empty(metadata.backend),
-        harness: non_empty(metadata.harness),
-        tier: non_empty(metadata.tier),
-        model: non_empty(metadata.model),
-        effort: non_empty(metadata.effort),
-        status,
-        last_call_at: non_empty(metadata.last_call_at),
-        // CONTRACT: collapse the private session id into a presence flag.
-        session_present: !metadata.session_id.is_empty(),
-        current_call,
-        detail_hints,
-        diagnostics,
+    NamedAgentProjection {
+        row: NamedAgentActivityView {
+            agent_id: agent_key,
+            name: non_empty(metadata.name),
+            backend: non_empty(metadata.backend),
+            harness: non_empty(metadata.harness),
+            tier: non_empty(metadata.tier),
+            model: non_empty(metadata.model),
+            effort: non_empty(metadata.effort),
+            status,
+            last_call_at: non_empty(metadata.last_call_at),
+            // CONTRACT: collapse the private session id into a presence flag.
+            session_present: !metadata.session_id.is_empty(),
+            current_call,
+            detail_hints,
+            diagnostics,
+        },
+        output_available,
     }
+}
+
+fn named_agent_activity_item(projection: &NamedAgentProjection) -> ActivityItem {
+    let agent = &projection.row;
+    let source = named_agent_source(agent);
+    let live = agent
+        .current_call
+        .as_ref()
+        .map(|call| call.active)
+        .unwrap_or(agent.status == "running");
+    let attention = !agent.diagnostics.is_empty()
+        || matches!(
+            agent.status.as_str(),
+            "blocked" | "failed" | STATUS_UNAVAILABLE
+        )
+        || agent
+            .current_call
+            .as_ref()
+            .and_then(|call| call.error.as_ref())
+            .is_some();
+    let (started_at, updated_at, finished_at) = activity_item_timing(agent);
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "agentId".to_owned(),
+        serde_json::Value::String(agent.agent_id.clone()),
+    );
+    if agent.session_present {
+        metadata.insert("sessionPresent".to_owned(), serde_json::Value::Bool(true));
+    }
+    if let Some(effort) = &agent.effort {
+        metadata.insert(
+            "effort".to_owned(),
+            serde_json::Value::String(effort.clone()),
+        );
+    }
+
+    ActivityItem {
+        id: named_agent_activity_id(&agent.agent_id),
+        kind: ACTIVITY_KIND_NAMED_AGENT.to_owned(),
+        label: agent.name.clone().unwrap_or_else(|| agent.agent_id.clone()),
+        status: agent.status.clone(),
+        live,
+        attention,
+        started_at,
+        updated_at,
+        finished_at,
+        source,
+        transcript: ActivityTranscriptAvailability {
+            status: if projection.output_available {
+                "available"
+            } else if agent.status == STATUS_UNAVAILABLE {
+                STATUS_UNAVAILABLE
+            } else {
+                "empty"
+            }
+            .to_owned(),
+            available: projection.output_available,
+            cursor: projection.output_available.then(|| "0".to_owned()),
+        },
+        diagnostics: agent.diagnostics.clone(),
+        metadata,
+    }
+}
+
+fn named_agent_source(agent: &NamedAgentActivityView) -> ActivitySourceDisplay {
+    ActivitySourceDisplay {
+        kind: ACTIVITY_KIND_NAMED_AGENT.to_owned(),
+        label: agent.name.clone().unwrap_or_else(|| agent.agent_id.clone()),
+        backend: agent.backend.clone(),
+        harness: agent.harness.clone(),
+        tier: agent.tier.clone(),
+        model: agent.model.clone(),
+    }
+}
+
+fn activity_item_timing(
+    agent: &NamedAgentActivityView,
+) -> (Option<String>, Option<String>, Option<String>) {
+    if let Some(call) = &agent.current_call {
+        return (
+            call.started_at
+                .clone()
+                .or_else(|| agent.last_call_at.clone()),
+            call.updated_at
+                .clone()
+                .or_else(|| agent.last_call_at.clone()),
+            call.finished_at.clone(),
+        );
+    }
+    (agent.last_call_at.clone(), agent.last_call_at.clone(), None)
+}
+
+fn activity_item_ordering(left: &ActivityItem, right: &ActivityItem) -> std::cmp::Ordering {
+    activity_item_rank(left)
+        .cmp(&activity_item_rank(right))
+        .then_with(|| {
+            recent_value(right)
+                .cmp(&recent_value(left))
+                .then_with(|| left.label.cmp(&right.label))
+                .then_with(|| left.id.cmp(&right.id))
+        })
+}
+
+fn activity_item_rank(item: &ActivityItem) -> u8 {
+    if item.live {
+        0
+    } else if item.attention {
+        1
+    } else if matches!(
+        item.status.as_str(),
+        "blocked" | "failed" | STATUS_UNAVAILABLE
+    ) {
+        2
+    } else {
+        3
+    }
+}
+
+fn recent_value(item: &ActivityItem) -> &str {
+    item.updated_at
+        .as_deref()
+        .or(item.started_at.as_deref())
+        .or(item.finished_at.as_deref())
+        .unwrap_or("")
+}
+
+fn named_agent_activity_id(agent_key: &str) -> String {
+    format!("{ACTIVITY_ID_NAMED_AGENT_PREFIX}{agent_key}")
+}
+
+fn named_agent_key_from_activity_id(activity_id: &str) -> Option<String> {
+    activity_id
+        .strip_prefix(ACTIVITY_ID_NAMED_AGENT_PREFIX)
+        .filter(|agent_key| {
+            !agent_key.is_empty() && !agent_key.contains('/') && !agent_key.contains('\\')
+        })
+        .map(str::to_owned)
+}
+
+fn normalize_transcript_limit(limit: Option<usize>) -> usize {
+    limit
+        .filter(|limit| *limit > 0)
+        .unwrap_or(DEFAULT_TRANSCRIPT_LIMIT)
+        .min(MAX_TRANSCRIPT_LIMIT)
+}
+
+fn transcript_cursor_offset(cursor: Option<&str>) -> usize {
+    cursor
+        .and_then(|cursor| cursor.parse::<usize>().ok())
+        .unwrap_or(0)
+}
+
+fn named_agent_transcript_blocking(
+    work_root_id: WorkRootId,
+    root_path: &Path,
+    cache_home: Option<&Path>,
+    activity_id: String,
+    agent_key: &str,
+    cursor: Option<&str>,
+    limit: usize,
+) -> ActivityTranscript {
+    let agents_dir = resolve_cache_root(cache_home)
+        .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path));
+    let Some(agent_dir) = agents_dir.map(|agents_dir| agents_dir.join(agent_key)) else {
+        return unavailable_transcript(
+            work_root_id,
+            activity_id,
+            agent_key,
+            "activity source unavailable",
+        );
+    };
+    if !agent_dir.is_dir() {
+        return unavailable_transcript(
+            work_root_id,
+            activity_id,
+            agent_key,
+            "activity source unavailable",
+        );
+    }
+
+    let projection = named_agent_projection(&agent_dir, agent_key.to_owned());
+    let source = named_agent_source(&projection.row);
+    let live = projection
+        .row
+        .current_call
+        .as_ref()
+        .map(|call| call.active)
+        .unwrap_or(false);
+
+    let output_path = agent_dir.join("output.md");
+    let raw = match std::fs::read_to_string(&output_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return ActivityTranscript {
+                work_root_id,
+                activity_id,
+                status: if projection.row.status == STATUS_UNAVAILABLE {
+                    STATUS_UNAVAILABLE.to_owned()
+                } else {
+                    "empty".to_owned()
+                },
+                source_status: if projection.row.status == STATUS_UNAVAILABLE {
+                    "degraded".to_owned()
+                } else {
+                    "missing".to_owned()
+                },
+                live,
+                source,
+                blocks: Vec::new(),
+                next_cursor: Some("0".to_owned()),
+                has_more: false,
+                diagnostics: projection.row.diagnostics,
+            };
+        }
+        Err(_) => {
+            let mut diagnostics = projection.row.diagnostics;
+            diagnostics.push("transcript source unreadable".to_owned());
+            return ActivityTranscript {
+                work_root_id,
+                activity_id,
+                status: "degraded".to_owned(),
+                source_status: "degraded".to_owned(),
+                live,
+                source,
+                blocks: Vec::new(),
+                next_cursor: Some("0".to_owned()),
+                has_more: false,
+                diagnostics,
+            };
+        }
+    };
+
+    let all_blocks = transcript_blocks_from_output(&raw);
+    let start = transcript_cursor_offset(cursor).min(all_blocks.len());
+    let end = (start + limit).min(all_blocks.len());
+    let blocks = all_blocks[start..end].to_vec();
+    ActivityTranscript {
+        work_root_id,
+        activity_id,
+        status: if projection.row.diagnostics.is_empty() {
+            "available"
+        } else {
+            "degraded"
+        }
+        .to_owned(),
+        source_status: if projection.row.diagnostics.is_empty() {
+            "ok"
+        } else {
+            "degraded"
+        }
+        .to_owned(),
+        live,
+        source,
+        blocks,
+        next_cursor: Some(end.to_string()),
+        has_more: end < all_blocks.len(),
+        diagnostics: projection.row.diagnostics,
+    }
+}
+
+fn unavailable_transcript(
+    work_root_id: WorkRootId,
+    activity_id: String,
+    agent_key: &str,
+    diagnostic: &str,
+) -> ActivityTranscript {
+    let fallback = NamedAgentActivityView {
+        agent_id: agent_key.to_owned(),
+        name: None,
+        backend: None,
+        harness: None,
+        tier: None,
+        model: None,
+        effort: None,
+        status: STATUS_UNAVAILABLE.to_owned(),
+        last_call_at: None,
+        session_present: false,
+        current_call: None,
+        detail_hints: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    ActivityTranscript {
+        work_root_id,
+        activity_id,
+        status: STATUS_UNAVAILABLE.to_owned(),
+        source_status: "missing".to_owned(),
+        live: false,
+        source: named_agent_source(&fallback),
+        blocks: Vec::new(),
+        next_cursor: Some("0".to_owned()),
+        has_more: false,
+        diagnostics: vec![diagnostic.to_owned()],
+    }
+}
+
+fn transcript_blocks_from_output(raw: &str) -> Vec<TranscriptBlock> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    raw.lines()
+        .enumerate()
+        .map(|(index, line)| TranscriptBlock {
+            cursor: index.to_string(),
+            timestamp: None,
+            render_kind: "markdown".to_owned(),
+            title: if index == 0 {
+                Some("Agent output".to_owned())
+            } else {
+                None
+            },
+            text: Some(bounded(line)),
+            data: None,
+            degraded: false,
+        })
+        .collect()
 }
 
 fn read_current_call(

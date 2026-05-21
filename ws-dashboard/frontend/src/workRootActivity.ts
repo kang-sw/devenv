@@ -20,6 +20,60 @@ export type NamedAgentCallActivityView = {
   error: string | null;
 };
 
+export type ActivitySourceDisplay = {
+  kind: "namedAgent" | "exec" | string;
+  label: string;
+  backend: string | null;
+  harness: string | null;
+  tier: string | null;
+  model: string | null;
+};
+
+export type ActivityTranscriptAvailability = {
+  status: "available" | "empty" | "unavailable" | "degraded" | string;
+  available: boolean;
+  cursor: string | null;
+};
+
+export type ActivityItem = {
+  id: string;
+  kind: "namedAgent" | "exec" | string;
+  label: string;
+  status: string;
+  live: boolean;
+  attention: boolean;
+  startedAt: string | null;
+  updatedAt: string | null;
+  finishedAt: string | null;
+  source: ActivitySourceDisplay;
+  transcript: ActivityTranscriptAvailability;
+  diagnostics: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type TranscriptBlock = {
+  cursor: string;
+  timestamp: string | null;
+  renderKind: "markdown" | "text" | "json" | string;
+  title: string | null;
+  text: string | null;
+  data: unknown | null;
+  degraded: boolean;
+};
+
+export type ActivityTranscript = {
+  workRootId: string;
+  activityId: string;
+  status: "available" | "empty" | "unavailable" | "degraded" | string;
+  sourceStatus: "ok" | "missing" | "unsupported" | "degraded" | string;
+  live: boolean;
+  source: ActivitySourceDisplay;
+  blocks: TranscriptBlock[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  diagnostics: string[];
+};
+
 export type NamedAgentActivityView = {
   agentId: string;
   name: string | null;
@@ -41,12 +95,22 @@ export type WorkRootActivityView = {
   // host paths, cache paths, process ids, stream paths, and session ids.
   workRootId: string;
   status: "ok" | "unavailable" | "degraded" | string;
+  updateMode: "snapshot" | "replace" | "append" | string;
+  feedCursor: string | null;
+  selectedItemId: string | null;
   summary: WorkRootActivitySummary;
+  items: ActivityItem[];
+  // Compatibility projection for the existing read-only named-agent pane.
   agents: NamedAgentActivityView[];
 };
 
 export type WorkRootActivityFetchOptions = {
   readonly recentLimit?: number;
+};
+
+export type ActivityTranscriptFetchOptions = {
+  readonly cursor?: string;
+  readonly limit?: number;
 };
 
 export function workRootActivityEndpoint(
@@ -62,6 +126,23 @@ export function workRootActivityEndpoint(
   return `${path}?${params.toString()}`;
 }
 
+export function workRootActivityTranscriptEndpoint(
+  workRootId: string,
+  activityId: string,
+  options: ActivityTranscriptFetchOptions = {},
+) {
+  const path = `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activity/items/${encodeURIComponent(activityId)}/transcript`;
+  const params = new URLSearchParams();
+  if (options.cursor !== undefined) {
+    params.set("cursor", options.cursor);
+  }
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
 export async function fetchWorkRootActivity(
   workRootId: string,
   options: WorkRootActivityFetchOptions = {},
@@ -75,6 +156,25 @@ export async function fetchWorkRootActivity(
   }
 
   return (await response.json()) as WorkRootActivityView;
+}
+
+export async function fetchWorkRootActivityTranscript(
+  workRootId: string,
+  activityId: string,
+  options: ActivityTranscriptFetchOptions = {},
+): Promise<ActivityTranscript> {
+  const response = await fetch(
+    workRootActivityTranscriptEndpoint(workRootId, activityId, options),
+    {
+      headers: { Accept: "application/json" },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await apiErrorDetail(response));
+  }
+
+  return (await response.json()) as ActivityTranscript;
 }
 
 export function mergeWorkRootActivityViews(
@@ -103,7 +203,11 @@ export function mergeWorkRootActivityViews(
     ...current,
     status:
       update.status === "unavailable" ? "unavailable" : degraded ? "degraded" : "ok",
+    updateMode: update.updateMode,
+    feedCursor: update.feedCursor,
+    selectedItemId: update.selectedItemId,
     summary,
+    items: update.items.length > 0 ? update.items : current.items,
     agents,
   };
 }

@@ -1,10 +1,14 @@
 import {
   fetchWorkRootActivity,
+  fetchWorkRootActivityTranscript,
   mergeWorkRootActivityViews,
   workRootActivityBadge,
   workRootActivityEndpoint,
+  workRootActivityTranscriptEndpoint,
+  type ActivityItem,
   type NamedAgentActivityView,
   type WorkRootActivitySummary,
+  type ActivityTranscript,
   type WorkRootActivityView,
 } from "./workRootActivity.js";
 
@@ -46,6 +50,14 @@ assertEqual(
   "/api/dashboard/work-roots/root-local-abc/activity?recentLimit=30",
   "activity endpoint encodes a recent-limit refresh query",
 );
+assertEqual(
+  workRootActivityTranscriptEndpoint("root/local test", "agent:reviewer", {
+    cursor: "2",
+    limit: 10,
+  }),
+  "/api/dashboard/work-roots/root%2Flocal%20test/activity/items/agent%3Areviewer/transcript?cursor=2&limit=10",
+  "transcript endpoint addresses encoded opaque ids and bounded query options",
+);
 
 const originalFetch = globalThis.fetch;
 try {
@@ -63,7 +75,11 @@ try {
     const view: WorkRootActivityView = {
       workRootId: "root-local-abc",
       status: "ok",
+      updateMode: "snapshot",
+      feedCursor: "snapshot:0:",
+      selectedItemId: null,
       summary: { total: 0, active: 0, blocked: 0, failed: 0, unavailable: 0 },
+      items: [],
       agents: [],
     };
     return new Response(JSON.stringify(view), {
@@ -78,6 +94,63 @@ try {
   assertEqual(activity.workRootId, "root-local-abc", "fetch helper returns the daemon view");
   assertEqual(activity.summary.total, 0, "Phase 1 no-agent summary can be consumed");
 
+  globalThis.fetch = (async (input, init) => {
+    assertEqual(
+      String(input),
+      "/api/dashboard/work-roots/root-local-abc/activity/items/agent%3Areviewer/transcript?cursor=1&limit=1",
+      "transcript fetch helper uses the transcript endpoint",
+    );
+    assertEqual(
+      (init?.headers as Record<string, string>).Accept,
+      "application/json",
+      "transcript fetch helper requests JSON",
+    );
+    const transcript: ActivityTranscript = {
+      workRootId: "root-local-abc",
+      activityId: "agent:reviewer",
+      status: "available",
+      sourceStatus: "ok",
+      live: false,
+      source: {
+        kind: "namedAgent",
+        label: "reviewer",
+        backend: "codex",
+        harness: null,
+        tier: null,
+        model: null,
+      },
+      blocks: [
+        {
+          cursor: "1",
+          timestamp: null,
+          renderKind: "markdown",
+          title: null,
+          text: "done without host paths",
+          data: null,
+          degraded: false,
+        },
+      ],
+      nextCursor: "2",
+      hasMore: false,
+      diagnostics: [],
+    };
+    return new Response(JSON.stringify(transcript), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  const transcript = await fetchWorkRootActivityTranscript(
+    "root-local-abc",
+    "agent:reviewer",
+    { cursor: "1", limit: 1 },
+  );
+  assertEqual(transcript.blocks[0]?.renderKind, "markdown", "transcript shape is consumed");
+  assertEqual(
+    JSON.stringify(transcript).includes("/Users/"),
+    false,
+    "transcript helper shape does not require host paths",
+  );
+
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ error: "unknown workRoot" }), {
       status: 404,
@@ -87,6 +160,17 @@ try {
     () => fetchWorkRootActivity("root-local-missing"),
     /unknown workRoot/,
     "fetch helper surfaces bounded backend JSON errors",
+  );
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: "unknown activity" }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+  await assertRejects(
+    () => fetchWorkRootActivityTranscript("root-local-abc", "agent:missing"),
+    /unknown activity/,
+    "transcript fetch helper surfaces bounded backend JSON errors",
   );
 } finally {
   globalThis.fetch = originalFetch;
@@ -108,8 +192,41 @@ function activityView(
   return {
     workRootId: partial.workRootId ?? "root-local-abc",
     status: partial.status ?? "ok",
+    updateMode: partial.updateMode ?? "snapshot",
+    feedCursor: partial.feedCursor ?? "snapshot:0:",
+    selectedItemId: partial.selectedItemId ?? null,
     summary: activitySummary(partial.summary),
+    items: partial.items ?? [],
     agents: partial.agents ?? [],
+  };
+}
+
+function activityItem(partial: Partial<ActivityItem> & { id: string }): ActivityItem {
+  return {
+    id: partial.id,
+    kind: partial.kind ?? "namedAgent",
+    label: partial.label ?? partial.id,
+    status: partial.status ?? "idle",
+    live: partial.live ?? false,
+    attention: partial.attention ?? false,
+    startedAt: partial.startedAt ?? null,
+    updatedAt: partial.updatedAt ?? null,
+    finishedAt: partial.finishedAt ?? null,
+    source: partial.source ?? {
+      kind: "namedAgent",
+      label: partial.label ?? partial.id,
+      backend: null,
+      harness: null,
+      tier: null,
+      model: null,
+    },
+    transcript: partial.transcript ?? {
+      status: "empty",
+      available: false,
+      cursor: null,
+    },
+    diagnostics: partial.diagnostics ?? [],
+    metadata: partial.metadata ?? {},
   };
 }
 
@@ -135,14 +252,22 @@ function activityAgent(
 
 const mergedActivity = mergeWorkRootActivityViews(
   activityView({
+    updateMode: "snapshot",
+    feedCursor: "snapshot:old",
+    selectedItemId: "agent:agent-a",
     summary: { total: 2, active: 1 },
+    items: [activityItem({ id: "agent:agent-a", status: "running", live: true })],
     agents: [
       activityAgent({ agentId: "agent-a", status: "running" }),
       activityAgent({ agentId: "agent-b", status: "idle" }),
     ],
   }),
   activityView({
+    updateMode: "snapshot",
+    feedCursor: "snapshot:new",
+    selectedItemId: "agent:agent-b",
     summary: { total: 2, blocked: 1, unavailable: 1 },
+    items: [activityItem({ id: "agent:agent-b", status: "blocked", attention: true })],
     agents: [
       activityAgent({ agentId: "agent-b", status: "blocked" }),
       activityAgent({
@@ -171,6 +296,26 @@ assertEqual(
   mergedActivity.status,
   "degraded",
   "recent activity refresh preserves degraded status from merged diagnostics",
+);
+assertDeepEqual(
+  mergedActivity.items.map((item) => item.id),
+  ["agent:agent-b"],
+  "recent activity refresh carries the source-neutral feed items from the latest update",
+);
+assertEqual(
+  mergedActivity.feedCursor,
+  "snapshot:new",
+  "recent activity refresh carries the feed cursor from the latest update",
+);
+assertEqual(
+  mergedActivity.selectedItemId,
+  "agent:agent-b",
+  "recent activity refresh carries the selected item hint from the latest update",
+);
+assertEqual(
+  mergedActivity.updateMode,
+  "snapshot",
+  "recent activity refresh carries the update mode from the latest update",
 );
 
 const loadingBadge = workRootActivityBadge({ phase: "loading" });
