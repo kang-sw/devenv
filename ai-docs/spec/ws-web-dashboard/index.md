@@ -273,15 +273,17 @@ named-agent rows and merges them into the existing projection so newly
 registered or called agents appear without a browser reload. The full projection
 remains available for the initial selected-workRoot fetch.
 
-## 🚧 Activity Console Read Model {#260521-ws-dashboard-activity-console-read-model}
+## Activity Console Read Model {#260521-ws-dashboard-activity-console-read-model}
 
-The dashboard will expose a workRoot-scoped Activity Console read model that
+The dashboard exposes a workRoot-scoped Activity Console read model that
 combines a live/latest Activity Feed snapshot with selected activity transcript
-backfill. The feed endpoint returns selectable Activity Items for the opened
-workRoot, while a per-item transcript endpoint returns normalized Transcript
-Blocks for the selected item. Named agents are the first supported source, but
-the public shape stays source-neutral so main-agent sessions, exec jobs,
-diagnostics, and later readable activity can fit the same console contract.
+backfill. The existing workRoot Activity endpoint returns selectable Activity
+Items for the opened workRoot while preserving a compatibility named-agent
+projection for the current Activity pane. A per-item transcript endpoint
+returns normalized Transcript Blocks for the selected item. Named agents are the
+first supported source, but the public shape stays source-neutral so main-agent
+sessions, exec jobs, diagnostics, and later readable activity can fit the same
+console contract.
 
 Activity Feed snapshots report enough item state for compact ribbon rendering
 without requiring a transcript fetch: stable activity id, kind, label, status,
