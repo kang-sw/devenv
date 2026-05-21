@@ -24,7 +24,6 @@ workflow-reference roles:
 lead-add-rule
 lead-bootstrap
 lead-discuss
-lead-edit
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
@@ -38,7 +37,6 @@ lead-sprint
 lead-update-spec
 lead-verify-discussion
 lead-workflow-manual
-lead-write-code
 lead-write-skeleton
 lead-write-spec
 lead-write-ticket
@@ -93,20 +91,19 @@ under `wsflow:lead-*` invocation names and `wsflow/<tool>` MCP notation.
 Shipped wsflow skills include planning, documentation, direct implementation,
 bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
-`lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
+`lead-write-ticket`, `lead-proceed`, `lead-implement`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
 `lead-sprint`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
-preserves deferred documentation wrap-up and routes source changes through the
-wsflow edit workflow. `lead-edit` may use direct edits or scoped subagent
+preserves deferred documentation wrap-up and routes source changes through
+`lead-implement`. `lead-implement` handles both direct edits and delegated
 implementation while the sprint wrap-up keeps documentation integration,
 verification, and commit ownership explicit. {#260513-wsflow-sprint-skill}
 
-The wsflow package excludes full ws implementation relays, skeleton flows,
-recovery orchestration, and upstream authoring helper skills:
-`lead-write-code`, `lead-write-skeleton`, `lead-salvage`, and
+The wsflow package excludes skeleton flows, recovery orchestration, and
+upstream authoring helper skills: `lead-write-skeleton`, `lead-salvage`, and
 `lead-skill-authoring`. wsflow skill text uses scoped subagent guidance for
 exploration, implementation, verification, audit, or review and keeps lead
 responsibility focused on integration, verification, final judgment, and commits.
@@ -280,25 +277,25 @@ asks the user to merge, continue, or stop. Follow-up changes after this gate
 route to another implementation slice or sprint and are captured in tickets as
 append-only Result editions for already completed phases.
 
-`lead-edit` performs a narrow direct edit in the lead session. It honors
-caller-provided scope boundaries, verifies the change, uses one reviewer for
-correctness and fit, escalates if the scope grows, and reports the commit range
-and test status to its caller.
+`lead-implement` is a unified implementation spine with two edit modes.
+Direct-edit mode: the lead edits and verifies inline on the current branch,
+suitable for single-file internal-only changes. Delegated mode: the lead writes
+a brief, optionally populates a plan, spawns an implementer agent, and captures
+the resulting commit range. `judge: needs-delegation` selects the mode at Route
+time; direct-edit escalates to delegated when scope grows beyond single-file
+internal-only.
 
-`lead-write-code` delegates an implementation target through an implementer
-agent, optional plan, partitioned reviewers, bounded fix relay, cleanup, and
-completion report. Its brief preserves caller-provided scope boundaries and
-selected binding decisions, and it carries concrete contract and integration
-test instructions when the target changes public or cross-module contracts.
-When workflow primitive context is not already active, it loads
-`lead-workflow-manual` before registering delegates or reviewers.
+Review is a single stage for both modes. `judge: review-allocation` picks depth
+(lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
+test) when partitioned. Relay cap is 2 cycles for single-reviewer, 3 cycles for
+partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
 
-Plan population is an either/or depth choice. When plan depth is `survey`,
-`plan-populator-survey` produces file-backed reference-map evidence and possible
-risk signals without deciding that the implementation direction is wrong. If
-survey cannot safely support implementation without strategy, contract, or
-reuse judgment, it returns `[escalate-to-research]` instead of forcing a survey
-plan. `lead-write-code` then routes to `plan-populator-research` before
+Plan population is an either/or depth choice for delegated mode. When plan depth
+is `survey`, `plan-populator-survey` produces file-backed reference-map evidence
+and possible risk signals without deciding that the implementation direction is
+wrong. If survey cannot safely support implementation without strategy, contract,
+or reuse judgment, it returns `[escalate-to-research]` instead of forcing a
+survey plan. `lead-implement` then routes to `plan-populator-research` before
 spawning the implementer.
 
 When plan depth is `research`, `plan-populator-research` makes planner
@@ -309,7 +306,7 @@ clean plan can satisfy the brief. A survey-to-research route replaces the same
 plan artifact path with the research plan; it does not create a research-suffixed
 plan filename or append research to a survey plan.
 
-Before spawning the implementer, `lead-write-code` handles plan-populator exit
+Before spawning the implementer, `lead-implement` handles plan-populator exit
 signals. It stops and escalates when implementation would likely pursue a wrong
 contract, bypass existing project mechanisms, or rely on a shortcut path. Review
 remains an enforcement step: reviewers compare the implementation against brief
@@ -327,9 +324,8 @@ decisions omitted from the brief or violated by the implementation as blocking
 findings. Correctness and test reviewers remain scoped to the diff and their
 assigned partitions.
 
-`lead-edit` and `lead-write-code` are code-and-review primitives; callers own
-documentation pipeline timing. `lead-implement` runs the documentation pre-pass
-after either primitive returns, while `lead-sprint` defers that pass to wrap-up.
+`lead-implement` runs the documentation pre-pass after the Edit and Review
+stages complete, while `lead-sprint` defers that pass to wrap-up.
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,
