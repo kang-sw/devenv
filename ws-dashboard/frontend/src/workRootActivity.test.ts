@@ -545,6 +545,23 @@ assertEqual(
   "error paths also require the expected workRoot/activity/request tuple",
 );
 assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 1 },
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-a", activityId: "agent:a" },
+  ),
+  false,
+  "an unavailable same-activity state with a newer request id rejects an older successful response",
+);
+assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 1 },
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+  ),
+  false,
+  "an unavailable same-activity state with a newer request id rejects an older rejection",
+);
+assertEqual(
   shouldLoadMoreActivityTranscript(
     { scrollTop: 460, clientHeight: 500, scrollHeight: 1_000 },
     true,

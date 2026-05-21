@@ -151,10 +151,12 @@ export function ActivityConsole({
     (mode: "replace" | "append") => {
       const item = selectedItem;
       if (!item || !item.transcript.available) {
+        const requestId = transcriptRequestSeq.current + 1;
+        transcriptRequestSeq.current = requestId;
         currentTranscriptRequest.current = {
           workRootId: view.workRootId,
           activityId: item?.id ?? null,
-          requestId: transcriptRequestSeq.current,
+          requestId,
         };
         if (!item) {
           setTranscriptState({
