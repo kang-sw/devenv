@@ -149,8 +149,6 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260518-epic-ws-dashboard-activity-console` | todo | Coordinate the full-scale read-only Activity Console with read model, UI shell, live stream, live UX, and transcript expansion children |
-| `260518-feat-ws-dashboard-activity-transcript-api` | ready | Expand Activity Console transcript sources and optional block-level live transcript behavior |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
@@ -172,11 +170,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260518-feat-ws-dashboard-activity-transcript-api` - Daemon-owned
-  transcript source adapters, fixture-backed native transcript parsing,
-  degraded block handling, redaction, and optional selected transcript event
-  stream; implements
-  `{#260522-ws-dashboard-activity-console-transcript-expansion}`.
+No ready tickets.
 
 ## Session Notes
 

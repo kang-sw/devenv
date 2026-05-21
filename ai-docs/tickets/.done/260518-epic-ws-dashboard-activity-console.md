@@ -1,6 +1,7 @@
 ---
 title: ws dashboard Activity Console
 parent: 260514-epic-ws-web-dashboard-mvp
+completed: 2026-05-22
 related:
   260517-feat-ws-dashboard-workroot-activity: completed first read-only named-agent projection, badge, and pane substrate
   260517-feat-ws-dashboard-workroot-activity-live-refresh: narrow polling-replacement idea absorbed into Activity Console live update children
@@ -26,7 +27,7 @@ The milestone covers:
   selected transcript backfill needed by the console.
 - A polished reusable Activity Console UI shell with an Activity Ribbon and
   Transcript Block viewer inside the WorkRoot Activity pane.
-- A cross-platform daemon watch and read-only stream path for live Activity
+- A daemon read-only stream path with bounded polling fallback for live Activity
   Feed and transcript invalidation events.
 - Frontend live update adoption that merges daemon stream events without stale
   workRoot updates or always-on full-list polling.
@@ -59,9 +60,23 @@ The milestone covers:
 - `260518-feat-ws-dashboard-activity-live-ux` - done; adopted the live stream in
   the Activity Console frontend with merge, stale-root, transcript-refresh, and
   fallback behavior.
-- `260518-feat-ws-dashboard-activity-transcript-api` - ready; expand transcript
-  sources and block-level live transcript behavior after the read model and
-  live update foundation are in place.
+- `260518-feat-ws-dashboard-activity-transcript-api` - done; expanded transcript
+  sources with fixture-backed Codex native parsing while keeping block-level
+  live transcript events deferred.
+
+### Result (9d978796) - 2026-05-22
+
+Completed the Activity Console milestone. WorkRoot Activity now renders as a
+reusable read-only Activity Console with a horizontal live/latest ribbon,
+selected transcript blocks, command-routed visible controls, owner-authenticated
+Activity Feed read model, SSE event stream with bounded polling fallback,
+frontend EventSource live merge, stale-root/teardown guards, browser-local dirty
+acknowledgement, and fixture-backed Codex native transcript parsing beyond the
+basic ws named-agent `output.md` backfill.
+
+The milestone intentionally leaves agent controls, broad exec job support,
+native watcher mode beyond bounded fallback, main-agent popup integration, and
+Claude/Gemini transcript adapters for later tickets or epics.
 
 ## Cross-Child Decisions
 
