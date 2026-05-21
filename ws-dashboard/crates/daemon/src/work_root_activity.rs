@@ -1109,8 +1109,8 @@ fn parse_codex_session_transcript(raw: &str) -> CodexSessionParse {
                 title: Some("Unsupported transcript record".to_owned()),
                 text: Some("Skipped unsupported native transcript record".to_owned()),
                 data: Some(serde_json::json!({
-                    "eventType": bounded(&envelope.event_type),
-                    "payloadType": bounded(envelope.payload.get("type").and_then(|value| value.as_str()).unwrap_or("")),
+                    "eventType": "unsupported",
+                    "payloadType": "unsupported",
                 })),
                 degraded: true,
             });
@@ -1172,7 +1172,7 @@ fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Optio
                 timestamp: envelope.timestamp.clone(),
                 render_kind: "toolCall".to_owned(),
                 title: Some("Tool call".to_owned()),
-                text: Some(format!("Called {}", bounded(name))),
+                text: Some(bounded(&format!("Called {name}"))),
                 data: Some(serde_json::json!({
                     "name": bounded(name),
                     "argumentsBytes": arguments_bytes,
@@ -1405,16 +1405,16 @@ fn resolve_codex_session_file(
 fn find_codex_session_file(sessions_dir: &Path, session_id: &str) -> Option<PathBuf> {
     let mut pending = VecDeque::from([sessions_dir.to_path_buf()]);
     let suffix = format!("-{session_id}.jsonl");
-    let mut visited = 0usize;
+    let mut visited_entries = 0usize;
     while let Some(dir) = pending.pop_front() {
-        visited = visited.saturating_add(1);
-        if visited > MAX_CODEX_SESSION_SCAN_ENTRIES {
-            return None;
-        }
         let Ok(entries) = std::fs::read_dir(dir) else {
             continue;
         };
         for entry in entries.flatten() {
+            visited_entries = visited_entries.saturating_add(1);
+            if visited_entries > MAX_CODEX_SESSION_SCAN_ENTRIES {
+                return None;
+            }
             let Ok(file_type) = entry.file_type() else {
                 continue;
             };
@@ -1803,7 +1803,7 @@ mod tests {
     #[test]
     fn codex_session_jsonl_malformed_and_unsupported_records_degrade_individually() {
         let raw = r#"not json with /private/path
-{"timestamp":"2026-05-22T00:00:02Z","type":"debug_event","payload":{"type":"unknown","raw":"/private/path"}}
+{"timestamp":"2026-05-22T00:00:02Z","type":"/private/native/type/thread-secret","payload":{"type":"/private/native/payload","raw":"/private/path"}}
 "#;
 
         let parsed = parse_codex_session_transcript(raw);
@@ -1822,6 +1822,67 @@ mod tests {
         );
         let encoded = serde_json::to_string(&parsed.blocks).expect("serialize degraded blocks");
         assert!(!encoded.contains("not json"));
+        assert!(!encoded.contains("/private/path"));
+        assert!(!encoded.contains("thread-secret"));
+        assert_eq!(
+            parsed.blocks[1].data.as_ref().unwrap()["eventType"],
+            "unsupported"
+        );
+        assert_eq!(
+            parsed.blocks[1].data.as_ref().unwrap()["payloadType"],
+            "unsupported"
+        );
+    }
+
+    #[test]
+    fn codex_session_jsonl_oversized_native_text_is_bounded() {
+        let long_message = "m".repeat(MAX_BOUNDED_TEXT + 50);
+        let long_tool_name = "tool".repeat(MAX_BOUNDED_TEXT);
+        let raw = format!(
+            "{}\n{}\n",
+            serde_json::json!({
+                "timestamp": "2026-05-22T00:00:00Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "message": long_message,
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-05-22T00:00:01Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": long_tool_name,
+                    "arguments": {
+                        "path": "/private/path/that/must/not/be/copied",
+                    }
+                }
+            })
+        );
+
+        let parsed = parse_codex_session_transcript(&raw);
+
+        assert_eq!(parsed.blocks.len(), 2);
+        assert_eq!(
+            parsed.blocks[0]
+                .text
+                .as_ref()
+                .expect("assistant text")
+                .chars()
+                .count(),
+            MAX_BOUNDED_TEXT
+        );
+        assert_eq!(
+            parsed.blocks[1]
+                .text
+                .as_ref()
+                .expect("tool call text")
+                .chars()
+                .count(),
+            MAX_BOUNDED_TEXT
+        );
+        let encoded = serde_json::to_string(&parsed.blocks).expect("serialize bounded blocks");
         assert!(!encoded.contains("/private/path"));
     }
 

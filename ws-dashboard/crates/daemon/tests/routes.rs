@@ -1540,6 +1540,116 @@ async fn work_root_activity_events_poll_fallback_reports_agent_changes_and_delet
     remove_static_fixture(&cache_home);
 }
 
+#[tokio::test]
+async fn work_root_activity_events_emit_transcript_update_for_native_codex_mutation() {
+    if skip_without_git(
+        "work_root_activity_events_emit_transcript_update_for_native_codex_mutation",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-events-native");
+    let cache_home = temp_fixture_path("work-root-activity-events-native-cache");
+    let codex_home = temp_fixture_path("work-root-activity-events-native-home");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+    let session_id = "thread-events-secret";
+    let session_path = write_codex_session(
+        &codex_home,
+        session_id,
+        r#"{"timestamp":"2026-05-22T00:00:00Z","type":"event_msg","payload":{"type":"agent_message","message":"first native line"}}
+"#,
+    );
+    write_agent_metadata(
+        &agents_dir,
+        "native-events",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "native-events",
+            "backend": "codex",
+            "status": "idle",
+            "session_id": session_id
+        }),
+    );
+
+    let state =
+        app_state_with_activity_cache_and_codex_home(cache_home.clone(), Some(codex_home.clone()));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response =
+        fetch_work_root_activity_events(app.clone(), cookie.as_str(), &work_root_id, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut stream = response.into_body().into_data_stream();
+    let mut buffer = String::new();
+    let mut seen = Vec::<serde_json::Value>::new();
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "itemUpserted" && event["item"]["id"] == "agent:native-events"
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("initial native SSE chunk")
+                .expect("initial native SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("initial native SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("initial native item event");
+
+    fs::write(
+        &session_path,
+        r#"{"timestamp":"2026-05-22T00:00:00Z","type":"event_msg","payload":{"type":"agent_message","message":"first native line"}}
+{"timestamp":"2026-05-22T00:00:01Z","type":"event_msg","payload":{"type":"agent_message","message":"second native line"}}
+"#,
+    )
+    .expect("mutate native session fixture");
+
+    timeout(Duration::from_secs(5), async {
+        while !seen.iter().any(|event| {
+            event["type"] == "transcriptUpdated"
+                && event["activityId"] == "agent:native-events"
+                && event["transcriptCursor"] == "0"
+        }) {
+            let chunk = stream
+                .next()
+                .await
+                .expect("native transcript SSE chunk")
+                .expect("native transcript SSE body chunk");
+            buffer.push_str(std::str::from_utf8(&chunk).expect("native transcript SSE UTF-8"));
+            drain_sse_events(&mut buffer, &mut seen);
+        }
+    })
+    .await
+    .expect("native transcript update event");
+
+    let body_text = serde_json::to_string(&seen).expect("native SSE events JSON string");
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        codex_home.display().to_string(),
+        session_path.display().to_string(),
+        session_id.to_owned(),
+        "rollout-".to_owned(),
+        ".jsonl".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "native transcript update event must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+    remove_static_fixture(&codex_home);
+}
+
 fn drain_sse_events(buffer: &mut String, events: &mut Vec<serde_json::Value>) {
     while let Some(boundary) = buffer.find("\n\n") {
         let frame = buffer[..boundary].to_owned();
@@ -2477,6 +2587,98 @@ async fn work_root_activity_transcript_route_falls_back_when_codex_native_missin
     assert_eq!(value["blocks"][0]["text"], "fallback output");
     assert!(!body_text.contains("thread-missing-secret"));
 
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+    remove_static_fixture(&codex_home);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn work_root_activity_transcript_route_degrades_when_codex_native_unreadable() {
+    if skip_without_git("work_root_activity_transcript_route_degrades_when_codex_native_unreadable")
+    {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-codex-unreadable");
+    let cache_home = temp_fixture_path("work-root-activity-codex-unreadable-cache");
+    let codex_home = temp_fixture_path("work-root-activity-codex-unreadable-home");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    let session_id = "thread-unreadable-secret";
+    let session_path = write_codex_session(
+        &codex_home,
+        session_id,
+        "unreadable native content with /private/native/path\n",
+    );
+    fs::set_permissions(&session_path, fs::Permissions::from_mode(0o000))
+        .expect("make native session unreadable");
+    write_agent_metadata(
+        &agents_dir,
+        "unreadable",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "unreadable",
+            "backend": "codex",
+            "status": "idle",
+            "session_id": session_id
+        }),
+    );
+    write_agent_output(
+        &agents_dir,
+        "unreadable",
+        "fallback after unreadable native\n",
+    );
+
+    let state =
+        app_state_with_activity_cache_and_codex_home(cache_home.clone(), Some(codex_home.clone()));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_transcript(
+        app,
+        cookie.as_str(),
+        &work_root_id,
+        "agent:unreadable",
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("unreadable fallback transcript JSON");
+    assert_eq!(value["status"], "degraded");
+    assert_eq!(value["sourceStatus"], "degraded");
+    assert_eq!(value["blocks"][0]["renderKind"], "markdown");
+    assert_eq!(
+        value["blocks"][0]["text"],
+        "fallback after unreadable native"
+    );
+    assert!(value["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .any(|diagnostic| diagnostic == "native transcript source unreadable"));
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        codex_home.display().to_string(),
+        session_path.display().to_string(),
+        session_id.to_owned(),
+        "/private/native/path".to_owned(),
+        "unreadable native content".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "unreadable native fallback response must not leak {forbidden}"
+        );
+    }
+
+    let _ = fs::set_permissions(&session_path, fs::Permissions::from_mode(0o600));
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
     remove_static_fixture(&codex_home);
