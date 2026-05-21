@@ -31,6 +31,10 @@ protection, selection preservation, and fallback behavior.
   backfill the selected transcript only when the selected item matches.
 - Use bounded polling only when the daemon reports fallback mode or the stream
   is unavailable.
+- Preserve the UI shell's browser-local acknowledgement watermark. Streamed or
+  polled updates newer than the saved watermark may turn on the ribbon's
+  breathing attention cue; selecting or acknowledging the item clears the local
+  dirty state without sending a daemon read receipt.
 
 ## Constraints
 
@@ -53,5 +57,6 @@ Verification should prove that newly registered or called named agents appear
 in the ribbon without browser reload, call status transitions update while a
 call runs or completes, transcript updates refresh only the selected matching
 item, stale root updates are ignored after switching workRoots, fallback mode
-uses bounded polling, the old always-on interval path is removed or limited to
-fallback mode, and desktop/mobile browser checks still pass.
+uses bounded polling, local dirty/acknowledgement state survives snapshot and
+stream merges correctly, the old always-on interval path is removed or limited
+to fallback mode, and desktop/constrained-width browser checks still pass.

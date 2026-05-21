@@ -36,8 +36,33 @@ the command spine would grow keybinding debt.
 - The ribbon defaults to live/active/attention items first, then latest updated
   activity. Live items use a green outline or equivalent semantic active
   treatment without turning the whole UI into a single-hue theme.
+- Ribbon items use a compact three-line shape: small source/kind text
+  (`Agent`, `Cmd`, or later source kinds), a primary name/title line, and small
+  status or recency text. The internal text area should stay around 2.5 font
+  heights, truncate rather than wrap, and remain horizontally scrollable at
+  constrained widths.
+- A small green breathing indicator may mark newly updated or attention-worthy
+  items. It is not merely the persistent running/live status indicator; it is a
+  short-lived attention cue that turns off when the user selects or otherwise
+  acknowledges the item.
 - Selecting a ribbon item renders transcript blocks below. Selection should
   survive snapshot refreshes where the selected item still exists.
+- The UI shell may keep a browser-local acknowledgement watermark per
+  workRoot/activity item. On initial feed load, compare that watermark with the
+  daemon-provided item update timestamp or cursor to mark items dirty and show
+  the breathing attention cue. Selecting or explicitly acknowledging the item
+  clears the local dirty state. This is local UI state, not daemon read-receipt
+  authority.
+- Transcript rendering is source-aware. Exec activity renders like a terminal
+  output view. Agent activity renders normalized action-unit blocks: dialogue
+  and assistant output are expanded by default, while tool calls, MCP activity,
+  and command runs default to one-line summaries.
+- Transcript block details expand inline when selected, exposing MCP, command,
+  or other backend action detail without opening a modal or making the browser
+  understand backend-private paths.
+- Transcript backfill and load-more behavior should be scroll-position driven.
+  Explicit refresh or load-more affordances are fallback/error controls rather
+  than the primary reading flow.
 - The WorkRoot Activity pane remains a reversible read-only workbench surface
   and should continue to close immediately without daemon side effects.
 
@@ -46,7 +71,11 @@ the command spine would grow keybinding debt.
 - No visible in-app tutorial text explaining the feature. Use normal labels,
   statuses, and affordances.
 - Text must fit inside ribbon buttons and transcript blocks across desktop and
-  mobile viewports; the ribbon scrolls horizontally rather than wrapping.
+  constrained-width views; the ribbon scrolls horizontally rather than
+  wrapping.
+- Mobile layout is not a target for this ticket. Narrow desktop or constrained
+  widths should keep the ribbon horizontally scrollable and preserve the
+  transcript viewer below it.
 - UI work must include browser-level visual and interaction verification
   against the daemon-served frontend, not only TypeScript tests.
 - Activity Ribbon selection, transcript viewer commands, pane open/focus, and
@@ -69,7 +98,11 @@ for component states. Default-select the first live/attention item, or the
 latest item when no live item exists.
 
 Verification should cover ordering, selection preservation, horizontal
-overflow, active/live styling, long text wrapping, tool/status/output blocks,
+overflow, the three-line ribbon item shape, breathing attention indicator
+acknowledgement, browser-local dirty-state initialization from update
+timestamps or cursors, active/live styling, long text wrapping,
+tool/status/output blocks, exec terminal-output rendering, agent action-unit
+blocks, inline detail expansion, scroll-position transcript loading,
 empty/degraded/running/completed states, duplicate pane focus, immediate close,
 root switching without stale activity, command-id and dispatch parity for
-visible controls, and desktop/mobile browser screenshots or DOM assertions.
+visible controls, and desktop screenshots or DOM assertions.

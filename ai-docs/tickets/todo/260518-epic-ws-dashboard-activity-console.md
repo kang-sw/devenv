@@ -68,6 +68,10 @@ The milestone covers:
   **Activity Item** for a selectable feed entry, **Activity Ribbon** for the
   horizontal item UI, **Transcript Block** for a normalized render unit, and
   **Activity Console** for ribbon plus selected transcript viewer.
+- The Activity Console is a dense operational surface. The ribbon optimizes
+  scan and selection through compact item rows, while the selected transcript
+  optimizes reading the chosen activity without turning the ribbon into a full
+  transcript.
 - Keep the console read-only. If a future terminate action is needed, it must
   be a separate high-friction control ticket and must not broaden this
   milestone into an agent-control surface.
