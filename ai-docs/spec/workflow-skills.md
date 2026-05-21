@@ -375,11 +375,12 @@ criteria, or spec-visible behavior need capture before implementation, and may
 route directly to `lead-implement` when the target is narrow, routine, fully
 scoped, and commit `AI Context` is enough traceability.
 
-Warm discussion state with an existing related ticket uses a ticket freshness
-gate. Before implementation routing, `lead-proceed` compares the active
-conversation and ticket artifact only; when settled decisions are missing from
-the ticket, it routes through `lead-write-ticket` edit, re-reads the refreshed
-ticket, and then continues scope resolution.
+Existing ticket routes use a lead-owned freshness check. Before implementation
+routing, `lead-proceed` compares active conversation decisions and the ticket
+artifact only; when settled decisions are missing from the ticket, it routes
+through `lead-write-ticket` edit, re-reads the refreshed ticket, and then
+continues scope resolution. When freshness is uncertain, it stops for
+discussion instead of delegating hidden conversation context to a subquery.
 {#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected scope as

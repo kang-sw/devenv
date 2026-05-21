@@ -23,7 +23,6 @@ Pipeline
 Execution
 - Announce routing before execution; chain stages without pausing for confirmation.
 - Handoff stages receive carried gate-suppression context.
-- Warmth is current-session context, not target identity.
 
 ## Route Rules
 
@@ -31,7 +30,8 @@ Route Context
 - `has-ticket` is artifact state; do not treat it as a judgment.
 - `discussion-needed` blocks every implementation route.
 - `needs-ticket` applies only to actionable inline targets without a ticket.
-- `ticket-freshness` applies only when `has-ticket=yes` and warmth is warm.
+- Freshness is lead-owned: compare active conversation decisions against the ticket, not source.
+- `freshness=missing-settled-decisions` means the ticket needs `wsflow:lead-write-ticket` refresh.
 
 Routing
 - Use the first matching route row.
@@ -55,8 +55,8 @@ Routing
 7. If `target-kind=inline`: apply `judge: actionable`.
 8. Apply `judge: discussion-needed`.
 9. If `target-kind=inline` and `actionable=yes`: apply `judge: needs-ticket`.
-10. Classify warmth from conversation state.
-11. If `has-ticket=yes` and warmth is warm: apply `judge: ticket-freshness`.
+10. If `has-ticket=yes`: set `freshness=missing-settled-decisions` when active conversation has settled decisions, constraints, rejected alternatives, or scope boundaries absent from the ticket; otherwise set `freshness=current`.
+11. If freshness is uncertain because a decision may still be unsettled or missing, set `freshness=uncertain` and `discussion-needed=yes`.
 12. Resolve implementation scope for ready tickets:
    - No phase sections -> whole target.
    - One explicit phase -> that phase.
@@ -74,7 +74,7 @@ Routing
 | `has-ticket=yes` and category is `epic` | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
 | `discussion-needed=yes` | Continue through `wsflow:lead-discuss`; carry the blocker; stop. |
 | `has-ticket=yes` and status is `todo/` | Continue through `wsflow:lead-write-spec`, then `wsflow:lead-write-ticket`; carry `promote-context`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and freshness is missing settled decisions | Continue through `wsflow:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and `freshness=missing-settled-decisions` | Continue through `wsflow:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and status is `ready/` | Continue through `wsflow:lead-implement`; carry resolved scope and implementation verdict. |
 | `has-ticket=no` and `needs-ticket=yes` | Continue through `wsflow:lead-write-spec`, then `wsflow:lead-write-ticket`; carry `create-context`; capture `Ticket:` and re-route. |
 | `has-ticket=no` and `needs-ticket=no` | Continue through `wsflow:lead-implement`; carry inline target, no-ticket scope, and implementation verdict. |
@@ -85,8 +85,8 @@ Routing
 ## Pipeline: <stage> -> <stage> [-> <stage>]
 
 - **Target**: <ticket path or brief summary>
-- **Warmth**: <warm | cold> - <evidence from conversation state>
 - **Ticket**: <present | absent> - <status/category or reason no ticket is needed>
+- **Freshness**: <current | missing-settled-decisions | uncertain | n/a>
 - **Discussion**: <not needed | needed - blocker>
 - **Slice**: <Phase N[: title] | whole target - no phases>
 - **Implementation Verdict**: wsflow:lead-implement -> wsflow:lead-edit
@@ -161,18 +161,11 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 | No | Inline target is narrow, routine, fully scoped, and commit `AI Context` is enough traceability |
 | No | Work is internal hygiene with no useful phase tracking and no unresolved user decision |
 
-### judge: ticket-freshness
-
-| Decision | When |
-|----------|------|
-| Refresh ticket | Active conversation since ticket capture settled decisions, constraints, rejected alternatives, or scope boundaries that are absent from the ticket |
-| Continue | The ticket already captures the active conversation's settled implementation intent, or the conversation only adds autonomous hygiene or implementation-detail work |
-
 ## Doctrine
 
 Proceed optimizes for **full-pipeline routing accuracy**. Conversation state and
 artifacts are the finite signal: use them to choose readiness stages, not to
-perform code-editing stages. Warmth sharpens routing; scope resolution bounds
-execution without replacing ticket authoring. When a rule is ambiguous, apply
-whichever interpretation better preserves the user's ability to intervene at any
-pipeline stage.
+perform code-editing stages. Freshness prevents stale ticket handoff; scope
+resolution bounds execution without replacing ticket authoring. When a rule is
+ambiguous, apply whichever interpretation better preserves the user's ability
+to intervene at any pipeline stage.

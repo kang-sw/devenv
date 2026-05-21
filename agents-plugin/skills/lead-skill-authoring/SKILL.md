@@ -46,6 +46,7 @@ These apply to both skill and agent documents.
 - Skill-to-skill handoffs share the active conversation; write `Continue through <skill>` without a carry block.
 - User-approval gates fire only when the user invokes the skill directly; chained invocations pass through.
 - A lead skill cannot also be its own executor; if routing names a sibling but the lead remains the acting agent, absorb the sibling.
+- Active-conversation judgments stay lead-owned; use `ws/subquery` only for self-contained artifact, source, spec, or ticket evidence.
 - Reserve "arguments" for MCP tools, CLI commands, and structured templates.
 
 ### Invariant / Constraint checklist

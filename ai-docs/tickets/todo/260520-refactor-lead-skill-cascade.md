@@ -280,7 +280,7 @@ Deviations:
 - `judge: branch-mode` was preserved from the original skill; scope did not
   list it but it was already present and needed no redesign.
 
-### Phase 3: Batch — R1 invoke handler structure, R2 cross-skill judges ban, R4 negative-invariant evidence rule, R5 domain-inference subquery handoff
+### Phase 3: Batch — R1 invoke handler structure, R2 cross-skill judges ban, R4 negative-invariant evidence rule, R5 lead-owned freshness boundary
 
 Goal: enforce four skill-authoring rules in `ws:lead-skill-authoring` in one
 edit, then sweep affected downstream skills.
