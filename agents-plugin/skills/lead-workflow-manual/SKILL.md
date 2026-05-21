@@ -69,6 +69,12 @@ uses delegate orientation and the default `core` model alias. Use
 `model: "light" | "core" | "deep"` for portable model selection and concrete
 provider model names only for intentional one-off overrides. `tier` remains a
 compatibility input. Call the agent for each continuity turn.
+Bundled prompt stems are registered through `prompts: ["<prompt-stem>"]`.
+`project-survey` is a prompt stem, not a workflow skill; when a skill asks for
+`project-survey`, register it with
+`ws/agents.register(name: "project-survey", prompts: ["project-survey"])`, call
+it with a self-contained survey brief, and collect the result through
+`ws/agents.result`.
 `ws/agents.call` starts async and returns promptly. Use
 `wait(timeout_seconds: 600)` for readiness metadata, `result(timeout_seconds:
 600)` or a longer bound for final output, `status` before waiting,

@@ -24,7 +24,6 @@ workflow-reference roles:
 lead-add-rule
 lead-bootstrap
 lead-discuss
-lead-edit
 lead-forge-mental-model
 lead-forge-spec
 lead-implement
@@ -38,7 +37,6 @@ lead-sprint
 lead-update-spec
 lead-verify-discussion
 lead-workflow-manual
-lead-write-code
 lead-write-skeleton
 lead-write-spec
 lead-write-ticket
@@ -77,12 +75,30 @@ selection and concrete provider names such as `gpt-5.5` or
 remains documented only as deprecated compatibility input.
 {#260508-workflow-model-alias-guidance}
 
-Workflow skill-authoring guidance treats skill-to-skill transitions as carried
-context, not API calls with arguments. Skill text says what context downstream
-workflow skills should carry; argument language is reserved for MCP tools, CLI
-commands, and structured templates. Dense routing or rule lists use Markdown
-hierarchy, named groups, fixed lookup tables, and command-shaped lists before
-inventing pseudo-code-like notation. {#260514-skill-authoring-carried-context}
+Workflow skill-to-skill handoffs share the active conversation; the receiving
+skill reads context from the conversation, not from a caller-emitted carry
+block. User-approval gates in skills fire only when the user invokes the skill
+directly; chained invocations re-ask only for safety, deletion, or explicit
+consent rules. Argument language is reserved for MCP tools, CLI commands, and
+structured templates. Dense routing or rule lists use Markdown hierarchy, named
+groups, fixed lookup tables, and command-shaped lists before introducing custom
+notation. Skill, agent, and prompt edits run a fresh-reader audit after local
+reread: a context-light reviewer or pass flags context-dependent wording,
+contradictions, duplication, orphan references, and missing end-state or output
+instructions.
+Fresh-reader audit findings include the quote, issue, and suggested rewrite or
+delete, or state that no material issue remains.
+Doctrine, terminology, route, layout, and audit-gate edits also run a
+downstream consistency sweep across affected skill, prompt, spec, mental-model,
+test, and mirrored-package surfaces. The first pass may conservatively
+over-report findings; the lead classifies each as fix, intentional difference,
+or out of scope before editing.
+Dense handlers use sub-blocks only when structure improves execution, such as
+when a handler exceeds four steps and mixes responsibilities. Sub-block names
+describe the responsibility they perform; single-purpose checklists are not
+split only because they are long. Compact checkpoint skills may stay prose or
+short lists when output and end state are obvious.
+{#260514-skill-authoring-carried-context}
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
 
@@ -91,20 +107,20 @@ under `wsflow:lead-*` invocation names and `wsflow/<tool>` MCP notation.
 Shipped wsflow skills include planning, documentation, direct implementation,
 bootstrap, release, verification, and reconstruction workflows:
 `lead-workflow-manual`, `lead-discuss`, `lead-write-spec`,
-`lead-write-ticket`, `lead-proceed`, `lead-implement`, `lead-edit`,
+`lead-write-ticket`, `lead-proceed`, `lead-implement`,
 `lead-update-spec`, `lead-bootstrap`, `lead-add-rule`, `lead-ship`,
 `lead-sprint`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
-preserves deferred documentation wrap-up and routes source changes through the
-wsflow edit workflow. `lead-edit` may use direct edits or scoped subagent
-implementation while the sprint wrap-up keeps documentation integration,
+preserves deferred documentation wrap-up and routes source tasks through
+`lead-edit`. In the current wsflow package, `lead-implement` also delegates
+source execution to `lead-edit`; `lead-edit` chooses direct or scoped subagent
+execution while the sprint wrap-up keeps documentation integration,
 verification, and commit ownership explicit. {#260513-wsflow-sprint-skill}
 
-The wsflow package excludes full ws implementation relays, skeleton flows,
-recovery orchestration, and upstream authoring helper skills:
-`lead-write-code`, `lead-write-skeleton`, `lead-salvage`, and
+The wsflow package excludes skeleton flows, recovery orchestration, and
+upstream authoring helper skills: `lead-write-skeleton`, `lead-salvage`, and
 `lead-skill-authoring`. wsflow skill text uses scoped subagent guidance for
 exploration, implementation, verification, audit, or review and keeps lead
 responsibility focused on integration, verification, final judgment, and commits.
@@ -182,10 +198,15 @@ what verification proves the phase complete.
 `lead-write-ticket` treats tickets as recoverability artifacts before compact
 summaries. Non-epic actionable tickets preserve caller-visible contracts,
 constraints, rationale, rejected alternatives, forward-compatibility guardrails,
-verification expectations, suggested strategy, phase dependencies, and agreed
-API/type/event/UI sketches. Source-local edit notes are excluded unless they
-are settled constraints; settled local or cross-ticket decisions stay in the
-relevant child ticket or phase.
+verification expectations, agreed strategy that constrains implementation,
+phase dependencies, and agreed API/type/event/UI sketches. Source-local edit
+notes are excluded unless they are settled constraints; settled local or
+cross-ticket decisions stay in the relevant child ticket or phase.
+Tickets capture enough settled detail for a fresh implementation session to
+recover the intended product, workflow, API, and verification contract without
+inventing missing decisions. Intent review checks whether the ticket permits a
+materially different caller-visible, workflow, API, or verification result
+without contradiction and captures the missing settled decision when it does.
 
 `lead-write-ticket` reviews related-ticket decisions by default when
 creating or editing a non-epic actionable ticket. It inspects the target's
@@ -233,6 +254,9 @@ corrected assumptions, observations, reuse opportunities, and code-hygiene
 findings, checks for over-alignment signals such as weak premise handling or
 missing countercases, then steers the discussion toward the best-supported
 direction.
+It intentionally remains compact and frequent-use; downstream authoring sweeps
+must not force full workflow-skill ceremony onto this checkpoint unless its
+actual output or end state is unclear.
 {#260512-discussion-verification-skill}
 
 ### Check Blockers Checkpoint {#260513-check-blockers-skill}
@@ -241,13 +265,16 @@ direction.
 whether a design discussion still has user-blocking blockers. It does not edit files. It
 classifies remaining work into user-blocking design questions, ticket or spec
 capture gaps, autonomous code-hygiene items, and proceed readiness.
+It intentionally remains compact and frequent-use; downstream authoring sweeps
+must not force full workflow-skill ceremony onto this checkpoint unless its
+actual output or end state is unclear.
 
 `lead-write-skeleton` is deprecated from normal implementation routing. The
 skill file remains available for compatibility, but `lead-implement` no longer
 invokes it and absence of ticket `skeletons:` frontmatter does not create a
 skeleton obligation. {#260510-skeleton-contract-populator-flow}
 
-`lead-write-code` absorbs the useful skeleton role through brief authoring.
+`lead-implement` delegated mode absorbs the useful skeleton role through brief authoring.
 For public interface, cross-module boundary, or new type contract changes, the
 brief includes concrete `Contract Instructions`: expected files or modules,
 public types/functions/handlers/tools, visibility, call shape, input/output
@@ -278,25 +305,25 @@ asks the user to merge, continue, or stop. Follow-up changes after this gate
 route to another implementation slice or sprint and are captured in tickets as
 append-only Result editions for already completed phases.
 
-`lead-edit` performs a narrow direct edit in the lead session. It honors
-caller-provided scope boundaries, verifies the change, uses one reviewer for
-correctness and fit, escalates if the scope grows, and reports the commit range
-and test status to its caller.
+`lead-implement` is a unified implementation spine with two edit modes.
+Direct-edit mode: the lead edits and verifies inline on the current branch,
+suitable for single-file internal-only changes. Delegated mode: the lead writes
+a brief, optionally populates a plan, spawns an implementer agent, and captures
+the resulting commit range. `judge: needs-delegation` selects the mode at Route
+time; direct-edit escalates to delegated when scope grows beyond single-file
+internal-only.
 
-`lead-write-code` delegates an implementation target through an implementer
-agent, optional plan, partitioned reviewers, bounded fix relay, cleanup, and
-completion report. Its brief preserves caller-provided scope boundaries and
-selected binding decisions, and it carries concrete contract and integration
-test instructions when the target changes public or cross-module contracts.
-When workflow primitive context is not already active, it loads
-`lead-workflow-manual` before registering delegates or reviewers.
+Review is a single stage for both modes. `judge: review-allocation` picks depth
+(lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
+test) when partitioned. Relay cap is 2 cycles for single-reviewer, 3 cycles for
+partitioned with lead adjudication at cycle 2 and caller escalation at cycle 3.
 
-Plan population is an either/or depth choice. When plan depth is `survey`,
-`plan-populator-survey` produces file-backed reference-map evidence and possible
-risk signals without deciding that the implementation direction is wrong. If
-survey cannot safely support implementation without strategy, contract, or
-reuse judgment, it returns `[escalate-to-research]` instead of forcing a survey
-plan. `lead-write-code` then routes to `plan-populator-research` before
+Plan population is an either/or depth choice for delegated mode. When plan depth
+is `survey`, `plan-populator-survey` produces file-backed reference-map evidence
+and possible risk signals without deciding that the implementation direction is
+wrong. If survey cannot safely support implementation without strategy, contract,
+or reuse judgment, it returns `[escalate-to-research]` instead of forcing a
+survey plan. `lead-implement` then routes to `plan-populator-research` before
 spawning the implementer.
 
 When plan depth is `research`, `plan-populator-research` makes planner
@@ -307,7 +334,7 @@ clean plan can satisfy the brief. A survey-to-research route replaces the same
 plan artifact path with the research plan; it does not create a research-suffixed
 plan filename or append research to a survey plan.
 
-Before spawning the implementer, `lead-write-code` handles plan-populator exit
+Before spawning the implementer, `lead-implement` handles plan-populator exit
 signals. It stops and escalates when implementation would likely pursue a wrong
 contract, bypass existing project mechanisms, or rely on a shortcut path. Review
 remains an enforcement step: reviewers compare the implementation against brief
@@ -325,9 +352,8 @@ decisions omitted from the brief or violated by the implementation as blocking
 findings. Correctness and test reviewers remain scoped to the diff and their
 assigned partitions.
 
-`lead-edit` and `lead-write-code` are code-and-review primitives; callers own
-documentation pipeline timing. `lead-implement` runs the documentation pre-pass
-after either primitive returns, while `lead-sprint` defers that pass to wrap-up.
+`lead-implement` runs the documentation pre-pass after the Edit and Review
+stages complete, while `lead-sprint` defers that pass to wrap-up.
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,
@@ -363,7 +389,7 @@ Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
 child ready promotion, or proceeding a ready child ticket. Existing `todo/`
 ticket paths are treated as implementation intent: `lead-proceed` continues
-through `lead-write-ticket` with carried context for autonomous `todo/` ->
+through `lead-write-spec` and `lead-write-ticket` for autonomous `todo/` ->
 `ready/` promotion before scope resolution, and escalates to `lead-discuss` only
 when promotion or implementation scope exposes unresolved design decisions,
 unclear completion criteria, user trade-offs, or missing spec coverage that
@@ -377,27 +403,27 @@ criteria, or spec-visible behavior need capture before implementation, and may
 route directly to `lead-implement` when the target is narrow, routine, fully
 scoped, and commit `AI Context` is enough traceability.
 
-Warm discussion state with an existing related ticket uses a ticket freshness
-gate. Before implementation routing, `lead-proceed` compares the active
-conversation and ticket artifact only; when settled decisions are missing from
-the ticket, it routes through `lead-write-ticket` edit, re-reads the refreshed
-ticket, and then continues scope resolution.
+Existing ticket routes use a lead-owned freshness check. Before implementation
+routing, `lead-proceed` compares active conversation decisions and the ticket
+artifact only; when settled decisions are missing from the ticket, it routes
+through `lead-write-ticket` edit, re-reads the refreshed ticket, and then
+continues scope resolution. When freshness is uncertain, it stops for
+discussion instead of delegating hidden conversation context to a subquery.
 {#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected scope as
 a hard scope boundary. `lead-proceed` does not rejudge ticket quality, demand
 ticket splitting, mutate ticket structure, decide contract-brief depth, or
 invoke implementation primitives before `lead-implement`. Public or
-cross-module contract checkpoints are expressed as `lead-write-code` brief
+cross-module contract checkpoints are expressed as `lead-implement` brief
 contract and integration-test instructions.
 
-Before implementation handoff, `lead-proceed` reads the corresponding
-`lead-implement` skill text and applies that implementation route contract from
-conversation and workflow artifacts only. Full ws announcements report an
-`Implementation Verdict` and `Verdict Basis`; unknown direct-edit predicates
-produce a delegated verdict. wsflow mirrors the same source-free precheck as an
-implementation verdict derived from `wsflow:lead-implement`, without
-introducing unavailable full ws implementation relay wording.
+Before implementation handoff, `lead-proceed` announces only the
+implementation-bound route. It does not apply sibling `lead-implement` judges,
+compute direct/delegated execution mode, compute branch mode, or inspect source.
+`lead-implement` owns those decisions when the handoff executes. wsflow mirrors
+the same route-only boundary without pre-applying `wsflow:lead-implement`
+branch or execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
 
 ## Sprint Session Container {#260505-sprint-session-container}

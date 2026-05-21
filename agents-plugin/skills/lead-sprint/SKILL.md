@@ -65,8 +65,8 @@ Pick first match, execute, return to loop.
 | Behavior, concept, or status question | Answer inline; use `ws/subquery(question: <block below>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, if codebase search is needed |
 | Codebase exploration | Call `ws/subquery(question: <block below>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)` |
 | Design discussion | Discuss inline; do not auto-chain to `ws:lead-write-spec` |
-| Single-file edit or clear isolated change | Invoke `ws:lead-edit` |
-| Multi-file or new-pattern implementation | Invoke `ws:lead-write-code` |
+| Single-file edit or clear isolated change | Invoke `ws:lead-implement` (direct-edit) |
+| Multi-file or new-pattern implementation | Invoke `ws:lead-implement` (delegated) |
 | Exploration required before routing | Run sprint-aware survey; re-apply judge |
 
 ### judge: needs-survey

@@ -88,7 +88,7 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 ## On: user signals done
 
 1. If the user wants implementation to start, continue through `wsflow:lead-proceed`; carry the current target and settled discussion context.
-2. For persistence without implementation, always suggest `wsflow:lead-write-spec` as the next step - write-spec's `judge: spec-impact` decides whether spec work is needed and exits immediately if not.
+2. For persistence without implementation, suggest `wsflow:lead-write-spec` as the next route; that skill owns whether spec changes are needed.
 3. Then offer ticket persistence:
    - **New ticket** - invoke `wsflow:lead-write-ticket`.
    - **Ticket update** - invoke `wsflow:lead-write-ticket`, then append design notes to an existing ticket phase.
