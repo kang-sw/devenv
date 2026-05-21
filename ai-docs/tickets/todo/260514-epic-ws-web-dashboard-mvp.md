@@ -114,10 +114,10 @@ The MVP should cover:
   runtime activity projection with a compact top-bar badge and group-1
   reversible detail pane, starting with read-only named-agent state and
   reserving running commands for the async exec output reader.
-- `260518-epic-ws-dashboard-activity-console` - todo; promote WorkRoot Activity
+- `260518-epic-ws-dashboard-activity-console` - done; promoted WorkRoot Activity
   from a named-agent list into a reusable read-only Activity Console with a
-  live/latest ribbon, selected transcript blocks, cross-platform watcher-backed
-  feed updates, and backend-owned transcript source resolution.
+  live/latest ribbon, selected transcript blocks, stream-backed feed updates,
+  and backend-owned transcript source resolution.
 
 ## Cross-Child Decisions
 

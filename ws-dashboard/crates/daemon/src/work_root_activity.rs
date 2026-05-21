@@ -35,6 +35,7 @@ const STATUS_UNAVAILABLE: &str = "unavailable";
 const MAX_RECENT_ACTIVITY_LIMIT: usize = 30;
 const DEFAULT_TRANSCRIPT_LIMIT: usize = 20;
 const MAX_TRANSCRIPT_LIMIT: usize = 100;
+const MAX_CODEX_SESSION_SCAN_ENTRIES: usize = 4096;
 const ACTIVITY_KIND_NAMED_AGENT: &str = "namedAgent";
 const ACTIVITY_ID_NAMED_AGENT_PREFIX: &str = "agent:";
 
@@ -65,6 +66,7 @@ pub struct ActivityEventsQuery {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WorkRootActivityProjectionConfig {
+    pub codex_home: Option<PathBuf>,
     // HINT: The wsstate Go manager accepts `WS_CACHE_HOME` as its cache-home
     // override. The dashboard keeps that override daemon-side so tests can
     // point at fixture cache trees without making browser API identity depend
@@ -75,12 +77,14 @@ pub struct WorkRootActivityProjectionConfig {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WorkRootActivityProjector {
     cache_home: Option<PathBuf>,
+    codex_home: Option<PathBuf>,
 }
 
 impl WorkRootActivityProjector {
     pub fn new(config: WorkRootActivityProjectionConfig) -> Self {
         Self {
             cache_home: config.cache_home,
+            codex_home: config.codex_home,
         }
     }
 
@@ -107,6 +111,7 @@ impl WorkRootActivityProjector {
         // parsing all run on a blocking pool so they never stall an Axum async
         // worker thread.
         let cache_home = self.cache_home.clone();
+        let codex_home = self.codex_home.clone();
         let root_path = root_path.to_path_buf();
         let recent_limit = normalize_recent_activity_limit(recent_limit);
         tokio::task::spawn_blocking(move || {
@@ -114,6 +119,7 @@ impl WorkRootActivityProjector {
                 work_root_id,
                 &root_path,
                 cache_home.as_deref(),
+                codex_home.as_deref(),
                 recent_limit,
             )
         })
@@ -131,12 +137,14 @@ impl WorkRootActivityProjector {
         limit: Option<usize>,
     ) -> ActivityTranscript {
         let cache_home = self.cache_home.clone();
+        let codex_home = self.codex_home.clone();
         let root_path = root_path.to_path_buf();
         tokio::task::spawn_blocking(move || {
             named_agent_transcript_blocking(
                 work_root_id,
                 &root_path,
                 cache_home.as_deref(),
+                codex_home.as_deref(),
                 activity_id,
                 &agent_key,
                 cursor.as_deref(),
@@ -153,9 +161,15 @@ impl WorkRootActivityProjector {
         root_path: &Path,
     ) -> ActivityWatchSnapshot {
         let cache_home = self.cache_home.clone();
+        let codex_home = self.codex_home.clone();
         let root_path = root_path.to_path_buf();
         tokio::task::spawn_blocking(move || {
-            watch_snapshot_blocking(work_root_id, &root_path, cache_home.as_deref())
+            watch_snapshot_blocking(
+                work_root_id,
+                &root_path,
+                cache_home.as_deref(),
+                codex_home.as_deref(),
+            )
         })
         .await
         .expect("workRoot activity watch snapshot task panicked")
@@ -430,11 +444,12 @@ fn project_blocking(
     work_root_id: WorkRootId,
     root_path: &Path,
     cache_home: Option<&Path>,
+    codex_home: Option<&Path>,
     recent_limit: Option<usize>,
 ) -> WorkRootActivityView {
     let projections = resolve_cache_root(cache_home)
         .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
-        .map(|agents_dir| scan_named_agents(&agents_dir, recent_limit))
+        .map(|agents_dir| scan_named_agents(&agents_dir, codex_home, recent_limit))
         .unwrap_or_default();
 
     let agents = projections
@@ -468,9 +483,10 @@ fn watch_snapshot_blocking(
     work_root_id: WorkRootId,
     root_path: &Path,
     cache_home: Option<&Path>,
+    codex_home: Option<&Path>,
 ) -> ActivityWatchSnapshot {
-    let view = project_blocking(work_root_id, root_path, cache_home, None);
-    let item_versions = activity_item_versions(root_path, cache_home);
+    let view = project_blocking(work_root_id, root_path, cache_home, codex_home, None);
+    let item_versions = activity_item_versions(root_path, cache_home, codex_home);
     let mut items = BTreeMap::new();
     let mut transcript_cursors = BTreeMap::new();
     for item in view.items {
@@ -485,7 +501,11 @@ fn watch_snapshot_blocking(
     }
 }
 
-fn activity_item_versions(root_path: &Path, cache_home: Option<&Path>) -> BTreeMap<String, String> {
+fn activity_item_versions(
+    root_path: &Path,
+    cache_home: Option<&Path>,
+    codex_home: Option<&Path>,
+) -> BTreeMap<String, String> {
     let Some(agents_dir) = resolve_cache_root(cache_home)
         .and_then(|cache_root| resolve_work_root_agents_dir(&cache_root, root_path))
     else {
@@ -509,7 +529,7 @@ fn activity_item_versions(root_path: &Path, cache_home: Option<&Path>) -> BTreeM
         }
         versions.insert(
             named_agent_activity_id(&agent_key),
-            system_time_version(agent_record_modified_at(&entry.path())),
+            system_time_version(agent_record_modified_at(&entry.path(), codex_home)),
         );
     }
     versions
@@ -544,7 +564,11 @@ fn summarize(agents: &[NamedAgentActivityView]) -> WorkRootActivitySummary {
 
 /// Scan `<worktree>/agents` for `agents/*/agent.json` plus optional
 /// `current/state.json`, mapping each directory into a bounded row.
-fn scan_named_agents(agents_dir: &Path, recent_limit: Option<usize>) -> Vec<NamedAgentProjection> {
+fn scan_named_agents(
+    agents_dir: &Path,
+    codex_home: Option<&Path>,
+    recent_limit: Option<usize>,
+) -> Vec<NamedAgentProjection> {
     let Ok(entries) = std::fs::read_dir(agents_dir) else {
         // No agents directory yet (or unreadable): an empty, healthy
         // projection rather than a route failure.
@@ -565,7 +589,7 @@ fn scan_named_agents(agents_dir: &Path, recent_limit: Option<usize>) -> Vec<Name
         }
         let agent_dir = entry.path();
         agent_dirs.push(RecentAgentDir {
-            modified_at: agent_record_modified_at(&agent_dir),
+            modified_at: agent_record_modified_at(&agent_dir, codex_home),
             agent_key,
             agent_dir,
         });
@@ -586,7 +610,7 @@ fn scan_named_agents(agents_dir: &Path, recent_limit: Option<usize>) -> Vec<Name
 
     let mut rows = agent_dirs
         .into_iter()
-        .map(|entry| named_agent_projection(&entry.agent_dir, entry.agent_key))
+        .map(|entry| named_agent_projection(&entry.agent_dir, entry.agent_key, codex_home))
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.row.agent_id.cmp(&right.row.agent_id));
     rows
@@ -602,9 +626,10 @@ struct RecentAgentDir {
 struct NamedAgentProjection {
     row: NamedAgentActivityView,
     output_available: bool,
+    native_transcript_available: bool,
 }
 
-fn agent_record_modified_at(agent_dir: &Path) -> SystemTime {
+fn agent_record_modified_at(agent_dir: &Path, codex_home: Option<&Path>) -> SystemTime {
     let mut latest = modified_at(agent_dir);
     for relative in [
         "agent.json",
@@ -619,6 +644,14 @@ fn agent_record_modified_at(agent_dir: &Path) -> SystemTime {
             latest = candidate;
         }
     }
+    if let Some(metadata) = read_agent_metadata(agent_dir).ok() {
+        if let Some(path) = resolve_codex_session_file(codex_home, &metadata) {
+            let candidate = modified_at(&path);
+            if candidate > latest {
+                latest = candidate;
+            }
+        }
+    }
     latest
 }
 
@@ -628,16 +661,13 @@ fn modified_at(path: &Path) -> SystemTime {
         .unwrap_or(UNIX_EPOCH)
 }
 
-fn named_agent_projection(agent_dir: &Path, agent_key: String) -> NamedAgentProjection {
+fn named_agent_projection(
+    agent_dir: &Path,
+    agent_key: String,
+    codex_home: Option<&Path>,
+) -> NamedAgentProjection {
     let output_available = agent_dir.join("output.md").is_file();
-    let metadata = match std::fs::read(agent_dir.join("agent.json")) {
-        Ok(raw) => match serde_json::from_slice::<AgentMetadata>(&raw) {
-            Ok(metadata) => Ok(metadata),
-            Err(_) => Err(DIAG_METADATA_UNREADABLE),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(DIAG_METADATA_MISSING),
-        Err(_) => Err(DIAG_METADATA_UNREADABLE),
-    };
+    let metadata = read_agent_metadata(agent_dir);
 
     let metadata = match metadata {
         Ok(metadata) => metadata,
@@ -661,9 +691,12 @@ fn named_agent_projection(agent_dir: &Path, agent_key: String) -> NamedAgentProj
                     diagnostics: vec![diagnostic.to_owned()],
                 },
                 output_available: false,
+                native_transcript_available: false,
             };
         }
     };
+
+    let native_transcript_available = resolve_codex_session_file(codex_home, &metadata).is_some();
 
     let mut diagnostics = Vec::new();
     let (status, status_diagnostic) = agent_status(&metadata.status);
@@ -700,6 +733,17 @@ fn named_agent_projection(agent_dir: &Path, agent_key: String) -> NamedAgentProj
             diagnostics,
         },
         output_available,
+        native_transcript_available,
+    }
+}
+
+fn read_agent_metadata(agent_dir: &Path) -> Result<AgentMetadata, &'static str> {
+    match std::fs::read(agent_dir.join("agent.json")) {
+        Ok(raw) => {
+            serde_json::from_slice::<AgentMetadata>(&raw).map_err(|_| DIAG_METADATA_UNREADABLE)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(DIAG_METADATA_MISSING),
+        Err(_) => Err(DIAG_METADATA_UNREADABLE),
     }
 }
 
@@ -749,7 +793,7 @@ fn named_agent_activity_item(projection: &NamedAgentProjection) -> ActivityItem 
         finished_at,
         source,
         transcript: ActivityTranscriptAvailability {
-            status: if projection.output_available {
+            status: if projection.output_available || projection.native_transcript_available {
                 "available"
             } else if agent.status == STATUS_UNAVAILABLE {
                 STATUS_UNAVAILABLE
@@ -757,8 +801,9 @@ fn named_agent_activity_item(projection: &NamedAgentProjection) -> ActivityItem 
                 "empty"
             }
             .to_owned(),
-            available: projection.output_available,
-            cursor: projection.output_available.then(|| "0".to_owned()),
+            available: projection.output_available || projection.native_transcript_available,
+            cursor: (projection.output_available || projection.native_transcript_available)
+                .then(|| "0".to_owned()),
         },
         diagnostics: agent.diagnostics.clone(),
         metadata,
@@ -853,10 +898,25 @@ fn transcript_cursor_offset(cursor: Option<&str>) -> usize {
         .unwrap_or(0)
 }
 
+fn paginate_transcript_blocks(
+    all_blocks: Vec<TranscriptBlock>,
+    cursor: Option<&str>,
+    limit: usize,
+) -> (Vec<TranscriptBlock>, String, bool) {
+    let start = transcript_cursor_offset(cursor).min(all_blocks.len());
+    let end = (start + limit).min(all_blocks.len());
+    (
+        all_blocks[start..end].to_vec(),
+        end.to_string(),
+        end < all_blocks.len(),
+    )
+}
+
 fn named_agent_transcript_blocking(
     work_root_id: WorkRootId,
     root_path: &Path,
     cache_home: Option<&Path>,
+    codex_home: Option<&Path>,
     activity_id: String,
     agent_key: &str,
     cursor: Option<&str>,
@@ -881,7 +941,7 @@ fn named_agent_transcript_blocking(
         );
     }
 
-    let projection = named_agent_projection(&agent_dir, agent_key.to_owned());
+    let projection = named_agent_projection(&agent_dir, agent_key.to_owned(), codex_home);
     let source = named_agent_source(&projection.row);
     let live = projection
         .row
@@ -889,6 +949,40 @@ fn named_agent_transcript_blocking(
         .as_ref()
         .map(|call| call.active)
         .unwrap_or(false);
+
+    let metadata = read_agent_metadata(&agent_dir).ok();
+    let mut native_diagnostic: Option<&str> = None;
+    if let Some(metadata) = metadata.as_ref() {
+        if let Some(native_path) = resolve_codex_session_file(codex_home, metadata) {
+            match std::fs::read_to_string(native_path) {
+                Ok(raw) => {
+                    let parsed = parse_codex_session_transcript(&raw);
+                    let (blocks, next_cursor, has_more) =
+                        paginate_transcript_blocks(parsed.blocks, cursor, limit);
+                    let mut diagnostics = projection.row.diagnostics;
+                    diagnostics.extend(parsed.diagnostics);
+                    let degraded = !diagnostics.is_empty() || parsed.degraded;
+                    return ActivityTranscript {
+                        work_root_id,
+                        activity_id,
+                        status: if degraded { "degraded" } else { "available" }.to_owned(),
+                        source_status: if degraded { "degraded" } else { "ok" }.to_owned(),
+                        live,
+                        source,
+                        blocks,
+                        next_cursor: Some(next_cursor),
+                        has_more,
+                        diagnostics,
+                    };
+                }
+                Err(_) => {
+                    // Fall through to the output.md source while reporting only
+                    // a source-neutral diagnostic. Native paths stay daemon-side.
+                    native_diagnostic = Some("native transcript source unreadable");
+                }
+            }
+        }
+    }
 
     let output_path = agent_dir.join("output.md");
     let raw = match std::fs::read_to_string(&output_path) {
@@ -917,6 +1011,9 @@ fn named_agent_transcript_blocking(
         }
         Err(_) => {
             let mut diagnostics = projection.row.diagnostics;
+            if let Some(diagnostic) = native_diagnostic {
+                diagnostics.push(diagnostic.to_owned());
+            }
             diagnostics.push("transcript source unreadable".to_owned());
             return ActivityTranscript {
                 work_root_id,
@@ -934,31 +1031,205 @@ fn named_agent_transcript_blocking(
     };
 
     let all_blocks = transcript_blocks_from_output(&raw);
-    let start = transcript_cursor_offset(cursor).min(all_blocks.len());
-    let end = (start + limit).min(all_blocks.len());
-    let blocks = all_blocks[start..end].to_vec();
+    let (blocks, next_cursor, has_more) = paginate_transcript_blocks(all_blocks, cursor, limit);
+    let mut diagnostics = projection.row.diagnostics;
+    if let Some(diagnostic) = native_diagnostic {
+        diagnostics.push(diagnostic.to_owned());
+    }
+    let degraded = !diagnostics.is_empty();
     ActivityTranscript {
         work_root_id,
         activity_id,
-        status: if projection.row.diagnostics.is_empty() {
-            "available"
-        } else {
-            "degraded"
-        }
-        .to_owned(),
-        source_status: if projection.row.diagnostics.is_empty() {
-            "ok"
-        } else {
-            "degraded"
-        }
-        .to_owned(),
+        status: if degraded { "degraded" } else { "available" }.to_owned(),
+        source_status: if degraded { "degraded" } else { "ok" }.to_owned(),
         live,
         source,
         blocks,
-        next_cursor: Some(end.to_string()),
-        has_more: end < all_blocks.len(),
-        diagnostics: projection.row.diagnostics,
+        next_cursor: Some(next_cursor),
+        has_more,
+        diagnostics,
     }
+}
+
+#[derive(Debug, Default)]
+struct CodexSessionParse {
+    blocks: Vec<TranscriptBlock>,
+    diagnostics: Vec<String>,
+    degraded: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexSessionEnvelope {
+    #[serde(default)]
+    timestamp: Option<String>,
+    #[serde(default, rename = "type")]
+    event_type: String,
+    #[serde(default)]
+    payload: serde_json::Value,
+}
+
+fn parse_codex_session_transcript(raw: &str) -> CodexSessionParse {
+    let mut parsed = CodexSessionParse::default();
+    for (line_index, line) in raw.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let cursor = parsed.blocks.len().to_string();
+        let envelope = match serde_json::from_str::<CodexSessionEnvelope>(line) {
+            Ok(envelope) => envelope,
+            Err(_) => {
+                parsed.degraded = true;
+                parsed
+                    .diagnostics
+                    .push("native transcript record malformed".to_owned());
+                parsed.blocks.push(TranscriptBlock {
+                    cursor,
+                    timestamp: None,
+                    render_kind: "status".to_owned(),
+                    title: Some("Malformed transcript record".to_owned()),
+                    text: Some(format!(
+                        "Skipped malformed native transcript record {}",
+                        line_index + 1
+                    )),
+                    data: None,
+                    degraded: true,
+                });
+                continue;
+            }
+        };
+
+        if let Some(block) = codex_session_block(&envelope, cursor.clone()) {
+            parsed.blocks.push(block);
+        } else {
+            parsed.degraded = true;
+            parsed.blocks.push(TranscriptBlock {
+                cursor,
+                timestamp: envelope.timestamp,
+                render_kind: "status".to_owned(),
+                title: Some("Unsupported transcript record".to_owned()),
+                text: Some("Skipped unsupported native transcript record".to_owned()),
+                data: Some(serde_json::json!({
+                    "eventType": "unsupported",
+                    "payloadType": "unsupported",
+                })),
+                degraded: true,
+            });
+        }
+    }
+    parsed
+}
+
+fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Option<TranscriptBlock> {
+    let payload_type = envelope
+        .payload
+        .get("type")
+        .and_then(|value| value.as_str())?;
+    match (envelope.event_type.as_str(), payload_type) {
+        ("event_msg", "task_started") => Some(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Task started".to_owned()),
+            text: Some("Agent turn started".to_owned()),
+            data: None,
+            degraded: false,
+        }),
+        ("event_msg", "task_complete") => Some(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Task complete".to_owned()),
+            text: Some("Agent turn completed".to_owned()),
+            data: None,
+            degraded: false,
+        }),
+        ("event_msg", "agent_message") => Some(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "assistant".to_owned(),
+            title: Some("Assistant".to_owned()),
+            text: envelope
+                .payload
+                .get("message")
+                .and_then(|value| value.as_str())
+                .map(bounded_native_text),
+            data: None,
+            degraded: false,
+        }),
+        ("response_item", "function_call") => {
+            let name = envelope
+                .payload
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("tool");
+            let arguments_bytes = envelope
+                .payload
+                .get("arguments")
+                .map(|value| value.to_string().len())
+                .unwrap_or(0);
+            Some(TranscriptBlock {
+                cursor,
+                timestamp: envelope.timestamp.clone(),
+                render_kind: "toolCall".to_owned(),
+                title: Some("Tool call".to_owned()),
+                text: Some(bounded(&format!("Called {name}"))),
+                data: Some(serde_json::json!({
+                    "name": bounded(name),
+                    "argumentsBytes": arguments_bytes,
+                })),
+                degraded: false,
+            })
+        }
+        ("response_item", "function_call_output") => {
+            let output_bytes = envelope
+                .payload
+                .get("output")
+                .map(|value| value.to_string().len())
+                .unwrap_or(0);
+            Some(TranscriptBlock {
+                cursor,
+                timestamp: envelope.timestamp.clone(),
+                render_kind: "toolResult".to_owned(),
+                title: Some("Tool output".to_owned()),
+                text: Some("Tool output captured".to_owned()),
+                data: Some(serde_json::json!({
+                    "outputBytes": output_bytes,
+                })),
+                degraded: false,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn bounded_native_text(value: &str) -> String {
+    bounded(value)
+        .split_whitespace()
+        .map(|token| {
+            if native_text_token_looks_private(token) {
+                "[redacted]"
+            } else {
+                token
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn native_text_token_looks_private(token: &str) -> bool {
+    token.contains('/')
+        || token.contains('\\')
+        || token.contains(".jsonl")
+        || token.contains("session_id")
+        || token
+            .chars()
+            .next()
+            .zip(token.chars().nth(1))
+            .zip(token.chars().nth(2))
+            .map(|((first, second), third)| {
+                first.is_ascii_alphabetic() && second == ':' && (third == '\\' || third == '/')
+            })
+            .unwrap_or(false)
 }
 
 fn unavailable_transcript(
@@ -1096,6 +1367,74 @@ fn home_dir() -> Option<PathBuf> {
     std::env::var_os(key)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+fn resolve_codex_home(configured: Option<&Path>) -> Option<PathBuf> {
+    if let Some(configured) = configured {
+        return Some(configured.to_path_buf());
+    }
+    if let Some(env) = std::env::var_os("CODEX_HOME") {
+        if !env.is_empty() {
+            return Some(PathBuf::from(env));
+        }
+    }
+    Some(home_dir()?.join(".codex"))
+}
+
+fn resolve_codex_session_file(
+    configured_codex_home: Option<&Path>,
+    metadata: &AgentMetadata,
+) -> Option<PathBuf> {
+    let backend = metadata.backend.to_ascii_lowercase();
+    let harness = metadata.harness.to_ascii_lowercase();
+    if backend != "codex" && harness != "codex" {
+        return None;
+    }
+    let session_id = metadata.session_id.trim();
+    if session_id.is_empty()
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains('\0')
+    {
+        return None;
+    }
+    let sessions_dir = resolve_codex_home(configured_codex_home)?.join("sessions");
+    find_codex_session_file(&sessions_dir, session_id)
+}
+
+fn find_codex_session_file(sessions_dir: &Path, session_id: &str) -> Option<PathBuf> {
+    let mut pending = VecDeque::from([sessions_dir.to_path_buf()]);
+    let suffix = format!("-{session_id}.jsonl");
+    let mut visited_entries = 0usize;
+    while let Some(dir) = pending.pop_front() {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            visited_entries = visited_entries.saturating_add(1);
+            if visited_entries > MAX_CODEX_SESSION_SCAN_ENTRIES {
+                return None;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if file_type.is_dir() {
+                pending.push_back(path);
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if name.starts_with("rollout-") && name.ends_with(&suffix) {
+                return Some(path);
+            }
+        }
+    }
+    None
 }
 
 struct GitIdentity {
@@ -1280,8 +1619,9 @@ fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 /// Subset of `wsagent` `agent.json` the projection needs. Private fields such
-/// as `pid`, stream paths, and the raw session id are intentionally not
-/// deserialized so they cannot reach the browser response.
+/// as `pid` and stream paths are intentionally not deserialized. The raw
+/// session id is deserialized only as daemon-private resolver input and is
+/// collapsed to `sessionPresent` before any browser response is built.
 #[derive(Debug, Default, Deserialize)]
 struct AgentMetadata {
     #[serde(default)]
@@ -1424,6 +1764,126 @@ mod tests {
         let long = "x".repeat(MAX_BOUNDED_TEXT + 50);
         assert_eq!(bounded(&long).chars().count(), MAX_BOUNDED_TEXT);
         assert_eq!(bounded("short"), "short");
+    }
+
+    #[test]
+    fn codex_session_jsonl_fixture_records_parse_to_bounded_blocks() {
+        let raw = r#"{"timestamp":"2026-05-22T00:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-private"}}
+{"timestamp":"2026-05-22T00:00:01Z","type":"event_msg","payload":{"type":"agent_message","message":"assistant text"}}
+{"timestamp":"2026-05-22T00:00:02Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":{"cmd":"cat /private/path"}}}
+{"timestamp":"2026-05-22T00:00:03Z","type":"response_item","payload":{"type":"function_call_output","output":"secret output"}}
+{"timestamp":"2026-05-22T00:00:04Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"done"}}
+"#;
+
+        let parsed = parse_codex_session_transcript(raw);
+
+        assert!(!parsed.degraded);
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(
+            parsed
+                .blocks
+                .iter()
+                .map(|block| block.render_kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["status", "assistant", "toolCall", "toolResult", "status"]
+        );
+        assert_eq!(parsed.blocks[0].title.as_deref(), Some("Task started"));
+        assert_eq!(parsed.blocks[1].text.as_deref(), Some("assistant text"));
+        assert_eq!(parsed.blocks[2].title.as_deref(), Some("Tool call"));
+        assert_eq!(parsed.blocks[2].data.as_ref().unwrap()["name"], "shell");
+        assert_eq!(parsed.blocks[3].title.as_deref(), Some("Tool output"));
+        assert_eq!(parsed.blocks[3].data.as_ref().unwrap()["outputBytes"], 15);
+        assert_eq!(parsed.blocks[4].title.as_deref(), Some("Task complete"));
+        let encoded = serde_json::to_string(&parsed.blocks).expect("serialize parser blocks");
+        assert!(!encoded.contains("/private/path"));
+        assert!(!encoded.contains("secret output"));
+        assert!(!encoded.contains("turn-private"));
+    }
+
+    #[test]
+    fn codex_session_jsonl_malformed_and_unsupported_records_degrade_individually() {
+        let raw = r#"not json with /private/path
+{"timestamp":"2026-05-22T00:00:02Z","type":"/private/native/type/thread-secret","payload":{"type":"/private/native/payload","raw":"/private/path"}}
+"#;
+
+        let parsed = parse_codex_session_transcript(raw);
+
+        assert!(parsed.degraded);
+        assert!(!parsed.diagnostics.is_empty());
+        assert_eq!(parsed.blocks.len(), 2);
+        assert!(parsed.blocks.iter().all(|block| block.degraded));
+        assert_eq!(
+            parsed.blocks[0].title.as_deref(),
+            Some("Malformed transcript record")
+        );
+        assert_eq!(
+            parsed.blocks[1].title.as_deref(),
+            Some("Unsupported transcript record")
+        );
+        let encoded = serde_json::to_string(&parsed.blocks).expect("serialize degraded blocks");
+        assert!(!encoded.contains("not json"));
+        assert!(!encoded.contains("/private/path"));
+        assert!(!encoded.contains("thread-secret"));
+        assert_eq!(
+            parsed.blocks[1].data.as_ref().unwrap()["eventType"],
+            "unsupported"
+        );
+        assert_eq!(
+            parsed.blocks[1].data.as_ref().unwrap()["payloadType"],
+            "unsupported"
+        );
+    }
+
+    #[test]
+    fn codex_session_jsonl_oversized_native_text_is_bounded() {
+        let long_message = "m".repeat(MAX_BOUNDED_TEXT + 50);
+        let long_tool_name = "tool".repeat(MAX_BOUNDED_TEXT);
+        let raw = format!(
+            "{}\n{}\n",
+            serde_json::json!({
+                "timestamp": "2026-05-22T00:00:00Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "message": long_message,
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-05-22T00:00:01Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": long_tool_name,
+                    "arguments": {
+                        "path": "/private/path/that/must/not/be/copied",
+                    }
+                }
+            })
+        );
+
+        let parsed = parse_codex_session_transcript(&raw);
+
+        assert_eq!(parsed.blocks.len(), 2);
+        assert_eq!(
+            parsed.blocks[0]
+                .text
+                .as_ref()
+                .expect("assistant text")
+                .chars()
+                .count(),
+            MAX_BOUNDED_TEXT
+        );
+        assert_eq!(
+            parsed.blocks[1]
+                .text
+                .as_ref()
+                .expect("tool call text")
+                .chars()
+                .count(),
+            MAX_BOUNDED_TEXT
+        );
+        let encoded = serde_json::to_string(&parsed.blocks).expect("serialize bounded blocks");
+        assert!(!encoded.contains("/private/path"));
     }
 
     #[test]
