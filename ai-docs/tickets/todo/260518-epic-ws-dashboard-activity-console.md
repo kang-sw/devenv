@@ -47,7 +47,7 @@ The milestone covers:
 - `260521-feat-ws-dashboard-command-dispatch-spine` - done; Phase 0 before
   Activity Console UI work, establishing the shared command dispatch path that
   future tmux-like keybindings and visible controls invoke.
-- `260518-feat-ws-dashboard-activity-read-model` - ready; implement the backend
+- `260518-feat-ws-dashboard-activity-read-model` - done; implement the backend
   feed snapshot plus selected transcript backfill contract that the console
   reads.
 - `260518-feat-ws-dashboard-activity-console-ui` - todo; build the reusable

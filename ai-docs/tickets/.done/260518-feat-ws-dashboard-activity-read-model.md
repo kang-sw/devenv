@@ -11,6 +11,7 @@ related:
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
+completed: 2026-05-21
 ---
 
 # ws dashboard Activity Console read model
@@ -161,3 +162,22 @@ transcripts, bounded backfill, owner-auth rejection, and a mixed ordering case
 that would have rendered poorly under A-Z sorting. The implementation should
 also preserve the current WorkRoot Activity route compatibility or record any
 explicit response migration in tests and docs.
+
+### Result (b48d54f9) - 2026-05-21
+
+Phase 1 implemented the Activity Console read model as source-neutral Activity
+Feed and Activity Transcript contracts while preserving the existing
+named-agent `agents` projection for the current WorkRoot Activity pane. The
+workRoot Activity route now returns selectable Activity Items with feed cursor,
+selected-item hint, update mode, source metadata, transcript availability, and
+ordering suitable for the later ribbon. A selected activity transcript route
+returns bounded normalized Transcript Blocks for named-agent output with
+explicit source status, cursor pagination, and unavailable/degraded states.
+
+The implementation kept Activity Console UI, live stream behavior, native
+Codex/Claude/Gemini transcript resolvers, exec jobs, and agent controls out of
+scope. Verification passed `cargo test -p ws-dashboard-core activity`,
+`cargo test -p ws-dashboard-daemon work_root_activity`,
+`npm run test:work-root-activity`, `npm run build`, and the broader
+`cargo test`; the frontend production build kept the existing large-chunk
+warning.
