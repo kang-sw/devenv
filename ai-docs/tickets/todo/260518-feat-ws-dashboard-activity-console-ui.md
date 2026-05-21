@@ -2,6 +2,7 @@
 title: ws dashboard Activity Console UI shell
 parent: 260518-epic-ws-dashboard-activity-console
 related:
+  260521-feat-ws-dashboard-command-dispatch-spine: prerequisite command spine for Activity Console controls
   260518-feat-ws-dashboard-activity-read-model: supplies Activity Feed items and selected transcript blocks
   260518-feat-ws-dashboard-activity-live-ux: later adds stream-backed updates to this shell
   260517-feat-ws-dashboard-workroot-activity: existing pane to migrate from list dump to console
@@ -22,6 +23,10 @@ live/latest items and a selected Transcript Block viewer below it.
 The same component family should later support popup-style transcript views
 from a main agent surface, so it must not be coupled to WorkRoot Activity pane
 placement or named-agent-specific metadata.
+
+This ticket should start after `260521-feat-ws-dashboard-command-dispatch-spine`
+lands. Activity Console adds enough new controls that implementing it before
+the command spine would grow keybinding debt.
 
 ## Decisions
 

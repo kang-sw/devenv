@@ -44,6 +44,9 @@ The milestone covers:
 
 ## Child Tickets
 
+- `260521-feat-ws-dashboard-command-dispatch-spine` - todo; Phase 0 before
+  Activity Console UI work, establishing the shared command dispatch path that
+  future tmux-like keybindings and visible controls invoke.
 - `260518-feat-ws-dashboard-activity-read-model` - todo; implement the backend
   feed snapshot plus selected transcript backfill contract that the console
   reads.
@@ -85,6 +88,9 @@ The milestone covers:
   future visible control need stable command ids that dispatch through the same
   behavior future tmux-like keybindings will invoke. Background stream or
   polling merges are data effects, not user commands.
+- Activity Console UI implementation starts after
+  `260521-feat-ws-dashboard-command-dispatch-spine` lands, so new controls do
+  not add raw callback paths that a future keybinding layer must rediscover.
 - Reuse the existing instance event envelope only where it clarifies stream
   shape. Do not expose the older `instance-events` scaffold name as the Activity
   Feed product vocabulary.
