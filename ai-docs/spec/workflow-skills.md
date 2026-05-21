@@ -246,7 +246,7 @@ skill file remains available for compatibility, but `lead-implement` no longer
 invokes it and absence of ticket `skeletons:` frontmatter does not create a
 skeleton obligation. {#260510-skeleton-contract-populator-flow}
 
-`lead-write-code` absorbs the useful skeleton role through brief authoring.
+`lead-implement` delegated mode absorbs the useful skeleton role through brief authoring.
 For public interface, cross-module boundary, or new type contract changes, the
 brief includes concrete `Contract Instructions`: expected files or modules,
 public types/functions/handlers/tools, visibility, call shape, input/output
@@ -386,7 +386,7 @@ Implementation always routes through `lead-implement` with the selected scope as
 a hard scope boundary. `lead-proceed` does not rejudge ticket quality, demand
 ticket splitting, mutate ticket structure, decide contract-brief depth, or
 invoke implementation primitives before `lead-implement`. Public or
-cross-module contract checkpoints are expressed as `lead-write-code` brief
+cross-module contract checkpoints are expressed as `lead-implement` brief
 contract and integration-test instructions.
 
 Before implementation handoff, `lead-proceed` reads the corresponding
