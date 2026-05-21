@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.27.0 - 2026-05-21
+
+### Added
+- Add explicit wsflow mirroring follow-up tracking for the remaining
+  `lead-implement` / `lead-edit` divergence.
+- Add libws harness research and MVP planning tickets for the future
+  JSONL-first agent run substrate.
+
+### Changed
+- Restructure `lead-implement` into the canonical unified implementation
+  spine, absorbing full ws `lead-edit` and `lead-write-code` behavior into
+  direct and delegated modes with one review stage.
+- Remove same-actor carry blocks from lead skill handoffs; skill-to-skill
+  transitions now rely on the shared active conversation.
+- Make `lead-proceed` route-only for implementation handoff, with lead-owned
+  ticket freshness and no pre-application of `lead-implement` judges.
+- Add fresh-reader audit and downstream consistency sweep gates to
+  `lead-skill-authoring`, including responsibility-based handler structure for
+  dense `On:` handlers.
+- Tighten `lead-write-ticket` recoverability so tickets preserve enough
+  settled product, workflow, API, and verification detail for fresh sessions.
+- Document wsflow as intentionally `lead-edit`-mediated until the follow-up
+  mirroring gap is resolved.
+
+### Fixed
+- Preserve add/delete ticket moves in `git.commit` summaries so ticket status
+  changes retain merge evidence.
+- Support mental-model commit notes in `git.commit`.
+- Make wsflow bundle verification tolerate only the documented wsflow-only
+  `lead-edit` surface.
+
 ## v0.26.8 - 2026-05-19
 
 ### Added
