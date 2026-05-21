@@ -868,6 +868,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     });
     expect(documentHorizontalOverflow).toBe(false);
     await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(100);
     await expect(populatedBody).toContainText("$ echo browser-gate");
     await expect(
       populatedBody.locator('[data-block-mode="terminal"]'),
@@ -1196,6 +1197,14 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(secondActivityPane).not.toContainText("exec-beta");
     await expect(secondActivityPane).not.toContainText("selected transcript alpha");
     await expect(secondActivityPane).not.toContainText("$ echo browser-gate");
+    const secondActivityTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="workRootActivity-pane:"]',
+    );
+    await secondActivityTab.hover();
+    await secondActivityTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    await expect(secondActivityPane).toHaveCount(0);
 
     const secondFileRow = page.locator(".file-explorer-row", {
       hasText: "second-readme.txt",
@@ -1231,6 +1240,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await pinnedReadOnlyTab.click();
     await expect(page.locator(".readonly-text-pane")).toContainText(
       "ws-dashboard browser gate fixture",
+    );
+    await page.unroute(/\/api\/dashboard\/work-roots\/.*\/activity(?:\?.*)?$/);
+    await page.unroute(
+      /\/api\/dashboard\/work-roots\/.*\/activity\/items\/.*\/transcript(?:\?.*)?$/,
     );
     note(
       "dynamic groups: opened-file group placement stayed scoped per workRoot and did not auto-target user-created groups",
@@ -1334,7 +1347,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
     await expectTerminalInputFocused(page);
 
-    await inputTarget.focus();
+    await page.locator(".terminal-surface").click();
+    const hangulInputTarget = await terminalInputTarget(page);
+    await hangulInputTarget.focus();
     await expectTerminalInputFocused(page);
     await page.keyboard.insertText(commandPlan.echo("한글-OK"));
     await expectTerminalInputFocused(page);
