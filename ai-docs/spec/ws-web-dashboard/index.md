@@ -399,6 +399,42 @@ receipt.
 Live UX adoption remains read-only. It does not expose raw SSE payloads, backend
 paths, cache paths, source ids, or control actions in browser UI state.
 
+## 🚧 Activity Console Transcript Expansion {#260522-ws-dashboard-activity-console-transcript-expansion}
+
+The Activity Console transcript backend will support additional daemon-owned
+transcript source adapters behind the existing `ActivityTranscript` and
+`TranscriptBlock` contracts. Browser callers continue to request selected
+activity transcripts by opaque workRoot and activity ids; they never receive
+backend session paths, cache paths, host paths, pids, session ids,
+stdout/stderr paths, stream paths, native transcript paths, or backend-native
+record formats.
+
+Native backend transcript parsing starts only from fixture-backed formats whose
+shape can be verified without invoking a live backend. Codex native session
+JSONL is the first candidate source when a stable fixture format is available.
+Claude and Gemini native transcript handling remain deferred unless their
+formats are similarly documented or fixture-backed. Malformed native transcript
+records degrade individual blocks or source status where possible instead of
+failing the whole selected activity transcript.
+
+Source adapters normalize dialogue, assistant output, tool calls, tool results,
+status/error entries, and command/output-like records into bounded
+`TranscriptBlock` values. Raw backend JSON or markdown may be adapter input but
+is not the browser contract. Exec transcript source integration remains blocked
+until the async exec output reader model exists.
+
+The backend may add a selected-activity transcript event stream when block-level
+append/update behavior materially improves the visible transcript experience:
+
+```text
+GET /api/dashboard/work-roots/{workRootId}/activity/items/{activityId}/transcript/events?after={cursor}
+```
+
+Candidate event categories include block append/update, status change,
+snapshot invalidation, and stream end. If block-level append would add
+complexity without a clear UX win, the implementation may keep using
+feed-level `transcriptUpdated` invalidations plus bounded selected backfill.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
