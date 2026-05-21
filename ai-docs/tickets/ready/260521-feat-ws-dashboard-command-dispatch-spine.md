@@ -1,6 +1,8 @@
 ---
 title: ws dashboard command dispatch spine
 parent: 260518-epic-ws-dashboard-activity-console
+spec:
+  - 260516-ws-web-dashboard-inspectable-navigation-shell
 related:
   260518-feat-ws-dashboard-activity-console-ui: first new surface that should build controls on the command spine
   260517-feat-ws-dashboard-workroot-activity: existing Activity pane entrypoint and live-refresh surface to preserve

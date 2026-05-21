@@ -150,7 +150,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260518-epic-ws-dashboard-activity-console` | todo | Coordinate the full-scale read-only Activity Console with read model, UI shell, live stream, live UX, and transcript expansion children |
-| `260521-feat-ws-dashboard-command-dispatch-spine` | todo | Add the frontend command dispatch spine before Activity Console controls |
+| `260521-feat-ws-dashboard-command-dispatch-spine` | ready | Add the frontend command dispatch spine before Activity Console controls |
 | `260518-feat-ws-dashboard-activity-read-model` | todo | Implement the backend Activity Feed snapshot plus selected transcript backfill read model |
 | `260518-feat-ws-dashboard-activity-console-ui` | todo | Build the reusable route-backed Activity Ribbon and Transcript Block UI shell |
 | `260518-feat-ws-dashboard-activity-watch-stream` | todo | Add backend cross-platform watcher, SSE stream, and fallback mode for Activity Console updates |
@@ -177,7 +177,10 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- No ready tickets.
+- `260521-feat-ws-dashboard-command-dispatch-spine` - Phase 0 command dispatch
+  spine before Activity Console UI controls; implements
+  `{#260516-ws-web-dashboard-inspectable-navigation-shell}` planned command
+  path behavior.
 
 ## Session Notes
 
