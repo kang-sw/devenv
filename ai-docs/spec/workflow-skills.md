@@ -113,10 +113,10 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-forge-mental-model`, and `lead-review`.
 
 The wsflow `lead-sprint` skill is a sprint-branch session container that
-preserves deferred documentation wrap-up and routes source changes through
-`lead-implement`. In the current wsflow package, `lead-implement` delegates
-source execution to `lead-edit`, and `lead-edit` chooses direct or scoped
-subagent execution while the sprint wrap-up keeps documentation integration,
+preserves deferred documentation wrap-up and routes source tasks through
+`lead-edit`. In the current wsflow package, `lead-implement` also delegates
+source execution to `lead-edit`; `lead-edit` chooses direct or scoped subagent
+execution while the sprint wrap-up keeps documentation integration,
 verification, and commit ownership explicit. {#260513-wsflow-sprint-skill}
 
 The wsflow package excludes skeleton flows, recovery orchestration, and
