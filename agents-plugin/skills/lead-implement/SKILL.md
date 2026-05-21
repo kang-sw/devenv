@@ -24,7 +24,6 @@ Execution
 
 Review
 - Single Review stage for all paths; reviewer count from `judge: review-allocation`.
-- Relay cap: 2 cycles for single-reviewer; 3 cycles for partitioned.
 - Lead fixes correctness, security, contract, and regression findings; may reject style-only or scope-expanding findings with reasons.
 - Delete review path files before Final Action Gate.
 
@@ -49,7 +48,7 @@ Review
 6. If `branch-mode` = create: create `implement/<scope>` before any source edit.
 7. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
 8. Call `ws/infra.read(name: "impl-playbook")`.
-9. Identify integration test paths and run command.
+9. Identify integration test paths and their run command.
 10. If `plan-depth` ≥ survey: survey project via `ws/agents.register(name: "project-survey", prompts: ["project-survey"])` → `ws/agents.call`; capture `[Must|Maybe]` references.
 11. If `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; audit against target; commit.
 12. If `plan-depth` ≥ survey: run plan populator with **Plan prompts**; if survey returns `[escalate-to-research]`, re-run as research; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
@@ -71,7 +70,7 @@ Review
 
 1. If direct-edit: edit directly per target and impl-playbook; commit logical checkpoints.
 2. If direct-edit: run tests/build; read full output before claiming pass; resolve introduced warnings per impl-playbook Verify; on failure, diagnose blame before fixing; re-run until pass or real blocker.
-3. If delegated: run baseline verification only when referenced tests already exist.
+3. If delegated and referenced tests exist: run baseline verification.
 4. If delegated: call `ws/agents.call(name: "implementer", prompt: ...)` with **Implementer spawn prompt**.
 5. If delegated: read `ws/agents.result(name: "implementer", timeout_seconds: 600)` only if async result lacks usable summary; capture `<first-commit>..<last-commit>`.
 6. Capture `<commit-range>` and `<result-commit>`.
@@ -101,7 +100,7 @@ Run mental-model-updater after update-spec so it sees implemented-marker changes
 1. Call `ws/infra.read(name: "executor-wrapup")`.
 2. Refresh `ai-docs/_index.md` for new skills, agents, or major patterns.
 3. If ticket-driven, follow Ticket Update using `<result-commit>`.
-4. Follow Doc Commit Gate. Do not re-run Doc Pipeline.
+4. Commit doc changes per executor-wrapup. Do not re-run Doc Pipeline.
 
 ### 7. Final Action Gate
 
@@ -114,10 +113,10 @@ Report:
 - deviations or open items;
 - unresolved disputes from review relay, if any.
 
-Wait for merge, continue, or stop. If the user wants more changes, route to a
-new implementation slice or `ws:lead-sprint`; already completed phases capture
-follow-up implementation through append-only ticket Result editions. Direct-current
-mode exits after docs because no implementation branch exists.
+Wait for merge, continue, or stop. Direct-current mode exits here; no merge
+stage. If the user wants more changes, route to a new implementation slice or
+`ws:lead-sprint`; completed phases capture follow-up through append-only ticket
+Result editions.
 
 ### 8. Merge
 
