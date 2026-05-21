@@ -1,6 +1,8 @@
 ---
 title: ws dashboard Activity Console live UX
 parent: 260518-epic-ws-dashboard-activity-console
+spec:
+  - 260521-ws-dashboard-activity-console-live-ux
 related:
   260518-feat-ws-dashboard-activity-console-ui: provides the static Activity Console shell to make live
   260518-feat-ws-dashboard-activity-watch-stream: supplies backend feed and transcript invalidation events

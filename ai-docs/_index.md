@@ -150,7 +150,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260518-epic-ws-dashboard-activity-console` | todo | Coordinate the full-scale read-only Activity Console with read model, UI shell, live stream, live UX, and transcript expansion children |
-| `260518-feat-ws-dashboard-activity-live-ux` | todo | Adopt Activity Console live events in the frontend with merge, stale-root, transcript-refresh, and fallback behavior |
+| `260518-feat-ws-dashboard-activity-live-ux` | ready | Adopt Activity Console live events in the frontend with merge, stale-root, transcript-refresh, and fallback behavior |
 | `260518-feat-ws-dashboard-activity-transcript-api` | todo | Expand Activity Console transcript sources and optional block-level live transcript behavior |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -173,7 +173,10 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-No ready tickets.
+- `260518-feat-ws-dashboard-activity-live-ux` - Frontend Activity Console
+  EventSource subscription, source-neutral event merge, transcript refresh,
+  stale-root rejection, fallback polling transition, and local dirty cue
+  preservation; implements `{#260521-ws-dashboard-activity-console-live-ux}`.
 
 ## Session Notes
 

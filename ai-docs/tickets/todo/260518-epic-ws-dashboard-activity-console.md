@@ -56,7 +56,7 @@ The milestone covers:
 - `260518-feat-ws-dashboard-activity-watch-stream` - done; implemented the
   daemon-side SSE feed event stream, cursor/reset behavior, and bounded
   polling fallback mode.
-- `260518-feat-ws-dashboard-activity-live-ux` - todo; adopt the live stream in
+- `260518-feat-ws-dashboard-activity-live-ux` - ready; adopt the live stream in
   the Activity Console frontend with merge, stale-root, transcript-refresh, and
   fallback behavior.
 - `260518-feat-ws-dashboard-activity-transcript-api` - todo; expand transcript
