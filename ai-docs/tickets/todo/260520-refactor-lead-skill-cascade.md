@@ -303,8 +303,8 @@ R2 — Cross-skill judges banned:
   not compute the verdict itself.
 - Remove `lead-proceed` step 13–14 (which pre-applies `lead-implement`'s
   `judge: needs-delegation` and `judge: branch-mode`).
-- Remove `implementation-verdict-context` (already removed by Phase 1, but
-  verify no straggler references).
+- Remove `implementation-verdict-context` and implementation-verdict announce
+  fields; verify no straggler references remain in full ws or wsflow proceed.
 - Update mental-model anchor
   `{#260519-proceed-implementation-dispatch-precheck}` to reflect that
   `lead-proceed` only flags routes as implementation-bound and stops short of

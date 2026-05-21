@@ -390,13 +390,12 @@ invoke implementation primitives before `lead-implement`. Public or
 cross-module contract checkpoints are expressed as `lead-implement` brief
 contract and integration-test instructions.
 
-Before implementation handoff, `lead-proceed` reads the corresponding
-`lead-implement` skill text and applies that implementation route contract from
-conversation and workflow artifacts only. Full ws announcements report an
-`Implementation Verdict` and `Verdict Basis`; unknown direct-edit predicates
-produce a delegated verdict. wsflow mirrors the same source-free precheck as an
-implementation verdict derived from `wsflow:lead-implement`, without
-introducing unavailable full ws implementation relay wording.
+Before implementation handoff, `lead-proceed` announces only the
+implementation-bound route. It does not apply sibling `lead-implement` judges,
+compute direct/delegated execution mode, compute branch mode, or inspect source.
+`lead-implement` owns those decisions when the handoff executes. wsflow mirrors
+the same route-only boundary without pre-applying `wsflow:lead-implement`
+branch or execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
 
 ## Sprint Session Container {#260505-sprint-session-container}
