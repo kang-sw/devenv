@@ -324,6 +324,10 @@ R1 — Handler label vocabulary:
 - Later downstream sweeps may apply the vocabulary to long flat handlers such
   as `ws:lead-write-ticket`, but this rule does not require a mechanical
   four-block rewrite.
+- Apply the vocabulary to full/wsflow `lead-write-ticket` `On: invoke` by
+  splitting the previous flat list into `Resolve`, `Route`, `Load`, `Write`,
+  `Verify`, `Commit`, and `Handoff` sub-blocks without changing ticket
+  behavior.
 
 R2 — Cross-skill judges banned:
 - Add to `ws:lead-skill-authoring`: a lead skill applies only its own judges;

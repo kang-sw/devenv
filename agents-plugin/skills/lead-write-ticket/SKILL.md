@@ -17,17 +17,37 @@ Target: user request
 
 ## On: invoke
 
-0. Call `ws/convention.read(name: "ticket-conventions")`.
+### 1. Resolve
+
+1. Call `ws/convention.read(name: "ticket-conventions")`.
+
+### 2. Route
+
 1. Classify category/status; mark **judge: spec-gate** for any non-`epic`, non-`research` ticket entering `ready/`.
 2. Apply `judge: cascade-ticket-edit`; if it fires, run **Cascade Edit** and stop ordinary single-target routing.
-3. If `user request` references an existing ticket, read it.
-4. For non-epic actionable creation or edits, run **Cross-ticket decision review** before phase drafting.
-5. For a new ticket, run **Create Ticket**.
-6. For an existing ticket, run **Edit Ticket**.
-7. Run **Intent Review**.
-8. Run **Spec-stem Check**.
-9. Commit edited paths with `ws/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed; separate child invocations own their own commits and outputs.
-10. Run **Output Handoff**.
+
+### 3. Load
+
+1. If `user request` references an existing ticket, read it.
+2. For non-epic actionable creation or edits, run **Cross-ticket decision review** before phase drafting.
+
+### 4. Write
+
+1. For a new ticket, run **Create Ticket**.
+2. For an existing ticket, run **Edit Ticket**.
+
+### 5. Verify
+
+1. Run **Intent Review**.
+2. Run **Spec-stem Check**.
+
+### 6. Commit
+
+1. Commit edited paths with `ws/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed; separate child invocations own their own commits and outputs.
+
+### 7. Handoff
+
+1. Run **Output Handoff**.
 
 ## On: Create Ticket
 
