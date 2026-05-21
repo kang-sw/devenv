@@ -93,6 +93,11 @@ downstream consistency sweep across affected skill, prompt, spec, mental-model,
 test, and mirrored-package surfaces. The first pass may conservatively
 over-report findings; the lead classifies each as fix, intentional difference,
 or out of scope before editing.
+Dense handlers use sub-blocks only when structure improves execution, such as
+when a handler exceeds four steps or mixes responsibilities. Sub-block names
+come from shared handler-label vocabulary before new labels are invented;
+compact checkpoint skills may stay prose or short lists when output and end
+state are obvious.
 {#260514-skill-authoring-carried-context}
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}

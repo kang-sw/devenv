@@ -26,6 +26,7 @@ These apply to both skill and agent documents.
 - Use Markdown hierarchy to route attention before adding prose.
 - Prefer command-shaped fragments over explanatory paragraphs.
 - For dense routing or rule lists, prefer short sections, named groups, fixed lookup tables, and command-shaped lists over long flat lists.
+- For dense handlers, split responsibilities only when structure improves execution; choose shared handler labels before inventing new ones.
 - Use Markdown structure before introducing custom notation.
 
 ### Content rules
@@ -76,6 +77,22 @@ Group names classify invariants only; they are not rules. Do not nest groups or
 bullets. Do not put handler steps, routing policy, Git branch policy, or
 rationale in invariant groups.
 
+### Handler labels
+
+Use sub-blocks when a handler exceeds four steps or mixes responsibilities.
+Choose labels from this vocabulary before inventing new names:
+
+- Load / Gather / Resolve
+- Classify / Decide / Route
+- Draft / Edit / Write
+- Verify / Review / Audit
+- Announce / Report / Handoff
+- Commit / Finalize / Cleanup
+- Execute / Continue / Stop
+
+Use domain-specific labels when they carry real information. Compact handlers
+do not need sub-blocks.
+
 ### Doctrine format
 
 Doctrine has two jobs: name the finite resource, then add the guiding principle.
@@ -102,7 +119,7 @@ Use this order. Omit sections the skill does not need.
 Hierarchy clarifies responsibility; handlers preserve required order.
 
 1. **Invariants** - unambiguous imperatives, zero interpretation cost, skimmable.
-2. **Event handlers** (`On: X`) - numbered step lists per entry point. Consistent sub-structure across siblings.
+2. **Event handlers** (`On: X`) - numbered step lists per entry point; use shared handler labels for dense sub-blocks.
 3. **Judgments** - soft decision points extracted from handlers. Name them (`judge: <name>`) and centralize criteria here; handlers reference by name. A fixed lookup table with unambiguous triggers is a routing rule in the handler, not a judgment.
 4. **Templates** - structured output formats: brief formats, agent-delegation call formats, addenda. Procedures belong in handlers.
 5. **Doctrine** - one paragraph, the guiding principle.

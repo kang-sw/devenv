@@ -103,10 +103,10 @@ anchors that codify the rules being removed. Sub-agent prompts under
 
 ## Forward-compatibility
 
-- New skills added after this cascade must follow the four-block
-  `On: invoke` structure (Gather State / Decide / Announce / Execute), must
-  not declare same-actor carry blocks, and must gate user-approval steps with
-  the not-chained condition.
+- New dense orchestration handlers added after this cascade should use shared
+  handler labels when sub-blocks improve execution; new skills must not declare
+  same-actor carry blocks, and must gate user-approval steps with the
+  not-chained condition.
 - Sub-agent invocations remain the only place where explicit context briefs are
   authored; that contract is unchanged.
 
@@ -311,14 +311,19 @@ Skill-authoring wording cleanup:
   checkpoints; classify full-ceremony rewrites for those skills as intentional
   differences unless output or end-state clarity is actually missing.
 
-R1 — `On: invoke` four-block structure:
-- Add to `ws:lead-skill-authoring`: `On: invoke` must be split into named
-  sub-blocks. Default split: `1. Gather State`, `2. Decide`, `3. Announce`,
-  `4. Execute`. Flat numbered lists are allowed only when they fit in ≤ 4
-  steps. Adapt block names to the skill's reading pattern but keep four
-  responsibilities.
-- Apply to `ws:lead-write-ticket` (currently 10-step flat list),
-  `ws:lead-discuss`, and any other skill missing block separation.
+R1 — Handler label vocabulary:
+- Add to `ws:lead-skill-authoring`: when a handler needs sub-blocks, choose
+  names from a shared responsibility vocabulary before inventing new labels.
+  Candidate labels: `Load`, `Gather`, `Resolve`, `Classify`, `Decide`,
+  `Route`, `Draft`, `Edit`, `Write`, `Verify`, `Review`, `Audit`,
+  `Announce`, `Report`, `Handoff`, `Commit`, `Finalize`, `Cleanup`,
+  `Execute`, `Continue`, `Stop`.
+- Treat structure as conditional: use sub-blocks when a handler exceeds four
+  steps or mixes responsibilities; compact handlers may stay prose or short
+  lists when output and end state are obvious.
+- Later downstream sweeps may apply the vocabulary to long flat handlers such
+  as `ws:lead-write-ticket`, but this rule does not require a mechanical
+  four-block rewrite.
 
 R2 — Cross-skill judges banned:
 - Add to `ws:lead-skill-authoring`: a lead skill applies only its own judges;
