@@ -126,8 +126,7 @@ Target: user request
 Trigger: non-`epic`, non-`research` ticket creation or move into `ready/`.
 Ungated: `idea/` creation and `idea/` -> `todo/` triage.
 Find coverage: identify the relevant spec file; use `ws/specs.find` or `ws/specs.status` when a file or stem is identifiable.
-Missing coverage: no relevant spec file exists or no entry covers behavior; continue through `ws:lead-write-spec`; carry context:
-`Chained from ws:lead-write-ticket - create planned coverage for this ready ticket without asking; ticket frontmatter will be populated from the follow-up coverage check.`
+Missing coverage: no relevant spec file exists or no entry covers behavior; continue through `ws:lead-write-spec`.
 Re-check: after `ws:lead-write-spec` returns, use `ws/specs.find` or `ws/specs.status`.
 Stop: coverage is still missing, `ws:lead-write-spec` failed, or the behavior is too underspecified; name the blocker.
 
