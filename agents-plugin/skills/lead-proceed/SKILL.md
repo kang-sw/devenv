@@ -22,7 +22,6 @@ Pipeline
 
 Execution
 - Announce routing before execution; chain stages without pausing for confirmation.
-- Handoff stages receive carried gate-suppression context.
 - Warmth is current-session context, not target identity.
 
 ## Route Rules
@@ -70,14 +69,14 @@ Routing
 
 | When | Route |
 |------|-------|
-| `target-kind=inline` and `actionable=no` | Continue through `ws:lead-discuss`; carry the blocker; stop. |
+| `target-kind=inline` and `actionable=no` | Continue through `ws:lead-discuss`; stop. |
 | `has-ticket=yes` and category is `epic` | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
-| `discussion-needed=yes` | Continue through `ws:lead-discuss`; carry the blocker; stop. |
-| `has-ticket=yes` and status is `todo/` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; carry `promote-context`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and freshness is missing settled decisions | Continue through `ws:lead-write-ticket`; carry `freshness-context`; capture `Ticket:` and re-route. |
-| `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`; carry resolved scope and implementation verdict. |
-| `has-ticket=no` and `needs-ticket=yes` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; carry `create-context`; capture `Ticket:` and re-route. |
-| `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`; carry inline target, no-ticket scope, and implementation verdict. |
+| `discussion-needed=yes` | Continue through `ws:lead-discuss`; stop. |
+| `has-ticket=yes` and status is `todo/` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and freshness is missing settled decisions | Continue through `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`. |
+| `has-ticket=no` and `needs-ticket=yes` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
+| `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`. |
 
 ### 3. Announce
 
@@ -92,7 +91,6 @@ Routing
 - **Implementation Verdict**: <ws:lead-edit | ws:lead-write-code> via ws:lead-implement
 - **Verdict Basis**: lead-implement route contract; source-free; unknown direct-edit predicate -> delegated
 - **Execution**: ws:lead-implement - owns code-editing stages and branch lifecycle
-- **Carried context**: downstream stages receive route constraints.
 
 Proceeding.
 ```
@@ -108,29 +106,6 @@ Do not ask for confirmation; the user can interrupt.
 4. If `ws:lead-write-ticket` ran, capture its `Ticket:` path before downstream routing.
 5. If the captured path remains under `ai-docs/tickets/todo/`, stop and report the ready-promotion blocker.
 6. If a ticket path was captured, rebuild route context from that path and re-enter `Select Route`.
-
-## Carried Context
-
-`spec-context`:
-`Chained from ws:lead-proceed - write any planned entries without asking; the session reminder will still emit.`
-
-`gate-suppression-context`:
-Carry: this is an autonomous proceed chain; downstream stages do not pause for approvals that this route already grants.
-
-`implementation-verdict-context`:
-Carry: verdict came from `ws:lead-implement` route contract, applied source-free before handoff.
-
-`create-context`:
-Carry `spec-context` and `gate-suppression-context`, then continue through `ws:lead-write-ticket`.
-Carry: re-check spec coverage before returning to `ws:lead-write-spec`; create autonomous coverage when possible.
-
-`promote-context`:
-Carry `spec-context` and `gate-suppression-context`, then continue through `ws:lead-write-ticket`.
-Carry: implementation intent; autonomous promotion for spec coverage, frontmatter, or queue updates; escalate unresolved design blockers.
-
-`freshness-context`:
-Continue through `ws:lead-write-ticket`.
-Carry: refresh from active conversation only; capture missing settled decisions, constraints, and rejected alternatives; do not inspect source, broad docs, decomposition, or implementation plan.
 
 ## Judgments
 
