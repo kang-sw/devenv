@@ -111,7 +111,6 @@ Required frontend coverage:
 Verification commands:
 - `cd ws-dashboard && cargo test -p ws-dashboard-core activity`
 - `cd ws-dashboard && cargo test -p ws-dashboard-daemon work_root_activity`
-- `cd ws-dashboard && cargo test -p ws-dashboard-daemon routes::work_root_activity`
 - `cd ws-dashboard/frontend && npm run test:work-root-activity`
 - `cd ws-dashboard/frontend && npm run build`
 
