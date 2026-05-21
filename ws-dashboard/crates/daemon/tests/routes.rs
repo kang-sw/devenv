@@ -1030,12 +1030,20 @@ async fn work_root_file_listing_routes_reports_unknown_work_root() {
 //   stdout/stderr paths, `agent.json`, or `current/state.json`.
 
 fn app_state_with_activity_cache_home(cache_home: PathBuf) -> AppState {
+    app_state_with_activity_cache_and_codex_home(cache_home, None)
+}
+
+fn app_state_with_activity_cache_and_codex_home(
+    cache_home: PathBuf,
+    codex_home: Option<PathBuf>,
+) -> AppState {
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
+            codex_home,
             cache_home: Some(cache_home),
         }),
     }
@@ -1697,6 +1705,18 @@ fn write_agent_output(agents_dir: &Path, agent_key: &str, raw: &str) {
     fs::write(agent_dir.join("output.md"), raw).expect("write output.md fixture");
 }
 
+fn write_codex_session(codex_home: &Path, session_id: &str, raw: &str) -> PathBuf {
+    let session_dir = codex_home
+        .join("sessions")
+        .join("2026")
+        .join("05")
+        .join("22");
+    fs::create_dir_all(&session_dir).expect("create codex session fixture dir");
+    let session_path = session_dir.join(format!("rollout-2026-05-22T00-00-00-{session_id}.jsonl"));
+    fs::write(&session_path, raw).expect("write codex session fixture");
+    session_path
+}
+
 async fn fetch_work_root_activity(
     app: axum::Router,
     cookie: &str,
@@ -2208,6 +2228,258 @@ async fn work_root_activity_transcript_route_auth_unknown_and_backfill_bounds() 
 
     remove_static_fixture(&root);
     remove_static_fixture(&cache_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_transcript_route_reads_codex_native_session_backfill() {
+    if skip_without_git("work_root_activity_transcript_route_reads_codex_native_session_backfill") {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-codex-native");
+    let cache_home = temp_fixture_path("work-root-activity-codex-native-cache");
+    let codex_home = temp_fixture_path("work-root-activity-codex-native-home");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    let session_id = "thread-native-secret";
+    let session_path = write_codex_session(
+        &codex_home,
+        session_id,
+        r#"{"timestamp":"2026-05-22T00:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-private"}}
+{"timestamp":"2026-05-22T00:00:01Z","type":"event_msg","payload":{"type":"agent_message","message":"I can help with the activity transcript."}}
+{"timestamp":"2026-05-22T00:00:02Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":{"cmd":"cat /private/cache/native.jsonl"}}}
+{"timestamp":"2026-05-22T00:00:03Z","type":"response_item","payload":{"type":"function_call_output","output":"private /host/path result"}}
+{"timestamp":"2026-05-22T00:00:04Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"done"}}
+"#,
+    );
+    write_agent_metadata(
+        &agents_dir,
+        "native",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "native",
+            "backend": "codex",
+            "harness": "codex",
+            "status": "idle",
+            "last_call_at": "2026-05-22T00:00:04Z",
+            "session_id": session_id,
+            "last_output_path": "/private/cache/native/output.md",
+            "pid": 999,
+            "stdout_path": "/private/cache/native/current/stdout",
+            "stderr_path": "/private/cache/native/current/stderr"
+        }),
+    );
+
+    let state =
+        app_state_with_activity_cache_and_codex_home(cache_home.clone(), Some(codex_home.clone()));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (feed_status, feed_body) =
+        fetch_work_root_activity(app.clone(), cookie.as_str(), &work_root_id).await;
+    assert_eq!(feed_status, StatusCode::OK);
+    let feed: serde_json::Value = serde_json::from_str(&feed_body).expect("native feed JSON");
+    assert_eq!(feed["items"][0]["transcript"]["status"], "available");
+    assert_eq!(feed["items"][0]["transcript"]["available"], true);
+
+    let (status, body_text) = fetch_work_root_activity_transcript(
+        app,
+        cookie.as_str(),
+        &work_root_id,
+        "agent:native",
+        "limit=3",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("native transcript JSON");
+    assert_eq!(value["status"], "available");
+    assert_eq!(value["sourceStatus"], "ok");
+    assert_eq!(value["blocks"].as_array().expect("blocks").len(), 3);
+    assert_eq!(value["blocks"][0]["renderKind"], "status");
+    assert_eq!(value["blocks"][0]["title"], "Task started");
+    assert_eq!(value["blocks"][1]["renderKind"], "assistant");
+    assert_eq!(
+        value["blocks"][1]["text"],
+        "I can help with the activity transcript."
+    );
+    assert_eq!(value["blocks"][2]["renderKind"], "toolCall");
+    assert_eq!(value["blocks"][2]["data"]["name"], "shell");
+    assert_eq!(value["nextCursor"], "3");
+    assert_eq!(value["hasMore"], true);
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        codex_home.display().to_string(),
+        session_path.display().to_string(),
+        session_id.to_owned(),
+        "turn-private".to_owned(),
+        "/private/cache".to_owned(),
+        "/host/path".to_owned(),
+        "native.jsonl".to_owned(),
+        "session_id".to_owned(),
+        "stdout".to_owned(),
+        "stderr".to_owned(),
+        "pid".to_owned(),
+        "function_call_output".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "native transcript response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+    remove_static_fixture(&codex_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_transcript_route_degrades_malformed_codex_native_records() {
+    if skip_without_git(
+        "work_root_activity_transcript_route_degrades_malformed_codex_native_records",
+    ) {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-codex-malformed");
+    let cache_home = temp_fixture_path("work-root-activity-codex-malformed-cache");
+    let codex_home = temp_fixture_path("work-root-activity-codex-malformed-home");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    let session_id = "thread-malformed-secret";
+    write_codex_session(
+        &codex_home,
+        session_id,
+        r#"{"timestamp":"2026-05-22T00:00:00Z","type":"event_msg","payload":{"type":"agent_message","message":"safe assistant text"}}
+not json with /private/native/path and thread-malformed-secret
+{"timestamp":"2026-05-22T00:00:02Z","type":"debug_event","payload":{"type":"unknown","path":"/private/native/path"}}
+"#,
+    );
+    write_agent_metadata(
+        &agents_dir,
+        "native-broken",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "native-broken",
+            "backend": "codex",
+            "status": "idle",
+            "session_id": session_id
+        }),
+    );
+
+    let state =
+        app_state_with_activity_cache_and_codex_home(cache_home.clone(), Some(codex_home.clone()));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_transcript(
+        app,
+        cookie.as_str(),
+        &work_root_id,
+        "agent:native-broken",
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("malformed native transcript JSON");
+    assert_eq!(value["status"], "degraded");
+    assert_eq!(value["sourceStatus"], "degraded");
+    let blocks = value["blocks"].as_array().expect("blocks");
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks[0]["renderKind"], "assistant");
+    assert_eq!(blocks[1]["degraded"], true);
+    assert_eq!(blocks[1]["title"], "Malformed transcript record");
+    assert_eq!(blocks[2]["degraded"], true);
+    assert_eq!(blocks[2]["title"], "Unsupported transcript record");
+    assert!(!value["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .is_empty());
+
+    for forbidden in [
+        root.display().to_string(),
+        cache_home.display().to_string(),
+        codex_home.display().to_string(),
+        session_id.to_owned(),
+        "/private/native/path".to_owned(),
+        "not json".to_owned(),
+    ] {
+        assert!(
+            !body_text.contains(&forbidden),
+            "malformed native transcript response must not leak {forbidden}"
+        );
+    }
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+    remove_static_fixture(&codex_home);
+}
+
+#[tokio::test]
+async fn work_root_activity_transcript_route_falls_back_when_codex_native_missing() {
+    if skip_without_git("work_root_activity_transcript_route_falls_back_when_codex_native_missing")
+    {
+        return;
+    }
+    let root = temp_fixture_path("work-root-activity-codex-missing");
+    let cache_home = temp_fixture_path("work-root-activity-codex-missing-cache");
+    let codex_home = temp_fixture_path("work-root-activity-codex-missing-home");
+    fs::create_dir_all(&root).expect("create activity workRoot");
+    init_git_repo(&root);
+    let agents_dir = resolve_work_root_agents_dir(&cache_home, &root)
+        .expect("resolve wsstate agents dir for git workRoot");
+
+    write_agent_metadata(
+        &agents_dir,
+        "fallback",
+        &serde_json::json!({
+            "schema_version": 1,
+            "name": "fallback",
+            "backend": "codex",
+            "status": "idle",
+            "session_id": "thread-missing-secret"
+        }),
+    );
+    write_agent_output(&agents_dir, "fallback", "fallback output\n");
+
+    let state =
+        app_state_with_activity_cache_and_codex_home(cache_home.clone(), Some(codex_home.clone()));
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let (status, body_text) = fetch_work_root_activity_transcript(
+        app,
+        cookie.as_str(),
+        &work_root_id,
+        "agent:fallback",
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value =
+        serde_json::from_str(&body_text).expect("fallback transcript JSON");
+    assert_eq!(value["status"], "available");
+    assert_eq!(value["sourceStatus"], "ok");
+    assert_eq!(value["blocks"][0]["renderKind"], "markdown");
+    assert_eq!(value["blocks"][0]["text"], "fallback output");
+    assert!(!body_text.contains("thread-missing-secret"));
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&cache_home);
+    remove_static_fixture(&codex_home);
 }
 
 #[tokio::test]
