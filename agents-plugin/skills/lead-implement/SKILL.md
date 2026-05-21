@@ -19,8 +19,6 @@ Branch
 
 Execution
 - Create the task list at Prep; every task is mandatory and ordered.
-- Direct-edit: lead edits and verifies inline on current branch.
-- Delegated: lead writes brief, spawns implementer agent; lead does not edit code directly.
 - Delegated: implementer reads only the brief and optional plan; never the ticket directly.
 - Brief preserves every selected-scope binding decision; audit before commit.
 
@@ -38,7 +36,7 @@ Review
 2. If ticket-driven: read ticket; extract scope, stem, artifacts, and caller-provided slice.
 3. Apply `judge: needs-delegation`.
 4. Apply `judge: branch-mode`.
-5. If delegated: apply `judge: plan-depth`.
+5. Apply `judge: plan-depth`.
 6. Apply `judge: review-allocation`.
 
 ### 2. Prep
@@ -48,12 +46,19 @@ Review
 3. On `implement/*`, set `<merge-target>` from caller or confirm before execution.
 4. If continuing on `implement/*` and branch name no longer matches selected scope, rename with `git branch -m implement/<scope>`; stop if target branch exists or upstream tracking is ambiguous.
 5. Record `<implementation-start>` with `git rev-parse HEAD`.
-6. Delegated outside `implement/*`: create `implement/<scope>` before any source edit.
-7. Create and maintain this task list:
+6. If `branch-mode` = create: create `implement/<scope>` before any source edit.
+7. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
+8. Call `ws/infra.read(name: "impl-playbook")`.
+9. Identify integration test paths and run command.
+10. If `plan-depth` ≥ survey: survey project via `ws/agents.register(name: "project-survey", prompts: ["project-survey"])` → `ws/agents.call`; capture `[Must|Maybe]` references.
+11. If `plan-depth` ≥ brief: write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; include survey references when available; audit against target; commit.
+12. If `plan-depth` ≥ survey: run plan populator with **Plan prompts**; if survey returns `[escalate-to-research]`, re-run as research; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
+13. If delegated: register implementer via `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
+14. Create and maintain task list:
 
 ```text
-[ ] Route - delegation mode, review allocation, branch mode, plan depth
-[ ] Prep - branch, context, brief (when delegated)
+[ ] Route - delegation, plan depth, branch mode, review allocation
+[ ] Prep - branch, context, brief/plan (per plan-depth)
 [ ] Edit - direct-edit or spawn implementer; capture commit range
 [ ] Review - reviewer relay per review-allocation
 [ ] Doc pre-pass - update-spec then mental-model-updater; commit each
@@ -62,76 +67,25 @@ Review
 [ ] Merge - implementation-branch modes only and only when approved
 ```
 
-**Direct-edit prep:**
-8. Call `ws/mental_models.find(query: <target or domain>)` or `ws/mental_models.status(domain: <domain>)`; read returned docs, ancestors first.
-9. Call `ws/infra.read(name: "impl-playbook")`.
-10. Identify integration test paths and run command.
-
-**Delegated prep:**
-8. Survey project: `ws/agents.register(name: "project-survey", prompts: ["project-survey"])` → `ws/agents.call(name: "project-survey", prompt: <target>)`.
-9. Capture `[Must|Maybe]` references from survey.
-10. Write brief at `ai-docs/.plans/YYYY-MM/DD-<stem>.brief.md` using **Brief template**; audit against target (every settled contract, strategy decision, rejected alternative, and verification expectation must appear or be explicitly deferred); commit.
-11. If `judge: plan-depth` ≠ `as-is`: register plan populator; call with **Plan prompts**; if survey returns `[escalate-to-research]`, re-run as research; if plan returns `[escalate-to-lead]`, stop and report blocker; commit plan.
-12. Register implementer: `ws/agents.register(name: "implementer", prompts: ["implementer"])`.
-13. Generate review paths: `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
-
 ### 3. Edit
 
-**Direct-edit:**
-1. Edit directly per target and impl-playbook.
-2. Commit logical checkpoints with repository commit rules.
-3. Run tests/build; read full output before claiming pass.
-4. Resolve introduced warnings per impl-playbook Verify.
-5. On failure, diagnose blame before fixing; re-run until pass or real blocker.
-
-**Delegated:**
-1. Identify integration test paths and verification command from brief.
-2. Run baseline verification only when referenced tests already exist.
-3. Call `ws/agents.call(name: "implementer", prompt: ...)` with **Implementer spawn prompt**.
-4. Read `ws/agents.result(name: "implementer", timeout_seconds: 600)` only if async result lacks usable summary.
-5. Capture `<first-commit>..<last-commit>` from implementer output.
-
-Capture `<commit-range>` and `<result-commit>` for both paths.
+1. If direct-edit: edit directly per target and impl-playbook; commit logical checkpoints.
+2. If direct-edit: run tests/build; read full output before claiming pass; resolve introduced warnings per impl-playbook Verify; on failure, diagnose blame before fixing; re-run until pass or real blocker.
+3. If delegated: run baseline verification only when referenced tests already exist.
+4. If delegated: call `ws/agents.call(name: "implementer", prompt: ...)` with **Implementer spawn prompt**.
+5. If delegated: read `ws/agents.result(name: "implementer", timeout_seconds: 600)` only if async result lacks usable summary; capture `<first-commit>..<last-commit>`.
+6. Capture `<commit-range>` and `<result-commit>`.
 
 ### 4. Review
 
-1. If `judge: review-allocation` = lead-only: record rationale; skip to Doc Pre-Pass.
-
-**Single-reviewer path:**
-2. Register reviewer: `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`.
-3. Generate path: `ws/path.generate(kind: "review", stems: ["direct"])`; store `<review-path>`.
-4. Call reviewer:
-
-```text
-Diff range: <implementation-start>..HEAD
-Scope: direct-edit - <scope description>
-
-Review for correctness and fit.
-Review focus:
-- <2-4 focus bullets>
-Write full findings to: <review-path>
-Return only: [clean|non-clean]: <one-line summary>
-```
-
-5. If `[clean]`, skip to cleanup.
-6. If `[non-clean]`, read `<review-path>` and classify findings:
-   - Fix: correctness, security, contract, regression.
-   - Reject: style-only conflict or scope expansion.
-7. Apply fixes, re-verify, re-call reviewer with rejected list.
-8. Repeat until `[clean]` or 2 cycles.
-
-**Partitioned-reviewer path:**
-2. Choose partition subset from Tier 2 using implementer report and changed files.
-3. For each selected partition, register reviewer from **Reviewer partition table**.
-4. Call selected reviewers in parallel with **Reviewer prompt frame**.
-5. If all `[clean]`, skip to cleanup.
-6. If any `[non-clean]`, relay to implementer with **Review relay prompt**.
-7. After implementer returns, extract won't-fix list.
-8. Re-review only non-clean partitions with **Re-review prompt**.
-9. Keep clean partitions accepted unless fix commit touched their surface.
-10. Repeat until all `[clean]` or 3 cycles; lead adjudicates at cycle 2; caller escalation at cycle 3.
-
-**Cleanup:** Delete all review path files.
+1. If lead-only: record rationale; skip to step 8.
+2. If single: register reviewer via `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`; generate path via `ws/path.generate(kind: "review", stems: ["direct"])`.
+3. If partitioned: choose partition subset from Tier 2; for each, register reviewer from **Reviewer partition table**; generate paths via `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
+4. Call reviewer(s) with **Reviewer prompt frame**.
+5. If all `[clean]`: skip to step 8.
+6. If non-clean and single: read review path; classify findings (fix: correctness/security/contract/regression; reject: style-only or scope expansion); apply fixes; re-verify; re-call reviewer with rejected list. Repeat until `[clean]` or 2 cycles.
+7. If non-clean and partitioned: relay to implementer with **Review relay prompt**; extract won't-fix list; re-review non-clean partitions with **Re-review prompt**; keep clean partitions accepted unless fix touched their surface. Repeat until all `[clean]` or 3 cycles; lead adjudicates at cycle 2; caller escalation at cycle 3.
+8. Delete all review path files.
 
 ### 5. Doc Pre-Pass
 
@@ -195,6 +149,19 @@ Pick the first matching decision.
 | Create implementation branch | Delegated path outside `implement/` |
 | Direct current branch | Direct-edit path |
 
+### judge: plan-depth
+
+Default: `none` for direct-edit; `survey` for delegated when uncertain.
+
+| Decision | When |
+|----------|------|
+| none | Narrow scope; clear change points; no cross-module risk |
+| brief | Moderate complexity; benefit from self-anchoring scope record |
+| survey | Multi-module span; cold context; reuse points unconfirmed |
+| research | Multiple viable strategies; non-obvious cross-module side effects |
+
+Levels are cumulative: `brief` writes the brief; `survey` writes brief then runs survey plan; `research` writes brief then runs research plan.
+
 ### judge: review-allocation
 
 Tier 1 — depth:
@@ -215,16 +182,6 @@ Tier 2 — partitions (only when Tier 1 = Partitioned):
 
 Choose the smallest partition set that covers material risk.
 Full review (all three): reserve for cross-cutting behavior plus runtime/tooling plus test surface.
-
-### judge: plan-depth
-
-Delegated path only. Default: `survey` when uncertain.
-
-| Signal | Decision |
-|--------|----------|
-| Concrete change points; single-file/function scope | as-is |
-| Multi-module span; cold implementer; reuse points unconfirmed | survey |
-| Multiple viable strategies; non-obvious cross-module side effects | research |
 
 ## Templates
 
@@ -379,7 +336,7 @@ For each won't-fix item: respond [accepted] or [maintained: <brief reason>].
 ## Doctrine
 
 Implement optimizes for **verified code reaching the target branch**. Route
-decides delegation, review depth, and branch mode upfront; subsequent stages
+decides delegation, plan depth, and branch mode upfront; subsequent stages
 execute per those decisions without re-routing. Code quality lives in the Edit
 stage (direct or implementer); review quality lives in the unified Review stage.
 When ambiguous, keep routing out of execution and execution out of routing.
