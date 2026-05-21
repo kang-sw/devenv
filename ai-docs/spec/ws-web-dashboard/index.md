@@ -273,6 +273,37 @@ named-agent rows and merges them into the existing projection so newly
 registered or called agents appear without a browser reload. The full projection
 remains available for the initial selected-workRoot fetch.
 
+## 🚧 Activity Console Read Model {#260521-ws-dashboard-activity-console-read-model}
+
+The dashboard will expose a workRoot-scoped Activity Console read model that
+combines a live/latest Activity Feed snapshot with selected activity transcript
+backfill. The feed endpoint returns selectable Activity Items for the opened
+workRoot, while a per-item transcript endpoint returns normalized Transcript
+Blocks for the selected item. Named agents are the first supported source, but
+the public shape stays source-neutral so main-agent sessions, exec jobs,
+diagnostics, and later readable activity can fit the same console contract.
+
+Activity Feed snapshots report enough item state for compact ribbon rendering
+without requiring a transcript fetch: stable activity id, kind, label, status,
+live/attention flags, timing fields, source display metadata, transcript
+availability, bounded diagnostics, selected item hint, feed cursor, and update
+mode. Ordering favors active, live, attention, blocked, failed, and recently
+updated activity before using alphabetical order as a tie-breaker.
+
+Transcript backfill returns bounded normalized blocks rather than backend-native
+cache records, raw session JSON, stdout/stderr paths, or file contents. Each
+block carries a cursor, timestamp when available, a render kind such as user,
+assistant, tool call/result, status, error, or output, and degraded-state
+markers. Cursor, block-count, and byte-count bounds keep transcript reads
+finite and make unknown activity ids, unavailable sources, empty transcripts,
+and malformed records explicit response states instead of whole-feed failures.
+
+Browser callers continue to address the model by opaque `workRootId` and
+activity id. Responses must not expose host paths, cache paths, backend session
+ids, process ids, stdout/stderr paths, stream paths, or backend-native
+transcript paths. The read model remains read-only and does not add agent start,
+interrupt, cancel, erase, retry, or exec-job control actions.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
