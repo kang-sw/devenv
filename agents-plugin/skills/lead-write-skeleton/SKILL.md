@@ -162,9 +162,8 @@ Verification: <build or syntax command and result>
 Next: <caller-owned when invoked by ws:lead-implement | ws:lead-implement when invoked standalone>
 ```
 
-When invoked standalone, report next route as `ws:lead-implement`; carry
-context: same target and skeleton exists. Do not recommend `ws:lead-edit` or
-`ws:lead-write-code` directly from this skill.
+When invoked standalone, report next route as `ws:lead-implement`. Do not
+recommend `ws:lead-edit` or `ws:lead-write-code` directly from this skill.
 
 ## Judgments
 
