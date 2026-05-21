@@ -306,6 +306,41 @@ ids, process ids, stdout/stderr paths, stream paths, or backend-native
 transcript paths. The read model remains read-only and does not add agent start,
 interrupt, cancel, erase, retry, or exec-job control actions.
 
+## 🚧 Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
+
+The WorkRoot Activity pane will render a reusable read-only Activity Console
+instead of a vertical named-agent card dump. The console combines a horizontal
+Activity Ribbon for live/latest items with a selected Transcript Block viewer
+below it, using the Activity Console read model as its route-backed source.
+
+Ribbon items use a compact three-line shape: small source or kind text, a
+primary name/title line, and small status or recency text. The text area stays
+compact, truncates instead of wrapping, and the ribbon scrolls horizontally at
+constrained desktop widths. Live, active, and attention-worthy items use
+semantic active styling, and a small short-lived green breathing indicator may
+mark newly updated or locally dirty items until the user selects or otherwise
+acknowledges them.
+
+The browser may keep a local acknowledgement watermark per workRoot/activity
+item. On initial feed load it compares that local watermark with daemon item
+timestamps or cursors to mark newly updated items dirty. Selecting or explicitly
+acknowledging an item clears only browser-local dirty state; the daemon does not
+gain read-receipt authority.
+
+Selecting a ribbon item renders normalized transcript blocks. Agent activity
+renders as action-unit blocks where dialogue and assistant output are expanded
+by default, while tool calls, MCP activity, and command runs default to one-line
+summaries with inline detail expansion. Exec activity renders as terminal-style
+output. Transcript backfill/load-more is driven primarily by scroll position,
+with explicit refresh or load-more controls reserved for fallback and error
+states.
+
+Visible Activity Console controls expose stable command ids and route their
+clicked behavior through the dashboard command dispatch path so later keyboard
+bindings can invoke the same behavior. The shell remains read-only, does not add
+agent control buttons, and does not consume live SSE/watch streams until the
+live UX child implements that behavior.
+
 ## Dark-First Visual System {#260516-ws-web-dashboard-dark-visual-system}
 
 The dashboard frontend provides a dark-first visual baseline for the protected
