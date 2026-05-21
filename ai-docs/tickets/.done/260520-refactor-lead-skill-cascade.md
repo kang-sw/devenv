@@ -3,8 +3,10 @@ title: lead skill cascade pruning from skill-authoring doctrine
 related:
   260517-bug-lead-proceed-overbroad-slice: shares lead-proceed surface; phase resolution stays domain complexity, sequence after Phase 3 lands; re-diagnose 260517 surface in Phase 3 Result since R2 removes lead-proceed steps 13-14
   260519-feat-implement-branch-squash-gate: shares lead-implement surface; sequence Phase 2 (R6) before or coordinate with squash-gate Phase 1
+  260521-refactor-wsflow-lead-implement-mirroring-gap: follow-up for the remaining wsflow lead-implement divergence discovered during final mirroring audit
 related-mental-model:
   - workflow-skills
+completed: 2026-05-21
 ---
 
 # lead skill cascade pruning from skill-authoring doctrine
@@ -378,3 +380,54 @@ Verification:
   reduction in the first three without growth blowing up
   `lead-skill-authoring`.
 - Confirm `ai-docs/_index.md` queue and inventory remain consistent.
+
+### Result (674e9955) - 2026-05-21
+
+Commits: `df117eff..674e9955` plus final ticket archival commit.
+
+- R5 landed first: `lead-proceed` now owns active-conversation freshness,
+  removes `warmth`, and limits `ws/subquery` to self-contained artifact,
+  source, spec, or ticket evidence. Spec and mental-model anchors were updated.
+- R2 landed in `lead-proceed`: implementation-bound routing no longer
+  pre-applies `lead-implement` branch or execution judgments, and straggler
+  implementation-verdict fields were removed.
+- R1 landed through `lead-skill-authoring`: dense mixed-responsibility `On:`
+  handlers use responsibility-named H3 sub-blocks; single-purpose checklists
+  stay flat. Full/wsflow `lead-write-ticket` was restructured under the new
+  rule without behavior changes.
+- Fresh-reader audit and downstream consistency sweep became the accepted
+  skill-authoring gates. R4 was not added as a separate negative-invariant
+  checklist item because the fresh-reader audit already catches unexplained
+  negative constraints, hidden discussion shorthand, contradictions, and missing
+  end-state instructions.
+- `lead-write-ticket` recoverability was tightened after fresh-reader audit:
+  tickets now preserve enough settled contract detail that a later fresh
+  implementation session cannot fill missing product, workflow, API, or
+  verification decisions differently without contradicting the ticket.
+
+Mirroring:
+- Full/wsflow `lead-write-ticket` were mirrored for handler structure and
+  recoverability wording, with wsflow notation adjusted to package rules.
+- Full/wsflow `lead-proceed` both carry the R2/R5 behavior; final audit removed
+  stale wsflow carried-context residue in `674e9955`.
+- Final audit also removed the last wsflow `lead-write-ticket` carry-context
+  phrase from the spec-gate handoff.
+- Full/wsflow `lead-implement` are not equivalent: full ws uses the unified
+  implementation spine from Phase 2, while wsflow still delegates execution to
+  `wsflow:lead-edit`. This closure created
+  `260521-refactor-wsflow-lead-implement-mirroring-gap` to resolve or document
+  that package-specific divergence.
+
+Verification:
+- Fresh-reader audit on full/wsflow `lead-write-ticket` found no remaining
+  material blocker after the recoverability fixes.
+- `uvx pytest agents-plugin/tests/test_skill_dispatch_contracts.py` passed.
+- `uvx pytest agents-plugin-wsflow/tests/test_wsflow_skill_bundle.py -k 'not test_full_skill_inventory_drift_is_visible'` passed; the excluded full-suite
+  drift test still reflects the separate wsflow/full `lead-edit` inventory
+  divergence.
+- `git diff --check` passed during the phase.
+- Line-count delta from `3d48c1d9` to `674e9955`: `lead-proceed` 153 -> 142,
+  `lead-implement` 341 -> 341, `lead-write-ticket` 168 -> 234,
+  `lead-skill-authoring` 114 -> 141. The write-ticket and authoring growth is
+  accepted because Phase 3 added handler structure, audit gates, and
+  recoverability contract rather than only pruning.

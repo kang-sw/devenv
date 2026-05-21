@@ -159,7 +159,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260519-feat-implement-branch-squash-gate` | todo | Add a pre-merge implementation-branch squash gate for cleaner main history |
-| `260520-refactor-lead-skill-cascade` | todo | Prune lead skill procedural sophistication via skill-authoring doctrine cascade (R3'/R6 phased, R1/R2/R4/R5 batched) |
 | `260521-refactor-wsflow-lead-implement-mirroring-gap` | todo | Resolve whether wsflow lead-implement should mirror the full unified spine or document lead-edit delegation as intentional divergence |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
