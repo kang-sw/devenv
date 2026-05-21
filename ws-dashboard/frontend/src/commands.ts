@@ -120,6 +120,41 @@ export function buildTerminalCreateCommand(workRootId: string): DashboardCommand
   };
 }
 
+export function buildActivitySelectItemCommand(
+  activityId: string,
+): DashboardCommand {
+  return {
+    commandId: "activity.selectItem",
+    payload: { type: "activity.selectItem", activityId },
+  };
+}
+
+export function buildActivityTranscriptLoadMoreCommand(
+  activityId: string,
+): DashboardCommand {
+  return {
+    commandId: "activity.transcript.loadMore",
+    payload: { type: "activity.transcript.loadMore", activityId },
+  };
+}
+
+export function buildActivityRefreshCommand(workRootId: string): DashboardCommand {
+  return {
+    commandId: "activity.refresh",
+    payload: { type: "activity.refresh", workRootId },
+  };
+}
+
+export function buildActivityDetailToggleCommand(
+  activityId: string,
+  detailKey: string,
+): DashboardCommand {
+  return {
+    commandId: "activity.detail.toggle",
+    payload: { type: "activity.detail.toggle", activityId, detailKey },
+  };
+}
+
 export function dispatchDashboardCommand(
   command: DashboardCommand,
   options: {

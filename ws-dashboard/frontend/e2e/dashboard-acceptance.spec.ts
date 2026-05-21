@@ -528,16 +528,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expectDockviewWorkbench(page);
 
-    // The pane body is the read-only projection. Running commands are an
-    // explicitly empty section, and the empty/no-agent detail is valid and
-    // visible for the plain-directory gate workRoot.
+    // The pane body is the read-only Activity Console projection. The
+    // plain-directory gate workRoot has an empty source-neutral feed.
     const paneBody = activityPane.locator(".workroot-activity-pane");
     await expect(paneBody).toBeVisible();
     await expect(
-      paneBody.locator('[data-running-commands-state="empty"]'),
-    ).toBeVisible();
-    await expect(
-      paneBody.locator('[data-named-agents-state="empty"]'),
+      paneBody.locator('[data-activity-console-state="empty"]'),
     ).toBeVisible();
 
     // The Activity tab carries the surface title.
@@ -575,13 +571,70 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
           body: JSON.stringify({
             workRootId: requestedWorkRootId,
             status: "degraded",
+            updateMode: "snapshot",
+            feedCursor: "browser:1",
+            selectedItemId: null,
             summary: {
-              total: 1,
+              total: 2,
               active: 1,
-              blocked: 0,
+              blocked: 1,
               failed: 0,
               unavailable: 0,
             },
+            items: [
+              {
+                id: "agent:alpha",
+                kind: "namedAgent",
+                label: "agent-alpha",
+                status: "running",
+                live: true,
+                attention: false,
+                startedAt: "2026-05-17T11:57:00Z",
+                updatedAt: "2026-05-17T11:58:00Z",
+                finishedAt: null,
+                source: {
+                  kind: "namedAgent",
+                  label: "claude",
+                  backend: "claude",
+                  harness: "codex",
+                  tier: "core",
+                  model: "opus",
+                },
+                transcript: {
+                  status: "available",
+                  available: true,
+                  cursor: "alpha:1",
+                },
+                diagnostics: ["cache row degraded"],
+                metadata: {},
+              },
+              {
+                id: "exec:beta",
+                kind: "exec",
+                label: "exec-beta-long-label-that-must-truncate-inside-ribbon",
+                status: "completed",
+                live: false,
+                attention: true,
+                startedAt: "2026-05-17T11:55:00Z",
+                updatedAt: "2026-05-17T11:59:00Z",
+                finishedAt: "2026-05-17T11:59:00Z",
+                source: {
+                  kind: "exec",
+                  label: "exec",
+                  backend: null,
+                  harness: null,
+                  tier: null,
+                  model: null,
+                },
+                transcript: {
+                  status: "available",
+                  available: true,
+                  cursor: "beta:1",
+                },
+                diagnostics: [],
+                metadata: {},
+              },
+            ],
             agents: [
               {
                 agentId: "agent-alpha",
@@ -613,9 +666,104 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         });
       },
     );
+    await page.route(
+      /\/api\/dashboard\/work-roots\/.*\/activity\/items\/.*\/transcript(?:\?.*)?$/,
+      async (route) => {
+        const url = new URL(route.request().url());
+        const pathMatch = url.pathname.match(
+          /\/api\/dashboard\/work-roots\/([^/]+)\/activity\/items\/([^/]+)\/transcript$/,
+        );
+        const requestedWorkRootId = pathMatch
+          ? decodeURIComponent(pathMatch[1])
+          : "browser-gate-root";
+        const activityId = pathMatch
+          ? decodeURIComponent(pathMatch[2])
+          : "agent:alpha";
+        const cursor = url.searchParams.get("cursor");
+        const source =
+          activityId === "exec:beta"
+            ? {
+                kind: "exec",
+                label: "exec",
+                backend: null,
+                harness: null,
+                tier: null,
+                model: null,
+              }
+            : {
+                kind: "namedAgent",
+                label: "claude",
+                backend: "claude",
+                harness: "codex",
+                tier: "core",
+                model: "opus",
+              };
+        const blocks =
+          activityId === "exec:beta"
+            ? [
+                {
+                  cursor: "beta:1",
+                  timestamp: "2026-05-17T11:59:00Z",
+                  renderKind: "text",
+                  title: "exec output",
+                  text: "$ echo browser-gate\nbrowser-gate",
+                  data: null,
+                  degraded: false,
+                },
+              ]
+            : cursor
+              ? [
+                  {
+                    cursor: "alpha:3",
+                    timestamp: "2026-05-17T11:59:30Z",
+                    renderKind: "markdown",
+                    title: "assistant follow-up",
+                    text: "loaded more transcript",
+                    data: null,
+                    degraded: false,
+                  },
+                ]
+              : [
+                  {
+                    cursor: "alpha:1",
+                    timestamp: "2026-05-17T11:58:00Z",
+                    renderKind: "markdown",
+                    title: "assistant",
+                    text: "selected transcript alpha",
+                    data: null,
+                    degraded: false,
+                  },
+                  {
+                    cursor: "alpha:2",
+                    timestamp: "2026-05-17T11:58:10Z",
+                    renderKind: "json",
+                    title: "tool call",
+                    text: "tool details visible after expansion",
+                    data: { tool: "read" },
+                    degraded: false,
+                  },
+                ];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            workRootId: requestedWorkRootId,
+            activityId,
+            status: "available",
+            sourceStatus: "ok",
+            live: activityId === "agent:alpha",
+            source,
+            blocks,
+            nextCursor: activityId === "agent:alpha" && !cursor ? "alpha:2" : null,
+            hasMore: activityId === "agent:alpha" && !cursor,
+            diagnostics: [],
+          }),
+        });
+      },
+    );
     await page.reload({ waitUntil: "domcontentloaded" });
     await openWorkRootInBrowser(page, workRoot);
-    await expect(opener).toContainText("1 agent");
+    await expect(opener).toContainText("2 agents");
 
     await opener.click();
     await expect(activityPane).toHaveCount(1);
@@ -627,21 +775,48 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(activityTab).toHaveAttribute("aria-selected", "true");
 
     const populatedBody = activityPane.locator(".workroot-activity-pane");
+    await expect(populatedBody.locator(".activity-console")).toBeVisible();
+    await expect(populatedBody.locator(".activity-ribbon")).toBeVisible();
+    const ribbonItems = populatedBody.locator(".activity-ribbon-item");
+    await expect(ribbonItems).toHaveCount(2);
+    await expect(ribbonItems.first()).toHaveCSS("min-width", "176px");
+    await expect(populatedBody.locator(".activity-ribbon")).toHaveJSProperty(
+      "scrollLeft",
+      0,
+    );
     await expect(
-      populatedBody.locator('[data-running-commands-state="empty"]'),
-    ).toBeVisible();
+      populatedBody.locator('[data-command-id="activity.selectItem"]'),
+    ).toHaveCount(2);
     await expect(
-      populatedBody.locator(".workroot-activity-agent", {
-        hasText: "agent-alpha",
-      }),
+      populatedBody.locator('[data-command-id="activity.refresh"]'),
     ).toBeVisible();
-    await expect(populatedBody).toContainText("running");
-    await expect(populatedBody).toContainText("session");
-    await expect(populatedBody).toContainText("claude · codex · opus · high");
-    await expect(populatedBody).toContainText("exec exec-alpha");
-    await expect(populatedBody).toContainText("bounded diagnostic");
-    await expect(populatedBody).toContainText("review output ready");
-    await expect(populatedBody).toContainText("cache row degraded");
+    await expect(populatedBody).toContainText("$ echo browser-gate");
+    await expect(
+      populatedBody.locator('[data-block-mode="terminal"]'),
+    ).toBeVisible();
+    const alphaItem = populatedBody.locator('[data-activity-id="agent:alpha"]');
+    await expect(alphaItem).toHaveAttribute("data-dirty", "true");
+    await alphaItem.click();
+    await expect(alphaItem).toHaveAttribute("data-dirty", "false");
+    await expect(populatedBody).toContainText("selected transcript alpha");
+    const detailToggle = populatedBody.locator(
+      '[data-command-id="activity.detail.toggle"]',
+    );
+    await expect(detailToggle).toBeVisible();
+    await detailToggle.click();
+    await expect(populatedBody).toContainText("tool details visible after expansion");
+    const loadMore = populatedBody.locator(
+      '[data-command-id="activity.transcript.loadMore"]',
+    );
+    await expect(loadMore).toBeVisible();
+    await loadMore.click();
+    await expect(populatedBody).toContainText("loaded more transcript");
+    const execItem = populatedBody.locator('[data-activity-id="exec:beta"]');
+    await execItem.click();
+    await expect(populatedBody).toContainText("$ echo browser-gate");
+    await expect(
+      populatedBody.locator('[data-block-mode="terminal"]'),
+    ).toBeVisible();
 
     await opener.click();
     await expect(activityPane).toHaveCount(1);
@@ -657,8 +832,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     note(
       "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
-        "empty and populated named-agent projections rendered, a second click " +
-        "focused it without duplicating, and hover-only close removed it " +
+        "empty and populated Activity Console projections rendered, selection, " +
+        "dirty acknowledgement, detail toggle, and load-more controls carried " +
+        "stable command ids, a second click focused it without duplicating, " +
+        "and hover-only close removed it " +
         "immediately with no confirmation popover",
     );
   });

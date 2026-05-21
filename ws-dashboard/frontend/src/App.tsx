@@ -5,6 +5,10 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
 import {
+  buildActivityDetailToggleCommand,
+  buildActivityRefreshCommand,
+  buildActivitySelectItemCommand,
+  buildActivityTranscriptLoadMoreCommand,
   buildDashboardRefreshCommand,
   buildFileExplorerOpenFileCommand,
   buildFileExplorerRefreshCommand,
@@ -98,10 +102,22 @@ import {
 } from "./resourceModel";
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
+  acknowledgeActivityItem,
+  defaultActivitySelection,
   fetchWorkRootActivity,
+  fetchWorkRootActivityTranscript,
+  initializeActivityDirtyItems,
   mergeWorkRootActivityViews,
+  orderActivityItems,
+  preserveActivitySelection,
+  shouldApplyActivityTranscriptResponse,
+  shouldLoadMoreActivityTranscript,
+  transcriptBlockView,
   workRootActivityBadge,
-  type NamedAgentActivityView,
+  type ActivityAcknowledgements,
+  type ActivityItem,
+  type ActivityTranscript,
+  type TranscriptBlock,
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
   type WorkRootActivityView,
@@ -1161,6 +1177,7 @@ function WorkbenchShell({
               workRootActivityState.rootId === root.id
                 ? workRootActivityState.activity
                 : { phase: "loading" },
+              onCommand,
             ),
             paneOrderByGroup,
           );
@@ -2080,6 +2097,7 @@ function workRootActivityPlacementState(
 function workRootActivityWorkbenchPane(
   root: WorkRootView,
   activity: WorkRootActivityBadgeInput,
+  onCommand: DashboardCommandDispatcher,
 ): WorkbenchPane {
   const ready = activity.phase === "ready" ? activity.view : null;
   const state: ViewState = {
@@ -2106,21 +2124,23 @@ function workRootActivityWorkbenchPane(
     kind: "workRootActivity",
     category: "opened",
     title: "WorkRoot Activity",
-    detail: `${root.label} named-agent activity`,
+    detail: `${root.label} activity console`,
     state,
     meta,
-    body: <WorkRootActivityPane activity={activity} />,
+    body: <WorkRootActivityPane activity={activity} onCommand={onCommand} />,
   };
 }
 
 function WorkRootActivityPane({
   activity,
+  onCommand,
 }: {
   activity: WorkRootActivityBadgeInput;
+  onCommand: DashboardCommandDispatcher;
 }) {
-  // CONTRACT: A reversible read-only projection of the Phase 1 named-agent
-  // activity API. It never exposes host cache paths, stream paths, pids, or
-  // session ids, and offers no agent control actions.
+  // CONTRACT: A reversible read-only Activity Console projection. It consumes
+  // source-neutral feed items/transcripts, exposes command-routed controls, and
+  // offers no agent/exec control actions or daemon-side acknowledgement.
   return (
     <section className="workroot-activity-pane" aria-label="WorkRoot Activity">
       {activity.phase === "loading" ? (
@@ -2132,117 +2152,384 @@ function WorkRootActivityPane({
           WorkRoot activity is unavailable
         </div>
       ) : (
-        <WorkRootActivityDetail view={activity.view} />
+        <WorkRootActivityConsole view={activity.view} onCommand={onCommand} />
       )}
-      {/* CONTRACT: Running command rows stay explicitly empty until
-          260513-feat-async-exec-output-reader provides the async exec source. */}
-      <section
-        className="workroot-activity-section"
-        data-running-commands-state="empty"
-      >
-        <h3 className="workroot-activity-section-title">Running commands</h3>
-        <p className="workroot-activity-empty">
-          No running commands. Command activity arrives with the async exec
-          output reader.
-        </p>
-      </section>
     </section>
   );
 }
 
-function WorkRootActivityDetail({ view }: { view: WorkRootActivityView }) {
-  const { summary, agents } = view;
+type ActivityTranscriptLoadState =
+  | { phase: "idle"; transcript: null; error: null; loadingMore: false }
+  | {
+      phase: "loading";
+      transcript: ActivityTranscript | null;
+      error: null;
+      loadingMore: false;
+    }
+  | {
+      phase: "ready";
+      transcript: ActivityTranscript;
+      error: null;
+      loadingMore: boolean;
+    }
+  | {
+      phase: "error";
+      transcript: ActivityTranscript | null;
+      error: string;
+      loadingMore: false;
+    };
+
+function WorkRootActivityConsole({
+  view,
+  onCommand,
+}: {
+  view: WorkRootActivityView;
+  onCommand: DashboardCommandDispatcher;
+}) {
+  const orderedItems = useMemo(() => orderActivityItems(view.items), [view.items]);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(() =>
+    view.selectedItemId && view.items.some((item) => item.id === view.selectedItemId)
+      ? view.selectedItemId
+      : defaultActivitySelection(view.items),
+  );
+  const [acknowledgements, setAcknowledgements] =
+    useState<ActivityAcknowledgements>({});
+  const dirtyItems = useMemo(
+    () => initializeActivityDirtyItems(view.items, acknowledgements),
+    [view.items, acknowledgements],
+  );
+  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [transcriptState, setTranscriptState] =
+    useState<ActivityTranscriptLoadState>({
+      phase: "idle",
+      transcript: null,
+      error: null,
+      loadingMore: false,
+    });
+  const transcriptRequestSeq = useRef(0);
+  const currentTranscriptRequest = useRef({
+    workRootId: view.workRootId,
+    activityId: selectedItemId,
+    requestId: 0,
+  });
+
+  useEffect(() => {
+    setSelectedItemId((current) =>
+      preserveActivitySelection(
+        view.items,
+        current ?? view.selectedItemId ?? null,
+      ),
+    );
+  }, [view.items, view.selectedItemId]);
+
+  const selectedItem =
+    orderedItems.find((item) => item.id === selectedItemId) ?? null;
+
+  useEffect(() => {
+    currentTranscriptRequest.current = {
+      ...currentTranscriptRequest.current,
+      workRootId: view.workRootId,
+      activityId: selectedItemId,
+    };
+  }, [view.workRootId, selectedItemId]);
+
+  const acknowledgeSelected = useCallback(
+    (item: ActivityItem) => {
+      setAcknowledgements((current) => acknowledgeActivityItem(current, item));
+    },
+    [],
+  );
+
+  const loadTranscript = useCallback(
+    (mode: "replace" | "append") => {
+      const item = selectedItem;
+      if (!item || !item.transcript.available) {
+        if (!item) {
+          setTranscriptState({
+            phase: "idle",
+            transcript: null,
+            error: null,
+            loadingMore: false,
+          });
+        } else {
+          setTranscriptState({
+            phase: "ready",
+            transcript: {
+              workRootId: view.workRootId,
+              activityId: item.id,
+              status: item.transcript.status,
+              sourceStatus: item.transcript.status,
+              live: item.live,
+              source: item.source,
+              blocks: [],
+              nextCursor: null,
+              hasMore: false,
+              diagnostics: item.diagnostics,
+            },
+            error: null,
+            loadingMore: false,
+          });
+        }
+        return;
+      }
+      const cursor =
+        mode === "append" && transcriptState.phase === "ready"
+          ? transcriptState.transcript.nextCursor
+          : undefined;
+      if (mode === "append" && !cursor) {
+        return;
+      }
+      const requestId = transcriptRequestSeq.current + 1;
+      transcriptRequestSeq.current = requestId;
+      const expected = { workRootId: view.workRootId, activityId: item.id, requestId };
+      currentTranscriptRequest.current = {
+        workRootId: view.workRootId,
+        activityId: item.id,
+        requestId,
+      };
+      setTranscriptState((current) =>
+        mode === "append" && current.phase === "ready"
+          ? { ...current, loadingMore: true }
+          : { phase: "loading", transcript: null, error: null, loadingMore: false },
+      );
+      void fetchWorkRootActivityTranscript(view.workRootId, item.id, {
+        cursor: cursor ?? undefined,
+        limit: 40,
+      })
+        .then((transcript) => {
+          if (
+            !shouldApplyActivityTranscriptResponse(
+              expected,
+              transcript,
+              currentTranscriptRequest.current,
+            )
+          ) {
+            return;
+          }
+          setTranscriptState((current) => {
+            if (mode === "append" && current.phase === "ready") {
+              return {
+                phase: "ready",
+                transcript: {
+                  ...transcript,
+                  blocks: [...current.transcript.blocks, ...transcript.blocks],
+                },
+                error: null,
+                loadingMore: false,
+              };
+            }
+            return {
+              phase: "ready",
+              transcript,
+              error: null,
+              loadingMore: false,
+            };
+          });
+        })
+        .catch((error) => {
+          if (currentTranscriptRequest.current.requestId !== requestId) {
+            return;
+          }
+          setTranscriptState({
+            phase: "error",
+            transcript: null,
+            error: error instanceof Error ? error.message : "transcript unavailable",
+            loadingMore: false,
+          });
+        });
+    },
+    [selectedItem, transcriptState, view.workRootId],
+  );
+
+  useEffect(() => {
+    if (selectedItem) {
+      acknowledgeSelected(selectedItem);
+    }
+    loadTranscript("replace");
+  }, [selectedItemId]);
+
+  const handleSelect = (item: ActivityItem) => {
+    onCommand(buildActivitySelectItemCommand(item.id), {
+      "activity.selectItem": () => {
+        acknowledgeSelected(item);
+        setSelectedItemId(item.id);
+      },
+    });
+  };
+
+  const handleLoadMore = () => {
+    if (!selectedItem) return;
+    onCommand(buildActivityTranscriptLoadMoreCommand(selectedItem.id), {
+      "activity.transcript.loadMore": () => loadTranscript("append"),
+    });
+  };
+
+  const handleRefresh = () => {
+    onCommand(buildActivityRefreshCommand(view.workRootId), {
+      "activity.refresh": () => loadTranscript("replace"),
+    });
+  };
+
+  const handleToggleDetail = (block: TranscriptBlock) => {
+    if (!selectedItem) return;
+    const detailKey = block.cursor;
+    onCommand(buildActivityDetailToggleCommand(selectedItem.id, detailKey), {
+      "activity.detail.toggle": () => {
+        setExpandedDetails((current) => {
+          const next = new Set(current);
+          if (next.has(detailKey)) next.delete(detailKey);
+          else next.add(detailKey);
+          return next;
+        });
+      },
+    });
+  };
+
+  const transcript =
+    transcriptState.phase === "ready" ? transcriptState.transcript : null;
   return (
-    <section className="workroot-activity-section">
-      <div className="workroot-activity-section-head">
-        <h3 className="workroot-activity-section-title">Named agents</h3>
+    <section className="activity-console" data-activity-console="ready">
+      <div className="activity-console-summary" aria-label="Activity summary">
         <span className="meta-chip">{view.status}</span>
+        <span className="meta-chip">{view.summary.total} total</span>
+        <span className="meta-chip">{view.summary.active} active</span>
+        <span className="meta-chip">{view.summary.blocked} attention</span>
       </div>
-      <div className="workroot-activity-summary">
-        <span className="meta-chip">{summary.total} total</span>
-        <span className="meta-chip">{summary.active} active</span>
-        <span className="meta-chip">{summary.blocked} blocked</span>
-        <span className="meta-chip">{summary.failed} failed</span>
-        <span className="meta-chip">{summary.unavailable} unavailable</span>
-      </div>
-      {agents.length === 0 ? (
-        <p
-          className="workroot-activity-empty"
-          data-named-agents-state="empty"
-        >
-          No named agents for this workRoot.
+      {orderedItems.length === 0 ? (
+        <p className="workroot-activity-empty" data-activity-console-state="empty">
+          No activity for this workRoot.
         </p>
       ) : (
-        <ul className="workroot-activity-agents">
-          {agents.map((agent) => (
-            <WorkRootActivityAgentRow agent={agent} key={agent.agentId} />
-          ))}
-        </ul>
+        <>
+          <div className="activity-ribbon" aria-label="Activity ribbon">
+            {orderedItems.map((item) => (
+              <button
+                className="activity-ribbon-item"
+                data-command-id="activity.selectItem"
+                data-activity-id={item.id}
+                data-selected={item.id === selectedItemId ? "true" : "false"}
+                data-dirty={dirtyItems.has(item.id) ? "true" : "false"}
+                key={item.id}
+                type="button"
+                onClick={() => handleSelect(item)}
+              >
+                <span className="activity-ribbon-cue" aria-hidden="true" />
+                <span className="activity-ribbon-title">{item.label}</span>
+                <span className="activity-ribbon-meta">
+                  {item.source.label || item.kind}
+                </span>
+                <span className="activity-ribbon-status">{item.status}</span>
+              </button>
+            ))}
+          </div>
+          <section className="activity-transcript" aria-label="Activity transcript">
+            <div className="activity-transcript-head">
+              <div className="activity-transcript-title">
+                <strong>{selectedItem?.label ?? "Activity"}</strong>
+                <span>{selectedItem?.status ?? "unavailable"}</span>
+              </div>
+              <button
+                className="activity-console-control"
+                data-command-id="activity.refresh"
+                type="button"
+                onClick={handleRefresh}
+              >
+                Refresh
+              </button>
+            </div>
+            {transcriptState.phase === "loading" ? (
+              <div className="workroot-activity-state">Loading transcript</div>
+            ) : transcriptState.phase === "error" ? (
+              <div className="workroot-activity-state workroot-activity-state-error">
+                Transcript unavailable
+              </div>
+            ) : transcript && transcript.blocks.length > 0 ? (
+              <div
+                className="activity-transcript-scroll"
+                onScroll={(event) => {
+                  const element = event.currentTarget;
+                  if (
+                    shouldLoadMoreActivityTranscript(
+                      element,
+                      transcript.hasMore,
+                      transcriptState.loadingMore,
+                    )
+                  ) {
+                    handleLoadMore();
+                  }
+                }}
+              >
+                {transcript.blocks.map((block) => (
+                  <ActivityTranscriptBlock
+                    block={block}
+                    expanded={expandedDetails.has(block.cursor)}
+                    key={block.cursor}
+                    onToggle={() => handleToggleDetail(block)}
+                    sourceKind={transcript.source.kind}
+                  />
+                ))}
+                {transcript.hasMore ? (
+                  <button
+                    className="activity-console-control activity-load-more"
+                    data-command-id="activity.transcript.loadMore"
+                    disabled={transcriptState.loadingMore}
+                    type="button"
+                    onClick={handleLoadMore}
+                  >
+                    {transcriptState.loadingMore ? "Loading" : "Load more"}
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <div className="workroot-activity-state" data-activity-transcript-state="empty">
+                Transcript is {selectedItem?.transcript.status ?? "empty"}.
+              </div>
+            )}
+          </section>
+        </>
       )}
     </section>
   );
 }
 
-function WorkRootActivityAgentRow({
-  agent,
+function ActivityTranscriptBlock({
+  block,
+  expanded,
+  onToggle,
+  sourceKind,
 }: {
-  agent: NamedAgentActivityView;
+  block: TranscriptBlock;
+  expanded: boolean;
+  onToggle: () => void;
+  sourceKind: string;
 }) {
-  const metaParts = [
-    agent.backend,
-    agent.harness,
-    agent.model ?? agent.tier,
-    agent.effort,
-  ].filter((part): part is string => Boolean(part));
-  const call = agent.currentCall;
+  const view = transcriptBlockView(block, sourceKind);
+  const detailVisible = view.mode === "expanded" || view.mode === "terminal" || expanded;
   return (
-    <li className="workroot-activity-agent" data-agent-status={agent.status}>
-      <div className="workroot-activity-agent-head">
-        <span className="workroot-activity-agent-name">
-          {agent.name ?? agent.agentId}
-        </span>
-        <span className="meta-chip">{agent.status}</span>
-        {agent.sessionPresent ? (
-          <span className="meta-chip">session</span>
+    <article
+      className="activity-transcript-block"
+      data-block-mode={view.mode}
+      data-block-tone={view.tone}
+    >
+      <div className="activity-transcript-block-head">
+        <span>{view.summary}</span>
+        {view.mode === "compact" && view.detail ? (
+          <button
+            className="activity-detail-toggle"
+            data-command-id="activity.detail.toggle"
+            type="button"
+            onClick={onToggle}
+          >
+            {expanded ? "Less" : "More"}
+          </button>
         ) : null}
       </div>
-      {metaParts.length > 0 ? (
-        <div className="workroot-activity-agent-meta">
-          {metaParts.join(" · ")}
-        </div>
+      {detailVisible && view.detail ? (
+        <pre className="activity-transcript-block-detail">{view.detail}</pre>
       ) : null}
-      {call ? (
-        <div className="workroot-activity-agent-call">
-          <span className="meta-chip">call {call.status}</span>
-          {call.executionId ? <span>exec {call.executionId}</span> : null}
-          {call.startedAt ? <span>started {call.startedAt}</span> : null}
-          {call.updatedAt ? <span>updated {call.updatedAt}</span> : null}
-          {call.finishedAt ? <span>finished {call.finishedAt}</span> : null}
-        </div>
-      ) : null}
-      {call?.error ? (
-        <div className="workroot-activity-agent-error">{call.error}</div>
-      ) : null}
-      {agent.lastCallAt ? (
-        <div className="workroot-activity-agent-timing">
-          last call {agent.lastCallAt}
-        </div>
-      ) : null}
-      {agent.detailHints.length > 0 ? (
-        <ul className="workroot-activity-hints">
-          {agent.detailHints.map((hint, index) => (
-            <li key={`hint-${index}`}>{hint}</li>
-          ))}
-        </ul>
-      ) : null}
-      {agent.diagnostics.length > 0 ? (
-        <ul className="workroot-activity-diagnostics">
-          {agent.diagnostics.map((diagnostic, index) => (
-            <li key={`diagnostic-${index}`}>{diagnostic}</li>
-          ))}
-        </ul>
-      ) : null}
-    </li>
+    </article>
   );
 }
 
@@ -2295,6 +2582,7 @@ function buildWorkbenchEditorGroups(
   closedAgentPaneIds: readonly string[] = [],
   activityPaneOpen = false,
   activityState: WorkRootActivityBadgeInput = { phase: "loading" },
+  onCommand: DashboardCommandDispatcher,
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
   void supportEntity;
@@ -2336,7 +2624,7 @@ function buildWorkbenchEditorGroups(
   // projection that defaults into group 1 (the agent/terminal-side split)
   // rather than the group-2 editor/read-only column.
   const activityPane: WorkbenchPane[] = activityPaneOpen
-    ? [workRootActivityWorkbenchPane(root, activityState)]
+    ? [workRootActivityWorkbenchPane(root, activityState, onCommand)]
     : [];
 
   return dashboardGroups.map((group, index) => ({

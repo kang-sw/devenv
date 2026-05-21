@@ -1,4 +1,8 @@
 import {
+  buildActivityDetailToggleCommand,
+  buildActivityRefreshCommand,
+  buildActivitySelectItemCommand,
+  buildActivityTranscriptLoadMoreCommand,
   buildDashboardRefreshCommand,
   buildFileExplorerOpenFileCommand,
   buildFileExplorerRefreshCommand,
@@ -42,6 +46,10 @@ const migratedCommands = [
   buildFileExplorerSelectEntryCommand(workRootId, "README.md"),
   buildWorkbenchOpenActivityCommand(workRootId),
   buildTerminalCreateCommand(workRootId),
+  buildActivitySelectItemCommand("agent:reviewer"),
+  buildActivityTranscriptLoadMoreCommand("agent:reviewer"),
+  buildActivityRefreshCommand(workRootId),
+  buildActivityDetailToggleCommand("agent:reviewer", "block:1"),
 ] as const;
 
 assertDeepEqual(
@@ -54,6 +62,10 @@ assertDeepEqual(
     "fileExplorer.selectEntry",
     "workbench.openActivity",
     "terminal.create",
+    "activity.selectItem",
+    "activity.transcript.loadMore",
+    "activity.refresh",
+    "activity.detail.toggle",
   ],
   "real command builders preserve migrated command ids",
 );
@@ -68,6 +80,10 @@ assertDeepEqual(
     "fileExplorer.selectEntry",
     "workbench.openActivity",
     "terminal.create",
+    "activity.selectItem",
+    "activity.transcript.loadMore",
+    "activity.refresh",
+    "activity.detail.toggle",
   ],
   "real command builders emit executable payload variants",
 );
@@ -149,4 +165,25 @@ assertEqual(
   dashboardCommandLabel(buildWorkbenchOpenActivityCommand(workRootId)),
   "Open WorkRoot Activity",
   "activity command label leaves an obvious later command surface",
+);
+
+assertEqual(
+  dashboardCommandLabel(buildActivitySelectItemCommand("agent:reviewer")),
+  "Select activity",
+  "activity selection command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildActivityTranscriptLoadMoreCommand("agent:reviewer")),
+  "Load transcript",
+  "activity transcript load-more command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildActivityRefreshCommand(workRootId)),
+  "Refresh",
+  "activity refresh command label reuses refresh wording",
+);
+assertEqual(
+  dashboardCommandLabel(buildActivityDetailToggleCommand("agent:reviewer", "block:1")),
+  "Toggle detail",
+  "activity detail toggle command label is stable",
 );

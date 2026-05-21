@@ -212,6 +212,161 @@ export function mergeWorkRootActivityViews(
   };
 }
 
+export type ActivityAcknowledgements = Record<string, string>;
+
+export type TranscriptBlockRenderMode =
+  | "expanded"
+  | "compact"
+  | "terminal";
+
+export type TranscriptBlockView = {
+  mode: TranscriptBlockRenderMode;
+  tone: "normal" | "status" | "tool" | "error" | "terminal";
+  summary: string;
+  detail: string | null;
+};
+
+export function activityItemRevisionToken(item: ActivityItem): string {
+  return (
+    item.updatedAt ??
+    item.transcript.cursor ??
+    item.finishedAt ??
+    item.startedAt ??
+    `${item.status}:${item.live ? "live" : "idle"}:${item.attention ? "attention" : "normal"}`
+  );
+}
+
+function activitySortKey(item: ActivityItem): string {
+  return item.updatedAt ?? item.finishedAt ?? item.startedAt ?? "";
+}
+
+export function orderActivityItems(
+  items: readonly ActivityItem[],
+): ActivityItem[] {
+  return [...items].sort((left, right) => {
+    const leftPriority = left.live || left.attention ? 1 : 0;
+    const rightPriority = right.live || right.attention ? 1 : 0;
+    if (leftPriority !== rightPriority) {
+      return rightPriority - leftPriority;
+    }
+    const timeCompare = activitySortKey(right).localeCompare(activitySortKey(left));
+    if (timeCompare !== 0) {
+      return timeCompare;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
+export function defaultActivitySelection(
+  items: readonly ActivityItem[],
+): string | null {
+  return orderActivityItems(items)[0]?.id ?? null;
+}
+
+export function preserveActivitySelection(
+  items: readonly ActivityItem[],
+  selectedItemId: string | null,
+): string | null {
+  if (selectedItemId && items.some((item) => item.id === selectedItemId)) {
+    return selectedItemId;
+  }
+  return defaultActivitySelection(items);
+}
+
+export function initializeActivityDirtyItems(
+  items: readonly ActivityItem[],
+  acknowledgements: ActivityAcknowledgements,
+): Set<string> {
+  const dirty = new Set<string>();
+  for (const item of items) {
+    const token = activityItemRevisionToken(item);
+    const acknowledgedToken = acknowledgements[item.id];
+    if (acknowledgedToken !== token || (!acknowledgedToken && (item.live || item.attention))) {
+      dirty.add(item.id);
+    }
+  }
+  return dirty;
+}
+
+export function acknowledgeActivityItem(
+  acknowledgements: ActivityAcknowledgements,
+  item: ActivityItem,
+): ActivityAcknowledgements {
+  return {
+    ...acknowledgements,
+    [item.id]: activityItemRevisionToken(item),
+  };
+}
+
+export function shouldApplyActivityTranscriptResponse(
+  expected: { workRootId: string; activityId: string; requestId: number },
+  response: { workRootId: string; activityId: string },
+  current: { workRootId: string; activityId: string | null; requestId: number },
+): boolean {
+  return (
+    expected.requestId === current.requestId &&
+    expected.workRootId === current.workRootId &&
+    expected.activityId === current.activityId &&
+    response.workRootId === current.workRootId &&
+    response.activityId === current.activityId
+  );
+}
+
+export function shouldLoadMoreActivityTranscript(
+  metrics: {
+    scrollTop: number;
+    clientHeight: number;
+    scrollHeight: number;
+  },
+  hasMore: boolean,
+  loading: boolean,
+  thresholdPx = 48,
+): boolean {
+  if (!hasMore || loading) {
+    return false;
+  }
+  return metrics.scrollHeight - (metrics.scrollTop + metrics.clientHeight) <= thresholdPx;
+}
+
+function transcriptBlockText(block: TranscriptBlock): string {
+  if (typeof block.text === "string" && block.text.length > 0) {
+    return block.text;
+  }
+  if (block.data !== null && block.data !== undefined) {
+    try {
+      return JSON.stringify(block.data);
+    } catch {
+      return String(block.data);
+    }
+  }
+  return "";
+}
+
+export function transcriptBlockView(
+  block: TranscriptBlock,
+  sourceKind: string,
+): TranscriptBlockView {
+  const key = `${block.renderKind} ${block.title ?? ""}`.toLowerCase();
+  const text = transcriptBlockText(block);
+  const summary = block.title ?? text.split(/\r?\n/, 1)[0] ?? block.renderKind;
+  if (sourceKind === "exec" || key.includes("terminal") || block.renderKind === "ansi") {
+    return { mode: "terminal", tone: "terminal", summary, detail: text || null };
+  }
+  if (block.degraded || key.includes("error") || block.renderKind === "error") {
+    return { mode: "compact", tone: "error", summary, detail: text || null };
+  }
+  if (
+    key.includes("tool") ||
+    key.includes("mcp") ||
+    key.includes("command") ||
+    key.includes("status") ||
+    block.renderKind === "json"
+  ) {
+    return { mode: "compact", tone: key.includes("tool") || key.includes("mcp") ? "tool" : "status", summary, detail: text || null };
+  }
+  return { mode: "expanded", tone: "normal", summary, detail: text || null };
+}
+
 function summarizeWorkRootActivityAgents(
   agents: readonly NamedAgentActivityView[],
 ): WorkRootActivitySummary {
