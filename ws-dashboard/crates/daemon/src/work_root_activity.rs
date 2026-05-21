@@ -248,13 +248,24 @@ fn project_blocking(
         .collect::<Vec<_>>();
     items.sort_by(activity_item_ordering);
 
+    let selected_item_id = items.first().map(|item| item.id.clone());
+    let feed_cursor = Some(feed_cursor(&items));
+
     ActivityFeed {
         work_root_id,
         status: if degraded { "degraded" } else { "ok" }.to_owned(),
+        update_mode: "snapshot".to_owned(),
+        feed_cursor,
+        selected_item_id,
         summary,
         items,
         agents,
     }
+}
+
+fn feed_cursor(items: &[ActivityItem]) -> String {
+    let latest = items.iter().map(recent_value).max().unwrap_or("");
+    format!("snapshot:{}:{latest}", items.len())
 }
 
 fn summarize(agents: &[NamedAgentActivityView]) -> WorkRootActivitySummary {
@@ -634,6 +645,11 @@ fn named_agent_transcript_blocking(
                 } else {
                     "empty".to_owned()
                 },
+                source_status: if projection.row.status == STATUS_UNAVAILABLE {
+                    "degraded".to_owned()
+                } else {
+                    "missing".to_owned()
+                },
                 live,
                 source,
                 blocks: Vec::new(),
@@ -649,6 +665,7 @@ fn named_agent_transcript_blocking(
                 work_root_id,
                 activity_id,
                 status: "degraded".to_owned(),
+                source_status: "degraded".to_owned(),
                 live,
                 source,
                 blocks: Vec::new(),
@@ -668,6 +685,12 @@ fn named_agent_transcript_blocking(
         activity_id,
         status: if projection.row.diagnostics.is_empty() {
             "available"
+        } else {
+            "degraded"
+        }
+        .to_owned(),
+        source_status: if projection.row.diagnostics.is_empty() {
+            "ok"
         } else {
             "degraded"
         }
@@ -706,6 +729,7 @@ fn unavailable_transcript(
         work_root_id,
         activity_id,
         status: STATUS_UNAVAILABLE.to_owned(),
+        source_status: "missing".to_owned(),
         live: false,
         source: named_agent_source(&fallback),
         blocks: Vec::new(),

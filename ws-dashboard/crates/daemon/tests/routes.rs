@@ -1114,6 +1114,12 @@ async fn work_root_activity_route_returns_empty_named_agent_projection() {
     let value: serde_json::Value = serde_json::from_str(&body_text).expect("empty activity JSON");
     assert_eq!(value["workRootId"], work_root_id);
     assert_eq!(value["status"], "ok");
+    assert_eq!(value["updateMode"], "snapshot");
+    assert!(value["feedCursor"]
+        .as_str()
+        .expect("feed cursor")
+        .starts_with("snapshot:"));
+    assert!(value["selectedItemId"].is_null());
     assert_eq!(
         value["summary"],
         serde_json::json!({
@@ -1413,6 +1419,12 @@ async fn work_root_activity_route_projects_named_agent_records() {
 
     assert_eq!(value["workRootId"], work_root_id);
     assert_eq!(value["status"], "ok");
+    assert_eq!(value["updateMode"], "snapshot");
+    assert!(value["feedCursor"]
+        .as_str()
+        .expect("feed cursor")
+        .starts_with("snapshot:"));
+    assert_eq!(value["selectedItemId"], "agent:builder");
     assert_eq!(
         value["summary"],
         serde_json::json!({
@@ -1642,7 +1654,7 @@ async fn work_root_activity_transcript_route_auth_unknown_and_backfill_bounds() 
         cookie.as_str(),
         &work_root_id,
         "agent:writer",
-        "limit=2&cursor=1",
+        "limit=2&cursor=0",
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1651,13 +1663,14 @@ async fn work_root_activity_transcript_route_auth_unknown_and_backfill_bounds() 
     assert_eq!(value["workRootId"], work_root_id);
     assert_eq!(value["activityId"], "agent:writer");
     assert_eq!(value["status"], "available");
+    assert_eq!(value["sourceStatus"], "ok");
     assert_eq!(value["source"]["kind"], "namedAgent");
     assert_eq!(value["blocks"].as_array().expect("blocks").len(), 2);
-    assert_eq!(value["blocks"][0]["cursor"], "1");
+    assert_eq!(value["blocks"][0]["cursor"], "0");
     assert_eq!(value["blocks"][0]["renderKind"], "markdown");
-    assert_eq!(value["blocks"][0]["text"], "second block");
-    assert_eq!(value["nextCursor"], "3");
-    assert_eq!(value["hasMore"], false);
+    assert_eq!(value["blocks"][0]["text"], "first block");
+    assert_eq!(value["nextCursor"], "2");
+    assert_eq!(value["hasMore"], true);
 
     for forbidden in [
         root.display().to_string(),
@@ -1794,6 +1807,7 @@ async fn work_root_activity_transcript_degrades_empty_and_unavailable_sources() 
     let empty: serde_json::Value =
         serde_json::from_str(&empty_body).expect("empty transcript JSON");
     assert_eq!(empty["status"], "empty");
+    assert_eq!(empty["sourceStatus"], "missing");
     assert_eq!(empty["blocks"].as_array().expect("blocks").len(), 0);
     assert_eq!(empty["hasMore"], false);
 
@@ -1809,6 +1823,7 @@ async fn work_root_activity_transcript_degrades_empty_and_unavailable_sources() 
     let broken: serde_json::Value =
         serde_json::from_str(&broken_body).expect("broken transcript JSON");
     assert_eq!(broken["status"], "unavailable");
+    assert_eq!(broken["sourceStatus"], "degraded");
     assert!(broken["diagnostics"].as_array().expect("diagnostics").len() >= 1);
     assert!(!broken_body.contains("agent.json"));
 
@@ -1875,6 +1890,43 @@ async fn work_root_activity_route_degrades_malformed_records() {
     assert_eq!(value["status"], "degraded");
     assert_eq!(value["summary"]["total"], 4);
     assert_eq!(value["summary"]["unavailable"], 2);
+
+    let items = value["items"].as_array().expect("activity items array");
+    assert_eq!(items.len(), 4);
+    let item_row = |item_id: &str| -> &serde_json::Value {
+        items
+            .iter()
+            .find(|item| item["id"] == item_id)
+            .unwrap_or_else(|| panic!("missing activity item {item_id}"))
+    };
+    let item_diagnostics_of = |item: &serde_json::Value| -> Vec<String> {
+        item["diagnostics"]
+            .as_array()
+            .expect("item diagnostics array")
+            .iter()
+            .map(|entry| entry.as_str().expect("diagnostic string").to_owned())
+            .collect()
+    };
+    let broken_call_item = item_row("agent:broken-call");
+    assert_eq!(broken_call_item["status"], "running");
+    assert_eq!(broken_call_item["attention"], true);
+    assert_eq!(broken_call_item["transcript"]["status"], "empty");
+    assert!(!item_diagnostics_of(broken_call_item).is_empty());
+    let broken_meta_item = item_row("agent:broken-meta");
+    assert_eq!(broken_meta_item["status"], "unavailable");
+    assert_eq!(broken_meta_item["attention"], true);
+    assert_eq!(broken_meta_item["transcript"]["status"], "unavailable");
+    assert_eq!(broken_meta_item["transcript"]["available"], false);
+    assert!(!item_diagnostics_of(broken_meta_item).is_empty());
+    let missing_meta_item = item_row("agent:missing-meta");
+    assert_eq!(missing_meta_item["status"], "unavailable");
+    assert_eq!(missing_meta_item["attention"], true);
+    assert_eq!(missing_meta_item["transcript"]["status"], "unavailable");
+    assert!(!item_diagnostics_of(missing_meta_item).is_empty());
+    let healthy_item = item_row("agent:healthy");
+    assert_eq!(healthy_item["status"], "idle");
+    assert_eq!(healthy_item["attention"], false);
+    assert!(item_diagnostics_of(healthy_item).is_empty());
 
     let agents = value["agents"].as_array().expect("activity agents array");
     assert_eq!(agents.len(), 4);

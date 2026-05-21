@@ -75,6 +75,9 @@ try {
     const view: WorkRootActivityView = {
       workRootId: "root-local-abc",
       status: "ok",
+      updateMode: "snapshot",
+      feedCursor: "snapshot:0:",
+      selectedItemId: null,
       summary: { total: 0, active: 0, blocked: 0, failed: 0, unavailable: 0 },
       items: [],
       agents: [],
@@ -106,6 +109,7 @@ try {
       workRootId: "root-local-abc",
       activityId: "agent:reviewer",
       status: "available",
+      sourceStatus: "ok",
       live: false,
       source: {
         kind: "namedAgent",
@@ -157,6 +161,17 @@ try {
     /unknown workRoot/,
     "fetch helper surfaces bounded backend JSON errors",
   );
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: "unknown activity" }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+  await assertRejects(
+    () => fetchWorkRootActivityTranscript("root-local-abc", "agent:missing"),
+    /unknown activity/,
+    "transcript fetch helper surfaces bounded backend JSON errors",
+  );
 } finally {
   globalThis.fetch = originalFetch;
 }
@@ -177,6 +192,9 @@ function activityView(
   return {
     workRootId: partial.workRootId ?? "root-local-abc",
     status: partial.status ?? "ok",
+    updateMode: partial.updateMode ?? "snapshot",
+    feedCursor: partial.feedCursor ?? "snapshot:0:",
+    selectedItemId: partial.selectedItemId ?? null,
     summary: activitySummary(partial.summary),
     items: partial.items ?? [],
     agents: partial.agents ?? [],

@@ -12,6 +12,9 @@ pub struct ActivityFeed {
     // workRootId only. Host paths and ws cache paths are never API identity.
     pub work_root_id: WorkRootId,
     pub status: String,
+    pub update_mode: String,
+    pub feed_cursor: Option<String>,
+    pub selected_item_id: Option<String>,
     pub summary: WorkRootActivitySummary,
     pub items: Vec<ActivityItem>,
     // Compatibility projection for the existing read-only named-agent pane.
@@ -76,6 +79,7 @@ pub struct ActivityTranscript {
     pub work_root_id: WorkRootId,
     pub activity_id: String,
     pub status: String,
+    pub source_status: String,
     pub live: bool,
     pub source: ActivitySourceDisplay,
     pub blocks: Vec<TranscriptBlock>,
@@ -171,6 +175,9 @@ mod tests {
         let view = ActivityFeed {
             work_root_id: OpaqueId::from("root-local-abc"),
             status: "degraded".to_owned(),
+            update_mode: "snapshot".to_owned(),
+            feed_cursor: Some("snapshot:1".to_owned()),
+            selected_item_id: Some("agent:reviewer".to_owned()),
             summary: WorkRootActivitySummary {
                 total: 1,
                 active: 1,
@@ -208,6 +215,9 @@ mod tests {
 
         let value = serde_json::to_value(view).expect("serialize activity feed");
         assert_eq!(value["workRootId"], "root-local-abc");
+        assert_eq!(value["updateMode"], "snapshot");
+        assert_eq!(value["feedCursor"], "snapshot:1");
+        assert_eq!(value["selectedItemId"], "agent:reviewer");
         assert_eq!(value["items"][0]["id"], "agent:reviewer");
         assert_eq!(value["items"][0]["kind"], "namedAgent");
         assert_eq!(value["items"][0]["startedAt"], "2026-05-17T09:00:00Z");
@@ -219,6 +229,7 @@ mod tests {
             work_root_id: OpaqueId::from("root-local-abc"),
             activity_id: "agent:reviewer".to_owned(),
             status: "available".to_owned(),
+            source_status: "ok".to_owned(),
             live: false,
             source: ActivitySourceDisplay {
                 kind: "namedAgent".to_owned(),
@@ -243,6 +254,7 @@ mod tests {
         };
         let transcript_value = serde_json::to_value(transcript).expect("serialize transcript");
         assert_eq!(transcript_value["activityId"], "agent:reviewer");
+        assert_eq!(transcript_value["sourceStatus"], "ok");
         assert_eq!(transcript_value["blocks"][0]["renderKind"], "markdown");
         assert_eq!(transcript_value["nextCursor"], "2");
         assert_eq!(transcript_value["hasMore"], true);
@@ -253,6 +265,10 @@ mod tests {
             "activity_id",
             "render_kind",
             "next_cursor",
+            "source_status",
+            "selected_item_id",
+            "feed_cursor",
+            "update_mode",
             "agent_id",
             "current_call",
             "session_id",

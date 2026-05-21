@@ -65,6 +65,7 @@ export type ActivityTranscript = {
   workRootId: string;
   activityId: string;
   status: "available" | "empty" | "unavailable" | "degraded" | string;
+  sourceStatus: "ok" | "missing" | "unsupported" | "degraded" | string;
   live: boolean;
   source: ActivitySourceDisplay;
   blocks: TranscriptBlock[];
@@ -94,6 +95,9 @@ export type WorkRootActivityView = {
   // host paths, cache paths, process ids, stream paths, and session ids.
   workRootId: string;
   status: "ok" | "unavailable" | "degraded" | string;
+  updateMode: "snapshot" | "replace" | "append" | string;
+  feedCursor: string | null;
+  selectedItemId: string | null;
   summary: WorkRootActivitySummary;
   items: ActivityItem[];
   // Compatibility projection for the existing read-only named-agent pane.
