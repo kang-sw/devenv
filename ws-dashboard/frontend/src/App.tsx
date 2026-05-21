@@ -97,14 +97,13 @@ import {
   type WorkspaceView,
 } from "./resourceModel";
 import { requestOpenWorkRoot } from "./openWorkRoot";
+import { ActivityConsole } from "./ActivityConsole";
 import {
   fetchWorkRootActivity,
   mergeWorkRootActivityViews,
   workRootActivityBadge,
-  type NamedAgentActivityView,
   type WorkRootActivityBadgeInput,
   type WorkRootActivityBadgeView,
-  type WorkRootActivityView,
 } from "./workRootActivity";
 
 type CommandPayload = DashboardCommandPayload;
@@ -1161,6 +1160,7 @@ function WorkbenchShell({
               workRootActivityState.rootId === root.id
                 ? workRootActivityState.activity
                 : { phase: "loading" },
+              onCommand,
             ),
             paneOrderByGroup,
           );
@@ -2080,6 +2080,7 @@ function workRootActivityPlacementState(
 function workRootActivityWorkbenchPane(
   root: WorkRootView,
   activity: WorkRootActivityBadgeInput,
+  onCommand: DashboardCommandDispatcher,
 ): WorkbenchPane {
   const ready = activity.phase === "ready" ? activity.view : null;
   const state: ViewState = {
@@ -2106,21 +2107,23 @@ function workRootActivityWorkbenchPane(
     kind: "workRootActivity",
     category: "opened",
     title: "WorkRoot Activity",
-    detail: `${root.label} named-agent activity`,
+    detail: `${root.label} activity console`,
     state,
     meta,
-    body: <WorkRootActivityPane activity={activity} />,
+    body: <WorkRootActivityPane activity={activity} onCommand={onCommand} />,
   };
 }
 
 function WorkRootActivityPane({
   activity,
+  onCommand,
 }: {
   activity: WorkRootActivityBadgeInput;
+  onCommand: DashboardCommandDispatcher;
 }) {
-  // CONTRACT: A reversible read-only projection of the Phase 1 named-agent
-  // activity API. It never exposes host cache paths, stream paths, pids, or
-  // session ids, and offers no agent control actions.
+  // CONTRACT: A reversible read-only Activity Console projection. It consumes
+  // source-neutral feed items/transcripts, exposes command-routed controls, and
+  // offers no agent/exec control actions or daemon-side acknowledgement.
   return (
     <section className="workroot-activity-pane" aria-label="WorkRoot Activity">
       {activity.phase === "loading" ? (
@@ -2132,117 +2135,9 @@ function WorkRootActivityPane({
           WorkRoot activity is unavailable
         </div>
       ) : (
-        <WorkRootActivityDetail view={activity.view} />
-      )}
-      {/* CONTRACT: Running command rows stay explicitly empty until
-          260513-feat-async-exec-output-reader provides the async exec source. */}
-      <section
-        className="workroot-activity-section"
-        data-running-commands-state="empty"
-      >
-        <h3 className="workroot-activity-section-title">Running commands</h3>
-        <p className="workroot-activity-empty">
-          No running commands. Command activity arrives with the async exec
-          output reader.
-        </p>
-      </section>
-    </section>
-  );
-}
-
-function WorkRootActivityDetail({ view }: { view: WorkRootActivityView }) {
-  const { summary, agents } = view;
-  return (
-    <section className="workroot-activity-section">
-      <div className="workroot-activity-section-head">
-        <h3 className="workroot-activity-section-title">Named agents</h3>
-        <span className="meta-chip">{view.status}</span>
-      </div>
-      <div className="workroot-activity-summary">
-        <span className="meta-chip">{summary.total} total</span>
-        <span className="meta-chip">{summary.active} active</span>
-        <span className="meta-chip">{summary.blocked} blocked</span>
-        <span className="meta-chip">{summary.failed} failed</span>
-        <span className="meta-chip">{summary.unavailable} unavailable</span>
-      </div>
-      {agents.length === 0 ? (
-        <p
-          className="workroot-activity-empty"
-          data-named-agents-state="empty"
-        >
-          No named agents for this workRoot.
-        </p>
-      ) : (
-        <ul className="workroot-activity-agents">
-          {agents.map((agent) => (
-            <WorkRootActivityAgentRow agent={agent} key={agent.agentId} />
-          ))}
-        </ul>
+        <ActivityConsole view={activity.view} onCommand={onCommand} />
       )}
     </section>
-  );
-}
-
-function WorkRootActivityAgentRow({
-  agent,
-}: {
-  agent: NamedAgentActivityView;
-}) {
-  const metaParts = [
-    agent.backend,
-    agent.harness,
-    agent.model ?? agent.tier,
-    agent.effort,
-  ].filter((part): part is string => Boolean(part));
-  const call = agent.currentCall;
-  return (
-    <li className="workroot-activity-agent" data-agent-status={agent.status}>
-      <div className="workroot-activity-agent-head">
-        <span className="workroot-activity-agent-name">
-          {agent.name ?? agent.agentId}
-        </span>
-        <span className="meta-chip">{agent.status}</span>
-        {agent.sessionPresent ? (
-          <span className="meta-chip">session</span>
-        ) : null}
-      </div>
-      {metaParts.length > 0 ? (
-        <div className="workroot-activity-agent-meta">
-          {metaParts.join(" · ")}
-        </div>
-      ) : null}
-      {call ? (
-        <div className="workroot-activity-agent-call">
-          <span className="meta-chip">call {call.status}</span>
-          {call.executionId ? <span>exec {call.executionId}</span> : null}
-          {call.startedAt ? <span>started {call.startedAt}</span> : null}
-          {call.updatedAt ? <span>updated {call.updatedAt}</span> : null}
-          {call.finishedAt ? <span>finished {call.finishedAt}</span> : null}
-        </div>
-      ) : null}
-      {call?.error ? (
-        <div className="workroot-activity-agent-error">{call.error}</div>
-      ) : null}
-      {agent.lastCallAt ? (
-        <div className="workroot-activity-agent-timing">
-          last call {agent.lastCallAt}
-        </div>
-      ) : null}
-      {agent.detailHints.length > 0 ? (
-        <ul className="workroot-activity-hints">
-          {agent.detailHints.map((hint, index) => (
-            <li key={`hint-${index}`}>{hint}</li>
-          ))}
-        </ul>
-      ) : null}
-      {agent.diagnostics.length > 0 ? (
-        <ul className="workroot-activity-diagnostics">
-          {agent.diagnostics.map((diagnostic, index) => (
-            <li key={`diagnostic-${index}`}>{diagnostic}</li>
-          ))}
-        </ul>
-      ) : null}
-    </li>
   );
 }
 
@@ -2295,6 +2190,7 @@ function buildWorkbenchEditorGroups(
   closedAgentPaneIds: readonly string[] = [],
   activityPaneOpen = false,
   activityState: WorkRootActivityBadgeInput = { phase: "loading" },
+  onCommand: DashboardCommandDispatcher,
 ): WorkbenchEditorGroupModel[] {
   void selectedInstance;
   void supportEntity;
@@ -2336,7 +2232,7 @@ function buildWorkbenchEditorGroups(
   // projection that defaults into group 1 (the agent/terminal-side split)
   // rather than the group-2 editor/read-only column.
   const activityPane: WorkbenchPane[] = activityPaneOpen
-    ? [workRootActivityWorkbenchPane(root, activityState)]
+    ? [workRootActivityWorkbenchPane(root, activityState, onCommand)]
     : [];
 
   return dashboardGroups.map((group, index) => ({

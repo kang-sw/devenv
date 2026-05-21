@@ -150,7 +150,6 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260518-epic-ws-dashboard-activity-console` | todo | Coordinate the full-scale read-only Activity Console with read model, UI shell, live stream, live UX, and transcript expansion children |
-| `260518-feat-ws-dashboard-activity-console-ui` | ready | Build the reusable route-backed Activity Ribbon and Transcript Block UI shell |
 | `260518-feat-ws-dashboard-activity-watch-stream` | todo | Add backend cross-platform watcher, SSE stream, and fallback mode for Activity Console updates |
 | `260518-feat-ws-dashboard-activity-live-ux` | todo | Adopt Activity Console live events in the frontend with merge, stale-root, transcript-refresh, and fallback behavior |
 | `260518-feat-ws-dashboard-activity-transcript-api` | todo | Expand Activity Console transcript sources and optional block-level live transcript behavior |
@@ -175,9 +174,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260518-feat-ws-dashboard-activity-console-ui` - Route-backed Activity
-  Ribbon and Transcript Block UI shell inside the WorkRoot Activity pane;
-  implements `{#260521-ws-dashboard-activity-console-ui-shell}`.
+No ready tickets.
 
 ## Session Notes
 

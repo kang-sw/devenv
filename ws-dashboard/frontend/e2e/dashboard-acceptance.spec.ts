@@ -33,6 +33,7 @@ let ownsWorkRoot = false;
 let ownsSecondWorkRoot = false;
 let commandPlan: TerminalCommandPlan;
 let portabilityEvidence: TerminalPortabilityEvidence | undefined;
+let activityFixtureRootId: string | null = null;
 
 const evidence: string[] = [];
 function note(line: string) {
@@ -528,16 +529,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expectDockviewWorkbench(page);
 
-    // The pane body is the read-only projection. Running commands are an
-    // explicitly empty section, and the empty/no-agent detail is valid and
-    // visible for the plain-directory gate workRoot.
+    // The pane body is the read-only Activity Console projection. The
+    // plain-directory gate workRoot has an empty source-neutral feed.
     const paneBody = activityPane.locator(".workroot-activity-pane");
     await expect(paneBody).toBeVisible();
     await expect(
-      paneBody.locator('[data-running-commands-state="empty"]'),
-    ).toBeVisible();
-    await expect(
-      paneBody.locator('[data-named-agents-state="empty"]'),
+      paneBody.locator('[data-activity-console-state="empty"]'),
     ).toBeVisible();
 
     // The Activity tab carries the surface title.
@@ -569,19 +566,128 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         const requestedWorkRootId = match
           ? decodeURIComponent(match[1])
           : "browser-gate-root";
+        if (!activityFixtureRootId) {
+          activityFixtureRootId = requestedWorkRootId;
+        }
+        if (requestedWorkRootId !== activityFixtureRootId) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              workRootId: requestedWorkRootId,
+              status: "ok",
+              updateMode: "snapshot",
+              feedCursor: "browser:second",
+              selectedItemId: null,
+              summary: {
+                total: 0,
+                active: 0,
+                blocked: 0,
+                failed: 0,
+                unavailable: 0,
+              },
+              items: [],
+              agents: [],
+            }),
+          });
+          return;
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
             workRootId: requestedWorkRootId,
             status: "degraded",
+            updateMode: "snapshot",
+            feedCursor: "browser:1",
+            selectedItemId: null,
             summary: {
-              total: 1,
+              total: 5,
               active: 1,
-              blocked: 0,
+              blocked: 1,
               failed: 0,
               unavailable: 0,
             },
+            items: [
+              {
+                id: "agent:alpha",
+                kind: "namedAgent",
+                label: "agent-alpha",
+                status: "running",
+                live: true,
+                attention: false,
+                startedAt: "2026-05-17T11:57:00Z",
+                updatedAt: "2026-05-17T11:58:00Z",
+                finishedAt: null,
+                source: {
+                  kind: "namedAgent",
+                  label: "claude",
+                  backend: "claude",
+                  harness: "codex",
+                  tier: "core",
+                  model: "opus",
+                },
+                transcript: {
+                  status: "available",
+                  available: true,
+                  cursor: "alpha:1",
+                },
+                diagnostics: ["cache row degraded"],
+                metadata: {},
+              },
+              {
+                id: "exec:beta",
+                kind: "exec",
+                label: "exec-beta-long-label-that-must-truncate-inside-ribbon",
+                status: "completed",
+                live: false,
+                attention: true,
+                startedAt: "2026-05-17T11:55:00Z",
+                updatedAt: "2026-05-17T11:59:00Z",
+                finishedAt: "2026-05-17T11:59:00Z",
+                source: {
+                  kind: "exec",
+                  label: "exec",
+                  backend: null,
+                  harness: null,
+                  tier: null,
+                  model: null,
+                },
+                transcript: {
+                  status: "available",
+                  available: true,
+                  cursor: "beta:1",
+                },
+                diagnostics: [],
+                metadata: {},
+              },
+              ...["gamma", "delta", "epsilon"].map((name, index) => ({
+                id: `agent:${name}`,
+                kind: "namedAgent",
+                label: `agent-${name}-long-ribbon-label-${index}`,
+                status: "completed",
+                live: false,
+                attention: false,
+                startedAt: "2026-05-17T10:00:00Z",
+                updatedAt: `2026-05-17T10:0${index}:00Z`,
+                finishedAt: `2026-05-17T10:0${index}:30Z`,
+                source: {
+                  kind: "namedAgent",
+                  label: "codex",
+                  backend: "codex",
+                  harness: "codex",
+                  tier: "core",
+                  model: null,
+                },
+                transcript: {
+                  status: "empty",
+                  available: false,
+                  cursor: null,
+                },
+                diagnostics: [],
+                metadata: {},
+              })),
+            ],
             agents: [
               {
                 agentId: "agent-alpha",
@@ -613,9 +719,104 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         });
       },
     );
+    await page.route(
+      /\/api\/dashboard\/work-roots\/.*\/activity\/items\/.*\/transcript(?:\?.*)?$/,
+      async (route) => {
+        const url = new URL(route.request().url());
+        const pathMatch = url.pathname.match(
+          /\/api\/dashboard\/work-roots\/([^/]+)\/activity\/items\/([^/]+)\/transcript$/,
+        );
+        const requestedWorkRootId = pathMatch
+          ? decodeURIComponent(pathMatch[1])
+          : "browser-gate-root";
+        const activityId = pathMatch
+          ? decodeURIComponent(pathMatch[2])
+          : "agent:alpha";
+        const cursor = url.searchParams.get("cursor");
+        const source =
+          activityId === "exec:beta"
+            ? {
+                kind: "exec",
+                label: "exec",
+                backend: null,
+                harness: null,
+                tier: null,
+                model: null,
+              }
+            : {
+                kind: "namedAgent",
+                label: "claude",
+                backend: "claude",
+                harness: "codex",
+                tier: "core",
+                model: "opus",
+              };
+        const blocks =
+          activityId === "exec:beta"
+            ? [
+                {
+                  cursor: "beta:1",
+                  timestamp: "2026-05-17T11:59:00Z",
+                  renderKind: "text",
+                  title: "exec output",
+                  text: "$ echo browser-gate\nbrowser-gate",
+                  data: null,
+                  degraded: false,
+                },
+              ]
+            : cursor
+              ? [
+                  {
+                    cursor: "alpha:3",
+                    timestamp: "2026-05-17T11:59:30Z",
+                    renderKind: "markdown",
+                    title: "assistant follow-up",
+                    text: "loaded more transcript",
+                    data: null,
+                    degraded: false,
+                  },
+                ]
+              : [
+                  {
+                    cursor: "alpha:1",
+                    timestamp: "2026-05-17T11:58:00Z",
+                    renderKind: "markdown",
+                    title: "assistant",
+                    text: "selected transcript alpha",
+                    data: null,
+                    degraded: false,
+                  },
+                  {
+                    cursor: "alpha:2",
+                    timestamp: "2026-05-17T11:58:10Z",
+                    renderKind: "json",
+                    title: "tool call",
+                    text: "tool details visible after expansion",
+                    data: { tool: "read" },
+                    degraded: false,
+                  },
+                ];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            workRootId: requestedWorkRootId,
+            activityId,
+            status: "available",
+            sourceStatus: "ok",
+            live: activityId === "agent:alpha",
+            source,
+            blocks,
+            nextCursor: activityId === "agent:alpha" && !cursor ? "alpha:2" : null,
+            hasMore: activityId === "agent:alpha" && !cursor,
+            diagnostics: [],
+          }),
+        });
+      },
+    );
     await page.reload({ waitUntil: "domcontentloaded" });
     await openWorkRootInBrowser(page, workRoot);
-    await expect(opener).toContainText("1 agent");
+    await expect(opener).toContainText("5 agents");
 
     await opener.click();
     await expect(activityPane).toHaveCount(1);
@@ -627,21 +828,83 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(activityTab).toHaveAttribute("aria-selected", "true");
 
     const populatedBody = activityPane.locator(".workroot-activity-pane");
+    await expect(populatedBody.locator(".activity-console")).toBeVisible();
+    await expect(populatedBody.locator(".activity-ribbon")).toBeVisible();
+    const ribbonItems = populatedBody.locator(".activity-ribbon-item");
+    await expect(ribbonItems).toHaveCount(5);
+    await expect(ribbonItems.first()).toHaveCSS("min-width", "176px");
+    await expect(populatedBody.locator(".activity-ribbon")).toHaveJSProperty(
+      "scrollLeft",
+      0,
+    );
     await expect(
-      populatedBody.locator('[data-running-commands-state="empty"]'),
-    ).toBeVisible();
+      populatedBody.locator('[data-command-id="activity.selectItem"]'),
+    ).toHaveCount(5);
     await expect(
-      populatedBody.locator(".workroot-activity-agent", {
-        hasText: "agent-alpha",
-      }),
+      populatedBody.locator('[data-command-id="activity.refresh"]'),
+    ).toHaveCount(0);
+    await page.setViewportSize({ width: 760, height: 760 });
+    await page.waitForTimeout(100);
+    const ribbonMetrics = await populatedBody
+      .locator(".activity-ribbon")
+      .evaluate((node) => {
+        return {
+          clientWidth: node.clientWidth,
+          scrollWidth: node.scrollWidth,
+          childCount: node.children.length,
+          childWidths: Array.from(node.children).map(
+            (child) => (child as HTMLElement).getBoundingClientRect().width,
+          ),
+        };
+      });
+    expect(ribbonMetrics.scrollWidth, JSON.stringify(ribbonMetrics)).toBeGreaterThan(
+      ribbonMetrics.clientWidth,
+    );
+    const itemBox = await ribbonItems.first().boundingBox();
+    expect(itemBox?.width).toBeLessThanOrEqual(180);
+    const documentHorizontalOverflow = await page.evaluate(() => {
+      const root = document.scrollingElement ?? document.documentElement;
+      return root.scrollWidth > root.clientWidth + 1;
+    });
+    expect(documentHorizontalOverflow).toBe(false);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(100);
+    await expect(populatedBody).toContainText("$ echo browser-gate");
+    await expect(
+      populatedBody.locator('[data-block-mode="terminal"]'),
     ).toBeVisible();
-    await expect(populatedBody).toContainText("running");
-    await expect(populatedBody).toContainText("session");
-    await expect(populatedBody).toContainText("claude · codex · opus · high");
-    await expect(populatedBody).toContainText("exec exec-alpha");
-    await expect(populatedBody).toContainText("bounded diagnostic");
-    await expect(populatedBody).toContainText("review output ready");
-    await expect(populatedBody).toContainText("cache row degraded");
+    const alphaItem = populatedBody.locator('[data-activity-id="agent:alpha"]');
+    await expect(alphaItem).toHaveAttribute("data-dirty", "true");
+    await alphaItem.click();
+    await expect(alphaItem).toHaveAttribute("data-dirty", "false");
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: activity.selectItem",
+    );
+    await expect(populatedBody).toContainText("selected transcript alpha");
+    const detailToggle = populatedBody.locator(
+      '[data-command-id="activity.detail.toggle"]',
+    );
+    await expect(detailToggle).toBeVisible();
+    await detailToggle.click();
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: activity.detail.toggle",
+    );
+    await expect(populatedBody).toContainText("tool details visible after expansion");
+    const loadMore = populatedBody.locator(
+      '[data-command-id="activity.transcript.loadMore"]',
+    );
+    await expect(loadMore).toBeVisible();
+    await loadMore.click();
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: activity.transcript.loadMore",
+    );
+    await expect(populatedBody).toContainText("loaded more transcript");
+    const execItem = populatedBody.locator('[data-activity-id="exec:beta"]');
+    await execItem.click();
+    await expect(populatedBody).toContainText("$ echo browser-gate");
+    await expect(
+      populatedBody.locator('[data-block-mode="terminal"]'),
+    ).toBeVisible();
 
     await opener.click();
     await expect(activityPane).toHaveCount(1);
@@ -657,8 +920,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
     note(
       "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
-        "empty and populated named-agent projections rendered, a second click " +
-        "focused it without duplicating, and hover-only close removed it " +
+        "empty and populated Activity Console projections rendered, selection, " +
+        "dirty acknowledgement, detail toggle, and load-more controls carried " +
+        "stable command ids, a second click focused it without duplicating, " +
+        "and hover-only close removed it " +
         "immediately with no confirmation popover",
     );
   });
@@ -918,6 +1183,28 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     }
     await openWorkRootInBrowser(page, secondWorkRoot);
     expect(await visibleWorkbenchGroupIds(page)).toEqual(["group-1"]);
+    await page
+      .locator('[data-command-id="workbench.openActivity"].workbench-activity-badge')
+      .click();
+    const secondActivityPane = page.locator(
+      '[data-surface-kind="workRootActivity"]',
+    );
+    await expect(secondActivityPane).toHaveCount(1);
+    await expect(
+      secondActivityPane.locator('[data-activity-console-state="empty"]'),
+    ).toBeVisible();
+    await expect(secondActivityPane).not.toContainText("agent-alpha");
+    await expect(secondActivityPane).not.toContainText("exec-beta");
+    await expect(secondActivityPane).not.toContainText("selected transcript alpha");
+    await expect(secondActivityPane).not.toContainText("$ echo browser-gate");
+    const secondActivityTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="workRootActivity-pane:"]',
+    );
+    await secondActivityTab.hover();
+    await secondActivityTab
+      .locator('[data-command-id="workbench.tab.close"]')
+      .click();
+    await expect(secondActivityPane).toHaveCount(0);
 
     const secondFileRow = page.locator(".file-explorer-row", {
       hasText: "second-readme.txt",
@@ -953,6 +1240,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await pinnedReadOnlyTab.click();
     await expect(page.locator(".readonly-text-pane")).toContainText(
       "ws-dashboard browser gate fixture",
+    );
+    await page.unroute(/\/api\/dashboard\/work-roots\/.*\/activity(?:\?.*)?$/);
+    await page.unroute(
+      /\/api\/dashboard\/work-roots\/.*\/activity\/items\/.*\/transcript(?:\?.*)?$/,
     );
     note(
       "dynamic groups: opened-file group placement stayed scoped per workRoot and did not auto-target user-created groups",
@@ -1056,7 +1347,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(page.locator(".xterm-rows")).toContainText("PASTE-OK");
     await expectTerminalInputFocused(page);
 
-    await inputTarget.focus();
+    await page.locator(".terminal-surface").click();
+    const hangulInputTarget = await terminalInputTarget(page);
+    await hangulInputTarget.focus();
     await expectTerminalInputFocused(page);
     await page.keyboard.insertText(commandPlan.echo("한글-OK"));
     await expectTerminalInputFocused(page);

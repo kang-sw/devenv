@@ -306,9 +306,9 @@ ids, process ids, stdout/stderr paths, stream paths, or backend-native
 transcript paths. The read model remains read-only and does not add agent start,
 interrupt, cancel, erase, retry, or exec-job control actions.
 
-## 🚧 Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
+## Activity Console UI Shell {#260521-ws-dashboard-activity-console-ui-shell}
 
-The WorkRoot Activity pane will render a reusable read-only Activity Console
+The WorkRoot Activity pane renders a reusable read-only Activity Console
 instead of a vertical named-agent card dump. The console combines a horizontal
 Activity Ribbon for live/latest items with a selected Transcript Block viewer
 below it, using the Activity Console read model as its route-backed source.

@@ -1,7 +1,16 @@
 import {
+  acknowledgeActivityItem,
+  defaultActivitySelection,
   fetchWorkRootActivity,
   fetchWorkRootActivityTranscript,
+  initializeActivityDirtyItems,
   mergeWorkRootActivityViews,
+  orderActivityItems,
+  preserveActivitySelection,
+  shouldApplyActivityTranscriptResponse,
+  shouldApplyActivityTranscriptRequest,
+  shouldLoadMoreActivityTranscript,
+  transcriptBlockView,
   workRootActivityBadge,
   workRootActivityEndpoint,
   workRootActivityTranscriptEndpoint,
@@ -9,6 +18,7 @@ import {
   type NamedAgentActivityView,
   type WorkRootActivitySummary,
   type ActivityTranscript,
+  type TranscriptBlock,
   type WorkRootActivityView,
 } from "./workRootActivity.js";
 
@@ -451,4 +461,159 @@ assertEqual(
   longTitleBadge.title.endsWith("…"),
   true,
   "an over-limit activity badge title ends with an ellipsis",
+);
+
+const orderedItems = orderActivityItems([
+  activityItem({ id: "old-live", live: true, updatedAt: "2026-05-21T10:00:00Z" }),
+  activityItem({ id: "new-idle", updatedAt: "2026-05-21T12:00:00Z" }),
+  activityItem({ id: "attention", attention: true, updatedAt: "2026-05-21T09:00:00Z" }),
+  activityItem({ id: "same-a", updatedAt: "2026-05-21T08:00:00Z" }),
+  activityItem({ id: "same-b", updatedAt: "2026-05-21T08:00:00Z" }),
+]);
+assertDeepEqual(
+  orderedItems.map((item) => item.id),
+  ["old-live", "attention", "new-idle", "same-a", "same-b"],
+  "activity ribbon ordering prefers live/attention, then latest, then stable id",
+);
+assertEqual(
+  defaultActivitySelection(orderedItems),
+  "old-live",
+  "default selection prefers the first live/attention item",
+);
+assertEqual(
+  preserveActivitySelection(orderedItems, "new-idle"),
+  "new-idle",
+  "selection is preserved when the item still exists",
+);
+assertEqual(
+  preserveActivitySelection(orderedItems, "missing"),
+  "old-live",
+  "selection falls back to default when the selected item disappears",
+);
+
+const ackSource = activityItem({
+  id: "ackable",
+  updatedAt: "2026-05-21T12:00:00Z",
+  transcript: { status: "available", available: true, cursor: "cursor:1" },
+});
+const acknowledgements = acknowledgeActivityItem({}, ackSource);
+assertDeepEqual(
+  Array.from(initializeActivityDirtyItems([ackSource], acknowledgements)),
+  [],
+  "local acknowledgement clears dirty state for the acknowledged item revision",
+);
+assertDeepEqual(
+  Array.from(
+    initializeActivityDirtyItems(
+      [
+        { ...ackSource, updatedAt: "2026-05-21T12:01:00Z" },
+        activityItem({ id: "attention-dirty", attention: true }),
+        activityItem({ id: "first-load-idle", updatedAt: "2026-05-21T12:02:00Z" }),
+      ],
+      acknowledgements,
+      { ackable: "2026-05-21T12:00:00Z", "first-load-idle": "2026-05-21T12:02:00Z" },
+    ),
+  ),
+  ["ackable", "attention-dirty"],
+  "dirty initialization compares local acknowledgements and seen revisions without marking every first-load item dirty",
+);
+
+assertEqual(
+  shouldApplyActivityTranscriptResponse(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-a", activityId: "agent:a" },
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+  ),
+  true,
+  "matching transcript response may update selected transcript state",
+);
+assertEqual(
+  shouldApplyActivityTranscriptResponse(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-a", activityId: "agent:a" },
+    { workRootId: "root-b", activityId: "agent:b", requestId: 3 },
+  ),
+  false,
+  "stale transcript response for an old root or request is ignored",
+);
+assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-b", activityId: "agent:a", requestId: 2 },
+  ),
+  false,
+  "error paths also require the expected workRoot/activity/request tuple",
+);
+assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 1 },
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+    { workRootId: "root-a", activityId: "agent:a" },
+  ),
+  false,
+  "an unavailable same-activity state with a newer request id rejects an older successful response",
+);
+assertEqual(
+  shouldApplyActivityTranscriptRequest(
+    { workRootId: "root-a", activityId: "agent:a", requestId: 1 },
+    { workRootId: "root-a", activityId: "agent:a", requestId: 2 },
+  ),
+  false,
+  "an unavailable same-activity state with a newer request id rejects an older rejection",
+);
+assertEqual(
+  shouldLoadMoreActivityTranscript(
+    { scrollTop: 460, clientHeight: 500, scrollHeight: 1_000 },
+    true,
+    false,
+  ),
+  true,
+  "near-end transcript scroll triggers load-more when more blocks exist",
+);
+assertEqual(
+  shouldLoadMoreActivityTranscript(
+    { scrollTop: 100, clientHeight: 500, scrollHeight: 1_000 },
+    true,
+    false,
+  ),
+  false,
+  "far-from-end transcript scroll does not trigger load-more",
+);
+
+function block(partial: Partial<TranscriptBlock>): TranscriptBlock {
+  return {
+    cursor: partial.cursor ?? "1",
+    timestamp: partial.timestamp ?? null,
+    renderKind: partial.renderKind ?? "markdown",
+    title: partial.title ?? null,
+    text: partial.text ?? "hello",
+    data: partial.data ?? null,
+    degraded: partial.degraded ?? false,
+  };
+}
+
+assertEqual(
+  transcriptBlockView(block({ renderKind: "markdown", text: "assistant output" }), "namedAgent").mode,
+  "expanded",
+  "assistant/output-like transcript blocks expand by default",
+);
+assertEqual(
+  transcriptBlockView(block({ renderKind: "json", title: "tool call", data: { ok: true } }), "namedAgent").tone,
+  "tool",
+  "tool-like transcript blocks default to compact tool summaries",
+);
+assertEqual(
+  transcriptBlockView(block({ renderKind: "status", title: "running" }), "namedAgent").mode,
+  "compact",
+  "status transcript blocks default to compact summaries",
+);
+assertEqual(
+  transcriptBlockView(block({ renderKind: "error", title: "failed", degraded: true }), "namedAgent").tone,
+  "error",
+  "error transcript blocks use error tone",
+);
+assertEqual(
+  transcriptBlockView(block({ renderKind: "text", title: "exec", text: "$ echo ok\nok" }), "exec").mode,
+  "terminal",
+  "exec transcript blocks render with terminal mode",
 );
