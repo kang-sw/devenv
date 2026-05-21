@@ -59,6 +59,12 @@ anchors that codify the rules being removed. Sub-agent prompts under
   generator. The new doctrine clause: lead skills are router contracts with
   auditable announce + same-actor conversation carry, with actor-boundary
   briefs at the call site.
+- Fresh-reader audit is a post-edit verification gate for skill authoring:
+  after local reread, a context-light pass flags wording that only makes sense
+  from the current discussion, plus contradictions, duplication, orphan
+  references, and missing end-state or output instructions.
+- Fresh-reader audit output names each quote, issue, and suggested rewrite or
+  delete; when clean, it states that no material issue remains.
 
 ## Constraints
 
@@ -286,6 +292,12 @@ Goal: enforce four skill-authoring rules in `ws:lead-skill-authoring` in one
 edit, then sweep affected downstream skills.
 
 Scope (each item is its own commit inside the phase):
+
+Skill-authoring wording cleanup:
+- Rewrite local-debate phrasing in `ws:lead-skill-authoring` into standalone
+  doctrine language: avoid negation-for-negation's-sake, hidden discussion
+  shorthand, and unexplained internal terms.
+- Add `fresh-reader audit` as the post-edit skill audit gate.
 
 R1 — `On: invoke` four-block structure:
 - Add to `ws:lead-skill-authoring`: `On: invoke` must be split into named

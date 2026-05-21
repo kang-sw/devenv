@@ -26,8 +26,8 @@ related:
 - Skill descriptions are the runtime trigger surface: keep top-level entries strong, derived primitives lighter, and conditional utilities explicit. {#260508-skill-description-attention-policy}
 - `lead-add-rule` requires explicit persistence intent such as save, remember, persist, or add a durable rule; prescriptive task wording alone must not trigger it. {#260508-add-rule-explicit-persistence-trigger}
 - Skill-to-skill handoffs share the active conversation; do not declare carry blocks, and reserve argument language for MCP tools, CLIs, and templates. {#260514-skill-authoring-carried-context}
-- User-approval gates in skills fire only on direct user invocation; chained invocations pass through. {#260514-skill-authoring-carried-context}
-- Dense skill routing should use Markdown hierarchy, grouped invariants, fixed lookup tables, and command-shaped lists before pseudo-code-like notation; pseudo-code obscures handoffs under attention pressure. {#260514-skill-authoring-carried-context}
+- User-approval gates in skills fire only on direct user invocation; chained invocations re-ask only for safety, deletion, or explicit consent rules. {#260514-skill-authoring-carried-context}
+- Dense skill routing should use Markdown hierarchy, grouped invariants, fixed lookup tables, and command-shaped lists before custom notation; skill, agent, and prompt edits run a fresh-reader audit for context-dependent wording and missing output/end-state instructions. {#260514-skill-authoring-carried-context}
 - `lead-proceed` routes through handoff stages and captures the `Ticket:` line from `lead-write-ticket`; changing that artifact breaks chaining. {#260505-proceed-routing-pipeline}
 - `lead-proceed` must stop on epic ticket paths because epics are board artifacts; implementation routes through child tickets. {#260505-proceed-routing-pipeline}
 - `lead-proceed` routes implementation-ready work to `lead-implement`; it announces the implementation-bound route but does not apply sibling judges, inspect source, or invoke implementation primitives directly. {#260505-proceed-routing-pipeline} {#260519-proceed-implementation-dispatch-precheck}

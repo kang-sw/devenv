@@ -78,10 +78,16 @@ remains documented only as deprecated compatibility input.
 Workflow skill-to-skill handoffs share the active conversation; the receiving
 skill reads context from the conversation, not from a caller-emitted carry
 block. User-approval gates in skills fire only when the user invokes the skill
-directly; chained invocations pass through. Argument language is reserved for
-MCP tools, CLI commands, and structured templates. Dense routing or rule lists
-use Markdown hierarchy, named groups, fixed lookup tables, and command-shaped
-lists before inventing pseudo-code-like notation.
+directly; chained invocations re-ask only for safety, deletion, or explicit
+consent rules. Argument language is reserved for MCP tools, CLI commands, and
+structured templates. Dense routing or rule lists use Markdown hierarchy, named
+groups, fixed lookup tables, and command-shaped lists before introducing custom
+notation. Skill, agent, and prompt edits run a fresh-reader audit after local
+reread: a context-light reviewer or pass flags context-dependent wording,
+contradictions, duplication, orphan references, and missing end-state or output
+instructions.
+Fresh-reader audit findings include the quote, issue, and suggested rewrite or
+delete, or state that no material issue remains.
 {#260514-skill-authoring-carried-context}
 
 ## wsflow Skill Surface {#260513-wsflow-agentless-skill-surface}
