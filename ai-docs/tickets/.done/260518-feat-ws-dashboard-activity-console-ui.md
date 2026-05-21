@@ -3,6 +3,7 @@ title: ws dashboard Activity Console UI shell
 parent: 260518-epic-ws-dashboard-activity-console
 spec:
   - 260521-ws-dashboard-activity-console-ui-shell
+completed: 2026-05-21
 related:
   260521-feat-ws-dashboard-command-dispatch-spine: prerequisite command spine for Activity Console controls
   260518-feat-ws-dashboard-activity-read-model: supplies Activity Feed items and selected transcript blocks
@@ -108,3 +109,22 @@ blocks, inline detail expansion, scroll-position transcript loading,
 empty/degraded/running/completed states, duplicate pane focus, immediate close,
 root switching without stale activity, command-id and dispatch parity for
 visible controls, and desktop screenshots or DOM assertions.
+
+### Result (f2e1e2c6) - 2026-05-21
+
+Implemented the WorkRoot Activity pane as a route-backed reusable Activity
+Console shell with `ActivityRibbon`, `TranscriptBlockViewer`, and
+`ActivityConsole` composition. The shell renders compact horizontally
+scrolling three-line ribbon items, local acknowledgement/dirty attention cues,
+selected transcript blocks, inline detail expansion, scroll-position transcript
+loading, empty/unavailable/degraded states, and guarded root/selection switching
+without stale transcript overwrite.
+
+Visible ribbon selection and transcript fallback controls now expose stable
+command ids and dispatch through the dashboard command path. The implementation
+remains read-only and leaves live SSE/watch adoption, agent controls, broad exec
+job support, mobile layout, and expanded transcript source adapters to later
+child tickets.
+
+Verification passed route-helper tests, command tests, workbench tests, build,
+browser acceptance, and partitioned reviewer relay.
