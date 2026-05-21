@@ -48,6 +48,10 @@ anchors that codify the rules being removed. Sub-agent prompts under
   editing without delegation. `lead-edit` is the lead wearing two hats, not a
   real actor boundary. Absorb both into `lead-implement` as a unified spine:
   `judge: needs-delegation` gates direct-edit vs delegated within each stage.
+- `judge: plan-depth` is a unified 4-level cumulative spectrum
+  (none / brief / survey / research) that fires independently of delegation
+  path. Brief is a self-anchoring scope record usable on any path; survey
+  and research build on brief by adding plan-populator output.
 - Mechanical rules belong in skill text; the doctrine paragraph stays the
   generator. The new doctrine clause: lead skills are router contracts with
   auditable announce + same-actor conversation carry, with actor-boundary
@@ -157,6 +161,25 @@ Verification:
 - Chained invocation (e.g., lead-discuss → lead-write-ticket, lead-proceed →
   lead-write-spec) passes through gates without re-prompting.
 
+### Result (c5c1349b) - 2026-05-21
+
+Commits: `fcea37a7..c5c1349b` (7 commits).
+
+- `ws:lead-skill-authoring`: replaced carry-block guidance with gate-local
+  chain-condition principle; regrouped Principles into 5 named subsections
+  (Reader model / Layout / Content rules / Iteration / Skill semantics).
+- Removed carry blocks from `ws:lead-discuss`, `ws:lead-write-ticket`,
+  `ws:lead-proceed`, `ws:lead-write-skeleton`.
+- Replaced inline "carry context: …" with bare `Continue through <skill>`.
+- Synced spec anchor `{#260514-skill-authoring-carried-context}` to
+  bare-handoff and chain-passthrough behavior.
+
+Deviations:
+- Not-chained gate annotation: encoded as doctrine principle in
+  `ws:lead-skill-authoring` rather than per-gate text in each downstream
+  skill. Downstream gates already behaved correctly once carry blocks were
+  absent; per-gate annotation would be redundant prose.
+
 ### Phase 2: R6 Unify implement spine — absorb lead-edit and lead-write-code review
 
 Goal: restructure `lead-implement` into a single unified spine where all
@@ -228,6 +251,31 @@ Verification:
 - Confirm `judge: review-allocation` tiered table covers all prior review
   scenarios (lead-only, single-reviewer, 2-partition, 3-partition).
 - Confirm `lead-sprint` routing table routes through `ws:lead-implement`.
+
+### Result (3d48c1d9) - 2026-05-21
+
+Commits: `009b1685..3d48c1d9` (7 implementation commits).
+
+- Unified `lead-implement` spine: Route → Prep → Edit → Review → Doc
+  Pre-Pass → Doc Commit Gate → Final Action Gate → Merge.
+- Three judges gate all stages: `judge: needs-delegation` (direct-edit vs
+  delegated), `judge: plan-depth` (4-level: none / brief / survey /
+  research), `judge: review-allocation` (Tier 1 depth × Tier 2 partitions).
+- Each stage is a single judge-gated linear sequence; no labeled structural
+  sections or path forks.
+- Deleted `ws:lead-edit` and `ws:lead-write-code` skill directories.
+- Updated cascade: `ws:lead-sprint` routing table, `ws:lead-write-skeleton`
+  next-route, `ws:lead-proceed` Announce template.
+- Updated `ai-docs/spec/workflow-skills.md` and
+  `ai-docs/mental-model/workflow-skills.md`; cleared 3 orphan
+  `lead-write-code` references.
+
+Deviations:
+- `judge: plan-depth` merged planned `judge: needs-brief` into a 4-level
+  cumulative spectrum; original scope only listed `needs-delegation` and
+  `review-allocation` judges.
+- `judge: branch-mode` was preserved from the original skill; scope did not
+  list it but it was already present and needed no redesign.
 
 ### Phase 3: Batch — R1 invoke handler structure, R2 cross-skill judges ban, R4 negative-invariant evidence rule, R5 domain-inference subquery handoff
 
