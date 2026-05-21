@@ -136,6 +136,15 @@ Verification commands:
 - `cd ws-dashboard/frontend && npm run build`
 - `cd ws-dashboard/frontend && npm run test:browser`
 
+Baseline before implementation:
+- The route/helper tests and build passed.
+- `npm run test:browser` failed in the existing Activity pane acceptance step
+  after the test installed an activity route fixture and re-opened the pane:
+  `[data-surface-kind="workRootActivity"]` stayed at count 0 after clicking
+  the activity badge. Treat this as an existing browser-gate failure in the
+  Activity pane path that this UI shell implementation must either fix or
+  escalate with exact evidence.
+
 Run relevant Rust activity tests only if backend routes/types are changed. The
 expected implementation should be frontend-only plus tests/styles, consuming
 the existing read model.
