@@ -50,7 +50,7 @@ The milestone covers:
 - `260518-feat-ws-dashboard-activity-read-model` - done; implement the backend
   feed snapshot plus selected transcript backfill contract that the console
   reads.
-- `260518-feat-ws-dashboard-activity-console-ui` - todo; build the reusable
+- `260518-feat-ws-dashboard-activity-console-ui` - ready; build the reusable
   Activity Ribbon, Transcript Block viewer, and WorkRoot Activity pane shell
   against the read model.
 - `260518-feat-ws-dashboard-activity-watch-stream` - todo; implement the

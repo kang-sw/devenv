@@ -1,6 +1,8 @@
 ---
 title: ws dashboard Activity Console UI shell
 parent: 260518-epic-ws-dashboard-activity-console
+spec:
+  - 260521-ws-dashboard-activity-console-ui-shell
 related:
   260521-feat-ws-dashboard-command-dispatch-spine: prerequisite command spine for Activity Console controls
   260518-feat-ws-dashboard-activity-read-model: supplies Activity Feed items and selected transcript blocks
