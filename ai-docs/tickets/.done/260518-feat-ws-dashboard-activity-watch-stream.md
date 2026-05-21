@@ -3,6 +3,7 @@ title: ws dashboard Activity Console watch stream
 parent: 260518-epic-ws-dashboard-activity-console
 spec:
   - 260521-ws-dashboard-activity-console-watch-stream
+completed: 2026-05-21
 related:
   260518-feat-ws-dashboard-activity-read-model: supplies feed item and transcript cursor contracts consumed by stream events
   260518-feat-ws-dashboard-activity-live-ux: consumes this backend stream in the frontend console
@@ -111,3 +112,22 @@ heartbeat/fallback behavior, agent file change invalidation, reconnect after a
 missed cursor, and private-field redaction. Native Windows evidence may be
 recorded as a later implementation note when the watcher crate or OS behavior
 requires host dogfood.
+
+### Result (2acdf8a3) - 2026-05-21
+
+Implemented the backend Activity Console event stream at
+`GET /api/dashboard/work-roots/{workRootId}/activity/events?after={cursor}`.
+The route is owner-authenticated before stream acceptance and emits
+source-neutral SSE `activity` frames for mode changes, snapshot invalidation,
+item upsert/removal, transcript updates, and heartbeat events.
+
+The completed backend stream uses bounded polling fallback mode and announces
+`pollFallback`; no native filesystem watcher dependency was added in this
+slice. Tests cover missing-agent-directory fallback, subscribed workRoot
+scoping against sibling workRoot cache mutations, reconnect cursor invalidation,
+private-field redaction, unknown workRoot handling, auth rejection, and SSE
+frame metadata.
+
+Deferred scope remains frontend live UX consumption, native watcher mode,
+agent controls, exec job source support, and expanded transcript source
+adapters.

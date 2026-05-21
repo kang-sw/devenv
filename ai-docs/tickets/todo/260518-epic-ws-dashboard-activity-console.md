@@ -53,8 +53,9 @@ The milestone covers:
 - `260518-feat-ws-dashboard-activity-console-ui` - done; built the reusable
   Activity Ribbon, Transcript Block viewer, and WorkRoot Activity pane shell
   against the read model.
-- `260518-feat-ws-dashboard-activity-watch-stream` - ready; implement the
-  daemon-side cross-platform watcher, SSE feed event stream, and fallback mode.
+- `260518-feat-ws-dashboard-activity-watch-stream` - done; implemented the
+  daemon-side SSE feed event stream, cursor/reset behavior, and bounded
+  polling fallback mode.
 - `260518-feat-ws-dashboard-activity-live-ux` - todo; adopt the live stream in
   the Activity Console frontend with merge, stale-root, transcript-refresh, and
   fallback behavior.

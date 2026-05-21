@@ -24,6 +24,55 @@ pub struct ActivityFeed {
 
 pub type WorkRootActivityView = ActivityFeed;
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ActivityConsoleEvent {
+    ItemUpserted {
+        cursor: String,
+        item: ActivityItem,
+    },
+    ItemRemoved {
+        cursor: String,
+        activity_id: String,
+    },
+    TranscriptUpdated {
+        cursor: String,
+        activity_id: String,
+        transcript_cursor: Option<String>,
+    },
+    SnapshotInvalidated {
+        cursor: String,
+        reason: ActivitySnapshotInvalidationReason,
+    },
+    ModeChanged {
+        cursor: String,
+        update_mode: ActivityUpdateMode,
+    },
+    Heartbeat {
+        cursor: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActivitySnapshotInvalidationReason {
+    Overflow,
+    WatchReset,
+    Fallback,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActivityUpdateMode {
+    Watch,
+    PollFallback,
+    Snapshot,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkRootActivitySummary {
@@ -285,5 +334,61 @@ mod tests {
                 "activity JSON leaked {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn activity_console_events_serialize_source_neutral_contract() {
+        let item = ActivityItem {
+            id: "agent:reviewer".to_owned(),
+            kind: "namedAgent".to_owned(),
+            label: "reviewer".to_owned(),
+            status: "running".to_owned(),
+            live: true,
+            attention: false,
+            started_at: None,
+            updated_at: Some("2026-05-21T00:00:00Z".to_owned()),
+            finished_at: None,
+            source: ActivitySourceDisplay {
+                kind: "namedAgent".to_owned(),
+                label: "reviewer".to_owned(),
+                backend: Some("codex".to_owned()),
+                harness: None,
+                tier: None,
+                model: None,
+            },
+            transcript: ActivityTranscriptAvailability {
+                status: "available".to_owned(),
+                available: true,
+                cursor: Some("0".to_owned()),
+            },
+            diagnostics: Vec::new(),
+            metadata: BTreeMap::new(),
+        };
+
+        let value = serde_json::to_value(ActivityConsoleEvent::ItemUpserted {
+            cursor: "0000000001".to_owned(),
+            item,
+        })
+        .expect("serialize item event");
+        assert_eq!(value["type"], "itemUpserted");
+        assert_eq!(value["cursor"], "0000000001");
+        assert_eq!(value["item"]["id"], "agent:reviewer");
+        assert!(value.get("work_root_path").is_none());
+
+        let mode = serde_json::to_value(ActivityConsoleEvent::ModeChanged {
+            cursor: "0000000002".to_owned(),
+            update_mode: ActivityUpdateMode::PollFallback,
+        })
+        .expect("serialize mode event");
+        assert_eq!(mode["type"], "modeChanged");
+        assert_eq!(mode["updateMode"], "pollFallback");
+
+        let invalidation = serde_json::to_value(ActivityConsoleEvent::SnapshotInvalidated {
+            cursor: "0000000003".to_owned(),
+            reason: ActivitySnapshotInvalidationReason::WatchReset,
+        })
+        .expect("serialize invalidation event");
+        assert_eq!(invalidation["type"], "snapshotInvalidated");
+        assert_eq!(invalidation["reason"], "watchReset");
     }
 }

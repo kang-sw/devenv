@@ -19,7 +19,8 @@ use crate::terminal::{
     terminal_resize, terminal_websocket, TerminalRegistry,
 };
 use crate::work_root_activity::{
-    work_root_activity, work_root_activity_transcript, WorkRootActivityProjector,
+    work_root_activity, work_root_activity_events, work_root_activity_transcript,
+    WorkRootActivityProjector,
 };
 use crate::work_root_files::{list_work_root_files, read_work_root_file, OpenedWorkRoots};
 
@@ -88,6 +89,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activity/items/{activity_id}/transcript",
             get(work_root_activity_transcript),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activity/events",
+            get(work_root_activity_events),
         )
         .route("/assets/{*asset_path}", get(static_asset))
         .route("/servers", get(index))
