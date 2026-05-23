@@ -35,6 +35,7 @@ Create and maintain this task list:
 [ ] Execute - invoke wsflow:lead-edit; capture commit range and result commit
 [ ] Doc pre-pass - invoke wsflow:lead-update-spec; update mental models directly when source changes require it
 [ ] Doc commit gate - refresh ai-docs/_index.md and ticket Result, then commit docs
+[ ] Doc closeout compaction - compact safe documentation-only branch-tip suffix
 [ ] Final report - summarize commits, verification, review, deviations, and next slice
 ```
 
@@ -58,12 +59,23 @@ Create and maintain this task list:
 3. If ticket-driven, add a `### Result (<result-commit>) - YYYY-MM-DD` section to the completed phase.
 4. Commit ticket and index changes through `wsflow/git.commit`.
 
-### 6. Final Report
+### 6. Doc Closeout Compaction
+
+1. If branch preparation did not create or continue a scoped implementation branch, record `skipped - current branch mode` and continue.
+2. Inspect commits from `HEAD` backward after Doc Commit Gate; build only the contiguous branch-tip suffix of eligible documentation closeout commits.
+3. An eligible commit is non-merge, workflow-owned, and changes only `ai-docs/spec/`, `ai-docs/mental-model/`, `ai-docs/tickets/`, `ai-docs/_index.md`, or narrowly relevant `ai-docs/ref/` workflow docs.
+4. Stop suffix collection at the first ineligible commit; never cross source, test, skill, runtime, generated, planning, ready-promotion, merge, or ambiguous-authorship commits.
+5. If the suffix has fewer than two eligible commits, record `skipped - fewer than two eligible closeout commits`.
+6. Compact the suffix into one closeout commit only when metadata synthesis is unambiguous; preserve AI Context, ticket Result references, Updated Tickets, Updated Specs, Mental Model Notes, and doc-audit rationale from absorbed commits.
+7. After compaction, verify the final tree matches the pre-compaction head; if equivalence cannot be proven, restore the pre-compaction head and report compaction as skipped with the blocker.
+
+### 7. Final Report
 
 Report:
 
 - implemented changes from edit output;
 - documentation updates and ticket Result hash;
+- doc closeout compaction status;
 - review result from edit `Review:`;
 - test status;
 - deviations or open items;

@@ -62,6 +62,7 @@ Review
 [ ] Review - reviewer relay per review-allocation
 [ ] Doc pre-pass - update-spec then mental-model-updater; commit each
 [ ] Doc commit gate - refresh _index.md, ticket status, then commit docs
+[ ] Doc closeout compaction - compact safe documentation-only branch-tip suffix
 [ ] Final action gate - wait for merge, continue, or stop
 [ ] Merge - implementation-branch modes only and only when approved
 ```
@@ -102,12 +103,23 @@ Run mental-model-updater after update-spec so it sees implemented-marker changes
 3. If ticket-driven, follow Ticket Update using `<result-commit>`.
 4. Commit doc changes per executor-wrapup. Do not re-run Doc Pipeline.
 
-### 7. Final Action Gate
+### 7. Doc Closeout Compaction
+
+1. If `branch-mode` is direct current branch, set `<doc-compaction-status>` to `skipped - direct-current mode` and continue.
+2. Inspect commits from `HEAD` backward after Doc Commit Gate; build only the contiguous branch-tip suffix of eligible documentation closeout commits.
+3. An eligible commit is non-merge, workflow-owned, and changes only `ai-docs/spec/`, `ai-docs/mental-model/`, `ai-docs/tickets/`, `ai-docs/_index.md`, or narrowly relevant `ai-docs/ref/` workflow docs.
+4. Stop suffix collection at the first ineligible commit; never cross source, test, skill, runtime, generated, planning, ready-promotion, merge, or ambiguous-authorship commits.
+5. If the suffix has fewer than two eligible commits, set `<doc-compaction-status>` to `skipped - fewer than two eligible closeout commits` and continue.
+6. Compact the suffix into one closeout commit only when metadata synthesis is unambiguous; preserve AI Context, ticket Result references, Updated Tickets, Updated Specs, Mental Model Notes, and doc-audit rationale from absorbed commits.
+7. After compaction, verify the final tree matches the pre-compaction head; if equivalence cannot be proven, restore the pre-compaction head and report `<doc-compaction-status>` as skipped with the blocker.
+
+### 8. Final Action Gate
 
 Report:
 
 - implemented changes from direct-edit or implementer output;
 - documentation updates and ticket Result hash;
+- doc closeout compaction status;
 - review result;
 - test status;
 - deviations or open items;
@@ -118,7 +130,7 @@ stage. If the user wants more changes, route to a new implementation slice or
 `ws:lead-sprint`; completed phases capture follow-up through append-only ticket
 Result editions.
 
-### 8. Merge
+### 9. Merge
 
 Implementation-branch modes only. Merge only when the user approves. Merge
 `implement/<scope>` to `<merge-target>` with the repository merge helper or
