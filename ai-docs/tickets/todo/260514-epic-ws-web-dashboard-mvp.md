@@ -118,6 +118,10 @@ The MVP should cover:
   from a named-agent list into a reusable read-only Activity Console with a
   live/latest ribbon, selected transcript blocks, stream-backed feed updates,
   and backend-owned transcript source resolution.
+- `260523-bug-ws-dashboard-activity-console-dogfood-usability` - todo; repair
+  post-epic dogfood usability gaps in Activity Console placement, transcript
+  tail-follow scrolling, compact block summaries, and Codex prompt/interruption
+  transcript coverage while keeping the surface read-only and command-routed.
 
 ## Cross-Child Decisions
 

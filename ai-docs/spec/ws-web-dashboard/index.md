@@ -264,6 +264,12 @@ agent/terminal-side split. This group-1 placement is an explicit exception for
 a reversible projection surface; general opened/support surfaces continue to use
 their existing support-group placement policy.
 
+> [!note] Implementation Gap · 2026-05-23
+> Dogfood feedback found the group-1 default poor for real lead-agent
+> monitoring. The intended repair is for WorkRoot Activity panes to prefer the
+> second/support split when available while preserving focus-existing behavior
+> and reversible close semantics.
+
 The pane displays named-agent projection rows and an explicit empty Running
 Commands section. Real running-command rows remain absent until the async exec
 job model exists.
@@ -334,6 +340,13 @@ summaries with inline detail expansion. Exec activity renders as terminal-style
 output. Transcript backfill/load-more is driven primarily by scroll position,
 with explicit refresh or load-more controls reserved for fallback and error
 states.
+
+> [!note] Implementation Gap · 2026-05-23
+> The initial shell does not yet meet dogfood usability expectations: transcript
+> views should tail-follow by default until the user scrolls away, WorkRoot
+> Activity scrolling must not snap upward during split/live updates, and compact
+> blocks should render a meaningful bounded one-line summary instead of generic
+> labels such as `Tool call` or `Unsupported transcript record`.
 
 Visible Activity Console controls expose stable command ids and route their
 clicked behavior through the dashboard command dispatch path so later keyboard
@@ -423,6 +436,13 @@ status/error entries, and command/output-like records into bounded
 `TranscriptBlock` values. Raw backend JSON or markdown may be adapter input but
 is not the browser contract. Exec transcript source integration remains blocked
 until the async exec output reader model exists.
+
+> [!note] Implementation Gap · 2026-05-23
+> Dogfood feedback found Codex native coverage too narrow for lead-agent
+> monitoring. Prompt, continuation, interrupt, and handoff records should be
+> fixture-backed and normalized into source-neutral transcript blocks when their
+> native shapes are known; unsupported handling must remain bounded and redacted
+> rather than echoing native record details.
 
 The backend continues to use feed-level `transcriptUpdated` invalidations plus
 bounded selected backfill for live transcript updates. It does not expose a
