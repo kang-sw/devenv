@@ -34,8 +34,10 @@ Language
 1. Invoke `wsflow:lead-workflow-manual`.
 2. Call `wsflow/git.status()`.
 3. Call `wsflow/project_tree()`.
-4. Initialize session state: `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` are empty.
-5. Enter session loop.
+4. Recover episode state from active conversation or recent `Sprint-Edit:` commit markers.
+5. If recovery finds one open episode, set `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` from it.
+6. If recovery is empty or ambiguous, initialize `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` as empty.
+7. Enter session loop.
 
 ## On: session loop
 
@@ -43,6 +45,14 @@ Language
 2. If a `sprint-edit` episode is active and the request answers the post-edit question, apply **Post-Edit Reply Routing**.
 3. Otherwise apply `judge: route-request`; execute the first matching route.
 4. Return to step 1.
+
+## On: recover episode
+
+1. Prefer active conversation state when it names an open `sprint-edit` episode.
+2. Otherwise inspect recent commits for `Sprint-Edit:` and `Sprint-Edit-Context:` markers.
+3. Treat the newest marker group with no later episode documentation closure as the open episode.
+4. Set `<episode-start>` to the parent of that group's first marked commit.
+5. If multiple marker groups could be open, leave state empty and report the ambiguity before routing.
 
 ## On: sprint-edit
 
