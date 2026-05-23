@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.28.1 - 2026-05-23
+
+### Fixed
+- Harden plugin-managed MCP startup when concurrent launcher repair attempts
+  share a runtime directory, including contract-addressed cache binaries,
+  process-unique temporary files, and compatible-target reuse after replace
+  failure.
+
 ## v0.28.0 - 2026-05-23
 
 ### Changed
