@@ -87,12 +87,13 @@ Trigger: post-edit reply means wrap it up, done, or good.
 4. Set `<episode-range>` to the smallest contiguous Git range that contains the marked commits; report any unmarked commits inside the range as excluded from sprint-edit intent.
 5. Invoke `ws:lead-update-spec` with `<episode-range>` and the marked commit list.
 6. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
-6. Call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <episode-range>\nMarked commits: <marked-commits>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>")`.
-7. Wait for completion; commit documentation changes.
-8. Call `ws/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
-9. Clear `<current-edit-context>`, `<episode-slug>`, and `<episode-start>`.
-10. Report marked episode commits, documentation updates, and verification.
-11. Return to session loop.
+7. Call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <episode-range>\nMarked commits: <marked-commits>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>")`.
+8. Wait for completion and apply any needed episode-scoped documentation updates.
+9. Call `ws/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
+10. Commit documentation changes only after the Doc Commit Gate passes.
+11. Clear `<current-edit-context>`, `<episode-slug>`, and `<episode-start>`.
+12. Report marked episode commits, documentation updates, and verification.
+13. Return to session loop.
 
 ## On: shift direction
 
