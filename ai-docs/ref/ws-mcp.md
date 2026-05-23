@@ -117,8 +117,10 @@ Go binary. Native Windows users may need to install Python 3 once when the
 Windows Store alias exists but no interpreter is installed.
 
 All fallback paths must preserve the same `runtime.json` compatibility contract,
-cache-local runtime location, release asset naming, and checksum verification
-policy.
+cache-local runtime directory, release asset naming, and checksum verification
+policy. The installed cache-local binary name is derived from the plugin version
+and `runtime.json` content hash so overlapping repair attempts for different
+contracts do not share a final executable path.
 
 Current launcher inputs:
 
@@ -137,6 +139,11 @@ Current launcher inputs:
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions. When set to `1`, `true`, `yes`, or `on`, agent-backed MCP tools and CLI commands are hidden or disabled. Unset preserves the full ws surface. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override. Empty or unset defaults to `ws`; wsflow sets this to `wsflow`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override. Empty or unset defaults to `ws.setup`; wsflow sets this to `setup`. |
+
+Runtime repair uses process-unique temporary paths and best-effort atomic
+replacement. When final replacement fails because another launcher process has
+already installed or is using the target binary, the launcher revalidates that
+target and proceeds only if it is compatible.
 
 The plugin-managed MCP path is proven for `codex exec` when `.mcp.json` sets
 `cwd: "."`. Without that field, Codex registers the server but startup fails
@@ -1420,20 +1427,21 @@ https://github.com/<release_repository>/releases/download/<release_tag>
 ```
 
 It then downloads `ws-mcp-<os>-<arch>[.exe]` and `SHA256SUMS`. The launcher
-checks an existing cache-local binary first; compatible `0.28.x` binaries run
-without network access, while missing or incompatible binaries trigger repair.
+checks an existing cache-local contract-addressed binary first; compatible
+`0.28.x` binaries run without network access, while missing or incompatible
+binaries trigger repair.
 
 Runtime binaries live in the installed plugin cache by default:
 
 ```text
-<installed-plugin-cache>/.runtime/<os>-<arch>/ws-mcp[.exe]
+<installed-plugin-cache>/.runtime/<os>-<arch>/ws-mcp-<plugin-version>-<runtime-json-sha12>[.exe]
 ```
 
 This keeps plugin document updates and runtime binaries version-scoped together.
 When a plugin reinstall or plugin version update creates a fresh cache copy, the
 next MCP startup may redownload the binary for that plugin/runtime contract. If
-the binary already exists and `ws-mcp version` satisfies `runtime.json`, startup
-should not perform routine network work.
+the contract-addressed binary already exists and satisfies `runtime.json`,
+startup should not perform routine network work.
 
 Update/drift behavior:
 

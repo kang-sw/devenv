@@ -1,6 +1,8 @@
 import importlib.util
+import hashlib
 import json
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -151,7 +153,6 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
     def test_absent_or_invalid_capabilities_probe_falls_back(self):
         launcher = load_launcher()
-        import tempfile
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
@@ -174,6 +175,75 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
             self.assertTrue(launcher.runtime_fully_compatible(binary, {"plugin_version": "0.18.1"}, temp))
             self.assertEqual(calls, [("runtime", "capabilities"), ("version",)])
+
+    def test_download_repair_uses_process_unique_temp_paths(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            binary = temp / "ws-mcp"
+            asset = "ws-mcp-darwin-arm64"
+            payload = b"runtime"
+            expected = hashlib.sha256(payload).hexdigest()
+            destinations = []
+
+            def fake_download_file(url, destination):
+                destinations.append(destination.name)
+                if url.endswith(asset):
+                    destination.write_bytes(payload)
+                elif url.endswith("SHA256SUMS"):
+                    destination.write_text(f"{expected}  {asset}\n", encoding="utf-8")
+                else:
+                    raise AssertionError(f"unexpected URL: {url}")
+
+            launcher.download_file = fake_download_file
+            launcher.install_downloaded_runtime(
+                binary,
+                temp,
+                asset,
+                {"release_repository": "example/repo", "release_tag": "v0.18.1"},
+            )
+
+            self.assertEqual(binary.read_bytes(), payload)
+            self.assertEqual(len(destinations), 2)
+            self.assertEqual(len(set(destinations)), 2)
+            self.assertNotIn(f"{binary.name}.download", destinations)
+            self.assertNotIn("SHA256SUMS.download", destinations)
+
+    def test_runtime_binary_name_is_contract_addressed(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "runtime.json"
+            contract_path.write_text('{"plugin_version":"0.18.1"}\n', encoding="utf-8")
+            got = launcher.runtime_binary_name({"plugin_version": "0.18.1"}, contract_path, "windows")
+
+            self.assertTrue(got.startswith("ws-mcp-0.18.1-"))
+            self.assertTrue(got.endswith(".exe"))
+            self.assertIn(hashlib.sha256(contract_path.read_bytes()).hexdigest()[:12], got)
+
+    def test_install_replace_failure_reuses_existing_compatible_runtime(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            tmp = temp / "candidate"
+            binary = temp / "ws-mcp-0.18.1-test"
+            tmp.write_text("candidate", encoding="utf-8")
+            binary.write_text("existing", encoding="utf-8")
+            calls = []
+
+            def fake_replace(source, destination):
+                calls.append((source, destination))
+                raise PermissionError("target is busy")
+
+            launcher.os.replace = fake_replace
+            launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir: got_binary == binary
+
+            installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
+
+            self.assertFalse(installed)
+            self.assertEqual(calls, [(tmp, binary)])
 
 
 if __name__ == "__main__":

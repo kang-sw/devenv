@@ -19,7 +19,7 @@ related:
 - `agents-plugin/.claude-plugin/plugin.json` is a Claude-facing compatibility manifest for the Codex-first candidate and should start the same Python launcher path, not the POSIX shell wrapper, so native Windows does not require `/bin/sh`. {#260505-plugin-local-mcp-server-config}
 - `agents-plugin-wsflow/` is the scaffolded agentless derivative package; its `.mcp.json` selects `WS_MCP_NO_AGENT=1`, `WS_MCP_NAMESPACE=wsflow`, and `WS_MCP_SETUP_TOOL=setup`. {#260513-wsflow-agentless-plugin-package}
 - `.agents/plugins/marketplace.json` exposes separate local Codex marketplace entries for `ws` and `wsflow`; `.claude-plugin/marketplace.json` exposes separate manual Claude marketplace entries for the same packages while `install.sh` installs only `ws`. Keep source paths and product identities distinct. {#260513-wsflow-marketplace-install}
-- `agents-plugin/bin/ws-mcp-launcher.py` owns runtime lookup, compatibility checks, release download, checksum verification, local dev runtime repair, and final handoff. {#260505-runtime-launcher-repair-project-root}
+- `agents-plugin/bin/ws-mcp-launcher.py` owns runtime lookup, compatibility checks, release download, checksum verification, local dev runtime repair, and final handoff; cache-local runtime binary names are derived from plugin version plus `runtime.json` content hash, and repair uses process-unique temporary files with compatible-target fallback after replace failure. {#260505-runtime-launcher-repair-project-root}
 - `agents-plugin/runtime.json` is active compatibility data, not descriptive metadata. {#260505-runtime-contract-metadata}
 
 ## Module Contracts

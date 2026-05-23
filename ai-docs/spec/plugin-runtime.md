@@ -97,13 +97,20 @@ install path. `install.sh` does not install wsflow into Claude.
 ## Runtime Launcher Repair And Project-Root Detection {#260505-runtime-launcher-repair-project-root}
 
 The plugin launcher resolves the current operating system and architecture,
-selects the matching cache-local `ws-mcp` binary path, and ensures an executable
-compatible runtime is present before delegating to it.
+selects a cache-local runtime binary path derived from `plugin_version` plus the
+`runtime.json` content hash, and ensures an executable compatible runtime is
+present before delegating to it.
 
 When the binary is missing or incompatible, the launcher can install a runtime
 from an explicit bootstrap binary, a bootstrap URL, a local devenv runtime, or
 the release asset URL declared in the runtime contract. Downloaded release
 assets are verified against `SHA256SUMS` before becoming executable.
+
+Install and repair paths use process-unique temporary files and best-effort
+atomic replacement. If replacing the final cache-local binary fails because
+another process already installed or is using that target, the launcher rechecks
+the target and proceeds only when it is compatible with the current runtime
+contract.
 
 For plugin-managed Codex sessions, the launcher detects the caller project root
 from the parent process environment when possible and exports it as
