@@ -158,7 +158,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
 | `260523-feat-ws-dashboard-tool-output-safe-summary` | idea | Improve safe one-line summaries for Codex tool output transcript blocks |
 | `260523-feat-ws-dashboard-persist-open-workroots` | idea | Persist opened dashboard workRoots across daemon restarts |
-| `260523-feat-ws-dashboard-linked-worktree-discovery` | idea | Surface linked Git worktrees in dashboard resource discovery |
+| `260523-feat-ws-dashboard-linked-worktree-discovery` | idea | TBA dashboard Git worktree discovery and external change detection |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
