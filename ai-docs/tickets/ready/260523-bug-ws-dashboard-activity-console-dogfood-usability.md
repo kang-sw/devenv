@@ -8,6 +8,8 @@ spec:
   - 260517-ws-dashboard-workroot-activity-pane
   - 260521-ws-dashboard-activity-console-ui-shell
   - 260522-ws-dashboard-activity-console-transcript-expansion
+plans:
+  phase-1: 2026-05/23-1049.activity-console-dogfood-phase1
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
@@ -68,6 +70,24 @@ transcript refresh, and Dockview rerender paths.
 
 Verification should include focused frontend unit coverage for scroll policy
 and browser-level evidence against the daemon-served production frontend.
+
+### Result (c82d7c43) - 2026-05-23
+
+Implemented support-split WorkRoot Activity placement and transcript scroll
+stability. New Activity panes now route through opened-surface placement so they
+prefer the support split, while duplicate badge opens focus the existing pane in
+its current group and close remains browser-only/reversible. Activity pane group
+ownership is persisted through App-owned pane order rather than a hard-coded
+group-1 render path.
+
+Transcript blocks now tail-follow by default, pause when the user scrolls away,
+and preserve workRoot/activity-scoped scroll memory across feed refresh,
+selected transcript refresh, stream invalidation, and workbench rerender paths.
+Browser acceptance verifies support-split placement, horizontal ribbon overflow,
+and refresh-after-scroll stability with response-applied transcript evidence.
+
+Deferred: backend tail-page pagination remains unchanged; compact transcript
+summary quality and Codex native transcript coverage stay in later phases.
 
 ### Phase 2: Improve compact transcript summaries
 

@@ -172,8 +172,8 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 - `260523-bug-ws-dashboard-activity-console-dogfood-usability` - repair Activity
-  Console dogfood usability gaps, starting with support-split placement and
-  transcript tail-follow/scroll stability.
+  Console dogfood usability gaps; next unresolved slice is compact transcript
+  summary quality.
 
 ## Session Notes
 
