@@ -648,6 +648,67 @@ async fn dashboard_resources_api_includes_opened_work_root() {
 }
 
 #[tokio::test]
+async fn dashboard_resources_refresh_recomputes_availability_without_activation_or_membership_loss()
+{
+    let root = temp_fixture_path("refresh-recompute");
+    fs::create_dir_all(&root).expect("create refresh root");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let offline_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/activation",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": "offline" }).to_string(),
+                ))
+                .expect("offline activation request"),
+        )
+        .await
+        .expect("offline activation response");
+    assert_eq!(offline_response.status(), StatusCode::OK);
+
+    let available = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let root_view = only_work_root(&available);
+    assert_eq!(root_view["id"], work_root_id);
+    assert_eq!(root_view["activation"], "offline");
+    assert_eq!(root_view["availability"], "available");
+
+    fs::remove_dir_all(&root).expect("remove refresh root after registry membership");
+    let missing = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let root_view = only_work_root(&missing);
+    assert_eq!(root_view["id"], work_root_id);
+    assert_eq!(root_view["activation"], "offline");
+    assert!(
+        ["missing", "moved"].contains(
+            &root_view["availability"]
+                .as_str()
+                .expect("missing availability")
+        ),
+        "missing root stays visible with degraded availability"
+    );
+
+    fs::create_dir_all(&root).expect("restore refresh root");
+    let restored = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let root_view = only_work_root(&restored);
+    assert_eq!(root_view["id"], work_root_id);
+    assert_eq!(root_view["activation"], "offline");
+    assert_eq!(root_view["availability"], "available");
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
 async fn work_root_registry_activation_controls_keep_offline_roots_visible_and_gate_routes() {
     let root = temp_fixture_path("activation-gate");
     fs::create_dir_all(&root).expect("create activation root");
@@ -3976,6 +4037,40 @@ fn body_contains_workspace(value: &serde_json::Value, workspace_id: &str) -> boo
                 .any(|workspace| workspace["id"] == workspace_id)
         })
         .unwrap_or(false)
+}
+
+async fn dashboard_resources_json(app: axum::Router, cookie: &str) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("resources request"),
+        )
+        .await
+        .expect("resources response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("resources body");
+    serde_json::from_slice(&body).expect("resources JSON")
+}
+
+fn only_work_root(value: &serde_json::Value) -> &serde_json::Value {
+    let roots = value["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .flat_map(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("workRoots array")
+                .iter()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(roots.len(), 1, "expected exactly one known workRoot");
+    roots[0]
 }
 
 async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -> String {

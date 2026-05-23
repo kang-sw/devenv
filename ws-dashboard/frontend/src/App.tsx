@@ -106,6 +106,11 @@ import {
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import { ActivityConsole } from "./ActivityConsole";
 import {
+  createResourceRefreshCoordinator,
+  resourceAvailabilityPollIntervalMs,
+  type ResourceRefreshCoordinator,
+} from "./resourceRefresh";
+import {
   applyActivityConsoleEvent,
   fetchWorkRootActivity,
   mergeWorkRootActivityViews,
@@ -134,8 +139,6 @@ type WorkbenchSelection = {
   mainInstance: InstanceView | null;
   selectedInstance: InstanceView | null;
 };
-
-const resourceEndpoint = "/api/dashboard/resources";
 
 async function requestWorkRootActivation(
   workRootId: string,
@@ -192,33 +195,38 @@ export function App() {
   >({});
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
+  const resourceRefreshCoordinatorRef =
+    useRef<ResourceRefreshCoordinator | null>(null);
 
-  const loadResources = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  if (!resourceRefreshCoordinatorRef.current) {
+    resourceRefreshCoordinatorRef.current = createResourceRefreshCoordinator({
+      applyResources: setResources,
+      setLoading,
+      setError,
+    });
+  }
 
-    try {
-      const response = await fetch(resourceEndpoint, {
-        headers: { Accept: "application/json" },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const nextResources = (await response.json()) as DashboardResourcesView;
-      setResources(nextResources);
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "request failed",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadResources = useCallback(
+    (reason: "initial" | "explicit" | "poll" | "open" = "explicit") =>
+      resourceRefreshCoordinatorRef.current?.refresh(reason),
+    [],
+  );
 
   useEffect(() => {
-    void loadResources();
+    resourceRefreshCoordinatorRef.current?.resume();
+    void loadResources("initial");
+  }, [loadResources]);
+
+  useEffect(() => {
+    resourceRefreshCoordinatorRef.current?.resume();
+    const interval = window.setInterval(() => {
+      void loadResources("poll");
+    }, resourceAvailabilityPollIntervalMs);
+
+    return () => {
+      window.clearInterval(interval);
+      resourceRefreshCoordinatorRef.current?.dispose();
+    };
   }, [loadResources]);
 
   const handleWorkRootOpened = useCallback(
@@ -238,11 +246,11 @@ export function App() {
       // Reconcile immediately with the aggregated open response and select the
       // opened workRoot, then re-fetch the canonical endpoint so it stays the
       // source of truth for refresh and re-entry.
-      setResources(openedView);
+      resourceRefreshCoordinatorRef.current?.applyExternalResources(openedView);
       if (openedWorkRootId) {
         setSelectedId(openedWorkRootId);
       }
-      void loadResources();
+      void loadResources("open");
     },
     [loadResources, resources],
   );
@@ -416,12 +424,18 @@ export function App() {
         executableHandlers[command.commandId] = () => setSelectedId(entityId);
       } else if (command.payload.type === "refresh") {
         executableHandlers[command.commandId] = () => {
-          void loadResources();
+          void loadResources("explicit");
         };
       } else if (command.payload.type === "workRoot.activation.set") {
         const { workRootId, activation } = command.payload;
         executableHandlers[command.commandId] = () => {
-          void requestWorkRootActivation(workRootId, activation).then(setResources);
+          void requestWorkRootActivation(workRootId, activation)
+            .then((nextResources) => {
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
+            })
+            .catch((nextError) => {
+              setError(nextError instanceof Error ? nextError.message : "activation failed");
+            });
         };
       }
 
@@ -522,18 +536,24 @@ function PanelHeader({
           {actions.map((action) => (
             <button
               className="action-button"
-              data-command-id={`resource.action.${action.id}`}
+              data-command-id={
+                action.id === "refresh"
+                  ? "dashboard.refresh"
+                  : `resource.action.${action.id}`
+              }
               disabled={!action.enabled}
               key={action.id}
               title={action.label}
               type="button"
               onClick={() =>
-                onCommand({
-                  commandId: `resource.action.${action.id}`,
-                  payload: action.id === "refresh"
-                    ? { type: "refresh" }
-                    : { type: "action", label: action.label, entityId },
-                })
+                onCommand(
+                  action.id === "refresh"
+                    ? buildDashboardRefreshCommand()
+                    : {
+                        commandId: `resource.action.${action.id}`,
+                        payload: { type: "action", label: action.label, entityId },
+                      },
+                )
               }
             >
               {action.label}
@@ -2240,7 +2260,9 @@ function WorkbenchToolbar({
             data-command-id={
               activationForAction(action.id)
                 ? "workRoot.activation.set"
-                : `resource.action.${action.id}`
+                : action.id === "refresh"
+                  ? "dashboard.refresh"
+                  : `resource.action.${action.id}`
             }
             disabled={!action.enabled}
             key={`${entityId}:${action.id}`}
@@ -2251,13 +2273,14 @@ function WorkbenchToolbar({
                 onCommand(buildWorkRootActivationCommand(entityId, activation));
                 return;
               }
-              onCommand({
-                commandId: `resource.action.${action.id}`,
-                payload:
-                  action.id === "refresh"
-                    ? { type: "refresh" }
-                    : { type: "action", label: action.label, entityId },
-              });
+              onCommand(
+                action.id === "refresh"
+                  ? buildDashboardRefreshCommand()
+                  : {
+                      commandId: `resource.action.${action.id}`,
+                      payload: { type: "action", label: action.label, entityId },
+                    },
+              );
             }}
           >
             {action.label}

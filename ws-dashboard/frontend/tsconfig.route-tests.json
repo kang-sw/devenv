@@ -21,6 +21,8 @@
     "src/commands.test.ts",
     "src/resourceModel.ts",
     "src/resourceModel.test.ts",
+    "src/resourceRefresh.ts",
+    "src/resourceRefresh.test.ts",
     "src/workRootFiles.ts",
     "src/workRootFiles.test.ts",
     "src/workRootActivity.ts",
