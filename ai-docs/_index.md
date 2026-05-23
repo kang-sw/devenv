@@ -157,6 +157,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-bug-ws-dashboard-dockview-split-scroll-reset` | todo | Fix Dockview split-wide scroll resets across WorkRoot Activity, editor panes, and other widgets |
 | `260523-bug-ws-dashboard-dev-run-ctrl-c-shutdown` | todo | Make dev.sh run Ctrl-C shutdown take priority over live browser connections |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
+| `260523-bug-ws-agent-register-erases-history` | idea | Preserve named-agent outputs and execution history across repeated register calls |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
