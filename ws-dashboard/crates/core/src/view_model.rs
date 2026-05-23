@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    InstanceId, InstanceKind, InstanceRole, InteractionMode, ResourcePath, ServerId, WorkRootId,
-    WorkRootKind, WorkRootStatus, WorkspaceId,
+    InstanceId, InstanceKind, InstanceRole, InteractionMode, ResourcePath, ServerId,
+    WorkRootActivation, WorkRootAvailability, WorkRootId, WorkRootKind, WorkRootStatus,
+    WorkspaceId,
 };
 
 // CONTRACT: The first visible dashboard API returns the full hierarchy instead
@@ -41,6 +42,8 @@ pub struct WorkRootView {
     pub resource_path: ResourcePath,
     pub label: String,
     pub kind: WorkRootKind,
+    pub activation: WorkRootActivation,
+    pub availability: WorkRootAvailability,
     pub status: WorkRootStatus,
     pub state: ViewState,
     pub compactable: bool,
@@ -83,8 +86,8 @@ pub struct ActionHint {
 mod tests {
     use super::*;
     use crate::{
-        InstanceKind, InstanceRole, InteractionMode, OpaqueId, ResourcePath, WorkRootKind,
-        WorkRootStatus,
+        InstanceKind, InstanceRole, InteractionMode, OpaqueId, ResourcePath, WorkRootActivation,
+        WorkRootAvailability, WorkRootKind, WorkRootStatus,
     };
 
     #[test]
@@ -106,6 +109,8 @@ mod tests {
             workspace["workRoots"][0]["resourcePath"]["workRootId"],
             "root-primary"
         );
+        assert_eq!(workspace["workRoots"][0]["activation"], "online");
+        assert_eq!(workspace["workRoots"][0]["availability"], "available");
 
         let main_instance = &workspace["workRoots"][0]["mainInstances"][0];
         assert_eq!(main_instance["role"], "main");
@@ -177,6 +182,8 @@ mod tests {
                     },
                     label: "Primary root".to_owned(),
                     kind: WorkRootKind::GitPrimaryRoot,
+                    activation: WorkRootActivation::Online,
+                    availability: WorkRootAvailability::Available,
                     status: WorkRootStatus::Online,
                     state: ViewState {
                         status: "ready".to_owned(),

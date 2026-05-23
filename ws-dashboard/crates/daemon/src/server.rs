@@ -56,8 +56,14 @@ where
     info!(bound_addr = %info.bound_addr, "ws-dashboard daemon listening");
 
     let dashboard_state = DashboardStateStore::default_local();
-    let opened_work_roots =
-        OpenedWorkRoots::from_paths(dashboard_state.load_opened_work_roots().await);
+    let opened_work_roots = OpenedWorkRoots::default();
+    for entry in dashboard_state.load_work_root_registry().await {
+        opened_work_roots.register_with_activation(
+            crate::discovery::local_work_root_id_for_path(&entry.path),
+            entry.path,
+            entry.activation,
+        );
+    }
     let app = build_router(AppState {
         config,
         auth,

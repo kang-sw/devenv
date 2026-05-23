@@ -14,7 +14,9 @@ use crate::config::ServeConfig;
 use crate::events::instance_events;
 use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
-use crate::root_picker::{create_empty_directory, list_root_picker, open_work_root};
+use crate::root_picker::{
+    create_empty_directory, list_root_picker, open_work_root, set_work_root_activation,
+};
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
     terminal_resize, terminal_websocket, TerminalRegistry,
@@ -52,6 +54,10 @@ pub fn build_router(state: AppState) -> Router {
             post(create_empty_directory),
         )
         .route("/api/dashboard/work-roots/open", post(open_work_root))
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activation",
+            post(set_work_root_activation),
+        )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/terminals",
             get(list_terminals).post(create_terminal),

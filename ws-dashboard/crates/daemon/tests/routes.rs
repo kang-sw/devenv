@@ -643,6 +643,145 @@ async fn dashboard_resources_api_includes_opened_work_root() {
 }
 
 #[tokio::test]
+async fn work_root_registry_activation_controls_keep_offline_roots_visible_and_gate_routes() {
+    let root = temp_fixture_path("activation-gate");
+    fs::create_dir_all(&root).expect("create activation root");
+    fs::write(root.join("README.md"), "hello\n").expect("write activation file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/activation"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": "offline" }).to_string(),
+                ))
+                .expect("offline activation request"),
+        )
+        .await
+        .expect("offline activation response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("offline activation body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("activation JSON");
+    let root_value = &value["workspaces"][0]["workRoots"][0];
+    assert_eq!(root_value["id"], work_root_id);
+    assert_eq!(root_value["availability"], "available");
+    assert_eq!(root_value["activation"], "offline");
+    assert_eq!(root_value["state"]["status"], "offline");
+
+    for (method, uri, body) in [
+        (
+            Method::GET,
+            format!("/api/dashboard/work-roots/{work_root_id}/files"),
+            Body::empty(),
+        ),
+        (
+            Method::POST,
+            format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+            Body::from(serde_json::json!({ "columns": 80, "rows": 24 }).to_string()),
+        ),
+        (
+            Method::GET,
+            format!("/api/dashboard/work-roots/{work_root_id}/activity"),
+            Body::empty(),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .expect("offline gated request"),
+            )
+            .await
+            .expect("offline gated response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("offline error body");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("offline error JSON");
+        assert_eq!(value["error"], "workRoot offline");
+        assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
+    }
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak() {
+    let root = temp_fixture_path("activation-missing");
+    fs::create_dir_all(&root).expect("create missing root");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    fs::remove_dir_all(&root).expect("remove root after registry membership");
+
+    let resources = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("resources request"),
+        )
+        .await
+        .expect("resources response");
+    assert_eq!(resources.status(), StatusCode::OK);
+    let resources_body = axum::body::to_bytes(resources.into_body(), 64 * 1024)
+        .await
+        .expect("resources body");
+    let value: serde_json::Value = serde_json::from_slice(&resources_body).expect("resources JSON");
+    assert_eq!(value["workspaces"][0]["workRoots"][0]["id"], work_root_id);
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["activation"],
+        "online"
+    );
+    assert!(["missing", "moved"].contains(
+        &value["workspaces"][0]["workRoots"][0]["availability"]
+            .as_str()
+            .expect("availability")
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{work_root_id}/files"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("missing workRoot files request"),
+        )
+        .await
+        .expect("missing workRoot files response");
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("unavailable body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("unavailable JSON");
+    assert_eq!(value["error"], "workRoot unavailable");
+    assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
+}
+
+#[tokio::test]
 async fn root_picker_routes_are_owner_authenticated() {
     let app = build_router(app_state());
 

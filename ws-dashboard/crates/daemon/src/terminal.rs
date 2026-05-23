@@ -21,6 +21,7 @@ use tokio::sync::watch;
 use ws_dashboard_core::WorkRootId;
 
 use crate::router::AppState;
+use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
 const MAX_TERMINAL_SESSIONS: usize = 16;
 const MAX_OUTPUT_CHUNKS: usize = 1024;
@@ -324,8 +325,9 @@ pub async fn create_terminal(
     Json(request): Json<CreateTerminalRequest>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return terminal_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return terminal_access_error(error),
     };
     let Ok((columns, rows)) = validate_size(request.columns, request.rows) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid terminal size");
@@ -358,8 +360,8 @@ pub async fn list_terminals(
     AxumPath(work_root_id): AxumPath<String>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    if state.opened_work_roots.resolve(&work_root_id).is_none() {
-        return terminal_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    if let Err(error) = resolve_online_available_work_root(&state, &work_root_id) {
+        return terminal_access_error(error);
     }
     Json(state.terminals.list_for_work_root(&work_root_id)).into_response()
 }
@@ -832,6 +834,10 @@ fn terminal_error(status: StatusCode, error: impl Into<String>) -> Response {
         }),
     )
         .into_response()
+}
+
+fn terminal_access_error(error: WorkRootAccessError) -> Response {
+    terminal_error(error.status(), error.message())
 }
 
 fn default_shell() -> PathBuf {

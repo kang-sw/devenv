@@ -12,6 +12,7 @@ import {
   buildFileExplorerToggleDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
+  buildWorkRootActivationCommand,
   buildWorkRootOpenCommand,
   dashboardCommandLabel,
   dispatchDashboardCommand,
@@ -136,6 +137,24 @@ type WorkbenchSelection = {
 
 const resourceEndpoint = "/api/dashboard/resources";
 
+async function requestWorkRootActivation(
+  workRootId: string,
+  activation: "online" | "offline",
+): Promise<DashboardResourcesView> {
+  const response = await fetch(
+    `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activation`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ activation }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return (await response.json()) as DashboardResourcesView;
+}
+
 // Terminal output is short-polled over HTTP (the daemon output route returns
 // immediately). A snappy interval keeps keystroke echo latency low; idle polls
 // are guarded below so they do not re-render the workbench.
@@ -203,7 +222,7 @@ export function App() {
   }, [loadResources]);
 
   const handleWorkRootOpened = useCallback(
-    (openedView: DashboardResourcesView) => {
+    (openedView: DashboardResourcesView, requestedWorkRootId?: string) => {
       // Identify the just-opened workRoot: the workRoot present in the
       // aggregated open response but absent from the prior resource view.
       const priorWorkRootIds = new Set(
@@ -211,7 +230,7 @@ export function App() {
           .filter((entity) => entity.type === "workRoot")
           .map((entity) => entity.id),
       );
-      const openedWorkRootId = flattenEntities(openedView).find(
+      const openedWorkRootId = requestedWorkRootId ?? flattenEntities(openedView).find(
         (entity) =>
           entity.type === "workRoot" && !priorWorkRootIds.has(entity.id),
       )?.id;
@@ -399,6 +418,11 @@ export function App() {
         executableHandlers[command.commandId] = () => {
           void loadResources();
         };
+      } else if (command.payload.type === "workRoot.activation.set") {
+        const { workRootId, activation } = command.payload;
+        executableHandlers[command.commandId] = () => {
+          void requestWorkRootActivation(workRootId, activation).then(setResources);
+        };
       }
 
       dispatchDashboardCommand(command, {
@@ -525,7 +549,7 @@ function OpenWorkRootControl({
   onOpened,
   onCommand,
 }: {
-  onOpened: (view: DashboardResourcesView) => void;
+  onOpened: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
   onCommand: DashboardCommandDispatcher;
 }) {
   const [path, setPath] = useState("");
@@ -547,7 +571,7 @@ function OpenWorkRootControl({
           void requestOpenWorkRoot(requestedPath)
             .then((openedView) => {
               setPath("");
-              onOpened(openedView);
+              onOpened(openedView, findOpenedWorkRootId(openedView, requestedPath));
             })
             .catch((nextError) => {
               setError(nextError instanceof Error ? nextError.message : "open failed");
@@ -598,6 +622,24 @@ function OpenWorkRootControl({
       ) : null}
     </form>
   );
+}
+
+function findOpenedWorkRootId(
+  view: DashboardResourcesView,
+  requestedPath: string,
+): string | undefined {
+  const normalized = requestedPath.trim().replace(/[\\/]+$/, "");
+  const label = normalized.split(/[\\/]/).filter(Boolean).pop();
+  if (!label) {
+    return undefined;
+  }
+  for (const workspace of view.workspaces) {
+    const match = workspace.workRoots.find((root) => root.label === label);
+    if (match) {
+      return match.id;
+    }
+  }
+  return undefined;
 }
 
 function ResourceNavigation({
@@ -1270,22 +1312,25 @@ function WorkbenchShell({
     }
     let cancelled = false;
     setWorkRootActivityState({ rootId, activity: { phase: "loading" } });
-    void fetchWorkRootActivity(rootId)
-      .then((view) => {
-        if (!cancelled) {
-          setWorkRootActivityState({
-            rootId,
-            activity: { phase: "ready", view },
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWorkRootActivityState({ rootId, activity: { phase: "error" } });
-        }
-      });
+    const timer = window.setTimeout(() => {
+      void fetchWorkRootActivity(rootId)
+        .then((view) => {
+          if (!cancelled) {
+            setWorkRootActivityState({
+              rootId,
+              activity: { phase: "ready", view },
+            });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setWorkRootActivityState({ rootId, activity: { phase: "error" } });
+          }
+        });
+    }, 300);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [workbenchModel?.root.id]);
 
@@ -2197,7 +2242,8 @@ function WorkbenchToolbar({
           }}
         />
         <span className="meta-chip">{kindLabel(root.kind)}</span>
-        <span className="meta-chip">{root.status}</span>
+        <span className="meta-chip">availability: {root.availability}</span>
+        <span className="meta-chip">activation: {root.activation}</span>
         {commandLog[0] ? (
           <span className="meta-chip">last: {commandLog[0].commandId}</span>
         ) : null}
@@ -2209,24 +2255,33 @@ function WorkbenchToolbar({
         {toolbarActions(root, selectedEntity).map(({ action, entityId }) => (
           <button
             className="action-button"
-            data-command-id={`resource.action.${action.id}`}
+            data-command-id={
+              activationForAction(action.id) ? "workRoot.activation.set" : `resource.action.${action.id}`
+            }
             disabled={!action.enabled}
             key={`${entityId}:${action.id}`}
             type="button"
-            onClick={() =>
+            onClick={() => {
+              const activation = activationForAction(action.id);
+              if (activation) {
+                onCommand(buildWorkRootActivationCommand(entityId, activation));
+                return;
+              }
               onCommand({
                 commandId: `resource.action.${action.id}`,
-                payload: action.id === "refresh"
-                  ? { type: "refresh" }
-                  : { type: "action", label: action.label, entityId },
-              })
-            }
+                payload:
+                  action.id === "refresh"
+                    ? { type: "refresh" }
+                    : { type: "action", label: action.label, entityId },
+              });
+            }}
           >
             {action.label}
           </button>
         ))}
         <button
           className="action-button workbench-toggle"
+          disabled={root.activation !== "online" || root.availability !== "available"}
           data-command-id="terminal.create"
           type="button"
           onClick={() => {
@@ -2237,6 +2292,21 @@ function WorkbenchToolbar({
           }}
         >
           New terminal
+        </button>
+        <button
+          className="action-button workbench-toggle"
+          data-command-id="workRoot.activation.set"
+          type="button"
+          onClick={() =>
+            onCommand(
+              buildWorkRootActivationCommand(
+                root.id,
+                root.activation === "online" ? "offline" : "online",
+              ),
+            )
+          }
+        >
+          {root.activation === "online" ? "Go offline" : "Go online"}
         </button>
         {toggles.map((toggle) => (
           <button
@@ -2478,6 +2548,16 @@ function toolbarActions(
   }
 
   return actions;
+}
+
+function activationForAction(actionId: string): "online" | "offline" | null {
+  if (actionId === "workRoot.activation.online") {
+    return "online";
+  }
+  if (actionId === "workRoot.activation.offline") {
+    return "offline";
+  }
+  return null;
 }
 
 type WorkbenchPane = {
@@ -3432,7 +3512,8 @@ function WorkspaceRows({
           selected={selectedId === compactMain.root.id}
           meta={[
             kindLabel(compactMain.root.kind),
-            compactMain.root.status,
+            `availability: ${compactMain.root.availability}`,
+            `activation: ${compactMain.root.activation}`,
             compactMain.instance.kind,
           ]}
           onCommand={onCommand}
@@ -3462,7 +3543,11 @@ function WorkspaceRows({
             state={root.state}
             depth={1}
             selected={selectedId === root.id}
-            meta={[kindLabel(root.kind), root.status]}
+            meta={[
+              kindLabel(root.kind),
+              `availability: ${root.availability}`,
+              `activation: ${root.activation}`,
+            ]}
             onCommand={onCommand}
           />
           {root.mainInstances.length > 0 ? (
@@ -3573,6 +3658,8 @@ function ResourceDetail({
         {entity.type === "workRoot" ? (
           <>
             <DetailItem label="kind" value={kindLabel(entity.kind)} />
+            <DetailItem label="availability" value={entity.availability} />
+            <DetailItem label="activation" value={entity.activation} />
             <DetailItem label="workRootStatus" value={entity.status} />
             <DetailItem
               label="instances"
@@ -3784,6 +3871,8 @@ function resourceEntityForWorkRoot(root: WorkRootView): ResourceEntity {
     compactable: root.compactable,
     path: root.resourcePath,
     kind: root.kind,
+    activation: root.activation,
+    availability: root.availability,
     status: root.status,
     instanceCount: root.mainInstances.length,
   };

@@ -19,6 +19,7 @@ use ws_dashboard_core::{
 };
 
 use crate::router::AppState;
+use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
 /// Upper bound applied to the wsagent-reported backend-error string so an
 /// oversized `current/state.json` error cannot bloat the projection response.
@@ -186,8 +187,9 @@ pub async fn work_root_activity(
     Query(query): Query<WorkRootActivityQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return activity_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return activity_access_error(error),
     };
 
     Json(
@@ -205,8 +207,9 @@ pub async fn work_root_activity_transcript(
     Query(query): Query<ActivityTranscriptQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return activity_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return activity_access_error(error),
     };
 
     let Some(agent_key) = named_agent_key_from_activity_id(&activity_id) else {
@@ -236,8 +239,9 @@ pub async fn work_root_activity_events(
     Query(query): Query<ActivityEventsQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return activity_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return activity_access_error(error),
     };
 
     let snapshot = state
@@ -421,6 +425,10 @@ fn activity_error(status: StatusCode, message: &str) -> Response {
         }),
     )
         .into_response()
+}
+
+fn activity_access_error(error: WorkRootAccessError) -> Response {
+    activity_error(error.status(), error.message())
 }
 
 /// Resolve the wsstate named-agent directory for an opened workRoot under an

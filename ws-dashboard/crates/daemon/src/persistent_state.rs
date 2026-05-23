@@ -6,8 +6,10 @@ use tokio::fs;
 use tracing::warn;
 
 use crate::work_root_files::OpenedWorkRoots;
+use ws_dashboard_core::WorkRootActivation;
 
 const OPENED_WORKROOTS_STATE_VERSION: u32 = 1;
+const WORKROOT_REGISTRY_STATE_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DashboardStateStore {
@@ -33,12 +35,20 @@ impl DashboardStateStore {
     }
 
     pub async fn load_opened_work_roots(&self) -> Vec<PathBuf> {
+        self.load_work_root_registry()
+            .await
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect()
+    }
+
+    pub async fn load_work_root_registry(&self) -> Vec<PersistedRegistryWorkRoot> {
         let Some(path) = self.state_file.as_deref() else {
             return Vec::new();
         };
 
-        match read_opened_work_roots(path).await {
-            Ok(paths) => paths,
+        match read_work_root_registry(path).await {
+            Ok(entries) => entries,
             Err(StateReadError::Missing) => Vec::new(),
             Err(error) => {
                 warn!(%error, path = %path.display(), "ignoring dashboard state file");
@@ -51,7 +61,7 @@ impl DashboardStateStore {
         let Some(path) = self.state_file.as_deref() else {
             return Ok(());
         };
-        write_opened_work_roots(path, opened.candidate_paths()).await
+        write_work_root_registry(path, opened.candidate_roots()).await
     }
 }
 
@@ -66,6 +76,26 @@ struct OpenedWorkRootsState {
 #[serde(rename_all = "camelCase")]
 struct PersistedWorkRoot {
     path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedRegistryWorkRoot {
+    pub path: PathBuf,
+    pub activation: WorkRootActivation,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkRootRegistryState {
+    version: u32,
+    work_root_registry: Vec<PersistedWorkRootRegistryEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedWorkRootRegistryEntry {
+    path: String,
+    activation: WorkRootActivation,
 }
 
 #[derive(Debug)]
@@ -89,7 +119,9 @@ impl std::fmt::Display for StateReadError {
     }
 }
 
-async fn read_opened_work_roots(path: &Path) -> Result<Vec<PathBuf>, StateReadError> {
+async fn read_work_root_registry(
+    path: &Path,
+) -> Result<Vec<PersistedRegistryWorkRoot>, StateReadError> {
     let raw = match fs::read_to_string(path).await {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -97,36 +129,79 @@ async fn read_opened_work_roots(path: &Path) -> Result<Vec<PathBuf>, StateReadEr
         }
         Err(error) => return Err(StateReadError::Read(error)),
     };
-    let state: OpenedWorkRootsState = serde_json::from_str(&raw).map_err(StateReadError::Parse)?;
-    if state.version != OPENED_WORKROOTS_STATE_VERSION {
-        return Err(StateReadError::UnsupportedVersion(state.version));
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(StateReadError::Parse)?;
+    let version = value
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as u32;
+    if version == OPENED_WORKROOTS_STATE_VERSION {
+        let state: OpenedWorkRootsState =
+            serde_json::from_value(value).map_err(StateReadError::Parse)?;
+        return Ok(deduplicate_paths(
+            state
+                .opened_work_roots
+                .into_iter()
+                .filter_map(|entry| {
+                    let trimmed = entry.path.trim();
+                    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+                })
+                .collect(),
+        )
+        .into_iter()
+        .map(|path| PersistedRegistryWorkRoot {
+            path,
+            activation: WorkRootActivation::Online,
+        })
+        .collect());
     }
-
-    Ok(deduplicate_paths(
+    if version != WORKROOT_REGISTRY_STATE_VERSION {
+        return Err(StateReadError::UnsupportedVersion(version));
+    }
+    let state: WorkRootRegistryState =
+        serde_json::from_value(value).map_err(StateReadError::Parse)?;
+    Ok(deduplicate_registry_entries(
         state
-            .opened_work_roots
+            .work_root_registry
             .into_iter()
             .filter_map(|entry| {
                 let trimmed = entry.path.trim();
-                (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+                (!trimmed.is_empty()).then(|| PersistedRegistryWorkRoot {
+                    path: PathBuf::from(trimmed),
+                    activation: entry.activation,
+                })
             })
             .collect(),
     ))
 }
 
-async fn write_opened_work_roots(path: &Path, paths: Vec<PathBuf>) -> Result<(), String> {
-    let state = OpenedWorkRootsState {
-        version: OPENED_WORKROOTS_STATE_VERSION,
-        opened_work_roots: deduplicate_paths(paths)
-            .into_iter()
-            .map(|path| PersistedWorkRoot {
-                path: path.to_string_lossy().into_owned(),
-            })
-            .collect(),
+async fn write_work_root_registry(
+    path: &Path,
+    roots: Vec<crate::work_root_files::RegisteredWorkRoot>,
+) -> Result<(), String> {
+    let state = WorkRootRegistryState {
+        version: WORKROOT_REGISTRY_STATE_VERSION,
+        work_root_registry: deduplicate_registry_entries(
+            roots
+                .into_iter()
+                .map(|root| PersistedRegistryWorkRoot {
+                    path: root.path,
+                    activation: root.activation,
+                })
+                .collect(),
+        )
+        .into_iter()
+        .map(|root| PersistedWorkRootRegistryEntry {
+            path: root.path.to_string_lossy().into_owned(),
+            activation: root.activation,
+        })
+        .collect(),
     };
-    let raw = serde_json::to_string_pretty(&state)
-        .map_err(|error| format!("serialize state failed: {error}"))?;
+    write_state_json(path, &state).await
+}
 
+async fn write_state_json<T: Serialize>(path: &Path, state: &T) -> Result<(), String> {
+    let raw = serde_json::to_string_pretty(state)
+        .map_err(|error| format!("serialize state failed: {error}"))?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .await
@@ -141,6 +216,16 @@ async fn write_opened_work_roots(path: &Path, paths: Vec<PathBuf>) -> Result<(),
         .await
         .map_err(|error| format!("replace state file failed: {error}"))?;
     Ok(())
+}
+
+fn deduplicate_registry_entries(
+    entries: Vec<PersistedRegistryWorkRoot>,
+) -> Vec<PersistedRegistryWorkRoot> {
+    let mut by_path = std::collections::BTreeMap::new();
+    for entry in entries {
+        by_path.insert(entry.path.clone(), entry);
+    }
+    by_path.into_values().collect()
 }
 
 fn deduplicate_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -192,7 +277,36 @@ mod tests {
         let raw = fs::read_to_string(&state_file)
             .await
             .expect("read persisted state");
-        assert!(raw.contains("\"version\": 1"));
+        assert!(raw.contains("\"version\": 2"));
+        assert!(raw.contains("\"workRootRegistry\""));
+        assert!(raw.contains("\"activation\": \"online\""));
+        remove_temp(&root);
+    }
+
+    #[tokio::test]
+    async fn state_store_migrates_v1_opened_work_roots_as_online_registry_entries() {
+        let root = temp_path("migrate");
+        let state_file = root.join("opened-workroots.json");
+        fs::create_dir_all(&root).await.expect("create state dir");
+        fs::write(
+            &state_file,
+            serde_json::json!({
+                "version": 1,
+                "openedWorkRoots": [
+                    { "path": root.join("legacy").to_string_lossy() }
+                ]
+            })
+            .to_string(),
+        )
+        .await
+        .expect("write v1 state");
+        let store = DashboardStateStore::at_path(&state_file);
+
+        let restored = store.load_work_root_registry().await;
+
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].path, root.join("legacy"));
+        assert_eq!(restored[0].activation, WorkRootActivation::Online);
         remove_temp(&root);
     }
 

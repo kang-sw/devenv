@@ -7,8 +7,8 @@ use std::process::Command;
 
 use ws_dashboard_core::{
     ActionHint, DashboardResourcesView, InstanceKind, InstanceRole, InstanceView, InteractionMode,
-    OpaqueId, ResourcePath, ServerView, ViewState, WorkRootId, WorkRootKind, WorkRootStatus,
-    WorkRootView, WorkspaceView,
+    OpaqueId, ResourcePath, ServerView, ViewState, WorkRootActivation, WorkRootAvailability,
+    WorkRootId, WorkRootKind, WorkRootStatus, WorkRootView, WorkspaceView,
 };
 
 use crate::resources::DashboardResourcesProvider;
@@ -16,11 +16,22 @@ use crate::resources::DashboardResourcesProvider;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalWorkRootCandidate {
     path: PathBuf,
+    activation: WorkRootActivation,
 }
 
 impl LocalWorkRootCandidate {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            activation: WorkRootActivation::Online,
+        }
+    }
+
+    pub fn with_activation(path: impl Into<PathBuf>, activation: WorkRootActivation) -> Self {
+        Self {
+            path: path.into(),
+            activation,
+        }
     }
 }
 
@@ -51,7 +62,7 @@ impl DashboardResourcesProvider for LocalDashboardResourcesProvider {
             let workspace = workspaces
                 .entry(workspace_key.clone())
                 .or_insert_with(|| WorkspaceBuilder::new(&self.server_id, workspace_key));
-            workspace.push(discovered);
+            workspace.push(discovered, candidate.activation);
         }
 
         DashboardResourcesView {
@@ -101,9 +112,11 @@ impl WorkspaceBuilder {
         }
     }
 
-    fn push(&mut self, discovered: DiscoveredWorkRoot) {
+    fn push(&mut self, discovered: DiscoveredWorkRoot, activation: WorkRootActivation) {
         let work_root_id = local_work_root_id_for_path(&discovered.path);
-        let enabled = discovered.status == WorkRootStatus::Online;
+        let available = discovered.availability == WorkRootAvailability::Available;
+        let active = activation == WorkRootActivation::Online;
+        let enabled = available && active;
 
         let resource_path = ResourcePath {
             server_id: self.server_id.clone(),
@@ -122,20 +135,18 @@ impl WorkspaceBuilder {
             resource_path,
             label: label_for_path(&discovered.path),
             kind: discovered.kind,
+            activation,
+            availability: discovered.availability,
             status: discovered.status,
             state: ViewState {
-                status: state_status(discovered.status).to_owned(),
+                status: state_status(discovered.availability, activation).to_owned(),
                 loading: false,
-                stale: discovered.status != WorkRootStatus::Online,
-                error: discovered.error,
+                stale: !enabled,
+                error: if active { discovered.error } else { None },
             },
             compactable: false,
             main_instances,
-            actions: vec![ActionHint {
-                id: if enabled { "openRoot" } else { "reconnect" }.to_owned(),
-                label: if enabled { "Open root" } else { "Reconnect" }.to_owned(),
-                enabled,
-            }],
+            actions: activation_actions(active, available),
         });
     }
 
@@ -198,6 +209,7 @@ struct DiscoveredWorkRoot {
     workspace_key: WorkspaceKey,
     kind: WorkRootKind,
     status: WorkRootStatus,
+    availability: WorkRootAvailability,
     error: Option<String>,
 }
 
@@ -209,23 +221,33 @@ fn discover_work_root(path: &Path) -> DiscoveredWorkRoot {
         Ok(_) => discovered_unusable(
             normalized,
             WorkRootStatus::Inaccessible,
+            WorkRootAvailability::Inaccessible,
             "workRoot is not a directory",
         ),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let status = match normalized.parent() {
-                Some(parent) if parent.exists() => WorkRootStatus::Moved,
-                _ => WorkRootStatus::Offline,
+            let (status, availability) = match normalized.parent() {
+                Some(parent) if parent.exists() => {
+                    (WorkRootStatus::Moved, WorkRootAvailability::Moved)
+                }
+                _ => (WorkRootStatus::Offline, WorkRootAvailability::Missing),
             };
-            discovered_unusable(normalized, status, state_status(status))
+            discovered_unusable(
+                normalized,
+                status,
+                availability,
+                availability_status(availability),
+            )
         }
         Err(error) if error.kind() == io::ErrorKind::PermissionDenied => discovered_unusable(
             normalized,
             WorkRootStatus::Inaccessible,
+            WorkRootAvailability::Inaccessible,
             "permission denied",
         ),
         Err(error) => discovered_unusable(
             normalized,
             WorkRootStatus::Inaccessible,
+            WorkRootAvailability::Inaccessible,
             &format!("metadata failed: {error}"),
         ),
     }
@@ -236,6 +258,7 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
         return discovered_unusable(
             path,
             WorkRootStatus::Inaccessible,
+            WorkRootAvailability::Inaccessible,
             if error.kind() == io::ErrorKind::PermissionDenied {
                 "permission denied"
             } else {
@@ -256,6 +279,7 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
             path,
             kind: git.kind,
             status: WorkRootStatus::Online,
+            availability: WorkRootAvailability::Available,
             error: None,
         },
         None => DiscoveredWorkRoot {
@@ -266,12 +290,18 @@ fn discover_existing_dir(path: PathBuf) -> DiscoveredWorkRoot {
             path,
             kind: WorkRootKind::PlainDirectory,
             status: WorkRootStatus::Online,
+            availability: WorkRootAvailability::Available,
             error: None,
         },
     }
 }
 
-fn discovered_unusable(path: PathBuf, status: WorkRootStatus, error: &str) -> DiscoveredWorkRoot {
+fn discovered_unusable(
+    path: PathBuf,
+    status: WorkRootStatus,
+    availability: WorkRootAvailability,
+    error: &str,
+) -> DiscoveredWorkRoot {
     DiscoveredWorkRoot {
         workspace_key: WorkspaceKey {
             id: OpaqueId::from(format!("workspace-local-{}", stable_path_hash(&path))),
@@ -280,6 +310,7 @@ fn discovered_unusable(path: PathBuf, status: WorkRootStatus, error: &str) -> Di
         path,
         kind: WorkRootKind::PlainDirectory,
         status,
+        availability,
         error: Some(error.to_owned()),
     }
 }
@@ -365,13 +396,47 @@ fn label_for_path(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-fn state_status(status: WorkRootStatus) -> &'static str {
-    match status {
-        WorkRootStatus::Online => "ready",
-        WorkRootStatus::Offline => "offline",
-        WorkRootStatus::Moved => "moved",
-        WorkRootStatus::Inaccessible => "inaccessible",
+fn state_status(
+    availability: WorkRootAvailability,
+    activation: WorkRootActivation,
+) -> &'static str {
+    if activation == WorkRootActivation::Offline {
+        return "offline";
     }
+    availability_status(availability)
+}
+
+fn availability_status(availability: WorkRootAvailability) -> &'static str {
+    match availability {
+        WorkRootAvailability::Available => "ready",
+        WorkRootAvailability::Missing => "missing",
+        WorkRootAvailability::Moved => "moved",
+        WorkRootAvailability::Inaccessible => "inaccessible",
+        WorkRootAvailability::Unknown => "unknown",
+    }
+}
+
+fn activation_actions(active: bool, available: bool) -> Vec<ActionHint> {
+    let mut actions = Vec::new();
+    if active {
+        actions.push(ActionHint {
+            id: if available { "openRoot" } else { "reconnect" }.to_owned(),
+            label: if available { "Open root" } else { "Reconnect" }.to_owned(),
+            enabled: available,
+        });
+        actions.push(ActionHint {
+            id: "workRoot.activation.offline".to_owned(),
+            label: "Go offline".to_owned(),
+            enabled: true,
+        });
+    } else {
+        actions.push(ActionHint {
+            id: "workRoot.activation.online".to_owned(),
+            label: "Go online".to_owned(),
+            enabled: true,
+        });
+    }
+    actions
 }
 
 fn stable_path_hash(path: &Path) -> String {
