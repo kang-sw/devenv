@@ -344,6 +344,13 @@ rerenders until the user returns to the tail. Transcript backfill/load-more is
 driven primarily by scroll position, with explicit refresh or load-more controls
 reserved for fallback and error states.
 
+> [!note] Implementation Gap · 2026-05-23
+> Missing behavior: expanded dialogue and assistant transcript text is rendered
+> as plain preformatted text rather than markdown. The dashboard should define a
+> shared markdown rendering component first, then apply that component
+> consistently across Activity Console messages and other project surfaces that
+> render trusted normalized markdown.
+
 Visible Activity Console controls expose stable command ids and route their
 clicked behavior through the dashboard command dispatch path so later keyboard
 bindings can invoke the same behavior. The shell remains read-only, does not add

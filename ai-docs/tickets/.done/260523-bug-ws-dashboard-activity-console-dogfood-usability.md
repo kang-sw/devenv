@@ -149,3 +149,12 @@ tests and route privacy tests verify that prompts are bounded/redacted and raw
 commands, cwd, paths, stdout/stderr, tool/MCP results, session ids, turn ids,
 native JSON, and private native type strings do not appear in browser transcript
 responses.
+
+#### Edition (e62d4a6d) - 2026-05-23
+
+Fixed a dogfood follow-up where Codex native dialogue could render duplicate
+adjacent user or assistant blocks when both `event_msg` and `response_item`
+records carried the same text. Native text redaction now preserves whitespace
+and markdown-like structure while still redacting private path/session-like
+tokens. Markdown rendering itself remains deferred and is recorded as an
+implementation gap for a future shared markdown rendering component.
