@@ -259,16 +259,11 @@ the browser view immediately without confirmation and without changing daemon
 agent state.
 
 Opening the activity detail from the top-bar badge focuses an existing activity
-pane for the selected workRoot or creates one in group 1, the
-agent/terminal-side split. This group-1 placement is an explicit exception for
-a reversible projection surface; general opened/support surfaces continue to use
-their existing support-group placement policy.
-
-> [!note] Planned 🚧
-> Dogfood feedback found the group-1 default poor for real lead-agent
-> monitoring. The intended repair is for WorkRoot Activity panes to prefer the
-> second/support split when available while preserving focus-existing behavior
-> and reversible close semantics.
+pane for the selected workRoot or creates one through the workbench support
+split placement policy. New Activity panes prefer the second/support split when
+available or creatable, while duplicate opens focus the existing Activity pane
+in whatever split currently owns it. Activity pane close remains reversible and
+has no daemon-side effect.
 
 The pane displays named-agent projection rows and an explicit empty Running
 Commands section. Real running-command rows remain absent until the async exec
@@ -337,16 +332,17 @@ Selecting a ribbon item renders normalized transcript blocks. Agent activity
 renders as action-unit blocks where dialogue and assistant output are expanded
 by default, while tool calls, MCP activity, and command runs default to one-line
 summaries with inline detail expansion. Exec activity renders as terminal-style
-output. Transcript backfill/load-more is driven primarily by scroll position,
-with explicit refresh or load-more controls reserved for fallback and error
-states.
+output. Transcript views follow the tail by default for newly selected or live
+updated activity. When the user scrolls away from the tail, the browser
+preserves that scroll position across feed refreshes, transcript refreshes,
+selected-transcript invalidations, and workbench split rerenders until the user
+returns to the tail. Transcript backfill/load-more is driven primarily by scroll
+position, with explicit refresh or load-more controls reserved for fallback and
+error states.
 
 > [!note] Planned 🚧
-> The initial shell does not yet meet dogfood usability expectations: transcript
-> views should tail-follow by default until the user scrolls away, WorkRoot
-> Activity scrolling must not snap upward during split/live updates, and compact
-> blocks should render a meaningful bounded one-line summary instead of generic
-> labels such as `Tool call` or `Unsupported transcript record`.
+> Compact blocks should render a meaningful bounded one-line summary instead of
+> generic labels such as `Tool call` or `Unsupported transcript record`.
 
 Visible Activity Console controls expose stable command ids and route their
 clicked behavior through the dashboard command dispatch path so later keyboard
