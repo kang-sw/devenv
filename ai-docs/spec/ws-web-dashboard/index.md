@@ -441,8 +441,11 @@ until the async exec output reader model exists.
 > Dogfood feedback found Codex native coverage too narrow for lead-agent
 > monitoring. Prompt, continuation, interrupt, and handoff records should be
 > fixture-backed and normalized into source-neutral transcript blocks when their
-> native shapes are known; unsupported handling must remain bounded and redacted
-> rather than echoing native record details.
+> native shapes are known. The repair should actively reduce unsupported volume
+> across observed Codex native records and make remaining degraded entries useful
+> through bounded structural summaries and omission reasons. Unsupported handling
+> must remain bounded and redacted rather than echoing raw JSON, private record
+> strings, payload snippets, paths, session ids, or tool output.
 
 The backend continues to use feed-level `transcriptUpdated` invalidations plus
 bounded selected backfill for live transcript updates. It does not expose a

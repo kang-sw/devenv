@@ -34,13 +34,18 @@ keybindings.
 - Compact transcript blocks need a meaningful single-line summary. Tool calls,
   command-like activity, MCP activity, and status blocks should show useful
   inline content without increasing vertical density or requiring `More`.
-- Codex native transcript parsing leaves too many records unsupported. Lead
-  prompts, follow-up prompts, interrupt messages, and similar handoff records
-  should appear as normalized transcript blocks when fixture evidence identifies
-  their native shape.
-- Unsupported or malformed native records must remain bounded and redacted; the
-  repair must not reintroduce raw record type, payload, session id, path, or
-  tool-output leakage.
+- Codex native transcript parsing leaves too many records unsupported. The
+  implementation pass should actively explore observed Codex native record
+  shapes and reduce unsupported volume as much as fixture-backed evidence
+  allows. Lead prompts, follow-up prompts, interrupt messages, tool/MCP
+  activity, patch/apply outcomes, and similar handoff records should appear as
+  normalized transcript blocks when their native shape is understood.
+- Remaining unsupported or malformed native records must still convey useful
+  safe information instead of ending at a generic "unsupported log line".
+  Expanded detail may show bounded structural summaries such as record category,
+  known safe fields, byte counts, status/outcome hints, and omission reasons,
+  but must not expose raw JSON, raw record type strings that can carry private
+  material, payload snippets, session ids, paths, or tool-output leakage.
 
 ## Phases
 
@@ -75,11 +80,15 @@ available for richer safe payload summaries.
 ### Phase 3: Expand Codex prompt and interruption transcript coverage
 
 Use fixture-backed Codex native session records to identify prompt,
-continuation, interrupt, and lead-agent handoff shapes. Normalize supported
-records into source-neutral `TranscriptBlock` values for user/input/status
-content so live lead-agent sessions show the actual prompts that explain agent
-behavior.
+continuation, interrupt, lead-agent handoff, MCP/tool activity, patch/apply, and
+other common observed shapes. Normalize supported records into source-neutral
+`TranscriptBlock` values for user/input/status/tool content so live lead-agent
+sessions show the prompts and activity that explain agent behavior.
 
-Unsupported record handling stays graceful and privacy-preserving. If fixture
-evidence is insufficient for a native shape, keep it degraded rather than
-guessing from raw payloads.
+The implementation should survey enough recent/native fixture evidence to
+meaningfully reduce unsupported record volume before settling parser coverage.
+Unsupported record handling stays graceful and privacy-preserving, but it should
+not be content-free. If fixture evidence is insufficient for a native shape,
+render a bounded degraded block or aggregate that provides safe structural
+context and omission reason while avoiding raw JSON, private record strings,
+payload snippets, session ids, paths, and tool output.
