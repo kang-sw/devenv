@@ -206,6 +206,11 @@ attachment layout. Dashboard-owned policy still owns surface identity,
 duplicate-open focus, placement, close behavior, restore sanitization, and the
 choice to flatten pinned/opened row concepts into Dockview-compatible tab
 metadata when a two-row custom tab shell would compete with Dockview ownership.
+Synchronization back into Dockview must be group-local: an inactive split
+group's selected tab is not treated as inactive merely because another split has
+global focus, and pane parameter updates must be keyed by stable content
+revisions instead of React node identity so unrelated refreshes do not remount
+scrolling pane bodies.
 
 Dockview-created split drops become durable dashboard workbench groups instead
 of snapping back to a fixed `primary`/`support` pair. Each opened workRoot owns
@@ -513,7 +518,8 @@ corresponds to durable dashboard behavior: dragging a tab into a new split
 target creates or maps a dashboard group, the pane remains there after React
 synchronization, ordinary file/terminal interactions still work in the
 resulting layout, and opening a second workRoot does not leak the first
-workRoot's user-created groups or active panes.
+workRoot's user-created groups or active panes. Split-scroll evidence also
+keeps a scrolled pane away from the top across refresh-driven synchronization.
 
 Workbench tab polish evidence is browser-level Playwright evidence against the
 daemon-served frontend. It covers hover-only close affordances, terminal and

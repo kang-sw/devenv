@@ -154,7 +154,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260519-feat-implement-branch-squash-gate` | todo | Add a pre-merge implementation-branch squash gate for cleaner main history |
 | `260520-refactor-lead-skill-cascade` | todo | Prune lead skill procedural sophistication via skill-authoring doctrine cascade (R3'/R6 phased, R1/R2/R4/R5 batched) |
-| `260523-bug-ws-dashboard-dockview-split-scroll-reset` | todo | Fix Dockview split-wide scroll resets across WorkRoot Activity, editor panes, and other widgets |
 | `260523-bug-ws-dashboard-dev-run-ctrl-c-shutdown` | todo | Make dev.sh run Ctrl-C shutdown take priority over live browser connections |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |

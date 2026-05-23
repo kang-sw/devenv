@@ -1,6 +1,13 @@
 ---
 title: Fix ws dashboard Dockview split scroll resets
 parent: 260514-epic-ws-web-dashboard-mvp
+spec:
+  - 260516-ws-web-dashboard-workroot-workbench-substrate
+  - 260517-ws-dashboard-readonly-text-scroll-containment
+  - 260521-ws-dashboard-activity-console-ui-shell
+related-mental-model:
+  - ws-web-dashboard
+completed: 2026-05-23
 ---
 
 # Fix ws dashboard Dockview split scroll resets
@@ -49,3 +56,17 @@ tab metadata.
 Add a browser-level regression that opens split workbench panes, scrolls an
 editor and WorkRoot Activity transcript away from top, triggers the relevant
 resource/activity refresh path, and asserts scroll positions are not reset.
+
+### Result (5adaad3) - 2026-05-23
+
+Fixed the shared Dockview workbench adapter path. Split sync now distinguishes a
+group's selected tab from Dockview's globally active focused panel, so ordinary
+sync no longer calls `setActive()` for already selected panes in inactive split
+groups. Pane parameter updates now use stable `contentRevision` values for
+editor, terminal, and WorkRoot Activity surfaces instead of comparing recreated
+React body identity.
+
+Verification covered workbench model tests for group-local active-tab detection
+and parameter churn, frontend production build, and browser acceptance that a
+scrolled read-only pane in a split workbench survives refresh without resetting
+to the top.

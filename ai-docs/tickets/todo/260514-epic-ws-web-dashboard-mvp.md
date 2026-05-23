@@ -126,7 +126,7 @@ The MVP should cover:
   selected transcripts tail-first with top-edge older-history loading, remove
   the redundant Activity Console summary row, and polish ribbon source/timing
   metadata without increasing card height.
-- `260523-bug-ws-dashboard-dockview-split-scroll-reset` - todo; fix
+- `260523-bug-ws-dashboard-dockview-split-scroll-reset` - done; fix
   Dockview split-wide scroll resets caused by active-pane sync and parameter
   churn in the workbench adapter.
 
