@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.28.0 - 2026-05-23
+
+### Changed
+- Redefine ready-ticket workflow as spec-addressed readiness while keeping
+  planned spec markers only for contract-first exceptions.
+- Make `lead-proceed` emit a single `NEXT:` Routing Verdict and stop cleanly on
+  route blockers before any implementation handoff.
+- Restructure sprint work into episode shells with guarded documentation commits
+  and recovery for open edit episodes.
+- Simplify `lead-skill-authoring` fresh-reader audits around target-only
+  reviewer prompts, lead-side finding classification, and bounded audit loops.
+- Require `lead-discuss` to stress-test premises, trade-offs, and failure modes
+  before endorsing a direction.
+
+### Fixed
+- Hide `root` from public and raw `agents.*` MCP schemas while preserving
+  explicit-root dispatch compatibility.
+- Clarify fresh-reader and doc-closeout compaction wording across workflow
+  guidance.
+- Align the main plugin proceed dispatch contract test with the current Routing
+  Verdict wording.
+
 ## v0.27.0 - 2026-05-21
 
 ### Added
