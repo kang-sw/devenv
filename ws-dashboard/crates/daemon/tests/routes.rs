@@ -25,6 +25,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -32,6 +33,7 @@ use futures_util::{SinkExt, StreamExt};
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
@@ -136,6 +138,7 @@ fn app_state_with_opened_and_store(
         dashboard_state,
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
 
@@ -150,6 +153,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         dashboard_state: DashboardStateStore::disabled(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
 
@@ -368,6 +372,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         dashboard_state: DashboardStateStore::disabled(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     };
     let expired_token = expired_state
         .auth
@@ -837,6 +842,7 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
     let app = build_router(state);
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
     fs::remove_dir_all(&root).expect("remove root after registry membership");
 
     let resources = app
@@ -873,6 +879,8 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
         format!("/api/dashboard/work-roots/{work_root_id}/activity"),
         format!("/api/dashboard/work-roots/{work_root_id}/activity/items/agent:test/transcript"),
         format!("/api/dashboard/work-roots/{work_root_id}/activity/events"),
+        format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+        format!("/api/dashboard/terminals/{terminal_id}/output"),
     ] {
         let response = response
             .clone()
@@ -894,6 +902,96 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
         assert_eq!(value["error"], "workRoot unavailable");
         assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
     }
+
+    for (uri, body) in [
+        (
+            format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+            Body::from(serde_json::json!({ "columns": 80, "rows": 24 }).to_string()),
+        ),
+        (
+            format!("/api/dashboard/terminals/{terminal_id}/input"),
+            Body::from(serde_json::json!({ "data": "echo blocked\n" }).to_string()),
+        ),
+        (
+            format!("/api/dashboard/terminals/{terminal_id}/resize"),
+            Body::from(serde_json::json!({ "columns": 100, "rows": 30 }).to_string()),
+        ),
+    ] {
+        let response = response
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .expect("missing workRoot terminal POST request"),
+            )
+            .await
+            .expect("missing workRoot terminal POST response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("terminal unavailable body");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("terminal unavailable JSON");
+        assert_eq!(value["error"], "workRoot unavailable");
+        assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
+    }
+
+    let delete_response = response
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("missing workRoot terminal delete request"),
+        )
+        .await
+        .expect("missing workRoot terminal delete response");
+    assert_eq!(delete_response.status(), StatusCode::CONFLICT);
+    let delete_body = axum::body::to_bytes(delete_response.into_body(), 4096)
+        .await
+        .expect("delete unavailable body");
+    let value: serde_json::Value =
+        serde_json::from_slice(&delete_body).expect("delete unavailable JSON");
+    assert_eq!(value["error"], "workRoot unavailable");
+    assert!(!String::from_utf8_lossy(&delete_body).contains(root.to_string_lossy().as_ref()));
+
+    let (addr, server) = spawn_test_server(response.clone()).await;
+    let mut websocket_request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
+        .into_client_request()
+        .expect("unavailable websocket request");
+    websocket_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let error = tokio_tungstenite::connect_async(websocket_request)
+        .await
+        .expect_err("unavailable websocket rejects");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+        }
+        other => panic!("unexpected unavailable websocket error: {other}"),
+    }
+    server.abort();
+    fs::create_dir_all(&root).expect("restore root for terminal cleanup");
+    let cleanup = response
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("terminal cleanup request"),
+        )
+        .await
+        .expect("terminal cleanup response");
+    assert_eq!(cleanup.status(), StatusCode::NO_CONTENT);
+    remove_static_fixture(&root);
 }
 
 #[tokio::test]
@@ -981,6 +1079,11 @@ async fn root_picker_routes_are_owner_authenticated() {
             .uri("/api/dashboard/work-roots/open")
             .body(Body::empty())
             .expect("open workRoot request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/work-roots/root-local-test/activation")
+            .body(Body::empty())
+            .expect("activate workRoot request"),
     ];
 
     for request in requests {
@@ -1453,6 +1556,7 @@ fn app_state_with_activity_cache_and_codex_home(
             codex_home,
             cache_home: Some(cache_home),
         }),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
 

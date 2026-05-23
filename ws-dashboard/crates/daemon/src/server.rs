@@ -1,9 +1,11 @@
 use std::future::{Future, IntoFuture};
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tokio::sync::watch;
+use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::auth::OwnerAuthState;
@@ -74,6 +76,7 @@ where
         dashboard_state,
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     });
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_task = tokio::spawn(async move {

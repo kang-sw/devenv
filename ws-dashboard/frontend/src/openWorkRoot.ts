@@ -7,7 +7,12 @@ export const openWorkRootEndpoint = "/api/dashboard/work-roots/open";
 
 // POST a host path to the daemon open-workRoot route. On success the daemon
 // returns the aggregated live resource view of every opened workRoot.
-export async function requestOpenWorkRoot(path: string): Promise<DashboardResourcesView> {
+export type OpenWorkRootResult = {
+  view: DashboardResourcesView;
+  openedWorkRootId: string | null;
+};
+
+export async function requestOpenWorkRoot(path: string): Promise<OpenWorkRootResult> {
   const response = await fetch(openWorkRootEndpoint, {
     method: "POST",
     headers: {
@@ -21,5 +26,8 @@ export async function requestOpenWorkRoot(path: string): Promise<DashboardResour
     throw new Error(await apiErrorDetail(response));
   }
 
-  return (await response.json()) as DashboardResourcesView;
+  return {
+    view: (await response.json()) as DashboardResourcesView,
+    openedWorkRootId: response.headers.get("x-ws-dashboard-opened-work-root-id"),
+  };
 }

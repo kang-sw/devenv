@@ -569,9 +569,9 @@ function OpenWorkRootControl({
           setPending(true);
           setError(null);
           void requestOpenWorkRoot(requestedPath)
-            .then((openedView) => {
+            .then((result) => {
               setPath("");
-              onOpened(openedView, findOpenedWorkRootId(openedView, requestedPath));
+              onOpened(result.view, result.openedWorkRootId ?? undefined);
             })
             .catch((nextError) => {
               setError(nextError instanceof Error ? nextError.message : "open failed");
@@ -622,46 +622,6 @@ function OpenWorkRootControl({
       ) : null}
     </form>
   );
-}
-
-function findOpenedWorkRootId(
-  view: DashboardResourcesView,
-  requestedPath: string,
-): string | undefined {
-  if (requestedPath.startsWith("/")) {
-    const requestedId = `root-local-${stablePathHash(requestedPath)}`;
-    if (
-      view.workspaces.some((workspace) =>
-        workspace.workRoots.some((root) => root.id === requestedId),
-      )
-    ) {
-      return requestedId;
-    }
-  }
-  const normalized = requestedPath.trim().replace(/[\\/]+$/, "");
-  const label = normalized.split(/[\\/]/).filter(Boolean).pop();
-  if (!label) {
-    return undefined;
-  }
-  for (const workspace of view.workspaces) {
-    const match = workspace.workRoots.find((root) => root.label === label);
-    if (match) {
-      return match.id;
-    }
-  }
-  return undefined;
-}
-
-function stablePathHash(path: string): string {
-  let hash = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  const mask = 0xffffffffffffffffn;
-  const bytes = new TextEncoder().encode(path);
-  for (const byte of bytes) {
-    hash ^= BigInt(byte);
-    hash = (hash * prime) & mask;
-  }
-  return hash.toString(16).padStart(16, "0");
 }
 
 function ResourceNavigation({

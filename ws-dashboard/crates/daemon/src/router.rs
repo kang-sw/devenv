@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Component, PathBuf};
+use std::sync::Arc;
 
 use axum::extract::{Path as AxumPath, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -8,6 +9,7 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::fs;
+use tokio::sync::Mutex;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
@@ -35,6 +37,7 @@ pub struct AppState {
     pub dashboard_state: DashboardStateStore,
     pub terminals: TerminalRegistry,
     pub work_root_activity: WorkRootActivityProjector,
+    pub registry_persist_lock: Arc<Mutex<()>>,
 }
 
 pub fn build_router(state: AppState) -> Router {

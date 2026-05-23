@@ -120,9 +120,11 @@ pub async fn open_work_root(
         );
     }
 
+    let opened_work_root_id = work_root.id.clone();
+    let _persist_guard = state.registry_persist_lock.lock().await;
     state
         .opened_work_roots
-        .register(work_root.id.clone(), requested_path);
+        .register(opened_work_root_id.clone(), requested_path);
     if let Err(error) = state
         .dashboard_state
         .persist_opened_work_roots(&state.opened_work_roots)
@@ -135,7 +137,14 @@ pub async fn open_work_root(
     // immediate open response is consistent with later GET /api/dashboard/resources
     // refreshes. The single-candidate `view` above is only the Online gate.
     let aggregated = live_dashboard_resources(&state.opened_work_roots);
-    Json::<DashboardResourcesView>(aggregated).into_response()
+    (
+        [(
+            "x-ws-dashboard-opened-work-root-id",
+            opened_work_root_id.as_str().to_owned(),
+        )],
+        Json::<DashboardResourcesView>(aggregated),
+    )
+        .into_response()
 }
 
 pub async fn set_work_root_activation(
@@ -144,6 +153,7 @@ pub async fn set_work_root_activation(
     Json(request): Json<SetWorkRootActivationRequest>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
+    let _persist_guard = state.registry_persist_lock.lock().await;
     let Some(previous_activation) = state
         .opened_work_roots
         .set_activation(&work_root_id, request.activation)
