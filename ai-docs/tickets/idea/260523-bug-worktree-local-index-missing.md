@@ -1,10 +1,10 @@
 ---
-title: worktree local index context is missing
+title: dashboard-managed worktree local context
 related-mental-model:
-  - workflow-skills
+  - ws-web-dashboard
 ---
 
-# worktree local index context is missing
+# dashboard-managed worktree local context
 
 ## Background
 
@@ -18,8 +18,26 @@ approved SSH test hosts, local browser-gate notes, and other ignored
 environment records. Agents then either re-derive local setup unnecessarily or
 try the wrong default account/path.
 
+Git worktree itself does not distinguish ignored build artifacts from ignored
+local workflow context. Copying all ignored files would drag build outputs,
+caches, and possibly secrets into implementation worktrees. Adding broad
+worktree-management APIs to ws core would also pull workflow orchestration into
+general Git workspace management.
+
 ## Direction
 
-Investigate how ws-created worktrees should carry ignored local context without
-committing it. A likely direction is copying selected ignored local files during
-worktree setup, with clear ownership and no accidental staging.
+Treat this as a dashboard/workroot management problem, not a ws core workflow
+primitive. A future dashboard surface could make local context propagation a
+human-visible action:
+
+- show which ignored local context files exist for the current workroot;
+- distinguish allowlisted local context from build artifacts and caches;
+- let the user copy selected local context into a new or existing worktree;
+- default to skip existing destination files unless the user explicitly
+  overwrites;
+- keep copied files ignored and unstaged;
+- warn before copying files likely to contain secrets.
+
+The likely allowlist starts with `ai-docs/_index.local.md` and
+`ai-docs/**/*.local.md`, but the dashboard design should decide the manifest,
+preview, and safety policy before implementation.
