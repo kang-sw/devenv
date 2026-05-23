@@ -528,7 +528,7 @@ export function shouldLoadMoreActivityTranscript(
   metrics: ActivityTranscriptScrollMetrics,
   hasMore: boolean,
   loading: boolean,
-  thresholdPx = 48,
+  thresholdPx = 8,
 ): boolean {
   if (!hasMore || loading) {
     return false;

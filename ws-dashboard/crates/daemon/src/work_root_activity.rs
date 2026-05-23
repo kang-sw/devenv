@@ -24,6 +24,7 @@ use crate::router::AppState;
 /// oversized `current/state.json` error cannot bloat the projection response.
 /// Daemon-emitted diagnostics are fixed short constants and need no bounding.
 const MAX_BOUNDED_TEXT: usize = 280;
+const MAX_NATIVE_MESSAGE_TEXT: usize = 8_192;
 
 const DIAG_METADATA_MISSING: &str = "agent metadata missing";
 const DIAG_METADATA_UNREADABLE: &str = "agent metadata unreadable";
@@ -1564,7 +1565,7 @@ fn safe_codex_type_label(value: &str) -> String {
 }
 
 fn bounded_native_text(value: &str) -> String {
-    let bounded = bounded(value);
+    let bounded = bounded_to_chars(value, MAX_NATIVE_MESSAGE_TEXT);
     let mut redacted = String::with_capacity(bounded.len());
     let mut token = String::new();
     for ch in bounded.chars() {
@@ -1714,10 +1715,14 @@ fn non_empty(value: String) -> Option<String> {
 }
 
 fn bounded(value: &str) -> String {
-    if value.chars().count() <= MAX_BOUNDED_TEXT {
+    bounded_to_chars(value, MAX_BOUNDED_TEXT)
+}
+
+fn bounded_to_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
         return value.to_owned();
     }
-    value.chars().take(MAX_BOUNDED_TEXT).collect()
+    value.chars().take(max_chars).collect()
 }
 
 /// Resolve the wsstate cache root, mirroring `wsstate.CacheRoot`: an explicit
@@ -2314,7 +2319,7 @@ mod tests {
 
     #[test]
     fn codex_session_jsonl_oversized_native_text_is_bounded() {
-        let long_message = "m".repeat(MAX_BOUNDED_TEXT + 50);
+        let long_message = "m".repeat(MAX_NATIVE_MESSAGE_TEXT + 50);
         let long_tool_name = "tool".repeat(MAX_BOUNDED_TEXT);
         let raw = format!(
             "{}\n{}\n",
@@ -2349,7 +2354,7 @@ mod tests {
                 .expect("assistant text")
                 .chars()
                 .count(),
-            MAX_BOUNDED_TEXT
+            MAX_NATIVE_MESSAGE_TEXT
         );
         assert_eq!(
             parsed.blocks[1]

@@ -763,12 +763,21 @@ assertEqual(
 );
 assertEqual(
   shouldLoadMoreActivityTranscript(
-    { scrollTop: 460, clientHeight: 500, scrollHeight: 1_000 },
+    { scrollTop: 492, clientHeight: 500, scrollHeight: 1_000 },
     true,
     false,
   ),
   true,
-  "near-end transcript scroll triggers load-more when more blocks exist",
+  "tail transcript scroll triggers load-more when more blocks exist",
+);
+assertEqual(
+  shouldLoadMoreActivityTranscript(
+    { scrollTop: 460, clientHeight: 500, scrollHeight: 1_000 },
+    true,
+    false,
+  ),
+  false,
+  "near-end but not tail transcript scroll does not trigger load-more",
 );
 assertEqual(
   shouldLoadMoreActivityTranscript(
