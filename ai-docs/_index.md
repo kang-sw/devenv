@@ -149,6 +149,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
+| `260523-bug-ws-dashboard-single-workroot-collapse` | ready | Restore compact left-nav rendering for single workspace/workRoot dashboards |
 | `260523-feat-ws-dashboard-readonly-file-pane-restore` | todo | Restore dashboard read-only file panes after refresh or daemon restart |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -176,7 +177,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-No ready tickets.
+- `260523-bug-ws-dashboard-single-workroot-collapse` - restore compact
+  workspace/workRoot left-nav presentation without depending on main/sub
+  instances.
 
 ## Session Notes
 
