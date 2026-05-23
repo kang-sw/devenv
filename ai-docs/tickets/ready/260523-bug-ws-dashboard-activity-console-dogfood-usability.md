@@ -102,6 +102,18 @@ Keep vertical density stable: the improvement is better text inside the existing
 one-line compact block, not larger default blocks. Detail expansion remains
 available for richer safe payload summaries.
 
+### Result (4f913e6d) - 2026-05-23
+
+Implemented frontend compact transcript summary selection. Compact tool-call
+blocks now prefer the normalized safe tool name plus argument-byte hint, tool
+results show available outcome/status/exit/byte hints, and status or degraded
+blocks prefer meaningful normalized first-line text over generic category
+labels. Summary strings are bounded and the one-line density, detail expansion,
+terminal rendering, and backend parser coverage remain unchanged.
+
+Deferred: broader Codex prompt, interruption, MCP/tool, and patch/apply native
+record coverage remains Phase 3.
+
 ### Phase 3: Expand Codex prompt and interruption transcript coverage
 
 Use fixture-backed Codex native session records to identify prompt,

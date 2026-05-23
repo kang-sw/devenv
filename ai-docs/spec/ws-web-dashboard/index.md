@@ -331,18 +331,18 @@ gain read-receipt authority.
 Selecting a ribbon item renders normalized transcript blocks. Agent activity
 renders as action-unit blocks where dialogue and assistant output are expanded
 by default, while tool calls, MCP activity, and command runs default to one-line
-summaries with inline detail expansion. Exec activity renders as terminal-style
-output. Transcript views follow the tail by default for newly selected or live
-updated activity. When the user scrolls away from the tail, the browser
-preserves that scroll position across feed refreshes, transcript refreshes,
-selected-transcript invalidations, and workbench split rerenders until the user
-returns to the tail. Transcript backfill/load-more is driven primarily by scroll
-position, with explicit refresh or load-more controls reserved for fallback and
-error states.
-
-> [!note] Planned 🚧
-> Compact blocks should render a meaningful bounded one-line summary instead of
-> generic labels such as `Tool call` or `Unsupported transcript record`.
+summaries with inline detail expansion. Compact summaries prefer bounded
+semantic content from normalized safe fields and first-line text over generic
+category titles, so tool calls can show the tool name and argument-size hint,
+tool results can show outcome/status/byte hints, and degraded records can show
+their omission reason without exposing raw native payloads. Exec activity
+renders as terminal-style output. Transcript views follow the tail by default
+for newly selected or live updated activity. When the user scrolls away from the
+tail, the browser preserves that scroll position across feed refreshes,
+transcript refreshes, selected-transcript invalidations, and workbench split
+rerenders until the user returns to the tail. Transcript backfill/load-more is
+driven primarily by scroll position, with explicit refresh or load-more controls
+reserved for fallback and error states.
 
 Visible Activity Console controls expose stable command ids and route their
 clicked behavior through the dashboard command dispatch path so later keyboard
