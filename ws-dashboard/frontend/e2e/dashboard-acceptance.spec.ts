@@ -799,6 +799,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       },
     );
     let alphaTranscriptReplaceRequests = 0;
+    let showRefreshedAlphaTranscript = false;
     await page.route(
       /\/api\/dashboard\/work-roots\/.*\/activity\/items\/.*\/transcript(?:\?.*)?$/,
       async (route) => {
@@ -863,6 +864,18 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
             degraded: false,
           })),
         ];
+        const refreshedAlphaBlocks = [
+          ...alphaInitialBlocks,
+          {
+            cursor: "alpha:refresh-applied",
+            timestamp: "2026-05-17T11:59:40Z",
+            renderKind: "markdown",
+            title: "refresh applied",
+            text: "selected transcript refresh applied",
+            data: null,
+            degraded: false,
+          },
+        ];
         const blocks =
           activityId === "exec:beta"
             ? [
@@ -888,7 +901,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
                     degraded: false,
                   },
                 ]
-              : alphaInitialBlocks;
+              : showRefreshedAlphaTranscript
+                ? refreshedAlphaBlocks
+                : alphaInitialBlocks;
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -1009,6 +1024,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       return node.scrollTop;
     });
     const alphaReplaceRequestsBeforeRefresh = alphaTranscriptReplaceRequests;
+    showRefreshedAlphaTranscript = true;
     await populatedBody
       .locator('.activity-transcript-head [data-command-id="activity.refresh"]')
       .click();
@@ -1018,6 +1034,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect
       .poll(() => alphaTranscriptReplaceRequests)
       .toBeGreaterThan(alphaReplaceRequestsBeforeRefresh);
+    await expect(populatedBody).toContainText("selected transcript refresh applied");
     await expect
       .poll(() =>
         transcriptScroll.evaluate((node) =>
