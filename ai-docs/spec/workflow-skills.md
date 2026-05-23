@@ -438,6 +438,17 @@ pass, invokes the mental-model updater, follows the executor wrap-up document
 pipeline, commits documentation updates, reports the documentation changes, and
 merges or deletes the sprint branch according to the remaining source changes.
 
+> [!note] Planned 🚧
+> `lead-sprint` will become an episode-oriented workflow shell rather than a
+> sprint-branch container. It will coordinate discussion, exploration,
+> `sprint-edit` micro-edit episodes, and full workflow handoff without creating
+> `sprint/` branches or running a final wrap-up. `sprint-edit` episodes will
+> handle only small lead-owned interactive edits, mark their commits with a
+> recoverable episode identifier, ask whether to keep refining the current
+> context, wrap it up, or shift direction, and run the documentation pass when
+> the episode wraps up. Larger implementation work will route through
+> `lead-proceed` or `lead-implement`. {#260523-sprint-episode-workflow-shell}
+
 ## Review Workflow Skills {#260513-review-workflow-skills}
 
 `lead-review` reviews a pull request or merge request branch. It loads
