@@ -564,7 +564,7 @@ export function activityRibbonStatusLine(
     nowMs,
   );
   if (relative) {
-    parts.push(`${relative} ago`);
+    parts.push(relative === "just now" ? relative : `${relative} ago`);
   }
   const duration = activityDurationLabel(item.startedAt, item.finishedAt);
   if (duration) {

@@ -734,6 +734,18 @@ assertEqual(
   "ribbon status line combines status, relative update time, and completed duration",
 );
 assertEqual(
+  activityRibbonStatusLine(
+    activityItem({
+      id: "just-now-running",
+      status: "running",
+      updatedAt: "2026-05-21T12:05:00Z",
+    }),
+    Date.parse("2026-05-21T12:05:30Z"),
+  ),
+  "running / just now",
+  "ribbon status line does not append ago to just now",
+);
+assertEqual(
   preserveActivitySelection(orderedItems, "new-idle"),
   "new-idle",
   "selection is preserved when the item still exists",
