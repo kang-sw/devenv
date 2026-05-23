@@ -138,7 +138,7 @@ The MVP should cover:
 - `260523-feat-ws-dashboard-terminal-tab-restore` - done; restore remembered
   terminal tabs after daemon restart by creating new terminal sessions with
   safe workRoot-relative cwd hints, without treating old PTYs as resumable.
-- `260523-feat-ws-dashboard-workroot-registry-activation` - todo; add a
+- `260523-feat-ws-dashboard-workroot-registry-activation` - ready; add a
   durable workspace/workRoot registry, separate live-derived availability from
   user-controlled online/offline activation, and keep known workRoots visible
   until explicit future forget/remove semantics exist.

@@ -5,6 +5,8 @@ related:
   260523-feat-ws-dashboard-persist-open-workroots: first narrow persistence step to absorb into the durable registry model
   260523-feat-ws-dashboard-linked-worktree-discovery: linked worktree discovery depends on durable membership and activation semantics
   260523-research-ws-dashboard-persistable-ui-state-map: broader persistence backlog that should build on this spine
+spec:
+  - 260523-dashboard-workroot-registry-activation
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -48,6 +50,11 @@ from a missing/inaccessible workRoot.
 - Keep availability and activation separate. UI labels may choose different
   wording later, but the model must distinguish "reachable but offline" from
   "missing or inaccessible".
+- Use `activation: online | offline` for user-controlled dashboard targeting.
+  Use an initial `availability` vocabulary covering available, missing, moved,
+  inaccessible, and unknown states. Git-specific states such as prunable can
+  remain details or follow-up vocabulary unless the linked-worktree discovery
+  ticket promotes them into first-class public values.
 - Do not reinterpret the existing `WorkRootStatus::Online/Offline` enum as the
   new activation layer. Introduce explicit public fields or vocabulary for
   availability and activation, then update frontend resource types, fixtures,
