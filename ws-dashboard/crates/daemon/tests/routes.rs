@@ -3803,6 +3803,7 @@ async fn work_root_terminal_routes_reject_unknown_work_root() {
 async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
     let root = temp_fixture_path("terminal-root");
     fs::create_dir_all(&root).expect("create terminal root dir");
+    fs::create_dir_all(root.join("nested")).expect("create terminal nested cwd dir");
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
@@ -3828,6 +3829,26 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
         .expect("invalid create terminal response");
     assert_eq!(invalid_create.status(), StatusCode::BAD_REQUEST);
 
+    let invalid_cwd_create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24, "cwdHint": "../outside" })
+                        .to_string(),
+                ))
+                .expect("invalid cwd terminal request"),
+        )
+        .await
+        .expect("invalid cwd terminal response");
+    assert_eq!(invalid_cwd_create.status(), StatusCode::BAD_REQUEST);
+
     let create = app
         .clone()
         .oneshot(
@@ -3839,7 +3860,7 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
                 .header(header::COOKIE, cookie.as_str())
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "columns": 80, "rows": 24, "title": "Test terminal" })
+                    serde_json::json!({ "columns": 80, "rows": 24, "title": "Test terminal", "cwdHint": "nested" })
                         .to_string(),
                 ))
                 .expect("create terminal request"),
@@ -3861,6 +3882,7 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
     assert_eq!(created["status"], "running");
     assert_eq!(created["columns"], 80);
     assert_eq!(created["rows"], 24);
+    assert_eq!(created["cwdHint"], "nested");
     assert!(!create_body
         .windows(root.display().to_string().len())
         .any(|window| window == root.display().to_string().as_bytes()));

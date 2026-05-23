@@ -69,16 +69,22 @@ import {
   listTerminals,
   markTerminalPaneCloseError,
   markTerminalSocketStatus,
+  loadTerminalRestoreIntents,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
+  replaceTerminalRestoreIntentsForWorkRoot,
   resizeTerminal,
   sendTerminalInput,
+  saveTerminalRestoreIntents,
   shouldPollTerminalOutput,
   terminalOutputPollChangedState,
   terminalPaneFromSession,
+  terminalRestoreIntentsForWorkRoot,
+  terminalRestoreIntentsFromPanes,
   terminalPaneLogicalKey,
   terminalWebSocketCursor,
   terminalWebSocketUrl,
+  type TerminalCreateOptions,
   type TerminalPaneState,
   type TerminalWebSocketServerMessage,
   type TerminalSessionView,
@@ -1084,6 +1090,7 @@ function WorkbenchShell({
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
+  const restoredTerminalIntentRoots = useRef<Set<string>>(new Set());
   const [focusedTerminalPaneId, setFocusedTerminalPaneId] = useState<
     string | null
   >(null);
@@ -1204,15 +1211,40 @@ function WorkbenchShell({
     if (!workbenchModel) {
       return;
     }
+    const rootId = workbenchModel.root.id;
     const listStartedAtMs = Date.now();
-    void listTerminals(workbenchModel.root.id)
+    void listTerminals(rootId)
       .then((sessions) => {
+        const restoreIntents = terminalRestoreIntentsForWorkRoot(
+          loadTerminalRestoreIntents(),
+          rootId,
+        );
+        if (
+          sessions.length === 0 &&
+          restoreIntents.length > 0 &&
+          !restoredTerminalIntentRoots.current.has(rootId)
+        ) {
+          restoredTerminalIntentRoots.current.add(rootId);
+          for (const intent of restoreIntents) {
+            onCommand(buildTerminalCreateCommand(rootId), {
+              "terminal.create": () =>
+                createTerminalPane({
+                  title: intent.title,
+                  cwdHint: intent.cwdHint,
+                }),
+            });
+          }
+          return;
+        }
         setTerminalPanes((current) =>
-          reconcileListedTerminalSessions(
-            current,
-            workbenchModel.root.id,
-            sessions,
-            listStartedAtMs,
+          persistTerminalPanesForWorkRoot(
+            rootId,
+            reconcileListedTerminalSessions(
+              current,
+              rootId,
+              sessions,
+              listStartedAtMs,
+            ),
           ),
         );
         setTerminalPaneOrderByGroup((current) =>
@@ -1626,17 +1658,39 @@ function WorkbenchShell({
     );
   }, [activeTerminalPaneRequest, editorGroups]);
 
-  function createTerminalPane() {
+  function persistTerminalPanesForWorkRoot(
+    workRootId: string,
+    nextPanes: Record<string, TerminalPaneState>,
+  ): Record<string, TerminalPaneState> {
+    const nextIntents = terminalRestoreIntentsFromPanes(
+      Object.values(nextPanes).filter(
+        (pane) => pane.session.workRootId === workRootId,
+      ),
+    );
+    saveTerminalRestoreIntents(
+      replaceTerminalRestoreIntentsForWorkRoot(
+        loadTerminalRestoreIntents(),
+        workRootId,
+        nextIntents,
+      ),
+    );
+    return nextPanes;
+  }
+
+  function createTerminalPane(options: TerminalCreateOptions = {}) {
     if (!workbenchModel) {
       return;
     }
-    void createTerminal(workbenchModel.root.id)
+    const rootId = workbenchModel.root.id;
+    void createTerminal(rootId, options)
       .then((session) => {
         const pane = terminalPaneFromSession(session);
-        setTerminalPanes((current) => ({
-          ...current,
-          [pane.logicalKey]: pane,
-        }));
+        setTerminalPanes((current) =>
+          persistTerminalPanesForWorkRoot(rootId, {
+            ...current,
+            [pane.logicalKey]: pane,
+          }),
+        );
         setTerminalPaneOrderByGroup((current) =>
           placeTerminalSessions(
             current,
@@ -1760,7 +1814,10 @@ function WorkbenchShell({
     void closeTerminal(pane.session.terminalId)
       .then(() =>
         setTerminalPanes((current) =>
-          removeClosedTerminalPane(current, pane.logicalKey),
+          persistTerminalPanesForWorkRoot(
+            pane.session.workRootId,
+            removeClosedTerminalPane(current, pane.logicalKey),
+          ),
         ),
       )
       .catch((error) => {

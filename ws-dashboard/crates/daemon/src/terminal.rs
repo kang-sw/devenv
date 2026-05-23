@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -181,6 +181,7 @@ struct TerminalSession {
     id: String,
     work_root_id: WorkRootId,
     title: String,
+    cwd_hint: Option<String>,
     created_at_ms: u64,
     inner: Mutex<TerminalSessionInner>,
     output_signal: watch::Sender<u64>,
@@ -207,6 +208,7 @@ pub struct TerminalSessionView {
     columns: u16,
     rows: u16,
     created_at_ms: u64,
+    cwd_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -282,6 +284,7 @@ pub struct CreateTerminalRequest {
     #[serde(default = "default_rows")]
     rows: u16,
     title: Option<String>,
+    cwd_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -334,6 +337,7 @@ pub async fn create_terminal(
         request.title.unwrap_or_else(|| "Terminal".to_owned()),
         columns,
         rows,
+        request.cwd_hint,
     ) {
         Ok(session) => {
             let view = session.view();
@@ -443,7 +447,9 @@ impl TerminalSession {
         title: String,
         columns: u16,
         rows: u16,
+        cwd_hint: Option<String>,
     ) -> Result<Arc<Self>, TerminalError> {
+        let (spawn_cwd, normalized_cwd_hint) = resolve_terminal_cwd(&root_path, cwd_hint)?;
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -454,7 +460,7 @@ impl TerminalSession {
             })
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
         let mut command = CommandBuilder::new(default_shell());
-        command.cwd(root_path);
+        command.cwd(spawn_cwd);
         let child = pair
             .slave
             .spawn_command(command)
@@ -472,6 +478,7 @@ impl TerminalSession {
             id: opaque_terminal_id(),
             work_root_id,
             title,
+            cwd_hint: normalized_cwd_hint,
             created_at_ms: now_ms(),
             inner: Mutex::new(TerminalSessionInner {
                 status: TerminalStatus::Running,
@@ -499,6 +506,7 @@ impl TerminalSession {
             columns: inner.columns,
             rows: inner.rows,
             created_at_ms: self.created_at_ms,
+            cwd_hint: self.cwd_hint.clone(),
         }
     }
 
@@ -779,6 +787,43 @@ fn validate_size(columns: u16, rows: u16) -> Result<(u16, u16), ()> {
     }
 }
 
+fn resolve_terminal_cwd(
+    root_path: &Path,
+    cwd_hint: Option<String>,
+) -> Result<(PathBuf, Option<String>), TerminalError> {
+    let Some(raw_hint) = cwd_hint else {
+        return Ok((root_path.to_path_buf(), None));
+    };
+    let trimmed = raw_hint.trim();
+    if trimmed.is_empty() || trimmed == "." {
+        return Ok((root_path.to_path_buf(), None));
+    }
+
+    let hint_path = Path::new(trimmed);
+    let mut normalized = PathBuf::new();
+    for component in hint_path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(TerminalError::BadRequest("invalid terminal cwd"));
+            }
+        }
+    }
+
+    if normalized.as_os_str().is_empty() {
+        return Ok((root_path.to_path_buf(), None));
+    }
+    let spawn_cwd = root_path.join(&normalized);
+    if !spawn_cwd.is_dir() {
+        return Err(TerminalError::BadRequest("terminal cwd not found"));
+    }
+    Ok((
+        spawn_cwd,
+        Some(normalized.to_string_lossy().replace('\\', "/")),
+    ))
+}
+
 fn terminal_error(status: StatusCode, error: impl Into<String>) -> Response {
     (
         status,
@@ -895,6 +940,32 @@ mod terminal_portability_skeleton_tests {
             TerminalShellSource::Fallback
         );
     }
+
+    #[test]
+    fn terminal_cwd_hint_stays_work_root_relative() {
+        let root = std::env::temp_dir().join(format!("ws-terminal-cwd-{}", now_ms()));
+        let nested = root.join("nested/child");
+        std::fs::create_dir_all(&nested).expect("create nested cwd fixture");
+
+        assert_eq!(
+            resolve_terminal_cwd(&root, None).expect("root cwd"),
+            (root.clone(), None)
+        );
+        assert_eq!(
+            resolve_terminal_cwd(&root, Some("nested/child".to_owned())).expect("nested cwd"),
+            (nested.clone(), Some("nested/child".to_owned()))
+        );
+        assert!(matches!(
+            resolve_terminal_cwd(&root, Some("../outside".to_owned())),
+            Err(TerminalError::BadRequest("invalid terminal cwd"))
+        ));
+        assert!(matches!(
+            resolve_terminal_cwd(&root, Some("missing".to_owned())),
+            Err(TerminalError::BadRequest("terminal cwd not found"))
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 fn opaque_terminal_id() -> String {
@@ -921,6 +992,7 @@ fn default_rows() -> u16 {
     24
 }
 
+#[derive(Debug)]
 enum TerminalError {
     BadRequest(&'static str),
     Gone(&'static str),

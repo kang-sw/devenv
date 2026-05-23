@@ -8,6 +8,7 @@ export type TerminalSessionView = {
   columns: number;
   rows: number;
   createdAtMs: number;
+  cwdHint: string | null;
 };
 
 export type TerminalOutputChunk = {
@@ -50,6 +51,18 @@ export type TerminalPaneState = {
   error: string | null;
   localCreatedAtMs: number;
   socketStatus: "disconnected" | "connecting" | "connected" | "fallback";
+};
+
+export type TerminalCreateOptions = {
+  title?: string;
+  cwdHint?: string | null;
+};
+
+export type TerminalRestoreIntent = {
+  workRootId: string;
+  title: string;
+  cwdHint: string | null;
+  updatedAtMs: number;
 };
 
 // PTY logical size contract, mirrored from the daemon terminal registry
@@ -113,14 +126,18 @@ export function terminalCloseEndpoint(terminalId: string) {
   return `/api/dashboard/terminals/${encodeURIComponent(terminalId)}`;
 }
 
-export async function createTerminal(workRootId: string) {
+export async function createTerminal(
+  workRootId: string,
+  options: TerminalCreateOptions = {},
+) {
   const response = await fetch(workRootTerminalsEndpoint(workRootId), {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({
       columns: defaultPtyLogicalSize.columns,
       rows: defaultPtyLogicalSize.rows,
-      title: "Terminal",
+      title: options.title ?? "Terminal",
+      cwdHint: options.cwdHint ?? null,
     }),
   });
   if (!response.ok) {
@@ -199,6 +216,116 @@ export function terminalPaneFromSession(session: TerminalSessionView): TerminalP
     localCreatedAtMs: Date.now(),
     socketStatus: "disconnected",
   };
+}
+
+export function terminalRestoreIntentsFromPanes(
+  panes: TerminalPaneState[],
+  nowMs = Date.now(),
+): TerminalRestoreIntent[] {
+  return panes
+    .filter((pane) => pane.session.status === "running")
+    .map((pane) => ({
+      workRootId: pane.session.workRootId,
+      title: pane.session.title,
+      cwdHint: pane.session.cwdHint,
+      updatedAtMs: nowMs,
+    }));
+}
+
+export function terminalRestoreIntentsForWorkRoot(
+  intents: TerminalRestoreIntent[],
+  workRootId: string,
+): TerminalRestoreIntent[] {
+  return intents.filter((intent) => intent.workRootId === workRootId);
+}
+
+export function replaceTerminalRestoreIntentsForWorkRoot(
+  current: TerminalRestoreIntent[],
+  workRootId: string,
+  nextForRoot: TerminalRestoreIntent[],
+): TerminalRestoreIntent[] {
+  return [
+    ...current.filter((intent) => intent.workRootId !== workRootId),
+    ...nextForRoot.filter((intent) => intent.workRootId === workRootId),
+  ];
+}
+
+export function loadTerminalRestoreIntents(
+  storage: Pick<Storage, "getItem"> | null = browserStorage(),
+): TerminalRestoreIntent[] {
+  if (!storage) {
+    return [];
+  }
+  try {
+    const raw = storage.getItem(terminalRestoreStorageKey);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw) as {
+      version?: unknown;
+      terminals?: unknown;
+    };
+    if (parsed.version !== 1 || !Array.isArray(parsed.terminals)) {
+      return [];
+    }
+    return parsed.terminals.flatMap((value): TerminalRestoreIntent[] => {
+      if (!value || typeof value !== "object") {
+        return [];
+      }
+      const record = value as Record<string, unknown>;
+      if (
+        typeof record.workRootId !== "string" ||
+        typeof record.title !== "string"
+      ) {
+        return [];
+      }
+      const cwdHint =
+        typeof record.cwdHint === "string"
+          ? record.cwdHint
+          : record.cwdHint === null || record.cwdHint === undefined
+            ? null
+            : undefined;
+      if (cwdHint === undefined) {
+        return [];
+      }
+      return [
+        {
+          workRootId: record.workRootId,
+          title: record.title.trim() || "Terminal",
+          cwdHint: cwdHint?.trim() ? cwdHint.trim() : null,
+          updatedAtMs:
+            typeof record.updatedAtMs === "number" &&
+            Number.isFinite(record.updatedAtMs)
+              ? record.updatedAtMs
+              : 0,
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
+}
+
+export function saveTerminalRestoreIntents(
+  intents: TerminalRestoreIntent[],
+  storage: Pick<Storage, "setItem" | "removeItem"> | null = browserStorage(),
+) {
+  if (!storage) {
+    return;
+  }
+  const terminals = intents.filter((intent) => intent.workRootId.trim());
+  try {
+    if (terminals.length === 0) {
+      storage.removeItem(terminalRestoreStorageKey);
+      return;
+    }
+    storage.setItem(
+      terminalRestoreStorageKey,
+      JSON.stringify({ version: 1, terminals }),
+    );
+  } catch {
+    // Browser persistence is best-effort; live terminal state remains canonical.
+  }
 }
 
 export function reconcileListedTerminalSessions(
@@ -354,4 +481,14 @@ async function terminalErrorMessage(response: Response) {
     // Fall through.
   }
   return `HTTP ${response.status}`;
+}
+
+const terminalRestoreStorageKey = "ws-dashboard.terminalRestore.v1";
+
+function browserStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
 }
