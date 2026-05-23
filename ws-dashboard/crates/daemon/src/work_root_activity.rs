@@ -1105,7 +1105,11 @@ fn parse_codex_session_transcript(raw: &str) -> CodexSessionParse {
         };
 
         match codex_session_record(&envelope, cursor.clone()) {
-            CodexSessionRecord::Block(block) => parsed.blocks.push(block),
+            CodexSessionRecord::Block(block) => {
+                if !is_duplicate_codex_dialogue_block(&parsed.blocks, &block) {
+                    parsed.blocks.push(block);
+                }
+            }
             CodexSessionRecord::Skip => {}
             CodexSessionRecord::Unsupported(block) => {
                 parsed.degraded = true;
@@ -1407,6 +1411,18 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
     }
 }
 
+fn is_duplicate_codex_dialogue_block(blocks: &[TranscriptBlock], block: &TranscriptBlock) -> bool {
+    if !matches!(block.render_kind.as_str(), "assistant" | "user") {
+        return false;
+    }
+    let Some(previous) = blocks.last() else {
+        return false;
+    };
+    previous.render_kind == block.render_kind
+        && previous.title == block.title
+        && previous.text == block.text
+}
+
 fn codex_user_message_text(payload: &serde_json::Value) -> Option<String> {
     if let Some(message) = payload.get("message").and_then(|value| value.as_str()) {
         return Some(bounded_native_text(message));
@@ -1548,17 +1564,31 @@ fn safe_codex_type_label(value: &str) -> String {
 }
 
 fn bounded_native_text(value: &str) -> String {
-    bounded(value)
-        .split_whitespace()
-        .map(|token| {
-            if native_text_token_looks_private(token) {
-                "[redacted]"
-            } else {
-                token
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let bounded = bounded(value);
+    let mut redacted = String::with_capacity(bounded.len());
+    let mut token = String::new();
+    for ch in bounded.chars() {
+        if ch.is_whitespace() {
+            push_native_text_token(&mut redacted, &mut token);
+            redacted.push(ch);
+        } else {
+            token.push(ch);
+        }
+    }
+    push_native_text_token(&mut redacted, &mut token);
+    redacted
+}
+
+fn push_native_text_token(output: &mut String, token: &mut String) {
+    if token.is_empty() {
+        return;
+    }
+    if native_text_token_looks_private(token) {
+        output.push_str("[redacted]");
+    } else {
+        output.push_str(token);
+    }
+    token.clear();
 }
 
 fn native_text_token_looks_private(token: &str) -> bool {
@@ -2256,6 +2286,30 @@ mod tests {
                 "native transcript block must not leak {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn codex_session_jsonl_deduplicates_adjacent_dialogue_records() {
+        let raw = r#"{"timestamp":"2026-05-22T00:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"Brief path: /private/repo\nContinue"}}
+{"timestamp":"2026-05-22T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Brief path: /private/repo\nContinue"}]}}
+{"timestamp":"2026-05-22T00:00:02Z","type":"event_msg","payload":{"type":"agent_message","message":"Assistant line\n\n- inspect /private/cache\n  next"}}
+{"timestamp":"2026-05-22T00:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Assistant line\n\n- inspect /private/cache\n  next"}]}}
+"#;
+
+        let parsed = parse_codex_session_transcript(raw);
+
+        assert!(!parsed.degraded);
+        assert_eq!(parsed.blocks.len(), 2);
+        assert_eq!(parsed.blocks[0].render_kind, "user");
+        assert_eq!(
+            parsed.blocks[0].text.as_deref(),
+            Some("Brief path: [redacted]\nContinue")
+        );
+        assert_eq!(parsed.blocks[1].render_kind, "assistant");
+        assert_eq!(
+            parsed.blocks[1].text.as_deref(),
+            Some("Assistant line\n\n- inspect [redacted]\n  next")
+        );
     }
 
     #[test]
