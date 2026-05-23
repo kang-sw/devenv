@@ -428,20 +428,16 @@ failing the whole selected activity transcript, and the existing `output.md`
 fallback remains available.
 
 Source adapters normalize dialogue, assistant output, tool calls, tool results,
-status/error entries, and command/output-like records into bounded
-`TranscriptBlock` values. Raw backend JSON or markdown may be adapter input but
-is not the browser contract. Exec transcript source integration remains blocked
-until the async exec output reader model exists.
-
-> [!note] Planned 🚧
-> Dogfood feedback found Codex native coverage too narrow for lead-agent
-> monitoring. Prompt, continuation, interrupt, and handoff records should be
-> fixture-backed and normalized into source-neutral transcript blocks when their
-> native shapes are known. The repair should actively reduce unsupported volume
-> across observed Codex native records and make remaining degraded entries useful
-> through bounded structural summaries and omission reasons. Unsupported handling
-> must remain bounded and redacted rather than echoing raw JSON, private record
-> strings, payload snippets, paths, session ids, or tool output.
+status/error entries, prompt/user messages, interruptions, handoff/status
+records, MCP/tool activity, patch/apply outcomes, and command/output-like
+records into bounded `TranscriptBlock` values when their fixture-backed native
+shape is known. Raw backend JSON or markdown may be adapter input but is not the
+browser contract. Low-value native telemetry may be skipped instead of rendered
+as transcript noise. Remaining unsupported records degrade into bounded
+structural summaries with omission reasons, never raw JSON, private record
+strings, payload snippets, paths, session ids, or tool output. Exec transcript
+source integration remains blocked until the async exec output reader model
+exists.
 
 The backend continues to use feed-level `transcriptUpdated` invalidations plus
 bounded selected backfill for live transcript updates. It does not expose a

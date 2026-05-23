@@ -15,6 +15,7 @@ plans:
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
+completed: 2026-05-23
 ---
 
 # Activity Console dogfood usability repair
@@ -130,3 +131,21 @@ not be content-free. If fixture evidence is insufficient for a native shape,
 render a bounded degraded block or aggregate that provides safe structural
 context and omission reason while avoiding raw JSON, private record strings,
 payload snippets, session ids, paths, and tool output.
+
+### Result (2ce8a204) - 2026-05-23
+
+Expanded the daemon Codex native transcript adapter for common prompt and
+activity records. Fixture-backed `user_message` and `response_item/message`
+records now render bounded user/assistant blocks; custom tool calls/results,
+MCP call completions, exec command completions, patch/apply outcomes, turn
+abortions, rollback, compaction, goal, and handoff status records normalize into
+source-neutral tool/status blocks. Low-value native telemetry such as token
+counts, session metadata, and turn context is skipped instead of becoming
+transcript noise.
+
+Remaining unsupported shapes now degrade into bounded structural summaries with
+safe event/payload categories, field counts, and omission reasons. Parser unit
+tests and route privacy tests verify that prompts are bounded/redacted and raw
+commands, cwd, paths, stdout/stderr, tool/MCP results, session ids, turn ids,
+native JSON, and private native type strings do not appear in browser transcript
+responses.
