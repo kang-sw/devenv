@@ -550,13 +550,134 @@ function transcriptBlockText(block: TranscriptBlock): string {
   return "";
 }
 
+const TRANSCRIPT_SUMMARY_MAX_CHARS = 160;
+
+function transcriptSummaryLine(value: string | null | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const line = value.split(/\r?\n/, 1)[0]?.replace(/\s+/g, " ").trim() ?? "";
+  if (line.length <= TRANSCRIPT_SUMMARY_MAX_CHARS) {
+    return line;
+  }
+  return `${line.slice(0, TRANSCRIPT_SUMMARY_MAX_CHARS - 3)}...`;
+}
+
+function transcriptBlockDataObject(block: TranscriptBlock): Record<string, unknown> | null {
+  if (
+    block.data !== null &&
+    typeof block.data === "object" &&
+    !Array.isArray(block.data)
+  ) {
+    return block.data as Record<string, unknown>;
+  }
+  return null;
+}
+
+function transcriptBlockDataString(
+  block: TranscriptBlock,
+  field: string,
+): string | null {
+  const value = transcriptBlockDataObject(block)?.[field];
+  if (typeof value !== "string") {
+    return null;
+  }
+  const summary = transcriptSummaryLine(value);
+  return summary.length > 0 ? summary : null;
+}
+
+function transcriptBlockDataNumber(
+  block: TranscriptBlock,
+  field: string,
+): number | null {
+  const value = transcriptBlockDataObject(block)?.[field];
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  return null;
+}
+
+function transcriptTitleIsGeneric(title: string): boolean {
+  return [
+    "status",
+    "task started",
+    "task complete",
+    "tool call",
+    "tool output",
+    "unsupported transcript record",
+  ].includes(title.toLowerCase());
+}
+
+function transcriptToolCallSummary(
+  block: TranscriptBlock,
+  title: string,
+  text: string,
+): string {
+  const name =
+    transcriptBlockDataString(block, "name") ??
+    text.match(/^Called\s+(.+)$/i)?.[1]?.trim() ??
+    "";
+  const argumentsBytes = transcriptBlockDataNumber(block, "argumentsBytes");
+  if (name && argumentsBytes !== null) {
+    return `${name} · ${argumentsBytes} arg bytes`;
+  }
+  if (name) {
+    return name;
+  }
+  return text || title || block.renderKind;
+}
+
+function transcriptToolResultSummary(
+  block: TranscriptBlock,
+  title: string,
+  text: string,
+): string {
+  const parts: string[] = [];
+  const status = transcriptBlockDataString(block, "status");
+  const outcome = transcriptBlockDataString(block, "outcome");
+  const exitCode = transcriptBlockDataNumber(block, "exitCode");
+  const outputBytes = transcriptBlockDataNumber(block, "outputBytes");
+  if (outcome) {
+    parts.push(outcome);
+  } else if (status) {
+    parts.push(status);
+  }
+  if (exitCode !== null) {
+    parts.push(`exit ${exitCode}`);
+  }
+  if (outputBytes !== null) {
+    parts.push(`${outputBytes} bytes`);
+  }
+  if (parts.length > 0) {
+    return `${title || "Tool output"} · ${parts.join(" · ")}`;
+  }
+  return text || title || block.renderKind;
+}
+
+function transcriptCompactSummary(block: TranscriptBlock): string {
+  const title = transcriptSummaryLine(block.title);
+  const text = transcriptSummaryLine(block.text);
+  const renderKind = block.renderKind.toLowerCase();
+  const key = `${renderKind} ${title}`.toLowerCase();
+  if (key.includes("toolcall") || key.includes("tool call")) {
+    return transcriptToolCallSummary(block, title, text);
+  }
+  if (key.includes("toolresult") || key.includes("tool output")) {
+    return transcriptToolResultSummary(block, title, text);
+  }
+  if (text && (!title || transcriptTitleIsGeneric(title))) {
+    return text;
+  }
+  return title || text || block.renderKind;
+}
+
 export function transcriptBlockView(
   block: TranscriptBlock,
   sourceKind: string,
 ): TranscriptBlockView {
   const key = `${block.renderKind} ${block.title ?? ""}`.toLowerCase();
   const text = transcriptBlockText(block);
-  const summary = block.title ?? text.split(/\r?\n/, 1)[0] ?? block.renderKind;
+  const summary = transcriptCompactSummary(block);
   if (sourceKind === "exec" || key.includes("terminal") || block.renderKind === "ansi") {
     return { mode: "terminal", tone: "terminal", summary, detail: text || null };
   }

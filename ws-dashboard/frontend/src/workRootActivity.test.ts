@@ -803,9 +803,57 @@ assertEqual(
   "tool-like transcript blocks default to compact tool summaries",
 );
 assertEqual(
+  transcriptBlockView(
+    block({
+      renderKind: "toolCall",
+      title: "Tool call",
+      text: "Called functions.exec_command",
+      data: { name: "functions.exec_command", argumentsBytes: 128 },
+    }),
+    "namedAgent",
+  ).summary,
+  "functions.exec_command · 128 arg bytes",
+  "tool call compact summaries include the safe tool name and argument size",
+);
+assertEqual(
+  transcriptBlockView(
+    block({
+      renderKind: "toolResult",
+      title: "Tool output",
+      text: "Tool output captured",
+      data: { outputBytes: 4_096 },
+    }),
+    "namedAgent",
+  ).summary,
+  "Tool output · 4096 bytes",
+  "tool result compact summaries include bounded output size",
+);
+assertEqual(
   transcriptBlockView(block({ renderKind: "status", title: "running" }), "namedAgent").mode,
   "compact",
   "status transcript blocks default to compact summaries",
+);
+assertEqual(
+  transcriptBlockView(
+    block({ renderKind: "status", title: "Task started", text: "Agent turn started" }),
+    "namedAgent",
+  ).summary,
+  "Agent turn started",
+  "status compact summaries prefer meaningful text over category titles",
+);
+assertEqual(
+  transcriptBlockView(
+    block({
+      renderKind: "status",
+      title: "Unsupported transcript record",
+      text: "Skipped unsupported native transcript record",
+      data: { eventType: "unsupported", payloadType: "unsupported" },
+      degraded: true,
+    }),
+    "namedAgent",
+  ).summary,
+  "Skipped unsupported native transcript record",
+  "degraded unsupported-like compact summaries avoid repeating the generic title",
 );
 assertEqual(
   transcriptBlockView(block({ renderKind: "error", title: "failed", degraded: true }), "namedAgent").tone,
