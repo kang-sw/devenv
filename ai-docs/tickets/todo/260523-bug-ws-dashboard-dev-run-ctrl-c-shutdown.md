@@ -23,12 +23,21 @@ more likely failure mode is that the shutdown signal reaches the daemon, but
 graceful shutdown waits indefinitely for long-lived dashboard connections such
 as Activity SSE streams, terminal WebSockets, or live browser requests.
 
+Follow-up dogfood confirmed that closing the paired browser tab allowed the
+`dev.sh run` process to exit. The developer terminal shutdown signal should take
+priority over open browser connections in local development.
+
+## Decision
+
+`dev.sh run` and the daemon serve path should prefer prompt process shutdown
+after the user presses `Ctrl-C`. Long-lived browser connections may receive a
+bounded graceful window, but they must not keep the local development server
+alive indefinitely after the outer server process has been interrupted.
+
 ## Follow-Up Questions
 
 - Does the hang require an open paired browser tab or an active terminal pane?
 - Does the daemon log or otherwise observe the first `Ctrl-C` before hanging?
-- Should `dev.sh run` or the daemon install a bounded shutdown timeout for local
-  development so a single `Ctrl-C` terminates promptly?
 - Should terminal sessions, SSE streams, and WebSocket tasks receive an explicit
   shutdown broadcast instead of relying only on connection drain?
 
