@@ -82,13 +82,19 @@ directly; chained invocations re-ask only for safety, deletion, or explicit
 consent rules. Argument language is reserved for MCP tools, CLI commands, and
 structured templates. Dense routing or rule lists use Markdown hierarchy, named
 groups, fixed lookup tables, and command-shaped lists before introducing custom
-notation. Skill, agent, and prompt edits run a fresh-reader audit after local
-reread: a capable reader with no prior conversation context flags awkward,
-surprising, context-dependent, underspecified, contradictory, duplicated,
-orphaned, or missing end-state/output wording. Fresh-reader findings distinguish
-material execution blockers from readability or confidence findings. Each
-finding includes the quote, issue, severity, and suggested rewrite or delete. If
-no findings remain, the audit says so clearly.
+notation. Skill, agent, and prompt edits run a fresh-reader audit through a
+separate fresh reviewer, such as an agent or subagent, after local reread; if no
+such reviewer is available, the workflow reports that the fresh-reader audit
+could not run instead of substituting a self-audit. The auditor receives only the
+exact text under review plus auditor-only instructions, then flags awkward,
+surprising, context-dependent,
+underspecified, contradictory, duplicated, orphaned, or missing
+end-state/output wording. Fresh-reader findings distinguish material execution
+blockers from readability or confidence findings. Each finding includes the
+quote, issue, severity, and either a suggested rewrite or a suggested deletion.
+The lead classifies findings before editing, may stop when remaining findings
+are forced, low-value, or contrary to the caller's intent, and runs at most three
+audit/revision cycles. If no findings remain, the audit says so clearly.
 Doctrine, terminology, route, layout, and audit-gate edits also run a
 downstream consistency sweep across affected skill, prompt, spec, mental-model,
 test, and mirrored-package surfaces. The first pass may conservatively

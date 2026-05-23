@@ -93,11 +93,20 @@ Test: invariants should re-derive from the named resource.
 
 ## On: Fresh-Reader Audit
 
-1. Read only the assigned target text as a capable agent with no prior conversation context.
-2. Flag wording that would feel awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, or missing required output/end-state instructions.
-3. Distinguish material execution blockers from readability or confidence findings; do not suppress the latter merely because execution could proceed.
-4. For each finding, include quote, issue, severity, and suggested rewrite or delete.
-5. If no finding remains, say so clearly.
+### Caller Setup
+
+1. Run this audit through a separate fresh reviewer (an agent or subagent); if none is available, say the fresh-reader audit could not run and do not self-audit.
+2. Give the auditor only the exact text under review plus **Auditor Instructions** below; exclude prior conversation and host-generated metadata.
+3. Classify each auditor finding as `fix`, `intentional difference`, or `out of scope` before editing.
+4. Stop after any pass when remaining findings are forced, low-value, or contrary to the caller's intent.
+5. Run at most three audit/revision cycles; for edits to this handler itself, avoid recursive audit mechanics and stop after the first useful pass.
+
+### Auditor Instructions
+
+1. Flag wording that would feel awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, or missing required output/end-state instructions.
+2. Distinguish material execution blockers from readability or confidence findings; do not suppress the latter merely because execution could proceed.
+3. For each finding, include a quote, the issue, severity (`low`/`medium`/`high`), and either a suggested rewrite or a suggested deletion.
+4. If no findings remain, say so clearly.
 
 ## On: Downstream Consistency Sweep
 
