@@ -4,6 +4,10 @@ parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260518-epic-ws-dashboard-activity-console: initial Activity Console milestone that exposed this dogfood gap
   260513-feat-async-exec-output-reader: future exec activity source remains separate from named-agent transcript repair
+spec:
+  - 260517-ws-dashboard-workroot-activity-pane
+  - 260521-ws-dashboard-activity-console-ui-shell
+  - 260522-ws-dashboard-activity-console-transcript-expansion
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime

@@ -264,7 +264,7 @@ agent/terminal-side split. This group-1 placement is an explicit exception for
 a reversible projection surface; general opened/support surfaces continue to use
 their existing support-group placement policy.
 
-> [!note] Implementation Gap · 2026-05-23
+> [!note] Planned 🚧
 > Dogfood feedback found the group-1 default poor for real lead-agent
 > monitoring. The intended repair is for WorkRoot Activity panes to prefer the
 > second/support split when available while preserving focus-existing behavior
@@ -341,7 +341,7 @@ output. Transcript backfill/load-more is driven primarily by scroll position,
 with explicit refresh or load-more controls reserved for fallback and error
 states.
 
-> [!note] Implementation Gap · 2026-05-23
+> [!note] Planned 🚧
 > The initial shell does not yet meet dogfood usability expectations: transcript
 > views should tail-follow by default until the user scrolls away, WorkRoot
 > Activity scrolling must not snap upward during split/live updates, and compact
@@ -437,7 +437,7 @@ status/error entries, and command/output-like records into bounded
 is not the browser contract. Exec transcript source integration remains blocked
 until the async exec output reader model exists.
 
-> [!note] Implementation Gap · 2026-05-23
+> [!note] Planned 🚧
 > Dogfood feedback found Codex native coverage too narrow for lead-agent
 > monitoring. Prompt, continuation, interrupt, and handoff records should be
 > fixture-backed and normalized into source-neutral transcript blocks when their
