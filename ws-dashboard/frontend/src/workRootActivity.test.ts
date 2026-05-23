@@ -1,6 +1,8 @@
 import {
   acknowledgeActivityItem,
   activityItemRevisionToken,
+  activityRibbonSourceLabel,
+  activityRibbonStatusLine,
   applyActivityConsoleEvent,
   defaultActivitySelection,
   fetchWorkRootActivity,
@@ -71,9 +73,10 @@ assertEqual(
 assertEqual(
   workRootActivityTranscriptEndpoint("root/local test", "agent:reviewer", {
     cursor: "2",
+    before: "8",
     limit: 10,
   }),
-  "/api/dashboard/work-roots/root%2Flocal%20test/activity/items/agent%3Areviewer/transcript?cursor=2&limit=10",
+  "/api/dashboard/work-roots/root%2Flocal%20test/activity/items/agent%3Areviewer/transcript?cursor=2&before=8&limit=10",
   "transcript endpoint addresses encoded opaque ids and bounded query options",
 );
 
@@ -681,6 +684,56 @@ assertEqual(
   "default selection prefers the first live/attention item",
 );
 assertEqual(
+  activityRibbonSourceLabel(
+    activityItem({
+      id: "agent-source",
+      kind: "namedAgent",
+      source: {
+        kind: "namedAgent",
+        label: "Codex",
+        backend: "codex",
+        harness: "codex",
+        tier: "core",
+        model: null,
+      },
+    }),
+  ),
+  "agent.codex",
+  "named-agent ribbon source label uses the backend discriminator",
+);
+assertEqual(
+  activityRibbonSourceLabel(
+    activityItem({
+      id: "exec-source",
+      kind: "exec",
+      source: {
+        kind: "exec",
+        label: "exec",
+        backend: null,
+        harness: null,
+        tier: null,
+        model: null,
+      },
+    }),
+  ),
+  "cmd.exec",
+  "exec ribbon source label uses the command discriminator",
+);
+assertEqual(
+  activityRibbonStatusLine(
+    activityItem({
+      id: "timed-completed",
+      status: "completed",
+      startedAt: "2026-05-21T10:00:00Z",
+      updatedAt: "2026-05-21T11:04:00Z",
+      finishedAt: "2026-05-21T11:04:00Z",
+    }),
+    Date.parse("2026-05-21T12:05:00Z"),
+  ),
+  "completed / 1 hr ago / 1 hr 4 mins",
+  "ribbon status line combines status, relative update time, and completed duration",
+);
+assertEqual(
   preserveActivitySelection(orderedItems, "new-idle"),
   "new-idle",
   "selection is preserved when the item still exists",
@@ -763,30 +816,30 @@ assertEqual(
 );
 assertEqual(
   shouldLoadMoreActivityTranscript(
-    { scrollTop: 492, clientHeight: 500, scrollHeight: 1_000 },
+    { scrollTop: 4, clientHeight: 500, scrollHeight: 1_000 },
     true,
     false,
   ),
   true,
-  "tail transcript scroll triggers load-more when more blocks exist",
+  "top transcript scroll triggers load-more when older blocks exist",
 );
 assertEqual(
   shouldLoadMoreActivityTranscript(
-    { scrollTop: 460, clientHeight: 500, scrollHeight: 1_000 },
+    { scrollTop: 12, clientHeight: 500, scrollHeight: 1_000 },
     true,
     false,
   ),
   false,
-  "near-end but not tail transcript scroll does not trigger load-more",
+  "near-top but outside threshold transcript scroll does not trigger load-more",
 );
 assertEqual(
   shouldLoadMoreActivityTranscript(
-    { scrollTop: 100, clientHeight: 500, scrollHeight: 1_000 },
+    { scrollTop: 492, clientHeight: 500, scrollHeight: 1_000 },
     true,
     false,
   ),
   false,
-  "far-from-end transcript scroll does not trigger load-more",
+  "tail transcript scroll does not trigger older load-more",
 );
 
 function block(partial: Partial<TranscriptBlock>): TranscriptBlock {

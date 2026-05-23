@@ -281,6 +281,7 @@ export type WorkRootActivityFetchOptions = {
 
 export type ActivityTranscriptFetchOptions = {
   readonly cursor?: string;
+  readonly before?: string;
   readonly limit?: number;
 };
 
@@ -306,6 +307,9 @@ export function workRootActivityTranscriptEndpoint(
   const params = new URLSearchParams();
   if (options.cursor !== undefined) {
     params.set("cursor", options.cursor);
+  }
+  if (options.before !== undefined) {
+    params.set("before", options.before);
   }
   if (options.limit !== undefined) {
     params.set("limit", String(options.limit));
@@ -533,7 +537,98 @@ export function shouldLoadMoreActivityTranscript(
   if (!hasMore || loading) {
     return false;
   }
-  return activityTranscriptDistanceFromTail(metrics) <= thresholdPx;
+  return metrics.scrollTop <= thresholdPx;
+}
+
+export function activityRibbonSourceLabel(item: ActivityItem): string {
+  if (item.kind === "namedAgent") {
+    return `agent.${activityRibbonToken(
+      item.source.backend ?? item.source.label ?? item.source.harness ?? item.kind,
+    )}`;
+  }
+  if (item.kind === "exec") {
+    return "cmd.exec";
+  }
+  return `${activityRibbonToken(item.kind)}.${activityRibbonToken(
+    item.source.backend ?? item.source.label ?? item.source.kind ?? "activity",
+  )}`;
+}
+
+export function activityRibbonStatusLine(
+  item: ActivityItem,
+  nowMs = Date.now(),
+): string {
+  const parts = [item.status];
+  const relative = activityRelativeTimeLabel(
+    item.updatedAt ?? item.finishedAt ?? item.startedAt,
+    nowMs,
+  );
+  if (relative) {
+    parts.push(`${relative} ago`);
+  }
+  const duration = activityDurationLabel(item.startedAt, item.finishedAt);
+  if (duration) {
+    parts.push(duration);
+  }
+  return parts.join(" / ");
+}
+
+function activityRibbonToken(value: string): string {
+  const token = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return token || "activity";
+}
+
+function activityRelativeTimeLabel(value: string | null, nowMs: number): string | null {
+  const timestamp = parseActivityTimestamp(value);
+  if (timestamp === null) {
+    return null;
+  }
+  const elapsedMs = Math.max(0, nowMs - timestamp);
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+  if (elapsedMinutes < 1) {
+    return "just now";
+  }
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} ${elapsedMinutes === 1 ? "min" : "mins"}`;
+  }
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours} ${elapsedHours === 1 ? "hr" : "hrs"}`;
+  }
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays} ${elapsedDays === 1 ? "day" : "days"}`;
+}
+
+function activityDurationLabel(startedAt: string | null, finishedAt: string | null): string | null {
+  const started = parseActivityTimestamp(startedAt);
+  const finished = parseActivityTimestamp(finishedAt);
+  if (started === null || finished === null || finished < started) {
+    return null;
+  }
+  const elapsedMinutes = Math.max(1, Math.round((finished - started) / 60_000));
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+  if (hours === 0) {
+    return `${minutes} ${minutes === 1 ? "min" : "mins"}`;
+  }
+  if (minutes === 0) {
+    return `${hours} ${hours === 1 ? "hr" : "hrs"}`;
+  }
+  return `${hours} ${hours === 1 ? "hr" : "hrs"} ${minutes} ${
+    minutes === 1 ? "min" : "mins"
+  }`;
+}
+
+function parseActivityTimestamp(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function transcriptBlockText(block: TranscriptBlock): string {

@@ -2298,6 +2298,42 @@ async fn work_root_activity_transcript_route_auth_unknown_and_backfill_bounds() 
     assert_eq!(unknown_status, StatusCode::NOT_FOUND);
     assert!(unknown_body.contains("unknown activity"));
 
+    let (tail_status, tail_body) = fetch_work_root_activity_transcript(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "agent:writer",
+        "limit=2",
+    )
+    .await;
+    assert_eq!(tail_status, StatusCode::OK);
+    let tail: serde_json::Value =
+        serde_json::from_str(&tail_body).expect("tail activity transcript JSON");
+    assert_eq!(tail["blocks"].as_array().expect("tail blocks").len(), 2);
+    assert_eq!(tail["blocks"][0]["cursor"], "1");
+    assert_eq!(tail["blocks"][0]["text"], "second block");
+    assert_eq!(tail["blocks"][1]["cursor"], "2");
+    assert_eq!(tail["blocks"][1]["text"], "third block");
+    assert_eq!(tail["nextCursor"], "1");
+    assert_eq!(tail["hasMore"], true);
+
+    let (older_status, older_body) = fetch_work_root_activity_transcript(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "agent:writer",
+        "limit=2&before=1",
+    )
+    .await;
+    assert_eq!(older_status, StatusCode::OK);
+    let older: serde_json::Value =
+        serde_json::from_str(&older_body).expect("older activity transcript JSON");
+    assert_eq!(older["blocks"].as_array().expect("older blocks").len(), 1);
+    assert_eq!(older["blocks"][0]["cursor"], "0");
+    assert_eq!(older["blocks"][0]["text"], "first block");
+    assert_eq!(older["nextCursor"], "0");
+    assert_eq!(older["hasMore"], false);
+
     let (status, body_text) = fetch_work_root_activity_transcript(
         app,
         cookie.as_str(),
@@ -2444,7 +2480,7 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
     assert_eq!(value["blocks"][11]["title"], "Patch apply");
     assert_eq!(value["blocks"][11]["data"]["changes"], 1);
     assert_eq!(value["blocks"][12]["title"], "Turn aborted");
-    assert_eq!(value["nextCursor"], "13");
+    assert_eq!(value["nextCursor"], "0");
     assert_eq!(value["hasMore"], false);
 
     for forbidden in [

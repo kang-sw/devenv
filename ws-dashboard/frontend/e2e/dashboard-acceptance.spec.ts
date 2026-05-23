@@ -814,7 +814,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
           ? decodeURIComponent(pathMatch[2])
           : "agent:alpha";
         const cursor = url.searchParams.get("cursor");
-        if (activityId === "agent:alpha" && !cursor) {
+        const before = url.searchParams.get("before");
+        if (activityId === "agent:alpha" && !cursor && !before) {
           alphaTranscriptReplaceRequests += 1;
         }
         const source =
@@ -901,6 +902,18 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
                     degraded: false,
                   },
                 ]
+              : before
+              ? [
+                  {
+                    cursor: "alpha:0",
+                    timestamp: "2026-05-17T11:59:30Z",
+                    renderKind: "markdown",
+                    title: "assistant follow-up",
+                    text: "loaded more transcript",
+                    data: null,
+                    degraded: false,
+                  },
+                ]
               : showRefreshedAlphaTranscript
                 ? refreshedAlphaBlocks
                 : alphaInitialBlocks;
@@ -915,8 +928,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
             live: activityId === "agent:alpha",
             source,
             blocks,
-            nextCursor: activityId === "agent:alpha" && !cursor ? "alpha:2" : null,
-            hasMore: activityId === "agent:alpha" && !cursor,
+            nextCursor:
+              activityId === "agent:alpha" && !cursor && !before ? "alpha:2" : null,
+            hasMore: activityId === "agent:alpha" && !cursor && !before,
             diagnostics: [],
           }),
         });
@@ -938,8 +952,19 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const populatedBody = activityPane.locator(".workroot-activity-pane");
     await expect(populatedBody.locator(".activity-console")).toBeVisible();
     await expect(populatedBody.locator(".activity-ribbon")).toBeVisible();
+    await expect(populatedBody.locator(".activity-console-summary")).toHaveCount(0);
     const ribbonItems = populatedBody.locator(".activity-ribbon-item");
     await expect(ribbonItems).toHaveCount(6);
+    await expect(
+      populatedBody
+        .locator('[data-activity-id="agent:alpha"]')
+        .locator(".activity-ribbon-meta"),
+    ).toHaveText("agent.claude");
+    await expect(
+      populatedBody
+        .locator('[data-activity-id="exec:beta"]')
+        .locator(".activity-ribbon-meta"),
+    ).toHaveText("cmd.exec");
     await expect(populatedBody).toContainText("agent-streamed-live");
     await expect
       .poll(() => activityRecentPollRequests, { timeout: 500 })
@@ -1052,6 +1077,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         ),
       )
       .toBeLessThanOrEqual(2);
+    await transcriptScroll.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
     const detailToggle = populatedBody.locator(
       '[data-command-id="activity.detail.toggle"]',
     );

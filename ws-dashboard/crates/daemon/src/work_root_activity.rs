@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use axum::Json;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use futures_util::stream::{self, Stream};
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{
@@ -56,6 +56,7 @@ pub struct WorkRootActivityQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ActivityTranscriptQuery {
     cursor: Option<String>,
+    before: Option<String>,
     limit: Option<usize>,
 }
 
@@ -135,6 +136,7 @@ impl WorkRootActivityProjector {
         activity_id: String,
         agent_key: String,
         cursor: Option<String>,
+        before: Option<String>,
         limit: Option<usize>,
     ) -> ActivityTranscript {
         let cache_home = self.cache_home.clone();
@@ -149,6 +151,7 @@ impl WorkRootActivityProjector {
                 activity_id,
                 &agent_key,
                 cursor.as_deref(),
+                before.as_deref(),
                 normalize_transcript_limit(limit),
             )
         })
@@ -219,6 +222,7 @@ pub async fn work_root_activity_transcript(
                 activity_id,
                 agent_key,
                 query.cursor,
+                query.before,
                 query.limit,
             )
             .await,
@@ -902,8 +906,27 @@ fn transcript_cursor_offset(cursor: Option<&str>) -> usize {
 fn paginate_transcript_blocks(
     all_blocks: Vec<TranscriptBlock>,
     cursor: Option<&str>,
+    before: Option<&str>,
     limit: usize,
 ) -> (Vec<TranscriptBlock>, String, bool) {
+    if let Some(before) = before {
+        let end = transcript_cursor_offset(Some(before)).min(all_blocks.len());
+        let start = end.saturating_sub(limit);
+        return (
+            all_blocks[start..end].to_vec(),
+            start.to_string(),
+            start > 0,
+        );
+    }
+    if cursor.is_none() {
+        let end = all_blocks.len();
+        let start = end.saturating_sub(limit);
+        return (
+            all_blocks[start..end].to_vec(),
+            start.to_string(),
+            start > 0,
+        );
+    }
     let start = transcript_cursor_offset(cursor).min(all_blocks.len());
     let end = (start + limit).min(all_blocks.len());
     (
@@ -921,6 +944,7 @@ fn named_agent_transcript_blocking(
     activity_id: String,
     agent_key: &str,
     cursor: Option<&str>,
+    before: Option<&str>,
     limit: usize,
 ) -> ActivityTranscript {
     let agents_dir = resolve_cache_root(cache_home)
@@ -959,7 +983,7 @@ fn named_agent_transcript_blocking(
                 Ok(raw) => {
                     let parsed = parse_codex_session_transcript(&raw);
                     let (blocks, next_cursor, has_more) =
-                        paginate_transcript_blocks(parsed.blocks, cursor, limit);
+                        paginate_transcript_blocks(parsed.blocks, cursor, before, limit);
                     let mut diagnostics = projection.row.diagnostics;
                     diagnostics.extend(parsed.diagnostics);
                     let degraded = !diagnostics.is_empty() || parsed.degraded;
@@ -1032,7 +1056,8 @@ fn named_agent_transcript_blocking(
     };
 
     let all_blocks = transcript_blocks_from_output(&raw);
-    let (blocks, next_cursor, has_more) = paginate_transcript_blocks(all_blocks, cursor, limit);
+    let (blocks, next_cursor, has_more) =
+        paginate_transcript_blocks(all_blocks, cursor, before, limit);
     let mut diagnostics = projection.row.diagnostics;
     if let Some(diagnostic) = native_diagnostic {
         diagnostics.push(diagnostic.to_owned());
