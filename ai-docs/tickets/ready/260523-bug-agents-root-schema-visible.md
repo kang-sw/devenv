@@ -4,8 +4,7 @@ related:
   260505-bug-plugin-managed-default-root-discovery: supersedes stale Windows root-discovery backlog item
   260505-feat-mcp-session-default-root: depends on the completed ws.setup session-root contract
 spec:
-  - 260505-mcp-session-default-root
-  - 260505-named-agent-mcp-tools
+  - 260523-agents-root-schema-invisibility
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
