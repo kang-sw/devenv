@@ -157,7 +157,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
 | `260523-feat-ws-dashboard-tool-output-safe-summary` | idea | Improve safe one-line summaries for Codex tool output transcript blocks |
-| `260523-feat-ws-dashboard-persist-open-workroots` | idea | Persist opened dashboard workRoots across daemon restarts |
 | `260523-feat-ws-dashboard-linked-worktree-discovery` | idea | TBA dashboard Git worktree discovery and external change detection |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
@@ -175,7 +174,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-No ready tickets.
+| Stem | Summary |
+|------|---------|
+| `260523-feat-ws-dashboard-persist-open-workroots` | Persist opened dashboard workRoots across daemon restarts |
 
 ## Session Notes
 

@@ -822,6 +822,14 @@ browser arrangement remains presentation state. File panes restore only when
 the file remains previewable; otherwise the pane shows an honest unavailable
 state.
 
+> [!note] Planned 🚧
+> The daemon will persist the owner's opened workRoot paths in local dashboard
+> state and seed the live resource view from that remembered list on startup.
+> Remembered roots re-run normal discovery instead of bypassing moved, offline,
+> inaccessible, primary-root, or linked-worktree classification. Auth sessions,
+> live terminal processes, Activity acknowledgement state, and exact browser
+> workbench arrangement remain outside the first persistence step.
+
 ## WorkRoot IO Command And Placement Polish {#260516-ws-web-dashboard-workroot-io-command-placement-polish}
 
 WorkRoot IO commands use consistent command ids and placement behavior across
