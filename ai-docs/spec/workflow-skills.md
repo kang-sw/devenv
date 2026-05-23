@@ -83,18 +83,15 @@ consent rules. Argument language is reserved for MCP tools, CLI commands, and
 structured templates. Dense routing or rule lists use Markdown hierarchy, named
 groups, fixed lookup tables, and command-shaped lists before introducing custom
 notation. Skill, agent, and prompt edits run a fresh-reader audit through a
-separate fresh reviewer, such as an agent or subagent, after local reread; if no
-such reviewer is available, the workflow reports that the fresh-reader audit
-could not run instead of substituting a self-audit. The auditor receives only the
-exact text under review plus auditor-only instructions, then flags awkward,
-surprising, context-dependent,
-underspecified, contradictory, duplicated, orphaned, or missing
-end-state/output wording. Fresh-reader findings distinguish material execution
-blockers from readability or confidence findings. Each finding includes the
-quote, issue, severity, and either a suggested rewrite or a suggested deletion.
-The lead classifies findings before editing, may stop when remaining findings
-are forced, low-value, or contrary to the caller's intent, and runs at most three
-audit/revision cycles. If no findings remain, the audit says so clearly.
+separate fresh reviewer, such as an agent or subagent, after local reread. The
+reviewer receives only the target file or excerpt and is instructed to read only
+that target, not other files, skills, docs, prior conversation, rationale, or
+host-generated metadata. Fresh-reader findings flag awkward, surprising,
+context-dependent, underspecified, contradictory, duplicated, orphaned, or
+missing end-state/output wording, and each finding includes the quote, issue,
+severity, and either a suggested rewrite or a suggested deletion. The lead
+classifies each finding as fix, intentional difference, or out of scope, edits
+only fix findings, and runs at most three audit/revision cycles.
 Doctrine, terminology, route, layout, and audit-gate edits also run a
 downstream consistency sweep across affected skill, prompt, spec, mental-model,
 test, and mirrored-package surfaces. The first pass may conservatively

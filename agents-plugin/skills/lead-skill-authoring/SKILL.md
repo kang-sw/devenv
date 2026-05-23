@@ -93,20 +93,14 @@ Test: invariants should re-derive from the named resource.
 
 ## On: Fresh-Reader Audit
 
-### Caller Setup
-
-1. Run this audit through a separate fresh reviewer (an agent or subagent); if none is available, say the fresh-reader audit could not run and do not self-audit.
-2. Give the auditor only the exact text under review plus **Auditor Instructions** below; exclude prior conversation and host-generated metadata.
-3. Classify each auditor finding as `fix`, `intentional difference`, or `out of scope` before editing.
-4. Stop after any pass when remaining findings are forced, low-value, or contrary to the caller's intent.
-5. Run at most three audit/revision cycles; for edits to this handler itself, avoid recursive audit mechanics and stop after the first useful pass.
-
-### Auditor Instructions
-
-1. Flag wording that would feel awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, or missing required output/end-state instructions.
-2. Distinguish material execution blockers from readability or confidence findings; do not suppress the latter merely because execution could proceed.
-3. For each finding, include a quote, the issue, severity (`low`/`medium`/`high`), and either a suggested rewrite or a suggested deletion.
-4. If no findings remain, say so clearly.
+1. Run a separate fresh reviewer (agent or subagent) for the audit.
+2. Give the reviewer only the target file or excerpt; do not include prior conversation, project docs, skill docs, specs, rationale, or host-generated metadata.
+3. Tell the reviewer to read only the provided target and not to read any other files, skills, docs, or context.
+4. Ask the reviewer to flag awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, or missing end-state/output wording.
+5. Require each finding to include a quote, the issue, severity (`low`/`medium`/`high`), and either a suggested rewrite or a suggested deletion.
+6. Classify each reviewer finding as `fix`, `intentional difference`, or `out of scope` before editing.
+7. Edit only findings classified as `fix`; record or ignore the rest without revising for them.
+8. Run at most three audit/revision cycles.
 
 ## On: Downstream Consistency Sweep
 
