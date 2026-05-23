@@ -160,7 +160,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260519-feat-implement-branch-squash-gate` | todo | Add a pre-merge implementation-branch squash gate for cleaner main history |
 | `260521-research-libws-harness-mvp-planning` | todo | Plan the future libws-harness MVP epic and child ticket population from the recovered JSONL run-substrate research |
-| `260521-refactor-wsflow-lead-implement-mirroring-gap` | todo | Resolve whether wsflow lead-implement should mirror the full unified spine or document lead-edit delegation as intentional divergence |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
@@ -169,7 +168,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260521-research-libws-harness-agent-substrate` | idea | Research a JSONL-first libws-harness run substrate with canonical run records, ToolHost composition, compaction, and dashboard/MCP/CLI adapters |
 | `260517-bug-ws-dashboard-windows-terminal-control-keys` | todo | Investigate native-Windows cmd.exe terminal Ctrl-C/control-key behavior after fixed-endpoint dogfood reached the live PTY |
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
-| `260517-bug-lead-proceed-overbroad-slice` | todo | Investigate conservative lead-proceed implementation slice routing when phase blast radii differ |
 | `260517-bug-ws-dashboard-terminal-focus-browser-gate-regression` | todo | Investigate terminal helper textarea focus loss blocking dashboard browser gate |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
 | `260505-bug-plugin-managed-default-root-discovery` | todo | Investigate plugin-managed default root discovery |

@@ -4,6 +4,7 @@ related:
   260517-feat-ws-dashboard-workroot-activity: dogfood case where a cohesive product surface hid separate implementation blast radii
 related-mental-model:
   - workflow-skills
+completed: 2026-05-23
 ---
 
 # lead-proceed overbroad implementation slice selection
@@ -24,3 +25,19 @@ The expected improvement is a conservative routing rule: when phase boundaries
 separate backend/API, visible UI, workbench placement, browser-gate, or other
 review surfaces, default to the first unfinished phase unless adjacent phases
 are inseparable from ticket artifacts.
+
+## Phases
+
+### Phase 1: Enforce one proceed phase
+
+Close the dogfood follow-up by confirming that `lead-proceed` now resolves one
+ticket phase per invocation instead of grouping adjacent phases by product
+cohesion.
+
+### Result (a0df5510) - 2026-05-23
+
+`a0df5510` changed full ws and wsflow `lead-proceed` so an explicit single phase
+is honored exactly, no explicit phase selects the first unfinished phase, and
+multiple named phases stop for slicing. The workflow spec and workflow-skills
+mental model now carry the same rule, so the original overbroad-slice dogfood
+issue is stale and closed.

@@ -4,6 +4,7 @@ related:
   260520-refactor-lead-skill-cascade: discovered while closing the lead skill cascade; full lead-implement changed shape while wsflow kept lead-edit delegation
 related-mental-model:
   - workflow-skills
+completed: 2026-05-23
 ---
 
 # wsflow lead-implement mirroring gap
@@ -39,3 +40,11 @@ Verification:
 - No stale full/wsflow drift remains undocumented for `lead-implement`.
 - wsflow distributed skill tests pass, except for any separately documented
   unrelated inventory-drift failure.
+
+### Result (e15b0451) - 2026-05-23
+
+Resolved by choosing intentional wsflow divergence for now. `a3a2a332`,
+`baccb851`, and `ce3633ea` documented that wsflow source execution remains
+`lead-edit`-mediated while full ws uses the unified `lead-implement` spine.
+`e15b0451` made the mirroring reference and wsflow bundle test allow only the
+documented `lead-edit` exception, so future wsflow drift remains visible.
