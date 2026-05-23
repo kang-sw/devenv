@@ -10,6 +10,7 @@ spec:
   - 260522-ws-dashboard-activity-console-transcript-expansion
 plans:
   phase-1: 2026-05/23-1049.activity-console-dogfood-phase1
+  phase-2: 2026-05/23-1148.activity-console-dogfood-phase2
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
