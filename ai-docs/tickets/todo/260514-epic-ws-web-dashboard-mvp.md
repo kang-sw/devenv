@@ -138,6 +138,13 @@ The MVP should cover:
 - `260523-feat-ws-dashboard-terminal-tab-restore` - done; restore remembered
   terminal tabs after daemon restart by creating new terminal sessions with
   safe workRoot-relative cwd hints, without treating old PTYs as resumable.
+- `260523-feat-ws-dashboard-readonly-file-pane-restore` - todo; restore
+  read-only preview/pinned file pane descriptors by replaying normal file-open
+  behavior through authenticated workRoot-relative file reads.
+- `260523-research-ws-dashboard-persistable-ui-state-map` - idea; map the
+  broader persistence backlog for selected resources, file explorer state,
+  workbench layout, Activity Console acknowledgement/scroll state, command
+  preferences, chrome preferences, and privacy-sensitive root-picker history.
 
 ## Cross-Child Decisions
 
@@ -239,6 +246,12 @@ The MVP should cover:
   interrupt, cancel, erase, and retry stay out of the dashboard Activity
   Console; any future terminate affordance requires a separate high-friction
   control ticket.
+- Persisted dashboard state should store logical, user-visible descriptors and
+  preferences, then revalidate through daemon/resource/file APIs on restore.
+  Browser state must not become authority for daemon resources, and persistence
+  should avoid raw output, transcripts, host paths, cache paths, backend
+  session paths, process ids, or stale daemon terminal ids unless a child ticket
+  explicitly defines a bounded privacy-reviewed format.
 
 ## Completion Criteria
 
