@@ -12,6 +12,7 @@ use tokio::fs;
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::events::instance_events;
+use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
 use crate::root_picker::{create_empty_directory, list_root_picker, open_work_root};
 use crate::terminal::{
@@ -29,6 +30,7 @@ pub struct AppState {
     pub config: ServeConfig,
     pub auth: OwnerAuthState,
     pub opened_work_roots: OpenedWorkRoots,
+    pub dashboard_state: DashboardStateStore,
     pub terminals: TerminalRegistry,
     pub work_root_activity: WorkRootActivityProjector,
 }

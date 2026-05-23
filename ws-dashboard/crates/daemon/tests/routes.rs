@@ -37,6 +37,7 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as Tungs
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
+use ws_dashboard_daemon::persistent_state::DashboardStateStore;
 use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_activity::{
@@ -121,10 +122,18 @@ fn terminal_test_command_profiles_have_exit_sequences() {
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn app_state() -> AppState {
+    app_state_with_opened_and_store(OpenedWorkRoots::default(), DashboardStateStore::disabled())
+}
+
+fn app_state_with_opened_and_store(
+    opened_work_roots: OpenedWorkRoots,
+    dashboard_state: DashboardStateStore,
+) -> AppState {
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
-        opened_work_roots: OpenedWorkRoots::default(),
+        opened_work_roots,
+        dashboard_state,
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
     }
@@ -138,6 +147,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         },
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
+        dashboard_state: DashboardStateStore::disabled(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
     }
@@ -355,6 +365,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         opened_work_roots: OpenedWorkRoots::default(),
+        dashboard_state: DashboardStateStore::disabled(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
     };
@@ -814,6 +825,81 @@ async fn root_picker_can_open_existing_directory_into_dashboard_model() {
 }
 
 #[tokio::test]
+async fn dashboard_resources_api_includes_remembered_work_root_after_restart_seed() {
+    // CONTRACT: daemon startup can seed OpenedWorkRoots from persisted paths,
+    // so the canonical resources route shows remembered roots before the owner
+    // manually opens a new one in this process.
+    let root = temp_fixture_path("remembered-resources");
+    let state_file_root = temp_fixture_path("remembered-resources-state");
+    fs::create_dir_all(&root).expect("create remembered resources workRoot");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let opened_before_restart = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    store
+        .persist_opened_work_roots(&opened_before_restart)
+        .await
+        .expect("persist remembered workRoot");
+    let remembered = store.load_opened_work_roots().await;
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::from_paths(remembered), store);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated remembered resources request"),
+        )
+        .await
+        .expect("authenticated remembered resources response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("remembered resources body bytes");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("remembered resources JSON body");
+
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["label"],
+        root.file_name()
+            .and_then(|name| name.to_str())
+            .expect("remembered root filename")
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn open_work_root_persists_opened_work_root_paths() {
+    // CONTRACT: opening a workRoot updates daemon-owned local state after the
+    // in-memory registration succeeds.
+    let root = temp_fixture_path("persist-open-root");
+    let state_file_root = temp_fixture_path("persist-open-root-state");
+    fs::create_dir_all(&root).expect("create persisted open workRoot");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let work_root_id = open_work_root_for_test(app, cookie.as_str(), &root).await;
+    let remembered = store.load_opened_work_roots().await;
+
+    assert_eq!(remembered, vec![root.clone()]);
+    assert!(
+        work_root_id.starts_with("root-local-"),
+        "persisted open should return normal workRoot id, got {work_root_id}"
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
 async fn open_work_root_returns_aggregated_view_of_all_opened_roots() {
     // CONTRACT: open_work_root returns the aggregated live view of every opened
     // workRoot, so the immediate open response matches the canonical resources
@@ -1041,6 +1127,7 @@ fn app_state_with_activity_cache_and_codex_home(
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
+        dashboard_state: DashboardStateStore::disabled(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
             codex_home,

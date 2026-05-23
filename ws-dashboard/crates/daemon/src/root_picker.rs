@@ -115,6 +115,13 @@ pub async fn open_work_root(
     state
         .opened_work_roots
         .register(work_root.id.clone(), requested_path);
+    if let Err(error) = state
+        .dashboard_state
+        .persist_opened_work_roots(&state.opened_work_roots)
+        .await
+    {
+        tracing::warn!(%error, "failed to persist opened dashboard workRoots");
+    }
 
     // CONTRACT: return the aggregated live view of every opened workRoot so the
     // immediate open response is consistent with later GET /api/dashboard/resources

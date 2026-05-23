@@ -8,6 +8,7 @@ use tracing::info;
 
 use crate::auth::OwnerAuthState;
 use crate::config::ServeConfig;
+use crate::persistent_state::DashboardStateStore;
 use crate::router::{build_router, AppState};
 use crate::terminal::TerminalRegistry;
 use crate::work_root_activity::WorkRootActivityProjector;
@@ -54,10 +55,14 @@ where
     eprintln!("ws-dashboard owner pairing URL: {}", info.pairing_url);
     info!(bound_addr = %info.bound_addr, "ws-dashboard daemon listening");
 
+    let dashboard_state = DashboardStateStore::default_local();
+    let opened_work_roots =
+        OpenedWorkRoots::from_paths(dashboard_state.load_opened_work_roots().await);
     let app = build_router(AppState {
         config,
         auth,
-        opened_work_roots: OpenedWorkRoots::default(),
+        opened_work_roots,
+        dashboard_state,
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
     });

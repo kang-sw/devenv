@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use ws_dashboard_core::{
-    ActionHint, DashboardResourcesView, InstanceKind, InstanceRole, InstanceView,
-    InteractionMode, OpaqueId, ResourcePath, ServerView, ViewState, WorkRootKind,
-    WorkRootStatus, WorkRootView, WorkspaceView,
+    ActionHint, DashboardResourcesView, InstanceKind, InstanceRole, InstanceView, InteractionMode,
+    OpaqueId, ResourcePath, ServerView, ViewState, WorkRootId, WorkRootKind, WorkRootStatus,
+    WorkRootView, WorkspaceView,
 };
 
 use crate::resources::DashboardResourcesProvider;
@@ -102,8 +102,7 @@ impl WorkspaceBuilder {
     }
 
     fn push(&mut self, discovered: DiscoveredWorkRoot) {
-        let work_root_id =
-            OpaqueId::from(format!("root-local-{}", stable_path_hash(&discovered.path)));
+        let work_root_id = local_work_root_id_for_path(&discovered.path);
         let enabled = discovered.status == WorkRootStatus::Online;
 
         let resource_path = ResourcePath {
@@ -349,6 +348,13 @@ fn normalize_candidate_path(path: &Path) -> PathBuf {
     std::env::current_dir()
         .map(|cwd| cwd.join(path))
         .unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub fn local_work_root_id_for_path(path: &Path) -> WorkRootId {
+    OpaqueId::from(format!(
+        "root-local-{}",
+        stable_path_hash(&normalize_candidate_path(path))
+    ))
 }
 
 fn label_for_path(path: &Path) -> String {

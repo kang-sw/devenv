@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use ws_dashboard_core::WorkRootId;
 
+use crate::discovery::local_work_root_id_for_path;
 use crate::router::AppState;
 
 const MAX_READ_ONLY_TEXT_BYTES: u64 = 512 * 1024;
@@ -21,6 +22,20 @@ pub struct OpenedWorkRoots {
 }
 
 impl OpenedWorkRoots {
+    pub fn from_paths(paths: Vec<PathBuf>) -> Self {
+        let opened = Self::default();
+        for path in paths {
+            opened.register_path(path);
+        }
+        opened
+    }
+
+    pub fn register_path(&self, root_path: PathBuf) -> WorkRootId {
+        let work_root_id = local_work_root_id_for_path(&root_path);
+        self.register(work_root_id.clone(), root_path);
+        work_root_id
+    }
+
     pub fn register(&self, work_root_id: WorkRootId, root_path: PathBuf) {
         self.roots
             .write()
