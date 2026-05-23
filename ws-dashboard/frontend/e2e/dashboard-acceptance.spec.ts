@@ -369,6 +369,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   const terminalSocketUrls: string[] = [];
   const terminalSocketFrames: string[] = [];
   let terminalOutputPolls = 0;
+  let resourceRefreshRequests = 0;
   page.on("websocket", (ws) => {
     if (
       ws.url().includes("/api/dashboard/terminals/") &&
@@ -384,6 +385,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const url = request.url();
     if (url.includes("/api/dashboard/terminals/") && url.includes("/output")) {
       terminalOutputPolls += 1;
+    }
+    if (new URL(url).pathname === "/api/dashboard/resources") {
+      resourceRefreshRequests += 1;
     }
   });
   // --- Owner pairing against the daemon-served production frontend ---------
@@ -1923,6 +1927,21 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         "via bounded resize forwarding",
     );
     await page.setViewportSize({ width: 1440, height: 900 });
+  });
+
+  await test.step("bounded resource polling runs while mounted and stops after unmount", async () => {
+    const beforePollingWindow = resourceRefreshRequests;
+    await expect
+      .poll(() => resourceRefreshRequests, { timeout: 7_000 })
+      .toBeGreaterThan(beforePollingWindow);
+
+    const beforeUnmount = resourceRefreshRequests;
+    await page.goto("about:blank");
+    await page.waitForTimeout(5_500);
+    expect(resourceRefreshRequests).toBe(beforeUnmount);
+    note(
+      "resources: mounted dashboard polled /api/dashboard/resources and stopped after page unmount",
+    );
   });
 
   if (portabilityEvidence) {
