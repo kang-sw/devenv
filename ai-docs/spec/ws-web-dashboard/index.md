@@ -204,6 +204,14 @@ the narrow exception because shell input fidelity must not be forked through
 dashboard commands. The shell reserves `^b` to mean ctrl plus lowercase `b`;
 full custom keybinding UI remains out of scope.
 
+> [!note] Planned 🚧
+> A single workspace with one workRoot will render as one compact left-nav row
+> selected by the concrete workRoot id, without depending on main/sub instance
+> presence. Multi-workRoot workspaces will continue to show separate workspace
+> and workRoot rows, and main/sub instances will remain workbench surfaces or
+> projections rather than default recursive left-nav rows.
+> {#260523-ws-dashboard-single-workroot-nav-collapse}
+
 ## WorkRoot Workbench Substrate {#260516-ws-web-dashboard-workroot-workbench-substrate}
 
 The dashboard frontend presents a `left nav | workRoot workbench` shell. The
