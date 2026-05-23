@@ -158,3 +158,12 @@ records carried the same text. Native text redaction now preserves whitespace
 and markdown-like structure while still redacting private path/session-like
 tokens. Markdown rendering itself remains deferred and is recorded as an
 implementation gap for a future shared markdown rendering component.
+
+#### Edition (8af2c9d) - 2026-05-23
+
+Fixed two additional dogfood findings. Native Codex user/assistant messages no
+longer use the small generic 280-character bound; they now use a larger bounded
+message limit while preserving private-token redaction. Activity transcript
+auto load-more now triggers only at the same tail threshold used by follow-tail
+state, avoiding the near-tail zone where appending blocks could restore an old
+absolute `scrollTop` and make a split-pane transcript feel pulled upward.
