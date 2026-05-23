@@ -394,20 +394,26 @@ Targets without phase sections use the whole target. When the user names one
 phase, that explicit request is honored exactly. When the user does not name a
 phase, `lead-proceed` selects the first unfinished phase by default. One proceed
 invocation carries one ticket phase when the target has phases. If a request
-names multiple phases, or if the selected phase is plainly too broad from ticket
+names multiple phases, or if the selected scope is plainly too broad from ticket
 text, `lead-proceed` stops for conservative phase or ticket slicing rather than
 splitting the phase internally.
+If no unfinished phase remains, or if the named phase already has a result and
+the user did not explicitly ask to revise or redo it, `lead-proceed` stops
+instead of silently reimplementing completed work.
 Compatibility phrasing such as `auto-slice` remains accepted as the same default
 phase-selection policy.
 
 Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
-child ready promotion, or proceeding a ready child ticket. Existing `todo/`
-ticket paths are treated as implementation intent: `lead-proceed` continues
-through `lead-write-ticket` for autonomous `todo/` -> `ready/` promotion before
-scope resolution, and escalates to `lead-discuss` only when promotion or
-implementation scope exposes unresolved design decisions, unclear completion
-criteria, user trade-offs, or missing spec addressing that cannot be created.
+child ready promotion, or proceeding a ready child ticket. Existing `idea/` and
+`todo/` ticket paths are treated as implementation intent: `lead-proceed`
+continues through `lead-write-ticket` for ticket triage, refresh, or autonomous
+`todo/` -> `ready/` promotion before scope resolution, and escalates to
+`lead-discuss` only when promotion or implementation scope exposes unresolved
+design decisions, unclear completion criteria, user trade-offs, or missing spec
+addressing that cannot be created.
+Missing ticket paths, unknown ticket statuses, completed tickets, and dropped
+tickets stop with a Routing Verdict instead of falling through to implementation.
 
 Inline targets are classified before routing. Non-actionable inline targets
 stop and route to `lead-discuss`. Actionable inline targets route to
@@ -426,14 +432,20 @@ discussion instead of delegating hidden conversation context to a subquery.
 {#260513-proceed-ticket-freshness-gate}
 
 Implementation always routes through `lead-implement` with the selected scope as
-a hard scope boundary. `lead-proceed` does not rejudge ticket quality, demand
-ticket splitting, mutate ticket structure, decide contract-brief depth, or
-invoke implementation primitives before `lead-implement`. Public or
-cross-module contract checkpoints are expressed as `lead-implement` brief
-contract and integration-test instructions.
+a hard scope boundary. `lead-proceed` does not rejudge general ticket quality,
+mutate ticket structure, decide contract-brief depth, or invoke implementation
+primitives before `lead-implement`; it requests phase or ticket slicing only
+when scope resolution blocks safe implementation. Public or cross-module
+contract checkpoints are expressed as `lead-implement` brief contract and
+integration-test instructions.
 
-Before implementation handoff, `lead-proceed` announces only the
-implementation-bound route. It does not apply sibling `lead-implement` judges,
+Before any handoff, `lead-proceed` emits a Routing Verdict with exactly one
+`NEXT:` skill or `stop`. It does not print a full route chain as the active
+execution instruction. After `lead-write-ticket` refresh or promotion returns,
+`lead-proceed` rebuilds route context and emits a new verdict instead of
+continuing from an old chain. When `NEXT:` is `lead-implement`,
+`lead-proceed` invokes that skill before source inspection, planning, editing,
+or implementation-tool use. It does not apply sibling `lead-implement` judges,
 compute direct/delegated execution mode, compute branch mode, or inspect source.
 `lead-implement` owns those decisions when the handoff executes. wsflow mirrors
 the same route-only boundary without pre-applying `wsflow:lead-implement`
