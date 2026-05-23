@@ -300,13 +300,10 @@ assistant, tool call/result, status, error, or output, and degraded-state
 markers. Cursor, block-count, and byte-count bounds keep transcript reads
 finite and make unknown activity ids, unavailable sources, empty transcripts,
 and malformed records explicit response states instead of whole-feed failures.
-
-> [!note] Planned 🚧
-> Transcript reads will default to the latest bounded tail window for the
-> selected activity. Older transcript history will page backward from the
-> current earliest loaded cursor so the UI can prepend older blocks when the
-> user scrolls upward, without forcing an initial read from the beginning of a
-> long transcript.
+Transcript reads default to the latest bounded tail window for the selected
+activity. Older transcript history pages backward from the current earliest
+loaded cursor so the UI can prepend older blocks when the user scrolls upward,
+without forcing an initial read from the beginning of a long transcript.
 
 Browser callers continue to address the model by opaque `workRootId` and
 activity id. Responses must not expose host paths, cache paths, backend session

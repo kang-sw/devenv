@@ -122,7 +122,7 @@ The MVP should cover:
   post-epic dogfood usability gaps in Activity Console placement, transcript
   tail-follow scrolling, compact block summaries, and Codex prompt/interruption
   transcript coverage while keeping the surface read-only and command-routed.
-- `260523-feat-ws-dashboard-activity-console-tail-ribbon-polish` - ready; make
+- `260523-feat-ws-dashboard-activity-console-tail-ribbon-polish` - done; make
   selected transcripts tail-first with top-edge older-history loading, remove
   the redundant Activity Console summary row, and polish ribbon source/timing
   metadata without increasing card height.

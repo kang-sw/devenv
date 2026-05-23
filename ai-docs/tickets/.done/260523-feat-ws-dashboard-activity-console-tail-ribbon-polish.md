@@ -9,6 +9,7 @@ spec:
   - 260521-ws-dashboard-activity-console-ui-shell
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-23
 ---
 
 # Polish Activity Console tail loading and ribbon metadata
@@ -52,6 +53,21 @@ Verification should cover backend pagination bounds, frontend scroll-trigger
 policy, and browser evidence that selecting a long transcript starts at the
 latest blocks while upward scrolling loads older history.
 
+### Result (36c64f8) - 2026-05-23
+
+Implemented tail-first selected transcript loading and older-history prepend.
+The transcript route now returns the latest bounded tail window by default,
+keeps legacy forward `cursor` pagination available, and accepts `before` for
+older windows. The frontend requests older history from the current earliest
+cursor, triggers older loading at the top edge, prepends returned blocks, and
+preserves the visible scroll position after prepend. The explicit fallback
+button moved to the top of the scroll region and now says "Load earlier
+transcript".
+
+Verification covered backend tail/default and `before` pagination route tests,
+frontend endpoint/scroll-trigger tests, production frontend build, and browser
+acceptance for the WorkRoot Activity pane.
+
 ### Phase 2: Ribbon density and timing polish
 
 Remove the Activity Console summary chip row. Update ribbon cards so the first
@@ -62,3 +78,14 @@ behavior stable.
 
 Verification should cover source discriminator formatting, relative time and
 duration formatting, summary-row removal, and narrow-width ribbon truncation.
+
+### Result (36c64f8) - 2026-05-23
+
+Implemented with Phase 1 in one pass. The Activity Console no longer renders
+the redundant summary chip row above the ribbon. Ribbon item first lines now
+show source discriminators such as `agent.codex`, `agent.claude`, and
+`cmd.exec`; the title remains on the second line; and the status line combines
+status, relative update time, and completed duration when timestamps are
+available. Frontend helper tests cover source labels and timing formatting, and
+browser acceptance verifies the summary row is absent and source discriminator
+text appears for agent and exec items.
