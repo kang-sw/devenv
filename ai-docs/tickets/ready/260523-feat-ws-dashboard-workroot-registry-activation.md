@@ -7,6 +7,8 @@ related:
   260523-research-ws-dashboard-persistable-ui-state-map: broader persistence backlog that should build on this spine
 spec:
   - 260523-dashboard-workroot-registry-activation
+plans:
+  phase-1: 2026-05/23-260523-feat-ws-dashboard-workroot-registry-activation
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -97,6 +99,38 @@ Verification should cover migration from the existing opened-workRoots state,
 all-workRoots-offline workspace visibility, public availability/activation
 serialization, online/offline API gating including error-code distinctions,
 and current availability recomputation for missing or inaccessible roots.
+
+### Result (05b8c07) - 2026-05-23
+
+Implemented the durable workRoot registry and activation spine. The daemon now
+persists versioned workRoot registry entries with provenance metadata, migrates
+existing opened-workRoots state as online registry membership, exposes
+availability separately from activation in the public resource model, and keeps
+known offline or unavailable workRoots visible.
+
+File, Activity, terminal HTTP, and terminal WebSocket paths now distinguish
+unknown workRoot ids from known offline activation and online-but-unavailable
+workRoots. Offline/unavailable responses remain bounded and avoid host paths.
+Activation changes are exposed through command-routed dashboard actions, and
+open-workRoot responses include the daemon-owned opened workRoot id header so
+the frontend does not reconstruct opaque ids from paths.
+
+Review follow-up hardened activation persistence rollback, open-root
+persistence failure handling, terminal-id route gating, already-open terminal
+WebSocket input/output gating, and ambiguous same-label opened-root selection.
+
+Verification passed:
+
+- `cargo fmt --all --check`
+- `cargo test -p ws-dashboard-core`
+- `cargo test -p ws-dashboard-daemon`
+- `npm run build`
+- `npm run test:open-work-root`
+- `npm run test:resource-model`
+- `npm run test:commands`
+- `npm run test:browser`
+
+Phase 2 remains open for bounded live status polling and refresh cadence.
 
 ### Phase 2: Explicit refresh and bounded live status polling
 
