@@ -8,6 +8,7 @@ spec:
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-23
 ---
 
 # agents root schema remains visible
@@ -78,3 +79,26 @@ Verification should prove that:
 - root-omitted `agents.*` calls work after `ws.setup(root)`;
 - explicit `root` compatibility calls still work if intentionally preserved;
 - no-agent/wsflow mode does not reintroduce an agent root schema surface.
+
+### Result (40f3216) - 2026-05-23
+
+Implemented the schema cleanup in the MCP server. Raw public `agents.*` schemas
+now omit `root`, including secondary public agent surfaces such as interrupt,
+print, and debug tools. Dispatch still resolves hidden explicit `root`
+arguments through the existing root resolver, so stale callers and broken host
+startup recovery retain compatibility. Non-agent root-aware schemas still
+advertise `root`.
+
+Added coverage for raw schema invisibility, non-agent root retention,
+root-omitted `agents.register` after `ws.setup(root)`, and explicit-root
+`agents.register` compatibility.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./internal/mcp ./cmd/ws-mcp ./internal/wsagent`
+  did not fully pass in the lead rerun because
+  `TestGeminiRunnerSessionCallbackErrorCancelsProcess` in `internal/wsagent`
+  exceeded its promptness bound. The same targeted test reproduced, and the
+  diff touches only `internal/mcp`.
+- `python3 -m unittest discover agents-plugin-wsflow/tests` passed.
+- Review partitions for correctness, fit, and test all returned clean.

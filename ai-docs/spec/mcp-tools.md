@@ -264,14 +264,10 @@ or compatibility tier field, resolved model, prompt references, or materialized
 system prompt text. `agents.call` starts an asynchronous call and returns
 immediately. Public named-agent workflows use `ws.setup` for session root
 selection; explicit root arguments may remain accepted as a hidden compatibility
-override.
-
-> [!note] Planned 🚧 {#260523-agents-root-schema-invisibility}
-> Public and generated `agents.*` schemas will omit `root` end-to-end. The raw
-> advertised schema, host-visible generated metadata, tests, runtime reference
-> examples, and workflow guidance will all present `ws.setup` as the normal
-> repository-root selection surface while preserving any intentional hidden
-> explicit-root dispatch compatibility.
+override. Public and generated `agents.*` schemas omit `root` end-to-end,
+including raw advertised schema metadata and host-visible generated metadata,
+while preserving intentional hidden explicit-root dispatch compatibility.
+{#260523-agents-root-schema-invisibility}
 
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable

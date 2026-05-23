@@ -169,13 +169,12 @@ dropped tickets live in hidden archive dirs and git history.
 | `260517-bug-ws-agent-empty-result-after-tool-use` | todo | Investigate ws named-agent empty final result after long Claude backend tool-use runs |
 | `260517-bug-ws-dashboard-terminal-focus-browser-gate-regression` | todo | Investigate terminal helper textarea focus loss blocking dashboard browser gate |
 | `260504-research-durable-leaf-role-assignment` | idea | Research stricter leaf/subquery recursion control |
-| `260523-bug-agents-root-schema-visible` | ready | Remove visible `root` parameters from public/generated `agents.*` schemas while preserving `ws.setup` as the session-root surface |
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
 ## Ticket Queue
 
-- `260523-bug-agents-root-schema-visible` - Hide `root` from public/generated `agents.*` schemas while preserving hidden compatibility override behavior and `ws.setup` as the normal session-root surface.
+- No ready tickets.
 
 ## Session Notes
 
