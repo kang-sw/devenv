@@ -2362,6 +2362,16 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
 {"timestamp":"2026-05-22T00:00:02Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":{"cmd":"cat /private/cache/native.jsonl"}}}
 {"timestamp":"2026-05-22T00:00:03Z","type":"response_item","payload":{"type":"function_call_output","output":"private /host/path result"}}
 {"timestamp":"2026-05-22T00:00:04Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"done"}}
+{"timestamp":"2026-05-22T00:00:05Z","type":"event_msg","payload":{"type":"user_message","message":"Please inspect /private/cache and continue"}}
+{"timestamp":"2026-05-22T00:00:06Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will inspect the safe summary."}]}}
+{"timestamp":"2026-05-22T00:00:07Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"patch touching /private/cache/native.jsonl"}}
+{"timestamp":"2026-05-22T00:00:08Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":"private custom output"}}
+{"timestamp":"2026-05-22T00:00:09Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","status":"success","duration":12,"invocation":{"tool":"tickets_status","arguments":{"path":"/private/cache"}},"result":{"text":"/private/mcp-result"}}}
+{"timestamp":"2026-05-22T00:00:10Z","type":"event_msg","payload":{"type":"exec_command_end","status":"success","exit_code":0,"duration":34,"command":"cat /private/cache/native.jsonl","cwd":"/private/cache","stdout":"private stdout","stderr":""}}
+{"timestamp":"2026-05-22T00:00:11Z","type":"event_msg","payload":{"type":"patch_apply_end","status":"success","success":true,"changes":[{"path":"/private/cache/native.jsonl"}],"stdout":"applied /private/cache/native.jsonl","stderr":""}}
+{"timestamp":"2026-05-22T00:00:12Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"user_interrupt"}}
+{"timestamp":"2026-05-22T00:00:13Z","type":"event_msg","payload":{"type":"token_count","info":{"path":"/private/cache"}}}
+{"timestamp":"2026-05-22T00:00:14Z","type":"session_meta","id":"thread-native-secret","cwd":"/private/cache"}
 "#,
     );
     write_agent_metadata(
@@ -2401,7 +2411,7 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
         cookie.as_str(),
         &work_root_id,
         "agent:native",
-        "limit=3",
+        "limit=20",
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -2409,7 +2419,7 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
         serde_json::from_str(&body_text).expect("native transcript JSON");
     assert_eq!(value["status"], "available");
     assert_eq!(value["sourceStatus"], "ok");
-    assert_eq!(value["blocks"].as_array().expect("blocks").len(), 3);
+    assert_eq!(value["blocks"].as_array().expect("blocks").len(), 13);
     assert_eq!(value["blocks"][0]["renderKind"], "status");
     assert_eq!(value["blocks"][0]["title"], "Task started");
     assert_eq!(value["blocks"][1]["renderKind"], "assistant");
@@ -2419,8 +2429,23 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
     );
     assert_eq!(value["blocks"][2]["renderKind"], "toolCall");
     assert_eq!(value["blocks"][2]["data"]["name"], "shell");
-    assert_eq!(value["nextCursor"], "3");
-    assert_eq!(value["hasMore"], true);
+    assert_eq!(value["blocks"][5]["renderKind"], "user");
+    assert_eq!(
+        value["blocks"][5]["text"],
+        "Please inspect [redacted] and continue"
+    );
+    assert_eq!(value["blocks"][6]["renderKind"], "assistant");
+    assert_eq!(value["blocks"][7]["renderKind"], "toolCall");
+    assert_eq!(value["blocks"][7]["data"]["name"], "apply_patch");
+    assert_eq!(value["blocks"][8]["renderKind"], "toolResult");
+    assert_eq!(value["blocks"][9]["title"], "MCP tool result");
+    assert_eq!(value["blocks"][10]["title"], "Command result");
+    assert_eq!(value["blocks"][10]["data"]["exitCode"], 0);
+    assert_eq!(value["blocks"][11]["title"], "Patch apply");
+    assert_eq!(value["blocks"][11]["data"]["changes"], 1);
+    assert_eq!(value["blocks"][12]["title"], "Turn aborted");
+    assert_eq!(value["nextCursor"], "13");
+    assert_eq!(value["hasMore"], false);
 
     for forbidden in [
         root.display().to_string(),
@@ -2437,6 +2462,11 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
         "stderr".to_owned(),
         "pid".to_owned(),
         "function_call_output".to_owned(),
+        "custom_tool_call_output".to_owned(),
+        "cat ".to_owned(),
+        "private stdout".to_owned(),
+        "private custom output".to_owned(),
+        "mcp-result".to_owned(),
     ] {
         assert!(
             !body_text.contains(&forbidden),
