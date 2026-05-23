@@ -64,7 +64,7 @@ Create and maintain this task list:
 1. If branch preparation did not create or continue a scoped implementation branch, record `skipped - current branch mode` and continue.
 2. Inspect commits from `HEAD` backward after Doc Commit Gate; build only the contiguous branch-tip suffix of eligible documentation closeout commits.
 3. An eligible commit is non-merge, workflow-owned, and changes only `ai-docs/spec/`, `ai-docs/mental-model/`, `ai-docs/tickets/`, `ai-docs/_index.md`, or narrowly relevant `ai-docs/ref/` workflow docs.
-4. Stop suffix collection at the first ineligible commit; never cross source, test, skill, runtime, generated, planning, ready-promotion, merge, or ambiguous-authorship commits.
+4. Stop suffix collection at the first ineligible commit; never cross source, test, skill, runtime, generated, planning, ready-promotion, review-fix, merge, or ambiguous-authorship commits.
 5. If the suffix has fewer than two eligible commits, record `skipped - fewer than two eligible closeout commits`.
 6. Compact the suffix into one closeout commit only when metadata synthesis is unambiguous; preserve AI Context, ticket Result references, Updated Tickets, Updated Specs, Mental Model Notes, and doc-audit rationale from absorbed commits.
 7. After compaction, verify the final tree matches the pre-compaction head; if equivalence cannot be proven, restore the pre-compaction head and report compaction as skipped with the blocker.
@@ -76,7 +76,7 @@ Report:
 - implemented changes from edit output;
 - documentation updates and ticket Result hash;
 - doc closeout compaction status;
-- review result from edit `Review:`;
+- review status if edit output includes one, otherwise `n/a`;
 - test status;
 - deviations or open items;
 - next unfinished phase, if any.

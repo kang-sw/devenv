@@ -25,7 +25,7 @@ Execution
 Review
 - Single Review stage for all paths; reviewer count from `judge: review-allocation`.
 - Lead fixes correctness, security, contract, and regression findings; may reject style-only or scope-expanding findings with reasons.
-- Delete review path files before Final Action Gate.
+- After capturing review result and disputes, delete review path files before Final Action Gate.
 
 ## On: invoke
 
@@ -108,7 +108,7 @@ Run mental-model-updater after update-spec so it sees implemented-marker changes
 1. If `branch-mode` is direct current branch, set `<doc-compaction-status>` to `skipped - direct-current mode` and continue.
 2. Inspect commits from `HEAD` backward after Doc Commit Gate; build only the contiguous branch-tip suffix of eligible documentation closeout commits.
 3. An eligible commit is non-merge, workflow-owned, and changes only `ai-docs/spec/`, `ai-docs/mental-model/`, `ai-docs/tickets/`, `ai-docs/_index.md`, or narrowly relevant `ai-docs/ref/` workflow docs.
-4. Stop suffix collection at the first ineligible commit; never cross source, test, skill, runtime, generated, planning, ready-promotion, merge, or ambiguous-authorship commits.
+4. Stop suffix collection at the first ineligible commit; never cross source, test, skill, runtime, generated, planning, ready-promotion, review-fix, merge, or ambiguous-authorship commits.
 5. If the suffix has fewer than two eligible commits, set `<doc-compaction-status>` to `skipped - fewer than two eligible closeout commits` and continue.
 6. Compact the suffix into one closeout commit only when metadata synthesis is unambiguous; preserve AI Context, ticket Result references, Updated Tickets, Updated Specs, Mental Model Notes, and doc-audit rationale from absorbed commits.
 7. After compaction, verify the final tree matches the pre-compaction head; if equivalence cannot be proven, restore the pre-compaction head and report `<doc-compaction-status>` as skipped with the blocker.
@@ -125,10 +125,11 @@ Report:
 - deviations or open items;
 - unresolved disputes from review relay, if any.
 
-Wait for merge, continue, or stop. Direct-current mode exits here; no merge
-stage. If the user wants more changes, route to a new implementation slice or
-`ws:lead-sprint`; completed phases capture follow-up through append-only ticket
-Result editions.
+Implementation-branch modes stop after reporting and wait for the user to choose
+merge, continue with a new slice, or stop. Direct-current mode exits after
+reporting; no merge stage. If the user wants more changes, route to a new
+implementation slice or `ws:lead-sprint`; completed phases capture follow-up
+through append-only ticket Result editions.
 
 ### 9. Merge
 

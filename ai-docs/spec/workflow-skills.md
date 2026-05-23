@@ -83,11 +83,12 @@ consent rules. Argument language is reserved for MCP tools, CLI commands, and
 structured templates. Dense routing or rule lists use Markdown hierarchy, named
 groups, fixed lookup tables, and command-shaped lists before introducing custom
 notation. Skill, agent, and prompt edits run a fresh-reader audit after local
-reread: a context-light reviewer or pass flags context-dependent wording,
-contradictions, duplication, orphan references, and missing end-state or output
-instructions.
-Fresh-reader audit findings include the quote, issue, and suggested rewrite or
-delete, or state that no material issue remains.
+reread: a capable reader with no prior conversation context flags awkward,
+surprising, context-dependent, underspecified, contradictory, duplicated,
+orphaned, or missing end-state/output wording. Fresh-reader findings distinguish
+material execution blockers from readability or confidence findings. Each
+finding includes the quote, issue, severity, and suggested rewrite or delete. If
+no findings remain, the audit says so clearly.
 Doctrine, terminology, route, layout, and audit-gate edits also run a
 downstream consistency sweep across affected skill, prompt, spec, mental-model,
 test, and mirrored-package surfaces. The first pass may conservatively
@@ -360,10 +361,11 @@ stages complete. `lead-sprint` runs documentation closure only for marked
 merge readiness is reported: it inspects only the branch-tip suffix and compacts
 a contiguous run of safe documentation-only closeout commits into one closeout
 commit when metadata synthesis and tree equivalence are unambiguous. Planning,
-ready-promotion, source, test, review-fix, merge, ambiguous ownership, and
-non-documentation commits remain outside the compaction target; unsafe, direct
-current-branch, or trivial suffixes are reported as skipped without blocking
-merge readiness. {#260523-implement-doc-closeout-compaction}
+ready-promotion, source, test, review-fix, merge, ambiguous-authorship, and
+non-documentation commits remain outside the compaction target; unsafe suffixes,
+suffixes on direct-current branches, and suffixes with fewer than two eligible
+commits are reported as skipped without blocking merge readiness.
+{#260523-implement-doc-closeout-compaction}
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,

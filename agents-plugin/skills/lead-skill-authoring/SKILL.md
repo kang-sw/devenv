@@ -41,7 +41,7 @@ These apply to both skill and agent documents.
 - Repeatedly violated rule -> mechanize with structure instead of restating it.
 - Compress before adding: delete filler, merge duplicates, keep exact technical nouns.
 - After each authoring pass, re-read additions and cut.
-- After skill, agent, or prompt edits, run a fresh-reader audit: context-dependent wording, contradictions, duplication, orphan references, missing end-state or output instructions.
+- After skill, agent, or prompt edits, run the audit in **On: Fresh-Reader Audit**.
 - After doctrine, terminology, routing, layout, or audit-gate edits, run a downstream consistency sweep across affected skill surfaces; conservative reviewers report findings only, then the lead classifies fixes.
 
 ### Skill semantics
@@ -93,10 +93,11 @@ Test: invariants should re-derive from the named resource.
 
 ## On: Fresh-Reader Audit
 
-1. Read only the assigned target text.
-2. Report material execution blockers: wrong-behavior wording, contradictions, orphan references, or missing required output/end-state instructions.
-3. For each finding, include quote, issue, and suggested rewrite or delete.
-4. If no material issue remains, say so clearly.
+1. Read only the assigned target text as a capable agent with no prior conversation context.
+2. Flag wording that would feel awkward, surprising, context-dependent, underspecified, contradictory, duplicated, orphaned, or missing required output/end-state instructions.
+3. Distinguish material execution blockers from readability or confidence findings; do not suppress the latter merely because execution could proceed.
+4. For each finding, include quote, issue, severity, and suggested rewrite or delete.
+5. If no finding remains, say so clearly.
 
 ## On: Downstream Consistency Sweep
 
