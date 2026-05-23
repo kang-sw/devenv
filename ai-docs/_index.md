@@ -118,7 +118,7 @@ Use the source tree and plugin manifest/tests for the current inventory.
 Full ceremony:  discuss -> proceed -> implement -> (write-skeleton? -> write-code | edit)
 Direct:         implement <description>
 Auto-route:     proceed <ticket-path>
-Sprint:         sprint -> write-code | edit per task -> wrap-up
+Sprint:         sprint -> discuss/explore -> sprint-edit episode? -> episode closure or normal handoff
 Review:         review [branch] -> verdict -> (discuss -> fix | comment | merge)
 Recovery:       salvage -> research report -> recovery epic? -> child tickets
 ```

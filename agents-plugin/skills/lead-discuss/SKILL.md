@@ -30,7 +30,7 @@ Conversation
 
 1. Invoke `ws:lead-workflow-manual` via Skill tool (loads orchestration primitives reference).
 2. Call `ws/project_tree()` to load the current project map.
-3. Call `ws/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - `ws:lead-sprint` provides session continuity."
+3. Call `ws/git.status()`.
 4. If `user request` references a ticket, read it.
 5. Enter user-message handling.
 

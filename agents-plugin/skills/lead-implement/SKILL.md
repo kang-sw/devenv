@@ -143,7 +143,6 @@ Pick the first matching decision.
 
 | Decision | When |
 |----------|------|
-| Stop or route sprint | Current branch starts with `sprint/` |
 | Continue implementation branch | Current branch starts with `implement/` |
 | Create implementation branch | Delegated path outside `implement/` |
 | Direct current branch | Direct-edit path |

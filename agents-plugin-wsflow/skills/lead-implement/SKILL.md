@@ -78,7 +78,6 @@ implementation slice; completed ticket Results are frozen.
 
 | Decision | When |
 |----------|------|
-| Stop | Current branch starts with `sprint/`; route sprint-scoped implementation through `wsflow:lead-sprint` or ask the user for an explicit non-sprint target branch. |
 | Continue current branch | Current branch is suitable for direct edits or already matches the requested implementation scope. |
 | Create implementation branch | The user explicitly asks for branch isolation or repository rules require it. |
 
