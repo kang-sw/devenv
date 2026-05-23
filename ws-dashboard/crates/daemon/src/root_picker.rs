@@ -144,18 +144,25 @@ pub async fn set_work_root_activation(
     Json(request): Json<SetWorkRootActivationRequest>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    if !state
+    let Some(previous_activation) = state
         .opened_work_roots
         .set_activation(&work_root_id, request.activation)
-    {
+    else {
         return picker_error(StatusCode::NOT_FOUND, "unknown workRoot");
-    }
+    };
     if let Err(error) = state
         .dashboard_state
         .persist_opened_work_roots(&state.opened_work_roots)
         .await
     {
+        state
+            .opened_work_roots
+            .set_activation(&work_root_id, previous_activation);
         tracing::warn!(%error, "failed to persist dashboard workRoot registry");
+        return picker_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "persist activation failed",
+        );
     }
     Json::<DashboardResourcesView>(live_dashboard_resources(&state.opened_work_roots))
         .into_response()

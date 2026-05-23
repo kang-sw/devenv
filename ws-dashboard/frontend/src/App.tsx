@@ -628,6 +628,16 @@ function findOpenedWorkRootId(
   view: DashboardResourcesView,
   requestedPath: string,
 ): string | undefined {
+  if (requestedPath.startsWith("/")) {
+    const requestedId = `root-local-${stablePathHash(requestedPath)}`;
+    if (
+      view.workspaces.some((workspace) =>
+        workspace.workRoots.some((root) => root.id === requestedId),
+      )
+    ) {
+      return requestedId;
+    }
+  }
   const normalized = requestedPath.trim().replace(/[\\/]+$/, "");
   const label = normalized.split(/[\\/]/).filter(Boolean).pop();
   if (!label) {
@@ -640,6 +650,18 @@ function findOpenedWorkRootId(
     }
   }
   return undefined;
+}
+
+function stablePathHash(path: string): string {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  const bytes = new TextEncoder().encode(path);
+  for (const byte of bytes) {
+    hash ^= BigInt(byte);
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(16).padStart(16, "0");
 }
 
 function ResourceNavigation({
@@ -2256,7 +2278,9 @@ function WorkbenchToolbar({
           <button
             className="action-button"
             data-command-id={
-              activationForAction(action.id) ? "workRoot.activation.set" : `resource.action.${action.id}`
+              activationForAction(action.id)
+                ? "workRoot.activation.set"
+                : `resource.action.${action.id}`
             }
             disabled={!action.enabled}
             key={`${entityId}:${action.id}`}
@@ -2292,21 +2316,6 @@ function WorkbenchToolbar({
           }}
         >
           New terminal
-        </button>
-        <button
-          className="action-button workbench-toggle"
-          data-command-id="workRoot.activation.set"
-          type="button"
-          onClick={() =>
-            onCommand(
-              buildWorkRootActivationCommand(
-                root.id,
-                root.activation === "online" ? "offline" : "online",
-              ),
-            )
-          }
-        >
-          {root.activation === "online" ? "Go offline" : "Go online"}
         </button>
         {toggles.map((toggle) => (
           <button

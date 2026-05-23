@@ -374,6 +374,9 @@ pub async fn terminal_output(
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     Json(session.output_after(query.after)).into_response()
 }
 
@@ -385,6 +388,9 @@ pub async fn terminal_input(
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     match session.write_input(request.data.as_bytes()) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => error.into_response(),
@@ -399,6 +405,9 @@ pub async fn terminal_resize(
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     let Ok((columns, rows)) = validate_size(request.columns, request.rows) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid terminal size");
     };
@@ -423,6 +432,9 @@ pub async fn terminal_websocket(
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     if !session.is_live() {
         return terminal_error(StatusCode::GONE, "terminal is closed");
     }
@@ -435,6 +447,12 @@ pub async fn close_terminal(
     State(state): State<AppState>,
     AxumPath(terminal_id): AxumPath<String>,
 ) -> Response {
+    let Some(session) = state.terminals.get(&terminal_id) else {
+        return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
+    };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     let Some(session) = state.terminals.remove(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };

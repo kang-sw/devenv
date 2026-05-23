@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tracing::warn;
 
-use crate::work_root_files::OpenedWorkRoots;
+use crate::work_root_files::{OpenedWorkRoots, WorkRootProvenance};
 use ws_dashboard_core::WorkRootActivation;
 
 const OPENED_WORKROOTS_STATE_VERSION: u32 = 1;
@@ -82,6 +82,7 @@ struct PersistedWorkRoot {
 pub struct PersistedRegistryWorkRoot {
     pub path: PathBuf,
     pub activation: WorkRootActivation,
+    pub provenance: WorkRootProvenance,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -96,6 +97,14 @@ struct WorkRootRegistryState {
 struct PersistedWorkRootRegistryEntry {
     path: String,
     activation: WorkRootActivation,
+    #[serde(default = "default_registry_provenance")]
+    provenance: PersistedWorkRootProvenance,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum PersistedWorkRootProvenance {
+    Opened,
 }
 
 #[derive(Debug)]
@@ -151,6 +160,7 @@ async fn read_work_root_registry(
         .map(|path| PersistedRegistryWorkRoot {
             path,
             activation: WorkRootActivation::Online,
+            provenance: WorkRootProvenance::Opened,
         })
         .collect());
     }
@@ -168,6 +178,7 @@ async fn read_work_root_registry(
                 (!trimmed.is_empty()).then(|| PersistedRegistryWorkRoot {
                     path: PathBuf::from(trimmed),
                     activation: entry.activation,
+                    provenance: entry.provenance.into(),
                 })
             })
             .collect(),
@@ -186,6 +197,7 @@ async fn write_work_root_registry(
                 .map(|root| PersistedRegistryWorkRoot {
                     path: root.path,
                     activation: root.activation,
+                    provenance: root.provenance,
                 })
                 .collect(),
         )
@@ -193,10 +205,31 @@ async fn write_work_root_registry(
         .map(|root| PersistedWorkRootRegistryEntry {
             path: root.path.to_string_lossy().into_owned(),
             activation: root.activation,
+            provenance: root.provenance.into(),
         })
         .collect(),
     };
     write_state_json(path, &state).await
+}
+
+fn default_registry_provenance() -> PersistedWorkRootProvenance {
+    PersistedWorkRootProvenance::Opened
+}
+
+impl From<PersistedWorkRootProvenance> for WorkRootProvenance {
+    fn from(provenance: PersistedWorkRootProvenance) -> Self {
+        match provenance {
+            PersistedWorkRootProvenance::Opened => Self::Opened,
+        }
+    }
+}
+
+impl From<WorkRootProvenance> for PersistedWorkRootProvenance {
+    fn from(provenance: WorkRootProvenance) -> Self {
+        match provenance {
+            WorkRootProvenance::Opened => Self::Opened,
+        }
+    }
 }
 
 async fn write_state_json<T: Serialize>(path: &Path, state: &T) -> Result<(), String> {
@@ -280,6 +313,7 @@ mod tests {
         assert!(raw.contains("\"version\": 2"));
         assert!(raw.contains("\"workRootRegistry\""));
         assert!(raw.contains("\"activation\": \"online\""));
+        assert!(raw.contains("\"provenance\": \"opened\""));
         remove_temp(&root);
     }
 
@@ -307,6 +341,7 @@ mod tests {
         assert_eq!(restored.len(), 1);
         assert_eq!(restored[0].path, root.join("legacy"));
         assert_eq!(restored[0].activation, WorkRootActivation::Online);
+        assert_eq!(restored[0].provenance, WorkRootProvenance::Opened);
         remove_temp(&root);
     }
 

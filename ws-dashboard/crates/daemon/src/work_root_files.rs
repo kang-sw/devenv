@@ -25,6 +25,12 @@ pub struct OpenedWorkRoots {
 pub struct RegisteredWorkRoot {
     pub path: PathBuf,
     pub activation: WorkRootActivation,
+    pub provenance: WorkRootProvenance,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkRootProvenance {
+    Opened,
 }
 
 impl OpenedWorkRoots {
@@ -52,16 +58,21 @@ impl OpenedWorkRoots {
         root_path: PathBuf,
         activation: WorkRootActivation,
     ) {
+        self.register_registry_entry(
+            work_root_id,
+            RegisteredWorkRoot {
+                path: root_path,
+                activation,
+                provenance: WorkRootProvenance::Opened,
+            },
+        );
+    }
+
+    pub fn register_registry_entry(&self, work_root_id: WorkRootId, root: RegisteredWorkRoot) {
         self.roots
             .write()
             .expect("opened workRoots lock poisoned")
-            .insert(
-                work_root_id,
-                RegisteredWorkRoot {
-                    path: root_path,
-                    activation,
-                },
-            );
+            .insert(work_root_id, root);
     }
 
     pub fn resolve(&self, work_root_id: &WorkRootId) -> Option<PathBuf> {
@@ -80,13 +91,14 @@ impl OpenedWorkRoots {
         &self,
         work_root_id: &WorkRootId,
         activation: WorkRootActivation,
-    ) -> bool {
+    ) -> Option<WorkRootActivation> {
         let mut roots = self.roots.write().expect("opened workRoots lock poisoned");
         let Some(root) = roots.get_mut(work_root_id) else {
-            return false;
+            return None;
         };
+        let previous = root.activation;
         root.activation = activation;
-        true
+        Some(previous)
     }
 
     /// Registered workRoot paths in a deterministic order.

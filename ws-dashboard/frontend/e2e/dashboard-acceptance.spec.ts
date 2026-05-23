@@ -402,6 +402,30 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
   });
 
+  await test.step("activation controls are command-routed and update visible state", async () => {
+    const metaRow = page.locator(".workbench-toolbar-meta");
+    const activationButton = page.locator(
+      '.workbench-toolbar-actions [data-command-id="workRoot.activation.set"]',
+    );
+    await expect(metaRow).toContainText("availability: available");
+    await expect(metaRow).toContainText("activation: online");
+    await expect(activationButton).toHaveText("Go offline");
+
+    await activationButton.click();
+    await expect(metaRow).toContainText("activation: offline");
+    await expect(
+      page.locator(".workbench-toolbar-meta .meta-chip", {
+        hasText: "last: workRoot.activation.set",
+      }),
+    ).toBeVisible();
+    await expect(activationButton).toHaveText("Go online");
+
+    await activationButton.click();
+    await expect(metaRow).toContainText("activation: online");
+    await expect(activationButton).toHaveText("Go offline");
+    note("activation controls dispatch through workRoot.activation.set and refresh visible state");
+  });
+
   // --- Top-bar WorkRoot Activity badge sits in the existing metadata row --
   await test.step("activity badge renders in the toolbar metadata row without growing it", async () => {
     const metaRow = page.locator(".workbench-toolbar-meta");

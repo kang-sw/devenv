@@ -12,7 +12,7 @@ use crate::persistent_state::DashboardStateStore;
 use crate::router::{build_router, AppState};
 use crate::terminal::TerminalRegistry;
 use crate::work_root_activity::WorkRootActivityProjector;
-use crate::work_root_files::OpenedWorkRoots;
+use crate::work_root_files::{OpenedWorkRoots, RegisteredWorkRoot};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StartupInfo {
@@ -58,10 +58,13 @@ where
     let dashboard_state = DashboardStateStore::default_local();
     let opened_work_roots = OpenedWorkRoots::default();
     for entry in dashboard_state.load_work_root_registry().await {
-        opened_work_roots.register_with_activation(
+        opened_work_roots.register_registry_entry(
             crate::discovery::local_work_root_id_for_path(&entry.path),
-            entry.path,
-            entry.activation,
+            RegisteredWorkRoot {
+                path: entry.path,
+                activation: entry.activation,
+                provenance: entry.provenance,
+            },
         );
     }
     let app = build_router(AppState {
