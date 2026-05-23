@@ -22,6 +22,7 @@ related:
 
 - Codex skill directory names and `name:` frontmatter are externally visible invocation strings; renames break user workflows.
 - Codex-facing workflow guidance teaches MCP primitives first; CLI adapter syntax belongs only in compatibility or testing references. {#260507-mcp-centric-workflow-language}
+- Agent, subquery, and wsflow subagent prompts are written in English; user-facing lead discussion may still use the active conversation language. {#260505-workflow-primitive-reference}
 - Shared workflow examples use `model: light|core|deep` as portable delegate aliases; `tier` is legacy compatibility language and concrete provider model names are reserved for intentional overrides. {#260508-workflow-model-alias-guidance}
 - Skill descriptions are the runtime trigger surface: keep top-level entries strong, derived primitives lighter, and conditional utilities explicit. {#260508-skill-description-attention-policy}
 - `lead-add-rule` requires explicit persistence intent such as save, remember, persist, or add a durable rule; prescriptive task wording alone must not trigger it. {#260508-add-rule-explicit-persistence-trigger}

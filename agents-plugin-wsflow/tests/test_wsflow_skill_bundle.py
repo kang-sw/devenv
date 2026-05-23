@@ -75,6 +75,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
     def test_workflow_manual_documents_subagent_guidance(self):
         text = (SKILLS_DIR / "lead-workflow-manual" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("Use subagents when a task benefits from scoped exploration", text)
+        self.assertIn("Write subagent prompts in English.", text)
         self.assertIn("The lead owns integration, verification, final judgment, and commits.", text)
 
     def test_proceed_uses_single_next_verdict(self):

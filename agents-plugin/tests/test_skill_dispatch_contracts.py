@@ -27,6 +27,11 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertNotIn("caller-provided `write-code` dispatch", text)
         self.assertNotIn("Confirm dispatch boundary", text)
 
+    def test_workflow_manual_requires_english_agent_prompts(self):
+        text = (SKILLS_DIR / "lead-workflow-manual" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("Write prompts sent to `ws/subquery` and `ws/agents.call` in English.", text)
+
 
 if __name__ == "__main__":
     unittest.main()

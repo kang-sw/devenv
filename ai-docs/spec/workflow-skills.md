@@ -60,6 +60,9 @@ operations, API documentation lookup, and project/convention reads. Skills name
 only primitives available in the runtime; when a needed surface is not exposed
 yet, skill text describes the required MCP contract instead of naming a
 host-specific helper.
+Prompts sent to `ws/subquery`, `ws/agents.call`, and wsflow subagents are
+written in English so delegated work products stay consistent with English
+AI-authored repository artifacts.
 
 Codex-facing workflow skill guidance presents MCP primitives as the primary ws
 runtime surface. Promptless `ws/agents.register(name: "<agent-name>")` is the

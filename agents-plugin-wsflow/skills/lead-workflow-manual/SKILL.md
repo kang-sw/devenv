@@ -137,6 +137,7 @@ Use subagents when a task benefits from scoped exploration, implementation,
 verification, audit, or review.
 
 Subagent prompts must be self-contained:
+- Write subagent prompts in English.
 - State the exact question and expected output.
 - State scope, permissions, and any writable paths or modules.
 - Tell exploration, verification, audit, and review workers to stay read-only.

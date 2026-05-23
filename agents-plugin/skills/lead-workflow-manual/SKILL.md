@@ -25,6 +25,7 @@ Write MCP calls as `ws/tool.name(arg: value)`.
 Show optional arguments only when the skill needs a non-default value.
 Omit `root` when the current repository root is intended.
 Use `prompt: <block below>` or `question: <block below>` for large text payloads.
+Write prompts sent to `ws/subquery` and `ws/agents.call` in English.
 
 When writing shared skill text, name only primitives that exist in the ws runtime.
 If a workflow needs a surface that is still planned, state the required MCP
