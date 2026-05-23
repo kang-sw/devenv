@@ -72,14 +72,15 @@ Sprint-Edit-Context: <one-line context>
 Trigger: post-edit reply means wrap it up, done, or good.
 
 1. Confirm `<episode-slug>` and `<episode-start>` exist; otherwise report that no active sprint-edit episode is open.
-2. Set `<episode-range>` to `<episode-start>..HEAD`.
-3. Verify the range contains commits with `Sprint-Edit: <episode-slug>`.
-4. Invoke `wsflow:lead-update-spec` with `<episode-range>`.
-5. Review changed source and update mental-model documents directly when module contracts, coupling, extension points, common mistakes, or technical debt changed.
-6. Call `wsflow/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
-7. Clear `<current-edit-context>`, `<episode-slug>`, and `<episode-start>`.
-8. Report episode commits, documentation updates, and verification.
-9. Return to session loop.
+2. Find commits in `<episode-start>..HEAD` whose commit body contains `Sprint-Edit: <episode-slug>`.
+3. Stop if no marked commits are found.
+4. Set `<episode-range>` to the smallest contiguous Git range that contains the marked commits; report any unmarked commits inside the range as excluded from sprint-edit intent.
+5. Invoke `wsflow:lead-update-spec` with `<episode-range>` and the marked commit list.
+6. Review changed source and update mental-model documents directly when module contracts, coupling, extension points, common mistakes, or technical debt changed.
+7. Call `wsflow/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
+8. Clear `<current-edit-context>`, `<episode-slug>`, and `<episode-start>`.
+9. Report marked episode commits, documentation updates, and verification.
+10. Return to session loop.
 
 ## On: shift direction
 

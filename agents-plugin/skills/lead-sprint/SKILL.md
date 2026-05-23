@@ -72,15 +72,16 @@ Sprint-Edit-Context: <one-line context>
 Trigger: post-edit reply means wrap it up, done, or good.
 
 1. Confirm `<episode-slug>` and `<episode-start>` exist; otherwise report that no active sprint-edit episode is open.
-2. Set `<episode-range>` to `<episode-start>..HEAD`.
-3. Verify the range contains commits with `Sprint-Edit: <episode-slug>`.
-4. Invoke `ws:lead-update-spec` with `<episode-range>`.
-5. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
-6. Call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <episode-range>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>")`.
+2. Find commits in `<episode-start>..HEAD` whose commit body contains `Sprint-Edit: <episode-slug>`.
+3. Stop if no marked commits are found.
+4. Set `<episode-range>` to the smallest contiguous Git range that contains the marked commits; report any unmarked commits inside the range as excluded from sprint-edit intent.
+5. Invoke `ws:lead-update-spec` with `<episode-range>` and the marked commit list.
+6. Call `ws/agents.register(name: "mental-model-updater", prompts: ["mental-model-updater"])`.
+6. Call `ws/agents.call(name: "mental-model-updater", prompt: "Commit range: <episode-range>\nMarked commits: <marked-commits>\nSprint-Edit: <episode-slug>\nContext: <current-edit-context>")`.
 7. Wait for completion; commit documentation changes.
 8. Call `ws/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
 9. Clear `<current-edit-context>`, `<episode-slug>`, and `<episode-start>`.
-10. Report episode commits, documentation updates, and verification.
+10. Report marked episode commits, documentation updates, and verification.
 11. Return to session loop.
 
 ## On: shift direction
