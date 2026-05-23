@@ -161,6 +161,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260519-feat-implement-branch-squash-gate` | todo | Add a pre-merge implementation-branch squash gate for cleaner main history |
 | `260521-research-libws-harness-mvp-planning` | todo | Plan the future libws-harness MVP epic and child ticket population from the recovered JSONL run-substrate research |
 | `260521-refactor-wsflow-lead-implement-mirroring-gap` | todo | Resolve whether wsflow lead-implement should mirror the full unified spine or document lead-edit delegation as intentional divergence |
+| `260523-refactor-lead-sprint-episode-shell` | ready | Redefine lead-sprint as an episode-oriented workflow shell with sprint-edit closure |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
@@ -178,7 +179,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- No ready tickets.
+- `260523-refactor-lead-sprint-episode-shell` - Redefine `lead-sprint` as an
+  episode-oriented workflow shell; depends on preserving normal
+  `lead-proceed`/`lead-implement` handoff boundaries.
 
 ## Session Notes
 
