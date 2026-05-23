@@ -5,8 +5,11 @@ related:
   260523-feat-ws-dashboard-workroot-registry-activation: durable registry changes make single known workRoot states common
 spec:
   - 260523-ws-dashboard-single-workroot-nav-collapse
+plans:
+  phase-1: 2026-05/23-260523-bug-ws-dashboard-single-workroot-collapse
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-23
 ---
 
 # Restore single workspace/workRoot navigation collapse
@@ -75,3 +78,23 @@ Verification should include route-independent frontend coverage for
 single-workRoot compaction without main instances, multi-root non-compaction,
 offline/unavailable metadata visibility, and browser-level evidence if the
 visible left-nav rendering changes.
+
+### Result (9fc2a73) - 2026-05-23
+
+Implemented browser-side singleton workspace/workRoot compaction. The compact
+row now selects the concrete workRoot id, preserves workspace/workRoot identity
+and workRoot kind/availability/activation metadata, and no longer depends on
+main instance presence. Multi-workRoot workspaces remain expanded, and
+main/sub instances stay out of the default left navigation.
+
+Review follow-up corrected stale spec wording that still implied
+`workspace -> workRoot -> mainInstance` compaction and hardened browser
+acceptance evidence by forcing an isolated temporary spawned-daemon state home
+for singleton assertions.
+
+Verification passed:
+
+- `ws/spec_index.verify`
+- `npm run test:resource-model`
+- `npm run build`
+- `npm run test:browser`
