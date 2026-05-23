@@ -129,6 +129,9 @@ The MVP should cover:
 - `260523-bug-ws-dashboard-dockview-split-scroll-reset` - done; fix
   Dockview split-wide scroll resets caused by active-pane sync and parameter
   churn in the workbench adapter.
+- `260523-bug-ws-dashboard-dev-run-ctrl-c-shutdown` - done; make the outer
+  `dev.sh run`/daemon shutdown signal take priority over open long-lived
+  browser connections by bounding graceful shutdown drain.
 
 ## Cross-Child Decisions
 

@@ -46,6 +46,7 @@ related:
 
 - Loopback is only a reachability default, not authorization: every browser route except `/pair` must pass owner-session auth before handler execution, including fallback paths. {#260515-ws-web-daemon-foundation}
 - The pairing URL is constructed after the listener is bound so port `0` resolves to the actual socket; changing startup reporting must preserve a single owner-visible pairing URL without leaking it through request diagnostics.
+- Server shutdown is signal-led rather than browser-connection-led: `server.rs` should start graceful shutdown but keep a bounded drain window so idle sockets, SSE streams, or WebSockets cannot make `dev.sh run` appear to ignore `Ctrl-C`. {#260515-ws-web-daemon-foundation}
 - Valid `/pair?token=...` exchanges consume the token, install the owner cookie, and redirect to token-free `/`; missing, invalid, reused, or expired tokens must stay non-redirecting and cookie-free so browser history and retry paths do not retain usable pairing URLs. {#260516-ws-web-dashboard-token-free-pairing-landing}
 - `OwnerAuthState` is cloned into Axum state, so auth storage changes must preserve shared one-time pairing consumption, pairing TTL enforcement before consumption, and rejection of session cookies before pairing succeeds.
 - Bearer auth is a daemon-local protected-route exception for CLI/smoke callers; it authenticates before cookie pairing state is considered, so browser cookie flow changes must not accidentally remove or broaden that non-browser path.

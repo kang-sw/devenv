@@ -3,8 +3,11 @@ title: Investigate dev.sh run Ctrl-C shutdown hang
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260517-bug-ws-dashboard-windows-terminal-control-keys: separate browser terminal Ctrl-C forwarding issue
+spec:
+  - 260515-ws-web-daemon-foundation
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-23
 ---
 
 # Investigate dev.sh run Ctrl-C shutdown hang
@@ -45,3 +48,15 @@ alive indefinitely after the outer server process has been interrupted.
 
 This is separate from browser-terminal `Ctrl-C` forwarding. Here the input is
 the outer developer terminal trying to stop the dashboard daemon itself.
+
+## Result (c37041b) - 2026-05-23
+
+`ws-dashboard serve` now begins Axum graceful shutdown after the outer shutdown
+signal, but gives long-lived browser connections only a bounded grace period.
+If an idle socket, SSE stream, WebSocket, or other open browser connection keeps
+the graceful drain alive past that window, the serve future is dropped so
+`dev.sh run` can exit promptly after `Ctrl-C`.
+
+The implementation keeps immediate shutdown tests and adds a daemon server test
+that opens an idle TCP connection, triggers shutdown, and verifies the server
+task still returns within the configured grace period.

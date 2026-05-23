@@ -13,9 +13,12 @@ authentication, and consumes ws runtime state through daemon-owned view models.
 
 The dashboard daemon starts through the `ws-dashboard serve` command as a
 Rust/Axum HTTP server with explicit serving configuration, structured startup
-logging, graceful shutdown, and a minimal health surface. The default bind
-target is `127.0.0.1`. The daemon does not treat loopback access as
-authorization.
+logging, bounded graceful shutdown, and a minimal health surface. The default
+bind target is `127.0.0.1`. The daemon does not treat loopback access as
+authorization. After the outer server process receives its shutdown signal,
+long-lived browser connections such as idle sockets, SSE streams, or WebSockets
+may receive a short drain window, but they must not keep the local development
+server alive indefinitely.
 
 On startup, the daemon creates an in-memory high-entropy one-time pairing token
 with an explicit expiry policy and exposes the corresponding pairing URL to the
