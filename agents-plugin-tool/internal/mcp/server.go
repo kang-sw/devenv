@@ -2067,7 +2067,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":               stringProperty("Repository root. Defaults to the server root."),
 					"name":               stringProperty("Agent name."),
 					"backend":            stringProperty("Optional backend name. Model aliases use the detected harness when omitted."),
 					"tier":               stringProperty("Deprecated compatibility alias selector: light, core, or deep."),
@@ -2085,7 +2084,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Repository root. Defaults to the server root."),
 					"name":   stringProperty("Agent name."),
 					"prompt": stringProperty("Prompt to send to the agent."),
 				},
@@ -2098,7 +2096,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":            stringProperty("Repository root. Defaults to the server root."),
 					"name":            stringProperty("Agent name. Compatibility alias for a single name."),
 					"names":           stringArrayProperty("Agent names to wait for."),
 					"timeout_seconds": numberProperty("Maximum seconds to wait. Defaults to 600."),
@@ -2111,7 +2108,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":            stringProperty("Repository root. Defaults to the server root."),
 					"name":            stringProperty("Agent name."),
 					"timeout_seconds": numberProperty("Maximum seconds to wait. Omit or set 0 for a non-blocking read."),
 				},
@@ -2124,7 +2120,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
@@ -2136,7 +2131,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":    stringProperty("Repository root. Defaults to the server root."),
 					"name":    stringProperty("Agent name."),
 					"message": stringProperty("Interrupt or redirect message to deliver to the agent."),
 				},
@@ -2149,7 +2143,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":  stringProperty("Repository root. Defaults to the server root."),
 					"name":  stringProperty("Agent name."),
 					"lines": integerProperty("Number of lines per section. Defaults to 40."),
 				},
@@ -2187,7 +2180,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
@@ -2199,7 +2191,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
@@ -2211,7 +2202,6 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": stringProperty("Repository root. Defaults to the server root."),
 					"name": stringProperty("Agent name."),
 				},
 				"required": []string{"name"},
@@ -2450,7 +2440,6 @@ func agentDebugSchema(linesDescription string) map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"root":  stringProperty("Repository root. Defaults to the server root."),
 			"name":  stringProperty("Agent name."),
 			"lines": integerProperty(linesDescription),
 		},
