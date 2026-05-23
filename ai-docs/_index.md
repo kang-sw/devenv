@@ -158,7 +158,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
-| `260519-feat-implement-branch-squash-gate` | todo | Compact safe post-implementation documentation closeout commit suffixes before merge readiness |
 | `260521-research-libws-harness-mvp-planning` | todo | Plan the future libws-harness MVP epic and child ticket population from the recovered JSONL run-substrate research |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
@@ -176,7 +175,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260519-feat-implement-branch-squash-gate` - Implement the post-documentation closeout compaction gate for safe branch-tip documentation-only suffixes.
+- No ready tickets.
 
 ## Session Notes
 

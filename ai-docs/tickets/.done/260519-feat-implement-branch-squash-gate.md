@@ -5,6 +5,7 @@ spec:
 related-mental-model:
   - workflow-skills
   - git-workflow-tools
+completed: 2026-05-23
 ---
 
 # implementation doc closeout compaction gate
@@ -96,3 +97,14 @@ Verification should cover:
   commits;
 - downstream merge reporting states whether closeout compaction was applied or
   skipped and why.
+
+### Result (1d67dc0) - 2026-05-23
+
+Implemented the post-documentation closeout compaction gate in full ws and
+wsflow `lead-implement`. The gate runs after the doc commit gate and before the
+final action/report step, skips current-branch modes, considers only contiguous
+documentation-only branch-tip closeout suffixes, preserves important workflow
+metadata when compaction is unambiguous, verifies final tree equivalence, and
+reports unsafe or trivial suffixes as non-blocking skips. This direct-current
+implementation run skipped the new compaction gate as `skipped - direct-current
+mode`.
