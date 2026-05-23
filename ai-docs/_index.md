@@ -176,7 +176,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- No ready tickets.
+- `260519-feat-implement-branch-squash-gate` - Implement the post-documentation closeout compaction gate for safe branch-tip documentation-only suffixes.
 
 ## Session Notes
 

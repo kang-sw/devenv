@@ -1,5 +1,7 @@
 ---
 title: implementation doc closeout compaction gate
+spec:
+  - 260523-implement-doc-closeout-compaction
 related-mental-model:
   - workflow-skills
   - git-workflow-tools
