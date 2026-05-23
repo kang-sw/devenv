@@ -136,13 +136,14 @@ dashboard commands with logical targets so mouse controls and later keybindings
 share the same command path.
 
 Explicit resource refresh recomputes availability from filesystem/Git without
-changing activation.
-
-> [!note] Planned 🚧
-> While the dashboard is open, bounded polling may refresh known workRoot
-> availability so external filesystem or Git worktree changes become visible,
-> but polling is not the sole correctness mechanism and filesystem watchers, if
-> added later, act only as refresh hints.
+changing activation. While the dashboard is open, bounded polling refreshes
+known workRoot availability through the same canonical resource endpoint so
+external filesystem or Git worktree changes can become visible. Polling is not
+the sole correctness mechanism: explicit refresh remains deterministic, polling
+does not become browser-side resource authority, overlapping refresh requests
+are suppressed, stale poll results do not overwrite newer open or activation
+resource views, and refresh failures keep the last known resource tree visible.
+Filesystem watchers, if added later, act only as refresh hints.
 
 ## Mock View-Model Fixtures {#260516-ws-web-dashboard-mock-view-model-fixtures}
 
