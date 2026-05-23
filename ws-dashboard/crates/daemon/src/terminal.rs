@@ -673,6 +673,9 @@ async fn terminal_socket_task(
     let mut output_signal = session.output_signal.subscribe();
     let mut cursor = after;
 
+    if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+        return;
+    }
     if send_output_backfill(&session, &mut sender, &mut cursor)
         .await
         .is_err()
@@ -717,6 +720,9 @@ async fn terminal_socket_task(
             }
             changed = output_signal.changed() => {
                 if changed.is_err() { break; }
+                if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+                    break;
+                }
                 if send_output_backfill(&session, &mut sender, &mut cursor).await.is_err() {
                     break;
                 }
