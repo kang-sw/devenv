@@ -94,5 +94,5 @@ related:
 - Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
 - Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve workflow intent while using wsflow notation, scoped subagent guidance, and the curated skill inventory.
-- Relaying reviewer file contents instead of file paths, which breaks the write-code review protocol and inflates lead context.
+- Relaying reviewer file contents instead of file paths, which breaks implementation review relay and inflates lead context.
 - Treating brief compression as permission to drop settled caller-visible contracts, implementation strategy decisions, rejected alternatives, or verification expectations.

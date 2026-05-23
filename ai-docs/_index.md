@@ -115,7 +115,7 @@ Use the source tree and plugin manifest/tests for the current inventory.
 ## Canonical Flows
 
 ```text
-Full ceremony:  discuss -> proceed -> implement -> (write-skeleton? -> write-code | edit)
+Full ceremony:  discuss -> proceed -> implement -> review/docs/final gate
 Direct:         implement <description>
 Auto-route:     proceed <ticket-path>
 Sprint:         sprint -> discuss/explore -> sprint-edit episode? -> episode closure or normal handoff
