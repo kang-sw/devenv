@@ -99,9 +99,10 @@ core workRoot API shape while preserving enough metadata for the UI to
 distinguish their repository role and lifecycle affordances.
 
 The API shape preserves the full hierarchy even when the browser later renders
-singleton `workspace -> workRoot -> mainInstance` chains as compact rows.
+a singleton `workspace -> workRoot` resource tree as one compact workRoot row.
 Authenticated callers may observe compactability hints, but compaction is a
-presentation policy and not URL identity.
+presentation policy and not URL identity; the compact row selects the concrete
+workRoot id and does not require a main instance.
 
 ## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 

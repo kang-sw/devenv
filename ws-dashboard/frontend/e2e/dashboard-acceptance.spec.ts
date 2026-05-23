@@ -89,7 +89,7 @@ test.beforeAll(async () => {
       process.env.WS_DASHBOARD_DAEMON_PAIRING_URL,
   );
   previousStateHome = process.env.WS_DASHBOARD_STATE_HOME;
-  if (!externalDaemon && !previousStateHome) {
+  if (!externalDaemon) {
     stateHome = mkdtempSync(path.join(os.tmpdir(), "ws-dash-state-"));
     ownsStateHome = true;
     process.env.WS_DASHBOARD_STATE_HOME = stateHome;
