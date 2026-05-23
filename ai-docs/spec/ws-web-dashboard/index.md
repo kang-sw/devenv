@@ -103,15 +103,15 @@ singleton `workspace -> workRoot -> mainInstance` chains as compact rows.
 Authenticated callers may observe compactability hints, but compaction is a
 presentation policy and not URL identity.
 
-## 🚧 Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
+## Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
 
-The dashboard will expose known workspace and workRoot membership from a
+The dashboard exposes known workspace and workRoot membership from a
 daemon-local durable registry instead of treating only currently opened
 workRoots as the visible resource set. A known workRoot remains visible until a
 future explicit forget/remove policy removes it, even when it is currently
 missing, inaccessible, moved, or inactive.
 
-WorkRoot view-models will separate live availability from user-controlled
+WorkRoot view-models separate live availability from user-controlled
 activation. `availability` describes the daemon's current filesystem/Git
 assessment of whether the workRoot can be used now, with initial public values
 for available, missing, moved, inaccessible, and unknown states. `activation`
@@ -129,15 +129,20 @@ Authenticated route behavior distinguishes registry membership and current
 operability. Unknown workRoot ids return not-found responses. Known workRoots
 with offline activation return a bounded offline response. Online workRoots
 whose availability has degraded return a bounded unavailable response without
-exposing host paths. Online/offline transitions are dashboard commands with
-logical targets so mouse controls and later keybindings share the same command
-path.
+exposing host paths. Terminal HTTP routes and already-open terminal WebSockets
+re-check the owning workRoot's activation and availability before accepting
+input, resize, close, or output/backfill access. Online/offline transitions are
+dashboard commands with logical targets so mouse controls and later keybindings
+share the same command path.
 
-Explicit refresh recomputes availability from filesystem/Git without changing
-activation. While the dashboard is open, bounded polling may refresh known
-workRoot availability so external filesystem or Git worktree changes become
-visible, but polling is not the sole correctness mechanism and filesystem
-watchers, if added later, act only as refresh hints.
+Explicit resource refresh recomputes availability from filesystem/Git without
+changing activation.
+
+> [!note] Planned 🚧
+> While the dashboard is open, bounded polling may refresh known workRoot
+> availability so external filesystem or Git worktree changes become visible,
+> but polling is not the sole correctness mechanism and filesystem watchers, if
+> added later, act only as refresh hints.
 
 ## Mock View-Model Fixtures {#260516-ws-web-dashboard-mock-view-model-fixtures}
 
@@ -651,8 +656,10 @@ folder deletion operations remain unavailable.
 After an authenticated owner opens a workRoot, the browser-visible resource
 tree refreshes from the canonical dashboard resources endpoint and selects the
 real opened workRoot instead of continuing to present mock workspace state.
-Open-workRoot responses may update the view immediately, but the resources
-endpoint remains the canonical source for subsequent refreshes.
+Open-workRoot responses may update the view immediately, and successful
+responses include an `x-ws-dashboard-opened-work-root-id` header identifying
+the daemon-owned id for the requested root. The resources endpoint remains the
+canonical source for subsequent refreshes.
 {#260516-ws-web-dashboard-open-workroot-resource-refresh}
 
 ## WorkRoot File Listing API {#260516-ws-web-dashboard-workroot-file-listing-api}
@@ -749,9 +756,11 @@ Live browser terminal I/O uses an owner-authenticated WebSocket as the primary
 transport for daemon-owned PTY sessions. The WebSocket attaches to existing
 opaque terminal ids after owner auth, carries ordered PTY output, status, and
 exit data to the browser, and carries raw input plus bounded resize requests
-back to the daemon. HTTP output transport remains available for initial replay,
-reload reconstruction, deterministic tests, or fallback, but the normal
-connected xterm path does not depend on periodic output polling.
+back to the daemon. If the owning workRoot goes offline or becomes unavailable,
+the WebSocket stops accepting client input and stops sending buffered or live
+PTY output. HTTP output transport remains available for initial replay, reload
+reconstruction, deterministic tests, or fallback, but the normal connected
+xterm path does not depend on periodic output polling.
 {#260516-ws-web-dashboard-terminal-websocket-transport}
 
 ## Terminal Pane {#260516-ws-web-dashboard-terminal-pane}
