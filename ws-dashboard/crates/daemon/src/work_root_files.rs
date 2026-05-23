@@ -68,11 +68,22 @@ impl OpenedWorkRoots {
         );
     }
 
-    pub fn register_registry_entry(&self, work_root_id: WorkRootId, root: RegisteredWorkRoot) {
+    pub fn register_registry_entry(
+        &self,
+        work_root_id: WorkRootId,
+        root: RegisteredWorkRoot,
+    ) -> Option<RegisteredWorkRoot> {
         self.roots
             .write()
             .expect("opened workRoots lock poisoned")
-            .insert(work_root_id, root);
+            .insert(work_root_id, root)
+    }
+
+    pub fn unregister(&self, work_root_id: &WorkRootId) -> Option<RegisteredWorkRoot> {
+        self.roots
+            .write()
+            .expect("opened workRoots lock poisoned")
+            .remove(work_root_id)
     }
 
     pub fn resolve(&self, work_root_id: &WorkRootId) -> Option<PathBuf> {

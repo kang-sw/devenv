@@ -658,6 +658,17 @@ async fn work_root_registry_activation_controls_keep_offline_roots_visible_and_g
     let cookie = pair_and_cookie(app.clone(), &token).await;
     let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
     let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
+    let (open_socket_addr, open_socket_server) = spawn_test_server(app.clone()).await;
+    let mut open_socket_request =
+        format!("ws://{open_socket_addr}/api/dashboard/terminals/{terminal_id}/socket")
+            .into_client_request()
+            .expect("pre-offline websocket request");
+    open_socket_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut open_socket, _) = tokio_tungstenite::connect_async(open_socket_request)
+        .await
+        .expect("pre-offline websocket connects");
 
     let response = app
         .clone()
@@ -779,6 +790,34 @@ async fn work_root_registry_activation_controls_keep_offline_roots_visible_and_g
         assert_eq!(value["error"], expected_error);
         assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
     }
+
+    open_socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({
+                "type": "input",
+                "data": "echo WS-OFFLINE-BYPASS\n"
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send offline websocket input frame");
+    let mut socket_closed = false;
+    for _ in 0..4 {
+        match timeout(Duration::from_secs(2), open_socket.next()).await {
+            Ok(Some(Ok(TungsteniteMessage::Close(_)))) | Ok(None) => {
+                socket_closed = true;
+                break;
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(_))) | Err(_) => {
+                socket_closed = true;
+                break;
+            }
+        }
+    }
+    assert!(socket_closed, "offline websocket closes after client input");
+    open_socket_server.abort();
 
     let (addr, server) = spawn_test_server(app.clone()).await;
     let mut websocket_request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
@@ -995,6 +1034,53 @@ async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak(
 }
 
 #[tokio::test]
+async fn open_work_root_header_identifies_requested_root_with_ambiguous_labels() {
+    let base = temp_fixture_path("ambiguous-open");
+    let first = base.join("first").join("same-name");
+    let second = base.join("second").join("same-name");
+    fs::create_dir_all(&first).expect("create first same-name root");
+    fs::create_dir_all(&second).expect("create second same-name root");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let first_id = open_work_root_for_test(app.clone(), cookie.as_str(), &first).await;
+    let expected_second_id = ws_dashboard_daemon::discovery::local_work_root_id_for_path(&second);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": second.display().to_string() }).to_string(),
+                ))
+                .expect("open second same-name root request"),
+        )
+        .await
+        .expect("open second same-name root response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-ws-dashboard-opened-work-root-id")
+            .and_then(|value| value.to_str().ok()),
+        Some(expected_second_id.as_str())
+    );
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("open second body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("open second JSON");
+    let ids = work_root_ids(&value);
+    assert!(ids.contains(&first_id));
+    assert!(ids.iter().any(|id| id == expected_second_id.as_str()));
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
 async fn work_root_activation_rolls_back_when_registry_persist_fails() {
     let root = temp_fixture_path("activation-persist-fails");
     fs::create_dir_all(&root).expect("create activation root");
@@ -1055,6 +1141,71 @@ async fn work_root_activation_rolls_back_when_registry_persist_fails() {
         value["workspaces"][0]["workRoots"][0]["activation"],
         "online"
     );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_directory);
+}
+
+#[tokio::test]
+async fn open_work_root_does_not_advertise_id_when_registry_persist_fails() {
+    let root = temp_fixture_path("open-persist-fails");
+    fs::create_dir_all(&root).expect("create open root");
+    let state_file_directory = temp_fixture_path("open-state-dir");
+    fs::create_dir_all(&state_file_directory).expect("create state-file directory");
+    let state = app_state_with_opened_and_store(
+        OpenedWorkRoots::default(),
+        DashboardStateStore::at_path(&state_file_directory),
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": root.display().to_string() }).to_string(),
+                ))
+                .expect("open workRoot request"),
+        )
+        .await
+        .expect("open workRoot response");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response
+        .headers()
+        .get("x-ws-dashboard-opened-work-root-id")
+        .is_none());
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("open persist error body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("open persist error JSON");
+    assert_eq!(value["error"], "persist workRoot failed");
+
+    let resources = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("resources request"),
+        )
+        .await
+        .expect("resources response");
+    assert_eq!(resources.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resources.into_body(), 64 * 1024)
+        .await
+        .expect("resources body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("resources JSON");
+    assert!(value["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .is_empty());
 
     remove_static_fixture(&root);
     remove_static_fixture(&state_file_directory);
@@ -3846,14 +3997,21 @@ async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -
         .await
         .expect("open workRoot response");
     assert_eq!(response.status(), StatusCode::OK);
+    let opened_header = response
+        .headers()
+        .get("x-ws-dashboard-opened-work-root-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
         .await
         .expect("open workRoot body bytes");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("open JSON");
-    value["workspaces"][0]["workRoots"][0]["id"]
-        .as_str()
-        .expect("workRoot id")
-        .to_owned()
+    let opened_id = opened_header.expect("opened workRoot id header");
+    assert!(
+        work_root_ids(&value).iter().any(|id| id == &opened_id),
+        "opened header id {opened_id} must be present in response body"
+    );
+    opened_id
 }
 
 async fn create_terminal_for_test(app: axum::Router, cookie: &str, work_root_id: &str) -> String {

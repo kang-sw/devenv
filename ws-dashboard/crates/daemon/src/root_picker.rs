@@ -14,6 +14,7 @@ use ws_dashboard_core::{
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
 use crate::resources::{live_dashboard_resources, DashboardResourcesProvider};
 use crate::router::AppState;
+use crate::work_root_files::RegisteredWorkRoot;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,15 +123,31 @@ pub async fn open_work_root(
 
     let opened_work_root_id = work_root.id.clone();
     let _persist_guard = state.registry_persist_lock.lock().await;
-    state
-        .opened_work_roots
-        .register(opened_work_root_id.clone(), requested_path);
+    let previous_entry = state.opened_work_roots.register_registry_entry(
+        opened_work_root_id.clone(),
+        RegisteredWorkRoot {
+            path: requested_path,
+            activation: WorkRootActivation::Online,
+            provenance: crate::work_root_files::WorkRootProvenance::Opened,
+        },
+    );
     if let Err(error) = state
         .dashboard_state
         .persist_opened_work_roots(&state.opened_work_roots)
         .await
     {
+        match previous_entry {
+            Some(previous) => {
+                state
+                    .opened_work_roots
+                    .register_registry_entry(opened_work_root_id, previous);
+            }
+            None => {
+                state.opened_work_roots.unregister(&opened_work_root_id);
+            }
+        }
         tracing::warn!(%error, "failed to persist opened dashboard workRoots");
+        return picker_error(StatusCode::INTERNAL_SERVER_ERROR, "persist workRoot failed");
     }
 
     // CONTRACT: return the aggregated live view of every opened workRoot so the

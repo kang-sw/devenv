@@ -439,7 +439,7 @@ pub async fn terminal_websocket(
         return terminal_error(StatusCode::GONE, "terminal is closed");
     }
     upgrade
-        .on_upgrade(move |socket| terminal_socket_task(session, socket, query.after))
+        .on_upgrade(move |socket| terminal_socket_task(state, session, socket, query.after))
         .into_response()
 }
 
@@ -663,7 +663,12 @@ impl TerminalSession {
     }
 }
 
-async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket, after: u64) {
+async fn terminal_socket_task(
+    state: AppState,
+    session: Arc<TerminalSession>,
+    socket: WebSocket,
+    after: u64,
+) {
     let (mut sender, mut receiver) = socket.split();
     let mut output_signal = session.output_signal.subscribe();
     let mut cursor = after;
@@ -681,6 +686,10 @@ async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket, 
                 let Some(Ok(message)) = maybe_message else { break; };
                 match message {
                     Message::Text(text) => {
+                        if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            break;
+                        }
                         let Ok(message) = serde_json::from_str::<TerminalWebSocketClientMessage>(&text) else {
                             break;
                         };
@@ -690,6 +699,10 @@ async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket, 
                         }
                     }
                     Message::Binary(bytes) => {
+                        if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            break;
+                        }
                         if session.write_input(&bytes).is_err() {
                             let _ = send_terminal_socket_status(&session, &mut sender, false).await;
                             break;
