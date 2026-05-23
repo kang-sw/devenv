@@ -262,9 +262,16 @@ The `agents.*` tool family exposes durable named-agent orchestration.
 `agents.register` creates or updates an agent record with backend, model alias
 or compatibility tier field, resolved model, prompt references, or materialized
 system prompt text. `agents.call` starts an asynchronous call and returns
-immediately. Public `agents.*` schemas do not advertise `root`; callers should
-use `ws.setup` for session root selection, while explicit root arguments may
-remain accepted as a hidden compatibility override.
+immediately. Public named-agent workflows use `ws.setup` for session root
+selection; explicit root arguments may remain accepted as a hidden compatibility
+override.
+
+> [!note] Planned 🚧 {#260523-agents-root-schema-invisibility}
+> Public and generated `agents.*` schemas will omit `root` end-to-end. The raw
+> advertised schema, host-visible generated metadata, tests, runtime reference
+> examples, and workflow guidance will all present `ws.setup` as the normal
+> repository-root selection surface while preserving any intentional hidden
+> explicit-root dispatch compatibility.
 
 `agents.register` prefers `model` as the public model-selection field.
 `model: "light"`, `model: "core"`, and `model: "deep"` select portable
