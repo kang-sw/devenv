@@ -785,14 +785,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
               updateMode: "watch",
             },
             {
-              type: "transcriptUpdated",
-              cursor: "browser:stream:3",
-              activityId: "agent:alpha",
-              transcriptCursor: "alpha:streamed",
-            },
-            {
               type: "heartbeat",
-              cursor: "browser:stream:4",
+              cursor: "browser:stream:3",
             },
           ]
             .map((event) => `event: activity\ndata: ${JSON.stringify(event)}\n\n`)
@@ -804,6 +798,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         });
       },
     );
+    let alphaTranscriptReplaceRequests = 0;
     await page.route(
       /\/api\/dashboard\/work-roots\/.*\/activity\/items\/.*\/transcript(?:\?.*)?$/,
       async (route) => {
@@ -818,6 +813,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
           ? decodeURIComponent(pathMatch[2])
           : "agent:alpha";
         const cursor = url.searchParams.get("cursor");
+        if (activityId === "agent:alpha" && !cursor) {
+          alphaTranscriptReplaceRequests += 1;
+        }
         const source =
           activityId === "exec:beta"
             ? {
@@ -941,7 +939,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     ).toHaveCount(6);
     await expect(
       populatedBody.locator('[data-command-id="activity.refresh"]'),
-    ).toHaveCount(0);
+    ).toHaveCount(1);
     await page.setViewportSize({ width: 760, height: 760 });
     await page.waitForTimeout(100);
     const ribbonMetrics = await populatedBody
@@ -1006,6 +1004,37 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       )
       .toBeGreaterThan(100);
     await expect(transcriptScroll).toHaveAttribute("data-following-tail", "false");
+    const refreshBeforeScrollTop = await transcriptScroll.evaluate((node) => {
+      (node as HTMLElement & { __wsStableScroll?: boolean }).__wsStableScroll = true;
+      return node.scrollTop;
+    });
+    const alphaReplaceRequestsBeforeRefresh = alphaTranscriptReplaceRequests;
+    await populatedBody
+      .locator('.activity-transcript-head [data-command-id="activity.refresh"]')
+      .click();
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: activity.refresh",
+    );
+    await expect
+      .poll(() => alphaTranscriptReplaceRequests)
+      .toBeGreaterThan(alphaReplaceRequestsBeforeRefresh);
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate((node) =>
+          Boolean(
+            (node as HTMLElement & { __wsStableScroll?: boolean }).__wsStableScroll,
+          ),
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate(
+          (node, expected) => Math.abs(node.scrollTop - expected),
+          refreshBeforeScrollTop,
+        ),
+      )
+      .toBeLessThanOrEqual(2);
     const detailToggle = populatedBody.locator(
       '[data-command-id="activity.detail.toggle"]',
     );

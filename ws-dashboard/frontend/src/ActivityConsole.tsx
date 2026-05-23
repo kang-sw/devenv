@@ -373,6 +373,7 @@ export function ActivityConsole({
             selectedItemId={selectedItemId}
           />
           <TranscriptBlockViewer
+            workRootId={view.workRootId}
             expandedDetails={expandedDetails}
             onLoadMore={handleLoadMore}
             onRefresh={handleRefresh}
@@ -424,6 +425,7 @@ export function ActivityRibbon({
 }
 
 export function TranscriptBlockViewer({
+  workRootId,
   expandedDetails,
   onLoadMore,
   onRefresh,
@@ -432,6 +434,7 @@ export function TranscriptBlockViewer({
   state,
   transcript,
 }: {
+  workRootId: string;
   expandedDetails: ReadonlySet<string>;
   onLoadMore: () => void;
   onRefresh: () => void;
@@ -442,7 +445,11 @@ export function TranscriptBlockViewer({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const selectedActivityId = selectedItem?.id ?? null;
-  const scrollMemoryKey = transcript?.activityId ?? selectedActivityId;
+  const scrollMemoryKey = transcript
+    ? `${transcript.workRootId}\u001f${transcript.activityId}`
+    : selectedActivityId
+      ? `${workRootId}\u001f${selectedActivityId}`
+      : null;
   const [followingTail, setFollowingTail] = useState(
     () =>
       (scrollMemoryKey
@@ -500,6 +507,7 @@ export function TranscriptBlockViewer({
     effectiveFollowingTail,
     rememberedScroll,
     scrollMemoryKey,
+    transcript,
     transcript?.activityId,
     transcript?.blocks.length,
     transcript?.blocks.at(-1)?.cursor,
@@ -512,6 +520,15 @@ export function TranscriptBlockViewer({
           <strong>{selectedItem?.label ?? "Activity"}</strong>
           <span>{selectedItem?.status ?? "unavailable"}</span>
         </div>
+        <button
+          className="activity-console-control"
+          data-command-id="activity.refresh"
+          disabled={!selectedItem?.transcript.available}
+          type="button"
+          onClick={onRefresh}
+        >
+          Refresh transcript
+        </button>
       </div>
       {state.phase === "loading" ? (
         <div className="workroot-activity-state">Loading transcript</div>
