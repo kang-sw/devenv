@@ -9,8 +9,10 @@ spec:
   - 260523-dashboard-workroot-registry-activation
 plans:
   phase-1: 2026-05/23-260523-feat-ws-dashboard-workroot-registry-activation
+  phase-2: 2026-05/23-260523-feat-ws-dashboard-workroot-registry-activation-phase-2
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-23
 ---
 
 # Add durable dashboard workspace and workRoot registry activation
@@ -143,3 +145,29 @@ Polling should be conservative: selected or online workRoots may refresh more
 often than offline workRoots, large registries should back off, and explicit
 refresh remains the deterministic recovery path. Later filesystem watches can
 only trigger refresh-needed invalidations and must not replace recomputation.
+
+### Result (67611367) - 2026-05-23
+
+Implemented explicit refresh and bounded live status polling over the canonical
+`GET /api/dashboard/resources` endpoint. The daemon route already recomputes
+known workRoot availability on each resource load, so the implementation
+preserved that route as the refresh authority and added route coverage proving
+availability changes do not remove registry membership or mutate activation.
+
+The frontend now uses a resource refresh coordinator for initial load,
+explicit `dashboard.refresh`, open-workRoot reconciliation, activation
+responses, and bounded polling. The coordinator suppresses overlapping polling
+requests, queues foreground refresh behind an in-flight poll, ignores stale
+poll responses after newer open/activation resource views, preserves the last
+known tree on refresh failure, and stops mounted-dashboard polling after
+unmount.
+
+Verification passed:
+
+- `cargo fmt --all --check`
+- `cargo test -p ws-dashboard-daemon`
+- `npm run build`
+- `npm run test:resource-model`
+- `npm run test:commands`
+- `npm run test:open-work-root`
+- `npm run test:browser`

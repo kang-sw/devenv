@@ -149,7 +149,6 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260523-feat-ws-dashboard-workroot-registry-activation` | ready | Add durable dashboard workspace and workRoot registry activation |
 | `260523-feat-ws-dashboard-readonly-file-pane-restore` | todo | Restore dashboard read-only file panes after refresh or daemon restart |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -177,9 +176,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260523-feat-ws-dashboard-workroot-registry-activation` - implement the durable
-  workRoot registry and activation spine before linked worktree discovery or
-  broader UI persistence work.
+No ready tickets.
 
 ## Session Notes
 
