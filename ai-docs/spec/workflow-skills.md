@@ -112,12 +112,13 @@ bootstrap, release, verification, and reconstruction workflows:
 `lead-sprint`, `lead-verify-discussion`, `lead-check-blockers`, `lead-forge-spec`,
 `lead-forge-mental-model`, and `lead-review`.
 
-The wsflow `lead-sprint` skill is a sprint-branch session container that
-preserves deferred documentation wrap-up and routes source tasks through
-`lead-edit`. In the current wsflow package, `lead-implement` also delegates
-source execution to `lead-edit`; `lead-edit` chooses direct or scoped subagent
-execution while the sprint wrap-up keeps documentation integration,
-verification, and commit ownership explicit. {#260513-wsflow-sprint-skill}
+The wsflow `lead-sprint` skill mirrors the episode-oriented sprint shell: it
+coordinates discussion, exploration, `sprint-edit` micro-edit episodes, and
+normal workflow handoff without owning a sprint branch or final wrap-up.
+Current wsflow source execution remains `lead-edit`-mediated, so sprint-edit
+uses `lead-edit` only when the change stays lead-owned and direct; larger or
+subagent-worthy work routes through normal wsflow workflow gates.
+{#260513-wsflow-sprint-skill}
 
 The wsflow package excludes skeleton flows, recovery orchestration, and
 upstream authoring helper skills: `lead-write-skeleton`, `lead-salvage`, and
@@ -353,7 +354,8 @@ findings. Correctness and test reviewers remain scoped to the diff and their
 assigned partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
-stages complete, while `lead-sprint` defers that pass to wrap-up.
+stages complete. `lead-sprint` runs documentation closure only for marked
+`sprint-edit` episodes when each episode wraps.
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,
@@ -426,28 +428,26 @@ the same route-only boundary without pre-applying `wsflow:lead-implement`
 branch or execution judgments.
 {#260519-proceed-implementation-dispatch-precheck}
 
-## Sprint Session Container {#260505-sprint-session-container}
+## Sprint Session Shell {#260505-sprint-session-container}
 
-`lead-sprint` is a multi-task session container for feature-branch work. It
-operates on `sprint/` branches, loops over user requests, and routes each task
-to inline discussion, scoped subquery, direct edit, or delegated code writing.
+`lead-sprint` is an episode-oriented workflow shell for sustained user sessions.
+It stays on the current branch, coordinates discussion and exploration, and
+routes larger implementation through `lead-proceed` or `lead-implement` instead
+of creating `sprint/` branches or running a final branch wrap-up.
 
-During the sprint loop, documentation pipeline work is suppressed for individual
-tasks. On wrap-up, the skill computes the branch range, runs the spec update
-pass, invokes the mental-model updater, follows the executor wrap-up document
-pipeline, commits documentation updates, reports the documentation changes, and
-merges or deletes the sprint branch according to the remaining source changes.
+Small interactive edits may enter `sprint-edit` only when a single lead-owned
+context covers the whole change. Each sprint-edit commit carries recoverable
+commit-body markers, `Sprint-Edit: <episode-slug>` and
+`Sprint-Edit-Context: <one-line context>`. After each edit, the shell asks
+whether to keep refining the current context, wrap it up, or shift direction.
 
-> [!note] Planned 🚧
-> `lead-sprint` will become an episode-oriented workflow shell rather than a
-> sprint-branch container. It will coordinate discussion, exploration,
-> `sprint-edit` micro-edit episodes, and full workflow handoff without creating
-> `sprint/` branches or running a final wrap-up. `sprint-edit` episodes will
-> handle only small lead-owned interactive edits, mark their commits with a
-> recoverable episode identifier, ask whether to keep refining the current
-> context, wrap it up, or shift direction, and run the documentation pass when
-> the episode wraps up. Larger implementation work will route through
-> `lead-proceed` or `lead-implement`. {#260523-sprint-episode-workflow-shell}
+Wrapping a sprint-edit episode runs documentation closure for that marked
+episode range: update specs, refresh mental models when needed, follow the
+executor document pipeline for episode-scoped docs, commit documentation changes,
+clear the active edit context, and return to the sprint loop. Public contracts,
+routing semantics, protocols, ticket phase completion, cross-module new patterns,
+plan or review allocation, and branch decisions route outside sprint-edit.
+{#260523-sprint-episode-workflow-shell}
 
 ## Review Workflow Skills {#260513-review-workflow-skills}
 

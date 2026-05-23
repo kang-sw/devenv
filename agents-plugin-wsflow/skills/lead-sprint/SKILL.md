@@ -1,6 +1,6 @@
 ---
 name: lead-sprint
-description: Use when the user asks for a wsflow sprint or multi-task branch session; defers documentation until wrap-up while source changes route through direct edit.
+description: Use when the user wants an ongoing wsflow sprint session for discussion, exploration, small interactive edits, and normal workflow handoff.
 ---
 
 # Sprint
@@ -13,109 +13,131 @@ Call `wsflow/project_tree()`.
 
 ## Invariants
 
-- Operate only on `sprint/` branches; create, continue, wrap up, or abandon explicitly.
-- Suppress documentation pipeline during task execution; run one wrap-up pass.
-- Execute source changes through `wsflow:lead-edit`; `lead-edit` chooses direct or subagent implementation.
-- Use subagents for bounded exploration, implementation support, verification, audit, or review.
-- Keep wrap-up integration lead-owned: specs, mental models, tickets, index, commits, merge, and cleanup.
-- Commit each logical source task before returning to the sprint loop.
+Scope
+- Stay on the current branch; never create or require `sprint/` branches.
+- Keep `lead-sprint` responsible for routing, session continuity, and episode closure.
+- Route general implementation through `wsflow:lead-proceed` or `wsflow:lead-implement`; do not weaken their gates.
+- Allow `sprint-edit` only for one-context, lead-owned, small interactive edits.
+
+Episodes
+- Keep one active `sprint-edit` episode per edit context.
+- Add both `Sprint-Edit:` and `Sprint-Edit-Context:` lines to every sprint-edit commit body.
+- Run documentation closure when an episode wraps; do not batch one final sprint wrap-up.
+- Return to the sprint loop after every route, handoff, or episode closure.
+
+Language
+- Render fixed English prompt templates in the user's active language.
 - All written artifacts are English.
 
 ## On: invoke
 
 1. Invoke `wsflow:lead-workflow-manual`.
-2. Call `wsflow/project_tree()`.
-3. Call `wsflow/git.status()`.
-4. On `sprint/` branch: detect sprint name; present continue, wrap-up, abandon.
-5. Outside `sprint/`: infer name without asking, then create `sprint/<name>`.
-   - Clear topic: short kebab-case slug.
-   - Vague or absent topic: random `<adjective>-<noun>-<noun>`.
-6. Enter session loop.
+2. Call `wsflow/git.status()`.
+3. Call `wsflow/project_tree()`.
+4. Recover episode state from active conversation or recent `Sprint-Edit:` commit markers.
+5. If recovery finds one open episode, set `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` from it.
+6. If recovery is empty or ambiguous, initialize `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` as empty.
+7. Enter session loop.
 
 ## On: session loop
 
-1. Apply `judge: needs-survey`; run Sprint-Aware Survey when warranted.
-2. Accept user request.
-3. Apply `judge: route-task`; execute the first matching route.
-4. Return to step 2.
+1. Accept user request.
+2. If a `sprint-edit` episode is active and the request answers the post-edit question, apply **Post-Edit Reply Routing**.
+3. Otherwise apply `judge: route-request`; execute the first matching route.
+4. Return to step 1.
 
-## On: wrap-up
+## On: recover episode
 
-Trigger: explicit done signal such as "done", "wrap up", or "finish sprint".
+1. Prefer active conversation state when it names an open `sprint-edit` episode.
+2. Otherwise inspect recent commits for `Sprint-Edit:` and `Sprint-Edit-Context:` markers.
+3. Treat the newest marker group with no later episode documentation closure as the open episode.
+4. Set `<episode-start>` to the parent of that group's first marked commit.
+5. If multiple marker groups could be open, leave state empty and report the ambiguity before routing.
 
-1. Confirm current branch is `sprint/<name>`.
-2. Set `<parent>` through `wsflow/git.merge_base(base: "main", head: "HEAD")`.
-3. Invoke `wsflow:lead-update-spec` with `<parent>..HEAD`.
-4. Review changed source and update mental-model documents directly when module contracts, coupling, extension points, common mistakes, or technical debt changed.
-5. Call `wsflow/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate.
-6. If ticket-driven, update existing tickets only; do not create new tickets during wrap-up.
-7. Run relevant verification commands after documentation updates.
-8. Report source commits, spec changes, mental-model changes, ticket/index updates, and verification.
-9. If source changes exist, merge `sprint/<name>` to `main` with a non-interactive Git sequence after user approval.
-10. If no source changes exist, skip merge and delete the branch after user approval.
+## On: sprint-edit
 
-## On: abandon
+Trigger: `judge: route-request` selects `Start or continue sprint-edit`.
 
-1. Confirm current branch is `sprint/<name>`.
-2. Report unmerged commits with `wsflow/git.log(range: "main..HEAD")`.
-3. Ask for explicit approval before deleting the branch or discarding work.
-4. Do not move tickets or edit docs unless the user explicitly requests cleanup.
+1. Apply `judge: sprint-edit`; if it fails, route through normal workflow instead.
+2. If no episode is active, set `<current-edit-context>` to a one-line context, set `<episode-slug>` to a short kebab-case slug, and set `<episode-start>` with `git rev-parse HEAD`.
+3. Invoke `wsflow:lead-edit` only for a lead-owned direct edit; if the edit needs subagent implementation, stop and route through normal workflow instead.
+4. Run focused verification; read full output before claiming pass.
+5. Commit the edit with normal commit message content plus both marker lines:
+
+```text
+Sprint-Edit: <episode-slug>
+Sprint-Edit-Context: <one-line context>
+```
+
+6. Ask, in the user's active language:
+
+```text
+[sprint] Should we keep refining <current edit context>, wrap it up here, or shift direction?
+```
+
+7. Return to session loop.
+
+## On: wrap episode
+
+Trigger: post-edit reply means wrap it up, done, or good.
+
+1. Confirm `<episode-slug>` and `<episode-start>` exist; otherwise report that no active sprint-edit episode is open.
+2. Find commits in `<episode-start>..HEAD` whose commit body contains `Sprint-Edit: <episode-slug>`.
+3. Stop if no marked commits are found.
+4. Set `<episode-range>` to the smallest contiguous Git range that contains the marked commits; report any unmarked commits inside the range as excluded from sprint-edit intent.
+5. Invoke `wsflow:lead-update-spec` with `<episode-range>` and the marked commit list.
+6. Review changed source and update mental-model documents directly when module contracts, coupling, extension points, common mistakes, or technical debt changed.
+7. Call `wsflow/infra.read(name: "executor-wrapup")`; follow Doc Pipeline and Doc Commit Gate for episode-scoped docs only.
+8. Clear `<current-edit-context>`, `<episode-slug>`, and `<episode-start>`.
+9. Report marked episode commits, documentation updates, and verification.
+10. Return to session loop.
+
+## On: shift direction
+
+Trigger: post-edit reply means shift direction or change focus.
+
+1. If an episode is active, ask whether to wrap the current episode before starting the new direction.
+2. If the user chooses wrap, run **On: wrap episode** first.
+3. If the user chooses leave open, preserve `<current-edit-context>`, `<episode-slug>`, and `<episode-start>` until the user returns or explicitly abandons it.
+4. Route the new request through the session loop.
 
 ## Judgments
 
-### judge: route-task
+### judge: route-request
 
 Pick first match, execute, return to loop.
 
 | Request type | Routing |
 |---|---|
-| Behavior, concept, or status question | Answer inline; use direct search, wsflow read tools, or Sprint-Aware Survey when codebase context is needed |
-| Codebase exploration | Run Sprint-Aware Survey |
+| Behavior, concept, or status question | Answer inline; use direct search, wsflow read tools, or scoped subagents when codebase context is needed |
+| Codebase exploration | Use direct local search or a scoped subagent |
 | Design discussion | Discuss inline; do not auto-chain to spec or ticket authoring |
-| Source change | Invoke `wsflow:lead-edit` |
-| Ticket, spec, or mental-model maintenance | Handle directly only when the user explicitly asks; otherwise defer to wrap-up |
-| Exploration required before routing | Run Sprint-Aware Survey; re-apply judge |
+| Ticket, spec, or protocol change | Route through normal workflow; usually `wsflow:lead-proceed` when implementation is requested |
+| One-context small interactive edit | Start or continue sprint-edit |
+| Larger implementation, public contract work, cross-module change, new pattern, or review-worthy work | Continue through `wsflow:lead-proceed` or `wsflow:lead-implement` |
+| Ambiguous request | Ask the smallest routing question, then re-apply judge |
 
-### judge: needs-survey
+### judge: sprint-edit
 
-Fire when:
+Allow only when every condition is true:
 
-- first session-loop entry this session;
-- request touches an unsurveyed domain or component;
-- domain shifts mid-session.
+- one active edit context is enough to hold the whole change;
+- the lead can keep the edit direct and verify inline without subagent implementation;
+- no public contract, protocol, ticket phase, branch, or routing semantics change;
+- no cross-module new pattern, plan allocation, or review allocation is needed;
+- failure can be safely resolved or reverted before leaving the episode.
 
-Skip for follow-ups in an established domain, status, or continuity queries.
+If any condition is false, route through normal workflow.
 
-## Templates
+### Post-Edit Reply Routing
 
-### Sprint-Aware Survey
-
-Use direct local search or a scoped subagent.
-
-```text
-Sprint: <sprint-name>
-Branch: <branch>
-Commit range: <parent>..HEAD
-Commits:
-<wsflow/git.log(range: "<parent>..HEAD") output>
-
-Project map:
-<wsflow/project_tree() output>
-
-Question:
-<focused read-only question>
-
-Return:
-- relevant files or docs
-- existing implementation or reusable patterns
-- risks that affect this sprint
-- next routing recommendation
-```
+| Reply intent | Action |
+|---|---|
+| keep refining or continue | Keep the current episode active; run **On: sprint-edit** for the next edit |
+| wrap it up, done, or good | Run **On: wrap episode** |
+| shift direction or change focus | Run **On: shift direction** |
+| unclear | Ask the fixed `[sprint]` question again with the current context |
 
 ## Doctrine
 
-Sprint optimizes for **sustained implementation throughput across a feature
-branch**. It keeps throughput by batching documentation to wrap-up and routing
-source tasks through `lead-edit`, while using scoped subagents when they improve
-exploration, implementation, or review. When ambiguous, preserve branch
-continuity without losing wrap-up accountability.
+Sprint optimizes for **session continuity across exploratory workflow turns**. It keeps the lead oriented by preserving a lightweight loop, lets tiny interactive edits close as recoverable episodes, and routes anything larger through the normal workflow before sprint convenience can weaken implementation discipline.

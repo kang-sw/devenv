@@ -30,7 +30,7 @@ Conversation
 
 1. Invoke `wsflow:lead-workflow-manual` via Skill tool (loads orchestration primitives reference).
 2. Call `wsflow/project_tree()` to load the current project map.
-3. Call `wsflow/git.status()`. If the current branch starts with `sprint/`, emit: "Note: sprint branch `<branch-name>` detected - route sprint-scoped implementation through `wsflow:lead-sprint` or ask for an explicit non-sprint target branch."
+3. Call `wsflow/git.status()`.
 4. If `user request` references a ticket, read it.
 5. Enter user-message handling.
 

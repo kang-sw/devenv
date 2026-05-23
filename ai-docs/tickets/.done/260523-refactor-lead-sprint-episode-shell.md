@@ -6,6 +6,7 @@ related:
   260521-refactor-wsflow-lead-implement-mirroring-gap: adjacent wsflow divergence discovered during the same lead skill cascade
 related-mental-model:
   - workflow-skills
+completed: 2026-05-23
 ---
 
 # lead-sprint episode workflow shell
@@ -93,3 +94,26 @@ Verification:
 - wsflow mirroring guidance and tests still pass or any intentional divergence is
   documented.
 - Relevant skill-bundle tests pass.
+
+### Result (8e7f40a) - 2026-05-23
+
+Implemented the episode-oriented sprint shell for full ws and mirrored the
+session shell in wsflow. `lead-sprint` now stays on the current branch, routes
+discussion and exploration inline, gates small direct changes through
+`sprint-edit`, marks sprint-edit commits, recovers open episodes from active
+conversation or commit markers, asks whether to keep refining, wrap up, or shift
+direction, and runs episode-scoped documentation closure when an episode wraps.
+
+The implementation removed stale full ws sprint-branch handoff text from
+`lead-discuss` and `lead-implement`, updated the workflow-skills spec and mental
+model, and refreshed the canonical flow index. wsflow preserves its documented
+`lead-edit` execution surface only for lead-owned direct sprint-edit changes;
+larger wsflow work routes through normal workflow gates.
+
+Verification:
+- `ws/spec_index.verify()` passed.
+- `python3 -m unittest discover agents-plugin/tests` passed, 9 tests.
+- `python3 -m unittest discover agents-plugin-wsflow/tests` passed, 9 tests.
+- Fit review passed after adding open sprint-edit episode recovery.
+- Fresh-reader audit reported no material execution blockers after fixing
+  episode documentation commit ordering.

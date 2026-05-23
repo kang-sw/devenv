@@ -54,14 +54,14 @@ related:
 - `lead-bootstrap` is mirrored between ws and wsflow, but downstream template version histories are package-local; wsflow starts its bootstrap baseline at `v0001` and does not replay the full ws migration backlog. {#260513-wsflow-agentless-skill-surface}
 - Orchestration-heavy skills load `lead-workflow-manual` when primitive context is not already active; skipping it causes notation drift and wrong agent-call forms. {#260505-workflow-primitive-reference}
 - Implementation skills do not create missing skeleton artifacts; `lead-implement` carries concrete contract and integration-test instructions in the implementation brief for delegated mode. {#260505-implementation-workflow-skills}
-- `lead-implement` is a unified implementation spine: direct-edit and delegated modes live in one skill; a single review stage covers 0..N reviewers via `judge: review-allocation`; `lead-sprint` defers the doc pipeline to wrap-up. {#260505-implementation-workflow-skills}
+- `lead-implement` is a unified implementation spine: direct-edit and delegated modes live in one skill; a single review stage covers 0..N reviewers via `judge: review-allocation`; `lead-sprint` routes larger work back through normal implementation gates. {#260505-implementation-workflow-skills}
 - `lead-implement` delegated mode uses brief-bounded implementation and file-based reviewer output; the brief must preserve selected-scope binding decisions, and ticket-driven fit review checks ticket-to-brief decision preservation. {#260505-implementation-workflow-skills}
 - `plan-populator-survey` collects file-backed reuse, contract, and shortcut-risk signals; when safe execution needs planner judgment, it exits with `[escalate-to-research]` instead of forcing a survey plan. {#260505-implementation-workflow-skills}
 - `plan-populator-research` turns codebase evidence into planner judgment: choose clean existing mechanisms, reject fallback/mock/temporary or duplicated-glue paths, and escalate when no clean plan satisfies the brief. {#260505-implementation-workflow-skills}
 - `lead-implement` treats survey and research as either/or plan depths; survey escalation routes to research before implementation, replacing the same plan path with the research plan. {#260505-implementation-workflow-skills}
 - `lead-implement` evaluates plan-populator exit signals before spawning the implementer; stopping early is preferred to running a known-bad implementation path through review. {#260505-implementation-workflow-skills}
-- Sprint defers doc pipeline until wrap-up; per-task doc updates inside sprint create partial checkpoints that confuse wrap-up. {#260505-sprint-session-container}
-- wsflow includes sprint as a branch container; current wsflow sprint source tasks route through `lead-edit`, and `wsflow:lead-implement` also delegates source execution to `lead-edit` while the lead keeps documentation integration, final judgment, and commits explicit. {#260513-wsflow-agentless-skill-surface} {#260513-wsflow-sprint-skill}
+- Sprint is an episode shell: only one-context lead-owned `sprint-edit` changes stay inside it, and each marked episode runs its own documentation closure when wrapped. {#260505-sprint-session-container}
+- wsflow sprint mirrors the episode shell while preserving current source execution mechanics: sprint-edit may use `lead-edit` only for lead-owned direct edits, while larger or subagent-worthy work routes through normal wsflow workflow gates. {#260513-wsflow-agentless-skill-surface} {#260513-wsflow-sprint-skill}
 - wsflow mirrors proceed route clarity by announcing implementation-bound routing without pre-applying `wsflow:lead-implement` branch or execution judgments. {#260519-proceed-implementation-dispatch-precheck}
 - `lead-review` loads `ai-docs/_review.local.md` for all environment-specific configuration (remote, phases, comment/merge/notification methods); when absent, it interviews the user and writes the config before the first review runs. {#260513-review-workflow-skill}
 - `lead-review` routes NEEDS FIX local-fix through `lead-discuss` with findings as context; re-review after fix is user-discretion, not automatic re-entry. {#260513-review-workflow-skill}
@@ -73,7 +73,7 @@ related:
 - Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
 - Legacy skeleton prompts may remain bundled for compatibility; normal implementation routing does not register skeleton-populator or skeleton-reviewer.
 - Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec gate and queue checks.
-- Moving updater dispatch into the Edit stage can double-run documentation updates or break sprint batching; the Doc Pre-Pass stage owns all doc pipeline calls.
+- Moving updater dispatch into the Edit stage can double-run documentation updates; implementation doc pre-pass and sprint-edit episode closure own their separate doc pipeline calls.
 - `lead-salvage` routes ticket writes through `lead-write-ticket`; direct ticket graph mutation inside salvage would bypass ticket conventions and commit handling.
 - Bootstrap guide semantics stay host-neutral; root `CLAUDE.md` only delegates to `AGENTS.md`.
 - Bootstrap template changes must check both ws and wsflow packages; matching behavior may use different template version numbers because each package owns its own downstream lineage.
@@ -94,5 +94,5 @@ related:
 - Editing downstream `ai-docs/WORKFLOW.md` as if it overrides installed ws tooling; upstream plugin/runtime semantics and bundled conventions remain canonical.
 - Removing the final `Ticket:` artifact from write-ticket output.
 - Rewriting wsflow skills mechanically from full ws skills; wsflow must preserve workflow intent while using wsflow notation, scoped subagent guidance, and the curated skill inventory.
-- Relaying reviewer file contents instead of file paths, which breaks the write-code review protocol and inflates lead context.
+- Relaying reviewer file contents instead of file paths, which breaks implementation review relay and inflates lead context.
 - Treating brief compression as permission to drop settled caller-visible contracts, implementation strategy decisions, rejected alternatives, or verification expectations.
