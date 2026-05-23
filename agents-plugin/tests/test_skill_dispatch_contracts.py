@@ -10,8 +10,10 @@ class SkillDispatchContractsTest(unittest.TestCase):
         text = (SKILLS_DIR / "lead-proceed" / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("Always route code-editing work through `ws:lead-implement`", text)
-        self.assertIn("**Implementation Route**", text)
-        self.assertIn("ws:lead-implement - owns execution mode", text)
+        self.assertIn("## Routing Verdict", text)
+        self.assertIn("NEXT: <ws:lead-discuss | ws:lead-write-ticket | ws:lead-implement | stop>", text)
+        self.assertIn("If `NEXT: ws:lead-implement`, invoke `ws:lead-implement`", text)
+        self.assertNotIn("**Implementation Route**", text)
         self.assertNotIn("**Implementation Verdict**", text)
         self.assertNotIn("**Verdict Basis**", text)
         self.assertNotIn("### judge: implementation-dispatch", text)
