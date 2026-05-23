@@ -122,6 +122,13 @@ The MVP should cover:
   post-epic dogfood usability gaps in Activity Console placement, transcript
   tail-follow scrolling, compact block summaries, and Codex prompt/interruption
   transcript coverage while keeping the surface read-only and command-routed.
+- `260523-feat-ws-dashboard-activity-console-tail-ribbon-polish` - ready; make
+  selected transcripts tail-first with top-edge older-history loading, remove
+  the redundant Activity Console summary row, and polish ribbon source/timing
+  metadata without increasing card height.
+- `260523-bug-ws-dashboard-dockview-split-scroll-reset` - todo; fix
+  Dockview split-wide scroll resets caused by active-pane sync and parameter
+  churn in the workbench adapter.
 
 ## Cross-Child Decisions
 

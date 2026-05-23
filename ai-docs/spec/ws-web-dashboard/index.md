@@ -301,6 +301,13 @@ markers. Cursor, block-count, and byte-count bounds keep transcript reads
 finite and make unknown activity ids, unavailable sources, empty transcripts,
 and malformed records explicit response states instead of whole-feed failures.
 
+> [!note] Planned 🚧
+> Transcript reads will default to the latest bounded tail window for the
+> selected activity. Older transcript history will page backward from the
+> current earliest loaded cursor so the UI can prepend older blocks when the
+> user scrolls upward, without forcing an initial read from the beginning of a
+> long transcript.
+
 Browser callers continue to address the model by opaque `workRootId` and
 activity id. Responses must not expose host paths, cache paths, backend session
 ids, process ids, stdout/stderr paths, stream paths, or backend-native
@@ -314,13 +321,18 @@ instead of a vertical named-agent card dump. The console combines a horizontal
 Activity Ribbon for live/latest items with a selected Transcript Block viewer
 below it, using the Activity Console read model as its route-backed source.
 
-Ribbon items use a compact three-line shape: small source or kind text, a
-primary name/title line, and small status or recency text. The text area stays
+Ribbon items use a compact three-line shape: small source discriminator text, a
+primary name/title line, and small status/recency text. Source discriminator
+text identifies the activity channel such as `agent.codex`, `agent.claude`, or
+`cmd.exec` rather than repeating the primary title. The status row includes the
+current activity status plus relative update time when known; completed activity
+may also show bounded elapsed duration when space allows. The text area stays
 compact, truncates instead of wrapping, and the ribbon scrolls horizontally at
 constrained desktop widths. Live, active, and attention-worthy items use
 semantic active styling, and a small short-lived green breathing indicator may
 mark newly updated or locally dirty items until the user selects or otherwise
-acknowledges them.
+acknowledges them. The Activity Console body does not render a separate summary
+chip row above the ribbon; the ribbon is the primary item selector.
 
 The browser may keep a local acknowledgement watermark per workRoot/activity
 item. On initial feed load it compares that local watermark with daemon item
@@ -340,9 +352,12 @@ renders as terminal-style output. Transcript views follow the tail by default
 for newly selected or live updated activity. When the user scrolls away from the
 tail, the browser preserves that scroll position across feed refreshes,
 transcript refreshes, selected-transcript invalidations, and workbench split
-rerenders until the user returns to the tail. Transcript backfill/load-more is
-driven primarily by scroll position, with explicit refresh or load-more controls
-reserved for fallback and error states.
+rerenders until the user returns to the tail. Initial selected transcript loads
+start from the latest tail window, not the oldest block. Older transcript
+history is loaded when the user scrolls near the top and is prepended while
+preserving the user's visible position. Explicit refresh or load-more controls
+remain available for fallback and error states rather than being the primary
+navigation path.
 
 > [!note] Implementation Gap · 2026-05-23
 > Missing behavior: expanded dialogue and assistant transcript text is rendered

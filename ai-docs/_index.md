@@ -154,6 +154,8 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260519-feat-implement-branch-squash-gate` | todo | Add a pre-merge implementation-branch squash gate for cleaner main history |
 | `260520-refactor-lead-skill-cascade` | todo | Prune lead skill procedural sophistication via skill-authoring doctrine cascade (R3'/R6 phased, R1/R2/R4/R5 batched) |
+| `260523-feat-ws-dashboard-activity-console-tail-ribbon-polish` | ready | Polish Activity Console tail-first transcript loading and ribbon metadata |
+| `260523-bug-ws-dashboard-dockview-split-scroll-reset` | todo | Fix Dockview split-wide scroll resets across WorkRoot Activity, editor panes, and other widgets |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
@@ -170,7 +172,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-No ready tickets.
+| `260523-feat-ws-dashboard-activity-console-tail-ribbon-polish` | Polish Activity Console tail-first transcript loading and ribbon metadata |
 
 ## Session Notes
 
