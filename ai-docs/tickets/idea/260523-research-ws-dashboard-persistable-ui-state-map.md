@@ -3,6 +3,7 @@ title: Map persistable ws dashboard UI state
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260523-feat-ws-dashboard-persist-open-workroots: first daemon-local persisted resource seed
+  260523-feat-ws-dashboard-workroot-registry-activation: durable workspace/workRoot spine for later UI persistence
   260523-feat-ws-dashboard-terminal-tab-restore: first browser descriptor replay surface
   260523-feat-ws-dashboard-readonly-file-pane-restore: concrete next descriptor replay surface
 ---
@@ -64,7 +65,9 @@ than daemon/resource state.
   daemon-local, not loggable command payload.
 - **Linked worktree visibility choices**: whether an auto-discovered sibling
   worktree was acknowledged, hidden, or opened. This should stay coupled to
-  `260523-feat-ws-dashboard-linked-worktree-discovery`.
+  `260523-feat-ws-dashboard-linked-worktree-discovery`. The current direction
+  rejects invisible worktrees: known workRoots stay visible with live-derived
+  availability until a future explicit forget/remove action exists.
 
 ## Risk Boundaries
 

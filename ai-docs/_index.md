@@ -149,6 +149,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
+| `260523-feat-ws-dashboard-workroot-registry-activation` | todo | Add durable dashboard workspace and workRoot registry activation |
 | `260523-feat-ws-dashboard-readonly-file-pane-restore` | todo | Restore dashboard read-only file panes after refresh or daemon restart |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
@@ -158,7 +159,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
 | `260523-feat-ws-dashboard-tool-output-safe-summary` | idea | Improve safe one-line summaries for Codex tool output transcript blocks |
-| `260523-feat-ws-dashboard-linked-worktree-discovery` | idea | TBA dashboard Git worktree discovery and external change detection |
+| `260523-feat-ws-dashboard-linked-worktree-discovery` | idea | Discover linked Git workRoots through the durable registry |
 | `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |

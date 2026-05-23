@@ -138,6 +138,10 @@ The MVP should cover:
 - `260523-feat-ws-dashboard-terminal-tab-restore` - done; restore remembered
   terminal tabs after daemon restart by creating new terminal sessions with
   safe workRoot-relative cwd hints, without treating old PTYs as resumable.
+- `260523-feat-ws-dashboard-workroot-registry-activation` - todo; add a
+  durable workspace/workRoot registry, separate live-derived availability from
+  user-controlled online/offline activation, and keep known workRoots visible
+  until explicit future forget/remove semantics exist.
 - `260523-feat-ws-dashboard-readonly-file-pane-restore` - todo; restore
   read-only preview/pinned file pane descriptors by replaying normal file-open
   behavior through authenticated workRoot-relative file reads.
@@ -252,6 +256,12 @@ The MVP should cover:
   should avoid raw output, transcripts, host paths, cache paths, backend
   session paths, process ids, or stale daemon terminal ids unless a child ticket
   explicitly defines a bounded privacy-reviewed format.
+- WorkRoot resource modeling separates durable membership, live-derived
+  availability, and user-controlled activation. Known workRoots remain visible
+  even when missing, inaccessible, prunable, or offline; there is no invisible
+  discovered-worktree state. Explicit refresh and bounded polling recompute
+  filesystem/Git availability, while future filesystem watchers may only act as
+  refresh-needed hints.
 
 ## Completion Criteria
 

@@ -1,13 +1,14 @@
 ---
-title: TBA dashboard Git worktree discovery lifecycle
+title: Discover linked Git workRoots through the durable registry
 parent: 260514-epic-ws-web-dashboard-mvp
 related:
   260523-feat-ws-dashboard-persist-open-workroots: persisted roots and discovered sibling worktrees should share a clear source model
+  260523-feat-ws-dashboard-workroot-registry-activation: prerequisite durable membership, availability, and activation model
 related-mental-model:
   - ws-web-dashboard
 ---
 
-# TBA dashboard Git worktree discovery lifecycle
+# Discover linked Git workRoots through the durable registry
 
 ## Background
 
@@ -24,37 +25,44 @@ The current `devenv` checkout demonstrates the mismatch: `git worktree list`
 reports the main worktree plus linked/prunable worktrees, while dashboard live
 resources remain bounded to daemon-opened paths.
 
-This ticket is intentionally TBA. The feature should be specified after a
-separate UX/data-model discussion covering discovery refresh, externally added
-worktrees, externally removed worktrees, and persistence interactions.
+This ticket remains behind the durable workspace/workRoot registry and
+activation spine. Linked worktree discovery should add and update known
+workRoot membership; it should not create a parallel hidden-discovery model.
 
 ## Discussion
 
-Likely feature set to discuss:
+Agreed direction:
 
 - When an opened workRoot is a Git repository, discover sibling linked worktrees
   through Git metadata such as `git worktree list --porcelain`.
-- Add reachable linked worktrees as additional workRoot rows in the same
-  workspace, preserving the existing opaque `workRootId` and
+- Add discovered linked worktrees as additional known workRoot rows in the same
+  durable workspace registry, preserving the existing opaque `workRootId` and
   `gitLinkedWorktree` kind vocabulary.
-- Degrade prunable, missing, moved, or inaccessible worktrees as stale rows
-  instead of dropping them silently.
+- Default discovered sibling workRoots to offline activation. Users explicitly
+  bring a workRoot online before file, Activity, or terminal APIs target it.
+- Recompute current status from filesystem/Git on explicit refresh and bounded
+  polling. Missing, prunable, moved, or inaccessible worktrees remain visible
+  as degraded rows instead of dropping silently.
 - Detect externally added and externally removed worktrees on explicit refresh
-  and, later, through a bounded watch/poll mechanism if the UX needs it.
+  and bounded polling. Later filesystem watchers may only act as refresh-needed
+  hints, not as the source of truth.
 - Keep host paths daemon-private; the browser sees labels, opaque ids, kind,
   status, and actions, not raw Git metadata paths.
 - Avoid broad filesystem crawling. This should be Git-worktree expansion from an
   already opened repository/worktree, not an arbitrary disk scan.
 - Do not add dashboard-side delete/remove worktree functionality as part of this
-  ticket; deletion detection is about reflecting external tool changes.
+  ticket. Future forget/delete UX must be separate from discovery and must not
+  be required to keep externally deleted worktrees visible as degraded rows.
+- Do not introduce an invisible discovered-worktree state. Known workRoots are
+  visible until explicitly forgotten or until a later root-folder deletion
+  policy defines removal.
 
 Open questions:
 
-- Should linked worktrees become immediately opened workRoots for file and
-  Activity APIs, or should selecting/opening them register them explicitly?
-- Should prunable worktrees appear by default, behind an unavailable/degraded
-  state, or be hidden until a diagnostic view exists?
-- How should persistence interact with auto-discovered linked worktrees: store
-  only user-opened roots, or store the expanded set with provenance?
-- Should the dashboard show externally removed worktrees as stale rows until
-  acknowledged, or remove them from the visible tree on refresh?
+- Which Git metadata states should map to which public availability labels:
+  reachable, missing, inaccessible, prunable, moved, or unknown?
+- How frequently should bounded polling refresh selected, online, offline, and
+  large workRoot sets?
+- Should externally removed workRoots require explicit acknowledgement before a
+  future forget action is offered, or should the forget action be available
+  immediately on degraded rows?
