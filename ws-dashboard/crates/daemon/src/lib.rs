@@ -5,6 +5,7 @@ pub mod discovery;
 pub mod events;
 pub mod logging;
 pub mod mock;
+pub mod persistent_state;
 pub mod resources;
 pub mod root_picker;
 pub mod router;

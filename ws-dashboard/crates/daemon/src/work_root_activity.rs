@@ -19,11 +19,13 @@ use ws_dashboard_core::{
 };
 
 use crate::router::AppState;
+use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
 /// Upper bound applied to the wsagent-reported backend-error string so an
 /// oversized `current/state.json` error cannot bloat the projection response.
 /// Daemon-emitted diagnostics are fixed short constants and need no bounding.
 const MAX_BOUNDED_TEXT: usize = 280;
+const MAX_NATIVE_MESSAGE_TEXT: usize = 8_192;
 
 const DIAG_METADATA_MISSING: &str = "agent metadata missing";
 const DIAG_METADATA_UNREADABLE: &str = "agent metadata unreadable";
@@ -55,6 +57,7 @@ pub struct WorkRootActivityQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ActivityTranscriptQuery {
     cursor: Option<String>,
+    before: Option<String>,
     limit: Option<usize>,
 }
 
@@ -134,6 +137,7 @@ impl WorkRootActivityProjector {
         activity_id: String,
         agent_key: String,
         cursor: Option<String>,
+        before: Option<String>,
         limit: Option<usize>,
     ) -> ActivityTranscript {
         let cache_home = self.cache_home.clone();
@@ -148,6 +152,7 @@ impl WorkRootActivityProjector {
                 activity_id,
                 &agent_key,
                 cursor.as_deref(),
+                before.as_deref(),
                 normalize_transcript_limit(limit),
             )
         })
@@ -182,8 +187,9 @@ pub async fn work_root_activity(
     Query(query): Query<WorkRootActivityQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return activity_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return activity_access_error(error),
     };
 
     Json(
@@ -201,8 +207,9 @@ pub async fn work_root_activity_transcript(
     Query(query): Query<ActivityTranscriptQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return activity_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return activity_access_error(error),
     };
 
     let Some(agent_key) = named_agent_key_from_activity_id(&activity_id) else {
@@ -218,6 +225,7 @@ pub async fn work_root_activity_transcript(
                 activity_id,
                 agent_key,
                 query.cursor,
+                query.before,
                 query.limit,
             )
             .await,
@@ -231,8 +239,9 @@ pub async fn work_root_activity_events(
     Query(query): Query<ActivityEventsQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return activity_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return activity_access_error(error),
     };
 
     let snapshot = state
@@ -416,6 +425,10 @@ fn activity_error(status: StatusCode, message: &str) -> Response {
         }),
     )
         .into_response()
+}
+
+fn activity_access_error(error: WorkRootAccessError) -> Response {
+    activity_error(error.status(), error.message())
 }
 
 /// Resolve the wsstate named-agent directory for an opened workRoot under an
@@ -901,8 +914,27 @@ fn transcript_cursor_offset(cursor: Option<&str>) -> usize {
 fn paginate_transcript_blocks(
     all_blocks: Vec<TranscriptBlock>,
     cursor: Option<&str>,
+    before: Option<&str>,
     limit: usize,
 ) -> (Vec<TranscriptBlock>, String, bool) {
+    if let Some(before) = before {
+        let end = transcript_cursor_offset(Some(before)).min(all_blocks.len());
+        let start = end.saturating_sub(limit);
+        return (
+            all_blocks[start..end].to_vec(),
+            start.to_string(),
+            start > 0,
+        );
+    }
+    if cursor.is_none() {
+        let end = all_blocks.len();
+        let start = end.saturating_sub(limit);
+        return (
+            all_blocks[start..end].to_vec(),
+            start.to_string(),
+            start > 0,
+        );
+    }
     let start = transcript_cursor_offset(cursor).min(all_blocks.len());
     let end = (start + limit).min(all_blocks.len());
     (
@@ -920,6 +952,7 @@ fn named_agent_transcript_blocking(
     activity_id: String,
     agent_key: &str,
     cursor: Option<&str>,
+    before: Option<&str>,
     limit: usize,
 ) -> ActivityTranscript {
     let agents_dir = resolve_cache_root(cache_home)
@@ -958,7 +991,7 @@ fn named_agent_transcript_blocking(
                 Ok(raw) => {
                     let parsed = parse_codex_session_transcript(&raw);
                     let (blocks, next_cursor, has_more) =
-                        paginate_transcript_blocks(parsed.blocks, cursor, limit);
+                        paginate_transcript_blocks(parsed.blocks, cursor, before, limit);
                     let mut diagnostics = projection.row.diagnostics;
                     diagnostics.extend(parsed.diagnostics);
                     let degraded = !diagnostics.is_empty() || parsed.degraded;
@@ -1031,7 +1064,8 @@ fn named_agent_transcript_blocking(
     };
 
     let all_blocks = transcript_blocks_from_output(&raw);
-    let (blocks, next_cursor, has_more) = paginate_transcript_blocks(all_blocks, cursor, limit);
+    let (blocks, next_cursor, has_more) =
+        paginate_transcript_blocks(all_blocks, cursor, before, limit);
     let mut diagnostics = projection.row.diagnostics;
     if let Some(diagnostic) = native_diagnostic {
         diagnostics.push(diagnostic.to_owned());
@@ -1068,6 +1102,12 @@ struct CodexSessionEnvelope {
     payload: serde_json::Value,
 }
 
+enum CodexSessionRecord {
+    Block(TranscriptBlock),
+    Skip,
+    Unsupported(TranscriptBlock),
+}
+
 fn parse_codex_session_transcript(raw: &str) -> CodexSessionParse {
     let mut parsed = CodexSessionParse::default();
     for (line_index, line) in raw.lines().enumerate() {
@@ -1098,34 +1138,39 @@ fn parse_codex_session_transcript(raw: &str) -> CodexSessionParse {
             }
         };
 
-        if let Some(block) = codex_session_block(&envelope, cursor.clone()) {
-            parsed.blocks.push(block);
-        } else {
-            parsed.degraded = true;
-            parsed.blocks.push(TranscriptBlock {
-                cursor,
-                timestamp: envelope.timestamp,
-                render_kind: "status".to_owned(),
-                title: Some("Unsupported transcript record".to_owned()),
-                text: Some("Skipped unsupported native transcript record".to_owned()),
-                data: Some(serde_json::json!({
-                    "eventType": "unsupported",
-                    "payloadType": "unsupported",
-                })),
-                degraded: true,
-            });
+        match codex_session_record(&envelope, cursor.clone()) {
+            CodexSessionRecord::Block(block) => {
+                if !is_duplicate_codex_dialogue_block(&parsed.blocks, &block) {
+                    parsed.blocks.push(block);
+                }
+            }
+            CodexSessionRecord::Skip => {}
+            CodexSessionRecord::Unsupported(block) => {
+                parsed.degraded = true;
+                parsed.blocks.push(block);
+            }
         }
     }
     parsed
 }
 
-fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Option<TranscriptBlock> {
-    let payload_type = envelope
+fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> CodexSessionRecord {
+    let Some(payload_type) = envelope
         .payload
         .get("type")
-        .and_then(|value| value.as_str())?;
+        .and_then(|value| value.as_str())
+    else {
+        return match envelope.event_type.as_str() {
+            "session_meta" | "turn_context" | "compacted" => CodexSessionRecord::Skip,
+            _ => CodexSessionRecord::Unsupported(unsupported_codex_session_block(
+                envelope, cursor, None,
+            )),
+        };
+    };
+
     match (envelope.event_type.as_str(), payload_type) {
-        ("event_msg", "task_started") => Some(TranscriptBlock {
+        ("event_msg", "token_count") | ("response_item", "reasoning") => CodexSessionRecord::Skip,
+        ("event_msg", "task_started") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
             timestamp: envelope.timestamp.clone(),
             render_kind: "status".to_owned(),
@@ -1134,7 +1179,7 @@ fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Optio
             data: None,
             degraded: false,
         }),
-        ("event_msg", "task_complete") => Some(TranscriptBlock {
+        ("event_msg", "task_complete") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
             timestamp: envelope.timestamp.clone(),
             render_kind: "status".to_owned(),
@@ -1143,7 +1188,7 @@ fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Optio
             data: None,
             degraded: false,
         }),
-        ("event_msg", "agent_message") => Some(TranscriptBlock {
+        ("event_msg", "agent_message") => CodexSessionRecord::Block(TranscriptBlock {
             cursor,
             timestamp: envelope.timestamp.clone(),
             render_kind: "assistant".to_owned(),
@@ -1156,6 +1201,36 @@ fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Optio
             data: None,
             degraded: false,
         }),
+        ("event_msg", "user_message") => CodexSessionRecord::Block(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "user".to_owned(),
+            title: Some("User".to_owned()),
+            text: codex_user_message_text(&envelope.payload),
+            data: None,
+            degraded: false,
+        }),
+        ("response_item", "message") => {
+            let role = envelope
+                .payload
+                .get("role")
+                .and_then(|value| value.as_str())
+                .unwrap_or("message");
+            let (render_kind, title) = match role {
+                "assistant" => ("assistant", "Assistant"),
+                "user" => ("user", "User"),
+                _ => ("text", "Message"),
+            };
+            CodexSessionRecord::Block(TranscriptBlock {
+                cursor,
+                timestamp: envelope.timestamp.clone(),
+                render_kind: render_kind.to_owned(),
+                title: Some(title.to_owned()),
+                text: codex_message_content_text(envelope.payload.get("content")),
+                data: None,
+                degraded: false,
+            })
+        }
         ("response_item", "function_call") => {
             let name = envelope
                 .payload
@@ -1167,7 +1242,7 @@ fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Optio
                 .get("arguments")
                 .map(|value| value.to_string().len())
                 .unwrap_or(0);
-            Some(TranscriptBlock {
+            CodexSessionRecord::Block(TranscriptBlock {
                 cursor,
                 timestamp: envelope.timestamp.clone(),
                 render_kind: "toolCall".to_owned(),
@@ -1180,13 +1255,38 @@ fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Optio
                 degraded: false,
             })
         }
+        ("response_item", "custom_tool_call") => {
+            let name = envelope
+                .payload
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("tool");
+            let input_bytes = envelope
+                .payload
+                .get("input")
+                .map(|value| value.to_string().len())
+                .unwrap_or(0);
+            CodexSessionRecord::Block(TranscriptBlock {
+                cursor,
+                timestamp: envelope.timestamp.clone(),
+                render_kind: "toolCall".to_owned(),
+                title: Some("Tool call".to_owned()),
+                text: Some(bounded(&format!("Called {name}"))),
+                data: Some(serde_json::json!({
+                    "name": bounded(name),
+                    "argumentsBytes": input_bytes,
+                    "inputBytes": input_bytes,
+                })),
+                degraded: false,
+            })
+        }
         ("response_item", "function_call_output") => {
             let output_bytes = envelope
                 .payload
                 .get("output")
                 .map(|value| value.to_string().len())
                 .unwrap_or(0);
-            Some(TranscriptBlock {
+            CodexSessionRecord::Block(TranscriptBlock {
                 cursor,
                 timestamp: envelope.timestamp.clone(),
                 render_kind: "toolResult".to_owned(),
@@ -1198,22 +1298,331 @@ fn codex_session_block(envelope: &CodexSessionEnvelope, cursor: String) -> Optio
                 degraded: false,
             })
         }
-        _ => None,
+        ("response_item", "custom_tool_call_output") => {
+            let output_bytes = envelope
+                .payload
+                .get("output")
+                .map(|value| value.to_string().len())
+                .unwrap_or(0);
+            CodexSessionRecord::Block(TranscriptBlock {
+                cursor,
+                timestamp: envelope.timestamp.clone(),
+                render_kind: "toolResult".to_owned(),
+                title: Some("Tool output".to_owned()),
+                text: Some("Tool output captured".to_owned()),
+                data: Some(serde_json::json!({
+                    "outputBytes": output_bytes,
+                })),
+                degraded: false,
+            })
+        }
+        ("event_msg", "mcp_tool_call_end") => CodexSessionRecord::Block(tool_result_event_block(
+            envelope,
+            cursor,
+            "MCP tool result",
+            "MCP tool call completed",
+            None,
+        )),
+        ("event_msg", "exec_command_end") => {
+            let exit_code = envelope
+                .payload
+                .get("exit_code")
+                .and_then(|value| value.as_i64());
+            CodexSessionRecord::Block(tool_result_event_block(
+                envelope,
+                cursor,
+                "Command result",
+                "Command completed",
+                exit_code,
+            ))
+        }
+        ("event_msg", "patch_apply_end") => {
+            let change_count = envelope
+                .payload
+                .get("changes")
+                .and_then(|value| value.as_array())
+                .map(|items| items.len())
+                .unwrap_or(0);
+            let mut data = codex_event_result_data(envelope, None);
+            data["changes"] = serde_json::json!(change_count);
+            CodexSessionRecord::Block(TranscriptBlock {
+                cursor,
+                timestamp: envelope.timestamp.clone(),
+                render_kind: "toolResult".to_owned(),
+                title: Some("Patch apply".to_owned()),
+                text: Some("Patch apply completed".to_owned()),
+                data: Some(data),
+                degraded: false,
+            })
+        }
+        ("event_msg", "turn_aborted") => CodexSessionRecord::Block(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Turn aborted".to_owned()),
+            text: Some("Agent turn aborted".to_owned()),
+            data: Some(serde_json::json!({
+                "reason": envelope
+                    .payload
+                    .get("reason")
+                    .and_then(|value| value.as_str())
+                    .map(safe_codex_type_label)
+                    .unwrap_or_else(|| "unspecified".to_owned()),
+            })),
+            degraded: false,
+        }),
+        ("event_msg", "thread_rolled_back") => CodexSessionRecord::Block(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Thread rolled back".to_owned()),
+            text: Some("Conversation history rolled back".to_owned()),
+            data: Some(serde_json::json!({
+                "numTurns": envelope
+                    .payload
+                    .get("num_turns")
+                    .and_then(|value| value.as_u64()),
+            })),
+            degraded: false,
+        }),
+        ("event_msg", "context_compacted") => CodexSessionRecord::Block(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Context compacted".to_owned()),
+            text: Some("Conversation context compacted".to_owned()),
+            data: None,
+            degraded: false,
+        }),
+        ("event_msg", "thread_goal_updated") => CodexSessionRecord::Block(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Goal updated".to_owned()),
+            text: Some("Thread goal updated".to_owned()),
+            data: None,
+            degraded: false,
+        }),
+        ("event_msg", "collab_agent_spawn_end") => CodexSessionRecord::Block(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Agent handoff".to_owned()),
+            text: Some("Sub-agent handoff completed".to_owned()),
+            data: Some(serde_json::json!({
+                "status": envelope
+                    .payload
+                    .get("status")
+                    .and_then(|value| value.as_str())
+                    .map(safe_codex_type_label)
+                    .unwrap_or_else(|| "unknown".to_owned()),
+            })),
+            degraded: false,
+        }),
+        ("event_msg", "collab_waiting_end") => CodexSessionRecord::Block(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Agent wait".to_owned()),
+            text: Some("Sub-agent wait completed".to_owned()),
+            data: None,
+            degraded: false,
+        }),
+        ("event_msg", "collab_close_end") => CodexSessionRecord::Block(TranscriptBlock {
+            cursor,
+            timestamp: envelope.timestamp.clone(),
+            render_kind: "status".to_owned(),
+            title: Some("Agent close".to_owned()),
+            text: Some("Sub-agent close completed".to_owned()),
+            data: None,
+            degraded: false,
+        }),
+        _ => CodexSessionRecord::Unsupported(unsupported_codex_session_block(
+            envelope,
+            cursor,
+            Some(payload_type),
+        )),
+    }
+}
+
+fn is_duplicate_codex_dialogue_block(blocks: &[TranscriptBlock], block: &TranscriptBlock) -> bool {
+    if !matches!(block.render_kind.as_str(), "assistant" | "user") {
+        return false;
+    }
+    let Some(previous) = blocks.last() else {
+        return false;
+    };
+    previous.render_kind == block.render_kind
+        && previous.title == block.title
+        && previous.text == block.text
+}
+
+fn codex_user_message_text(payload: &serde_json::Value) -> Option<String> {
+    if let Some(message) = payload.get("message").and_then(|value| value.as_str()) {
+        return Some(bounded_native_text(message));
+    }
+    codex_message_content_text(payload.get("text_elements"))
+}
+
+fn codex_message_content_text(value: Option<&serde_json::Value>) -> Option<String> {
+    let value = value?;
+    let mut parts = Vec::new();
+    collect_codex_message_text(value, &mut parts);
+    if parts.is_empty() {
+        None
+    } else {
+        Some(bounded_native_text(&parts.join("\n")))
+    }
+}
+
+fn collect_codex_message_text(value: &serde_json::Value, parts: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => parts.push(text.clone()),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_codex_message_text(item, parts);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for key in ["text", "content"] {
+                if let Some(text) = map.get(key).and_then(|value| value.as_str()) {
+                    parts.push(text.to_owned());
+                    return;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn tool_result_event_block(
+    envelope: &CodexSessionEnvelope,
+    cursor: String,
+    title: &str,
+    text: &str,
+    exit_code: Option<i64>,
+) -> TranscriptBlock {
+    TranscriptBlock {
+        cursor,
+        timestamp: envelope.timestamp.clone(),
+        render_kind: "toolResult".to_owned(),
+        title: Some(title.to_owned()),
+        text: Some(text.to_owned()),
+        data: Some(codex_event_result_data(envelope, exit_code)),
+        degraded: false,
+    }
+}
+
+fn codex_event_result_data(
+    envelope: &CodexSessionEnvelope,
+    exit_code: Option<i64>,
+) -> serde_json::Value {
+    let status = envelope
+        .payload
+        .get("status")
+        .and_then(|value| value.as_str())
+        .map(safe_codex_type_label);
+    let success = envelope
+        .payload
+        .get("success")
+        .and_then(|value| value.as_bool());
+    let outcome = match (success, status.as_deref()) {
+        (Some(true), _) => "success".to_owned(),
+        (Some(false), _) => "failed".to_owned(),
+        (_, Some(status)) => status.to_owned(),
+        _ => "completed".to_owned(),
+    };
+    let output_bytes = [
+        "stdout",
+        "stderr",
+        "formatted_output",
+        "aggregated_output",
+        "result",
+    ]
+    .iter()
+    .filter_map(|key| envelope.payload.get(*key))
+    .map(|value| value.to_string().len())
+    .sum::<usize>();
+    let duration_ms = envelope
+        .payload
+        .get("duration")
+        .or_else(|| envelope.payload.get("duration_ms"))
+        .and_then(|value| value.as_u64());
+    serde_json::json!({
+        "status": status.unwrap_or_else(|| "unknown".to_owned()),
+        "outcome": outcome,
+        "exitCode": exit_code,
+        "durationMs": duration_ms,
+        "outputBytes": output_bytes,
+    })
+}
+
+fn unsupported_codex_session_block(
+    envelope: &CodexSessionEnvelope,
+    cursor: String,
+    payload_type: Option<&str>,
+) -> TranscriptBlock {
+    TranscriptBlock {
+        cursor,
+        timestamp: envelope.timestamp.clone(),
+        render_kind: "status".to_owned(),
+        title: Some("Unsupported transcript record".to_owned()),
+        text: Some("Skipped unsupported native transcript record".to_owned()),
+        data: Some(serde_json::json!({
+            "eventType": safe_codex_type_label(&envelope.event_type),
+            "payloadType": payload_type
+                .map(safe_codex_type_label)
+                .unwrap_or_else(|| "none".to_owned()),
+            "payloadFieldCount": envelope
+                .payload
+                .as_object()
+                .map(|value| value.len())
+                .unwrap_or(0),
+            "omissionReason": "unsupported codex native shape",
+        })),
+        degraded: true,
+    }
+}
+
+fn safe_codex_type_label(value: &str) -> String {
+    if !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        value.to_owned()
+    } else {
+        "private".to_owned()
     }
 }
 
 fn bounded_native_text(value: &str) -> String {
-    bounded(value)
-        .split_whitespace()
-        .map(|token| {
-            if native_text_token_looks_private(token) {
-                "[redacted]"
-            } else {
-                token
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let bounded = bounded_to_chars(value, MAX_NATIVE_MESSAGE_TEXT);
+    let mut redacted = String::with_capacity(bounded.len());
+    let mut token = String::new();
+    for ch in bounded.chars() {
+        if ch.is_whitespace() {
+            push_native_text_token(&mut redacted, &mut token);
+            redacted.push(ch);
+        } else {
+            token.push(ch);
+        }
+    }
+    push_native_text_token(&mut redacted, &mut token);
+    redacted
+}
+
+fn push_native_text_token(output: &mut String, token: &mut String) {
+    if token.is_empty() {
+        return;
+    }
+    if native_text_token_looks_private(token) {
+        output.push_str("[redacted]");
+    } else {
+        output.push_str(token);
+    }
+    token.clear();
 }
 
 fn native_text_token_looks_private(token: &str) -> bool {
@@ -1339,10 +1748,14 @@ fn non_empty(value: String) -> Option<String> {
 }
 
 fn bounded(value: &str) -> String {
-    if value.chars().count() <= MAX_BOUNDED_TEXT {
+    bounded_to_chars(value, MAX_BOUNDED_TEXT)
+}
+
+fn bounded_to_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
         return value.to_owned();
     }
-    value.chars().take(MAX_BOUNDED_TEXT).collect()
+    value.chars().take(max_chars).collect()
 }
 
 /// Resolve the wsstate cache root, mirroring `wsstate.CacheRoot`: an explicit
@@ -1826,17 +2239,120 @@ mod tests {
         assert!(!encoded.contains("thread-secret"));
         assert_eq!(
             parsed.blocks[1].data.as_ref().unwrap()["eventType"],
-            "unsupported"
+            "private"
         );
         assert_eq!(
             parsed.blocks[1].data.as_ref().unwrap()["payloadType"],
-            "unsupported"
+            "private"
+        );
+        assert_eq!(
+            parsed.blocks[1].data.as_ref().unwrap()["payloadFieldCount"],
+            2
+        );
+        assert_eq!(
+            parsed.blocks[1].data.as_ref().unwrap()["omissionReason"],
+            "unsupported codex native shape"
+        );
+    }
+
+    #[test]
+    fn codex_session_jsonl_common_native_records_parse_to_safe_blocks() {
+        let raw = r#"{"timestamp":"2026-05-22T00:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"Please inspect /private/repo and continue"}}
+{"timestamp":"2026-05-22T00:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Here is the next step."}]}}
+{"timestamp":"2026-05-22T00:00:02Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"patch touching /private/repo/file"}}
+{"timestamp":"2026-05-22T00:00:03Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":"private /host/path output"}}
+{"timestamp":"2026-05-22T00:00:04Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","status":"success","duration":12,"invocation":{"tool":"tickets_status","arguments":{"path":"/private/repo"}},"result":{"text":"/private/result"}}}
+{"timestamp":"2026-05-22T00:00:05Z","type":"event_msg","payload":{"type":"exec_command_end","status":"success","exit_code":0,"duration":34,"command":"cat /private/repo/file","cwd":"/private/repo","stdout":"secret stdout","stderr":""}}
+{"timestamp":"2026-05-22T00:00:06Z","type":"event_msg","payload":{"type":"patch_apply_end","status":"success","success":true,"changes":[{"path":"/private/repo/file"}],"stdout":"applied /private/repo/file","stderr":""}}
+{"timestamp":"2026-05-22T00:00:07Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"user_interrupt"}}
+{"timestamp":"2026-05-22T00:00:08Z","type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":2}}
+{"timestamp":"2026-05-22T00:00:09Z","type":"event_msg","payload":{"type":"token_count","info":{"private":"/private/repo"}}}
+{"timestamp":"2026-05-22T00:00:10Z","type":"session_meta","id":"thread-secret","cwd":"/private/repo"}
+"#;
+
+        let parsed = parse_codex_session_transcript(raw);
+
+        assert!(!parsed.degraded);
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.blocks.len(), 9);
+        assert_eq!(parsed.blocks[0].render_kind, "user");
+        assert_eq!(
+            parsed.blocks[0].text.as_deref(),
+            Some("Please inspect [redacted] and continue")
+        );
+        assert_eq!(parsed.blocks[1].render_kind, "assistant");
+        assert_eq!(
+            parsed.blocks[1].text.as_deref(),
+            Some("Here is the next step.")
+        );
+        assert_eq!(parsed.blocks[2].render_kind, "toolCall");
+        assert_eq!(
+            parsed.blocks[2].data.as_ref().unwrap()["name"],
+            "apply_patch"
+        );
+        assert_eq!(parsed.blocks[3].render_kind, "toolResult");
+        assert_eq!(parsed.blocks[4].title.as_deref(), Some("MCP tool result"));
+        assert_eq!(
+            parsed.blocks[4].data.as_ref().unwrap()["outcome"],
+            "success"
+        );
+        assert_eq!(parsed.blocks[5].title.as_deref(), Some("Command result"));
+        assert_eq!(parsed.blocks[5].data.as_ref().unwrap()["exitCode"], 0);
+        assert_eq!(parsed.blocks[6].title.as_deref(), Some("Patch apply"));
+        assert_eq!(parsed.blocks[6].data.as_ref().unwrap()["changes"], 1);
+        assert_eq!(parsed.blocks[7].title.as_deref(), Some("Turn aborted"));
+        assert_eq!(
+            parsed.blocks[7].data.as_ref().unwrap()["reason"],
+            "user_interrupt"
+        );
+        assert_eq!(
+            parsed.blocks[8].title.as_deref(),
+            Some("Thread rolled back")
+        );
+        assert_eq!(parsed.blocks[8].data.as_ref().unwrap()["numTurns"], 2);
+        let encoded = serde_json::to_string(&parsed.blocks).expect("serialize parser blocks");
+        for forbidden in [
+            "/private",
+            "/host/path",
+            "secret stdout",
+            "private /host/path output",
+            "thread-secret",
+            "cat ",
+        ] {
+            assert!(
+                !encoded.contains(forbidden),
+                "native transcript block must not leak {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_session_jsonl_deduplicates_adjacent_dialogue_records() {
+        let raw = r#"{"timestamp":"2026-05-22T00:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"Brief path: /private/repo\nContinue"}}
+{"timestamp":"2026-05-22T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Brief path: /private/repo\nContinue"}]}}
+{"timestamp":"2026-05-22T00:00:02Z","type":"event_msg","payload":{"type":"agent_message","message":"Assistant line\n\n- inspect /private/cache\n  next"}}
+{"timestamp":"2026-05-22T00:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Assistant line\n\n- inspect /private/cache\n  next"}]}}
+"#;
+
+        let parsed = parse_codex_session_transcript(raw);
+
+        assert!(!parsed.degraded);
+        assert_eq!(parsed.blocks.len(), 2);
+        assert_eq!(parsed.blocks[0].render_kind, "user");
+        assert_eq!(
+            parsed.blocks[0].text.as_deref(),
+            Some("Brief path: [redacted]\nContinue")
+        );
+        assert_eq!(parsed.blocks[1].render_kind, "assistant");
+        assert_eq!(
+            parsed.blocks[1].text.as_deref(),
+            Some("Assistant line\n\n- inspect [redacted]\n  next")
         );
     }
 
     #[test]
     fn codex_session_jsonl_oversized_native_text_is_bounded() {
-        let long_message = "m".repeat(MAX_BOUNDED_TEXT + 50);
+        let long_message = "m".repeat(MAX_NATIVE_MESSAGE_TEXT + 50);
         let long_tool_name = "tool".repeat(MAX_BOUNDED_TEXT);
         let raw = format!(
             "{}\n{}\n",
@@ -1871,7 +2387,7 @@ mod tests {
                 .expect("assistant text")
                 .chars()
                 .count(),
-            MAX_BOUNDED_TEXT
+            MAX_NATIVE_MESSAGE_TEXT
         );
         assert_eq!(
             parsed.blocks[1]

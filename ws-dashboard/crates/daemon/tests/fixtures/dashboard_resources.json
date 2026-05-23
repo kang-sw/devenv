@@ -109,7 +109,9 @@
               "label": "Open root",
               "enabled": true
             }
-          ]
+          ],
+          "activation": "online",
+          "availability": "available"
         },
         {
           "id": "root-devenv-linked",
@@ -164,7 +166,9 @@
               "label": "Focus root",
               "enabled": true
             }
-          ]
+          ],
+          "activation": "online",
+          "availability": "available"
         },
         {
           "id": "root-devenv-offline",
@@ -191,7 +195,9 @@
               "label": "Reconnect",
               "enabled": false
             }
-          ]
+          ],
+          "activation": "online",
+          "availability": "missing"
         }
       ],
       "actions": [
@@ -266,7 +272,9 @@
               "label": "Reveal",
               "enabled": false
             }
-          ]
+          ],
+          "activation": "online",
+          "availability": "inaccessible"
         }
       ],
       "actions": [

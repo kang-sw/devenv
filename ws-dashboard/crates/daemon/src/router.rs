@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Component, PathBuf};
+use std::sync::Arc;
 
 use axum::extract::{Path as AxumPath, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -8,12 +9,16 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::fs;
+use tokio::sync::Mutex;
 
 use crate::auth::{OwnerAuthState, PairingOutcome};
 use crate::config::ServeConfig;
 use crate::events::instance_events;
+use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
-use crate::root_picker::{create_empty_directory, list_root_picker, open_work_root};
+use crate::root_picker::{
+    create_empty_directory, list_root_picker, open_work_root, set_work_root_activation,
+};
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
     terminal_resize, terminal_websocket, TerminalRegistry,
@@ -29,8 +34,10 @@ pub struct AppState {
     pub config: ServeConfig,
     pub auth: OwnerAuthState,
     pub opened_work_roots: OpenedWorkRoots,
+    pub dashboard_state: DashboardStateStore,
     pub terminals: TerminalRegistry,
     pub work_root_activity: WorkRootActivityProjector,
+    pub registry_persist_lock: Arc<Mutex<()>>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -50,6 +57,10 @@ pub fn build_router(state: AppState) -> Router {
             post(create_empty_directory),
         )
         .route("/api/dashboard/work-roots/open", post(open_work_root))
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/activation",
+            post(set_work_root_activation),
+        )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/terminals",
             get(list_terminals).post(create_terminal),

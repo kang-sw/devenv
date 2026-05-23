@@ -6,8 +6,11 @@ import {
   markTerminalPaneCloseError,
   markTerminalSocketStatus,
   mergeListedTerminalSessions,
+  loadTerminalRestoreIntents,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
+  replaceTerminalRestoreIntentsForWorkRoot,
+  saveTerminalRestoreIntents,
   terminalCloseEndpoint,
   terminalInputEndpoint,
   terminalOutputEndpoint,
@@ -16,6 +19,8 @@ import {
   terminalPaneId,
   terminalPaneLogicalKey,
   terminalResizeEndpoint,
+  terminalRestoreIntentsForWorkRoot,
+  terminalRestoreIntentsFromPanes,
   terminalWebSocketEndpoint,
   terminalWebSocketUrl,
   terminalWebSocketCursor,
@@ -45,6 +50,7 @@ const session: TerminalSessionView = {
   columns: 80,
   rows: 24,
   createdAtMs: 1,
+  cwdHint: null,
 };
 
 assertEqual(workRootTerminalsEndpoint("root/local abc"), "/api/dashboard/work-roots/root%2Flocal%20abc/terminals", "workRoot terminal endpoint encodes id");
@@ -130,6 +136,73 @@ assertEqual(
   "close failed",
   "close failure preserves pane state with error",
 );
+
+const restoreIntents = terminalRestoreIntentsFromPanes(
+  [
+    pane,
+    terminalPaneFromSession({
+      ...session,
+      terminalId: "term_nested",
+      title: "Nested",
+      cwdHint: "nested",
+    }),
+  ],
+  123,
+);
+assertDeepEqual(
+  restoreIntents.map((intent) => ({
+    workRootId: intent.workRootId,
+    title: intent.title,
+    cwdHint: intent.cwdHint,
+    updatedAtMs: intent.updatedAtMs,
+  })),
+  [
+    { workRootId: "root-local-abc", title: "Terminal", cwdHint: null, updatedAtMs: 123 },
+    { workRootId: "root-local-abc", title: "Nested", cwdHint: "nested", updatedAtMs: 123 },
+  ],
+  "restore intents capture browser-visible terminal tab context",
+);
+assertDeepEqual(
+  terminalRestoreIntentsForWorkRoot(restoreIntents, "root-local-abc").map((intent) => intent.title),
+  ["Terminal", "Nested"],
+  "restore intents filter by workRoot",
+);
+assertDeepEqual(
+  replaceTerminalRestoreIntentsForWorkRoot(
+    [{ workRootId: "other", title: "Other", cwdHint: null, updatedAtMs: 1 }],
+    "root-local-abc",
+    restoreIntents,
+  ).map((intent) => intent.title),
+  ["Other", "Terminal", "Nested"],
+  "replace restore intents updates one workRoot without dropping others",
+);
+
+const fakeStorage = new Map<string, string>();
+const storage = {
+  getItem: (key: string) => fakeStorage.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    fakeStorage.set(key, value);
+  },
+  removeItem: (key: string) => {
+    fakeStorage.delete(key);
+  },
+};
+saveTerminalRestoreIntents(restoreIntents, storage);
+assertDeepEqual(
+  loadTerminalRestoreIntents(storage).map((intent) => ({
+    workRootId: intent.workRootId,
+    title: intent.title,
+    cwdHint: intent.cwdHint,
+  })),
+  [
+    { workRootId: "root-local-abc", title: "Terminal", cwdHint: null },
+    { workRootId: "root-local-abc", title: "Nested", cwdHint: "nested" },
+  ],
+  "terminal restore intents round-trip through storage",
+);
+fakeStorage.set("ws-dashboard.terminalRestore.v1", "not json");
+assertDeepEqual(loadTerminalRestoreIntents(storage), [], "malformed restore storage degrades to empty");
+
 assertDeepEqual(validateTerminalSize(100, 30), { columns: 100, rows: 30 }, "valid resize accepted");
 assertThrows(() => validateTerminalSize(0, 30), /invalid terminal size/, "non-positive columns rejected");
 assertThrows(() => validateTerminalSize(1000, 30), /invalid terminal size/, "oversized columns rejected");

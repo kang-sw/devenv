@@ -7,11 +7,14 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use ws_dashboard_core::DashboardResourcesView;
+use ws_dashboard_core::{
+    DashboardResourcesView, WorkRootActivation, WorkRootAvailability, WorkRootId,
+};
 
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
 use crate::resources::{live_dashboard_resources, DashboardResourcesProvider};
 use crate::router::AppState;
+use crate::work_root_files::RegisteredWorkRoot;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +50,12 @@ pub struct CreateEmptyDirectoryRequest {
 #[serde(rename_all = "camelCase")]
 pub struct OpenWorkRootRequest {
     pub path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SetWorkRootActivationRequest {
+    pub activation: WorkRootActivation,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -101,7 +110,7 @@ pub async fn open_work_root(
         return picker_error(StatusCode::BAD_REQUEST, "workRoot was not discovered");
     };
 
-    if work_root.status != ws_dashboard_core::WorkRootStatus::Online {
+    if work_root.availability != WorkRootAvailability::Available {
         return picker_error(
             StatusCode::BAD_REQUEST,
             work_root
@@ -112,15 +121,78 @@ pub async fn open_work_root(
         );
     }
 
-    state
-        .opened_work_roots
-        .register(work_root.id.clone(), requested_path);
+    let opened_work_root_id = work_root.id.clone();
+    let _persist_guard = state.registry_persist_lock.lock().await;
+    let previous_entry = state.opened_work_roots.register_registry_entry(
+        opened_work_root_id.clone(),
+        RegisteredWorkRoot {
+            path: requested_path,
+            activation: WorkRootActivation::Online,
+            provenance: crate::work_root_files::WorkRootProvenance::Opened,
+        },
+    );
+    if let Err(error) = state
+        .dashboard_state
+        .persist_opened_work_roots(&state.opened_work_roots)
+        .await
+    {
+        match previous_entry {
+            Some(previous) => {
+                state
+                    .opened_work_roots
+                    .register_registry_entry(opened_work_root_id, previous);
+            }
+            None => {
+                state.opened_work_roots.unregister(&opened_work_root_id);
+            }
+        }
+        tracing::warn!(%error, "failed to persist opened dashboard workRoots");
+        return picker_error(StatusCode::INTERNAL_SERVER_ERROR, "persist workRoot failed");
+    }
 
     // CONTRACT: return the aggregated live view of every opened workRoot so the
     // immediate open response is consistent with later GET /api/dashboard/resources
     // refreshes. The single-candidate `view` above is only the Online gate.
     let aggregated = live_dashboard_resources(&state.opened_work_roots);
-    Json::<DashboardResourcesView>(aggregated).into_response()
+    (
+        [(
+            "x-ws-dashboard-opened-work-root-id",
+            opened_work_root_id.as_str().to_owned(),
+        )],
+        Json::<DashboardResourcesView>(aggregated),
+    )
+        .into_response()
+}
+
+pub async fn set_work_root_activation(
+    State(state): State<AppState>,
+    axum::extract::Path(work_root_id): axum::extract::Path<String>,
+    Json(request): Json<SetWorkRootActivationRequest>,
+) -> Response {
+    let work_root_id = WorkRootId::from(work_root_id);
+    let _persist_guard = state.registry_persist_lock.lock().await;
+    let Some(previous_activation) = state
+        .opened_work_roots
+        .set_activation(&work_root_id, request.activation)
+    else {
+        return picker_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    };
+    if let Err(error) = state
+        .dashboard_state
+        .persist_opened_work_roots(&state.opened_work_roots)
+        .await
+    {
+        state
+            .opened_work_roots
+            .set_activation(&work_root_id, previous_activation);
+        tracing::warn!(%error, "failed to persist dashboard workRoot registry");
+        return picker_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "persist activation failed",
+        );
+    }
+    Json::<DashboardResourcesView>(live_dashboard_resources(&state.opened_work_roots))
+        .into_response()
 }
 
 fn root_picker_view(path: &Path) -> Result<RootPickerView, String> {

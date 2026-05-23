@@ -25,6 +25,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -32,11 +33,13 @@ use futures_util::{SinkExt, StreamExt};
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as TungsteniteMessage};
 use tower::ServiceExt;
 use ws_dashboard_daemon::auth::{OwnerAuthState, PairingTokenPolicy};
 use ws_dashboard_daemon::config::ServeConfig;
+use ws_dashboard_daemon::persistent_state::DashboardStateStore;
 use ws_dashboard_daemon::router::{build_router, AppState};
 use ws_dashboard_daemon::terminal::TerminalRegistry;
 use ws_dashboard_daemon::work_root_activity::{
@@ -121,12 +124,21 @@ fn terminal_test_command_profiles_have_exit_sequences() {
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn app_state() -> AppState {
+    app_state_with_opened_and_store(OpenedWorkRoots::default(), DashboardStateStore::disabled())
+}
+
+fn app_state_with_opened_and_store(
+    opened_work_roots: OpenedWorkRoots,
+    dashboard_state: DashboardStateStore,
+) -> AppState {
     AppState {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
-        opened_work_roots: OpenedWorkRoots::default(),
+        opened_work_roots,
+        dashboard_state,
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
 
@@ -138,8 +150,10 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         },
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
+        dashboard_state: DashboardStateStore::disabled(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
 
@@ -355,8 +369,10 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral_with_policy(PairingTokenPolicy::new(Duration::ZERO)),
         opened_work_roots: OpenedWorkRoots::default(),
+        dashboard_state: DashboardStateStore::disabled(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     };
     let expired_token = expired_state
         .auth
@@ -632,6 +648,631 @@ async fn dashboard_resources_api_includes_opened_work_root() {
 }
 
 #[tokio::test]
+async fn dashboard_resources_refresh_recomputes_availability_without_activation_or_membership_loss()
+{
+    let root = temp_fixture_path("refresh-recompute");
+    fs::create_dir_all(&root).expect("create refresh root");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+
+    let offline_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/activation",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": "offline" }).to_string(),
+                ))
+                .expect("offline activation request"),
+        )
+        .await
+        .expect("offline activation response");
+    assert_eq!(offline_response.status(), StatusCode::OK);
+
+    let available = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let root_view = only_work_root(&available);
+    assert_eq!(root_view["id"], work_root_id);
+    assert_eq!(root_view["activation"], "offline");
+    assert_eq!(root_view["availability"], "available");
+
+    fs::remove_dir_all(&root).expect("remove refresh root after registry membership");
+    let missing = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let root_view = only_work_root(&missing);
+    assert_eq!(root_view["id"], work_root_id);
+    assert_eq!(root_view["activation"], "offline");
+    assert!(
+        ["missing", "moved"].contains(
+            &root_view["availability"]
+                .as_str()
+                .expect("missing availability")
+        ),
+        "missing root stays visible with degraded availability"
+    );
+
+    fs::create_dir_all(&root).expect("restore refresh root");
+    let restored = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let root_view = only_work_root(&restored);
+    assert_eq!(root_view["id"], work_root_id);
+    assert_eq!(root_view["activation"], "offline");
+    assert_eq!(root_view["availability"], "available");
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_registry_activation_controls_keep_offline_roots_visible_and_gate_routes() {
+    let root = temp_fixture_path("activation-gate");
+    fs::create_dir_all(&root).expect("create activation root");
+    fs::write(root.join("README.md"), "hello\n").expect("write activation file");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
+    let (open_socket_addr, open_socket_server) = spawn_test_server(app.clone()).await;
+    let mut open_socket_request =
+        format!("ws://{open_socket_addr}/api/dashboard/terminals/{terminal_id}/socket")
+            .into_client_request()
+            .expect("pre-offline websocket request");
+    open_socket_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let (mut open_socket, _) = tokio_tungstenite::connect_async(open_socket_request)
+        .await
+        .expect("pre-offline websocket connects");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/activation",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": "offline" }).to_string(),
+                ))
+                .expect("offline activation request"),
+        )
+        .await
+        .expect("offline activation response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("offline activation body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("activation JSON");
+    let root_value = &value["workspaces"][0]["workRoots"][0];
+    assert_eq!(root_value["id"], work_root_id);
+    assert_eq!(root_value["availability"], "available");
+    assert_eq!(root_value["activation"], "offline");
+    assert_eq!(root_value["state"]["status"], "offline");
+
+    for (method, uri, body, expected_error) in [
+        (
+            Method::GET,
+            format!("/api/dashboard/work-roots/{work_root_id}/files"),
+            Body::empty(),
+            "workRoot offline",
+        ),
+        (
+            Method::GET,
+            format!("/api/dashboard/work-roots/{work_root_id}/files/read?path=README.md"),
+            Body::empty(),
+            "workRoot offline",
+        ),
+        (
+            Method::GET,
+            format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+            Body::empty(),
+            "workRoot offline",
+        ),
+        (
+            Method::POST,
+            format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+            Body::from(serde_json::json!({ "columns": 80, "rows": 24 }).to_string()),
+            "workRoot offline",
+        ),
+        (
+            Method::GET,
+            format!("/api/dashboard/terminals/{terminal_id}/output"),
+            Body::empty(),
+            "workRoot offline",
+        ),
+        (
+            Method::POST,
+            format!("/api/dashboard/terminals/{terminal_id}/input"),
+            Body::from(serde_json::json!({ "data": "echo blocked\n" }).to_string()),
+            "workRoot offline",
+        ),
+        (
+            Method::POST,
+            format!("/api/dashboard/terminals/{terminal_id}/resize"),
+            Body::from(serde_json::json!({ "columns": 100, "rows": 30 }).to_string()),
+            "workRoot offline",
+        ),
+        (
+            Method::DELETE,
+            format!("/api/dashboard/terminals/{terminal_id}"),
+            Body::empty(),
+            "workRoot offline",
+        ),
+        (
+            Method::GET,
+            format!("/api/dashboard/work-roots/{work_root_id}/activity"),
+            Body::empty(),
+            "workRoot offline",
+        ),
+        (
+            Method::GET,
+            format!(
+                "/api/dashboard/work-roots/{work_root_id}/activity/items/agent:test/transcript"
+            ),
+            Body::empty(),
+            "workRoot offline",
+        ),
+        (
+            Method::GET,
+            format!("/api/dashboard/work-roots/{work_root_id}/activity/events"),
+            Body::empty(),
+            "workRoot offline",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .expect("offline gated request"),
+            )
+            .await
+            .expect("offline gated response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("offline error body");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("offline error JSON");
+        assert_eq!(value["error"], expected_error);
+        assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
+    }
+
+    open_socket
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({
+                "type": "input",
+                "data": "echo WS-OFFLINE-BYPASS\n"
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send offline websocket input frame");
+    let mut socket_closed = false;
+    for _ in 0..4 {
+        match timeout(Duration::from_secs(2), open_socket.next()).await {
+            Ok(Some(Ok(TungsteniteMessage::Close(_)))) | Ok(None) => {
+                socket_closed = true;
+                break;
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(_))) | Err(_) => {
+                socket_closed = true;
+                break;
+            }
+        }
+    }
+    assert!(socket_closed, "offline websocket closes after client input");
+    open_socket_server.abort();
+
+    let (addr, server) = spawn_test_server(app.clone()).await;
+    let mut websocket_request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
+        .into_client_request()
+        .expect("offline websocket request");
+    websocket_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let error = tokio_tungstenite::connect_async(websocket_request)
+        .await
+        .expect_err("offline websocket rejects");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+        }
+        other => panic!("unexpected offline websocket error: {other}"),
+    }
+    server.abort();
+
+    let online_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/activation",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": "online" }).to_string(),
+                ))
+                .expect("online activation request"),
+        )
+        .await
+        .expect("online activation response");
+    assert_eq!(online_response.status(), StatusCode::OK);
+    let close_response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("terminal cleanup request"),
+        )
+        .await
+        .expect("terminal cleanup response");
+    assert_eq!(close_response.status(), StatusCode::NO_CONTENT);
+
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn online_missing_work_root_returns_bounded_unavailable_without_path_leak() {
+    let root = temp_fixture_path("activation-missing");
+    fs::create_dir_all(&root).expect("create missing root");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let work_root_id = open_work_root_for_test(app.clone(), cookie.as_str(), &root).await;
+    let terminal_id = create_terminal_for_test(app.clone(), cookie.as_str(), &work_root_id).await;
+    fs::remove_dir_all(&root).expect("remove root after registry membership");
+
+    let resources = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("resources request"),
+        )
+        .await
+        .expect("resources response");
+    assert_eq!(resources.status(), StatusCode::OK);
+    let resources_body = axum::body::to_bytes(resources.into_body(), 64 * 1024)
+        .await
+        .expect("resources body");
+    let value: serde_json::Value = serde_json::from_slice(&resources_body).expect("resources JSON");
+    assert_eq!(value["workspaces"][0]["workRoots"][0]["id"], work_root_id);
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["activation"],
+        "online"
+    );
+    assert!(["missing", "moved"].contains(
+        &value["workspaces"][0]["workRoots"][0]["availability"]
+            .as_str()
+            .expect("availability")
+    ));
+
+    let response = app.clone();
+    for uri in [
+        format!("/api/dashboard/work-roots/{work_root_id}/files"),
+        format!("/api/dashboard/work-roots/{work_root_id}/files/read?path=README.md"),
+        format!("/api/dashboard/work-roots/{work_root_id}/activity"),
+        format!("/api/dashboard/work-roots/{work_root_id}/activity/items/agent:test/transcript"),
+        format!("/api/dashboard/work-roots/{work_root_id}/activity/events"),
+        format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+        format!("/api/dashboard/terminals/{terminal_id}/output"),
+    ] {
+        let response = response
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .body(Body::empty())
+                    .expect("missing workRoot gated request"),
+            )
+            .await
+            .expect("missing workRoot gated response");
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("unavailable body");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("unavailable JSON");
+        assert_eq!(value["error"], "workRoot unavailable");
+        assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
+    }
+
+    for (uri, body) in [
+        (
+            format!("/api/dashboard/work-roots/{work_root_id}/terminals"),
+            Body::from(serde_json::json!({ "columns": 80, "rows": 24 }).to_string()),
+        ),
+        (
+            format!("/api/dashboard/terminals/{terminal_id}/input"),
+            Body::from(serde_json::json!({ "data": "echo blocked\n" }).to_string()),
+        ),
+        (
+            format!("/api/dashboard/terminals/{terminal_id}/resize"),
+            Body::from(serde_json::json!({ "columns": 100, "rows": 30 }).to_string()),
+        ),
+    ] {
+        let response = response
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .expect("missing workRoot terminal POST request"),
+            )
+            .await
+            .expect("missing workRoot terminal POST response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("terminal unavailable body");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("terminal unavailable JSON");
+        assert_eq!(value["error"], "workRoot unavailable");
+        assert!(!String::from_utf8_lossy(&body).contains(root.to_string_lossy().as_ref()));
+    }
+
+    let delete_response = response
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("missing workRoot terminal delete request"),
+        )
+        .await
+        .expect("missing workRoot terminal delete response");
+    assert_eq!(delete_response.status(), StatusCode::CONFLICT);
+    let delete_body = axum::body::to_bytes(delete_response.into_body(), 4096)
+        .await
+        .expect("delete unavailable body");
+    let value: serde_json::Value =
+        serde_json::from_slice(&delete_body).expect("delete unavailable JSON");
+    assert_eq!(value["error"], "workRoot unavailable");
+    assert!(!String::from_utf8_lossy(&delete_body).contains(root.to_string_lossy().as_ref()));
+
+    let (addr, server) = spawn_test_server(response.clone()).await;
+    let mut websocket_request = format!("ws://{addr}/api/dashboard/terminals/{terminal_id}/socket")
+        .into_client_request()
+        .expect("unavailable websocket request");
+    websocket_request
+        .headers_mut()
+        .insert(header::COOKIE, cookie.parse().expect("cookie header"));
+    let error = tokio_tungstenite::connect_async(websocket_request)
+        .await
+        .expect_err("unavailable websocket rejects");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+        }
+        other => panic!("unexpected unavailable websocket error: {other}"),
+    }
+    server.abort();
+    fs::create_dir_all(&root).expect("restore root for terminal cleanup");
+    let cleanup = response
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/terminals/{terminal_id}"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("terminal cleanup request"),
+        )
+        .await
+        .expect("terminal cleanup response");
+    assert_eq!(cleanup.status(), StatusCode::NO_CONTENT);
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn open_work_root_header_identifies_requested_root_with_ambiguous_labels() {
+    let base = temp_fixture_path("ambiguous-open");
+    let first = base.join("first").join("same-name");
+    let second = base.join("second").join("same-name");
+    fs::create_dir_all(&first).expect("create first same-name root");
+    fs::create_dir_all(&second).expect("create second same-name root");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let first_id = open_work_root_for_test(app.clone(), cookie.as_str(), &first).await;
+    let expected_second_id = ws_dashboard_daemon::discovery::local_work_root_id_for_path(&second);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": second.display().to_string() }).to_string(),
+                ))
+                .expect("open second same-name root request"),
+        )
+        .await
+        .expect("open second same-name root response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-ws-dashboard-opened-work-root-id")
+            .and_then(|value| value.to_str().ok()),
+        Some(expected_second_id.as_str())
+    );
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("open second body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("open second JSON");
+    let ids = work_root_ids(&value);
+    assert!(ids.contains(&first_id));
+    assert!(ids.iter().any(|id| id == expected_second_id.as_str()));
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn work_root_activation_rolls_back_when_registry_persist_fails() {
+    let root = temp_fixture_path("activation-persist-fails");
+    fs::create_dir_all(&root).expect("create activation root");
+    let state_file_directory = temp_fixture_path("activation-state-dir");
+    fs::create_dir_all(&state_file_directory).expect("create state-file directory");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = ws_dashboard_daemon::discovery::local_work_root_id_for_path(&root);
+    let state = app_state_with_opened_and_store(
+        opened,
+        DashboardStateStore::at_path(&state_file_directory),
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/activation",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": "offline" }).to_string(),
+                ))
+                .expect("activation request"),
+        )
+        .await
+        .expect("activation response");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("persist error body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("persist error JSON");
+    assert_eq!(value["error"], "persist activation failed");
+
+    let resources = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("resources request"),
+        )
+        .await
+        .expect("resources response");
+    assert_eq!(resources.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resources.into_body(), 64 * 1024)
+        .await
+        .expect("resources body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("resources JSON");
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["activation"],
+        "online"
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_directory);
+}
+
+#[tokio::test]
+async fn open_work_root_does_not_advertise_id_when_registry_persist_fails() {
+    let root = temp_fixture_path("open-persist-fails");
+    fs::create_dir_all(&root).expect("create open root");
+    let state_file_directory = temp_fixture_path("open-state-dir");
+    fs::create_dir_all(&state_file_directory).expect("create state-file directory");
+    let state = app_state_with_opened_and_store(
+        OpenedWorkRoots::default(),
+        DashboardStateStore::at_path(&state_file_directory),
+    );
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/open")
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": root.display().to_string() }).to_string(),
+                ))
+                .expect("open workRoot request"),
+        )
+        .await
+        .expect("open workRoot response");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response
+        .headers()
+        .get("x-ws-dashboard-opened-work-root-id")
+        .is_none());
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .expect("open persist error body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("open persist error JSON");
+    assert_eq!(value["error"], "persist workRoot failed");
+
+    let resources = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("resources request"),
+        )
+        .await
+        .expect("resources response");
+    assert_eq!(resources.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resources.into_body(), 64 * 1024)
+        .await
+        .expect("resources body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("resources JSON");
+    assert!(value["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .is_empty());
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_directory);
+}
+
+#[tokio::test]
 async fn root_picker_routes_are_owner_authenticated() {
     let app = build_router(app_state());
 
@@ -650,6 +1291,11 @@ async fn root_picker_routes_are_owner_authenticated() {
             .uri("/api/dashboard/work-roots/open")
             .body(Body::empty())
             .expect("open workRoot request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/dashboard/work-roots/root-local-test/activation")
+            .body(Body::empty())
+            .expect("activate workRoot request"),
     ];
 
     for request in requests {
@@ -811,6 +1457,81 @@ async fn root_picker_can_open_existing_directory_into_dashboard_model() {
     );
 
     remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn dashboard_resources_api_includes_remembered_work_root_after_restart_seed() {
+    // CONTRACT: daemon startup can seed OpenedWorkRoots from persisted paths,
+    // so the canonical resources route shows remembered roots before the owner
+    // manually opens a new one in this process.
+    let root = temp_fixture_path("remembered-resources");
+    let state_file_root = temp_fixture_path("remembered-resources-state");
+    fs::create_dir_all(&root).expect("create remembered resources workRoot");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let opened_before_restart = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    store
+        .persist_opened_work_roots(&opened_before_restart)
+        .await
+        .expect("persist remembered workRoot");
+    let remembered = store.load_opened_work_roots().await;
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::from_paths(remembered), store);
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("authenticated remembered resources request"),
+        )
+        .await
+        .expect("authenticated remembered resources response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("remembered resources body bytes");
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).expect("remembered resources JSON body");
+
+    assert_eq!(
+        value["workspaces"][0]["workRoots"][0]["label"],
+        root.file_name()
+            .and_then(|name| name.to_str())
+            .expect("remembered root filename")
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_root);
+}
+
+#[tokio::test]
+async fn open_work_root_persists_opened_work_root_paths() {
+    // CONTRACT: opening a workRoot updates daemon-owned local state after the
+    // in-memory registration succeeds.
+    let root = temp_fixture_path("persist-open-root");
+    let state_file_root = temp_fixture_path("persist-open-root-state");
+    fs::create_dir_all(&root).expect("create persisted open workRoot");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let work_root_id = open_work_root_for_test(app, cookie.as_str(), &root).await;
+    let remembered = store.load_opened_work_roots().await;
+
+    assert_eq!(remembered, vec![root.clone()]);
+    assert!(
+        work_root_id.starts_with("root-local-"),
+        "persisted open should return normal workRoot id, got {work_root_id}"
+    );
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_root);
 }
 
 #[tokio::test]
@@ -1041,11 +1762,13 @@ fn app_state_with_activity_cache_and_codex_home(
         config: ServeConfig::default_loopback(),
         auth: OwnerAuthState::new_ephemeral(),
         opened_work_roots: OpenedWorkRoots::default(),
+        dashboard_state: DashboardStateStore::disabled(),
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
             codex_home,
             cache_home: Some(cache_home),
         }),
+        registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
 
@@ -2298,6 +3021,42 @@ async fn work_root_activity_transcript_route_auth_unknown_and_backfill_bounds() 
     assert_eq!(unknown_status, StatusCode::NOT_FOUND);
     assert!(unknown_body.contains("unknown activity"));
 
+    let (tail_status, tail_body) = fetch_work_root_activity_transcript(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "agent:writer",
+        "limit=2",
+    )
+    .await;
+    assert_eq!(tail_status, StatusCode::OK);
+    let tail: serde_json::Value =
+        serde_json::from_str(&tail_body).expect("tail activity transcript JSON");
+    assert_eq!(tail["blocks"].as_array().expect("tail blocks").len(), 2);
+    assert_eq!(tail["blocks"][0]["cursor"], "1");
+    assert_eq!(tail["blocks"][0]["text"], "second block");
+    assert_eq!(tail["blocks"][1]["cursor"], "2");
+    assert_eq!(tail["blocks"][1]["text"], "third block");
+    assert_eq!(tail["nextCursor"], "1");
+    assert_eq!(tail["hasMore"], true);
+
+    let (older_status, older_body) = fetch_work_root_activity_transcript(
+        app.clone(),
+        cookie.as_str(),
+        &work_root_id,
+        "agent:writer",
+        "limit=2&before=1",
+    )
+    .await;
+    assert_eq!(older_status, StatusCode::OK);
+    let older: serde_json::Value =
+        serde_json::from_str(&older_body).expect("older activity transcript JSON");
+    assert_eq!(older["blocks"].as_array().expect("older blocks").len(), 1);
+    assert_eq!(older["blocks"][0]["cursor"], "0");
+    assert_eq!(older["blocks"][0]["text"], "first block");
+    assert_eq!(older["nextCursor"], "0");
+    assert_eq!(older["hasMore"], false);
+
     let (status, body_text) = fetch_work_root_activity_transcript(
         app,
         cookie.as_str(),
@@ -2362,6 +3121,16 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
 {"timestamp":"2026-05-22T00:00:02Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":{"cmd":"cat /private/cache/native.jsonl"}}}
 {"timestamp":"2026-05-22T00:00:03Z","type":"response_item","payload":{"type":"function_call_output","output":"private /host/path result"}}
 {"timestamp":"2026-05-22T00:00:04Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"done"}}
+{"timestamp":"2026-05-22T00:00:05Z","type":"event_msg","payload":{"type":"user_message","message":"Please inspect /private/cache and continue"}}
+{"timestamp":"2026-05-22T00:00:06Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will inspect the safe summary."}]}}
+{"timestamp":"2026-05-22T00:00:07Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"patch touching /private/cache/native.jsonl"}}
+{"timestamp":"2026-05-22T00:00:08Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":"private custom output"}}
+{"timestamp":"2026-05-22T00:00:09Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","status":"success","duration":12,"invocation":{"tool":"tickets_status","arguments":{"path":"/private/cache"}},"result":{"text":"/private/mcp-result"}}}
+{"timestamp":"2026-05-22T00:00:10Z","type":"event_msg","payload":{"type":"exec_command_end","status":"success","exit_code":0,"duration":34,"command":"cat /private/cache/native.jsonl","cwd":"/private/cache","stdout":"private stdout","stderr":""}}
+{"timestamp":"2026-05-22T00:00:11Z","type":"event_msg","payload":{"type":"patch_apply_end","status":"success","success":true,"changes":[{"path":"/private/cache/native.jsonl"}],"stdout":"applied /private/cache/native.jsonl","stderr":""}}
+{"timestamp":"2026-05-22T00:00:12Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"user_interrupt"}}
+{"timestamp":"2026-05-22T00:00:13Z","type":"event_msg","payload":{"type":"token_count","info":{"path":"/private/cache"}}}
+{"timestamp":"2026-05-22T00:00:14Z","type":"session_meta","id":"thread-native-secret","cwd":"/private/cache"}
 "#,
     );
     write_agent_metadata(
@@ -2401,7 +3170,7 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
         cookie.as_str(),
         &work_root_id,
         "agent:native",
-        "limit=3",
+        "limit=20",
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -2409,7 +3178,7 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
         serde_json::from_str(&body_text).expect("native transcript JSON");
     assert_eq!(value["status"], "available");
     assert_eq!(value["sourceStatus"], "ok");
-    assert_eq!(value["blocks"].as_array().expect("blocks").len(), 3);
+    assert_eq!(value["blocks"].as_array().expect("blocks").len(), 13);
     assert_eq!(value["blocks"][0]["renderKind"], "status");
     assert_eq!(value["blocks"][0]["title"], "Task started");
     assert_eq!(value["blocks"][1]["renderKind"], "assistant");
@@ -2419,8 +3188,23 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
     );
     assert_eq!(value["blocks"][2]["renderKind"], "toolCall");
     assert_eq!(value["blocks"][2]["data"]["name"], "shell");
-    assert_eq!(value["nextCursor"], "3");
-    assert_eq!(value["hasMore"], true);
+    assert_eq!(value["blocks"][5]["renderKind"], "user");
+    assert_eq!(
+        value["blocks"][5]["text"],
+        "Please inspect [redacted] and continue"
+    );
+    assert_eq!(value["blocks"][6]["renderKind"], "assistant");
+    assert_eq!(value["blocks"][7]["renderKind"], "toolCall");
+    assert_eq!(value["blocks"][7]["data"]["name"], "apply_patch");
+    assert_eq!(value["blocks"][8]["renderKind"], "toolResult");
+    assert_eq!(value["blocks"][9]["title"], "MCP tool result");
+    assert_eq!(value["blocks"][10]["title"], "Command result");
+    assert_eq!(value["blocks"][10]["data"]["exitCode"], 0);
+    assert_eq!(value["blocks"][11]["title"], "Patch apply");
+    assert_eq!(value["blocks"][11]["data"]["changes"], 1);
+    assert_eq!(value["blocks"][12]["title"], "Turn aborted");
+    assert_eq!(value["nextCursor"], "0");
+    assert_eq!(value["hasMore"], false);
 
     for forbidden in [
         root.display().to_string(),
@@ -2437,6 +3221,11 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
         "stderr".to_owned(),
         "pid".to_owned(),
         "function_call_output".to_owned(),
+        "custom_tool_call_output".to_owned(),
+        "cat ".to_owned(),
+        "private stdout".to_owned(),
+        "private custom output".to_owned(),
+        "mcp-result".to_owned(),
     ] {
         assert!(
             !body_text.contains(&forbidden),
@@ -3250,6 +4039,40 @@ fn body_contains_workspace(value: &serde_json::Value, workspace_id: &str) -> boo
         .unwrap_or(false)
 }
 
+async fn dashboard_resources_json(app: axum::Router, cookie: &str) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/resources")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("resources request"),
+        )
+        .await
+        .expect("resources response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("resources body");
+    serde_json::from_slice(&body).expect("resources JSON")
+}
+
+fn only_work_root(value: &serde_json::Value) -> &serde_json::Value {
+    let roots = value["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .flat_map(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("workRoots array")
+                .iter()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(roots.len(), 1, "expected exactly one known workRoot");
+    roots[0]
+}
+
 async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -> String {
     let response = app
         .oneshot(
@@ -3269,14 +4092,21 @@ async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -
         .await
         .expect("open workRoot response");
     assert_eq!(response.status(), StatusCode::OK);
+    let opened_header = response
+        .headers()
+        .get("x-ws-dashboard-opened-work-root-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
         .await
         .expect("open workRoot body bytes");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("open JSON");
-    value["workspaces"][0]["workRoots"][0]["id"]
-        .as_str()
-        .expect("workRoot id")
-        .to_owned()
+    let opened_id = opened_header.expect("opened workRoot id header");
+    assert!(
+        work_root_ids(&value).iter().any(|id| id == &opened_id),
+        "opened header id {opened_id} must be present in response body"
+    );
+    opened_id
 }
 
 async fn create_terminal_for_test(app: axum::Router, cookie: &str, work_root_id: &str) -> String {
@@ -3650,6 +4480,7 @@ async fn work_root_terminal_routes_reject_unknown_work_root() {
 async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
     let root = temp_fixture_path("terminal-root");
     fs::create_dir_all(&root).expect("create terminal root dir");
+    fs::create_dir_all(root.join("nested")).expect("create terminal nested cwd dir");
     let state = app_state();
     let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
     let app = build_router(state);
@@ -3675,6 +4506,26 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
         .expect("invalid create terminal response");
     assert_eq!(invalid_create.status(), StatusCode::BAD_REQUEST);
 
+    let invalid_cwd_create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/terminals"
+                ))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "columns": 80, "rows": 24, "cwdHint": "../outside" })
+                        .to_string(),
+                ))
+                .expect("invalid cwd terminal request"),
+        )
+        .await
+        .expect("invalid cwd terminal response");
+    assert_eq!(invalid_cwd_create.status(), StatusCode::BAD_REQUEST);
+
     let create = app
         .clone()
         .oneshot(
@@ -3686,7 +4537,7 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
                 .header(header::COOKIE, cookie.as_str())
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "columns": 80, "rows": 24, "title": "Test terminal" })
+                    serde_json::json!({ "columns": 80, "rows": 24, "title": "Test terminal", "cwdHint": "nested" })
                         .to_string(),
                 ))
                 .expect("create terminal request"),
@@ -3708,6 +4559,7 @@ async fn work_root_terminal_routes_create_list_output_input_resize_and_close() {
     assert_eq!(created["status"], "running");
     assert_eq!(created["columns"], 80);
     assert_eq!(created["rows"], 24);
+    assert_eq!(created["cwdHint"], "nested");
     assert!(!create_body
         .windows(root.display().to_string().len())
         .any(|window| window == root.display().to_string().as_bytes()));

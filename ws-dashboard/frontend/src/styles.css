@@ -1413,13 +1413,6 @@ button {
   gap: var(--ws-space-06);
 }
 
-.activity-console-summary {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: var(--ws-space-03);
-}
-
 .activity-ribbon {
   display: flex;
   flex-wrap: nowrap;

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,6 +21,7 @@ use tokio::sync::watch;
 use ws_dashboard_core::WorkRootId;
 
 use crate::router::AppState;
+use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessError};
 
 const MAX_TERMINAL_SESSIONS: usize = 16;
 const MAX_OUTPUT_CHUNKS: usize = 1024;
@@ -181,6 +182,7 @@ struct TerminalSession {
     id: String,
     work_root_id: WorkRootId,
     title: String,
+    cwd_hint: Option<String>,
     created_at_ms: u64,
     inner: Mutex<TerminalSessionInner>,
     output_signal: watch::Sender<u64>,
@@ -207,6 +209,7 @@ pub struct TerminalSessionView {
     columns: u16,
     rows: u16,
     created_at_ms: u64,
+    cwd_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -282,6 +285,7 @@ pub struct CreateTerminalRequest {
     #[serde(default = "default_rows")]
     rows: u16,
     title: Option<String>,
+    cwd_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -321,8 +325,9 @@ pub async fn create_terminal(
     Json(request): Json<CreateTerminalRequest>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return terminal_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return terminal_access_error(error),
     };
     let Ok((columns, rows)) = validate_size(request.columns, request.rows) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid terminal size");
@@ -334,6 +339,7 @@ pub async fn create_terminal(
         request.title.unwrap_or_else(|| "Terminal".to_owned()),
         columns,
         rows,
+        request.cwd_hint,
     ) {
         Ok(session) => {
             let view = session.view();
@@ -354,8 +360,8 @@ pub async fn list_terminals(
     AxumPath(work_root_id): AxumPath<String>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    if state.opened_work_roots.resolve(&work_root_id).is_none() {
-        return terminal_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    if let Err(error) = resolve_online_available_work_root(&state, &work_root_id) {
+        return terminal_access_error(error);
     }
     Json(state.terminals.list_for_work_root(&work_root_id)).into_response()
 }
@@ -368,6 +374,9 @@ pub async fn terminal_output(
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     Json(session.output_after(query.after)).into_response()
 }
 
@@ -379,6 +388,9 @@ pub async fn terminal_input(
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     match session.write_input(request.data.as_bytes()) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => error.into_response(),
@@ -393,6 +405,9 @@ pub async fn terminal_resize(
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     let Ok((columns, rows)) = validate_size(request.columns, request.rows) else {
         return terminal_error(StatusCode::BAD_REQUEST, "invalid terminal size");
     };
@@ -417,11 +432,14 @@ pub async fn terminal_websocket(
     let Some(session) = state.terminals.get(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     if !session.is_live() {
         return terminal_error(StatusCode::GONE, "terminal is closed");
     }
     upgrade
-        .on_upgrade(move |socket| terminal_socket_task(session, socket, query.after))
+        .on_upgrade(move |socket| terminal_socket_task(state, session, socket, query.after))
         .into_response()
 }
 
@@ -429,6 +447,12 @@ pub async fn close_terminal(
     State(state): State<AppState>,
     AxumPath(terminal_id): AxumPath<String>,
 ) -> Response {
+    let Some(session) = state.terminals.get(&terminal_id) else {
+        return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
+    };
+    if let Err(error) = resolve_online_available_work_root(&state, &session.work_root_id) {
+        return terminal_access_error(error);
+    }
     let Some(session) = state.terminals.remove(&terminal_id) else {
         return terminal_error(StatusCode::NOT_FOUND, "unknown terminal");
     };
@@ -443,7 +467,9 @@ impl TerminalSession {
         title: String,
         columns: u16,
         rows: u16,
+        cwd_hint: Option<String>,
     ) -> Result<Arc<Self>, TerminalError> {
+        let (spawn_cwd, normalized_cwd_hint) = resolve_terminal_cwd(&root_path, cwd_hint)?;
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -454,7 +480,7 @@ impl TerminalSession {
             })
             .map_err(|_| TerminalError::BadRequest("terminal spawn failed"))?;
         let mut command = CommandBuilder::new(default_shell());
-        command.cwd(root_path);
+        command.cwd(spawn_cwd);
         let child = pair
             .slave
             .spawn_command(command)
@@ -472,6 +498,7 @@ impl TerminalSession {
             id: opaque_terminal_id(),
             work_root_id,
             title,
+            cwd_hint: normalized_cwd_hint,
             created_at_ms: now_ms(),
             inner: Mutex::new(TerminalSessionInner {
                 status: TerminalStatus::Running,
@@ -499,6 +526,7 @@ impl TerminalSession {
             columns: inner.columns,
             rows: inner.rows,
             created_at_ms: self.created_at_ms,
+            cwd_hint: self.cwd_hint.clone(),
         }
     }
 
@@ -635,11 +663,19 @@ impl TerminalSession {
     }
 }
 
-async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket, after: u64) {
+async fn terminal_socket_task(
+    state: AppState,
+    session: Arc<TerminalSession>,
+    socket: WebSocket,
+    after: u64,
+) {
     let (mut sender, mut receiver) = socket.split();
     let mut output_signal = session.output_signal.subscribe();
     let mut cursor = after;
 
+    if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+        return;
+    }
     if send_output_backfill(&session, &mut sender, &mut cursor)
         .await
         .is_err()
@@ -653,6 +689,10 @@ async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket, 
                 let Some(Ok(message)) = maybe_message else { break; };
                 match message {
                     Message::Text(text) => {
+                        if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            break;
+                        }
                         let Ok(message) = serde_json::from_str::<TerminalWebSocketClientMessage>(&text) else {
                             break;
                         };
@@ -662,6 +702,10 @@ async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket, 
                         }
                     }
                     Message::Binary(bytes) => {
+                        if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+                            let _ = send_terminal_socket_status(&session, &mut sender, false).await;
+                            break;
+                        }
                         if session.write_input(&bytes).is_err() {
                             let _ = send_terminal_socket_status(&session, &mut sender, false).await;
                             break;
@@ -676,6 +720,9 @@ async fn terminal_socket_task(session: Arc<TerminalSession>, socket: WebSocket, 
             }
             changed = output_signal.changed() => {
                 if changed.is_err() { break; }
+                if resolve_online_available_work_root(&state, &session.work_root_id).is_err() {
+                    break;
+                }
                 if send_output_backfill(&session, &mut sender, &mut cursor).await.is_err() {
                     break;
                 }
@@ -779,6 +826,43 @@ fn validate_size(columns: u16, rows: u16) -> Result<(u16, u16), ()> {
     }
 }
 
+fn resolve_terminal_cwd(
+    root_path: &Path,
+    cwd_hint: Option<String>,
+) -> Result<(PathBuf, Option<String>), TerminalError> {
+    let Some(raw_hint) = cwd_hint else {
+        return Ok((root_path.to_path_buf(), None));
+    };
+    let trimmed = raw_hint.trim();
+    if trimmed.is_empty() || trimmed == "." {
+        return Ok((root_path.to_path_buf(), None));
+    }
+
+    let hint_path = Path::new(trimmed);
+    let mut normalized = PathBuf::new();
+    for component in hint_path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(TerminalError::BadRequest("invalid terminal cwd"));
+            }
+        }
+    }
+
+    if normalized.as_os_str().is_empty() {
+        return Ok((root_path.to_path_buf(), None));
+    }
+    let spawn_cwd = root_path.join(&normalized);
+    if !spawn_cwd.is_dir() {
+        return Err(TerminalError::BadRequest("terminal cwd not found"));
+    }
+    Ok((
+        spawn_cwd,
+        Some(normalized.to_string_lossy().replace('\\', "/")),
+    ))
+}
+
 fn terminal_error(status: StatusCode, error: impl Into<String>) -> Response {
     (
         status,
@@ -787,6 +871,10 @@ fn terminal_error(status: StatusCode, error: impl Into<String>) -> Response {
         }),
     )
         .into_response()
+}
+
+fn terminal_access_error(error: WorkRootAccessError) -> Response {
+    terminal_error(error.status(), error.message())
 }
 
 fn default_shell() -> PathBuf {
@@ -895,6 +983,32 @@ mod terminal_portability_skeleton_tests {
             TerminalShellSource::Fallback
         );
     }
+
+    #[test]
+    fn terminal_cwd_hint_stays_work_root_relative() {
+        let root = std::env::temp_dir().join(format!("ws-terminal-cwd-{}", now_ms()));
+        let nested = root.join("nested/child");
+        std::fs::create_dir_all(&nested).expect("create nested cwd fixture");
+
+        assert_eq!(
+            resolve_terminal_cwd(&root, None).expect("root cwd"),
+            (root.clone(), None)
+        );
+        assert_eq!(
+            resolve_terminal_cwd(&root, Some("nested/child".to_owned())).expect("nested cwd"),
+            (nested.clone(), Some("nested/child".to_owned()))
+        );
+        assert!(matches!(
+            resolve_terminal_cwd(&root, Some("../outside".to_owned())),
+            Err(TerminalError::BadRequest("invalid terminal cwd"))
+        ));
+        assert!(matches!(
+            resolve_terminal_cwd(&root, Some("missing".to_owned())),
+            Err(TerminalError::BadRequest("terminal cwd not found"))
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 fn opaque_terminal_id() -> String {
@@ -921,6 +1035,7 @@ fn default_rows() -> u16 {
     24
 }
 
+#[derive(Debug)]
 enum TerminalError {
     BadRequest(&'static str),
     Gone(&'static str),

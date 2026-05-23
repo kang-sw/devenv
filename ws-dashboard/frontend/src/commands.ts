@@ -1,6 +1,7 @@
 export type DashboardCommandId =
   | "dashboard.refresh"
   | "workRoot.open"
+  | "workRoot.activation.set"
   | "fileExplorer.refresh"
   | "fileExplorer.toggleDirectory"
   | "fileExplorer.openFile"
@@ -21,6 +22,7 @@ export type DashboardCommandPayload =
   | { type: "select"; entityId: string }
   | { type: "action"; label: string; entityId: string }
   | { type: "workRoot.open" }
+  | { type: "workRoot.activation.set"; workRootId: string; activation: "online" | "offline" }
   | { type: "fileExplorer.refresh"; workRootId: string }
   | { type: "fileExplorer.toggleDirectory"; workRootId: string; path: string }
   | {
@@ -66,6 +68,16 @@ export function buildDashboardRefreshCommand(): DashboardCommand {
 
 export function buildWorkRootOpenCommand(_submittedHostPath: string): DashboardCommand {
   return { commandId: "workRoot.open", payload: { type: "workRoot.open" } };
+}
+
+export function buildWorkRootActivationCommand(
+  workRootId: string,
+  activation: "online" | "offline",
+): DashboardCommand {
+  return {
+    commandId: "workRoot.activation.set",
+    payload: { type: "workRoot.activation.set", workRootId, activation },
+  };
 }
 
 export function buildFileExplorerRefreshCommand(workRootId: string): DashboardCommand {
@@ -177,6 +189,8 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Select";
     case "workRoot.open":
       return "Open workRoot";
+    case "workRoot.activation.set":
+      return payload.activation === "online" ? "Bring workRoot online" : "Take workRoot offline";
     case "fileExplorer.toggleDirectory":
       return "Toggle directory";
     case "fileExplorer.openFile":

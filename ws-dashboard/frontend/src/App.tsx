@@ -12,6 +12,7 @@ import {
   buildFileExplorerToggleDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
+  buildWorkRootActivationCommand,
   buildWorkRootOpenCommand,
   dashboardCommandLabel,
   dispatchDashboardCommand,
@@ -69,16 +70,22 @@ import {
   listTerminals,
   markTerminalPaneCloseError,
   markTerminalSocketStatus,
+  loadTerminalRestoreIntents,
   reconcileListedTerminalSessions,
   removeClosedTerminalPane,
+  replaceTerminalRestoreIntentsForWorkRoot,
   resizeTerminal,
   sendTerminalInput,
+  saveTerminalRestoreIntents,
   shouldPollTerminalOutput,
   terminalOutputPollChangedState,
   terminalPaneFromSession,
+  terminalRestoreIntentsForWorkRoot,
+  terminalRestoreIntentsFromPanes,
   terminalPaneLogicalKey,
   terminalWebSocketCursor,
   terminalWebSocketUrl,
+  type TerminalCreateOptions,
   type TerminalPaneState,
   type TerminalWebSocketServerMessage,
   type TerminalSessionView,
@@ -98,6 +105,11 @@ import {
 } from "./resourceModel";
 import { requestOpenWorkRoot } from "./openWorkRoot";
 import { ActivityConsole } from "./ActivityConsole";
+import {
+  createResourceRefreshCoordinator,
+  resourceAvailabilityPollIntervalMs,
+  type ResourceRefreshCoordinator,
+} from "./resourceRefresh";
 import {
   applyActivityConsoleEvent,
   fetchWorkRootActivity,
@@ -128,7 +140,23 @@ type WorkbenchSelection = {
   selectedInstance: InstanceView | null;
 };
 
-const resourceEndpoint = "/api/dashboard/resources";
+async function requestWorkRootActivation(
+  workRootId: string,
+  activation: "online" | "offline",
+): Promise<DashboardResourcesView> {
+  const response = await fetch(
+    `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/activation`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ activation }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return (await response.json()) as DashboardResourcesView;
+}
 
 // Terminal output is short-polled over HTTP (the daemon output route returns
 // immediately). A snappy interval keeps keystroke echo latency low; idle polls
@@ -167,37 +195,42 @@ export function App() {
   >({});
   const commandSequence = useRef(0);
   const fileOpenSequence = useRef(0);
+  const resourceRefreshCoordinatorRef =
+    useRef<ResourceRefreshCoordinator | null>(null);
 
-  const loadResources = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  if (!resourceRefreshCoordinatorRef.current) {
+    resourceRefreshCoordinatorRef.current = createResourceRefreshCoordinator({
+      applyResources: setResources,
+      setLoading,
+      setError,
+    });
+  }
 
-    try {
-      const response = await fetch(resourceEndpoint, {
-        headers: { Accept: "application/json" },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const nextResources = (await response.json()) as DashboardResourcesView;
-      setResources(nextResources);
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "request failed",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadResources = useCallback(
+    (reason: "initial" | "explicit" | "poll" | "open" = "explicit") =>
+      resourceRefreshCoordinatorRef.current?.refresh(reason),
+    [],
+  );
 
   useEffect(() => {
-    void loadResources();
+    resourceRefreshCoordinatorRef.current?.resume();
+    void loadResources("initial");
+  }, [loadResources]);
+
+  useEffect(() => {
+    resourceRefreshCoordinatorRef.current?.resume();
+    const interval = window.setInterval(() => {
+      void loadResources("poll");
+    }, resourceAvailabilityPollIntervalMs);
+
+    return () => {
+      window.clearInterval(interval);
+      resourceRefreshCoordinatorRef.current?.dispose();
+    };
   }, [loadResources]);
 
   const handleWorkRootOpened = useCallback(
-    (openedView: DashboardResourcesView) => {
+    (openedView: DashboardResourcesView, requestedWorkRootId?: string) => {
       // Identify the just-opened workRoot: the workRoot present in the
       // aggregated open response but absent from the prior resource view.
       const priorWorkRootIds = new Set(
@@ -205,7 +238,7 @@ export function App() {
           .filter((entity) => entity.type === "workRoot")
           .map((entity) => entity.id),
       );
-      const openedWorkRootId = flattenEntities(openedView).find(
+      const openedWorkRootId = requestedWorkRootId ?? flattenEntities(openedView).find(
         (entity) =>
           entity.type === "workRoot" && !priorWorkRootIds.has(entity.id),
       )?.id;
@@ -213,11 +246,11 @@ export function App() {
       // Reconcile immediately with the aggregated open response and select the
       // opened workRoot, then re-fetch the canonical endpoint so it stays the
       // source of truth for refresh and re-entry.
-      setResources(openedView);
+      resourceRefreshCoordinatorRef.current?.applyExternalResources(openedView);
       if (openedWorkRootId) {
         setSelectedId(openedWorkRootId);
       }
-      void loadResources();
+      void loadResources("open");
     },
     [loadResources, resources],
   );
@@ -391,7 +424,18 @@ export function App() {
         executableHandlers[command.commandId] = () => setSelectedId(entityId);
       } else if (command.payload.type === "refresh") {
         executableHandlers[command.commandId] = () => {
-          void loadResources();
+          void loadResources("explicit");
+        };
+      } else if (command.payload.type === "workRoot.activation.set") {
+        const { workRootId, activation } = command.payload;
+        executableHandlers[command.commandId] = () => {
+          void requestWorkRootActivation(workRootId, activation)
+            .then((nextResources) => {
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
+            })
+            .catch((nextError) => {
+              setError(nextError instanceof Error ? nextError.message : "activation failed");
+            });
         };
       }
 
@@ -492,18 +536,24 @@ function PanelHeader({
           {actions.map((action) => (
             <button
               className="action-button"
-              data-command-id={`resource.action.${action.id}`}
+              data-command-id={
+                action.id === "refresh"
+                  ? "dashboard.refresh"
+                  : `resource.action.${action.id}`
+              }
               disabled={!action.enabled}
               key={action.id}
               title={action.label}
               type="button"
               onClick={() =>
-                onCommand({
-                  commandId: `resource.action.${action.id}`,
-                  payload: action.id === "refresh"
-                    ? { type: "refresh" }
-                    : { type: "action", label: action.label, entityId },
-                })
+                onCommand(
+                  action.id === "refresh"
+                    ? buildDashboardRefreshCommand()
+                    : {
+                        commandId: `resource.action.${action.id}`,
+                        payload: { type: "action", label: action.label, entityId },
+                      },
+                )
               }
             >
               {action.label}
@@ -519,7 +569,7 @@ function OpenWorkRootControl({
   onOpened,
   onCommand,
 }: {
-  onOpened: (view: DashboardResourcesView) => void;
+  onOpened: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
   onCommand: DashboardCommandDispatcher;
 }) {
   const [path, setPath] = useState("");
@@ -539,9 +589,9 @@ function OpenWorkRootControl({
           setPending(true);
           setError(null);
           void requestOpenWorkRoot(requestedPath)
-            .then((openedView) => {
+            .then((result) => {
               setPath("");
-              onOpened(openedView);
+              onOpened(result.view, result.openedWorkRootId ?? undefined);
             })
             .catch((nextError) => {
               setError(nextError instanceof Error ? nextError.message : "open failed");
@@ -1084,6 +1134,7 @@ function WorkbenchShell({
   const focusedReadOnlyRequest = useRef<number | null>(null);
   const focusedTerminalRequest = useRef<number | null>(null);
   const terminalOpenSequence = useRef(0);
+  const restoredTerminalIntentRoots = useRef<Set<string>>(new Set());
   const [focusedTerminalPaneId, setFocusedTerminalPaneId] = useState<
     string | null
   >(null);
@@ -1163,6 +1214,7 @@ function WorkbenchShell({
               supportEntity,
               readOnlyFilePanes,
               readOnlyFilePaneOrderByGroup,
+              paneOrderByGroup,
               Object.values(terminalPanes),
               terminalPaneOrderByGroup,
               {
@@ -1203,15 +1255,40 @@ function WorkbenchShell({
     if (!workbenchModel) {
       return;
     }
+    const rootId = workbenchModel.root.id;
     const listStartedAtMs = Date.now();
-    void listTerminals(workbenchModel.root.id)
+    void listTerminals(rootId)
       .then((sessions) => {
+        const restoreIntents = terminalRestoreIntentsForWorkRoot(
+          loadTerminalRestoreIntents(),
+          rootId,
+        );
+        if (
+          sessions.length === 0 &&
+          restoreIntents.length > 0 &&
+          !restoredTerminalIntentRoots.current.has(rootId)
+        ) {
+          restoredTerminalIntentRoots.current.add(rootId);
+          for (const intent of restoreIntents) {
+            onCommand(buildTerminalCreateCommand(rootId), {
+              "terminal.create": () =>
+                createTerminalPane({
+                  title: intent.title,
+                  cwdHint: intent.cwdHint,
+                }),
+            });
+          }
+          return;
+        }
         setTerminalPanes((current) =>
-          reconcileListedTerminalSessions(
-            current,
-            workbenchModel.root.id,
-            sessions,
-            listStartedAtMs,
+          persistTerminalPanesForWorkRoot(
+            rootId,
+            reconcileListedTerminalSessions(
+              current,
+              rootId,
+              sessions,
+              listStartedAtMs,
+            ),
           ),
         );
         setTerminalPaneOrderByGroup((current) =>
@@ -1237,22 +1314,25 @@ function WorkbenchShell({
     }
     let cancelled = false;
     setWorkRootActivityState({ rootId, activity: { phase: "loading" } });
-    void fetchWorkRootActivity(rootId)
-      .then((view) => {
-        if (!cancelled) {
-          setWorkRootActivityState({
-            rootId,
-            activity: { phase: "ready", view },
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWorkRootActivityState({ rootId, activity: { phase: "error" } });
-        }
-      });
+    const timer = window.setTimeout(() => {
+      void fetchWorkRootActivity(rootId)
+        .then((view) => {
+          if (!cancelled) {
+            setWorkRootActivityState({
+              rootId,
+              activity: { phase: "ready", view },
+            });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setWorkRootActivityState({ rootId, activity: { phase: "error" } });
+          }
+        });
+    }, 300);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [workbenchModel?.root.id]);
 
@@ -1625,17 +1705,39 @@ function WorkbenchShell({
     );
   }, [activeTerminalPaneRequest, editorGroups]);
 
-  function createTerminalPane() {
+  function persistTerminalPanesForWorkRoot(
+    workRootId: string,
+    nextPanes: Record<string, TerminalPaneState>,
+  ): Record<string, TerminalPaneState> {
+    const nextIntents = terminalRestoreIntentsFromPanes(
+      Object.values(nextPanes).filter(
+        (pane) => pane.session.workRootId === workRootId,
+      ),
+    );
+    saveTerminalRestoreIntents(
+      replaceTerminalRestoreIntentsForWorkRoot(
+        loadTerminalRestoreIntents(),
+        workRootId,
+        nextIntents,
+      ),
+    );
+    return nextPanes;
+  }
+
+  function createTerminalPane(options: TerminalCreateOptions = {}) {
     if (!workbenchModel) {
       return;
     }
-    void createTerminal(workbenchModel.root.id)
+    const rootId = workbenchModel.root.id;
+    void createTerminal(rootId, options)
       .then((session) => {
         const pane = terminalPaneFromSession(session);
-        setTerminalPanes((current) => ({
-          ...current,
-          [pane.logicalKey]: pane,
-        }));
+        setTerminalPanes((current) =>
+          persistTerminalPanesForWorkRoot(rootId, {
+            ...current,
+            [pane.logicalKey]: pane,
+          }),
+        );
         setTerminalPaneOrderByGroup((current) =>
           placeTerminalSessions(
             current,
@@ -1759,7 +1861,10 @@ function WorkbenchShell({
     void closeTerminal(pane.session.terminalId)
       .then(() =>
         setTerminalPanes((current) =>
-          removeClosedTerminalPane(current, pane.logicalKey),
+          persistTerminalPanesForWorkRoot(
+            pane.session.workRootId,
+            removeClosedTerminalPane(current, pane.logicalKey),
+          ),
         ),
       )
       .catch((error) => {
@@ -1920,8 +2025,8 @@ function WorkbenchShell({
     // CONTRACT: The top-bar Activity badge is the selected-workRoot entrypoint
     // for one reversible WorkRoot Activity pane. Routing through
     // decideSurfaceOpenWithDynamicGroups keeps duplicate opens focusing the
-    // existing pane and new opens using policy-owned group-1 placement instead
-    // of a raw Dockview handle.
+    // existing pane and new opens using policy-owned support-split placement
+    // instead of a raw Dockview handle.
     const rootId = workbenchModel.root.id;
     const paneId = workRootActivityPaneId(rootId);
     const decision = decideSurfaceOpenWithDynamicGroups(
@@ -1934,7 +2039,24 @@ function WorkbenchShell({
       },
     );
     if (decision.type === "openNew") {
+      if (decision.createdGroupId) {
+        onWorkbenchGroupsByRootChange((current) => ({
+          ...current,
+          [rootId]: reconcileDashboardGroupsForPlacement(
+            current[rootId] ?? workbenchGroups,
+            decision,
+          ),
+        }));
+      }
       setActivityPaneOpenByRoot((current) => ({ ...current, [rootId]: true }));
+      onPaneOrderByRootChange((current) => ({
+        ...current,
+        [rootId]: addPaneToGroupOrder(
+          current[rootId] ?? {},
+          paneId,
+          String(decision.groupId),
+        ),
+      }));
     }
     setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(current, decision.groupId, paneId),
@@ -2122,7 +2244,8 @@ function WorkbenchToolbar({
           }}
         />
         <span className="meta-chip">{kindLabel(root.kind)}</span>
-        <span className="meta-chip">{root.status}</span>
+        <span className="meta-chip">availability: {root.availability}</span>
+        <span className="meta-chip">activation: {root.activation}</span>
         {commandLog[0] ? (
           <span className="meta-chip">last: {commandLog[0].commandId}</span>
         ) : null}
@@ -2134,24 +2257,38 @@ function WorkbenchToolbar({
         {toolbarActions(root, selectedEntity).map(({ action, entityId }) => (
           <button
             className="action-button"
-            data-command-id={`resource.action.${action.id}`}
+            data-command-id={
+              activationForAction(action.id)
+                ? "workRoot.activation.set"
+                : action.id === "refresh"
+                  ? "dashboard.refresh"
+                  : `resource.action.${action.id}`
+            }
             disabled={!action.enabled}
             key={`${entityId}:${action.id}`}
             type="button"
-            onClick={() =>
-              onCommand({
-                commandId: `resource.action.${action.id}`,
-                payload: action.id === "refresh"
-                  ? { type: "refresh" }
-                  : { type: "action", label: action.label, entityId },
-              })
-            }
+            onClick={() => {
+              const activation = activationForAction(action.id);
+              if (activation) {
+                onCommand(buildWorkRootActivationCommand(entityId, activation));
+                return;
+              }
+              onCommand(
+                action.id === "refresh"
+                  ? buildDashboardRefreshCommand()
+                  : {
+                      commandId: `resource.action.${action.id}`,
+                      payload: { type: "action", label: action.label, entityId },
+                    },
+              );
+            }}
           >
             {action.label}
           </button>
         ))}
         <button
           className="action-button workbench-toggle"
+          disabled={root.activation !== "online" || root.availability !== "available"}
           data-command-id="terminal.create"
           type="button"
           onClick={() => {
@@ -2230,7 +2367,7 @@ function workRootActivityPaneId(workRootId: string) {
 // Build the placement state the WorkRoot Activity badge feeds into
 // decideSurfaceOpenWithDynamicGroups. It mirrors the live editor groups so a
 // duplicate open focuses the pane in whatever group it currently occupies,
-// while a first open resolves to the policy-owned group-1 exception.
+// while a first open resolves through the policy-owned support-split target.
 function workRootActivityPlacementState(
   groups: ReadonlyArray<{ id: string; label: string }>,
   editorGroups: WorkbenchEditorGroupModel[],
@@ -2294,6 +2431,7 @@ function workRootActivityWorkbenchPane(
     detail: `${root.label} activity console`,
     state,
     meta,
+    contentRevision: workRootActivityPaneRevision(activity, transcriptRefresh),
     body: (
       <WorkRootActivityPane
         activity={activity}
@@ -2344,6 +2482,48 @@ function WorkRootActivityPane({
   );
 }
 
+function workRootActivityPaneRevision(
+  activity: WorkRootActivityBadgeInput,
+  transcriptRefresh: ActivityTranscriptRefreshSignal | null,
+) {
+  if (activity.phase !== "ready") {
+    return `activity:${activity.phase}`;
+  }
+  const view = activity.view;
+  return [
+    "activity",
+    view.status,
+    view.updateMode,
+    view.feedCursor ?? "",
+    view.selectedItemId ?? "",
+    view.items.length,
+    transcriptRefresh?.activityId ?? "",
+    transcriptRefresh?.cursor ?? "",
+    transcriptRefresh?.sequence ?? 0,
+  ].join(":");
+}
+
+function readOnlyFilePaneRevision(pane: ReadOnlyFilePane) {
+  return [
+    "readonly",
+    pane.status,
+    pane.path,
+    pane.sizeBytes ?? "",
+    pane.languageHint ?? "",
+    pane.extension ?? "",
+    pane.error ?? "",
+    hashText(pane.content),
+  ].join(":");
+}
+
+function hashText(value: string) {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return `${value.length}:${(hash >>> 0).toString(36)}`;
+}
+
 function toolbarActions(
   root: WorkRootView,
   selectedEntity: ResourceEntity | null,
@@ -2362,6 +2542,16 @@ function toolbarActions(
   return actions;
 }
 
+function activationForAction(actionId: string): "online" | "offline" | null {
+  if (actionId === "workRoot.activation.online") {
+    return "online";
+  }
+  if (actionId === "workRoot.activation.offline") {
+    return "offline";
+  }
+  return null;
+}
+
 type WorkbenchPane = {
   readonly id: string;
   readonly kind: SurfaceKind;
@@ -2370,6 +2560,7 @@ type WorkbenchPane = {
   readonly detail: string;
   readonly state: ViewState;
   readonly meta: readonly string[];
+  readonly contentRevision?: string;
   readonly body?: ReactNode;
 };
 
@@ -2387,6 +2578,7 @@ function buildWorkbenchEditorGroups(
   supportEntity: ResourceEntity | null,
   readOnlyFilePanes: ReadOnlyFilePane[],
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
+  activityPaneOrderByGroup: WorkbenchPaneOrder,
   terminalPanes: TerminalPaneState[],
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
@@ -2432,19 +2624,21 @@ function buildWorkbenchEditorGroups(
         ]
       : [];
 
-  // CONTRACT: The WorkRoot Activity pane is the one reversible opened
-  // projection that defaults into group 1 (the agent/terminal-side split)
-  // rather than the group-2 editor/read-only column.
-  const activityPane: WorkbenchPane[] = activityPaneOpen
-    ? [
-        workRootActivityWorkbenchPane(
-          root,
-          activityState,
-          activityTranscriptRefresh,
-          onCommand,
-        ),
-      ]
-    : [];
+  const activityPane = activityPaneOpen
+    ? workRootActivityWorkbenchPane(
+        root,
+        activityState,
+        activityTranscriptRefresh,
+        onCommand,
+      )
+    : null;
+  const activityGroupId = activityPane
+    ? activityPaneGroupIdFromOrder(
+        activityPane.id,
+        activityPaneOrderByGroup,
+        dashboardGroups,
+      )
+    : null;
 
   return dashboardGroups.map((group, index) => ({
     id: group.id,
@@ -2452,7 +2646,7 @@ function buildWorkbenchEditorGroups(
     panes: [
       ...(index === 0 ? agentPane : []),
       ...(terminalPanesByGroup[group.id] ?? []),
-      ...(index === 0 ? activityPane : []),
+      ...(activityPane && activityGroupId === group.id ? [activityPane] : []),
       ...(readOnlyPanesByGroup[group.id] ?? []),
     ],
   }));
@@ -2615,6 +2809,7 @@ function terminalWorkbenchPane(
       pane.socketStatus,
       `${pane.session.columns}x${pane.session.rows}`,
     ],
+    contentRevision: `terminal:${pane.paneId}`,
     body: <TerminalPaneBody key={pane.paneId} pane={pane} actions={actions} />,
   };
 }
@@ -3084,6 +3279,18 @@ function sameReadOnlyOpenRequest(
   );
 }
 
+function addPaneToGroupOrder(
+  orderByGroup: WorkbenchPaneOrder,
+  paneId: string,
+  groupId: string,
+): WorkbenchPaneOrder {
+  const withoutPane = removePaneFromOrder(orderByGroup, paneId);
+  return {
+    ...withoutPane,
+    [groupId]: [...(withoutPane[groupId] ?? []), paneId],
+  };
+}
+
 function removePaneFromOrder(
   orderByGroup: WorkbenchPaneOrder,
   paneId: string | undefined,
@@ -3096,6 +3303,19 @@ function removePaneFromOrder(
       groupId,
       paneIds.filter((candidate) => candidate !== paneId),
     ]),
+  );
+}
+
+function activityPaneGroupIdFromOrder(
+  paneId: string,
+  orderByGroup: WorkbenchPaneOrder,
+  groups: ReadonlyArray<{ id: string }>,
+): string {
+  return groupIdForPaneOrder(
+    paneId,
+    orderByGroup,
+    {},
+    groups[1]?.id ?? groups[0]?.id ?? "group-1",
   );
 }
 
@@ -3177,6 +3397,7 @@ function readOnlyWorkbenchPane(
     detail: pane.path,
     state,
     meta,
+    contentRevision: readOnlyFilePaneRevision(pane),
     body: <ReadOnlyTextPane pane={pane} root={root} />,
   };
 }
@@ -3283,7 +3504,8 @@ function WorkspaceRows({
           selected={selectedId === compactMain.root.id}
           meta={[
             kindLabel(compactMain.root.kind),
-            compactMain.root.status,
+            `availability: ${compactMain.root.availability}`,
+            `activation: ${compactMain.root.activation}`,
             compactMain.instance.kind,
           ]}
           onCommand={onCommand}
@@ -3313,7 +3535,11 @@ function WorkspaceRows({
             state={root.state}
             depth={1}
             selected={selectedId === root.id}
-            meta={[kindLabel(root.kind), root.status]}
+            meta={[
+              kindLabel(root.kind),
+              `availability: ${root.availability}`,
+              `activation: ${root.activation}`,
+            ]}
             onCommand={onCommand}
           />
           {root.mainInstances.length > 0 ? (
@@ -3424,6 +3650,8 @@ function ResourceDetail({
         {entity.type === "workRoot" ? (
           <>
             <DetailItem label="kind" value={kindLabel(entity.kind)} />
+            <DetailItem label="availability" value={entity.availability} />
+            <DetailItem label="activation" value={entity.activation} />
             <DetailItem label="workRootStatus" value={entity.status} />
             <DetailItem
               label="instances"
@@ -3635,6 +3863,8 @@ function resourceEntityForWorkRoot(root: WorkRootView): ResourceEntity {
     compactable: root.compactable,
     path: root.resourcePath,
     kind: root.kind,
+    activation: root.activation,
+    availability: root.availability,
     status: root.status,
     instanceCount: root.mainInstances.length,
   };

@@ -47,6 +47,8 @@ function workRoot(
     resourcePath: { serverId: "server-local", workspaceId, workRootId: id, instanceId: null },
     label,
     kind: "plainDirectory",
+    activation: "online",
+    availability: "available",
     status: "online",
     state: readyState,
     compactable: false,
@@ -141,6 +143,16 @@ assertEqual(
   workRootEntity?.type === "workRoot" ? workRootEntity.instanceCount : -1,
   2,
   "workRoot entity reports its main instance count",
+);
+assertEqual(
+  workRootEntity?.type === "workRoot" ? workRootEntity.activation : "missing",
+  "online",
+  "workRoot entity carries activation distinctly",
+);
+assertEqual(
+  workRootEntity?.type === "workRoot" ? workRootEntity.availability : "missing",
+  "available",
+  "workRoot entity carries availability distinctly",
 );
 
 // A caller selects the mock workRoot...

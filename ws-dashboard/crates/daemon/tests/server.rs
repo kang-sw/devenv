@@ -10,13 +10,16 @@
 //   known.
 // - shutdown hooks can terminate the server without leaving a background task.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
+use std::time::Duration;
 
 use clap::Parser;
+use tokio::net::TcpStream;
+use tokio::sync::oneshot;
 use ws_dashboard_daemon::auth::OwnerAuthState;
 use ws_dashboard_daemon::cli::{BindMode, Cli, ServeArgs};
 use ws_dashboard_daemon::config::{validate_bind_guard, ServeConfig};
-use ws_dashboard_daemon::server::{run_with_shutdown, startup_info};
+use ws_dashboard_daemon::server::{run_with_shutdown, run_with_shutdown_and_grace, startup_info};
 
 #[test]
 fn default_serving_config_binds_to_loopback() {
@@ -108,6 +111,32 @@ async fn shutdown_hook_can_terminate_server_task() {
 }
 
 #[tokio::test]
+async fn shutdown_grace_period_bounds_open_idle_connections() {
+    let addr = unused_loopback_addr();
+    let mut config = ServeConfig::default_loopback();
+    config.bind_addr = addr;
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let server = tokio::spawn(run_with_shutdown_and_grace(
+        config,
+        async move {
+            let _ = shutdown_rx.await;
+        },
+        Duration::from_millis(25),
+    ));
+    let idle_connection = connect_with_retry(addr).await;
+
+    shutdown_tx.send(()).expect("send shutdown");
+    let info = tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("server shutdown should be bounded by grace period")
+        .expect("server task should not panic")
+        .expect("server exits after bounded shutdown");
+
+    assert_eq!(info.bound_addr, addr);
+    drop(idle_connection);
+}
+
+#[tokio::test]
 async fn daemon_security_smoke_covers_loopback_startup_and_public_guards() {
     let info = run_with_shutdown(ServeConfig::default_loopback(), async {})
         .await
@@ -129,4 +158,28 @@ async fn daemon_security_smoke_covers_loopback_startup_and_public_guards() {
     assert!(disabled_owner_auth
         .to_string()
         .contains("owner authentication"));
+}
+
+fn unused_loopback_addr() -> SocketAddr {
+    let listener =
+        StdTcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).expect("reserve port");
+    listener.local_addr().expect("reserved port addr")
+}
+
+async fn connect_with_retry(addr: SocketAddr) -> TcpStream {
+    let mut last_error = None;
+    for _ in 0..40 {
+        match TcpStream::connect(addr).await {
+            Ok(stream) => return stream,
+            Err(error) => {
+                last_error = Some(error);
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        }
+    }
+
+    panic!(
+        "server did not accept connections at {addr}: {:?}",
+        last_error
+    );
 }

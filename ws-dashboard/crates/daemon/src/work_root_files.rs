@@ -9,31 +9,107 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use ws_dashboard_core::WorkRootId;
+use ws_dashboard_core::{WorkRootActivation, WorkRootId};
 
+use crate::discovery::local_work_root_id_for_path;
 use crate::router::AppState;
 
 const MAX_READ_ONLY_TEXT_BYTES: u64 = 512 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub struct OpenedWorkRoots {
-    roots: Arc<RwLock<HashMap<WorkRootId, PathBuf>>>,
+    roots: Arc<RwLock<HashMap<WorkRootId, RegisteredWorkRoot>>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RegisteredWorkRoot {
+    pub path: PathBuf,
+    pub activation: WorkRootActivation,
+    pub provenance: WorkRootProvenance,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkRootProvenance {
+    Opened,
 }
 
 impl OpenedWorkRoots {
+    pub fn from_paths(paths: Vec<PathBuf>) -> Self {
+        let opened = Self::default();
+        for path in paths {
+            opened.register_path(path);
+        }
+        opened
+    }
+
+    pub fn register_path(&self, root_path: PathBuf) -> WorkRootId {
+        let work_root_id = local_work_root_id_for_path(&root_path);
+        self.register(work_root_id.clone(), root_path);
+        work_root_id
+    }
+
     pub fn register(&self, work_root_id: WorkRootId, root_path: PathBuf) {
+        self.register_with_activation(work_root_id, root_path, WorkRootActivation::Online);
+    }
+
+    pub fn register_with_activation(
+        &self,
+        work_root_id: WorkRootId,
+        root_path: PathBuf,
+        activation: WorkRootActivation,
+    ) {
+        self.register_registry_entry(
+            work_root_id,
+            RegisteredWorkRoot {
+                path: root_path,
+                activation,
+                provenance: WorkRootProvenance::Opened,
+            },
+        );
+    }
+
+    pub fn register_registry_entry(
+        &self,
+        work_root_id: WorkRootId,
+        root: RegisteredWorkRoot,
+    ) -> Option<RegisteredWorkRoot> {
         self.roots
             .write()
             .expect("opened workRoots lock poisoned")
-            .insert(work_root_id, root_path);
+            .insert(work_root_id, root)
+    }
+
+    pub fn unregister(&self, work_root_id: &WorkRootId) -> Option<RegisteredWorkRoot> {
+        self.roots
+            .write()
+            .expect("opened workRoots lock poisoned")
+            .remove(work_root_id)
     }
 
     pub fn resolve(&self, work_root_id: &WorkRootId) -> Option<PathBuf> {
+        self.get(work_root_id).map(|root| root.path)
+    }
+
+    pub fn get(&self, work_root_id: &WorkRootId) -> Option<RegisteredWorkRoot> {
         self.roots
             .read()
             .expect("opened workRoots lock poisoned")
             .get(work_root_id)
             .cloned()
+    }
+
+    pub fn set_activation(
+        &self,
+        work_root_id: &WorkRootId,
+        activation: WorkRootActivation,
+    ) -> Option<WorkRootActivation> {
+        let mut roots = self.roots.write().expect("opened workRoots lock poisoned");
+        let Some(root) = roots.get_mut(work_root_id) else {
+            return None;
+        };
+        let previous = root.activation;
+        root.activation = activation;
+        Some(previous)
     }
 
     /// Registered workRoot paths in a deterministic order.
@@ -47,10 +123,22 @@ impl OpenedWorkRoots {
             .read()
             .expect("opened workRoots lock poisoned")
             .values()
-            .cloned()
+            .map(|root| root.path.clone())
             .collect();
         paths.sort();
         paths
+    }
+
+    pub fn candidate_roots(&self) -> Vec<RegisteredWorkRoot> {
+        let mut roots: Vec<RegisteredWorkRoot> = self
+            .roots
+            .read()
+            .expect("opened workRoots lock poisoned")
+            .values()
+            .cloned()
+            .collect();
+        roots.sort_by(|left, right| left.path.cmp(&right.path));
+        roots
     }
 }
 
@@ -114,8 +202,9 @@ pub async fn list_work_root_files(
     Query(query): Query<WorkRootFileListQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return file_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return error.into_file_response(),
     };
 
     let Some(relative_path) = safe_work_root_relative_path(&query.path) else {
@@ -147,8 +236,9 @@ pub async fn read_work_root_file(
     Query(query): Query<WorkRootFileListQuery>,
 ) -> Response {
     let work_root_id = WorkRootId::from(work_root_id);
-    let Some(root_path) = state.opened_work_roots.resolve(&work_root_id) else {
-        return file_error(StatusCode::NOT_FOUND, "unknown workRoot");
+    let root_path = match resolve_online_available_work_root(&state, &work_root_id) {
+        Ok(root_path) => root_path,
+        Err(error) => return error.into_file_response(),
     };
 
     let Some(relative_path) = safe_work_root_relative_path(&query.path) else {
@@ -383,6 +473,50 @@ fn file_error(status: StatusCode, error: impl Into<String>) -> Response {
         }),
     )
         .into_response()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkRootAccessError {
+    Unknown,
+    Offline,
+    Unavailable,
+}
+
+impl WorkRootAccessError {
+    pub fn status(self) -> StatusCode {
+        match self {
+            Self::Unknown => StatusCode::NOT_FOUND,
+            Self::Offline | Self::Unavailable => StatusCode::CONFLICT,
+        }
+    }
+
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown workRoot",
+            Self::Offline => "workRoot offline",
+            Self::Unavailable => "workRoot unavailable",
+        }
+    }
+
+    pub fn into_file_response(self) -> Response {
+        file_error(self.status(), self.message())
+    }
+}
+
+pub fn resolve_online_available_work_root(
+    state: &AppState,
+    work_root_id: &WorkRootId,
+) -> Result<PathBuf, WorkRootAccessError> {
+    let Some(root) = state.opened_work_roots.get(work_root_id) else {
+        return Err(WorkRootAccessError::Unknown);
+    };
+    if root.activation == WorkRootActivation::Offline {
+        return Err(WorkRootAccessError::Offline);
+    }
+    if !root.path.is_dir() || std::fs::read_dir(&root.path).is_err() {
+        return Err(WorkRootAccessError::Unavailable);
+    }
+    Ok(root.path)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -369,6 +369,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   const terminalSocketUrls: string[] = [];
   const terminalSocketFrames: string[] = [];
   let terminalOutputPolls = 0;
+  let resourceRefreshRequests = 0;
   page.on("websocket", (ws) => {
     if (
       ws.url().includes("/api/dashboard/terminals/") &&
@@ -385,6 +386,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     if (url.includes("/api/dashboard/terminals/") && url.includes("/output")) {
       terminalOutputPolls += 1;
     }
+    if (new URL(url).pathname === "/api/dashboard/resources") {
+      resourceRefreshRequests += 1;
+    }
   });
   // --- Owner pairing against the daemon-served production frontend ---------
   await test.step("owner pairing", async () => {
@@ -400,6 +404,30 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note(
       "open workRoot: live opened workRoot is selected and shown in the explorer",
     );
+  });
+
+  await test.step("activation controls are command-routed and update visible state", async () => {
+    const metaRow = page.locator(".workbench-toolbar-meta");
+    const activationButton = page.locator(
+      '.workbench-toolbar-actions [data-command-id="workRoot.activation.set"]',
+    );
+    await expect(metaRow).toContainText("availability: available");
+    await expect(metaRow).toContainText("activation: online");
+    await expect(activationButton).toHaveText("Go offline");
+
+    await activationButton.click();
+    await expect(metaRow).toContainText("activation: offline");
+    await expect(
+      page.locator(".workbench-toolbar-meta .meta-chip", {
+        hasText: "last: workRoot.activation.set",
+      }),
+    ).toBeVisible();
+    await expect(activationButton).toHaveText("Go online");
+
+    await activationButton.click();
+    await expect(metaRow).toContainText("activation: online");
+    await expect(activationButton).toHaveText("Go offline");
+    note("activation controls dispatch through workRoot.activation.set and refresh visible state");
   });
 
   // --- Top-bar WorkRoot Activity badge sits in the existing metadata row --
@@ -499,7 +527,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
   // --- Top-bar badge opens/focuses/closes the WorkRoot Activity pane -----
   // CONTRACT: The Activity badge opens or focuses exactly one WorkRoot Activity
-  // pane in group 1, duplicate badge clicks do not create duplicate panes, the
+  // pane in group 2, duplicate badge clicks do not create duplicate panes, the
   // pane closes immediately with no confirmation popover, and running-command
   // rows stay explicitly empty until the async exec source exists.
   await test.step("activity badge opens, focuses, and closes the WorkRoot Activity pane", async () => {
@@ -517,12 +545,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // No Activity pane exists until the badge is clicked.
     await expect(activityPane).toHaveCount(0);
 
-    // Badge click opens exactly one Activity pane, and it lands in group 1.
+    // Badge click opens exactly one Activity pane, and it lands in group 2.
     await opener.click();
     await expect(activityPane).toHaveCount(1);
     await expect(activityPane).toHaveAttribute(
       "data-workbench-group-id",
-      "group-1",
+      "group-2",
     );
     await expect(activityPane).toHaveAttribute(
       "aria-label",
@@ -798,6 +826,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         });
       },
     );
+    let alphaTranscriptReplaceRequests = 0;
+    let showRefreshedAlphaTranscript = false;
     await page.route(
       /\/api\/dashboard\/work-roots\/.*\/activity\/items\/.*\/transcript(?:\?.*)?$/,
       async (route) => {
@@ -812,6 +842,10 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
           ? decodeURIComponent(pathMatch[2])
           : "agent:alpha";
         const cursor = url.searchParams.get("cursor");
+        const before = url.searchParams.get("before");
+        if (activityId === "agent:alpha" && !cursor && !before) {
+          alphaTranscriptReplaceRequests += 1;
+        }
         const source =
           activityId === "exec:beta"
             ? {
@@ -830,6 +864,47 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
                 tier: "core",
                 model: "opus",
               };
+        const alphaInitialBlocks = [
+          {
+            cursor: "alpha:1",
+            timestamp: "2026-05-17T11:58:00Z",
+            renderKind: "markdown",
+            title: "assistant",
+            text: "selected transcript alpha",
+            data: null,
+            degraded: false,
+          },
+          {
+            cursor: "alpha:2",
+            timestamp: "2026-05-17T11:58:10Z",
+            renderKind: "json",
+            title: "tool call",
+            text: "tool details visible after expansion",
+            data: { tool: "read" },
+            degraded: false,
+          },
+          ...Array.from({ length: 28 }, (_, index) => ({
+            cursor: `alpha:filler:${index}`,
+            timestamp: "2026-05-17T11:58:20Z",
+            renderKind: "markdown",
+            title: `tail filler ${index}`,
+            text: `tail-follow filler line ${index}`,
+            data: null,
+            degraded: false,
+          })),
+        ];
+        const refreshedAlphaBlocks = [
+          ...alphaInitialBlocks,
+          {
+            cursor: "alpha:refresh-applied",
+            timestamp: "2026-05-17T11:59:40Z",
+            renderKind: "markdown",
+            title: "refresh applied",
+            text: "selected transcript refresh applied",
+            data: null,
+            degraded: false,
+          },
+        ];
         const blocks =
           activityId === "exec:beta"
             ? [
@@ -855,26 +930,21 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
                     degraded: false,
                   },
                 ]
-              : [
+              : before
+              ? [
                   {
-                    cursor: "alpha:1",
-                    timestamp: "2026-05-17T11:58:00Z",
+                    cursor: "alpha:0",
+                    timestamp: "2026-05-17T11:59:30Z",
                     renderKind: "markdown",
-                    title: "assistant",
-                    text: "selected transcript alpha",
+                    title: "assistant follow-up",
+                    text: "loaded more transcript",
                     data: null,
                     degraded: false,
                   },
-                  {
-                    cursor: "alpha:2",
-                    timestamp: "2026-05-17T11:58:10Z",
-                    renderKind: "json",
-                    title: "tool call",
-                    text: "tool details visible after expansion",
-                    data: { tool: "read" },
-                    degraded: false,
-                  },
-                ];
+                ]
+              : showRefreshedAlphaTranscript
+                ? refreshedAlphaBlocks
+                : alphaInitialBlocks;
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -886,8 +956,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
             live: activityId === "agent:alpha",
             source,
             blocks,
-            nextCursor: activityId === "agent:alpha" && !cursor ? "alpha:2" : null,
-            hasMore: activityId === "agent:alpha" && !cursor,
+            nextCursor:
+              activityId === "agent:alpha" && !cursor && !before ? "alpha:2" : null,
+            hasMore: activityId === "agent:alpha" && !cursor && !before,
             diagnostics: [],
           }),
         });
@@ -901,7 +972,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(activityPane).toHaveCount(1);
     await expect(activityPane).toHaveAttribute(
       "data-workbench-group-id",
-      "group-1",
+      "group-2",
     );
     await expect(activityTab).toHaveCount(1);
     await expect(activityTab).toHaveAttribute("aria-selected", "true");
@@ -909,8 +980,19 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const populatedBody = activityPane.locator(".workroot-activity-pane");
     await expect(populatedBody.locator(".activity-console")).toBeVisible();
     await expect(populatedBody.locator(".activity-ribbon")).toBeVisible();
+    await expect(populatedBody.locator(".activity-console-summary")).toHaveCount(0);
     const ribbonItems = populatedBody.locator(".activity-ribbon-item");
     await expect(ribbonItems).toHaveCount(6);
+    await expect(
+      populatedBody
+        .locator('[data-activity-id="agent:alpha"]')
+        .locator(".activity-ribbon-meta"),
+    ).toHaveText("agent.claude");
+    await expect(
+      populatedBody
+        .locator('[data-activity-id="exec:beta"]')
+        .locator(".activity-ribbon-meta"),
+    ).toHaveText("cmd.exec");
     await expect(populatedBody).toContainText("agent-streamed-live");
     await expect
       .poll(() => activityRecentPollRequests, { timeout: 500 })
@@ -925,7 +1007,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     ).toHaveCount(6);
     await expect(
       populatedBody.locator('[data-command-id="activity.refresh"]'),
-    ).toHaveCount(0);
+    ).toHaveCount(1);
     await page.setViewportSize({ width: 760, height: 760 });
     await page.waitForTimeout(100);
     const ribbonMetrics = await populatedBody
@@ -964,6 +1046,68 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "last: activity.selectItem",
     );
     await expect(populatedBody).toContainText("selected transcript alpha");
+    const transcriptScroll = populatedBody.locator(".activity-transcript-scroll");
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate(
+          (node) => node.scrollHeight > node.clientHeight + 1,
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate(
+          (node) =>
+            node.scrollHeight - (node.scrollTop + node.clientHeight) <= 8,
+        ),
+      )
+      .toBe(true);
+    await transcriptScroll.hover();
+    await page.mouse.wheel(0, -600);
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate(
+          (node) => node.scrollHeight - (node.scrollTop + node.clientHeight),
+        ),
+      )
+      .toBeGreaterThan(100);
+    await expect(transcriptScroll).toHaveAttribute("data-following-tail", "false");
+    const refreshBeforeScrollTop = await transcriptScroll.evaluate((node) => {
+      (node as HTMLElement & { __wsStableScroll?: boolean }).__wsStableScroll = true;
+      return node.scrollTop;
+    });
+    const alphaReplaceRequestsBeforeRefresh = alphaTranscriptReplaceRequests;
+    showRefreshedAlphaTranscript = true;
+    await populatedBody
+      .locator('.activity-transcript-head [data-command-id="activity.refresh"]')
+      .click();
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: activity.refresh",
+    );
+    await expect
+      .poll(() => alphaTranscriptReplaceRequests)
+      .toBeGreaterThan(alphaReplaceRequestsBeforeRefresh);
+    await expect(populatedBody).toContainText("selected transcript refresh applied");
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate((node) =>
+          Boolean(
+            (node as HTMLElement & { __wsStableScroll?: boolean }).__wsStableScroll,
+          ),
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate(
+          (node, expected) => Math.abs(node.scrollTop - expected),
+          refreshBeforeScrollTop,
+        ),
+      )
+      .toBeLessThanOrEqual(2);
+    await transcriptScroll.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
     const detailToggle = populatedBody.locator(
       '[data-command-id="activity.detail.toggle"]',
     );
@@ -1002,7 +1146,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
 
     note(
-      "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
+      "activity pane: badge click opened one WorkRoot Activity pane in group 2, " +
         "empty and populated Activity Console projections rendered, named live stream " +
         "upsert appeared without reload and without healthy-mode recent polling, " +
         "selection, dirty acknowledgement, " +
@@ -1251,10 +1395,24 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         timeout: 3_000,
       })
       .toBeGreaterThan(0);
+    const scrollTopBeforeRefresh = await content.evaluate((node) => node.scrollTop);
+    await page.locator('[data-command-id="fileExplorer.refresh"]').click();
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: fileExplorer.refresh",
+    );
+    await settlePastPollCycle(page);
+    await expect
+      .poll(() =>
+        content.evaluate(
+          (node, expected) => Math.abs(node.scrollTop - expected),
+          scrollTopBeforeRefresh,
+        ),
+      )
+      .toBeLessThanOrEqual(2);
     expect(await documentScrolls(page)).toBe(beforeDocumentScroll);
     expect(beforeDocumentScroll).toBe(false);
     note(
-      "read-only file: long file scroll stayed inside the pane without creating top-level document scroll",
+      "read-only file: long file scroll stayed inside the pane and survived a split workbench refresh without creating top-level document scroll",
     );
   });
 
@@ -1769,6 +1927,21 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         "via bounded resize forwarding",
     );
     await page.setViewportSize({ width: 1440, height: 900 });
+  });
+
+  await test.step("bounded resource polling runs while mounted and stops after unmount", async () => {
+    const beforePollingWindow = resourceRefreshRequests;
+    await expect
+      .poll(() => resourceRefreshRequests, { timeout: 7_000 })
+      .toBeGreaterThan(beforePollingWindow);
+
+    const beforeUnmount = resourceRefreshRequests;
+    await page.goto("about:blank");
+    await page.waitForTimeout(5_500);
+    expect(resourceRefreshRequests).toBe(beforeUnmount);
+    note(
+      "resources: mounted dashboard polled /api/dashboard/resources and stopped after page unmount",
+    );
   });
 
   if (portabilityEvidence) {

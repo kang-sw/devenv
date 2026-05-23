@@ -36,9 +36,9 @@ pub async fn dashboard_resources(State(state): State<AppState>) -> Json<Dashboar
 pub fn live_dashboard_resources(opened: &OpenedWorkRoots) -> DashboardResourcesView {
     LocalDashboardResourcesProvider::new(
         opened
-            .candidate_paths()
+            .candidate_roots()
             .into_iter()
-            .map(LocalWorkRootCandidate::new)
+            .map(|root| LocalWorkRootCandidate::with_activation(root.path, root.activation))
             .collect(),
     )
     .dashboard_resources()

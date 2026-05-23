@@ -13,6 +13,26 @@ pub enum WorkRootStatus {
     Inaccessible,
 }
 
+// CONTRACT: Availability is derived from local discovery and is distinct from
+// the user's activation choice. Do not reuse Online/Offline status vocabulary
+// for activation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkRootAvailability {
+    Available,
+    Missing,
+    Moved,
+    Inaccessible,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkRootActivation {
+    Online,
+    Offline,
+}
+
 // CONTRACT: WorkRootKind is additive role metadata for the same core workRoot
 // UI/API shape; primary roots and linked worktrees must stay distinguishable.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

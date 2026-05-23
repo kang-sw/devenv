@@ -45,6 +45,8 @@ export type WorkRootView = {
   resourcePath: ResourcePath;
   label: string;
   kind: "plainDirectory" | "gitPrimaryRoot" | "gitLinkedWorktree";
+  activation: "online" | "offline";
+  availability: "available" | "missing" | "moved" | "inaccessible" | "unknown";
   status: "online" | "offline" | "moved" | "inaccessible";
   state: ViewState;
   compactable: boolean;
@@ -103,6 +105,8 @@ export type ResourceEntity =
       compactable: boolean;
       path: ResourcePath;
       kind: WorkRootView["kind"];
+      activation: WorkRootView["activation"];
+      availability: WorkRootView["availability"];
       status: WorkRootView["status"];
       instanceCount: number;
     }
@@ -161,6 +165,8 @@ export function flattenEntities(
         compactable: root.compactable,
         path: root.resourcePath,
         kind: root.kind,
+        activation: root.activation,
+        availability: root.availability,
         status: root.status,
         instanceCount: root.mainInstances.length,
       });

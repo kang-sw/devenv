@@ -8,9 +8,14 @@ spec:
   - 260517-ws-dashboard-workroot-activity-pane
   - 260521-ws-dashboard-activity-console-ui-shell
   - 260522-ws-dashboard-activity-console-transcript-expansion
+plans:
+  phase-1: 2026-05/23-1049.activity-console-dogfood-phase1
+  phase-2: 2026-05/23-1148.activity-console-dogfood-phase2
+  phase-3: 2026-05/23-1221.activity-console-dogfood-phase3
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
+completed: 2026-05-23
 ---
 
 # Activity Console dogfood usability repair
@@ -69,6 +74,24 @@ transcript refresh, and Dockview rerender paths.
 Verification should include focused frontend unit coverage for scroll policy
 and browser-level evidence against the daemon-served production frontend.
 
+### Result (c82d7c43) - 2026-05-23
+
+Implemented support-split WorkRoot Activity placement and transcript scroll
+stability. New Activity panes now route through opened-surface placement so they
+prefer the support split, while duplicate badge opens focus the existing pane in
+its current group and close remains browser-only/reversible. Activity pane group
+ownership is persisted through App-owned pane order rather than a hard-coded
+group-1 render path.
+
+Transcript blocks now tail-follow by default, pause when the user scrolls away,
+and preserve workRoot/activity-scoped scroll memory across feed refresh,
+selected transcript refresh, stream invalidation, and workbench rerender paths.
+Browser acceptance verifies support-split placement, horizontal ribbon overflow,
+and refresh-after-scroll stability with response-applied transcript evidence.
+
+Deferred: backend tail-page pagination remains unchanged; compact transcript
+summary quality and Codex native transcript coverage stay in later phases.
+
 ### Phase 2: Improve compact transcript summaries
 
 Change compact transcript rendering so the default one-line view prefers a
@@ -80,6 +103,18 @@ should display their meaningful text instead of only a repeated label.
 Keep vertical density stable: the improvement is better text inside the existing
 one-line compact block, not larger default blocks. Detail expansion remains
 available for richer safe payload summaries.
+
+### Result (4f913e6d) - 2026-05-23
+
+Implemented frontend compact transcript summary selection. Compact tool-call
+blocks now prefer the normalized safe tool name plus argument-byte hint, tool
+results show available outcome/status/exit/byte hints, and status or degraded
+blocks prefer meaningful normalized first-line text over generic category
+labels. Summary strings are bounded and the one-line density, detail expansion,
+terminal rendering, and backend parser coverage remain unchanged.
+
+Deferred: broader Codex prompt, interruption, MCP/tool, and patch/apply native
+record coverage remains Phase 3.
 
 ### Phase 3: Expand Codex prompt and interruption transcript coverage
 
@@ -96,3 +131,39 @@ not be content-free. If fixture evidence is insufficient for a native shape,
 render a bounded degraded block or aggregate that provides safe structural
 context and omission reason while avoiding raw JSON, private record strings,
 payload snippets, session ids, paths, and tool output.
+
+### Result (2ce8a204) - 2026-05-23
+
+Expanded the daemon Codex native transcript adapter for common prompt and
+activity records. Fixture-backed `user_message` and `response_item/message`
+records now render bounded user/assistant blocks; custom tool calls/results,
+MCP call completions, exec command completions, patch/apply outcomes, turn
+abortions, rollback, compaction, goal, and handoff status records normalize into
+source-neutral tool/status blocks. Low-value native telemetry such as token
+counts, session metadata, and turn context is skipped instead of becoming
+transcript noise.
+
+Remaining unsupported shapes now degrade into bounded structural summaries with
+safe event/payload categories, field counts, and omission reasons. Parser unit
+tests and route privacy tests verify that prompts are bounded/redacted and raw
+commands, cwd, paths, stdout/stderr, tool/MCP results, session ids, turn ids,
+native JSON, and private native type strings do not appear in browser transcript
+responses.
+
+#### Edition (e62d4a6d) - 2026-05-23
+
+Fixed a dogfood follow-up where Codex native dialogue could render duplicate
+adjacent user or assistant blocks when both `event_msg` and `response_item`
+records carried the same text. Native text redaction now preserves whitespace
+and markdown-like structure while still redacting private path/session-like
+tokens. Markdown rendering itself remains deferred and is recorded as an
+implementation gap for a future shared markdown rendering component.
+
+#### Edition (8af2c9d) - 2026-05-23
+
+Fixed two additional dogfood findings. Native Codex user/assistant messages no
+longer use the small generic 280-character bound; they now use a larger bounded
+message limit while preserving private-token redaction. Activity transcript
+auto load-more now triggers only at the same tail threshold used by follow-tail
+state, avoiding the near-tail zone where appending blocks could restore an old
+absolute `scrollTop` and make a split-pane transcript feel pulled upward.

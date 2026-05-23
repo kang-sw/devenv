@@ -10,6 +10,7 @@ import {
   buildFileExplorerToggleDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
+  buildWorkRootActivationCommand,
   buildWorkRootOpenCommand,
   dashboardCommandLabel,
   dispatchDashboardCommand,
@@ -46,6 +47,7 @@ const migratedCommands = [
   buildFileExplorerSelectEntryCommand(workRootId, "README.md"),
   buildWorkbenchOpenActivityCommand(workRootId),
   buildTerminalCreateCommand(workRootId),
+  buildWorkRootActivationCommand(workRootId, "offline"),
   buildActivitySelectItemCommand("agent:reviewer"),
   buildActivityTranscriptLoadMoreCommand("agent:reviewer"),
   buildActivityRefreshCommand(workRootId),
@@ -62,6 +64,7 @@ assertDeepEqual(
     "fileExplorer.selectEntry",
     "workbench.openActivity",
     "terminal.create",
+    "workRoot.activation.set",
     "activity.selectItem",
     "activity.transcript.loadMore",
     "activity.refresh",
@@ -80,6 +83,7 @@ assertDeepEqual(
     "fileExplorer.selectEntry",
     "workbench.openActivity",
     "terminal.create",
+    "workRoot.activation.set",
     "activity.selectItem",
     "activity.transcript.loadMore",
     "activity.refresh",
@@ -161,6 +165,30 @@ dispatchDashboardCommand(buildTerminalCreateCommand(workRootId), {
   },
 });
 assertEqual(terminalCreates, 1, "programmatic terminal.create dispatch reaches executable handler");
+let activationChanges = 0;
+dispatchDashboardCommand(buildWorkRootActivationCommand(workRootId, "online"), {
+  handlers: {
+    "workRoot.activation.set": (command) => {
+      if (command.payload.type !== "workRoot.activation.set") {
+        throw new Error("activation handler received wrong payload");
+      }
+      activationChanges +=
+        command.payload.workRootId === workRootId && command.payload.activation === "online"
+          ? 1
+          : 0;
+    },
+  },
+});
+assertEqual(
+  activationChanges,
+  1,
+  "programmatic workRoot.activation.set dispatch reaches executable handler",
+);
+assertEqual(
+  dashboardCommandLabel(buildWorkRootActivationCommand(workRootId, "offline")),
+  "Take workRoot offline",
+  "activation command label is stable",
+);
 assertEqual(
   dashboardCommandLabel(buildWorkbenchOpenActivityCommand(workRootId)),
   "Open WorkRoot Activity",

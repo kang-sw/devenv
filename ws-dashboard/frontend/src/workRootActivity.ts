@@ -281,6 +281,7 @@ export type WorkRootActivityFetchOptions = {
 
 export type ActivityTranscriptFetchOptions = {
   readonly cursor?: string;
+  readonly before?: string;
   readonly limit?: number;
 };
 
@@ -306,6 +307,9 @@ export function workRootActivityTranscriptEndpoint(
   const params = new URLSearchParams();
   if (options.cursor !== undefined) {
     params.set("cursor", options.cursor);
+  }
+  if (options.before !== undefined) {
+    params.set("before", options.before);
   }
   if (options.limit !== undefined) {
     params.set("limit", String(options.limit));
@@ -498,20 +502,133 @@ export function shouldApplyActivityTranscriptRequest(
   );
 }
 
+export type ActivityTranscriptScrollMetrics = {
+  readonly scrollTop: number;
+  readonly clientHeight: number;
+  readonly scrollHeight: number;
+};
+
+export function activityTranscriptDistanceFromTail(
+  metrics: ActivityTranscriptScrollMetrics,
+): number {
+  return Math.max(0, metrics.scrollHeight - (metrics.scrollTop + metrics.clientHeight));
+}
+
+export function isActivityTranscriptAtTail(
+  metrics: ActivityTranscriptScrollMetrics,
+  thresholdPx = 8,
+): boolean {
+  return activityTranscriptDistanceFromTail(metrics) <= thresholdPx;
+}
+
+export function shouldFollowActivityTranscriptTail(
+  metrics: ActivityTranscriptScrollMetrics,
+  thresholdPx = 8,
+): boolean {
+  return isActivityTranscriptAtTail(metrics, thresholdPx);
+}
+
 export function shouldLoadMoreActivityTranscript(
-  metrics: {
-    scrollTop: number;
-    clientHeight: number;
-    scrollHeight: number;
-  },
+  metrics: ActivityTranscriptScrollMetrics,
   hasMore: boolean,
   loading: boolean,
-  thresholdPx = 48,
+  thresholdPx = 8,
 ): boolean {
   if (!hasMore || loading) {
     return false;
   }
-  return metrics.scrollHeight - (metrics.scrollTop + metrics.clientHeight) <= thresholdPx;
+  return metrics.scrollTop <= thresholdPx;
+}
+
+export function activityRibbonSourceLabel(item: ActivityItem): string {
+  if (item.kind === "namedAgent") {
+    return `agent.${activityRibbonToken(
+      item.source.backend ?? item.source.label ?? item.source.harness ?? item.kind,
+    )}`;
+  }
+  if (item.kind === "exec") {
+    return "cmd.exec";
+  }
+  return `${activityRibbonToken(item.kind)}.${activityRibbonToken(
+    item.source.backend ?? item.source.label ?? item.source.kind ?? "activity",
+  )}`;
+}
+
+export function activityRibbonStatusLine(
+  item: ActivityItem,
+  nowMs = Date.now(),
+): string {
+  const parts = [item.status];
+  const relative = activityRelativeTimeLabel(
+    item.updatedAt ?? item.finishedAt ?? item.startedAt,
+    nowMs,
+  );
+  if (relative) {
+    parts.push(relative === "just now" ? relative : `${relative} ago`);
+  }
+  const duration = activityDurationLabel(item.startedAt, item.finishedAt);
+  if (duration) {
+    parts.push(duration);
+  }
+  return parts.join(" / ");
+}
+
+function activityRibbonToken(value: string): string {
+  const token = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return token || "activity";
+}
+
+function activityRelativeTimeLabel(value: string | null, nowMs: number): string | null {
+  const timestamp = parseActivityTimestamp(value);
+  if (timestamp === null) {
+    return null;
+  }
+  const elapsedMs = Math.max(0, nowMs - timestamp);
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+  if (elapsedMinutes < 1) {
+    return "just now";
+  }
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} ${elapsedMinutes === 1 ? "min" : "mins"}`;
+  }
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours} ${elapsedHours === 1 ? "hr" : "hrs"}`;
+  }
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays} ${elapsedDays === 1 ? "day" : "days"}`;
+}
+
+function activityDurationLabel(startedAt: string | null, finishedAt: string | null): string | null {
+  const started = parseActivityTimestamp(startedAt);
+  const finished = parseActivityTimestamp(finishedAt);
+  if (started === null || finished === null || finished < started) {
+    return null;
+  }
+  const elapsedMinutes = Math.max(1, Math.round((finished - started) / 60_000));
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+  if (hours === 0) {
+    return `${minutes} ${minutes === 1 ? "min" : "mins"}`;
+  }
+  if (minutes === 0) {
+    return `${hours} ${hours === 1 ? "hr" : "hrs"}`;
+  }
+  return `${hours} ${hours === 1 ? "hr" : "hrs"} ${minutes} ${
+    minutes === 1 ? "min" : "mins"
+  }`;
+}
+
+function parseActivityTimestamp(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function transcriptBlockText(block: TranscriptBlock): string {
@@ -528,13 +645,134 @@ function transcriptBlockText(block: TranscriptBlock): string {
   return "";
 }
 
+const TRANSCRIPT_SUMMARY_MAX_CHARS = 160;
+
+function transcriptSummaryLine(value: string | null | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const line = value.split(/\r?\n/, 1)[0]?.replace(/\s+/g, " ").trim() ?? "";
+  if (line.length <= TRANSCRIPT_SUMMARY_MAX_CHARS) {
+    return line;
+  }
+  return `${line.slice(0, TRANSCRIPT_SUMMARY_MAX_CHARS - 3)}...`;
+}
+
+function transcriptBlockDataObject(block: TranscriptBlock): Record<string, unknown> | null {
+  if (
+    block.data !== null &&
+    typeof block.data === "object" &&
+    !Array.isArray(block.data)
+  ) {
+    return block.data as Record<string, unknown>;
+  }
+  return null;
+}
+
+function transcriptBlockDataString(
+  block: TranscriptBlock,
+  field: string,
+): string | null {
+  const value = transcriptBlockDataObject(block)?.[field];
+  if (typeof value !== "string") {
+    return null;
+  }
+  const summary = transcriptSummaryLine(value);
+  return summary.length > 0 ? summary : null;
+}
+
+function transcriptBlockDataNumber(
+  block: TranscriptBlock,
+  field: string,
+): number | null {
+  const value = transcriptBlockDataObject(block)?.[field];
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  return null;
+}
+
+function transcriptTitleIsGeneric(title: string): boolean {
+  return [
+    "status",
+    "task started",
+    "task complete",
+    "tool call",
+    "tool output",
+    "unsupported transcript record",
+  ].includes(title.toLowerCase());
+}
+
+function transcriptToolCallSummary(
+  block: TranscriptBlock,
+  title: string,
+  text: string,
+): string {
+  const name =
+    transcriptBlockDataString(block, "name") ??
+    text.match(/^Called\s+(.+)$/i)?.[1]?.trim() ??
+    "";
+  const argumentsBytes = transcriptBlockDataNumber(block, "argumentsBytes");
+  if (name && argumentsBytes !== null) {
+    return `${name} · ${argumentsBytes} arg bytes`;
+  }
+  if (name) {
+    return name;
+  }
+  return text || title || block.renderKind;
+}
+
+function transcriptToolResultSummary(
+  block: TranscriptBlock,
+  title: string,
+  text: string,
+): string {
+  const parts: string[] = [];
+  const status = transcriptBlockDataString(block, "status");
+  const outcome = transcriptBlockDataString(block, "outcome");
+  const exitCode = transcriptBlockDataNumber(block, "exitCode");
+  const outputBytes = transcriptBlockDataNumber(block, "outputBytes");
+  if (outcome) {
+    parts.push(outcome);
+  } else if (status) {
+    parts.push(status);
+  }
+  if (exitCode !== null) {
+    parts.push(`exit ${exitCode}`);
+  }
+  if (outputBytes !== null) {
+    parts.push(`${outputBytes} bytes`);
+  }
+  if (parts.length > 0) {
+    return `${title || "Tool output"} · ${parts.join(" · ")}`;
+  }
+  return text || title || block.renderKind;
+}
+
+function transcriptCompactSummary(block: TranscriptBlock): string {
+  const title = transcriptSummaryLine(block.title);
+  const text = transcriptSummaryLine(block.text);
+  const renderKind = block.renderKind.toLowerCase();
+  const key = `${renderKind} ${title}`.toLowerCase();
+  if (key.includes("toolcall") || key.includes("tool call")) {
+    return transcriptToolCallSummary(block, title, text);
+  }
+  if (key.includes("toolresult") || key.includes("tool output")) {
+    return transcriptToolResultSummary(block, title, text);
+  }
+  if (text && (!title || transcriptTitleIsGeneric(title))) {
+    return text;
+  }
+  return title || text || block.renderKind;
+}
+
 export function transcriptBlockView(
   block: TranscriptBlock,
   sourceKind: string,
 ): TranscriptBlockView {
   const key = `${block.renderKind} ${block.title ?? ""}`.toLowerCase();
   const text = transcriptBlockText(block);
-  const summary = block.title ?? text.split(/\r?\n/, 1)[0] ?? block.renderKind;
+  const summary = transcriptCompactSummary(block);
   if (sourceKind === "exec" || key.includes("terminal") || block.renderKind === "ansi") {
     return { mode: "terminal", tone: "terminal", summary, detail: text || null };
   }

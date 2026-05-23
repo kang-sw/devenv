@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   buildActivityDetailToggleCommand,
   buildActivityRefreshCommand,
@@ -8,11 +8,14 @@ import {
 } from "./commands";
 import {
   acknowledgeActivityItem,
+  activityRibbonSourceLabel,
+  activityRibbonStatusLine,
   defaultActivitySelection,
   fetchWorkRootActivityTranscript,
   initializeActivityDirtyItems,
   orderActivityItems,
   preserveActivitySelection,
+  isActivityTranscriptAtTail,
   shouldApplyActivityTranscriptRequest,
   shouldLoadMoreActivityTranscript,
   transcriptBlockView,
@@ -56,6 +59,11 @@ type TranscriptRequestKey = {
   activityId: string | null;
   requestId: number;
 };
+
+const transcriptScrollMemory = new Map<
+  string,
+  { scrollTop: number; followingTail: boolean }
+>();
 
 export type ActivityTranscriptRefreshSignal = {
   readonly rootId: string;
@@ -157,7 +165,7 @@ export function ActivityConsole({
   }, []);
 
   const requestTranscript = useCallback(
-    (mode: "replace" | "append") => {
+    (mode: "replace" | "prepend") => {
       const item = selectedItem;
       if (!item || !item.transcript.available) {
         const requestId = transcriptRequestSeq.current + 1;
@@ -196,10 +204,10 @@ export function ActivityConsole({
         return;
       }
       const cursor =
-        mode === "append" && transcriptState.phase === "ready"
+        mode === "prepend" && transcriptState.phase === "ready"
           ? transcriptState.transcript.nextCursor
           : undefined;
-      if (mode === "append" && !cursor) {
+      if (mode === "prepend" && !cursor) {
         return;
       }
       const requestId = transcriptRequestSeq.current + 1;
@@ -210,18 +218,27 @@ export function ActivityConsole({
         requestId,
       };
       currentTranscriptRequest.current = expected;
-      setTranscriptState((current) =>
-        mode === "append" && current.phase === "ready"
-          ? { ...current, loadingMore: true }
-          : {
-              phase: "loading",
-              transcript: null,
-              error: null,
-              loadingMore: false,
-            },
-      );
+      setTranscriptState((current) => {
+        if (mode === "prepend" && current.phase === "ready") {
+          return { ...current, loadingMore: true };
+        }
+        if (
+          mode === "replace" &&
+          current.phase === "ready" &&
+          current.transcript.workRootId === view.workRootId &&
+          current.transcript.activityId === item.id
+        ) {
+          return { ...current, loadingMore: false };
+        }
+        return {
+          phase: "loading",
+          transcript: null,
+          error: null,
+          loadingMore: false,
+        };
+      });
       void loadTranscript(view.workRootId, item.id, {
-        cursor: cursor ?? undefined,
+        before: cursor ?? undefined,
         limit: 40,
       })
         .then((transcript) => {
@@ -235,12 +252,12 @@ export function ActivityConsole({
             return;
           }
           setTranscriptState((current) => {
-            if (mode === "append" && current.phase === "ready") {
+            if (mode === "prepend" && current.phase === "ready") {
               return {
                 phase: "ready",
                 transcript: {
                   ...transcript,
-                  blocks: [...current.transcript.blocks, ...transcript.blocks],
+                  blocks: [...transcript.blocks, ...current.transcript.blocks],
                 },
                 error: null,
                 loadingMore: false,
@@ -276,17 +293,6 @@ export function ActivityConsole({
   );
 
   useEffect(() => {
-    currentTranscriptRequest.current = {
-      workRootId: view.workRootId,
-      activityId: selectedItemId,
-      requestId: transcriptRequestSeq.current + 1,
-    };
-    setTranscriptState({
-      phase: "loading",
-      transcript: null,
-      error: null,
-      loadingMore: false,
-    });
     requestTranscript("replace");
   }, [view.workRootId, selectedItemId, selectedRevision]);
 
@@ -318,7 +324,7 @@ export function ActivityConsole({
   const handleLoadMore = () => {
     if (!selectedItem) return;
     onCommand(buildActivityTranscriptLoadMoreCommand(selectedItem.id), {
-      "activity.transcript.loadMore": () => requestTranscript("append"),
+      "activity.transcript.loadMore": () => requestTranscript("prepend"),
     });
   };
 
@@ -347,12 +353,6 @@ export function ActivityConsole({
     transcriptState.phase === "ready" ? transcriptState.transcript : null;
   return (
     <section className="activity-console" data-activity-console="ready">
-      <div className="activity-console-summary" aria-label="Activity summary">
-        <span className="meta-chip">{view.status}</span>
-        <span className="meta-chip">{view.summary.total} total</span>
-        <span className="meta-chip">{view.summary.active} active</span>
-        <span className="meta-chip">{view.summary.blocked} attention</span>
-      </div>
       {orderedItems.length === 0 ? (
         <p
           className="workroot-activity-empty"
@@ -369,6 +369,7 @@ export function ActivityConsole({
             selectedItemId={selectedItemId}
           />
           <TranscriptBlockViewer
+            workRootId={view.workRootId}
             expandedDetails={expandedDetails}
             onLoadMore={handleLoadMore}
             onRefresh={handleRefresh}
@@ -409,10 +410,12 @@ export function ActivityRibbon({
         >
           <span className="activity-ribbon-cue" aria-hidden="true" />
           <span className="activity-ribbon-meta">
-            {item.source.label || item.kind}
+            {activityRibbonSourceLabel(item)}
           </span>
           <span className="activity-ribbon-title">{item.label}</span>
-          <span className="activity-ribbon-status">{item.status}</span>
+          <span className="activity-ribbon-status">
+            {activityRibbonStatusLine(item)}
+          </span>
         </button>
       ))}
     </div>
@@ -420,6 +423,7 @@ export function ActivityRibbon({
 }
 
 export function TranscriptBlockViewer({
+  workRootId,
   expandedDetails,
   onLoadMore,
   onRefresh,
@@ -428,6 +432,7 @@ export function TranscriptBlockViewer({
   state,
   transcript,
 }: {
+  workRootId: string;
   expandedDetails: ReadonlySet<string>;
   onLoadMore: () => void;
   onRefresh: () => void;
@@ -436,6 +441,96 @@ export function TranscriptBlockViewer({
   state: ActivityTranscriptLoadState;
   transcript: ActivityTranscript | null;
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const pendingPrependScroll = useRef<{
+    readonly scrollHeight: number;
+    readonly scrollTop: number;
+  } | null>(null);
+  const selectedActivityId = selectedItem?.id ?? null;
+  const scrollMemoryKey = transcript
+    ? `${transcript.workRootId}\u001f${transcript.activityId}`
+    : selectedActivityId
+      ? `${workRootId}\u001f${selectedActivityId}`
+      : null;
+  const [followingTail, setFollowingTail] = useState(
+    () =>
+      (scrollMemoryKey
+        ? transcriptScrollMemory.get(scrollMemoryKey)?.followingTail
+        : undefined) ?? true,
+  );
+  const rememberedScroll = scrollMemoryKey
+    ? transcriptScrollMemory.get(scrollMemoryKey)
+    : undefined;
+  const effectiveFollowingTail = rememberedScroll?.followingTail ?? followingTail;
+  const autoScrollInProgress = useRef(false);
+
+  useEffect(() => {
+    setFollowingTail(
+      (scrollMemoryKey ? transcriptScrollMemory.get(scrollMemoryKey)?.followingTail : undefined) ??
+        true,
+    );
+  }, [scrollMemoryKey]);
+
+
+  useEffect(() => {
+    return () => {
+      const element = scrollRef.current;
+      if (!element || !scrollMemoryKey) {
+        return;
+      }
+      const atTail = isActivityTranscriptAtTail(element);
+      transcriptScrollMemory.set(scrollMemoryKey, {
+        scrollTop: element.scrollTop,
+        followingTail: atTail,
+      });
+    };
+  }, [scrollMemoryKey]);
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !transcript || transcript.blocks.length === 0) {
+      return;
+    }
+    const prependScroll = pendingPrependScroll.current;
+    if (prependScroll) {
+      pendingPrependScroll.current = null;
+      element.scrollTop = Math.min(
+        prependScroll.scrollTop +
+          Math.max(0, element.scrollHeight - prependScroll.scrollHeight),
+        Math.max(0, element.scrollHeight - element.clientHeight),
+      );
+      if (scrollMemoryKey) {
+        transcriptScrollMemory.set(scrollMemoryKey, {
+          scrollTop: element.scrollTop,
+          followingTail: isActivityTranscriptAtTail(element),
+        });
+      }
+      return;
+    }
+    if (!effectiveFollowingTail) {
+      if (rememberedScroll) {
+        element.scrollTop = Math.min(
+          rememberedScroll.scrollTop,
+          Math.max(0, element.scrollHeight - element.clientHeight),
+        );
+      }
+      return;
+    }
+    autoScrollInProgress.current = true;
+    element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    window.setTimeout(() => {
+      autoScrollInProgress.current = false;
+    }, 0);
+  }, [
+    effectiveFollowingTail,
+    rememberedScroll,
+    scrollMemoryKey,
+    transcript,
+    transcript?.activityId,
+    transcript?.blocks.length,
+    transcript?.blocks.at(-1)?.cursor,
+  ]);
+
   return (
     <section className="activity-transcript" aria-label="Activity transcript">
       <div className="activity-transcript-head">
@@ -443,6 +538,15 @@ export function TranscriptBlockViewer({
           <strong>{selectedItem?.label ?? "Activity"}</strong>
           <span>{selectedItem?.status ?? "unavailable"}</span>
         </div>
+        <button
+          className="activity-console-control"
+          data-command-id="activity.refresh"
+          disabled={!selectedItem?.transcript.available}
+          type="button"
+          onClick={onRefresh}
+        >
+          Refresh transcript
+        </button>
       </div>
       {state.phase === "loading" ? (
         <div className="workroot-activity-state">Loading transcript</div>
@@ -461,8 +565,21 @@ export function TranscriptBlockViewer({
       ) : transcript && transcript.blocks.length > 0 ? (
         <div
           className="activity-transcript-scroll"
+          data-following-tail={effectiveFollowingTail ? "true" : "false"}
+          ref={scrollRef}
           onScroll={(event) => {
             const element = event.currentTarget;
+            const atTail = isActivityTranscriptAtTail(element);
+            setFollowingTail(atTail);
+            if (scrollMemoryKey) {
+              transcriptScrollMemory.set(scrollMemoryKey, {
+                scrollTop: element.scrollTop,
+                followingTail: atTail,
+              });
+            }
+            if (autoScrollInProgress.current || effectiveFollowingTail) {
+              return;
+            }
             if (
               shouldLoadMoreActivityTranscript(
                 element,
@@ -470,10 +587,34 @@ export function TranscriptBlockViewer({
                 state.loadingMore,
               )
             ) {
+              pendingPrependScroll.current = {
+                scrollHeight: element.scrollHeight,
+                scrollTop: element.scrollTop,
+              };
               onLoadMore();
             }
           }}
         >
+          {transcript.hasMore ? (
+            <button
+              className="activity-console-control activity-load-more"
+              data-command-id="activity.transcript.loadMore"
+              disabled={state.loadingMore}
+              type="button"
+              onClick={() => {
+                const element = scrollRef.current;
+                if (element) {
+                  pendingPrependScroll.current = {
+                    scrollHeight: element.scrollHeight,
+                    scrollTop: element.scrollTop,
+                  };
+                }
+                onLoadMore();
+              }}
+            >
+              {state.loadingMore ? "Loading earlier transcript" : "Load earlier transcript"}
+            </button>
+          ) : null}
           {transcript.blocks.map((block) => (
             <ActivityTranscriptBlock
               block={block}
@@ -483,17 +624,6 @@ export function TranscriptBlockViewer({
               sourceKind={transcript.source.kind}
             />
           ))}
-          {transcript.hasMore ? (
-            <button
-              className="activity-console-control activity-load-more"
-              data-command-id="activity.transcript.loadMore"
-              disabled={state.loadingMore}
-              type="button"
-              onClick={onLoadMore}
-            >
-              {state.loadingMore ? "Loading" : "Load more"}
-            </button>
-          ) : null}
         </div>
       ) : (
         <div

@@ -118,10 +118,37 @@ The MVP should cover:
   from a named-agent list into a reusable read-only Activity Console with a
   live/latest ribbon, selected transcript blocks, stream-backed feed updates,
   and backend-owned transcript source resolution.
-- `260523-bug-ws-dashboard-activity-console-dogfood-usability` - todo; repair
+- `260523-bug-ws-dashboard-activity-console-dogfood-usability` - done; repair
   post-epic dogfood usability gaps in Activity Console placement, transcript
   tail-follow scrolling, compact block summaries, and Codex prompt/interruption
   transcript coverage while keeping the surface read-only and command-routed.
+- `260523-feat-ws-dashboard-activity-console-tail-ribbon-polish` - done; make
+  selected transcripts tail-first with top-edge older-history loading, remove
+  the redundant Activity Console summary row, and polish ribbon source/timing
+  metadata without increasing card height.
+- `260523-bug-ws-dashboard-dockview-split-scroll-reset` - done; fix
+  Dockview split-wide scroll resets caused by active-pane sync and parameter
+  churn in the workbench adapter.
+- `260523-bug-ws-dashboard-dev-run-ctrl-c-shutdown` - done; make the outer
+  `dev.sh run`/daemon shutdown signal take priority over open long-lived
+  browser connections by bounding graceful shutdown drain.
+- `260523-feat-ws-dashboard-persist-open-workroots` - done; persist opened
+  workRoot paths in daemon-local state and seed live resource discovery from
+  remembered roots after daemon restart.
+- `260523-feat-ws-dashboard-terminal-tab-restore` - done; restore remembered
+  terminal tabs after daemon restart by creating new terminal sessions with
+  safe workRoot-relative cwd hints, without treating old PTYs as resumable.
+- `260523-feat-ws-dashboard-workroot-registry-activation` - ready; add a
+  durable workspace/workRoot registry, separate live-derived availability from
+  user-controlled online/offline activation, and keep known workRoots visible
+  until explicit future forget/remove semantics exist.
+- `260523-feat-ws-dashboard-readonly-file-pane-restore` - todo; restore
+  read-only preview/pinned file pane descriptors by replaying normal file-open
+  behavior through authenticated workRoot-relative file reads.
+- `260523-research-ws-dashboard-persistable-ui-state-map` - idea; map the
+  broader persistence backlog for selected resources, file explorer state,
+  workbench layout, Activity Console acknowledgement/scroll state, command
+  preferences, chrome preferences, and privacy-sensitive root-picker history.
 
 ## Cross-Child Decisions
 
@@ -223,6 +250,20 @@ The MVP should cover:
   interrupt, cancel, erase, and retry stay out of the dashboard Activity
   Console; any future terminate affordance requires a separate high-friction
   control ticket.
+- Persisted dashboard state should store logical, user-visible descriptors and
+  preferences, then revalidate through daemon/resource/file APIs on restore.
+  Browser state must not become authority for daemon resources, and persistence
+  should avoid raw output, transcripts, host paths, cache paths, backend
+  session paths, process ids, or stale daemon terminal ids unless a child ticket
+  explicitly defines a bounded privacy-reviewed format.
+- WorkRoot resource modeling separates durable membership, live-derived
+  availability, and user-controlled activation. Existing `WorkRootStatus`
+  online/offline vocabulary is reachability-flavored and must not be reused as
+  the activation layer without a public model split. Known workRoots remain
+  visible even when missing, inaccessible, prunable, or offline; there is no
+  invisible discovered-worktree state. Explicit refresh and bounded polling
+  recompute filesystem/Git availability, while future filesystem watchers may
+  only act as refresh-needed hints.
 
 ## Completion Criteria
 
