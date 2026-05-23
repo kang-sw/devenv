@@ -499,7 +499,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
 
   // --- Top-bar badge opens/focuses/closes the WorkRoot Activity pane -----
   // CONTRACT: The Activity badge opens or focuses exactly one WorkRoot Activity
-  // pane in group 1, duplicate badge clicks do not create duplicate panes, the
+  // pane in group 2, duplicate badge clicks do not create duplicate panes, the
   // pane closes immediately with no confirmation popover, and running-command
   // rows stay explicitly empty until the async exec source exists.
   await test.step("activity badge opens, focuses, and closes the WorkRoot Activity pane", async () => {
@@ -517,12 +517,12 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     // No Activity pane exists until the badge is clicked.
     await expect(activityPane).toHaveCount(0);
 
-    // Badge click opens exactly one Activity pane, and it lands in group 1.
+    // Badge click opens exactly one Activity pane, and it lands in group 2.
     await opener.click();
     await expect(activityPane).toHaveCount(1);
     await expect(activityPane).toHaveAttribute(
       "data-workbench-group-id",
-      "group-1",
+      "group-2",
     );
     await expect(activityPane).toHaveAttribute(
       "aria-label",
@@ -785,8 +785,14 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
               updateMode: "watch",
             },
             {
-              type: "heartbeat",
+              type: "transcriptUpdated",
               cursor: "browser:stream:3",
+              activityId: "agent:alpha",
+              transcriptCursor: "alpha:streamed",
+            },
+            {
+              type: "heartbeat",
+              cursor: "browser:stream:4",
             },
           ]
             .map((event) => `event: activity\ndata: ${JSON.stringify(event)}\n\n`)
@@ -830,6 +836,35 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
                 tier: "core",
                 model: "opus",
               };
+        const alphaInitialBlocks = [
+          {
+            cursor: "alpha:1",
+            timestamp: "2026-05-17T11:58:00Z",
+            renderKind: "markdown",
+            title: "assistant",
+            text: "selected transcript alpha",
+            data: null,
+            degraded: false,
+          },
+          {
+            cursor: "alpha:2",
+            timestamp: "2026-05-17T11:58:10Z",
+            renderKind: "json",
+            title: "tool call",
+            text: "tool details visible after expansion",
+            data: { tool: "read" },
+            degraded: false,
+          },
+          ...Array.from({ length: 28 }, (_, index) => ({
+            cursor: `alpha:filler:${index}`,
+            timestamp: "2026-05-17T11:58:20Z",
+            renderKind: "markdown",
+            title: `tail filler ${index}`,
+            text: `tail-follow filler line ${index}`,
+            data: null,
+            degraded: false,
+          })),
+        ];
         const blocks =
           activityId === "exec:beta"
             ? [
@@ -855,26 +890,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
                     degraded: false,
                   },
                 ]
-              : [
-                  {
-                    cursor: "alpha:1",
-                    timestamp: "2026-05-17T11:58:00Z",
-                    renderKind: "markdown",
-                    title: "assistant",
-                    text: "selected transcript alpha",
-                    data: null,
-                    degraded: false,
-                  },
-                  {
-                    cursor: "alpha:2",
-                    timestamp: "2026-05-17T11:58:10Z",
-                    renderKind: "json",
-                    title: "tool call",
-                    text: "tool details visible after expansion",
-                    data: { tool: "read" },
-                    degraded: false,
-                  },
-                ];
+              : alphaInitialBlocks;
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -901,7 +917,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(activityPane).toHaveCount(1);
     await expect(activityPane).toHaveAttribute(
       "data-workbench-group-id",
-      "group-1",
+      "group-2",
     );
     await expect(activityTab).toHaveCount(1);
     await expect(activityTab).toHaveAttribute("aria-selected", "true");
@@ -964,6 +980,32 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "last: activity.selectItem",
     );
     await expect(populatedBody).toContainText("selected transcript alpha");
+    const transcriptScroll = populatedBody.locator(".activity-transcript-scroll");
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate(
+          (node) => node.scrollHeight > node.clientHeight + 1,
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate(
+          (node) =>
+            node.scrollHeight - (node.scrollTop + node.clientHeight) <= 8,
+        ),
+      )
+      .toBe(true);
+    await transcriptScroll.hover();
+    await page.mouse.wheel(0, -600);
+    await expect
+      .poll(() =>
+        transcriptScroll.evaluate(
+          (node) => node.scrollHeight - (node.scrollTop + node.clientHeight),
+        ),
+      )
+      .toBeGreaterThan(100);
+    await expect(transcriptScroll).toHaveAttribute("data-following-tail", "false");
     const detailToggle = populatedBody.locator(
       '[data-command-id="activity.detail.toggle"]',
     );
@@ -1002,7 +1044,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(page.locator(".workbench-close-popover")).toHaveCount(0);
 
     note(
-      "activity pane: badge click opened one WorkRoot Activity pane in group 1, " +
+      "activity pane: badge click opened one WorkRoot Activity pane in group 2, " +
         "empty and populated Activity Console projections rendered, named live stream " +
         "upsert appeared without reload and without healthy-mode recent polling, " +
         "selection, dirty acknowledgement, " +

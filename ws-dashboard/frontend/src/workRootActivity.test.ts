@@ -11,8 +11,11 @@ import {
   parseActivityConsoleEvent,
   preserveActivitySelection,
   shouldApplyActivityStreamRequest,
+  activityTranscriptDistanceFromTail,
+  isActivityTranscriptAtTail,
   shouldApplyActivityTranscriptResponse,
   shouldApplyActivityTranscriptRequest,
+  shouldFollowActivityTranscriptTail,
   shouldLoadMoreActivityTranscript,
   transcriptBlockView,
   workRootActivityBadge,
@@ -413,6 +416,27 @@ assertEqual(
   ),
   false,
   "stale workRoot stream completions are ignored after root switch",
+);
+
+assertEqual(
+  activityTranscriptDistanceFromTail({ scrollTop: 240, clientHeight: 160, scrollHeight: 400 }),
+  0,
+  "transcript scroll metrics report zero distance at the tail",
+);
+assertEqual(
+  isActivityTranscriptAtTail({ scrollTop: 230, clientHeight: 160, scrollHeight: 400 }, 12),
+  true,
+  "transcript follow policy treats near-tail scroll as following",
+);
+assertEqual(
+  shouldFollowActivityTranscriptTail({ scrollTop: 120, clientHeight: 160, scrollHeight: 400 }, 12),
+  false,
+  "transcript follow policy pauses when the user scrolls away from the tail",
+);
+assertEqual(
+  shouldFollowActivityTranscriptTail({ scrollTop: 240, clientHeight: 160, scrollHeight: 400 }, 12),
+  true,
+  "transcript follow policy resumes when the user returns to the tail",
 );
 
 

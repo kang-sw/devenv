@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   buildActivityDetailToggleCommand,
   buildActivityRefreshCommand,
@@ -13,6 +13,7 @@ import {
   initializeActivityDirtyItems,
   orderActivityItems,
   preserveActivitySelection,
+  isActivityTranscriptAtTail,
   shouldApplyActivityTranscriptRequest,
   shouldLoadMoreActivityTranscript,
   transcriptBlockView,
@@ -56,6 +57,11 @@ type TranscriptRequestKey = {
   activityId: string | null;
   requestId: number;
 };
+
+const transcriptScrollMemory = new Map<
+  string,
+  { scrollTop: number; followingTail: boolean }
+>();
 
 export type ActivityTranscriptRefreshSignal = {
   readonly rootId: string;
@@ -210,16 +216,25 @@ export function ActivityConsole({
         requestId,
       };
       currentTranscriptRequest.current = expected;
-      setTranscriptState((current) =>
-        mode === "append" && current.phase === "ready"
-          ? { ...current, loadingMore: true }
-          : {
-              phase: "loading",
-              transcript: null,
-              error: null,
-              loadingMore: false,
-            },
-      );
+      setTranscriptState((current) => {
+        if (mode === "append" && current.phase === "ready") {
+          return { ...current, loadingMore: true };
+        }
+        if (
+          mode === "replace" &&
+          current.phase === "ready" &&
+          current.transcript.workRootId === view.workRootId &&
+          current.transcript.activityId === item.id
+        ) {
+          return { ...current, loadingMore: false };
+        }
+        return {
+          phase: "loading",
+          transcript: null,
+          error: null,
+          loadingMore: false,
+        };
+      });
       void loadTranscript(view.workRootId, item.id, {
         cursor: cursor ?? undefined,
         limit: 40,
@@ -276,17 +291,6 @@ export function ActivityConsole({
   );
 
   useEffect(() => {
-    currentTranscriptRequest.current = {
-      workRootId: view.workRootId,
-      activityId: selectedItemId,
-      requestId: transcriptRequestSeq.current + 1,
-    };
-    setTranscriptState({
-      phase: "loading",
-      transcript: null,
-      error: null,
-      loadingMore: false,
-    });
     requestTranscript("replace");
   }, [view.workRootId, selectedItemId, selectedRevision]);
 
@@ -436,6 +440,71 @@ export function TranscriptBlockViewer({
   state: ActivityTranscriptLoadState;
   transcript: ActivityTranscript | null;
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const selectedActivityId = selectedItem?.id ?? null;
+  const scrollMemoryKey = transcript?.activityId ?? selectedActivityId;
+  const [followingTail, setFollowingTail] = useState(
+    () =>
+      (scrollMemoryKey
+        ? transcriptScrollMemory.get(scrollMemoryKey)?.followingTail
+        : undefined) ?? true,
+  );
+  const rememberedScroll = scrollMemoryKey
+    ? transcriptScrollMemory.get(scrollMemoryKey)
+    : undefined;
+  const effectiveFollowingTail = rememberedScroll?.followingTail ?? followingTail;
+  const autoScrollInProgress = useRef(false);
+
+  useEffect(() => {
+    setFollowingTail(
+      (scrollMemoryKey ? transcriptScrollMemory.get(scrollMemoryKey)?.followingTail : undefined) ??
+        true,
+    );
+  }, [scrollMemoryKey]);
+
+
+  useEffect(() => {
+    return () => {
+      const element = scrollRef.current;
+      if (!element || !scrollMemoryKey) {
+        return;
+      }
+      const atTail = isActivityTranscriptAtTail(element);
+      transcriptScrollMemory.set(scrollMemoryKey, {
+        scrollTop: element.scrollTop,
+        followingTail: atTail,
+      });
+    };
+  }, [scrollMemoryKey]);
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !transcript || transcript.blocks.length === 0) {
+      return;
+    }
+    if (!effectiveFollowingTail) {
+      if (rememberedScroll) {
+        element.scrollTop = Math.min(
+          rememberedScroll.scrollTop,
+          Math.max(0, element.scrollHeight - element.clientHeight),
+        );
+      }
+      return;
+    }
+    autoScrollInProgress.current = true;
+    element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    window.setTimeout(() => {
+      autoScrollInProgress.current = false;
+    }, 0);
+  }, [
+    effectiveFollowingTail,
+    rememberedScroll,
+    scrollMemoryKey,
+    transcript?.activityId,
+    transcript?.blocks.length,
+    transcript?.blocks.at(-1)?.cursor,
+  ]);
+
   return (
     <section className="activity-transcript" aria-label="Activity transcript">
       <div className="activity-transcript-head">
@@ -461,8 +530,21 @@ export function TranscriptBlockViewer({
       ) : transcript && transcript.blocks.length > 0 ? (
         <div
           className="activity-transcript-scroll"
+          data-following-tail={effectiveFollowingTail ? "true" : "false"}
+          ref={scrollRef}
           onScroll={(event) => {
             const element = event.currentTarget;
+            const atTail = isActivityTranscriptAtTail(element);
+            setFollowingTail(atTail);
+            if (scrollMemoryKey) {
+              transcriptScrollMemory.set(scrollMemoryKey, {
+                scrollTop: element.scrollTop,
+                followingTail: atTail,
+              });
+            }
+            if (autoScrollInProgress.current || effectiveFollowingTail) {
+              return;
+            }
             if (
               shouldLoadMoreActivityTranscript(
                 element,

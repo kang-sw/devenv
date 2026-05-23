@@ -1163,6 +1163,7 @@ function WorkbenchShell({
               supportEntity,
               readOnlyFilePanes,
               readOnlyFilePaneOrderByGroup,
+              paneOrderByGroup,
               Object.values(terminalPanes),
               terminalPaneOrderByGroup,
               {
@@ -1920,8 +1921,8 @@ function WorkbenchShell({
     // CONTRACT: The top-bar Activity badge is the selected-workRoot entrypoint
     // for one reversible WorkRoot Activity pane. Routing through
     // decideSurfaceOpenWithDynamicGroups keeps duplicate opens focusing the
-    // existing pane and new opens using policy-owned group-1 placement instead
-    // of a raw Dockview handle.
+    // existing pane and new opens using policy-owned support-split placement
+    // instead of a raw Dockview handle.
     const rootId = workbenchModel.root.id;
     const paneId = workRootActivityPaneId(rootId);
     const decision = decideSurfaceOpenWithDynamicGroups(
@@ -1934,7 +1935,24 @@ function WorkbenchShell({
       },
     );
     if (decision.type === "openNew") {
+      if (decision.createdGroupId) {
+        onWorkbenchGroupsByRootChange((current) => ({
+          ...current,
+          [rootId]: reconcileDashboardGroupsForPlacement(
+            current[rootId] ?? workbenchGroups,
+            decision,
+          ),
+        }));
+      }
       setActivityPaneOpenByRoot((current) => ({ ...current, [rootId]: true }));
+      onPaneOrderByRootChange((current) => ({
+        ...current,
+        [rootId]: addPaneToGroupOrder(
+          current[rootId] ?? {},
+          paneId,
+          String(decision.groupId),
+        ),
+      }));
     }
     setActivePaneByGroupForSelected((current) =>
       selectWorkbenchPane(current, decision.groupId, paneId),
@@ -2230,7 +2248,7 @@ function workRootActivityPaneId(workRootId: string) {
 // Build the placement state the WorkRoot Activity badge feeds into
 // decideSurfaceOpenWithDynamicGroups. It mirrors the live editor groups so a
 // duplicate open focuses the pane in whatever group it currently occupies,
-// while a first open resolves to the policy-owned group-1 exception.
+// while a first open resolves through the policy-owned support-split target.
 function workRootActivityPlacementState(
   groups: ReadonlyArray<{ id: string; label: string }>,
   editorGroups: WorkbenchEditorGroupModel[],
@@ -2387,6 +2405,7 @@ function buildWorkbenchEditorGroups(
   supportEntity: ResourceEntity | null,
   readOnlyFilePanes: ReadOnlyFilePane[],
   readOnlyFilePaneOrderByGroup: WorkbenchPaneOrder,
+  activityPaneOrderByGroup: WorkbenchPaneOrder,
   terminalPanes: TerminalPaneState[],
   terminalPaneOrderByGroup: WorkbenchPaneOrder,
   terminalActions: TerminalPaneActions,
@@ -2432,19 +2451,21 @@ function buildWorkbenchEditorGroups(
         ]
       : [];
 
-  // CONTRACT: The WorkRoot Activity pane is the one reversible opened
-  // projection that defaults into group 1 (the agent/terminal-side split)
-  // rather than the group-2 editor/read-only column.
-  const activityPane: WorkbenchPane[] = activityPaneOpen
-    ? [
-        workRootActivityWorkbenchPane(
-          root,
-          activityState,
-          activityTranscriptRefresh,
-          onCommand,
-        ),
-      ]
-    : [];
+  const activityPane = activityPaneOpen
+    ? workRootActivityWorkbenchPane(
+        root,
+        activityState,
+        activityTranscriptRefresh,
+        onCommand,
+      )
+    : null;
+  const activityGroupId = activityPane
+    ? activityPaneGroupIdFromOrder(
+        activityPane.id,
+        activityPaneOrderByGroup,
+        dashboardGroups,
+      )
+    : null;
 
   return dashboardGroups.map((group, index) => ({
     id: group.id,
@@ -2452,7 +2473,7 @@ function buildWorkbenchEditorGroups(
     panes: [
       ...(index === 0 ? agentPane : []),
       ...(terminalPanesByGroup[group.id] ?? []),
-      ...(index === 0 ? activityPane : []),
+      ...(activityPane && activityGroupId === group.id ? [activityPane] : []),
       ...(readOnlyPanesByGroup[group.id] ?? []),
     ],
   }));
@@ -3084,6 +3105,18 @@ function sameReadOnlyOpenRequest(
   );
 }
 
+function addPaneToGroupOrder(
+  orderByGroup: WorkbenchPaneOrder,
+  paneId: string,
+  groupId: string,
+): WorkbenchPaneOrder {
+  const withoutPane = removePaneFromOrder(orderByGroup, paneId);
+  return {
+    ...withoutPane,
+    [groupId]: [...(withoutPane[groupId] ?? []), paneId],
+  };
+}
+
 function removePaneFromOrder(
   orderByGroup: WorkbenchPaneOrder,
   paneId: string | undefined,
@@ -3096,6 +3129,19 @@ function removePaneFromOrder(
       groupId,
       paneIds.filter((candidate) => candidate !== paneId),
     ]),
+  );
+}
+
+function activityPaneGroupIdFromOrder(
+  paneId: string,
+  orderByGroup: WorkbenchPaneOrder,
+  groups: ReadonlyArray<{ id: string }>,
+): string {
+  return groupIdForPaneOrder(
+    paneId,
+    orderByGroup,
+    {},
+    groups[1]?.id ?? groups[0]?.id ?? "group-1",
   );
 }
 

@@ -498,12 +498,34 @@ export function shouldApplyActivityTranscriptRequest(
   );
 }
 
+export type ActivityTranscriptScrollMetrics = {
+  readonly scrollTop: number;
+  readonly clientHeight: number;
+  readonly scrollHeight: number;
+};
+
+export function activityTranscriptDistanceFromTail(
+  metrics: ActivityTranscriptScrollMetrics,
+): number {
+  return Math.max(0, metrics.scrollHeight - (metrics.scrollTop + metrics.clientHeight));
+}
+
+export function isActivityTranscriptAtTail(
+  metrics: ActivityTranscriptScrollMetrics,
+  thresholdPx = 8,
+): boolean {
+  return activityTranscriptDistanceFromTail(metrics) <= thresholdPx;
+}
+
+export function shouldFollowActivityTranscriptTail(
+  metrics: ActivityTranscriptScrollMetrics,
+  thresholdPx = 8,
+): boolean {
+  return isActivityTranscriptAtTail(metrics, thresholdPx);
+}
+
 export function shouldLoadMoreActivityTranscript(
-  metrics: {
-    scrollTop: number;
-    clientHeight: number;
-    scrollHeight: number;
-  },
+  metrics: ActivityTranscriptScrollMetrics,
   hasMore: boolean,
   loading: boolean,
   thresholdPx = 48,
@@ -511,7 +533,7 @@ export function shouldLoadMoreActivityTranscript(
   if (!hasMore || loading) {
     return false;
   }
-  return metrics.scrollHeight - (metrics.scrollTop + metrics.clientHeight) <= thresholdPx;
+  return activityTranscriptDistanceFromTail(metrics) <= thresholdPx;
 }
 
 function transcriptBlockText(block: TranscriptBlock): string {

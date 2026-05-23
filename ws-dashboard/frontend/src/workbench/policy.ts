@@ -173,15 +173,11 @@ export function decideSurfaceOpenWithDynamicGroups(
 ): WorkbenchDynamicPlacementDecision {
   // CONTRACT: Dynamic placement is the caller-facing policy for Dockview-backed
   // workbenches. Existing logical keys still focus their attachment. New
-  // persistent terminal panes prefer group 1. New editor/read-only file panes
-  // prefer group 2, creating group 2 when only group 1 exists. Groups 3+ are
-  // user-created groups and are not automatic placement targets.
-  // CONTRACT: WorkRoot Activity is the one reversible opened projection with a
-  // group-1 placement exception. New opens must target group 1 while duplicate
-  // logical keys keep focusing the existing attachment through the branch above.
-  // The exception is local to the WorkRoot Activity request path; keep
-  // selectDynamicTargetGroup as the general opened/read-only placement rule.
-  // Duplicate logical keys must keep decideSurfaceOpen focusExisting behavior.
+  // persistent terminal panes prefer group 1. New opened surfaces, including
+  // read-only files and WorkRoot Activity, prefer group 2, creating group 2
+  // when only group 1 exists. Groups 3+ are user-created groups and are not
+  // automatic placement targets. Duplicate logical keys must keep
+  // decideSurfaceOpen focusExisting behavior.
   // Generated dashboard groups use the ordered browser-state seed `group-N`
   // (next index after the current groups), never raw Dockview handles.
   const existing = state.attachments.find(
@@ -203,14 +199,10 @@ export function decideSurfaceOpenWithDynamicGroups(
   }
 
   const registryEntry = registry[request.surfaceKind];
-  const { groupId, groups, createdGroupId } =
-    request.surfaceKind === "workRootActivity"
-      ? {
-          groupId: state.groups[0].groupId,
-          groups: state.groups,
-          createdGroupId: null,
-        }
-      : selectDynamicTargetGroup(state, registryEntry.rowPolicy);
+  const { groupId, groups, createdGroupId } = selectDynamicTargetGroup(
+    state,
+    registryEntry.rowPolicy,
+  );
   const attachment = {
     attachmentId:
       request.attachmentId ?? attachmentId(`att:${request.logicalKey}`),
