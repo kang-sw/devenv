@@ -39,6 +39,7 @@ related:
 - MCP starts with the lead tool surface; worktree locks are not an authority signal for tool visibility. {#260505-tool-profile-gating}
 - `WS_MCP_TOOL_PROFILE` is an optional containment filter. If host environment propagation fails, delegated agents may see lead tools and must follow prompt-level role rules.
 - `ws.setup(root)` is the public root-session setup surface; it stores a canonical Git worktree root in the current server instance only and does not change process cwd or write config. Hidden `session.*` dispatch can exist for compatibility but must not be advertised as canonical.
+- Public `agents.*` MCP schemas intentionally omit `root` even though dispatch still accepts hidden explicit-root compatibility arguments through the normal root resolver; non-agent root-aware schemas keep advertising `root`. {#260523-agents-root-schema-invisibility}
 - Plugin-managed MCP calls may lack a caller repository root on native Windows; if `WS_MCP_PROJECT_ROOT` and host metadata are unavailable, tools need an explicit compatibility `root` or `ws.setup(root)` rather than the user's shell cwd.
 - The server records a session harness from MCP payloads, not as an authority boundary: `initialize.params` may identify Claude/Codex clients, and `tools/call._meta.x-codex-turn-metadata` is a Codex signal. Conflicts are debug events and do not silently switch the stored harness. {#260508-mcp-payload-harness-detection}
 
@@ -54,6 +55,7 @@ related:
 ## Extension Points & Change Recipes
 
 - **Add an MCP tool**: add schema in `tools()`, dispatch in `callTool`, optional profile permissions in `roleAllowsTool`, visibility tests when filtered, and `runtime.json`.
+- **Change an `agents.*` MCP tool**: keep the advertised schema rootless, route dispatch through the shared root resolver for session-root and hidden explicit-root compatibility, and test raw `tools()` schema plus session and explicit-root calls together.
 - **Add a CLI mirror**: add the top-level or group subcommand in `cmd/ws-mcp`, map flags to the same internal package as MCP, add readable default output plus explicit `--format json` when structured consumers exist, and add command smoke tests.
 - **Change broad documentation find formatting**: update MCP text dispatch, CLI query paths, exported format helpers, and JSON tests together; zero-result guidance and truncation wording are part of the LLM-facing contract.
 - **Restrict a tool under a profile**: update profile tables and add tests proving allowlists cannot regain a hidden tool.

@@ -55,6 +55,30 @@ func TestFormatBroadDocumentationFindBoundsEvidenceAndGuidesZeroResults(t *testi
 	}
 }
 
+func TestRawPublicAgentToolSchemasOmitRoot(t *testing.T) {
+	agentTools := 0
+	for _, tool := range tools() {
+		name, _ := tool["name"].(string)
+		schema, _ := tool["inputSchema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		if strings.HasPrefix(name, "agents.") {
+			agentTools++
+			if _, ok := properties["root"]; ok {
+				t.Fatalf("raw public agent tool %s advertises root", name)
+			}
+			continue
+		}
+		if name == "git.status" {
+			if _, ok := properties["root"]; !ok {
+				t.Fatalf("non-agent root-aware tool %s no longer advertises root", name)
+			}
+		}
+	}
+	if agentTools == 0 {
+		t.Fatal("raw tools list has no public agent tools")
+	}
+}
+
 func TestServeStdioToolsListAndCall(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()
@@ -573,6 +597,8 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tickets.list","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.setup","arguments":{"format":"json"}}}`,
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tickets.list","arguments":{"root":%q}}}`, rootB),
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"session-agent","model":"light"}}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agents.register","arguments":{"root":%q,"name":"explicit-agent","model":"light"}}}`, rootB),
 	}, "\n")
 
 	out.Reset()
@@ -597,6 +623,18 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	}
 	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
 		t.Fatalf("explicit root did not override session default: %s", byID["4"])
+	}
+	if toolIsError(t, byID["5"]) {
+		t.Fatalf("root-omitted agents.register after ws.setup failed: %s", byID["5"])
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootA, "session-agent"); err != nil {
+		t.Fatalf("root-omitted agents.register did not use session root: %v", err)
+	}
+	if toolIsError(t, byID["6"]) {
+		t.Fatalf("explicit-root agents.register compatibility failed: %s", byID["6"])
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootB, "explicit-agent"); err != nil {
+		t.Fatalf("explicit-root agents.register did not use explicit root: %v", err)
 	}
 }
 
