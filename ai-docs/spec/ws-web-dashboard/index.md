@@ -188,10 +188,14 @@ boundary. {#260516-ws-web-dashboard-server-scoped-browser-routes}
 ## Inspectable Navigation Shell {#260516-ws-web-dashboard-inspectable-navigation-shell}
 
 The first browser shell renders the resource view-model contract from the
-daemon API. It shows server, workspace, workRoot, main-instance, and
-sub-instance state; loading, empty, stale, and error states; compact singleton
-rows; and a reserved right-side viewer region without implementing the deferred
-viewer feature.
+daemon API. It shows server, workspace, and workRoot location state; loading,
+empty, stale, and error states; compact singleton rows; and a reserved
+right-side viewer region without implementing the deferred viewer feature. A
+single workspace with one workRoot renders as one compact left-nav row selected
+by the concrete workRoot id, without depending on main/sub instance presence.
+Multi-workRoot workspaces continue to show separate workspace and workRoot rows.
+Main/sub instances remain workbench surfaces or projections rather than default
+recursive left-nav rows.
 
 User-visible dashboard controls expose stable command ids so later keyboard
 bindings can target the same behaviors. Representative visible controls route
@@ -204,14 +208,7 @@ backend session paths are not command identity. Terminal raw byte input remains
 the narrow exception because shell input fidelity must not be forked through
 dashboard commands. The shell reserves `^b` to mean ctrl plus lowercase `b`;
 full custom keybinding UI remains out of scope.
-
-> [!note] Planned 🚧
-> A single workspace with one workRoot will render as one compact left-nav row
-> selected by the concrete workRoot id, without depending on main/sub instance
-> presence. Multi-workRoot workspaces will continue to show separate workspace
-> and workRoot rows, and main/sub instances will remain workbench surfaces or
-> projections rather than default recursive left-nav rows.
-> {#260523-ws-dashboard-single-workroot-nav-collapse}
+{#260523-ws-dashboard-single-workroot-nav-collapse}
 
 ## WorkRoot Workbench Substrate {#260516-ws-web-dashboard-workroot-workbench-substrate}
 
