@@ -174,9 +174,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-| Stem | Summary |
-|------|---------|
-| `260523-feat-ws-dashboard-persist-open-workroots` | Persist opened dashboard workRoots across daemon restarts |
+No ready tickets.
 
 ## Session Notes
 

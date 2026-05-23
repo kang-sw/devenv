@@ -8,6 +8,7 @@ spec:
   - 260516-ws-web-dashboard-workroot-io-restore-model
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-23
 ---
 
 # Persist dashboard open workRoots across daemon restarts
@@ -59,6 +60,20 @@ deduplicated paths, deterministic ordering, and best-effort recovery from
 missing or malformed state by returning an empty remembered set instead of
 failing daemon startup. Tests should cover startup restore, open-time write,
 malformed-state degradation, and that authentication/pairing remains unchanged.
+
+### Result (de6031f) - 2026-05-23
+
+Implemented a daemon-local versioned JSON state store for opened workRoot paths.
+`ws-dashboard serve` now loads remembered paths before building the router, and
+the canonical resources route reports those roots through the existing discovery
+provider. Opening a workRoot updates the store after in-memory registration;
+write failures warn without blocking the open action.
+
+The state format deduplicates and sorts paths, treats missing state as empty,
+and degrades malformed or unsupported state to an empty remembered set rather
+than failing daemon startup. Tests cover persistence read/write behavior,
+malformed-state degradation, remembered-root resource restore, and open-time
+persistence.
 
 ### Phase 2: Terminal tab/PWD restore design
 

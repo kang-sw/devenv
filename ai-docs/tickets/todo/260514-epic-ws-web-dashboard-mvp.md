@@ -132,6 +132,10 @@ The MVP should cover:
 - `260523-bug-ws-dashboard-dev-run-ctrl-c-shutdown` - done; make the outer
   `dev.sh run`/daemon shutdown signal take priority over open long-lived
   browser connections by bounding graceful shutdown drain.
+- `260523-feat-ws-dashboard-persist-open-workroots` - done; persist opened
+  workRoot paths in daemon-local state and seed live resource discovery from
+  remembered roots after daemon restart, while deferring terminal tab/PWD
+  restore design.
 
 ## Cross-Child Decisions
 
