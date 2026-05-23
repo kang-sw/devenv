@@ -108,3 +108,12 @@ metadata when compaction is unambiguous, verifies final tree equivalence, and
 reports unsafe or trivial suffixes as non-blocking skips. This direct-current
 implementation run skipped the new compaction gate as `skipped - direct-current
 mode`.
+
+#### Edition (16e540d) - 2026-05-23
+
+Fresh-reader follow-up clarified the compaction wording after the completed
+implementation. The edit explicitly excludes `review-fix` and
+ambiguous-authorship commits in the skill text, sharpens the final action
+end-state wording, aligns wsflow review-status reporting, and updates the
+fresh-reader audit rule so future audits include no-prior-context awkwardness
+and underspecification findings, not only hard execution blockers.
