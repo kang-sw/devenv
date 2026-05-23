@@ -158,6 +158,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-bug-ws-dashboard-dev-run-ctrl-c-shutdown` | todo | Make dev.sh run Ctrl-C shutdown take priority over live browser connections |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
+| `260523-feat-ws-dashboard-tool-output-safe-summary` | idea | Improve safe one-line summaries for Codex tool output transcript blocks |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
