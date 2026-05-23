@@ -257,11 +257,13 @@ The MVP should cover:
   session paths, process ids, or stale daemon terminal ids unless a child ticket
   explicitly defines a bounded privacy-reviewed format.
 - WorkRoot resource modeling separates durable membership, live-derived
-  availability, and user-controlled activation. Known workRoots remain visible
-  even when missing, inaccessible, prunable, or offline; there is no invisible
-  discovered-worktree state. Explicit refresh and bounded polling recompute
-  filesystem/Git availability, while future filesystem watchers may only act as
-  refresh-needed hints.
+  availability, and user-controlled activation. Existing `WorkRootStatus`
+  online/offline vocabulary is reachability-flavored and must not be reused as
+  the activation layer without a public model split. Known workRoots remain
+  visible even when missing, inaccessible, prunable, or offline; there is no
+  invisible discovered-worktree state. Explicit refresh and bounded polling
+  recompute filesystem/Git availability, while future filesystem watchers may
+  only act as refresh-needed hints.
 
 ## Completion Criteria
 

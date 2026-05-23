@@ -43,6 +43,9 @@ Agreed direction:
 - Recompute current status from filesystem/Git on explicit refresh and bounded
   polling. Missing, prunable, moved, or inaccessible worktrees remain visible
   as degraded rows instead of dropping silently.
+- Use the durable registry's separated availability/activation model. Linked
+  discovery should never overload `status: online/offline` to mean both
+  reachability and activation.
 - Detect externally added and externally removed worktrees on explicit refresh
   and bounded polling. Later filesystem watchers may only act as refresh-needed
   hints, not as the source of truth.
@@ -61,6 +64,8 @@ Open questions:
 
 - Which Git metadata states should map to which public availability labels:
   reachable, missing, inaccessible, prunable, moved, or unknown?
+- Should `prunable` be a first-class public availability value or a degraded
+  Git-specific detail under a broader unavailable/missing availability?
 - How frequently should bounded polling refresh selected, online, offline, and
   large workRoot sets?
 - Should externally removed workRoots require explicit acknowledgement before a

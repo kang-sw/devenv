@@ -34,6 +34,12 @@ dashboard activation:
   APIs; offline workRoots remain selectable rows with activation actions. A
   workspace with all workRoots offline is still valid.
 
+The current public `WorkRootStatus` vocabulary already uses `online`,
+`offline`, `moved`, and `inaccessible` for reachability/availability. That
+shape must not be reused as activation state. The implementation should split
+the public model so callers can distinguish a reachable-but-offline workRoot
+from a missing/inaccessible workRoot.
+
 ## Decisions
 
 - Do not introduce an "invisible worktree" state. Known workRoots are either
@@ -42,12 +48,21 @@ dashboard activation:
 - Keep availability and activation separate. UI labels may choose different
   wording later, but the model must distinguish "reachable but offline" from
   "missing or inaccessible".
+- Do not reinterpret the existing `WorkRootStatus::Online/Offline` enum as the
+  new activation layer. Introduce explicit public fields or vocabulary for
+  availability and activation, then update frontend resource types, fixtures,
+  route tests, and mental-model/spec language together.
 - Treat explicit refresh and bounded polling as the initial live-status update
   mechanism. Filesystem watchers may later become invalidation hints only; they
   are not the source of truth.
 - Browser state must not become resource authority. Durable registry state
   seeds the daemon/resource model, and refresh recomputes current availability
   from filesystem/Git.
+- Route/API errors should distinguish unknown workRoots from known inactive or
+  unavailable workRoots: unknown ids remain 404, known-but-offline workRoots
+  should return a bounded "workRoot offline" style error, and online roots whose
+  filesystem/Git availability degraded should return a bounded unavailable
+  error without host paths.
 
 ## Phases
 
@@ -59,14 +74,22 @@ provenance, and activation state. Preserve the existing opened workRoot
 behavior by treating currently opened roots as online registry entries during
 migration.
 
+Split the resource view-model contract before relying on activation semantics.
+The public model should expose availability separately from activation, and
+frontend `resourceModel.ts`, Rust serde tests, mock fixtures, route tests, and
+resource detail UI should be updated in the same slice. Keep current row
+identity stable where possible so remembered workRoots do not churn selection
+or pane state.
+
 The resource view should expose known workRoots even when offline, while
 gating file, Activity, and terminal APIs to online workRoots. Explicit online
 and offline transitions should be command-routable so future keybindings use
 the same control path as mouse actions.
 
 Verification should cover migration from the existing opened-workRoots state,
-all-workRoots-offline workspace visibility, online/offline API gating, and
-current availability recomputation for missing or inaccessible roots.
+all-workRoots-offline workspace visibility, public availability/activation
+serialization, online/offline API gating including error-code distinctions,
+and current availability recomputation for missing or inaccessible roots.
 
 ### Phase 2: Explicit refresh and bounded live status polling
 
