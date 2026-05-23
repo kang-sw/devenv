@@ -11,6 +11,7 @@ spec:
 plans:
   phase-1: 2026-05/23-1049.activity-console-dogfood-phase1
   phase-2: 2026-05/23-1148.activity-console-dogfood-phase2
+  phase-3: 2026-05/23-1221.activity-console-dogfood-phase3
 related-mental-model:
   - ws-web-dashboard
   - named-agent-runtime
