@@ -1,4 +1,5 @@
 import {
+  compactWorkspaceWorkRoot,
   flattenEntities,
   preferredSelection,
   reconcileSelectedId,
@@ -200,4 +201,125 @@ assertEqual(
   reconcileSelectedId([], "root-devenv-primary"),
   "root-devenv-primary",
   "no entities keeps the prior selection",
+);
+
+// Singleton left-nav compaction is a workspace/workRoot presentation rule. It
+// selects the concrete workRoot, does not require main instances, and does not
+// hide degraded metadata.
+const singletonNoMainWorkspace = liveView.workspaces[0];
+assertEqual(
+  compactWorkspaceWorkRoot(singletonNoMainWorkspace, liveView.workspaces.length)?.id,
+  "root-local-abc",
+  "single workspace + single workRoot compacts to the workRoot id without main instances",
+);
+
+const multiRootWorkspace: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-multi",
+      label: "multi",
+      state: readyState,
+      compactable: true,
+      workRoots: [
+        workRoot("root-multi-a", "workspace-multi", "multi-a"),
+        workRoot("root-multi-b", "workspace-multi", "multi-b"),
+      ],
+      actions: [],
+    },
+  ],
+};
+assertEqual(
+  compactWorkspaceWorkRoot(multiRootWorkspace.workspaces[0], multiRootWorkspace.workspaces.length),
+  null,
+  "multi-workRoot workspace remains expanded instead of compacting",
+);
+
+const offlineUnavailableRoot = workRoot("root-offline", "workspace-offline", "offline");
+offlineUnavailableRoot.activation = "offline";
+offlineUnavailableRoot.availability = "inaccessible";
+offlineUnavailableRoot.status = "inaccessible";
+offlineUnavailableRoot.state = {
+  status: "degraded",
+  loading: false,
+  stale: true,
+  error: "permission denied",
+};
+const offlineWorkspace: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-offline",
+      label: "offline",
+      state: readyState,
+      compactable: false,
+      workRoots: [offlineUnavailableRoot],
+      actions: [],
+    },
+  ],
+};
+const compactOfflineRoot = compactWorkspaceWorkRoot(
+  offlineWorkspace.workspaces[0],
+  offlineWorkspace.workspaces.length,
+);
+assertEqual(compactOfflineRoot?.id, "root-offline", "offline single root still compacts");
+assertEqual(
+  compactOfflineRoot?.availability,
+  "inaccessible",
+  "compact offline row keeps availability metadata",
+);
+assertEqual(
+  compactOfflineRoot?.activation,
+  "offline",
+  "compact offline row keeps activation metadata",
+);
+
+const mainWithSub = instance("instance-main-with-sub", "workspace-main", "root-main");
+mainWithSub.subInstances = [
+  {
+    ...instance("instance-sub", "workspace-main", "root-main"),
+    role: "sub",
+  },
+];
+const workspaceWithInstances: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    {
+      id: "workspace-main",
+      label: "main",
+      state: readyState,
+      compactable: false,
+      workRoots: [workRoot("root-main", "workspace-main", "main", [mainWithSub])],
+      actions: [],
+    },
+  ],
+};
+assertEqual(
+  compactWorkspaceWorkRoot(workspaceWithInstances.workspaces[0], workspaceWithInstances.workspaces.length)?.id,
+  "root-main",
+  "main/sub instance presence does not block workspace/workRoot compaction",
+);
+assertTrue(
+  !flattenEntities(workspaceWithInstances).some((entity) => entity.type === "instance"),
+  "main/sub instances do not reappear as left-nav rows when compactable",
+);
+
+const twoWorkspaceView: DashboardResourcesView = {
+  server: { id: "server-local", label: "Local ws dashboard", state: readyState, actions: [] },
+  workspaces: [
+    liveView.workspaces[0],
+    {
+      id: "workspace-second",
+      label: "second",
+      state: readyState,
+      compactable: true,
+      workRoots: [workRoot("root-second", "workspace-second", "second")],
+      actions: [],
+    },
+  ],
+};
+assertEqual(
+  compactWorkspaceWorkRoot(twoWorkspaceView.workspaces[0], twoWorkspaceView.workspaces.length),
+  null,
+  "single-root workspaces only compact when the dashboard has one workspace",
 );

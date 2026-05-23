@@ -123,6 +123,21 @@ export type ResourceEntity =
       subInstanceCount: number;
     };
 
+// A dashboard with exactly one workspace containing exactly one workRoot is
+// rendered as one compact workRoot row in the browser left nav. The selected
+// location remains the concrete workRoot id; main/sub instances are workbench
+// surfaces and do not participate in this presentation decision.
+export function compactWorkspaceWorkRoot(
+  workspace: WorkspaceView,
+  workspaceCount: number,
+): WorkRootView | null {
+  if (workspaceCount !== 1 || workspace.workRoots.length !== 1) {
+    return null;
+  }
+
+  return workspace.workRoots[0];
+}
+
 // Flatten the resource hierarchy into the left-nav entity rows.
 //
 // Main and sub instances are workbench surfaces/projections, not default

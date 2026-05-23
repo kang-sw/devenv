@@ -31,6 +31,9 @@ let workRoot: string;
 let secondWorkRoot: string | null = null;
 let ownsWorkRoot = false;
 let ownsSecondWorkRoot = false;
+let ownsStateHome = false;
+let stateHome: string | null = null;
+let previousStateHome: string | undefined;
 let commandPlan: TerminalCommandPlan;
 let portabilityEvidence: TerminalPortabilityEvidence | undefined;
 let activityFixtureRootId: string | null = null;
@@ -78,6 +81,18 @@ test.beforeAll(async () => {
         `bulk gate fixture ${index}\n`,
       );
     }
+  }
+
+  const externalDaemon = Boolean(
+    process.env.WS_DASHBOARD_DAEMON_MODE === "external" ||
+      process.env.WS_DASHBOARD_DAEMON_BASE_URL ||
+      process.env.WS_DASHBOARD_DAEMON_PAIRING_URL,
+  );
+  previousStateHome = process.env.WS_DASHBOARD_STATE_HOME;
+  if (!externalDaemon && !previousStateHome) {
+    stateHome = mkdtempSync(path.join(os.tmpdir(), "ws-dash-state-"));
+    ownsStateHome = true;
+    process.env.WS_DASHBOARD_STATE_HOME = stateHome;
   }
 
   daemon = await startDaemon();
@@ -146,6 +161,9 @@ test.beforeAll(async () => {
   } else {
     note("second test workRoot: not configured for external daemon");
   }
+  if (stateHome) {
+    note("spawned daemon state: isolated temporary state home");
+  }
 });
 
 test.afterEach(async ({}, testInfo) => {
@@ -163,6 +181,14 @@ test.afterAll(async () => {
   }
   if (secondWorkRoot && ownsSecondWorkRoot) {
     rmSync(secondWorkRoot, { recursive: true, force: true });
+  }
+  if (ownsStateHome && stateHome) {
+    rmSync(stateHome, { recursive: true, force: true });
+  }
+  if (previousStateHome === undefined) {
+    delete process.env.WS_DASHBOARD_STATE_HOME;
+  } else {
+    process.env.WS_DASHBOARD_STATE_HOME = previousStateHome;
   }
   if (portabilityEvidence) {
     writeFileSync(
@@ -401,8 +427,22 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   // --- Open a real workRoot through the raw path opener -------------------
   await test.step("open real workRoot", async () => {
     await openWorkRootInBrowser(page, workRoot);
+    const resourceRows = page.locator(
+      '.resource-row[data-command-id="resource.select"]',
+    );
+    await expect(resourceRows).toHaveCount(1);
+    const compactRow = resourceRows.first();
+    await expect(compactRow.locator(".row-eyebrow")).toHaveText(
+      "compact workRoot",
+    );
+    await expect(compactRow).toHaveClass(/resource-row-selected/);
+    await expect(compactRow).toContainText(workRootDisplayName(workRoot));
+    await expect(compactRow).toContainText("directory");
+    await expect(compactRow).toContainText("availability: available");
+    await expect(compactRow).toContainText("activation: online");
     note(
-      "open workRoot: live opened workRoot is selected and shown in the explorer",
+      "open workRoot: live opened workRoot is selected, shown in the explorer, " +
+        "and rendered as one compact workRoot nav row",
     );
   });
 

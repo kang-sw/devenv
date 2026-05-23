@@ -91,6 +91,7 @@ import {
   type TerminalSessionView,
 } from "./terminals";
 import {
+  compactWorkspaceWorkRoot,
   flattenEntities,
   reconcileSelectedId,
   type ActionHint,
@@ -705,6 +706,7 @@ function ResourceNavigation({
           <WorkspaceRows
             key={workspace.id}
             workspace={workspace}
+            workspaceCount={resources.workspaces.length}
             selectedId={selectedId}
             onCommand={onCommand}
           />
@@ -3483,30 +3485,31 @@ function ResourceSummary({ entity }: { entity: ResourceEntity }) {
 
 function WorkspaceRows({
   workspace,
+  workspaceCount,
   selectedId,
   onCommand,
 }: {
   workspace: WorkspaceView;
+  workspaceCount: number;
   selectedId: string | null;
   onCommand: DashboardCommandDispatcher;
 }) {
-  const compactMain = compactMainInstance(workspace);
+  const compactRoot = compactWorkspaceWorkRoot(workspace, workspaceCount);
 
-  if (compactMain) {
+  if (compactRoot) {
     return (
       <div className="resource-group">
         <ResourceRow
-          id={compactMain.root.id}
-          title={`${workspace.label} / ${compactMain.root.label}`}
+          id={compactRoot.id}
+          title={`${workspace.label} / ${compactRoot.label}`}
           eyebrow="compact workRoot"
-          state={compactMain.root.state}
+          state={compactRoot.state}
           depth={0}
-          selected={selectedId === compactMain.root.id}
+          selected={selectedId === compactRoot.id}
           meta={[
-            kindLabel(compactMain.root.kind),
-            `availability: ${compactMain.root.availability}`,
-            `activation: ${compactMain.root.activation}`,
-            compactMain.instance.kind,
+            kindLabel(compactRoot.kind),
+            `availability: ${compactRoot.availability}`,
+            `activation: ${compactRoot.activation}`,
           ]}
           onCommand={onCommand}
         />
@@ -3876,24 +3879,6 @@ function instanceSummary(instance: InstanceView) {
 
 function closeContractLabel(kind: SurfaceKind) {
   return `close: ${decideSurfaceClose(kind).behavior}`;
-}
-
-function compactMainInstance(workspace: WorkspaceView) {
-  if (!workspace.compactable || workspace.workRoots.length !== 1) {
-    return null;
-  }
-
-  const root = workspace.workRoots[0];
-  if (!root.compactable || root.mainInstances.length !== 1) {
-    return null;
-  }
-
-  const instance = root.mainInstances[0];
-  if (instance.subInstances.length > 0) {
-    return null;
-  }
-
-  return { id: instance.id, root, instance };
 }
 
 function kindLabel(kind: WorkRootView["kind"]) {
