@@ -355,17 +355,15 @@ assigned partitions.
 
 `lead-implement` runs the documentation pre-pass after the Edit and Review
 stages complete. `lead-sprint` runs documentation closure only for marked
-`sprint-edit` episodes when each episode wraps.
-
-> [!note] Planned 🚧
-> `lead-implement` will add a post-documentation closeout compaction gate for
-> implementation-branch modes. After the final documentation gate completes and
-> before merge readiness is reported, the gate will inspect the branch-tip suffix
-> and compact only a contiguous run of safe documentation-only closeout commits
-> into one closeout commit. Planning, ready-promotion, source, test, review-fix,
-> merge, ambiguous ownership, and non-documentation commits remain outside the
-> compaction target; unsafe or trivial suffixes are reported as skipped without
-> blocking merge readiness. {#260523-implement-doc-closeout-compaction}
+`sprint-edit` episodes when each episode wraps. For implementation-branch modes,
+`lead-implement` also runs a post-documentation closeout compaction gate before
+merge readiness is reported: it inspects only the branch-tip suffix and compacts
+a contiguous run of safe documentation-only closeout commits into one closeout
+commit when metadata synthesis and tree equivalence are unambiguous. Planning,
+ready-promotion, source, test, review-fix, merge, ambiguous ownership, and
+non-documentation commits remain outside the compaction target; unsafe, direct
+current-branch, or trivial suffixes are reported as skipped without blocking
+merge readiness. {#260523-implement-doc-closeout-compaction}
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It
 adds or updates spec entries, strips planned markers when implementation lands,
