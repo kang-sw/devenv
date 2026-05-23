@@ -4,6 +4,10 @@ import {
   type DockviewBridgePort,
 } from "./dockviewBridge.js";
 import {
+  dockviewPanelIsSelectedWithinGroup,
+  shouldUpdateDockviewWorkbenchPanelParams,
+} from "./dockviewLayoutModel.js";
+import {
   defaultSurfaceKinds,
   defaultSurfaceRegistry,
 } from "./surfaceRegistry.js";
@@ -642,6 +646,79 @@ assertDeepEqual(
   bridge.serialize(layout),
   serialized,
   "bridge serialization returns the sanitized dashboard workbench layout",
+);
+
+assert(
+  dockviewPanelIsSelectedWithinGroup({
+    id: "pane-in-inactive-group",
+    group: { activePanel: { id: "pane-in-inactive-group" } },
+    api: { isActive: false },
+  }),
+  "Dockview sync treats a group's selected tab as active even when another split group has focus",
+);
+assert(
+  !dockviewPanelIsSelectedWithinGroup({
+    id: "inactive-tab",
+    group: { activePanel: { id: "selected-tab" } },
+    api: { isActive: false },
+  }),
+  "Dockview sync can still activate a non-selected tab in its group",
+);
+assert(
+  !shouldUpdateDockviewWorkbenchPanelParams(
+    {
+      groupId: "group-1",
+      groupLabel: "Primary",
+      paneId: "activity",
+      category: "opened",
+      surfaceKind: "workRootActivity",
+      title: "WorkRoot Activity",
+      detail: "activity",
+      meta: ["ok"],
+      body: { render: "old" },
+      contentRevision: "activity:1",
+    },
+    {
+      groupId: "group-1",
+      groupLabel: "Primary",
+      paneId: "activity",
+      category: "opened",
+      surfaceKind: "workRootActivity",
+      title: "WorkRoot Activity",
+      detail: "activity",
+      meta: ["ok"],
+      body: { render: "new" },
+      contentRevision: "activity:1",
+    },
+  ),
+  "Dockview pane params ignore React body identity churn when the content revision is unchanged",
+);
+assert(
+  shouldUpdateDockviewWorkbenchPanelParams(
+    {
+      groupId: "group-1",
+      groupLabel: "Primary",
+      paneId: "activity",
+      category: "opened",
+      surfaceKind: "workRootActivity",
+      title: "WorkRoot Activity",
+      detail: "activity",
+      meta: ["ok"],
+      contentRevision: "activity:1",
+    },
+    {
+      groupId: "group-1",
+      groupLabel: "Primary",
+      paneId: "activity",
+      category: "opened",
+      surfaceKind: "workRootActivity",
+      title: "WorkRoot Activity",
+      detail: "activity",
+      meta: ["ok"],
+      contentRevision: "activity:2",
+    },
+  ),
+  "Dockview pane params update when the stable content revision changes",
 );
 
 const groupOne = workbenchGroupId("group-1");

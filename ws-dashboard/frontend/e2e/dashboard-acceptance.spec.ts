@@ -1367,10 +1367,24 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         timeout: 3_000,
       })
       .toBeGreaterThan(0);
+    const scrollTopBeforeRefresh = await content.evaluate((node) => node.scrollTop);
+    await page.locator('[data-command-id="fileExplorer.refresh"]').click();
+    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
+      "last: fileExplorer.refresh",
+    );
+    await settlePastPollCycle(page);
+    await expect
+      .poll(() =>
+        content.evaluate(
+          (node, expected) => Math.abs(node.scrollTop - expected),
+          scrollTopBeforeRefresh,
+        ),
+      )
+      .toBeLessThanOrEqual(2);
     expect(await documentScrolls(page)).toBe(beforeDocumentScroll);
     expect(beforeDocumentScroll).toBe(false);
     note(
-      "read-only file: long file scroll stayed inside the pane without creating top-level document scroll",
+      "read-only file: long file scroll stayed inside the pane and survived a split workbench refresh without creating top-level document scroll",
     );
   });
 

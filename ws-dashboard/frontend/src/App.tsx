@@ -2312,6 +2312,7 @@ function workRootActivityWorkbenchPane(
     detail: `${root.label} activity console`,
     state,
     meta,
+    contentRevision: workRootActivityPaneRevision(activity, transcriptRefresh),
     body: (
       <WorkRootActivityPane
         activity={activity}
@@ -2362,6 +2363,48 @@ function WorkRootActivityPane({
   );
 }
 
+function workRootActivityPaneRevision(
+  activity: WorkRootActivityBadgeInput,
+  transcriptRefresh: ActivityTranscriptRefreshSignal | null,
+) {
+  if (activity.phase !== "ready") {
+    return `activity:${activity.phase}`;
+  }
+  const view = activity.view;
+  return [
+    "activity",
+    view.status,
+    view.updateMode,
+    view.feedCursor ?? "",
+    view.selectedItemId ?? "",
+    view.items.length,
+    transcriptRefresh?.activityId ?? "",
+    transcriptRefresh?.cursor ?? "",
+    transcriptRefresh?.sequence ?? 0,
+  ].join(":");
+}
+
+function readOnlyFilePaneRevision(pane: ReadOnlyFilePane) {
+  return [
+    "readonly",
+    pane.status,
+    pane.path,
+    pane.sizeBytes ?? "",
+    pane.languageHint ?? "",
+    pane.extension ?? "",
+    pane.error ?? "",
+    hashText(pane.content),
+  ].join(":");
+}
+
+function hashText(value: string) {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return `${value.length}:${(hash >>> 0).toString(36)}`;
+}
+
 function toolbarActions(
   root: WorkRootView,
   selectedEntity: ResourceEntity | null,
@@ -2388,6 +2431,7 @@ type WorkbenchPane = {
   readonly detail: string;
   readonly state: ViewState;
   readonly meta: readonly string[];
+  readonly contentRevision?: string;
   readonly body?: ReactNode;
 };
 
@@ -2636,6 +2680,7 @@ function terminalWorkbenchPane(
       pane.socketStatus,
       `${pane.session.columns}x${pane.session.rows}`,
     ],
+    contentRevision: `terminal:${pane.paneId}`,
     body: <TerminalPaneBody key={pane.paneId} pane={pane} actions={actions} />,
   };
 }
@@ -3223,6 +3268,7 @@ function readOnlyWorkbenchPane(
     detail: pane.path,
     state,
     meta,
+    contentRevision: readOnlyFilePaneRevision(pane),
     body: <ReadOnlyTextPane pane={pane} root={root} />,
   };
 }
