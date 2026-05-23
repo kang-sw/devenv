@@ -172,14 +172,17 @@ or implemented entries according to the current behavior, verifies the spec
 index, and commits the spec update.
 
 `lead-write-ticket` creates or updates workflow tickets. It treats `todo/` as
-accepted backlog and `ready/` as the spec-gated implementation queue. The spec
-gate runs only when a non-`epic`, non-`research` action creates or moves a ticket
-into `ready/`; `todo/` tickets may carry optional `spec:` links as recovery
-hints. For `ready/` creation or promotion, missing coverage causes
-`lead-write-ticket` to invoke `lead-write-spec` autonomously, re-check coverage,
-and stop only when coverage remains missing, spec writing fails, or the behavior
-is too underspecified to spec. Queue entries are maintained for `ready/` work
-only.
+accepted backlog and `ready/` as the spec-addressed implementation queue. The
+spec-address gate runs only when a non-`epic`, non-`research` action creates or
+moves a ticket into `ready/`; `todo/` tickets may carry optional `spec:` links as
+recovery hints. For `ready/` creation or promotion, `lead-write-ticket` accepts
+confirmed `spec:` or `spec-remove:` stems, or a ticket-local `## Spec Impact`
+section naming the target spec area, expected caller-visible change, and whether
+a contract-first planned spec is required. It invokes `lead-write-spec`
+autonomously only for contract-first planned spec entries, and stops when no
+stem or `## Spec Impact` can address the work, spec writing fails, or the
+behavior is too underspecified to spec. Queue entries are maintained for
+`ready/` work only.
 
 `lead-write-ticket` preserves epics as lightweight milestone boards. When
 detailed discussion, implementation phases, or phase-specific decisions arise
@@ -382,7 +385,7 @@ loads `lead-workflow-manual` before routing.
 When handoff stages are needed, their order is fixed:
 
 ```text
-spec -> ticket -> implementation
+ticket readiness -> implementation
 ```
 
 Existing non-epic `ready/` ticket paths skip ticket creation and become
@@ -401,11 +404,10 @@ Epic ticket paths are milestone-board artifacts, not implementation targets;
 `lead-proceed` stops on epics and routes the user toward child ticket creation,
 child ready promotion, or proceeding a ready child ticket. Existing `todo/`
 ticket paths are treated as implementation intent: `lead-proceed` continues
-through `lead-write-spec` and `lead-write-ticket` for autonomous `todo/` ->
-`ready/` promotion before scope resolution, and escalates to `lead-discuss` only
-when promotion or implementation scope exposes unresolved design decisions,
-unclear completion criteria, user trade-offs, or missing spec coverage that
-cannot be created.
+through `lead-write-ticket` for autonomous `todo/` -> `ready/` promotion before
+scope resolution, and escalates to `lead-discuss` only when promotion or
+implementation scope exposes unresolved design decisions, unclear completion
+criteria, user trade-offs, or missing spec addressing that cannot be created.
 
 Inline targets are classified before routing. Non-actionable inline targets
 stop and route to `lead-discuss`. Actionable inline targets route to

@@ -24,18 +24,19 @@ Target: user request
 2. Identify the target from `user request` - area name, file path, or description.
 3. If creating a new spec:
    a. Apply `judge: directory-vs-flat` to choose the file structure.
-   b. Write the spec body following the `spec-format` template. Apply `judge: idea-level` before inserting any `🚧` entries.
+   b. Write the spec body following the `spec-format` template. Apply `judge: contract-first-spec` before inserting any `🚧` entries.
    c. Call `ws/spec_index.verify()` for duplicate-anchor verification.
    d. Add the spec to the listing in `ai-docs/_index.md`.
 4. If updating an existing spec:
    a. Read the target file first.
    b. For each new anchor: call `ws/spec_stem.generate(slug: "<descriptive-slug>")` to get a collision-free `{#YYMMDD-slug}`.
    c. Insert the anchor - on a heading line or anywhere in body text (not heading-only).
-   d. Apply `judge: idea-level` before adding any `> [!note] Planned 🚧` callouts. Remove `🚧` from confirmed-implemented features as needed.
+   d. Apply `judge: contract-first-spec` before adding any `> [!note] Planned 🚧` callouts. Remove `🚧` from confirmed-implemented features as needed.
    e. Call `ws/spec_index.verify()` for duplicate-anchor verification.
 5. Apply `judge: split-trigger` after writing - if any section warrants its own file, extract it to `<area>/<section>.md` and replace the original section with `See [section.md](section.md).`
 6. Accuracy check - confirm every heading without `🚧` exists in the codebase. Use `ws/subquery(question: "<focused verification question>")`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, if uncertain. Never remove `🚧` without confirmation.
 7. **Commit** - call `ws/git.commit(paths: ["<file>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the listing changed.
+8. **Output Handoff** - report changed spec path, changed stem, whether any `🚧` marker was added, and whether the caller should add `spec:` or keep ticket-local `## Spec Impact`.
 
 ## Judgments
 
@@ -43,9 +44,13 @@ Target: user request
 
 Evaluate whether work introduces or modifies behavior observable outside the implementation. Internal restructuring, behavior-preserving refactors, and tooling with no public-facing surface do not qualify. Callable interfaces, user-visible output, and documented conventions qualify.
 
-### judge: idea-level
+### judge: contract-first-spec
 
-When about to write a `🚧` entry or `> [!note] Planned 🚧` callout: write it, then emit: "Session reminder: a non-`epic`, non-`research` `ready/` ticket must exist before this session ends for this `🚧` entry to be valid per spec-conventions." Do not ask whether to defer.
+Yes: planned behavior must be visible and stable before implementation begins.
+Usually yes: externally consumed schemas, CLI/API contracts, file or wire formats, cross-skill routing contracts, or multi-ticket planned behavior.
+No: planned text mainly restates a ticket phase, final behavior will be refined during implementation, or a ticket-local `## Spec Impact` is enough for post-implementation closeout.
+When yes: write the marker, then emit "Session reminder: implementation `🚧` entries require a non-`epic`, non-`research` `ready/` ticket; epic or research tickets may back only planned decomposition or investigation text."
+When no: do not write `🚧`; suggest ticket-local `## Spec Impact` instead.
 
 ### judge: directory-vs-flat
 
@@ -107,6 +112,15 @@ Anchoring rules:
 - Slugs are clean identifiers: lowercase, hyphens, no spaces.
 - No ticket references (`[stem/pN]`) in headings or `🚧` markers - implementation traceability is via commits referencing spec-stems.
 - Rename: when a slug changes, the commit message must include `renamed-spec: <old-stem> -> <new-stem>`.
+
+Output handoff:
+
+```text
+Spec: <spec-stem> [new|updated|removed|renamed]
+Path: ai-docs/spec/<path>.md
+Planned marker: <added|none|removed>
+Ticket handoff: <add spec: <spec-stem> | keep ## Spec Impact | no ticket action>
+```
 
 ## Doctrine
 

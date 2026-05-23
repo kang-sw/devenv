@@ -76,7 +76,7 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
    b. Do not require spec creation; `todo/` is accepted backlog, not the implementation queue.
 3. **Ready promotion (todo/ -> ready/)**:
    a. Invoke `wsflow:lead-write-ticket` (Edit path) for the `todo/` -> `ready/` promotion.
-   b. `wsflow:lead-write-ticket` owns spec coverage, frontmatter population, the `git mv`, queue update, and commit.
+   b. `wsflow:lead-write-ticket` owns spec addressing, frontmatter population, the `git mv`, queue update, and commit.
    c. Stop this handler after `wsflow:lead-write-ticket` returns.
 4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.

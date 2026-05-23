@@ -180,7 +180,7 @@ ai-docs/tickets/.dropped/
 - Reference tickets by stem, not path: `260429-research-host-neutral-ws-plugin`.
 - Creation-date prefixes are stable; never rename to change the date.
 - Move status with `git mv` when possible.
-- `todo/` is accepted backlog; `ready/` is the spec-gated implementation queue.
+- `todo/` is accepted backlog; `ready/` is the spec-addressed implementation queue.
 - Research tickets use freeform topic sections and no phases.
 - Actionable tickets use `## Phases` and stable `### Phase N: <title>`.
 - Do not edit phase plan text after it has a `### Result` section; append

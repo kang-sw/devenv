@@ -142,8 +142,8 @@ line-level match evidence. Convention lookup accepts common aliases such as
 `tickets.list` returns ticket paths and structured status metadata across ticket
 status directories. Active discovery includes `ready/`, `todo/`, and `idea/` by
 default; archived `.done/` and `.dropped/` tickets are omitted unless explicitly
-requested. `ready/` identifies spec-gated implementation work, while `todo/`
-remains accepted backlog.
+requested. `ready/` identifies spec-addressed implementation work, while
+`todo/` remains accepted backlog.
 
 `tickets.find` locates tickets by text query, exact ticket stem, mentioned
 ticket stem, and optional status filters. `tickets.status` returns structured

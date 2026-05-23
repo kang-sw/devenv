@@ -16,7 +16,7 @@ Scope
 - Do not rejudge ticket quality, demand ticket splitting, or mutate ticket structure.
 
 Pipeline
-- Handoff stage order is fixed when stages fire: spec -> ticket -> implementation.
+- Handoff stage order is fixed when stages fire: ticket readiness -> implementation.
 - Always route code-editing work through `ws:lead-implement`.
 - Proceed assumes implementation intent; stop only when the target is not actionable or user-blocking discussion remains.
 
@@ -70,10 +70,10 @@ Routing
 | `target-kind=inline` and `actionable=no` | Continue through `ws:lead-discuss`; stop. |
 | `has-ticket=yes` and category is `epic` | Stop; suggest child ticket creation, child promotion, or proceed on a ready child. |
 | `discussion-needed=yes` | Continue through `ws:lead-discuss`; stop. |
-| `has-ticket=yes` and status is `todo/` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
+| `has-ticket=yes` and status is `todo/` | Continue through `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and `freshness=missing-settled-decisions` | Continue through `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
 | `has-ticket=yes` and status is `ready/` | Continue through `ws:lead-implement`. |
-| `has-ticket=no` and `needs-ticket=yes` | Continue through `ws:lead-write-spec`, then `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
+| `has-ticket=no` and `needs-ticket=yes` | Continue through `ws:lead-write-ticket`; capture `Ticket:` and re-route. |
 | `has-ticket=no` and `needs-ticket=no` | Continue through `ws:lead-implement`. |
 
 ### 3. Announce
@@ -120,7 +120,7 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 |----------|------|
 | Yes | User-blocking design choice, scope boundary, acceptance criterion, trade-off, or delegation decision remains open |
 | Yes | Ticket promotion or implementation scope cannot be completed autonomously |
-| No | Missing spec coverage, frontmatter, queue hygiene, tests, or local implementation details can be resolved autonomously |
+| No | Missing spec addressing, frontmatter, queue hygiene, tests, or local implementation details can be resolved autonomously |
 
 ### judge: needs-ticket
 
@@ -128,7 +128,7 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 |----------|------|
 | Yes | Inline target changes workflow semantics, public contracts, cross-skill routing, queue behavior, branch behavior, or documentation pipeline behavior |
 | Yes | Inline target needs phases, acceptance criteria, explicit traceability, or durable discussion capture |
-| Yes | Caller-visible behavior may need spec coverage before implementation |
+| Yes | Caller-visible behavior may need spec addressing before implementation |
 | No | Inline target is narrow, routine, fully scoped, and commit `AI Context` is enough traceability |
 | No | Work is internal hygiene with no useful phase tracking and no unresolved user decision |
 

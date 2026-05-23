@@ -38,8 +38,8 @@ related:
 - `lead-implement` delegated mode handles public or cross-module contract work; contract checkpoints live in the brief, not in generated skeleton artifacts. {#260512-skeleton-inside-implement-branch}
 - `lead-implement` continues on existing `implement/*` branches, may safely rename them before execution, closes docs before the final gate, and treats merge as one user-approved final action. {#260505-implementation-workflow-skills}
 - `lead-implement` compacts only safe documentation-only branch-tip closeout suffixes before merge readiness; planning, ready-promotion, source, test, review-fix, merge, ambiguous-authorship, and non-documentation commits are preserved and reported as skipped. {#260523-implement-doc-closeout-compaction}
-- `lead-write-ticket` runs the spec gate only when non-`epic`, non-`research` work enters `ready/`; `todo/` is accepted backlog with optional spec recovery hints. {#260505-planning-workflow-skills}
-- `lead-write-ticket` invokes `lead-write-spec` autonomously when ready-ticket coverage is missing, then stops only if coverage still cannot be established. {#260505-planning-workflow-skills}
+- `lead-write-ticket` runs the spec-address gate only when non-`epic`, non-`research` work enters `ready/`; `todo/` is accepted backlog with optional spec recovery hints. {#260505-planning-workflow-skills}
+- `lead-write-ticket` accepts existing spec stems, `spec-remove:`, or ticket-local `## Spec Impact` for ready addressing; it invokes `lead-write-spec` only for contract-first planned spec entries. {#260505-planning-workflow-skills}
 - `lead-write-ticket` keeps epics at milestone-board scope and routes detailed discussion, implementation phases, and phase-specific decisions into child tickets; child-ticket phases are complete fresh-session implementation units, not internal task lists. {#260508-write-ticket-epic-child-boundary}
 - `lead-write-ticket` preserves settled decisions before brevity: actionable child tickets record enough contract, agreed strategy, rejected-alternative, verification, and binding cross-ticket detail that a fresh implementation session cannot produce a materially different caller-visible, workflow, API, or verification result without contradicting the ticket. {#260516-write-ticket-related-ticket-propagation}
 - `lead-write-ticket` reviews related-ticket decisions by default; explicit cascade wording broadens the pass to board and multi-ticket edits, with epics board-level and no implicit ready promotion. {#260516-write-ticket-related-ticket-propagation}
@@ -73,7 +73,7 @@ related:
 
 - Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
 - Legacy skeleton prompts may remain bundled for compatibility; normal implementation routing does not register skeleton-populator or skeleton-reviewer.
-- Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec gate and queue checks.
+- Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec-address gate and queue checks.
 - Moving updater dispatch into the Edit stage can double-run documentation updates; implementation doc pre-pass and sprint-edit episode closure own their separate doc pipeline calls.
 - `lead-salvage` routes ticket writes through `lead-write-ticket`; direct ticket graph mutation inside salvage would bypass ticket conventions and commit handling.
 - Bootstrap guide semantics stay host-neutral; root `CLAUDE.md` only delegates to `AGENTS.md`.

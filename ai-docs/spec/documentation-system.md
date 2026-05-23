@@ -50,10 +50,11 @@ Specs describe caller-visible project behavior. They live under
 `ai-docs/spec/`, use English content, carry stable `{#YYMMDD-slug}` anchors, and
 avoid implementation detail that would drift under behavior-preserving refactors.
 
-Planned spec behavior uses `🚧` markers: a planned new feature is a heading such
-as `## 🚧 Feature Name {#YYMMDD-slug}`, and a planned change to an existing
-feature uses a `> [!note] Planned 🚧` callout. Entries without `🚧` are treated
-as implemented and must be verified before committing.
+Contract-first planned spec behavior uses `🚧` markers only when planned
+behavior must be visible and stable before implementation begins: a planned new
+feature is a heading such as `## 🚧 Feature Name {#YYMMDD-slug}`, and a planned
+change to an existing feature uses a `> [!note] Planned 🚧` callout. Entries
+without `🚧` are treated as implemented and must be verified before committing.
 
 `ws/spec_stem.generate` creates collision-free anchor stems. `ws/spec_index.verify`
 checks the spec corpus for duplicate anchors. `ws/specs.list`,
@@ -66,7 +67,8 @@ stem.
 Tickets track workflow work under `ai-docs/tickets/` with directory-based
 status. Active status directories are `ready/`, `todo/`, and `idea/`: `idea/`
 captures rough ideas before triage, `todo/` holds accepted backlog with
-recoverable ticket intent, and `ready/` holds spec-gated implementation work.
+recoverable ticket intent, and `ready/` holds spec-addressed implementation
+work.
 Completed or dropped work moves to `.done/` or `.dropped/`. `## Ticket Queue`
 lists `ready/` work only.
 
@@ -169,21 +171,22 @@ without loading the full documentation corpus into context.
 
 `lead-write-spec` creates or updates spec entries for caller-visible behavior.
 It reads spec conventions, chooses a file layout, generates stems, writes
-implemented or `🚧` entries, verifies duplicate anchors, performs accuracy
-checks, and commits the spec update.
+implemented entries or contract-first `🚧` entries, verifies duplicate anchors,
+performs accuracy checks, and commits the spec update.
 
 `lead-update-spec` audits commit ranges for caller-visible behavior changes. It
 adds missing implemented entries, strips `🚧` markers when implementation has
 landed, handles removed spec stems, verifies duplicate anchors, and commits all
 spec changes together.
 
-`lead-write-ticket` creates or updates tickets. It applies the spec gate when a
-non-`epic`, non-`research` ticket enters `ready/`, reads ticket conventions,
-invokes `lead-write-spec` when ready-ticket coverage is missing, re-checks
-coverage before finalizing the ticket, updates queue entries for `ready/` work,
-preserves stable ticket stems, and commits ticket changes. Creating or promoting
-accepted backlog into `todo/` preserves intent without requiring immediate spec
-linkage; optional `todo/` `spec:` links are recovery hints and promotion
+`lead-write-ticket` creates or updates tickets. It applies the spec-address gate
+when a non-`epic`, non-`research` ticket enters `ready/`, reads ticket
+conventions, verifies existing stems or ticket-local `## Spec Impact`, invokes
+`lead-write-spec` only for contract-first planned spec entries, updates queue
+entries for `ready/` work, preserves stable ticket stems, and commits ticket
+changes. Creating or promoting accepted backlog into `todo/` preserves intent
+without requiring immediate spec linkage; optional `todo/` `spec:` links are
+recovery hints and promotion
 candidates.
 
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}

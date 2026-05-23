@@ -59,7 +59,7 @@ Ask the user to confirm, split, merge, drop, or reorder domains before writing.
 For each confirmed domain, run focused read-only investigation:
 
 1. Identify implemented behavior that callers can observe.
-2. Identify planned behavior with ready ticket coverage.
+2. Identify contract-first planned implementation behavior backed by non-epic/non-research ready tickets, plus epic/research planned decomposition or investigation text and other planned behavior for survey evidence.
 3. Identify behavior that looks documented but unimplemented.
 4. Identify tickets in `ready/` whose phases belong to the domain.
 5. Identify spec anchors that should be reused, renamed, added, or removed.
@@ -73,8 +73,8 @@ self-contained and ask for file paths, stems, and short evidence notes.
 2. Draft the spec from caller-visible behavior only.
 3. For each new implemented or planned behavior anchor, call
    `wsflow/spec_stem.generate(slug: "<descriptive-slug>")`.
-4. Mark unimplemented ready-ticket behavior with `🚧` following spec
-   conventions.
+4. Mark unimplemented ready-ticket behavior with `🚧` only when it is
+   contract-first planned behavior following spec conventions.
 5. Keep implementation details out unless they are the public contract.
 6. Call `wsflow/spec_index.verify()`.
 7. Ask the user to confirm the domain spec before committing if the forge pass
@@ -112,8 +112,11 @@ candidates.
 ### judge: implemented-vs-planned
 
 Write implemented behavior without `🚧` only when source or committed history
-confirms it exists. Write planned behavior with `🚧` only when a ready ticket
-exists. Otherwise record the gap in the survey report, not the spec body.
+confirms it exists. Write planned implementation behavior with `🚧` only when it
+is contract-first and backed by a non-`epic`, non-`research` ready ticket.
+Epic or research tickets may back `🚧` text only for planned decomposition or
+investigation outputs. Otherwise record the gap in the survey report, not the
+spec body.
 
 ## Templates
 

@@ -137,7 +137,7 @@ Find tickets relevant to the <domain> domain.
 Module paths: <paths from task description>
 
 Use `ws/tickets.find(query: "<domain>")`; filter by module paths when needed.
-Return features -> ticket status. todo items are `🚧` candidates.
+Return features -> ticket status. Only contract-first ready implementation items, plus epic/research planned decomposition or investigation text, are `🚧` candidates; todo items are ticket-intent evidence.
 ```
 
 Call `ws/subquery(deep_research: true, question: <block below>)`:
@@ -176,7 +176,7 @@ classification (implemented / planned), and uncertainty flags.
 Present the behavior brief to the user. For each item, establish:
 
 1. **Caller-visible or internal-only?** - Internal behaviors are excluded from spec per `spec-conventions.md`. Ask on every ambiguous item.
-2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Planned -> `## 🚧 Feature {#slug}`.
+2. **Implemented or planned?** - Implemented -> plain `{#slug}`. Contract-first planned implementation behavior -> `## 🚧 Feature {#slug}` only when backed by a non-`epic`, non-`research` `ready/` ticket. Epic or research tickets may back only planned decomposition or investigation text. Other planned work stays in ticket `## Spec Impact` or the survey report.
 
 Ask on every ambiguous item. Do not classify without confirmation. Collect the
 confirmed list before writing anything.
@@ -251,7 +251,7 @@ Total stems generated: <count>
 ### 3. Suggested next steps
 
 - Use `ws/subquery(deep_research: false, question: <self-contained spec-updater prompt>)`, then `ws/agents.result(name: <subquery-key>, timeout_seconds: 600)`, to strip `🚧` markers from any planned features whose implementation has since landed in commit history.
-- Review `🚧` entries with open tickets - confirm each has an active todo ticket or drop the marker.
+- Review `🚧` entries with open tickets - confirm implementation behavior has a non-`epic`, non-`research` `ready/` ticket, or that epic/research backing documents only planned decomposition or investigation text; otherwise drop the marker.
 - Run `ws:lead-write-spec` for any domain surfaces discovered after wrap-up.
 
 ## Judgments

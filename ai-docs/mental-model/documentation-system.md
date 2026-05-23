@@ -25,7 +25,7 @@ related:
 - Ticket status is directory state: `ready/`, `todo/`, and `idea/` are active; `.done` and `.dropped` are invisible unless discovery calls opt in. {#260505-ticket-document-system}
 - Ticket Result hashes identify the commit that made the completed phase reviewable on its current branch; merge commits are only required when the phase was already merged before the ticket update. {#260505-ticket-document-system}
 - Ticket phase plan text freezes after the first Result, but later implementation tweaks append `#### Edition` entries under the Result area; existing Result and Edition text remains frozen. {#260513-ticket-result-editions}
-- Ready-ticket convention keeps spec linkage mandatory; `lead-write-ticket` may create missing planned coverage through `lead-write-spec` before finalizing the queue entry. {#260505-documentation-authoring-workflows}
+- Ready-ticket convention keeps spec addressing mandatory through `spec:`, `spec-remove:`, or `## Spec Impact`; `lead-write-ticket` invokes `lead-write-spec` only for contract-first planned spec entries before finalizing the queue entry. {#260505-documentation-authoring-workflows}
 - Epic tickets are lightweight milestone boards for scope, child-ticket decomposition, cross-child decisions, and completion criteria; child tickets carry implementation detail and complete phase units. `lead-proceed` executes one selected phase without changing ticket decomposition. {#260508-lightweight-epic-ticket-conventions} {#260505-proceed-routing-pipeline}
 - Mental-model hierarchy is path-derived; subdomain callers must load parent `index.md` before child docs. {#260505-mental-model-document-system}
 - The root `ai-docs/mental-model.md` may carry a compact project reading map for task/topic routing; it does not own behavior, status, queue, or source-derived claims. {#260505-mental-model-document-system}
@@ -52,7 +52,7 @@ related:
 ## Common Mistakes
 
 - Adding spec anchors manually without checking for duplicates.
-- Promoting non-epic, non-research work into `ready/` without matching spec entry/stem linkage.
+- Promoting non-epic, non-research work into `ready/` without a confirmed spec stem, `spec-remove:`, or `## Spec Impact`.
 - Using full YAML features in frontmatter; the parser is deliberately minimal.
 - Changing workflow semantics in the downstream workflow guide instead of the canonical plugin/runtime, bundled conventions, or bootstrap templates.
 - Loading mental-model child docs without ancestors and missing inherited Domain Rules.

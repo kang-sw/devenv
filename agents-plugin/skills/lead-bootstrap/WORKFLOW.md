@@ -43,7 +43,7 @@ template rather than relying on a project-local guide override.
 - Reference tickets by stem, never by path; stems stay stable when tickets move
   between status directories.
 - `idea/` is rough intake, `todo/` is accepted backlog, and `ready/` is the
-  spec-gated implementation queue.
+  spec-addressed implementation queue.
 - `_index.md` `## Ticket Queue` lists `ready/` work only. Do not list `.done/`
   or `.dropped/` tickets there.
 - Actionable tickets use `## Phases` with stable `### Phase N: <title>`
@@ -59,8 +59,10 @@ template rather than relying on a project-local guide override.
   change without changing behavior.
 - Each behavior entry uses a stable `{#YYMMDD-slug}` anchor. The anchor stem is
   the identifier used in tickets, commits, and mental-model cross-references.
-- Planned work uses `🚧` markers on headings or planned callouts. Remove the
-  marker only after verifying the behavior is implemented.
+- Contract-first planned behavior uses `🚧` markers on headings or planned
+  callouts. Other planned work stays in ticket `## Spec Impact` until
+  implementation closeout. Remove the marker only after verifying the behavior
+  is implemented.
 - If stem-generation or duplicate-anchor tools are unavailable, choose a clear
   date-prefixed stem manually, search the spec tree for duplicates, and verify
   with ws tooling when it becomes available.

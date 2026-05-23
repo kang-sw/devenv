@@ -11,16 +11,16 @@ Canonical reference for ticket structure, naming, and lifecycle.
 ## Status Flow
 
 - Status is directory-based only: `idea/` → `todo/` → `ready/` → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
-- `idea/` is rough capture before triage; `todo/` is accepted backlog with recoverable intent; `ready/` is the spec-gated implementation queue.
+- `idea/` is rough capture before triage; `todo/` is accepted backlog with recoverable intent; `ready/` is the spec-addressed implementation queue.
 - Move tickets with `git mv`; no cross-link updates needed.
 - Add `completed:` date on move to `.done/`.
 - `idea/` tickets may omit `spec:` entries.
 - `todo/` tickets may include optional `spec:` entries as recovery hints and promotion candidates.
-- Non-`epic`, non-`research` tickets entering `ready/` require `spec:` linkage; epics decompose scope and research captures findings.
-- Epic tickets are lightweight milestone boards and remain exempt from ready spec gating.
+- Non-`epic`, non-`research` tickets entering `ready/` require spec addressing through `spec:`, `spec-remove:`, or a body `## Spec Impact` section; epics decompose scope and research captures findings.
+- Epic tickets are lightweight milestone boards and remain exempt from the ready spec-address gate.
 - Promoting `idea/` → `todo/` is triage and does not require spec creation.
-- Promoting or creating a non-`epic`, non-`research` ticket in `ready/`: `/write-ticket` invokes `/write-spec` when needed, then verifies planned entries and ticket `spec:` frontmatter before the move or commit.
-- Dropping a ticket with linked spec entries: route through `/discuss` → `/write-spec` removes orphaned `🚧` entries before the move.
+- Promoting or creating a non-`epic`, non-`research` ticket in `ready/`: `lead-write-ticket` verifies spec addressing before the move or commit and invokes `lead-write-spec` only for contract-first planned spec entries.
+- Dropping a ticket with linked spec entries: route through `lead-discuss`, then `lead-write-spec` to remove orphaned `🚧` entries before moving the ticket.
 
 ## Epic Tickets
 
@@ -109,6 +109,7 @@ Optional sections — add between `## Background` and `## Phases` when relevant:
 - `## Decisions` — design choices with rationale and rejected alternatives.
 - `## Constraints` — non-obvious boundaries (performance, compatibility, etc.).
 - `## Prior Art` — existing patterns or components to reuse.
+- `## Spec Impact` — ready-only spec addressing when no existing stem yet covers the behavior; include target spec area, expected caller-visible change, and `Contract-first spec: yes|no`.
 
 ### Body (category = `research`)
 

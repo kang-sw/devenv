@@ -14,6 +14,8 @@ Target: user request
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
+- Ready tickets require spec addressing, not mandatory planned spec text.
+- Proceed-routed actionable `todo/` tickets move to `ready/` when intent review and spec-address check pass.
 
 ## On: invoke
 
@@ -23,8 +25,9 @@ Target: user request
 
 ### 2. Route
 
-1. Classify category/status; mark **judge: spec-gate** for any non-`epic`, non-`research` ticket entering `ready/`.
+1. Classify category/status; mark **judge: spec-address-gate** for any non-`epic`, non-`research` ticket entering `ready/`.
 2. Apply `judge: cascade-ticket-edit`; if it fires, run **Cascade Edit** and stop ordinary single-target routing.
+3. For a proceed-routed actionable `todo/` ticket, set the requested change to ready promotion.
 
 ### 3. Load
 
@@ -39,7 +42,7 @@ Target: user request
 ### 5. Verify
 
 1. Run **Intent Review**.
-2. Run **Spec-stem Check**.
+2. Run **Spec-address Check**.
 
 ### 6. Commit
 
@@ -71,7 +74,7 @@ Target: user request
 
 ### 4. Ready Guard
 
-1. For `ready/`, defer queue entry until **Spec-stem Check** passes.
+1. For `ready/`, defer queue entry until **Spec-address Check** passes.
 
 ## On: Edit Ticket
 
@@ -89,6 +92,7 @@ Target: user request
 
 1. For moves, use native `git mv`.
 2. For `.done/` moves, add `completed:` date in frontmatter.
+3. For proceed-routed `todo/` -> `ready/` promotion, defer `git mv` until **Spec-address Check** passes.
 
 ### 4. Shape
 
@@ -119,37 +123,42 @@ Target: user request
 8. Fix gaps in-place.
 9. Present a brief correction summary, or confirm nothing was missed.
 
-## On: Spec-stem Check
+## On: Spec-address Check
 
 ### 1. Scope
 
 1. Skip `epic` and `research`.
-2. Apply `judge: spec-gate` before any `ready/` queue entry or commit.
+2. Treat requested `todo/` -> `ready/` promotion as `ready/` for this check.
+3. Apply `judge: spec-address-gate` before any `ready/` queue entry or commit.
 
 ### 2. Todo Handling
 
 1. For `todo/`, preserve existing `spec:` links as optional recovery hints.
-2. For `todo/`, do not require stem discovery, do not fire `judge: missing-spec-entry`, and do not suppress the proceed prompt.
+2. For `todo/`, do not require spec addressing, do not fire `judge: missing-spec-address`, and do not suppress the proceed prompt.
 
-### 3. Ready Coverage
+### 3. Ready Addressing
 
-1. For `ready/`, use `wsflow/specs.find` or `wsflow/specs.status` to confirm canonical stems.
-2. For `ready/`, ensure frontmatter `spec:` lists every stem the phases implement.
-3. For `ready/`, add missing stems.
-4. For a phase with no spec entry, apply `judge: missing-spec-entry`.
+1. For `ready/`, use `wsflow/specs.find` or `wsflow/specs.status` to confirm existing `spec:` and `spec-remove:` stems.
+2. For `ready/`, keep confirmed existing stems in frontmatter.
+3. For `ready/`, when neither confirmed `spec:` nor `spec-remove:` stems address the phase, write or update `## Spec Impact`.
+4. `## Spec Impact` must name the target spec area, expected caller-visible change, and `Contract-first spec: yes|no`.
+5. If `Contract-first spec: yes`, continue through `wsflow:lead-write-spec`, re-check the created or updated stem, and list it in `spec:`.
+6. After a contract-first spec is listed in `spec:`, remove redundant `## Spec Impact` text or keep only closeout notes not covered by the spec.
+7. If neither confirmed stems nor `## Spec Impact` addresses a phase, apply `judge: missing-spec-address`.
 
 ### 4. Ready Queue
 
-1. For `ready/`, remind that implementation commits should include a `## Spec` section with those stems.
+1. For `ready/`, remind that implementation commits should include a `## Spec` section for existing stems or the doc closeout should resolve `## Spec Impact`.
 2. For `ready/`, ensure `ai-docs/_index.md ## Ticket Queue` has `` `stem` - one-line purpose and dependency notes ``.
+3. For deferred `todo/` -> `ready/` promotion, perform native `git mv` before commit.
 
 ## On: Output Handoff
 
 1. For `epic`, do not suggest proceeding on the epic path.
 2. For `epic`, suggest creating, promoting, or proceeding a child ticket.
-3. For non-epic tickets, suggest `wsflow:lead-proceed` unless `judge: missing-spec-entry` fired.
+3. For non-epic tickets, suggest `wsflow:lead-proceed` unless `judge: missing-spec-address` fired.
 4. State that proceed routes to implementation readiness; `wsflow:lead-implement` resolves direct execution needs.
-5. Emit the created ticket path on its own final line: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
+5. Emit the current ticket path on its own final line for every create, edit, move, or promotion: `Ticket: ai-docs/tickets/<status>/<stem>.md`.
 6. For `epic`, state that the path is a board artifact, not an implementation target.
 7. Preserve the final `Ticket:` line; callers such as `wsflow:lead-proceed` capture this path from prefix-stage output.
 
@@ -175,7 +184,7 @@ Target: user request
 1. Keep epics to scope, non-scope, child ticket board, cross-child decisions, and completion criteria.
 2. Put implementation decisions, constraints, rejected alternatives, and phases into child tickets.
 3. Do not promote tickets to `ready/` unless the user explicitly asks for ready promotion or routes through `wsflow:lead-proceed`.
-4. For any selected target entering `ready/`, run Spec-stem check before commit.
+4. For any selected target entering `ready/`, run Spec-address check before commit.
 
 ### 3. Verify and Report
 
@@ -184,22 +193,27 @@ Target: user request
 
 ## Judgments
 
-### judge: spec-gate
+### judge: spec-address-gate
 
 Trigger: non-`epic`, non-`research` ticket creation or move into `ready/`.
 Ungated: `idea/` creation and `idea/` -> `todo/` triage.
-Find coverage: identify the relevant spec file; use `wsflow/specs.find` or `wsflow/specs.status` when a file or stem is identifiable.
-Missing coverage: no relevant spec file exists or no entry covers behavior; continue through `wsflow:lead-write-spec`.
-Re-check: after `wsflow:lead-write-spec` returns, use `wsflow/specs.find` or `wsflow/specs.status`.
-Stop: coverage is still missing, `wsflow:lead-write-spec` failed, or the behavior is too underspecified; name the blocker.
+Find addressing: identify existing `spec:` or `spec-remove:` stems, or write a ticket-local `## Spec Impact` section.
+Contract-first: continue through `wsflow:lead-write-spec` only when `judge: contract-first-spec` is yes.
+Stop: no stem or `## Spec Impact` can address the behavior, `wsflow:lead-write-spec` failed, or the behavior is too underspecified; name the blocker.
 
 ### judge: initial-status
 
 `idea/`: topic is exploratory or underspecified.
 `todo/`: scope and goal are accepted actionable backlog.
-`ready/`: spec-gated implementation queue.
+`ready/`: spec-addressed implementation queue.
 `todo/` `spec:` links: optional recovery hints.
 Uncertain: prefer `idea/`.
+
+### judge: contract-first-spec
+
+Yes: planned behavior must be visible and stable before implementation begins.
+Usually yes: externally consumed schemas, CLI/API contracts, file or wire formats, cross-skill routing contracts, or multi-ticket planned behavior.
+No: ticket only needs a spec area for post-implementation closeout, final behavior will be refined during implementation, or planned text would mostly restate the ticket phase.
 
 ### judge: cascade-ticket-edit
 
@@ -216,9 +230,9 @@ Phase default: non-epic actionable tickets use one `Phase 1`.
 Phase unit: one reviewable implementation slice a future fresh session can finish, review, verify, and hand off cleanly.
 Phase split: add phases only when review, verification, rollback, or dependency boundaries differ.
 
-### judge: missing-spec-entry
+### judge: missing-spec-address
 
-Trigger: a phase implements caller-visible behavior with no spec entry after `judge: spec-gate` runs `wsflow:lead-write-spec` and re-checks coverage.
+Trigger: a phase implements caller-visible behavior with no confirmed stem, `spec-remove:`, or `## Spec Impact` after `judge: spec-address-gate` runs.
 Action: stop the authoring flow.
 Report: name the uncovered phase and blocker.
 Blocker: missing spec traceability for caller-visible behavior.
