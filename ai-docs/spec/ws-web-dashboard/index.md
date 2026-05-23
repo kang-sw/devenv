@@ -103,6 +103,42 @@ singleton `workspace -> workRoot -> mainInstance` chains as compact rows.
 Authenticated callers may observe compactability hints, but compaction is a
 presentation policy and not URL identity.
 
+## 🚧 Durable WorkRoot Registry And Activation {#260523-dashboard-workroot-registry-activation}
+
+The dashboard will expose known workspace and workRoot membership from a
+daemon-local durable registry instead of treating only currently opened
+workRoots as the visible resource set. A known workRoot remains visible until a
+future explicit forget/remove policy removes it, even when it is currently
+missing, inaccessible, moved, or inactive.
+
+WorkRoot view-models will separate live availability from user-controlled
+activation. `availability` describes the daemon's current filesystem/Git
+assessment of whether the workRoot can be used now, with initial public values
+for available, missing, moved, inaccessible, and unknown states. `activation`
+describes whether the dashboard is currently allowed to target that workRoot
+for file, Activity, and terminal APIs, with `online` and `offline` values.
+A reachable workRoot with `activation: offline` remains a visible row and is
+not the same state as a missing or inaccessible workRoot.
+
+Existing opened-workRoot persistence migrates into the registry as known
+membership with `activation: online`, preserving current restart behavior.
+Newly discovered sibling workRoots may enter the same registry with
+`activation: offline` while remaining visible in the resource tree.
+
+Authenticated route behavior distinguishes registry membership and current
+operability. Unknown workRoot ids return not-found responses. Known workRoots
+with offline activation return a bounded offline response. Online workRoots
+whose availability has degraded return a bounded unavailable response without
+exposing host paths. Online/offline transitions are dashboard commands with
+logical targets so mouse controls and later keybindings share the same command
+path.
+
+Explicit refresh recomputes availability from filesystem/Git without changing
+activation. While the dashboard is open, bounded polling may refresh known
+workRoot availability so external filesystem or Git worktree changes become
+visible, but polling is not the sole correctness mechanism and filesystem
+watchers, if added later, act only as refresh hints.
+
 ## Mock View-Model Fixtures {#260516-ws-web-dashboard-mock-view-model-fixtures}
 
 The dashboard daemon provides deterministic fixture-backed resource data that
