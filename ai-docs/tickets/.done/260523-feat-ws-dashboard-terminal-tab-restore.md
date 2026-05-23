@@ -8,6 +8,7 @@ spec:
   - 260523-ws-dashboard-terminal-tab-restore
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-23
 ---
 
 # Restore dashboard terminal tabs after daemon restarts
@@ -41,3 +42,19 @@ Tmux-like keybindings can target the same behavior. Closing a terminal removes
 its descriptor, and existing live sessions from the daemon remain authoritative
 when present. Verification should cover pure persistence helpers, route-level
 cwd hint handling, and focused frontend tests for terminal restore behavior.
+
+### Result (facfac9) - 2026-05-23
+
+Implemented browser-side terminal restore descriptors and daemon cwd-hint
+handling. The frontend stores running terminal tab descriptors in localStorage
+with workRoot id, title, and workRoot-relative cwd hint, restores them through
+`terminal.create` commands when the selected workRoot has no live daemon
+terminal sessions, and clears descriptors when terminal panes are closed.
+
+The daemon terminal create route now accepts a workRoot-relative `cwdHint`,
+rejects absolute/traversing/missing cwd hints, starts the shell in the resolved
+directory, and reports the normalized hint back in terminal session views.
+Restored tabs create new daemon terminal sessions; old terminal ids and PTY
+processes are not treated as resumable state. Current PWD capture remains
+limited to explicit/root hints because live shell PWD tracking is not yet
+implemented.

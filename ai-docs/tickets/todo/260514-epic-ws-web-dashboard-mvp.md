@@ -134,8 +134,10 @@ The MVP should cover:
   browser connections by bounding graceful shutdown drain.
 - `260523-feat-ws-dashboard-persist-open-workroots` - done; persist opened
   workRoot paths in daemon-local state and seed live resource discovery from
-  remembered roots after daemon restart, while deferring terminal tab/PWD
-  restore design.
+  remembered roots after daemon restart.
+- `260523-feat-ws-dashboard-terminal-tab-restore` - done; restore remembered
+  terminal tabs after daemon restart by creating new terminal sessions with
+  safe workRoot-relative cwd hints, without treating old PTYs as resumable.
 
 ## Cross-Child Decisions
 

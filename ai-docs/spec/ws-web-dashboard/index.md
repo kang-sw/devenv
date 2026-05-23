@@ -825,14 +825,13 @@ state and seeds the live resource view from that remembered list on startup.
 Remembered roots re-run normal discovery instead of bypassing moved, offline,
 inaccessible, primary-root, or linked-worktree classification. Auth sessions,
 live terminal processes, Activity acknowledgement state, and exact browser
-workbench arrangement remain outside the first persistence step.
-
-> [!note] Planned 🚧
-> Terminal tabs will restore after daemon restart as newly created daemon
-> terminal sessions attached to the remembered workRoot. The restore descriptor
-> carries only browser-visible tab context such as title and a workRoot-relative
-> cwd hint; it does not treat old daemon terminal ids or PTY processes as
-> resumable state. {#260523-ws-dashboard-terminal-tab-restore}
+process survival, Activity acknowledgement state, and exact browser workbench
+arrangement remain outside the restore model. Browser-visible terminal tab
+descriptors can restore after daemon restart as newly created daemon terminal
+sessions attached to the remembered workRoot. The restore descriptor carries
+title plus a workRoot-relative cwd hint, but it does not treat old daemon
+terminal ids or PTY processes as resumable state.
+{#260523-ws-dashboard-terminal-tab-restore}
 
 ## WorkRoot IO Command And Placement Polish {#260516-ws-web-dashboard-workroot-io-command-placement-polish}
 
