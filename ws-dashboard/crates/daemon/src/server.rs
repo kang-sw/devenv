@@ -1,7 +1,9 @@
-use std::future::Future;
+use std::future::{Future, IntoFuture};
 use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
 
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 use tracing::info;
 
 use crate::auth::OwnerAuthState;
@@ -17,6 +19,8 @@ pub struct StartupInfo {
     pub pairing_url: String,
 }
 
+pub const DEFAULT_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(750);
+
 pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     run_with_shutdown(config, shutdown_signal())
         .await
@@ -24,6 +28,17 @@ pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
 }
 
 pub async fn run_with_shutdown<F>(config: ServeConfig, shutdown: F) -> anyhow::Result<StartupInfo>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    run_with_shutdown_and_grace(config, shutdown, DEFAULT_SHUTDOWN_GRACE_PERIOD).await
+}
+
+pub async fn run_with_shutdown_and_grace<F>(
+    config: ServeConfig,
+    shutdown: F,
+    grace_period: Duration,
+) -> anyhow::Result<StartupInfo>
 where
     F: Future<Output = ()> + Send + 'static,
 {
@@ -46,9 +61,29 @@ where
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
     });
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
-        .await?;
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let shutdown_task = tokio::spawn(async move {
+        shutdown.await;
+        let _ = shutdown_tx.send(true);
+    });
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone()))
+        .into_future();
+    tokio::pin!(server);
+
+    tokio::select! {
+        result = &mut server => {
+            shutdown_task.abort();
+            result?;
+        }
+        () = force_after_shutdown(shutdown_rx, grace_period) => {
+            shutdown_task.abort();
+            tracing::warn!(
+                grace_period_ms = grace_period.as_millis(),
+                "forcing ws-dashboard daemon shutdown after grace period"
+            );
+        }
+    }
 
     Ok(info)
 }
@@ -68,6 +103,22 @@ async fn shutdown_signal() {
     if let Err(error) = tokio::signal::ctrl_c().await {
         tracing::warn!(%error, "failed to install ctrl-c shutdown signal");
     }
+}
+
+async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
+    if *shutdown_rx.borrow() {
+        return;
+    }
+    while shutdown_rx.changed().await.is_ok() {
+        if *shutdown_rx.borrow() {
+            return;
+        }
+    }
+}
+
+async fn force_after_shutdown(shutdown_rx: watch::Receiver<bool>, grace_period: Duration) {
+    wait_for_shutdown(shutdown_rx).await;
+    tokio::time::sleep(grace_period).await;
 }
 
 fn display_addr(addr: SocketAddr) -> String {
