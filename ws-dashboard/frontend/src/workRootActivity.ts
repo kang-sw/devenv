@@ -198,21 +198,6 @@ export function parseActivityConsoleEvent(value: unknown): ActivityConsoleEvent 
   }
 }
 
-function summarizeActivityItems(items: readonly ActivityItem[]): WorkRootActivitySummary {
-  return items.reduce<WorkRootActivitySummary>(
-    (summary, item) => {
-      summary.total += 1;
-      if (item.live) summary.active += 1;
-      if (item.attention) summary.blocked += 1;
-      const status = item.status.toLowerCase();
-      if (status.includes("fail") || status === "error") summary.failed += 1;
-      if (status === "unavailable") summary.unavailable += 1;
-      return summary;
-    },
-    { total: 0, active: 0, blocked: 0, failed: 0, unavailable: 0 },
-  );
-}
-
 function withEventCursor(view: WorkRootActivityView, cursor: string): WorkRootActivityView {
   return { ...view, feedCursor: cursor };
 }
@@ -233,7 +218,6 @@ export function applyActivityConsoleEvent(
     view = {
       ...view,
       items,
-      summary: summarizeActivityItems(items),
       selectedItemId: preserveActivitySelection(items, current.selectedItemId),
     };
   } else if (event.type === "itemRemoved") {
@@ -241,7 +225,6 @@ export function applyActivityConsoleEvent(
     view = {
       ...view,
       items,
-      summary: summarizeActivityItems(items),
       selectedItemId: preserveActivitySelection(items, current.selectedItemId),
     };
   } else if (event.type === "transcriptUpdated") {

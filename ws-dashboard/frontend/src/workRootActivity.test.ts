@@ -286,6 +286,7 @@ assertEqual(
 
 const eventBase = activityView({
   selectedItemId: "agent:keep",
+  summary: { total: 2 },
   items: [
     activityItem({ id: "agent:keep", label: "keep", updatedAt: "2026-05-21T12:00:00Z" }),
     activityItem({ id: "agent:remove", label: "remove", updatedAt: "2026-05-21T11:00:00Z" }),
@@ -307,7 +308,7 @@ assertDeepEqual(
   "itemUpserted merges the item into the ordered feed",
 );
 assertEqual(upsertedEvent.view.selectedItemId, "agent:keep", "itemUpserted preserves existing selection");
-assertEqual(upsertedEvent.view.summary.total, 3, "itemUpserted recomputes source-neutral summary totals");
+assertEqual(upsertedEvent.view.summary.total, 2, "itemUpserted preserves authoritative source-neutral summary totals");
 assertEqual(upsertedEvent.refetchSnapshot, false, "itemUpserted does not request snapshot refetch");
 
 const removedUnselectedEvent = applyActivityConsoleEvent(eventBase, {
@@ -462,6 +463,45 @@ function activityAgent(
     diagnostics: partial.diagnostics ?? [],
   };
 }
+
+const fullAgentActivityWithBoundedItems = activityView({
+  summary: { total: 51, active: 2 },
+  agents: Array.from({ length: 51 }, (_, index) =>
+    activityAgent({
+      agentId: `agent-${String(index + 1).padStart(2, "0")}`,
+      status: index < 2 ? "running" : "idle",
+    }),
+  ),
+  items: Array.from({ length: 30 }, (_, index) =>
+    activityItem({
+      id: `agent:agent-${String(index + 1).padStart(2, "0")}`,
+      status: index < 2 ? "running" : "idle",
+      live: index < 2,
+    }),
+  ),
+});
+const streamedAgentActivity = applyActivityConsoleEvent(
+  fullAgentActivityWithBoundedItems,
+  {
+    type: "itemUpserted",
+    cursor: "watch:after-upsert",
+    item: activityItem({
+      id: "agent:agent-31",
+      status: "running",
+      live: true,
+    }),
+  },
+);
+assertEqual(
+  streamedAgentActivity.view.summary.total,
+  51,
+  "stream item updates preserve authoritative full activity summary totals",
+);
+assertEqual(
+  workRootActivityBadge({ phase: "ready", view: streamedAgentActivity.view }).label,
+  "51 agents",
+  "top-bar activity badge does not collapse to bounded recent item count after stream updates",
+);
 
 const mergedActivity = mergeWorkRootActivityViews(
   activityView({

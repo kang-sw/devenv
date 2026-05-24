@@ -516,6 +516,12 @@ button {
   align-items: stretch;
 }
 
+.root-picker-close-button.icon-button {
+  flex: 0 0 auto;
+  background: transparent;
+  box-shadow: none;
+}
+
 .root-picker-footer {
   border-top: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
   border-bottom: 0;
@@ -2964,11 +2970,17 @@ button {
 }
 
 .git-worktree-modal {
+  height: auto;
+  max-height: min(680px, calc(100vh - 32px));
   width: min(480px, calc(100vw - 32px));
+  overflow: auto;
 }
 
 .git-worktree-modal .root-picker-dialog {
   gap: var(--ws-space-05);
+  height: auto;
+  min-height: 0;
+  grid-template-rows: auto auto;
   padding: var(--ws-space-07);
 }
 

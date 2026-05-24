@@ -19,6 +19,7 @@ import {
   SquareTerminal,
   Stethoscope,
   Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -1226,14 +1227,13 @@ function OpenWorkRootControl({
                   {pickerView?.currentPath ?? "Loading host directories"}
                 </div>
               </div>
-              <button
-                className="action-button"
-                data-command-id="rootPicker.close"
-                type="button"
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="rootPicker.close"
+                icon={X}
+                label="Close"
                 onClick={closePicker}
-              >
-                Close
-              </button>
+              />
             </div>
 
             <form
@@ -1669,7 +1669,13 @@ function GitWorktreeAddModal({
               <Heading className="root-picker-title" slot="title">Add worktree</Heading>
               <div className="root-picker-current">{options?.git.rootLabel ?? "Loading Git workspace"}</div>
             </div>
-            <button className="action-button" data-command-id="gitWorktreeAdd.close" type="button" onClick={close}>Close</button>
+            <ChromeIconButton
+              className="root-picker-close-button"
+              commandId="gitWorktreeAdd.close"
+              icon={X}
+              label="Close"
+              onClick={close}
+            />
           </div>
           <form className="git-worktree-form" onSubmit={submit}>
             <label className="git-worktree-field">
