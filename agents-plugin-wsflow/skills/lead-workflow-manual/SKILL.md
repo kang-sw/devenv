@@ -50,8 +50,12 @@ and expected output.
 `wsflow/config.show`
 
 Use `wsflow/runtime.info` for runtime compatibility checks and feature
-detection. Use `wsflow/setup(root: "<path>")` to set the current server process
-root when plugin-managed startup did not infer the intended repository.
+detection; when a package declares a required runtime version, compare the
+returned metadata against that requirement. Use `wsflow/setup(root: "<cwd>")`,
+or pass an absolute repository path as `root`, to set the current server process
+root when plugin-managed startup did not infer the intended repository; verify
+the returned `root` matches the intended repository, and rerun setup with the
+correct absolute path if it does not.
 
 ### Project Context
 

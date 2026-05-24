@@ -401,9 +401,12 @@ func TestServeStdioConfigAgentsTier(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"survey","tier":"light"}}}`+"\n",
-	), &out); err != nil {
+	server := NewServer(root, "test")
+	if err := server.ServeStdio(context.Background(), strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q}}}`+"\n", root)), &out); err != nil {
+		t.Fatalf("ServeStdio setup returned error: %v", err)
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"survey","tier":"light"}}}`+"\n"), &out); err != nil {
 		t.Fatalf("ServeStdio returned error: %v", err)
 	}
 	status, err := wsagent.NewManager(wsagent.Options{}).Status(root, "survey")
@@ -625,17 +628,112 @@ func TestServeStdioSetupRootAndExplicitOverride(t *testing.T) {
 	if !strings.Contains(toolText(t, byID["4"]), "260505-feat-beta") || strings.Contains(toolText(t, byID["4"]), "260505-feat-alpha") {
 		t.Fatalf("explicit root did not override session default: %s", byID["4"])
 	}
-	if toolIsError(t, byID["5"]) {
-		t.Fatalf("root-omitted agents.register after ws.setup failed: %s", byID["5"])
-	}
-	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootA, "session-agent"); err != nil {
-		t.Fatalf("root-omitted agents.register did not use session root: %v", err)
+	if !toolIsError(t, byID["5"]) || !strings.Contains(toolText(t, byID["5"]), "setup required") || !strings.Contains(toolText(t, byID["5"]), `root: "<cwd>"`) {
+		t.Fatalf("root-omitted agents.register without actor was not setup-gated: %s", byID["5"])
 	}
 	if toolIsError(t, byID["6"]) {
 		t.Fatalf("explicit-root agents.register compatibility failed: %s", byID["6"])
 	}
 	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootB, "explicit-agent"); err != nil {
 		t.Fatalf("explicit-root agents.register did not use explicit root: %v", err)
+	}
+}
+
+func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
+	useLeadProfile(t)
+	rootA := initTicketRepo(t, "260524-feat-actor-alpha")
+	rootB := initTicketRepo(t, "260524-feat-actor-beta")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	server := NewServer(rootB, "test")
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"format":"json"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"before-setup","model":"light"}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var stateBefore struct {
+		ActorID  string `json:"actor_id"`
+		HasActor bool   `json:"has_actor"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &stateBefore); err != nil {
+		t.Fatalf("setup state before bootstrap is not JSON: %v\n%s", err, byID["1"])
+	}
+	if stateBefore.HasActor || stateBefore.ActorID != "" {
+		t.Fatalf("id-less setup minted actor authority: %s", byID["1"])
+	}
+	if !toolIsError(t, byID["2"]) || !strings.Contains(toolText(t, byID["2"]), "setup required") {
+		t.Fatalf("root-omitted agent call before actor was not gated: %s", byID["2"])
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`+"\n", rootA)), &out); err != nil {
+		t.Fatalf("ServeStdio bootstrap returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var setup struct {
+		Root             string `json:"root"`
+		ActorID          string `json:"actor_id"`
+		HasActor         bool   `json:"has_actor"`
+		ActorAuthority   string `json:"actor_authority"`
+		RecoveryGuidance string `json:"recovery_guidance"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["3"])), &setup); err != nil {
+		t.Fatalf("bootstrap setup is not JSON: %v\n%s", err, byID["3"])
+	}
+	if setup.Root != canonicalTestPath(t, rootA) || !setup.HasActor || setup.ActorID == "" || setup.ActorAuthority != "lead" || !strings.Contains(setup.RecoveryGuidance, setup.ActorID) {
+		t.Fatalf("bootstrap setup response mismatch: %s", byID["3"])
+	}
+	out.Reset()
+	if err := server.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"after-setup","model":"light"}}}`+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio after setup returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if toolIsError(t, byID["4"]) {
+		t.Fatalf("root-omitted agents.register after actor setup failed: %s", byID["4"])
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootA, "after-setup"); err != nil {
+		t.Fatalf("root-omitted agents.register did not use actor root: %v", err)
+	}
+
+	out.Reset()
+	recoveryServer := NewServer(rootB, "test")
+	if err := recoveryServer.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"fresh-before-recovery","model":"light"}}}`+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio pre-recovery returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if !toolIsError(t, byID["5"]) || !strings.Contains(toolText(t, byID["5"]), "setup required") {
+		t.Fatalf("fresh server did not require actor recovery before root-omitted agent call: %s", byID["5"])
+	}
+	out.Reset()
+	if err := recoveryServer.ServeStdio(context.Background(), strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ws.setup","arguments":{"id":%q,"format":"json"}}}`+"\n", setup.ActorID)), &out); err != nil {
+		t.Fatalf("ServeStdio recovery returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	var recovered struct {
+		Root           string `json:"root"`
+		ActorID        string `json:"actor_id"`
+		HasActor       bool   `json:"has_actor"`
+		ActorAuthority string `json:"actor_authority"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, byID["6"])), &recovered); err != nil {
+		t.Fatalf("recovery setup is not JSON: %v\n%s", err, byID["6"])
+	}
+	if recovered.Root != canonicalTestPath(t, rootA) || recovered.ActorID != setup.ActorID || !recovered.HasActor || recovered.ActorAuthority != "lead" {
+		t.Fatalf("recovery setup response mismatch: %s", byID["6"])
+	}
+	out.Reset()
+	if err := recoveryServer.ServeStdio(context.Background(), strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"fresh-after-recovery","model":"light"}}}`+"\n"), &out); err != nil {
+		t.Fatalf("ServeStdio post-recovery returned error: %v", err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if toolIsError(t, byID["7"]) {
+		t.Fatalf("root-omitted agents.register after actor recovery failed: %s", byID["7"])
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).Status(rootA, "fresh-after-recovery"); err != nil {
+		t.Fatalf("recovered actor did not bind root for agent register: %v", err)
 	}
 }
 

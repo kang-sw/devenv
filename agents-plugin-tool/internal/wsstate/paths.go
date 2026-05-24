@@ -195,6 +195,35 @@ func layoutFor(cacheRoot, projectKey, worktreeKey string) Layout {
 	}
 }
 
+func LayoutForWorktreeKey(cacheRoot, worktreeKey string) (Layout, error) {
+	if !validWorktreeKey(worktreeKey) {
+		return Layout{}, fmt.Errorf("invalid worktree key %q", worktreeKey)
+	}
+	projectKey := worktreeKey
+	if before, _, ok := strings.Cut(worktreeKey, "@"); ok {
+		projectKey = before
+	}
+	return layoutFor(cacheRoot, projectKey, worktreeKey), nil
+}
+
+func validWorktreeKey(value string) bool {
+	if len(value) != 8 && len(value) != 17 {
+		return false
+	}
+	for i, r := range value {
+		if i == 8 && len(value) == 17 {
+			if r != '@' {
+				return false
+			}
+			continue
+		}
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
 func gitIdentity(repoPath string) (worktreeRoot string, commonRoot string, err error) {
 	abs, err := canonicalPath(repoPath)
 	if err != nil {

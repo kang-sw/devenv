@@ -126,6 +126,40 @@ func (m Manager) Open(root string) (*Store, error) {
 	return store, nil
 }
 
+func (m Manager) OpenWorktreeKey(worktreeKey string) (*Store, error) {
+	if m.opts.CacheHome != "" {
+		if err := os.MkdirAll(m.opts.CacheHome, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: m.opts.CacheHome})
+	if err != nil {
+		return nil, err
+	}
+	layout, err := wsstate.LayoutForWorktreeKey(cacheRoot, worktreeKey)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(layout.WorktreeDir, "state.sqlite")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	store := &Store{db: db, path: path, layout: layout, now: m.now}
+	openMu.Lock()
+	defer openMu.Unlock()
+	if err := store.configure(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.Migrate(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
 func (m Manager) now() time.Time {
 	if m.opts.Now != nil {
 		return m.opts.Now()
@@ -188,6 +222,20 @@ ON CONFLICT(actor_id) DO UPDATE SET
   last_seen_at=excluded.last_seen_at`,
 		actor.ActorID, actor.Authority, actor.RootPath, actor.WorktreeKey, actor.ParentActorID, blankDefault(actor.Status, "active"), boolInt(actor.Pinned), now, now)
 	return err
+}
+
+func (s *Store) Actor(ctx context.Context, id string) (Actor, bool, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT actor_id, authority, root_path, worktree_key, parent_actor_id, status, pinned FROM actors WHERE actor_id = ?`, id)
+	var actor Actor
+	var pinned int
+	if err := row.Scan(&actor.ActorID, &actor.Authority, &actor.RootPath, &actor.WorktreeKey, &actor.ParentActorID, &actor.Status, &pinned); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Actor{}, false, nil
+		}
+		return Actor{}, false, err
+	}
+	actor.Pinned = pinned != 0
+	return actor, true, nil
 }
 
 func (s *Store) UpsertArtifact(ctx context.Context, artifact Artifact) error {

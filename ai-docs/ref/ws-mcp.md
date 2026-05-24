@@ -164,7 +164,7 @@ and `ws-mcp` uses that environment variable whenever a tool or command omits
 root should resolve to the active project in plugin-managed Codex sessions.
 
 At tool-call time, root-aware MCP tools resolve omitted `root` arguments in this
-order: explicit compatibility `root`, volatile root set by `ws.setup`, Codex
+order: explicit compatibility `root`, actor or volatile root set by `ws.setup`, Codex
 `_meta.x-codex-turn-metadata.workspaces` when it contains exactly one workspace,
 explicit non-dot server startup root, `WS_MCP_PROJECT_ROOT`, then the server
 startup root. If Codex metadata contains multiple workspaces and no
@@ -226,7 +226,7 @@ Behavior:
 
 ### `ws/ws.setup`
 
-Configure volatile ws MCP session state for the current server process.
+Configure ws MCP session state for the current server process.
 
 Input schema:
 
@@ -234,9 +234,17 @@ Input schema:
 {
   "type": "object",
   "properties": {
+    "method": {
+      "type": "string",
+      "description": "Optional setup method. Use \"lead-workflow-bootstrap\" to create a recoverable lead actor."
+    },
+    "id": {
+      "type": "string",
+      "description": "Recover a previously returned actor_id and bind it to this MCP server process."
+    },
     "root": {
       "type": "string",
-      "description": "Git worktree root to store for later root-omitted ws MCP tool calls."
+      "description": "Git worktree root. For lead bootstrap, pass an absolute path or the literal \"<cwd>\"."
     },
     "format": {
       "type": "string",
@@ -248,12 +256,21 @@ Input schema:
 
 Behavior:
 
-- When `root` is present, validates it with Git and stores the canonical
-  worktree root in memory.
-- Affects later root-omitted root-aware tool calls handled by the same server.
-- Omitting `root` reports current setup state without guessing or persisting a
-  root.
-- Does not persist beyond the MCP server process and does not write config files.
+- `ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>")`, or the same
+  call with an absolute root path, creates a cooperative lead actor, persists
+  the actor metadata in root/worktree SQLite state, and binds the actor root to
+  the current server process.
+- `ws.setup(id: "<actor-id>")` restores a persisted actor and binds the current
+  server process to that actor root.
+- `ws.setup(root: "<path>")` without `method` preserves compatibility root
+  setup: it validates the path with Git and stores the canonical worktree root
+  in memory only.
+- Omitting `root`, `method`, and `id` reports current setup state without
+  guessing, persisting a root, or minting lead authority.
+- Root-omitted actor-owned tools such as `agents.register`, `agents.call`, and
+  `subquery` require a current actor binding; explicit `root` remains a hidden
+  compatibility override during migration.
+- The actor model is a cooperative workflow guard, not a hard security boundary.
 - Legacy `session.set_default_root` and `session.get_default_root` may remain as
   hidden compatibility dispatch, but they are not advertised in `tools/list` or
   `agents-plugin/runtime.json`.
@@ -262,7 +279,9 @@ Output:
 
 - MCP text content with labeled setup fields by default.
 - Pass `format: "json"` for structured compatibility output with `root`,
-  `has_root`, `session_harness`, `env_project_root`, and `server_root`.
+  `has_root`, `actor_id`, `has_actor`, `actor_authority`,
+  `recovery_guidance`, `session_harness`, `env_project_root`, and
+  `server_root`.
 
 ### `ws/api.list`
 
@@ -1131,10 +1150,11 @@ Behavior:
   non-empty; Codex uses `model_reasoning_effort=<value>` and Claude uses
   `--effort <value>`.
 
-Public `agents.*` schemas intentionally omit `root`; establish the current
-worktree with `ws/ws.setup` before normal calls. Explicit `root` arguments may
-still work as a compatibility override, but they are not the advertised caller
-surface.
+Public `agents.*` schemas intentionally omit `root`; establish a lead actor with
+`ws/ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>")` before normal
+root-omitted calls and recover it with `ws/ws.setup(id: "<actor-id>")` after an
+MCP restart. Explicit `root` arguments may still work as a compatibility
+override, but they are not the advertised caller surface.
 
 ### `ws/agents.register`
 

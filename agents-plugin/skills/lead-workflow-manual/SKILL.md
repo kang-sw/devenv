@@ -44,6 +44,17 @@ include only local arguments that affect the current step.
 
 ## Available
 
+### Session setup
+
+`ws/setup`
+
+At the start of any lead workflow session, call
+`ws/setup(method: "lead-workflow-bootstrap", root: "<cwd>")`, or pass an
+absolute repository path as `root`. Record the returned `actor_id`; if MCP
+restarts, recover with `ws/setup(id: "<actor-id>")` before any agent or subquery
+call that omits `root`. Pass `"<cwd>"` or an absolute repository path; do not
+use relative paths such as `"."`.
+
 ### Async one-turn query
 
 `ws/subquery`

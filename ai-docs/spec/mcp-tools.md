@@ -57,25 +57,26 @@ server session before falling back to startup state. The priority is:
 5. `WS_MCP_PROJECT_ROOT`.
 6. Server startup root.
 
-`ws.setup` is the public setup surface for volatile session state. When called
-with `root`, it validates that the path is inside a Git worktree, stores the
+`ws.setup` is the public setup surface for session state. When called with
+`root`, it validates that the path is inside a Git worktree, stores the
 canonical worktree root in the current server process, and returns setup state.
-The value is volatile and does not write user config, ws cache config, or
-repository files. Calling `ws.setup` without `root` reports the current setup
-state, including the detected session harness when one has been observed. The
-default response is compact labeled text; callers can request structured JSON
-for compatibility. Legacy `session.*` root tools may remain callable as hidden
-compatibility dispatch, but they are not advertised as canonical tools.
+The root-only value is volatile and does not write user config, ws cache config,
+or repository files. Calling `ws.setup` without `root`, `method`, or `id`
+reports current setup state, including the detected session harness when one has
+been observed, and does not mint lead authority. The default response is compact
+labeled text; callers can request structured JSON for compatibility. Legacy
+`session.*` root tools may remain callable as hidden compatibility dispatch, but
+they are not advertised as canonical tools.
 
-> [!note] Planned 🚧
-> `ws.setup` will gain cooperative actor bootstrap and recovery semantics.
-> `ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>")`, or the same
-> call with an absolute root path, creates a lead actor for a workflow session
-> and returns an actor id with explicit recovery guidance. `ws.setup(id:
-> "<actor-id>")` restores that actor in a fresh MCP server process. Calls
-> without `method` or `id` report limited setup state but do not mint lead
-> authority. The actor model is a cooperative workflow guard, not a hard
-> security boundary. {#260524-mcp-actor-setup-bootstrap}
+`ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>")`, or the same call
+with an absolute root path, creates a cooperative lead actor for a workflow
+session and returns an actor id with explicit recovery guidance.
+`ws.setup(id: "<actor-id>")` restores that actor in a fresh MCP server process
+and binds the current session root to the actor root. Root-omitted actor-owned
+tools such as agent registration, agent calls, and subqueries require either a
+current actor binding or a hidden explicit-root compatibility argument. The
+actor model is a cooperative workflow guard, not a hard security boundary.
+{#260524-mcp-actor-setup-bootstrap}
 
 When host metadata names multiple workspaces and no higher-priority root exists,
 root-aware tools refuse to guess and return an actionable error asking the caller

@@ -25,7 +25,7 @@ related:
 - `ws-mcp smoke --root <repo>` is the single-process executable smoke entrypoint; keep it aligned with release workflow checks. {#260505-runtime-cli-entrypoints}
 - `internal/mcp/server.go` owns MCP JSON-RPC request handling, tool schemas, tool dispatch, optional profile filtering, and cancellation. {#260505-mcp-server-protocol-surface}
 - `internal/mcp/api_async.go` owns recoverable API documentation job state behind the `api.ask_async` tool family. {#260508-api-documentation-async-mcp-tools}
-- `internal/wsstore` owns the root/worktree SQLite metadata foundation for future actor setup, async metadata, retention, pruning, and tombstone cleanup. Current named-agent and exec runtime paths still read their existing JSON/file state until later migration tickets wire the store in.
+- `internal/wsstore` owns root/worktree SQLite metadata for setup actors, future async metadata, retention, pruning, and tombstone cleanup. Current named-agent and exec runtime paths still read their existing JSON/file state until later migration tickets wire the store in.
 - `runtime.info` and `runtime.capabilities` are launcher-facing compatibility data; capabilities adds MCP protocol, lead tool names, and CLI commands. {#260505-runtime-debug-metadata-tools} {#260506-runtime-capabilities-single-probe}
 
 ## Module Contracts
@@ -40,7 +40,9 @@ related:
 - Empty `WS_MCP_NAMESPACE` and `WS_MCP_SETUP_TOOL` values are treated as unset, preserving `ws` namespace text and the `ws.setup` advertised setup tool.
 - MCP starts with the lead tool surface; worktree locks are not an authority signal for tool visibility. {#260505-tool-profile-gating}
 - `WS_MCP_TOOL_PROFILE` is an optional containment filter. If host environment propagation fails, delegated agents may see lead tools and must follow prompt-level role rules.
-- `ws.setup(root)` is the public root-session setup surface; it stores a canonical Git worktree root in the current server instance only and does not change process cwd or write config. Hidden `session.*` dispatch can exist for compatibility but must not be advertised as canonical.
+- `ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>" or absolute path)` creates a cooperative lead actor, persists actor metadata in root/worktree SQLite state, and binds the actor root to the current server process; `ws.setup(id: "<actor-id>")` restores that binding after restart. {#260524-mcp-actor-setup-bootstrap}
+- `ws.setup(root)` without a method remains the compatibility root-session setup surface; it stores a canonical Git worktree root in the current server instance only and does not change process cwd or write config. Hidden `session.*` dispatch can exist for compatibility but must not be advertised as canonical.
+- Root-omitted `agents.register`, `agents.call`, and `subquery` require a current actor binding, while hidden explicit-root arguments remain compatibility overrides during migration. {#260524-mcp-actor-setup-bootstrap}
 - Public `agents.*` MCP schemas intentionally omit `root` even though dispatch still accepts hidden explicit-root compatibility arguments through the normal root resolver; non-agent root-aware schemas keep advertising `root`. {#260523-agents-root-schema-invisibility}
 - Public `exec.*` schemas use `working_dir` for command execution location, not `root`; dispatch resolves the ws worktree root internally, constrains resolved working directories inside that root, and reconciles lost running workers so persisted exec jobs do not remain indefinitely running. {#260524-exec-job-mcp-tools}
 - `wsstore` is metadata/control-plane storage only: large stdout, stderr, prompts, final outputs, transcripts, and runtime logs remain file-backed, while SQLite rows track paths, byte counts, actor/job identity, retention, prune runs, and retryable tombstones.
@@ -78,6 +80,7 @@ related:
 - Treating `domain_hint` in `api.ask` as a direct domain selector; only exact existing domain names bypass routing. {#260505-api-documentation-mcp-tools}
 - Adding API-doc async tools without updating `agents-plugin/runtime.json`; launcher compatibility checks compare the required MCP tool surface against runtime metadata.
 - Assuming MCP tool calls know the user's shell cwd; plugin-managed server cwd can be the plugin cache.
+- Passing `"."` to lead actor setup is ambiguous in plugin-managed sessions; use an absolute root path or the literal `"<cwd>"` bootstrap placeholder.
 - Guessing among multiple host workspaces creates cross-project writes; root resolution must ask for explicit compatibility `root` or `ws.setup(root)` instead.
 - Letting `WS_MCP_PROJECT_ROOT` shadow an explicit non-dot server startup root makes tests pass in this dogfooding repo while plugin-managed calls target the wrong project.
 - Treating namespace override as a tool rename; wsflow changes user-facing namespace text and advertised setup alias, while generic MCP tool identifiers stay stable.

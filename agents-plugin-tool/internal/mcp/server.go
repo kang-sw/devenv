@@ -3,6 +3,8 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,17 +24,20 @@ import (
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsprompt"
 	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wsstore"
 )
 
 type Server struct {
-	root           string
-	version        string
-	sourceCommit   string
-	role           toolRole
-	api            apiRuntime
-	rootMu         sync.RWMutex
-	sessionRoot    string
-	sessionHarness string
+	root                  string
+	version               string
+	sourceCommit          string
+	role                  toolRole
+	api                   apiRuntime
+	rootMu                sync.RWMutex
+	sessionRoot           string
+	sessionHarness        string
+	sessionActorID        string
+	sessionActorAuthority string
 }
 
 type toolRole string
@@ -70,6 +75,8 @@ type rpcError struct {
 const ProtocolVersion = "2025-03-26"
 
 const maxDebugEvents = 256
+
+const leadWorkflowBootstrapMethod = "lead-workflow-bootstrap"
 
 const (
 	envNoAgent   = "WS_MCP_NO_AGENT"
@@ -318,6 +325,9 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 	if setupToolName() != "ws.setup" && params.Name == setupToolName() {
 		params.Name = "ws.setup"
 	}
+	if err := s.actorGate(params.Name, params.Arguments); err != nil {
+		return toolTextResponse(req.ID, "", err)
+	}
 
 	switch params.Name {
 	case "runtime.info":
@@ -333,14 +343,8 @@ func (s *Server) callTool(ctx context.Context, req request) response {
 		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
 	case "ws.setup":
-		if root, _ := params.Arguments["root"].(string); strings.TrimSpace(root) != "" {
-			canonical, err := canonicalGitRoot(root)
-			if err != nil {
-				return toolTextResponse(req.ID, "", err)
-			}
-			s.rootMu.Lock()
-			s.sessionRoot = canonical
-			s.rootMu.Unlock()
+		if err := s.applySetup(ctx, params.Arguments); err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		state := s.setupState(requestedToolName)
 		if wantsJSON(params.Arguments) {
@@ -1067,10 +1071,16 @@ func (s *Server) setupState(source string) map[string]any {
 	s.rootMu.RLock()
 	sessionRoot := s.sessionRoot
 	sessionHarness := s.sessionHarness
+	actorID := s.sessionActorID
+	actorAuthority := s.sessionActorAuthority
 	s.rootMu.RUnlock()
 	return map[string]any{
 		"root":                 sessionRoot,
 		"has_root":             sessionRoot != "",
+		"actor_id":             actorID,
+		"has_actor":            actorID != "",
+		"actor_authority":      actorAuthority,
+		"recovery_guidance":    recoveryGuidance(actorID),
 		"session_default_root": sessionRoot,
 		"has_session_default":  sessionRoot != "",
 		"session_harness":      sessionHarness,
@@ -1084,10 +1094,181 @@ func formatSetupState(values map[string]any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "root: %s\n", displayString(values["root"]))
 	fmt.Fprintf(&b, "has_root: %t\n", boolValue(values["has_root"]))
+	fmt.Fprintf(&b, "actor_id: %s\n", displayString(values["actor_id"]))
+	fmt.Fprintf(&b, "has_actor: %t\n", boolValue(values["has_actor"]))
+	fmt.Fprintf(&b, "actor_authority: %s\n", displayString(values["actor_authority"]))
+	if guidance := displayString(values["recovery_guidance"]); guidance != "" {
+		fmt.Fprintf(&b, "recovery_guidance: %s\n", guidance)
+	}
 	fmt.Fprintf(&b, "session_harness: %s\n", displayString(values["session_harness"]))
 	fmt.Fprintf(&b, "server_root: %s\n", displayString(values["server_root"]))
 	fmt.Fprintf(&b, "env_project_root: %s\n", displayString(values["env_project_root"]))
 	return b.String()
+}
+
+func recoveryGuidance(actorID string) string {
+	if actorID == "" {
+		return fmt.Sprintf("Lead bootstrap requires %s(method: %q, root: \"<cwd>\" or an absolute path).", setupToolName(), leadWorkflowBootstrapMethod)
+	}
+	return fmt.Sprintf("Do not forget this actor_id. If MCP restarts, call %s(id: %q).", setupToolName(), actorID)
+}
+
+func (s *Server) applySetup(ctx context.Context, arguments map[string]any) error {
+	if id, _ := arguments["id"].(string); strings.TrimSpace(id) != "" {
+		return s.restoreActor(ctx, strings.TrimSpace(id))
+	}
+	method, _ := arguments["method"].(string)
+	method = strings.TrimSpace(method)
+	if method != "" {
+		if method != leadWorkflowBootstrapMethod {
+			return fmt.Errorf("unsupported setup method %q", method)
+		}
+		return s.bootstrapLeadActor(ctx, arguments)
+	}
+	if root, _ := arguments["root"].(string); strings.TrimSpace(root) != "" {
+		canonical, err := canonicalSetupRoot(root)
+		if err != nil {
+			return err
+		}
+		s.rootMu.Lock()
+		s.sessionRoot = canonical
+		s.rootMu.Unlock()
+	}
+	return nil
+}
+
+func (s *Server) bootstrapLeadActor(ctx context.Context, arguments map[string]any) error {
+	root, _ := arguments["root"].(string)
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return fmt.Errorf("root is required for setup method %q; pass an absolute path or the literal \"<cwd>\"", leadWorkflowBootstrapMethod)
+	}
+	if root != "<cwd>" && !filepath.IsAbs(root) {
+		return fmt.Errorf("root for setup method %q must be an absolute path or the literal \"<cwd>\"", leadWorkflowBootstrapMethod)
+	}
+	canonical, err := canonicalSetupRoot(root)
+	if err != nil {
+		return err
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).Open(canonical)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	worktreeKey := store.Layout().WorktreeKey
+	actorID, err := mintActorID("lead", worktreeKey)
+	if err != nil {
+		return err
+	}
+	actor := wsstore.Actor{
+		ActorID:     actorID,
+		Authority:   "lead",
+		RootPath:    canonical,
+		WorktreeKey: worktreeKey,
+		Status:      "active",
+		Pinned:      true,
+	}
+	if err := store.UpsertActor(ctx, actor); err != nil {
+		return err
+	}
+	s.bindActor(actor)
+	return nil
+}
+
+func canonicalSetupRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "<cwd>" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("resolve <cwd>: %w", err)
+		}
+		root = cwd
+	}
+	return canonicalGitRoot(root)
+}
+
+func (s *Server) restoreActor(ctx context.Context, actorID string) error {
+	worktreeKey, err := actorWorktreeKey(actorID)
+	if err != nil {
+		return err
+	}
+	store, err := wsstore.NewManager(wsstore.Options{}).OpenWorktreeKey(worktreeKey)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	actor, ok, err := store.Actor(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("actor id %q was not found; call %s(method: %q, root: \"<cwd>\" or an absolute path) to create a lead actor", actorID, setupToolName(), leadWorkflowBootstrapMethod)
+	}
+	if actor.Status != "" && actor.Status != "active" {
+		return fmt.Errorf("actor id %q is not active: %s", actorID, actor.Status)
+	}
+	if err := store.UpsertActor(ctx, actor); err != nil {
+		return err
+	}
+	s.bindActor(actor)
+	return nil
+}
+
+func (s *Server) bindActor(actor wsstore.Actor) {
+	s.rootMu.Lock()
+	defer s.rootMu.Unlock()
+	s.sessionRoot = actor.RootPath
+	s.sessionActorID = actor.ActorID
+	s.sessionActorAuthority = actor.Authority
+}
+
+func mintActorID(authority, worktreeKey string) (string, error) {
+	var suffix [12]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
+	}
+	return authority + "-" + worktreeKey + "-" + hex.EncodeToString(suffix[:]), nil
+}
+
+func actorWorktreeKey(actorID string) (string, error) {
+	if !strings.HasPrefix(actorID, "lead-") {
+		return "", fmt.Errorf("invalid actor id %q", actorID)
+	}
+	rest := strings.TrimPrefix(actorID, "lead-")
+	idx := strings.LastIndex(rest, "-")
+	if idx <= 0 || idx == len(rest)-1 {
+		return "", fmt.Errorf("invalid actor id %q", actorID)
+	}
+	worktreeKey := rest[:idx]
+	if _, err := wsstate.LayoutForWorktreeKey("", worktreeKey); err != nil {
+		return "", fmt.Errorf("invalid actor id %q: %w", actorID, err)
+	}
+	return worktreeKey, nil
+}
+
+func (s *Server) actorGate(name string, arguments map[string]any) error {
+	if !rootOmittedActorTool(name) {
+		return nil
+	}
+	if value, ok := arguments["root"].(string); ok && strings.TrimSpace(value) != "" {
+		return nil
+	}
+	s.rootMu.RLock()
+	hasActor := s.sessionActorID != ""
+	s.rootMu.RUnlock()
+	if hasActor {
+		return nil
+	}
+	return fmt.Errorf("setup required before root-omitted %s: call %s(method: %q, root: \"<cwd>\" or an absolute path) from lead-workflow-manual, or recover with %s(id: \"<actor-id>\")", name, setupToolName(), leadWorkflowBootstrapMethod, setupToolName())
+}
+
+func rootOmittedActorTool(name string) bool {
+	switch name {
+	case "agents.register", "agents.call", "subquery":
+		return true
+	default:
+		return false
+	}
 }
 
 func formatStringLines(values []string) string {
@@ -1730,11 +1911,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "ws.setup",
-			"description": "Configure volatile ws MCP session state such as the repository root for this server process.",
+			"description": "Configure ws MCP session state, including lead actor bootstrap and repository root recovery for this server process.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root":   stringProperty("Git worktree root to store for later root-omitted ws MCP tool calls."),
+					"method": stringProperty(`Optional setup method. Use "lead-workflow-bootstrap" to create a recoverable lead actor.`),
+					"id":     stringProperty("Recover a previously returned actor_id and bind it to this MCP server process."),
+					"root":   stringProperty(`Git worktree root. For lead bootstrap, pass an absolute path or the literal "<cwd>".`),
 					"format": stringProperty(`Optional output format. Use "json" for structured compatibility output.`),
 				},
 			},
