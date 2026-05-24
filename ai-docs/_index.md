@@ -149,22 +149,18 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260524-epic-ws-dashboard-resource-continuity-sprint` | todo | Coordinate the dashboard root lifecycle, restore, linked-worktree, transcript summary, and cleanup pass |
-| `260524-feat-ws-dashboard-root-picker-modal` | ready | Replace the temporary open-workRoot path input with an explorer-like modal picker |
 | `260524-feat-ws-dashboard-document-viewer-editor-substrate` | todo | Add a reusable markdown document viewer, translation-ready block model, panel-local edit mode, and save fan-out contract |
-| `260524-feat-ws-dashboard-workspace-root-prune-policy` | ready | Add dashboard workspace root ownership and automatic no-active-workRoot pruning |
-| `260523-feat-ws-dashboard-readonly-file-pane-restore` | todo | Restore dashboard read-only file panes after refresh or daemon restart |
+| `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
+| `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
 | `260513-feat-async-exec-output-reader` | todo | Add async exec jobs with bounded results and light-agent output questions |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260519-feat-implement-branch-squash-gate` | todo | Add a pre-merge implementation-branch squash gate for cleaner main history |
 | `260520-refactor-lead-skill-cascade` | todo | Prune lead skill procedural sophistication via skill-authoring doctrine cascade (R3'/R6 phased, R1/R2/R4/R5 batched) |
-| `260523-feat-ws-dashboard-tool-output-safe-summary` | todo | Show bounded head/tail snippets for Codex tool output transcript blocks |
-| `260523-feat-ws-dashboard-linked-worktree-discovery` | todo | Discover linked Git workRoots through the durable registry |
-| `260524-feat-ws-dashboard-workspace-forget-remove-ui` | todo | Add explicit dashboard workspace forget/remove UI |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
 | `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
+| `260524-bug-project-tree-stale-ticket-status-map` | idea | Clarify stale ticket status projection in project_tree output |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
 | `260513-research-dual-mcp-startup-order` | idea | Validate dual stdio doctor and HTTP MCP startup ordering |
@@ -181,7 +177,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260524-feat-ws-dashboard-root-picker-modal` - replace the temporary open-workRoot path input with an explorer-like modal picker while preserving root picker/open-workRoot command and resource-refresh semantics.
+No ready tickets currently queued.
 
 ## Session Notes
 

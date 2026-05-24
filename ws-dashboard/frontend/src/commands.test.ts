@@ -8,6 +8,13 @@ import {
   buildFileExplorerRefreshCommand,
   buildFileExplorerSelectEntryCommand,
   buildFileExplorerToggleDirectoryCommand,
+  buildRootPickerCloseCommand,
+  buildRootPickerCreateDirectoryCommand,
+  buildRootPickerNavigateCommand,
+  buildRootPickerOpenCommand,
+  buildRootPickerPinDirectoryCommand,
+  buildRootPickerSelectDirectoryCommand,
+  buildRootPickerUnpinDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
   buildWorkspaceRemoveCommand,
@@ -42,6 +49,13 @@ const workRootId = "workRoot:local";
 const filePath = "src/App.tsx";
 const migratedCommands = [
   buildDashboardRefreshCommand(),
+  buildRootPickerOpenCommand(),
+  buildRootPickerNavigateCommand("/private/path"),
+  buildRootPickerSelectDirectoryCommand("/private/path"),
+  buildRootPickerCreateDirectoryCommand("/private", "path"),
+  buildRootPickerPinDirectoryCommand("/private/path"),
+  buildRootPickerUnpinDirectoryCommand("/private/path"),
+  buildRootPickerCloseCommand(),
   buildFileExplorerRefreshCommand(workRootId),
   buildFileExplorerToggleDirectoryCommand(workRootId, "src"),
   buildFileExplorerOpenFileCommand(workRootId, filePath, "singleClick"),
@@ -60,6 +74,13 @@ assertDeepEqual(
   migratedCommands.map((command) => command.commandId),
   [
     "dashboard.refresh",
+    "rootPicker.open",
+    "rootPicker.navigate",
+    "rootPicker.selectDirectory",
+    "rootPicker.createDirectory",
+    "rootPicker.pinDirectory",
+    "rootPicker.unpinDirectory",
+    "rootPicker.close",
     "fileExplorer.refresh",
     "fileExplorer.toggleDirectory",
     "fileExplorer.openFile",
@@ -80,6 +101,13 @@ assertDeepEqual(
   migratedCommands.map((command) => command.payload.type),
   [
     "refresh",
+    "rootPicker.open",
+    "rootPicker.navigate",
+    "rootPicker.selectDirectory",
+    "rootPicker.createDirectory",
+    "rootPicker.pinDirectory",
+    "rootPicker.unpinDirectory",
+    "rootPicker.close",
     "fileExplorer.refresh",
     "fileExplorer.toggleDirectory",
     "fileExplorer.openFile",
@@ -155,6 +183,47 @@ assertEqual(
   Object.prototype.hasOwnProperty.call(workRootOpenCommand.payload, "path"),
   false,
   "workRoot.open command payload does not carry a path field",
+);
+
+const rootPickerPrivatePath = "/Users/kang-sw/private/root";
+const rootPickerCommands = [
+  buildRootPickerNavigateCommand(rootPickerPrivatePath),
+  buildRootPickerSelectDirectoryCommand(rootPickerPrivatePath),
+  buildRootPickerCreateDirectoryCommand(rootPickerPrivatePath, "child"),
+  buildRootPickerPinDirectoryCommand(rootPickerPrivatePath),
+  buildRootPickerUnpinDirectoryCommand(rootPickerPrivatePath),
+];
+for (const command of rootPickerCommands) {
+  assertNotContains(
+    JSON.stringify(command),
+    rootPickerPrivatePath,
+    `${command.commandId} command omits host paths`,
+  );
+}
+assertEqual(
+  dashboardCommandLabel(buildRootPickerOpenCommand()),
+  "Open root picker",
+  "root picker open label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildRootPickerCloseCommand()),
+  "Close root picker",
+  "root picker close label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildRootPickerCreateDirectoryCommand(rootPickerPrivatePath, "child")),
+  "Create directory",
+  "root picker create-directory label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildRootPickerPinDirectoryCommand(rootPickerPrivatePath)),
+  "Pin directory",
+  "root picker pin-directory label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildRootPickerUnpinDirectoryCommand(rootPickerPrivatePath)),
+  "Unpin directory",
+  "root picker unpin-directory label is stable",
 );
 
 let terminalCreates = 0;

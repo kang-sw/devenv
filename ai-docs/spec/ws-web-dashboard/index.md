@@ -682,17 +682,31 @@ The picker includes only a narrow `Create empty folder` operation for creating
 a new workRoot candidate. Generic delete, rename, move, copy, and recursive
 folder deletion operations remain unavailable.
 
-> [!note] Planned 🚧
-> The browser shell replaces the always-visible open-workRoot path input with
-> an owner-authenticated root picker modal. The left navigation exposes an
-> `Open...` entrypoint; the modal provides directory navigation, parent/up
-> movement, keyboard-friendly selection, loading/error/empty states, a selected
-> directory footer, and a secondary exact-path field for pasted or remote paths.
-> Opening a selected directory continues through the `workRoot.open` command
-> path, open-workRoot API, daemon-opened workRoot id reconciliation, and
-> canonical resource refresh flow. The modal may expose only the existing
-> single-segment `Create empty folder` action, not broad file-manager
-> operations. {#260524-ws-dashboard-root-picker-modal}
+The browser shell opens workRoots through an owner-authenticated root picker
+modal instead of an always-visible path input. The left navigation exposes an
+`Open...` entrypoint; the modal is an explorer-style folder selection dialog
+with local Back/Forward history, Up and Refresh actions, an address field,
+platform-aware built-in places derived from daemon-owned data, a details-style
+current-folder row list, and footer controls for opening the selected or typed
+path. Directory rows support keyboard-friendly selection and row action, and
+closing the modal restores focus to the opener. Opening a selected or exact
+directory continues through the `workRoot.open` command path, open-workRoot API,
+daemon-opened workRoot id reconciliation, and canonical resource refresh flow.
+The modal may expose only the existing single-segment `Create empty folder`
+action, not broad file-manager operations. Host paths remain authenticated
+picker/open request data rather than loggable command payload fields.
+{#260524-ws-dashboard-root-picker-modal}
+{#260524-ws-dashboard-react-aria-root-picker-pilot}
+
+Authenticated owners can pin and unpin root picker directories in the picker
+sidebar. Pinned directories are stored in daemon-local dashboard persistence,
+are visually distinguished from built-in places, and remain selection or
+navigation affordances only. Unavailable pinned directories stay visible in a
+degraded state so the owner can remove them without the picker exposing private
+diagnostics or silently creating, opening, deleting, renaming, or moving
+filesystem resources. Pin and unpin controls keep host paths as authenticated
+request data rather than loggable command payload fields.
+{#260524-ws-dashboard-root-picker-pins}
 
 After an authenticated owner opens a workRoot, the browser-visible resource
 tree refreshes from the canonical dashboard resources endpoint and selects the

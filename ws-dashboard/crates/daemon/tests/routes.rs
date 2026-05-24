@@ -1510,6 +1510,16 @@ async fn root_picker_routes_are_owner_authenticated() {
             .expect("create directory request"),
         Request::builder()
             .method(Method::POST)
+            .uri("/api/dashboard/root-picker/pins")
+            .body(Body::empty())
+            .expect("pin directory request"),
+        Request::builder()
+            .method(Method::DELETE)
+            .uri("/api/dashboard/root-picker/pins")
+            .body(Body::empty())
+            .expect("unpin directory request"),
+        Request::builder()
+            .method(Method::POST)
             .uri("/api/dashboard/work-roots/open")
             .body(Body::empty())
             .expect("open workRoot request"),
@@ -1575,9 +1585,130 @@ async fn root_picker_lists_directory_candidates_with_owner_cookie() {
     assert_eq!(entries[0]["name"], "alpha");
     assert_eq!(entries[0]["entryType"], "directory");
     assert_eq!(entries[0]["selectable"], true);
+    assert_eq!(entries[0]["kindLabel"], "Folder");
+    assert!(entries[0]["modifiedTime"].as_str().is_some());
+    assert!(entries[0]["size"].is_null());
     assert_eq!(entries[1]["name"], "zeta");
+    let places = value["places"].as_array().expect("known places array");
+    assert!(
+        !places.is_empty(),
+        "daemon-derived picker places are exposed"
+    );
+    assert!(
+        places.iter().all(|place| place["available"] == true),
+        "unavailable picker places are filtered by the daemon"
+    );
+    assert!(
+        places
+            .iter()
+            .any(|place| place["kind"] == "home" || place["kind"] == "root"),
+        "known places include a platform root or home directory"
+    );
+    assert!(
+        places.iter().all(|place| place["source"] == "builtIn"),
+        "initial known places are distinguished from owner pins"
+    );
 
     remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn root_picker_pins_round_trip_through_dashboard_state() {
+    let root = write_root_picker_fixture();
+    let missing = temp_fixture_path("missing-pin").join("gone");
+    let state_file_directory = temp_fixture_path("picker-pins-state");
+    let store = DashboardStateStore::at_path(state_file_directory.join("opened-workroots.json"));
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    for pin in [&root, &missing] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/dashboard/root-picker/pins")
+                    .header(header::COOKIE, cookie.as_str())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "path": pin.display().to_string() }).to_string(),
+                    ))
+                    .expect("pin directory request"),
+            )
+            .await
+            .expect("pin directory response");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let persisted_pins = store.load_root_picker_pins().await;
+    assert_eq!(persisted_pins.len(), 2);
+    assert!(persisted_pins.contains(&root));
+    assert!(persisted_pins.contains(&missing));
+
+    let restarted_state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store);
+    let restarted_token = restarted_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let restarted_app = build_router(restarted_state);
+    let restarted_cookie = pair_and_cookie(restarted_app.clone(), &restarted_token).await;
+    let response = restarted_app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/root-picker?path={}",
+                    root.display()
+                ))
+                .header(header::COOKIE, restarted_cookie.as_str())
+                .body(Body::empty())
+                .expect("root picker with pins request"),
+        )
+        .await
+        .expect("root picker with pins response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("root picker pins body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("root picker pins JSON");
+    let pins: Vec<_> = value["places"]
+        .as_array()
+        .expect("places array")
+        .iter()
+        .filter(|place| place["source"] == "pin")
+        .collect();
+    assert_eq!(pins.len(), 2);
+    let root_canonical = root.canonicalize().unwrap().display().to_string();
+    let missing_display = missing.display().to_string();
+    assert!(pins.iter().any(|place| {
+        place["path"].as_str() == Some(root_canonical.as_str()) && place["available"] == true
+    }));
+    assert!(pins.iter().any(|place| {
+        place["path"].as_str() == Some(missing_display.as_str()) && place["available"] == false
+    }));
+
+    let unpin = restarted_app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/api/dashboard/root-picker/pins")
+                .header(header::COOKIE, restarted_cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": root.canonicalize().unwrap().display().to_string() })
+                        .to_string(),
+                ))
+                .expect("unpin directory request"),
+        )
+        .await
+        .expect("unpin directory response");
+    assert_eq!(unpin.status(), StatusCode::OK);
+
+    remove_static_fixture(&root);
+    remove_static_fixture(&state_file_directory);
 }
 
 #[tokio::test]

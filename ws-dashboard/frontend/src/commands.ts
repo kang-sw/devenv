@@ -3,6 +3,13 @@ export type DashboardCommandId =
   | "workspace.remove"
   | "workRoot.open"
   | "workRoot.activation.set"
+  | "rootPicker.open"
+  | "rootPicker.close"
+  | "rootPicker.navigate"
+  | "rootPicker.selectDirectory"
+  | "rootPicker.createDirectory"
+  | "rootPicker.pinDirectory"
+  | "rootPicker.unpinDirectory"
   | "fileExplorer.refresh"
   | "fileExplorer.toggleDirectory"
   | "fileExplorer.openFile"
@@ -25,6 +32,13 @@ export type DashboardCommandPayload =
   | { type: "workspace.remove"; workspaceId: string }
   | { type: "workRoot.open" }
   | { type: "workRoot.activation.set"; workRootId: string; activation: "online" | "offline" }
+  | { type: "rootPicker.open" }
+  | { type: "rootPicker.close" }
+  | { type: "rootPicker.navigate" }
+  | { type: "rootPicker.selectDirectory" }
+  | { type: "rootPicker.createDirectory" }
+  | { type: "rootPicker.pinDirectory" }
+  | { type: "rootPicker.unpinDirectory" }
   | { type: "fileExplorer.refresh"; workRootId: string }
   | { type: "fileExplorer.toggleDirectory"; workRootId: string; path: string }
   | {
@@ -70,6 +84,52 @@ export function buildDashboardRefreshCommand(): DashboardCommand {
 
 export function buildWorkRootOpenCommand(_submittedHostPath: string): DashboardCommand {
   return { commandId: "workRoot.open", payload: { type: "workRoot.open" } };
+}
+
+export function buildRootPickerOpenCommand(): DashboardCommand {
+  return { commandId: "rootPicker.open", payload: { type: "rootPicker.open" } };
+}
+
+export function buildRootPickerCloseCommand(): DashboardCommand {
+  return { commandId: "rootPicker.close", payload: { type: "rootPicker.close" } };
+}
+
+export function buildRootPickerNavigateCommand(_targetPath: string): DashboardCommand {
+  return {
+    commandId: "rootPicker.navigate",
+    payload: { type: "rootPicker.navigate" },
+  };
+}
+
+export function buildRootPickerSelectDirectoryCommand(_targetPath: string): DashboardCommand {
+  return {
+    commandId: "rootPicker.selectDirectory",
+    payload: { type: "rootPicker.selectDirectory" },
+  };
+}
+
+export function buildRootPickerCreateDirectoryCommand(
+  _parentPath: string,
+  _name: string,
+): DashboardCommand {
+  return {
+    commandId: "rootPicker.createDirectory",
+    payload: { type: "rootPicker.createDirectory" },
+  };
+}
+
+export function buildRootPickerPinDirectoryCommand(_path: string): DashboardCommand {
+  return {
+    commandId: "rootPicker.pinDirectory",
+    payload: { type: "rootPicker.pinDirectory" },
+  };
+}
+
+export function buildRootPickerUnpinDirectoryCommand(_path: string): DashboardCommand {
+  return {
+    commandId: "rootPicker.unpinDirectory",
+    payload: { type: "rootPicker.unpinDirectory" },
+  };
 }
 
 export function buildWorkspaceRemoveCommand(workspaceId: string): DashboardCommand {
@@ -202,6 +262,20 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Open workRoot";
     case "workRoot.activation.set":
       return payload.activation === "online" ? "Bring workRoot online" : "Take workRoot offline";
+    case "rootPicker.open":
+      return "Open root picker";
+    case "rootPicker.close":
+      return "Close root picker";
+    case "rootPicker.navigate":
+      return "Navigate root picker";
+    case "rootPicker.selectDirectory":
+      return "Select directory";
+    case "rootPicker.createDirectory":
+      return "Create directory";
+    case "rootPicker.pinDirectory":
+      return "Pin directory";
+    case "rootPicker.unpinDirectory":
+      return "Unpin directory";
     case "fileExplorer.toggleDirectory":
       return "Toggle directory";
     case "fileExplorer.openFile":

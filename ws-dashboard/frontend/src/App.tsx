@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, Key, ReactNode, SetStateAction } from "react";
+import {
+  Dialog,
+  GridList,
+  GridListItem,
+  Heading,
+  Modal,
+  ModalOverlay,
+} from "react-aria-components";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -10,6 +18,13 @@ import {
   buildFileExplorerRefreshCommand,
   buildFileExplorerSelectEntryCommand,
   buildFileExplorerToggleDirectoryCommand,
+  buildRootPickerCloseCommand,
+  buildRootPickerCreateDirectoryCommand,
+  buildRootPickerNavigateCommand,
+  buildRootPickerOpenCommand,
+  buildRootPickerPinDirectoryCommand,
+  buildRootPickerSelectDirectoryCommand,
+  buildRootPickerUnpinDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
   buildWorkspaceRemoveCommand,
@@ -109,6 +124,24 @@ import {
   type WorkspaceView,
 } from "./resourceModel";
 import { requestOpenWorkRoot } from "./openWorkRoot";
+import {
+  createRootPickerDirectory,
+  fetchRootPicker,
+  pinRootPickerDirectory,
+  rootPickerHistoryBack,
+  rootPickerHistoryForward,
+  rootPickerHistoryInitial,
+  rootPickerHistoryPush,
+  rootPickerEntryLabel,
+  rootPickerInsertEntry,
+  rootPickerModifiedTimeLabel,
+  rootPickerPinnedPathSet,
+  rootPickerVisibleEntries,
+  rootPickerVisiblePlaces,
+  unpinRootPickerDirectory,
+  type RootPickerNavigationHistory,
+  type RootPickerView,
+} from "./rootPicker";
 import { ActivityConsole } from "./ActivityConsole";
 import {
   createResourceRefreshCoordinator,
@@ -708,13 +741,124 @@ function OpenWorkRootControl({
   onOpened: (view: DashboardResourcesView, requestedWorkRootId?: string) => void;
   onCommand: DashboardCommandDispatcher;
 }) {
-  const [path, setPath] = useState("");
-  const [pending, setPending] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [pickerView, setPickerView] = useState<RootPickerView | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [addressPath, setAddressPath] = useState("");
+  const [exactPath, setExactPath] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [history, setHistory] = useState<RootPickerNavigationHistory>(() =>
+    rootPickerHistoryInitial(),
+  );
+  const [loading, setLoading] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [pinningPath, setPinningPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const wasOpenRef = useRef(false);
 
-  const submit = async () => {
-    const requestedPath = path.trim();
-    if (requestedPath.length === 0 || pending) {
+  const loadPicker = useCallback(
+    async (path: string | null, historyMode: "push" | "replace" = "push") => {
+      setLoading(true);
+      setError(null);
+      try {
+        const view = await fetchRootPicker(path);
+        setPickerView(view);
+        setSelectedPath(view.currentPath);
+        setAddressPath(view.currentPath);
+        setExactPath(view.currentPath);
+        if (historyMode === "push") {
+          setHistory((current) => rootPickerHistoryPush(current, view.currentPath));
+        }
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : "picker load failed");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!open || pickerView || loading) {
+      return;
+    }
+    void loadPicker(null);
+  }, [loadPicker, loading, open, pickerView]);
+
+  useEffect(() => {
+    if (wasOpenRef.current && !open) {
+      openerRef.current?.focus();
+    }
+    wasOpenRef.current = open;
+  }, [open]);
+
+  const closePicker = () => {
+    onCommand(buildRootPickerCloseCommand(), {
+      "rootPicker.close": () => {
+        setOpen(false);
+      },
+    });
+  };
+
+  const openPicker = () => {
+    onCommand(buildRootPickerOpenCommand(), {
+      "rootPicker.open": () => {
+        setError(null);
+        setOpen(true);
+      },
+    });
+  };
+
+  const navigateTo = (path: string, historyMode: "push" | "replace" = "push") => {
+    onCommand(buildRootPickerNavigateCommand(path), {
+      "rootPicker.navigate": () => {
+        void loadPicker(path, historyMode);
+      },
+    });
+  };
+
+  const selectDirectory = (path: string) => {
+    onCommand(buildRootPickerSelectDirectoryCommand(path), {
+      "rootPicker.selectDirectory": () => {
+        setSelectedPath(path);
+        setExactPath(path);
+      },
+    });
+  };
+
+  const navigateBack = () => {
+    const transition = rootPickerHistoryBack(history);
+    if (!transition.targetPath) {
+      return;
+    }
+    setHistory(transition.history);
+    navigateTo(transition.targetPath, "replace");
+  };
+
+  const navigateForward = () => {
+    const transition = rootPickerHistoryForward(history);
+    if (!transition.targetPath) {
+      return;
+    }
+    setHistory(transition.history);
+    navigateTo(transition.targetPath, "replace");
+  };
+
+  const handleGridSelection = (keys: "all" | Set<Key>) => {
+    if (keys === "all") {
+      return;
+    }
+    const nextPath = Array.from(keys).at(0);
+    if (typeof nextPath === "string") {
+      selectDirectory(nextPath);
+    }
+  };
+
+  const submitPath = (submittedPath: string) => {
+    const requestedPath = submittedPath.trim();
+    if (requestedPath.length === 0 || pendingOpen) {
       return;
     }
 
@@ -722,61 +866,432 @@ function OpenWorkRootControl({
       buildWorkRootOpenCommand(requestedPath),
       {
         "workRoot.open": () => {
-          setPending(true);
+          setPendingOpen(true);
           setError(null);
           void requestOpenWorkRoot(requestedPath)
             .then((result) => {
-              setPath("");
+              setOpen(false);
+              setPickerView(null);
+              setSelectedPath(null);
+              setAddressPath("");
+              setExactPath("");
+              setCreateName("");
+              setHistory(rootPickerHistoryInitial());
               onOpened(result.view, result.openedWorkRootId ?? undefined);
             })
             .catch((nextError) => {
               setError(nextError instanceof Error ? nextError.message : "open failed");
             })
             .finally(() => {
-              setPending(false);
+              setPendingOpen(false);
             });
         },
       },
     );
   };
 
+  const createDirectory = () => {
+    const parentPath = pickerView?.currentPath;
+    const name = createName.trim();
+    if (!parentPath || name.length === 0 || creating) {
+      return;
+    }
+    onCommand(buildRootPickerCreateDirectoryCommand(parentPath, name), {
+      "rootPicker.createDirectory": () => {
+        setCreating(true);
+        setError(null);
+        void createRootPickerDirectory(parentPath, name)
+          .then((entry) => {
+            setPickerView((current) =>
+              current
+                ? {
+                    ...current,
+                    entries: rootPickerInsertEntry(current.entries, entry),
+                  }
+                : current,
+            );
+            setSelectedPath(entry.path);
+            setExactPath(entry.path);
+            setCreateName("");
+          })
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "create failed");
+          })
+          .finally(() => {
+            setCreating(false);
+          });
+      },
+    });
+  };
+
+  const updatePickerPlaces = (places: RootPickerView["places"]) => {
+    setPickerView((current) => (current ? { ...current, places } : current));
+  };
+
+  const pinDirectory = (path: string) => {
+    if (pinningPath) {
+      return;
+    }
+    onCommand(buildRootPickerPinDirectoryCommand(path), {
+      "rootPicker.pinDirectory": () => {
+        setPinningPath(path);
+        setError(null);
+        void pinRootPickerDirectory(path)
+          .then((view) => updatePickerPlaces(view.places))
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "pin failed");
+          })
+          .finally(() => setPinningPath(null));
+      },
+    });
+  };
+
+  const unpinDirectory = (path: string) => {
+    if (pinningPath) {
+      return;
+    }
+    onCommand(buildRootPickerUnpinDirectoryCommand(path), {
+      "rootPicker.unpinDirectory": () => {
+        setPinningPath(path);
+        setError(null);
+        void unpinRootPickerDirectory(path)
+          .then((view) => updatePickerPlaces(view.places))
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "unpin failed");
+          })
+          .finally(() => setPinningPath(null));
+      },
+    });
+  };
+
+  const selectedLabel = selectedPath ? rootPickerEntryLabel(selectedPath) : "None";
+  const selectedEntry = pickerView?.entries.find((entry) => entry.path === selectedPath);
+  const visibleEntries = rootPickerVisibleEntries(pickerView?.entries ?? []);
+  const visiblePlaces = rootPickerVisiblePlaces(pickerView);
+  const pinnedPaths = rootPickerPinnedPathSet(pickerView);
+  const selectedPathIsPinned = selectedPath ? pinnedPaths.has(selectedPath) : false;
+
   return (
-    <form
-      className="open-work-root"
-      aria-label="Open workRoot"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
-      <label className="section-label" htmlFor="open-work-root-path">
-        Open workRoot
-      </label>
+    <div className="open-work-root" aria-label="Open workRoot">
       <div className="open-work-root-row">
-        <input
-          id="open-work-root-path"
-          className="open-work-root-input"
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="/path/to/workRoot"
-          value={path}
-          disabled={pending}
-          onChange={(event) => setPath(event.target.value)}
-        />
+        <div>
+          <div className="section-label">Open workRoot</div>
+          <div className="open-work-root-summary">Choose a directory from this host</div>
+        </div>
         <button
+          ref={openerRef}
           className="action-button action-button-primary"
-          data-command-id="workRoot.open"
-          disabled={pending || path.trim().length === 0}
-          type="submit"
+          data-command-id="rootPicker.open"
+          type="button"
+          onClick={openPicker}
         >
-          {pending ? "Opening" : "Open"}
+          Open...
         </button>
       </div>
-      {error ? (
-        <InlineNotice tone="error" title="Open failed" detail={error} />
-      ) : null}
-    </form>
+      <ModalOverlay
+        className="root-picker-backdrop"
+        isDismissable
+        isOpen={open}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && open) {
+            closePicker();
+          }
+        }}
+      >
+        <Modal className="root-picker-modal">
+          <Dialog aria-label="Open workRoot" className="root-picker-dialog">
+            <div className="root-picker-header">
+              <div className="root-picker-title-block">
+                <Heading className="root-picker-title" slot="title">
+                  Open workRoot
+                </Heading>
+                <div className="root-picker-current" title={pickerView?.currentPath ?? ""}>
+                  {pickerView?.currentPath ?? "Loading host directories"}
+                </div>
+              </div>
+              <button
+                className="action-button"
+                data-command-id="rootPicker.close"
+                type="button"
+                onClick={closePicker}
+              >
+                Close
+              </button>
+            </div>
+
+            <form
+              className="root-picker-toolbar"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (addressPath.trim().length > 0) {
+                  navigateTo(addressPath.trim());
+                }
+              }}
+            >
+              <div className="root-picker-toolbar-buttons">
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={history.backStack.length === 0 || loading}
+                  type="button"
+                  onClick={navigateBack}
+                >
+                  Back
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={history.forwardStack.length === 0 || loading}
+                  type="button"
+                  onClick={navigateForward}
+                >
+                  Forward
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={!pickerView?.parentPath || loading}
+                  type="button"
+                  onClick={() => {
+                    if (pickerView?.parentPath) {
+                      navigateTo(pickerView.parentPath);
+                    }
+                  }}
+                >
+                  Up
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={!pickerView || loading}
+                  type="button"
+                  onClick={() => {
+                    if (pickerView) {
+                      navigateTo(pickerView.currentPath, "replace");
+                    }
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
+              <input
+                aria-label="Address"
+                className="root-picker-input root-picker-address"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={addressPath}
+                onChange={(event) => setAddressPath(event.target.value)}
+              />
+            </form>
+
+            <div className="root-picker-content">
+              <aside className="root-picker-places" aria-label="Known places">
+                <div className="root-picker-places-header">
+                  <div className="root-picker-column-label">Places</div>
+                  <button
+                    className="action-button action-button-compact"
+                    data-command-id={
+                      selectedPathIsPinned
+                        ? "rootPicker.unpinDirectory"
+                        : "rootPicker.pinDirectory"
+                    }
+                    disabled={!selectedPath || Boolean(pinningPath)}
+                    type="button"
+                    onClick={() => {
+                      if (!selectedPath) {
+                        return;
+                      }
+                      if (selectedPathIsPinned) {
+                        unpinDirectory(selectedPath);
+                      } else {
+                        pinDirectory(selectedPath);
+                      }
+                    }}
+                  >
+                    {selectedPathIsPinned ? "Unpin" : "Pin"}
+                  </button>
+                </div>
+                {visiblePlaces.length === 0 ? (
+                  <div className="root-picker-state root-picker-state-compact">
+                    No known places
+                  </div>
+                ) : (
+                  visiblePlaces.map((place) => (
+                    <div
+                      className={`root-picker-place-row ${
+                        place.source === "pin" ? "root-picker-place-row-pinned" : ""
+                      }`}
+                      key={place.id}
+                    >
+                      <button
+                        className="root-picker-place"
+                        data-command-id="rootPicker.navigate"
+                        data-root-picker-place-kind={place.kind}
+                        disabled={!place.available}
+                        title={place.path}
+                        type="button"
+                        onClick={() => navigateTo(place.path)}
+                      >
+                        <span className="root-picker-place-label">{place.label}</span>
+                        <span className="root-picker-place-path">
+                          {place.available ? place.path : "Unavailable"}
+                        </span>
+                      </button>
+                      {place.source === "pin" ? (
+                        <button
+                          aria-label={`Unpin ${place.label}`}
+                          className="root-picker-place-unpin"
+                          data-command-id="rootPicker.unpinDirectory"
+                          disabled={Boolean(pinningPath)}
+                          type="button"
+                          onClick={() => unpinDirectory(place.path)}
+                        >
+                          x
+                        </button>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </aside>
+
+              <section className="root-picker-list-region" aria-label="Current folder">
+                <div className="root-picker-list-heading" aria-hidden="true">
+                  <span>Name</span>
+                  <span>Kind</span>
+                  <span>Modified</span>
+                </div>
+                {loading && !pickerView ? (
+                  <div className="root-picker-state">Loading directories</div>
+                ) : visibleEntries.length === 0 ? (
+                  <div className="root-picker-state">No child directories</div>
+                ) : (
+                  <GridList
+                    aria-label="Directories"
+                    className="root-picker-grid-list"
+                    disabledKeys={visibleEntries
+                      .filter((entry) => !entry.selectable)
+                      .map((entry) => entry.path)}
+                    keyboardNavigationBehavior="arrow"
+                    layout="stack"
+                    onAction={(key) => navigateTo(String(key))}
+                    onSelectionChange={handleGridSelection}
+                    selectedKeys={selectedPath ? new Set([selectedPath]) : new Set()}
+                    selectionBehavior="replace"
+                    selectionMode="single"
+                  >
+                    {visibleEntries.map((entry) => (
+                      <GridListItem
+                        className="root-picker-row"
+                        data-command-id="rootPicker.selectDirectory"
+                        id={entry.path}
+                        key={entry.path}
+                        textValue={entry.name}
+                        onDoubleClick={() => navigateTo(entry.path)}
+                      >
+                        <span className="root-picker-row-icon" aria-hidden="true">
+                          /
+                        </span>
+                        <span className="root-picker-row-name" title={entry.path}>
+                          {entry.name}
+                        </span>
+                        <span className="root-picker-row-kind">
+                          {entry.kindLabel ?? "Directory"}
+                        </span>
+                        <span className="root-picker-row-modified">
+                          {rootPickerModifiedTimeLabel(entry.modifiedTime)}
+                        </span>
+                      </GridListItem>
+                    ))}
+                  </GridList>
+                )}
+              </section>
+            </div>
+
+            {error ? <InlineNotice tone="error" title="Root picker" detail={error} /> : null}
+
+            <div className="root-picker-create">
+              <label className="section-label" htmlFor="root-picker-create-name">
+                Create empty folder
+              </label>
+              <div className="root-picker-create-row">
+                <input
+                  id="root-picker-create-name"
+                  className="root-picker-input"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="folder-name"
+                  value={createName}
+                  onChange={(event) => setCreateName(event.target.value)}
+                />
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.createDirectory"
+                  disabled={!pickerView || createName.trim().length === 0 || creating}
+                  type="button"
+                  onClick={createDirectory}
+                >
+                  {creating ? "Creating" : "Create"}
+                </button>
+              </div>
+            </div>
+
+            <form
+              className="root-picker-footer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitPath(exactPath);
+              }}
+            >
+              <label className="root-picker-selection" htmlFor="root-picker-exact-path">
+                Selected: {selectedLabel}
+              </label>
+              <input
+                id="root-picker-exact-path"
+                className="root-picker-input"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={exactPath}
+                onChange={(event) => setExactPath(event.target.value)}
+              />
+              <div className="root-picker-footer-actions">
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.navigate"
+                  disabled={!selectedEntry || loading}
+                  type="button"
+                  onClick={() => {
+                    if (selectedEntry) {
+                      navigateTo(selectedEntry.path);
+                    }
+                  }}
+                >
+                  Open folder
+                </button>
+                <button
+                  className="action-button action-button-primary"
+                  data-command-id="workRoot.open"
+                  disabled={exactPath.trim().length === 0 || pendingOpen}
+                  type="submit"
+                >
+                  {pendingOpen ? "Opening" : "Open"}
+                </button>
+                <button
+                  className="action-button"
+                  data-command-id="rootPicker.close"
+                  type="button"
+                  onClick={closePicker}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+    </div>
   );
 }
 
