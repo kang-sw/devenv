@@ -7,9 +7,22 @@
   --ws-color-panel-selected: #102744;
   --ws-color-panel-inset: #0c0f14;
   --ws-color-panel-code: #080a0d;
+  --ws-color-surface-app: var(--ws-color-canvas);
+  --ws-color-surface-region-nav: #11161d;
+  --ws-color-surface-region-workbench: #151a23;
+  --ws-color-surface-context: #171d27;
+  --ws-color-surface-context-raised: #1a202a;
+  --ws-color-surface-pane: #141923;
+  --ws-color-surface-pane-body: #0f141b;
+  --ws-color-surface-document-chrome: #111720;
+  --ws-color-split-gutter: #090c11;
   --ws-color-border-subtle: #252c37;
   --ws-color-border: #333b49;
   --ws-color-border-strong: #596273;
+  --ws-color-divider-local: #202733;
+  --ws-color-divider-context: #303947;
+  --ws-color-divider-structural: #445064;
+  --ws-color-split-gutter-highlight: #354052;
   --ws-color-text-primary: #f4f4f4;
   --ws-color-text-secondary: #c6c6c6;
   --ws-color-text-tertiary: #a8a8a8;
@@ -56,6 +69,8 @@
   --ws-space-10: 16px;
   --ws-border-width-hairline: 1px;
   --ws-border-width-state-rail: 3px;
+  --ws-border-width-structural: 1px;
+  --ws-split-gutter-size: 4px;
   --ws-radius-square: 0;
   --ws-focus-ring: 2px solid var(--ws-color-focus);
 
@@ -152,8 +167,8 @@ button {
 .ws-panel {
   min-width: 0;
   overflow: hidden;
-  border-right: var(--ws-border-width-hairline) solid var(--ws-color-border);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  border-right: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
   background: var(--ws-color-panel);
 }
 
@@ -169,8 +184,8 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: var(--ws-space-08);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
+  background: var(--ws-color-surface-context-raised);
 }
 
 .ws-control-button {
@@ -275,21 +290,19 @@ button {
      scrolls inside its own pane instead of growing the document. */
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(248px, 316px) minmax(380px, 1fr) minmax(248px, 336px);
-  border-top: var(--ws-border-width-hairline) solid var(--ws-color-border);
-  border-left: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  gap: var(--ws-split-gutter-size);
+  border-top: var(--ws-border-width-structural) solid var(--ws-color-divider-structural);
+  background: var(--ws-color-split-gutter);
 }
 
 .shell-panel {
   min-width: 0;
   overflow: hidden;
-  border-right: var(--ws-border-width-hairline) solid var(--ws-color-border);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
   background: var(--ws-color-panel);
 }
 
-.shell-panel-nav,
-.shell-panel-viewer {
-  background: var(--ws-color-panel-subtle);
+.shell-panel-nav {
+  background: var(--ws-color-surface-region-nav);
 }
 
 .shell-panel-nav {
@@ -300,6 +313,10 @@ button {
 
 .shell-panel-main {
   background: var(--ws-color-panel);
+}
+
+.shell-panel-viewer {
+  background: var(--ws-color-panel-subtle);
 }
 
 .panel-header {
@@ -1393,7 +1410,7 @@ button {
 
 .shell-panel-workbench {
   min-height: 0;
-  background: var(--ws-color-panel);
+  background: var(--ws-color-surface-region-workbench);
 }
 
 .workbench-shell {
@@ -1401,7 +1418,7 @@ button {
   height: 100%;
   min-height: 0;
   flex-direction: column;
-  background: var(--ws-color-panel);
+  background: var(--ws-color-surface-region-workbench);
 }
 
 .workbench-toolbar {
@@ -1410,8 +1427,8 @@ button {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--ws-space-04) var(--ws-space-09);
   align-items: center;
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
+  background: var(--ws-color-surface-context-raised);
   padding: var(--ws-space-06) var(--ws-space-08) var(--ws-space-06) var(--ws-space-09);
 }
 
@@ -1479,8 +1496,14 @@ button {
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
-  border-top: var(--ws-border-width-hairline) solid var(--ws-color-border);
-  background: var(--ws-color-panel);
+  border-top: var(--ws-split-gutter-size) solid var(--ws-color-split-gutter);
+  background: var(--ws-color-split-gutter);
+  --dv-sash-color: color-mix(in srgb, var(--ws-color-split-gutter) 82%, transparent);
+  --dv-active-sash-color: var(--ws-color-split-gutter-highlight);
+  --dv-separator-border: var(--ws-color-split-gutter-highlight);
+  --dv-tab-divider-color: var(--ws-color-divider-local);
+  --dv-group-view-background-color: var(--ws-color-surface-context);
+  --dv-tabs-and-actions-container-background-color: var(--ws-color-surface-context-raised);
 }
 
 .dockview-workbench-layout .dv-dockview {
@@ -1490,19 +1513,21 @@ button {
 }
 
 .dockview-workbench-layout .dv-groupview {
-  background: var(--ws-color-panel);
+  background: var(--ws-color-surface-context);
+  box-shadow: inset 0 0 0 var(--ws-border-width-hairline)
+    color-mix(in srgb, var(--ws-color-divider-context) 78%, transparent);
 }
 
 .dockview-workbench-layout .dv-tabs-and-actions-container {
-  background: var(--ws-color-panel-subtle);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  background: var(--ws-color-surface-context-raised);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
 }
 
 .dockview-workbench-layout .dv-tab {
   margin: 0;
   padding: 0;
   border-radius: 0;
-  border-right: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  border-right: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
 }
 
 .dockview-workbench-layout .dv-tab:has(.dockview-workbench-tab-active) {
@@ -1544,7 +1569,7 @@ button {
   min-width: 0;
   min-height: 0;
   grid-template-rows: minmax(0, 1fr);
-  background: var(--ws-color-panel);
+  background: var(--ws-color-surface-pane);
 }
 
 .workbench-pane-header {
@@ -1553,8 +1578,8 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
+  background: var(--ws-color-surface-context-raised);
   padding: var(--ws-space-08) var(--ws-space-09);
 }
 
@@ -1578,6 +1603,7 @@ button {
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  background: var(--ws-color-surface-pane-body);
   padding: var(--ws-space-09);
 }
 
@@ -1601,8 +1627,8 @@ button {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  border-top: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
+  border-top: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
+  background: var(--ws-color-surface-context-raised);
   color: var(--ws-color-text-tertiary);
   padding: 4px 10px;
   font-size: var(--ws-font-size-01);
@@ -1619,6 +1645,7 @@ button {
   display: flex;
   min-height: 0;
   flex-direction: column;
+  background: var(--ws-color-surface-pane);
 }
 
 .readonly-text-pane-header {
@@ -1626,8 +1653,8 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--ws-space-08);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-inset);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
+  background: var(--ws-color-surface-document-chrome);
   padding: var(--ws-space-07) var(--ws-space-08);
 }
 
@@ -1953,6 +1980,7 @@ button {
 
 .workbench-pane[data-surface-kind="editor"] .readonly-text-pane {
   flex: 1 1 auto;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ws-color-divider-local) 80%, transparent);
 }
 
 .workbench-pane[data-surface-kind="editor"] .readonly-text-content {
@@ -2381,20 +2409,20 @@ button {
 .open-work-root,
 .resource-list-region,
 .file-explorer {
-  background: var(--ws-color-panel-inset);
+  background: var(--ws-color-surface-pane-body);
 }
 
 .open-work-root,
 .resource-list-region {
-  border-bottom-color: var(--ws-color-border);
+  border-bottom-color: var(--ws-color-divider-context);
 }
 
 .file-explorer {
-  border-top: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  border-top: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
 }
 
 .file-explorer-header {
-  background: var(--ws-color-panel-subtle);
+  background: var(--ws-color-surface-context);
 }
 
 .file-explorer-icon {
@@ -2412,7 +2440,7 @@ button {
 
 .resource-row {
   grid-template-columns: minmax(0, 1fr) auto;
-  background: var(--ws-color-panel-subtle);
+  background: var(--ws-color-surface-context);
   margin-bottom: var(--ws-space-03);
   min-height: 38px;
   padding-top: var(--ws-space-04);

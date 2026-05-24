@@ -262,6 +262,55 @@ async function expectDockviewWorkbench(page: Page) {
   ).toHaveCount(0);
 }
 
+async function expectContextSurfaceHierarchy(page: Page) {
+  const hierarchy = await page.evaluate(() => {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const navStyle = getComputedStyle(document.querySelector(".shell-panel-nav")!);
+    const workbenchStyle = getComputedStyle(
+      document.querySelector(".shell-panel-workbench")!,
+    );
+    const toolbarStyle = getComputedStyle(document.querySelector(".workbench-toolbar")!);
+    const layoutStyle = getComputedStyle(
+      document.querySelector(".dockview-workbench-layout")!,
+    );
+    const tabbarStyle = getComputedStyle(
+      document.querySelector(".dv-tabs-and-actions-container")!,
+    );
+    const paneBodyStyle = getComputedStyle(
+      document.querySelector(".workbench-pane-body")!,
+    );
+
+    return {
+      navBackground: navStyle.backgroundColor,
+      workbenchBackground: workbenchStyle.backgroundColor,
+      toolbarBackground: toolbarStyle.backgroundColor,
+      toolbarDivider: toolbarStyle.borderBottomColor,
+      dockviewBorderTopWidth: layoutStyle.borderTopWidth,
+      dockviewBackground: layoutStyle.backgroundColor,
+      tabbarBackground: tabbarStyle.backgroundColor,
+      tabbarDivider: tabbarStyle.borderBottomColor,
+      paneBodyBackground: paneBodyStyle.backgroundColor,
+      localDivider: rootStyle.getPropertyValue("--ws-color-divider-local").trim(),
+      contextDivider: rootStyle.getPropertyValue("--ws-color-divider-context").trim(),
+      structuralDivider: rootStyle
+        .getPropertyValue("--ws-color-divider-structural")
+        .trim(),
+      splitGutter: rootStyle.getPropertyValue("--ws-color-split-gutter").trim(),
+      splitGutterSize: rootStyle.getPropertyValue("--ws-split-gutter-size").trim(),
+    };
+  });
+
+  expect(hierarchy.navBackground).not.toBe(hierarchy.workbenchBackground);
+  expect(hierarchy.toolbarBackground).not.toBe(hierarchy.paneBodyBackground);
+  expect(hierarchy.tabbarBackground).not.toBe(hierarchy.paneBodyBackground);
+  expect(hierarchy.toolbarDivider).not.toBe(hierarchy.tabbarDivider);
+  expect(hierarchy.localDivider).not.toBe(hierarchy.contextDivider);
+  expect(hierarchy.contextDivider).not.toBe(hierarchy.structuralDivider);
+  expect(hierarchy.dockviewBorderTopWidth).toBe(hierarchy.splitGutterSize);
+  expect(hierarchy.dockviewBackground).not.toBe(hierarchy.paneBodyBackground);
+  expect(hierarchy.splitGutter).toBeTruthy();
+}
+
 async function expectDurableDockviewSplitDrop(
   page: Page,
 ): Promise<{ paneId: string; groupId: string }> {
@@ -496,9 +545,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(compactRow).toHaveAttribute("title", /directory/);
     await expect(compactRow).toHaveAttribute("title", /availability: available/);
     await expect(compactRow).toHaveAttribute("title", /activation: online/);
+    await expectContextSurfaceHierarchy(page);
     note(
       "open workRoot: live opened workRoot is selected, shown in the explorer, " +
         "and rendered as one compact workRoot nav row",
+    );
+    note(
+      "visual hierarchy: nav, workbench topbar, Dockview group, tabbar, and pane body use distinct context surface/divider roles",
     );
   });
 
