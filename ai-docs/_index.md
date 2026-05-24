@@ -149,7 +149,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
-| `260524-feat-ws-dashboard-visual-building-blocks-first-pass` | todo | Define dashboard visual building blocks and apply a first pass to high-impact UI surfaces |
+| `260524-feat-ws-dashboard-visual-building-blocks-first-pass` | ready | Define dashboard visual building blocks and apply a first pass to high-impact UI surfaces |
 | `260524-feat-ws-dashboard-document-viewer-editor-substrate` | todo | Add a reusable markdown document viewer, translation-ready block model, panel-local edit mode, and save fan-out contract |
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
@@ -178,7 +178,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-No ready tickets currently queued.
+- `260524-feat-ws-dashboard-visual-building-blocks-first-pass` - Ready visual system first pass; preserves dashboard behavior while applying reusable visual building blocks to high-impact UI surfaces.
 
 ## Session Notes
 
