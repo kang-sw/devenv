@@ -5,6 +5,8 @@ related:
   260523-feat-ws-dashboard-linked-worktree-discovery: created worktrees should appear through the existing linked-worktree discovery projection
   260524-feat-ws-dashboard-workspace-forget-remove-ui: workspace remove moves behind the same overflow menu
   260523-feat-ws-dashboard-workroot-registry-activation: created worktrees should reuse durable workspace/workRoot activation and availability
+spec:
+  - 260524-ws-dashboard-git-worktree-creation
 related-mental-model:
   - ws-web-dashboard
 ---

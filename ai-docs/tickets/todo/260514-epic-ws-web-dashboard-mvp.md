@@ -94,7 +94,7 @@ Active or planned product tracks:
   registry/root-picker/workspace policies into practical owner operations for
   managing active, unavailable, linked, remembered, pinned, and recoverable
   workRoots without turning the picker into a generic file manager.
-  `260524-feat-ws-dashboard-add-git-worktree-ui` is the first planned slice:
+  `260524-feat-ws-dashboard-add-git-worktree-ui` is the first ready slice:
   move workspace removal behind an overflow menu and add Git worktree creation
   with daemon-resolved branch/path preview.
   `260524-feat-ws-dashboard-git-aware-workroot-toolbar` is the companion
