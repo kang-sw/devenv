@@ -9,6 +9,7 @@ related-mental-model:
   - plugin-runtime
 spec:
   - 260524-mcp-actor-setup-bootstrap
+completed: 2026-05-24
 ---
 
 # MCP actor setup bootstrap
@@ -79,3 +80,19 @@ instance, root guidance that uses absolute paths or `"<cwd>"`, id-less setup not
 minting lead authority, setup-gated calls before setup, compatibility with
 existing root-omitted tool behavior, and Windows coverage for the same setup and
 recovery paths.
+
+### Result (0f605a0) - 2026-05-24
+
+Implemented cooperative lead actor setup through `ws.setup(method:
+"lead-workflow-bootstrap", root: "<cwd>" or absolute path)` and recovery through
+`ws.setup(id: "<actor-id>")`. Actor rows are persisted in the root/worktree
+SQLite state store, setup output includes actor and recovery guidance, and
+root-omitted `agents.register`, `agents.call`, and `subquery` are setup-gated
+unless a hidden explicit-root compatibility argument is supplied.
+
+The implementation keeps root-only `ws.setup(root)` as volatile compatibility
+state, preserves explicit-root agent compatibility during migration, and updates
+the lead workflow manual, wsflow setup guidance, runtime reference, spec, and
+mental models. Verification covered local `go test ./...`, wsflow package
+tests, spec index validation, `git diff --check`, and Windows remote
+`go test ./internal/wsstore ./internal/wsstate ./internal/mcp`.

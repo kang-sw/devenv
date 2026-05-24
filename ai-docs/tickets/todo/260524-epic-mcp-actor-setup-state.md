@@ -47,7 +47,7 @@ The epic owns decomposition for:
 
 - `260524-feat-mcp-actor-setup-bootstrap` - introduce cooperative actor setup,
   lead bootstrap, setup recovery, setup-required tool gating, and minimal
-  root-aware actor persistence.
+  root-aware actor persistence. Done in `0f605a0`.
 - `260524-feat-mcp-child-actor-bootstrap` - create child actor ids for delegated
   agent calls and inject setup recovery instructions into child system prompts.
 - `260524-feat-mcp-state-store-prune` - introduce the SQLite metadata store,
