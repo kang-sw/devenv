@@ -25,6 +25,19 @@ persisting daemon-private file content. Restored panes re-read through the
 authenticated file API, so deleted, binary, oversized, unreadable, or moved
 files degrade through the normal read-only file pane unavailable/error states.
 
+## Decisions
+
+- Restore file panes quietly after browser refresh or daemon restart. Do not
+  use toast-style global alerts for every pane restore failure.
+- Keep failed restores pane-local: the tab/pane may come back, but its body
+  shows the normal bounded unavailable or error state for missing, unreadable,
+  binary, oversized, or moved files.
+- Do not force selected workRoot changes during restore. A restored pane remains
+  owned by the workRoot in its descriptor.
+- Preserve current preview and pinned semantics exactly: one replaceable preview
+  per workRoot, pinned panes keyed by workRoot-relative path, and
+  preview-to-pinned removal of the matching preview pane.
+
 ## Phases
 
 ### Phase 1: Restore read-only file pane descriptors
@@ -40,6 +53,10 @@ file explorer interactions so future keyboard bindings can target the same
 behavior. Duplicate preview and pinned semantics must remain intact: one
 replaceable preview per workRoot, pinned panes keyed by file path, and
 preview-to-pinned removal of the matching preview pane.
+
+Restore failures should use pane-local unavailable/error rendering rather than
+global notification fan-out. Restoring a pane must not change the selected
+workRoot merely because the pane belongs to another root.
 
 Verification should cover pure descriptor storage, stale/missing file
 degradation, duplicate preview/pinned behavior after restore, and browser-level

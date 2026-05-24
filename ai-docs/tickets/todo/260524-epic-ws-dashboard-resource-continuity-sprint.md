@@ -52,15 +52,13 @@ The sprint scope includes:
 - `260523-feat-ws-dashboard-readonly-file-pane-restore` - todo; restore
   browser-visible read-only file panes after refresh or daemon restart without
   persisting file contents or absolute host paths.
-- `260523-feat-ws-dashboard-linked-worktree-discovery` - idea; promote when
-  ready to add Git linked worktrees as child workRoots instead of independent
-  workspaces.
-- `260523-feat-ws-dashboard-tool-output-safe-summary` - idea; promote when the
-  bounded head/tail rendering policy is concrete enough to improve transcript
-  inspection without freezing the browser.
-- `260524-feat-ws-dashboard-workspace-forget-remove-ui` - idea; promote when
-  the explicit workspace cleanup UX can build on the root-prune policy and
-  linked-worktree discovery behavior.
+- `260523-feat-ws-dashboard-linked-worktree-discovery` - todo; add Git linked
+  worktrees as child workRoots instead of independent workspaces.
+- `260523-feat-ws-dashboard-tool-output-safe-summary` - todo; show bounded
+  head/tail tool-output snippets for authenticated owners.
+- `260524-feat-ws-dashboard-workspace-forget-remove-ui` - todo; add explicit
+  workspace cleanup UX on top of the root-prune policy and linked-worktree
+  discovery behavior.
 
 ## Cross-Child Decisions
 

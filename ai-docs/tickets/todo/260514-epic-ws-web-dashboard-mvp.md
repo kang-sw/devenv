@@ -153,9 +153,9 @@ The MVP should cover:
   broader persistence backlog for selected resources, file explorer state,
   workbench layout, Activity Console acknowledgement/scroll state, command
   preferences, chrome preferences, and privacy-sensitive root-picker history.
-- `260523-feat-ws-dashboard-linked-worktree-discovery` - idea; discover linked
+- `260523-feat-ws-dashboard-linked-worktree-discovery` - todo; discover linked
   Git worktrees as child workRoots under owner-managed workspace roots.
-- `260524-feat-ws-dashboard-workspace-forget-remove-ui` - idea; add explicit
+- `260524-feat-ws-dashboard-workspace-forget-remove-ui` - todo; add explicit
   workspace owner forget/remove controls separate from automatic
   empty-workspace pruning and child workRoot projection.
 

@@ -46,6 +46,13 @@ derive a replacement workspace.
   active, the workspace stays visible as disabled or recovery-needed. That state
   is room for reconnecting the root or deriving a new workspace from a dangling
   child; it is not a normal active workspace.
+- Disabled or recovery-needed workspaces remain visible and selectable in the
+  left navigation, but ordinary file, terminal, and Activity operations target
+  only active child workRoots.
+- Automatic pruning does not ask for confirmation because it is not a
+  user-initiated destructive action. If the selected workspace/workRoot is
+  pruned, browser selection reconciles to the next available workRoot, or to the
+  server/root empty state when none remains.
 - Explicit workspace forget/remove UI remains separate. Automatic pruning of
   empty workspaces must not become a broad filesystem delete operation and must
   not replace high-friction owner cleanup controls for workspace roots.
@@ -80,6 +87,8 @@ activation responses should apply the settled policy:
 - disabled or recovery-needed workspaces remain selectable enough for recovery
   affordances, but ordinary workRoot operations still target only online and
   available workRoots.
+- pruning reconciles stale browser selections and dependent workbench state
+  without prompting the user.
 - linked or dangling child workRoots must not silently become independent
   workspaces without an explicit future derive/promote operation.
 - explicit workspace forget/remove UI remains out of scope for this phase, and

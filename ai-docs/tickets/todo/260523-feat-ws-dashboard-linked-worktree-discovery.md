@@ -44,6 +44,9 @@ Agreed direction:
 - Treat linked worktrees as child workRoots derived from the workspace root
   workRoot. They should not become independent workspaces unless a later
   explicit derive/promote operation creates a new owner-managed workspace.
+- Do not expose Git `prunable` as a first-class public availability value.
+  Surface it, if needed, as bounded degraded detail under an unavailable or
+  missing state.
 - Recompute current availability and classification from filesystem/Git on
   explicit refresh and bounded polling. Git discovery determines the sibling
   worktree set; filesystem access determines whether each child workRoot is
@@ -66,10 +69,26 @@ Agreed direction:
   workRoots are visible while their owning workspace remains visible, but the
   workspace root policy may automatically prune a workspace when it has no
   active workRoots.
+- Externally added linked worktrees appear on explicit refresh or bounded
+  polling. Externally removed worktrees disappear from the child projection when
+  Git no longer reports them and the filesystem is not usable. Workspace pruning
+  still depends only on the workspace's overall active workRoot count.
 
-Open questions:
+## Phases
 
-- How frequently should bounded polling refresh selected, online, offline, and
-  large workRoot sets?
-- How should externally removed child workRoots interact with the new root
-  policy when the workspace still has other active workRoots?
+### Phase 1: Discover linked worktrees as child workRoots
+
+Extend the live resource refresh path so Git repositories can discover linked
+worktrees through `git worktree list --porcelain`, then present those entries
+as child workRoots under the owner-managed workspace root.
+
+Discovery should avoid broad filesystem crawling and should not create
+independent workspaces. Public state should keep the existing `workRoot`
+vocabulary, derive availability from current filesystem/Git access, and keep
+Git-specific details such as `prunable` bounded behind broader unavailable or
+missing states.
+
+Verification should cover primary-root discovery, linked-worktree discovery,
+external addition, external removal, no direct child forget/remove action,
+workspace prune interaction through active workRoot count, and no host-path or
+Git-metadata path leakage.

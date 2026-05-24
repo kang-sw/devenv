@@ -37,8 +37,21 @@ turning the transcript into an unbounded payload dump.
 - Apply one generic bounded rendering policy first. Tool-type-specific polish
   can come later only when a concrete type needs different display treatment.
 
-## Open Questions
+## Phases
 
-- What exact byte and line caps should apply before head/tail splitting?
-- Should expanded view keep the same head/tail policy with a larger cap, or add
-  a local owner-only raw detail mode later?
+### Phase 1: Render bounded tool output snippets
+
+Replace content-free Codex tool-output placeholders with authenticated-owner
+snippets that show the first 10 lines and last 10 lines when output exceeds the
+inline budget. Include a clear omitted-middle marker with bounded line and/or
+byte counts.
+
+The first implementation should use one generic rendering policy across MCP,
+shell, patch, and generic function outputs. Expanded detail may use the same
+head/tail policy with a larger bounded cap; unlimited raw output remains out of
+scope.
+
+Verification should cover short output, long output with omitted-middle
+metadata, empty output, non-text or malformed payload degradation, hidden
+internal storage/session identifiers, and browser rendering that remains bounded
+for large transcript blocks.

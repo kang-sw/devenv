@@ -157,11 +157,11 @@ dropped tickets live in hidden archive dirs and git history.
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260519-feat-implement-branch-squash-gate` | todo | Add a pre-merge implementation-branch squash gate for cleaner main history |
 | `260520-refactor-lead-skill-cascade` | todo | Prune lead skill procedural sophistication via skill-authoring doctrine cascade (R3'/R6 phased, R1/R2/R4/R5 batched) |
+| `260523-feat-ws-dashboard-tool-output-safe-summary` | todo | Show bounded head/tail snippets for Codex tool output transcript blocks |
+| `260523-feat-ws-dashboard-linked-worktree-discovery` | todo | Discover linked Git workRoots through the durable registry |
+| `260524-feat-ws-dashboard-workspace-forget-remove-ui` | todo | Add explicit dashboard workspace forget/remove UI |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
-| `260523-feat-ws-dashboard-tool-output-safe-summary` | idea | Show bounded head/tail snippets for Codex tool output transcript blocks |
-| `260523-feat-ws-dashboard-linked-worktree-discovery` | idea | Discover linked Git workRoots through the durable registry |
-| `260524-feat-ws-dashboard-workspace-forget-remove-ui` | idea | Add explicit dashboard workspace forget/remove UI |
 | `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
 | `260512-research-gemini-cli-stream-json` | idea | Capture Gemini CLI headless stream-json contract |
