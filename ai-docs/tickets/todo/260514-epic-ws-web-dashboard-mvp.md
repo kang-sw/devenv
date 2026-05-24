@@ -97,6 +97,9 @@ Active or planned product tracks:
   registry/root-picker/workspace policies into practical owner operations for
   managing active, unavailable, linked, remembered, pinned, and recoverable
   workRoots without turning the picker into a generic file manager.
+  `260524-feat-ws-dashboard-add-git-worktree-ui` is the first planned slice:
+  move workspace removal behind an overflow menu and add Git worktree creation
+  with daemon-resolved branch/path preview.
 - Agent view panel - planned child track. Promote read-only Activity Console
   foundations into a dedicated agent-oriented panel for named-agent/main-
   session/subtask visibility while keeping control actions such as interrupt,
