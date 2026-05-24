@@ -164,6 +164,22 @@ The MVP should cover:
 - `260524-feat-ws-dashboard-react-aria-root-picker-pilot` - done; rework the
   local root picker modal into a React Aria explorer-style folder picker while
   preserving the dashboard command and open-workRoot contracts.
+- `260524-feat-ws-dashboard-visual-building-blocks-first-pass` - done; define
+  reusable dashboard-local visual building blocks and apply a first pass to the
+  left nav, workbench chrome, Activity Console, and read-only/document pane
+  without changing behavior.
+- `260524-feat-ws-dashboard-nav-topbar-icon-polish` - done; reduce dashboard
+  chrome clutter by applying icon-first left navigation, file explorer, and
+  topbar polish while preserving command behavior and leaving main pane bodies
+  alone.
+- `260524-feat-ws-dashboard-icon-chrome-refinement` - done; refine the
+  icon-first chrome pass after screenshot review by fixing compact glyph
+  overlap, removing ready chips from nav rows, tuning power/menu/chip state
+  treatment, and moving icon buttons toward quiet hover-revealed chrome.
+- `260524-feat-ws-dashboard-context-surface-hierarchy` - done; clarified the
+  visual hierarchy between navigation, workRoot topbar, Dockview split groups,
+  editor/document shells, local dividers, and pane bodies without changing
+  dashboard behavior or reintroducing heavy boxed controls.
 - `260524-feat-ws-dashboard-document-viewer-editor-substrate` - todo; add a
   reusable markdown document viewer substrate, translation-ready block model,
   panel-local view/edit mode, raw-text editing boundary, and same-document save

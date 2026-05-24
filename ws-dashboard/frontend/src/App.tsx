@@ -1,6 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, Dispatch, Key, ReactNode, SetStateAction } from "react";
 import {
+  Activity,
+  BriefcaseBusiness,
+  CirclePower,
+  Eye,
+  File,
+  Folder,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
+  LayoutPanelTop,
+  ListTodo,
+  MoreHorizontal,
+  PanelsTopLeft,
+  RefreshCw,
+  SquareTerminal,
+  Stethoscope,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
+import {
   Dialog,
   GridList,
   GridListItem,
@@ -630,7 +650,7 @@ export function App() {
   return (
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
-        <aside className="shell-panel shell-panel-nav" aria-label="Resources">
+        <aside className="shell-panel shell-panel-nav ws-panel" aria-label="Resources">
           <PanelHeader
             title={resources?.server.label ?? "ws dashboard"}
             state={resources?.server.state}
@@ -654,7 +674,7 @@ export function App() {
         </aside>
 
         <section
-          className="shell-panel shell-panel-workbench"
+          className="shell-panel shell-panel-workbench ws-panel"
           aria-label="WorkRoot workbench"
         >
           <WorkbenchShell
@@ -681,6 +701,72 @@ export function App() {
   );
 }
 
+function ChromeIconButton({
+  icon: Icon,
+  label,
+  className = "",
+  commandId,
+  disabled = false,
+  tone = "default",
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  className?: string;
+  commandId: string;
+  disabled?: boolean;
+  tone?: "default" | "primary" | "danger";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className={`icon-button icon-button-${tone} ${className}`.trim()}
+      data-command-id={commandId}
+      disabled={disabled}
+      title={label}
+      type="button"
+      onClick={onClick}
+    >
+      <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
+    </button>
+  );
+}
+
+function ResourceGlyph({
+  presentation,
+}: {
+  presentation: "compactWorkRoot" | "workspace" | "workRoot";
+}) {
+  if (presentation === "compactWorkRoot") {
+    return (
+      <span
+        className="resource-row-icon resource-row-icon-compact"
+        aria-hidden="true"
+      >
+        <FolderOpen size={15} strokeWidth={1.8} />
+      </span>
+    );
+  }
+
+  const Icon = presentation === "workspace" ? BriefcaseBusiness : FolderGit2;
+  return (
+    <span className="resource-row-icon" aria-hidden="true">
+      <Icon size={15} strokeWidth={1.8} />
+    </span>
+  );
+}
+
+function WorkRootKindIcon({ kind }: { kind: WorkRootView["kind"] }) {
+  const Icon = kind === "plainDirectory" ? Folder : kind === "gitLinkedWorktree" ? GitBranch : FolderGit2;
+  return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
+}
+
+function ToggleIcon({ toggle }: { toggle: WorkbenchToggle }) {
+  const Icon = workbenchToggleIcon(toggle);
+  return <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
+}
+
 function PanelHeader({
   title,
   state,
@@ -695,7 +781,7 @@ function PanelHeader({
   onCommand?: DashboardCommandDispatcher;
 }) {
   return (
-    <div className="panel-header">
+    <div className="panel-header ws-toolbar">
       <div className="panel-title-block">
         <div className="panel-title">{title}</div>
         {state ? <StateLine state={state} /> : null}
@@ -703,17 +789,16 @@ function PanelHeader({
       {actions.length > 0 && onCommand ? (
         <div className="action-strip">
           {actions.map((action) => (
-            <button
-              className="action-button"
-              data-command-id={
+            <ChromeIconButton
+              commandId={
                 action.id === "refresh"
                   ? "dashboard.refresh"
                   : `resource.action.${action.id}`
               }
               disabled={!action.enabled}
+              icon={action.id === "refresh" ? RefreshCw : PanelsTopLeft}
               key={action.id}
-              title={action.label}
-              type="button"
+              label={action.label}
               onClick={() =>
                 onCommand(
                   action.id === "refresh"
@@ -724,9 +809,7 @@ function PanelHeader({
                       },
                 )
               }
-            >
-              {action.label}
-            </button>
+            />
           ))}
         </div>
       ) : null}
@@ -980,12 +1063,14 @@ function OpenWorkRootControl({
         </div>
         <button
           ref={openerRef}
-          className="action-button action-button-primary"
+          aria-label="Open workRoot"
+          className="icon-button icon-button-primary"
           data-command-id="rootPicker.open"
+          title="Open workRoot"
           type="button"
           onClick={openPicker}
         >
-          Open...
+          <FolderOpen aria-hidden="true" size={15} strokeWidth={1.8} />
         </button>
       </div>
       <ModalOverlay
@@ -1557,14 +1642,13 @@ function WorkRootFileExplorer({
             {workRoot.label}
           </div>
         </div>
-        <button
-          className="action-button file-explorer-refresh"
-          data-command-id="fileExplorer.refresh"
-          type="button"
+        <ChromeIconButton
+          className="file-explorer-refresh"
+          commandId="fileExplorer.refresh"
+          icon={RefreshCw}
+          label="Refresh files"
           onClick={refreshExplorer}
-        >
-          Refresh
-        </button>
+        />
       </div>
       <div
         className="file-explorer-body"
@@ -1672,6 +1756,13 @@ function FileExplorerRow({
     >
       <span className="file-explorer-twisty" aria-hidden="true">
         {isDirectory ? (expanded ? "▾" : "▸") : ""}
+      </span>
+      <span className="file-explorer-icon" aria-hidden="true">
+        {isDirectory ? (
+          <Folder size={14} strokeWidth={1.8} />
+        ) : (
+          <File size={14} strokeWidth={1.8} />
+        )}
       </span>
       <span className="file-explorer-name">
         {entry.name}
@@ -2847,6 +2938,8 @@ function WorkbenchClosePopover({
   );
 }
 
+type WorkbenchToggle = "viewer" | "task" | "diagnostics" | "events" | "layout";
+
 function WorkbenchToolbar({
   server,
   workspace,
@@ -2868,105 +2961,173 @@ function WorkbenchToolbar({
   onOpenActivity: () => void;
   onCreateTerminal: () => void;
 }) {
-  const toggles = [
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const toggles: WorkbenchToggle[] = [
     "viewer",
     "task",
     "diagnostics",
     "events",
     "layout",
-  ] as const;
+  ];
+  const actions = toolbarActions(root, selectedEntity);
+  const activationAction = actions.find((entry) => activationForAction(entry.action.id));
+  const activation = activationAction
+    ? activationForAction(activationAction.action.id)
+    : null;
+  const openRootAction = actions.find(({ action }) =>
+    action.id === "openRoot" || action.id === "reconnect",
+  );
+  const secondaryActions = actions.filter(
+    ({ action }) =>
+      !activationForAction(action.id) &&
+      action.id !== "openRoot" &&
+      action.id !== "reconnect",
+  );
+  const rootMetadataTitle = [
+    kindLabel(root.kind),
+    `availability: ${root.availability}`,
+    `activation: ${root.activation}`,
+    commandLog[0] ? `last: ${commandLog[0].commandId}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const runResourceAction = (action: ActionHint, entityId: string) => {
+    onCommand({
+      commandId: `resource.action.${action.id}`,
+      payload: { type: "action", label: action.label, entityId },
+    });
+  };
 
   return (
-    <div className="workbench-toolbar">
-      <div className="workbench-breadcrumb" aria-label="Workbench breadcrumb">
-        <span>{server.label}</span>
-        <span>{workspace.label}</span>
-        <strong>{root.label}</strong>
-      </div>
-      <div className="workbench-toolbar-meta">
-        <StateBadge state={root.state} />
-        <WorkbenchActivityBadge
-          activity={activity}
-          onOpenActivity={() => {
-            onCommand(
-              buildWorkbenchOpenActivityCommand(root.id),
-              { "workbench.openActivity": onOpenActivity },
-            );
-          }}
-        />
-        <span className="meta-chip">{kindLabel(root.kind)}</span>
-        <span className="meta-chip">availability: {root.availability}</span>
-        <span className="meta-chip">activation: {root.activation}</span>
-        {commandLog[0] ? (
-          <span className="meta-chip">last: {commandLog[0].commandId}</span>
-        ) : null}
+    <div
+      className="workbench-toolbar ws-toolbar"
+      data-last-command-id={commandLog[0]?.commandId ?? ""}
+    >
+      <ChromeIconButton
+        className={`workbench-power-button workbench-power-button-${root.activation}`}
+        commandId="workRoot.activation.set"
+        disabled={!activationAction || !activationAction.action.enabled || !activation}
+        icon={CirclePower}
+        label={activationAction?.action.label ?? "Set workRoot activation"}
+        onClick={() => {
+          if (!activationAction || !activation) {
+            return;
+          }
+          onCommand(buildWorkRootActivationCommand(activationAction.entityId, activation));
+        }}
+      />
+      <div className="workbench-toolbar-center" title={rootMetadataTitle}>
+        <div className="workbench-breadcrumb" aria-label="Workbench breadcrumb">
+          <span>{server.label}</span>
+          <span>{workspace.label}</span>
+          <strong>{root.label}</strong>
+        </div>
+        <div className="workbench-toolbar-meta" title={rootMetadataTitle}>
+          <StateBadge state={root.state} />
+          <WorkbenchActivityBadge
+            activity={activity}
+            onOpenActivity={() => {
+              onCommand(
+                buildWorkbenchOpenActivityCommand(root.id),
+                { "workbench.openActivity": onOpenActivity },
+              );
+            }}
+          />
+          {root.availability !== "available" ? (
+            <span className="meta-chip ws-chip">{root.availability}</span>
+          ) : null}
+          {root.activation !== "online" ? (
+            <span className="meta-chip ws-chip">{root.activation}</span>
+          ) : null}
+        </div>
       </div>
       <div
         className="workbench-toolbar-actions"
-        aria-label="Workbench toggles and actions"
+        aria-label="Workbench primary actions"
       >
-        {toolbarActions(root, selectedEntity).map(({ action, entityId }) => (
-          <button
-            className="action-button"
-            data-command-id={
-              activationForAction(action.id)
-                ? "workRoot.activation.set"
-                : action.id === "refresh"
-                  ? "dashboard.refresh"
-                  : `resource.action.${action.id}`
-            }
-            disabled={!action.enabled}
-            key={`${entityId}:${action.id}`}
-            type="button"
-            onClick={() => {
-              const activation = activationForAction(action.id);
-              if (activation) {
-                onCommand(buildWorkRootActivationCommand(entityId, activation));
-                return;
-              }
-              onCommand(
-                action.id === "refresh"
-                  ? buildDashboardRefreshCommand()
-                  : {
-                      commandId: `resource.action.${action.id}`,
-                      payload: { type: "action", label: action.label, entityId },
-                    },
-              );
-            }}
-          >
-            {action.label}
-          </button>
-        ))}
-        <button
-          className="action-button workbench-toggle"
+        {openRootAction ? (
+          <ChromeIconButton
+            commandId={`resource.action.${openRootAction.action.id}`}
+            disabled={!openRootAction.action.enabled}
+            icon={FolderOpen}
+            label={openRootAction.action.label}
+            onClick={() => runResourceAction(openRootAction.action, openRootAction.entityId)}
+          />
+        ) : null}
+        <ChromeIconButton
+          commandId="dashboard.refresh"
+          icon={RefreshCw}
+          label="Refresh dashboard"
+          onClick={() => onCommand(buildDashboardRefreshCommand())}
+        />
+        <ChromeIconButton
+          commandId="terminal.create"
           disabled={root.activation !== "online" || root.availability !== "available"}
-          data-command-id="terminal.create"
-          type="button"
+          icon={SquareTerminal}
+          label="New terminal"
           onClick={() => {
             onCommand(
               buildTerminalCreateCommand(root.id),
               { "terminal.create": onCreateTerminal },
             );
           }}
-        >
-          New terminal
-        </button>
-        {toggles.map((toggle) => (
+        />
+        <div className="workbench-overflow">
           <button
-            className="action-button workbench-toggle"
-            data-command-id={`workbench.toggle.${toggle}`}
-            key={toggle}
+            aria-expanded={overflowOpen}
+            aria-haspopup="menu"
+            aria-label="More workbench actions"
+            className="icon-button"
+            title="More workbench actions"
             type="button"
-            onClick={() =>
-              onCommand({
-                commandId: `workbench.toggle.${toggle}`,
-                payload: { type: "action", label: toggle, entityId: root.id },
-              })
-            }
+            onClick={() => setOverflowOpen((current) => !current)}
           >
-            {toggle}
+            <MoreHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />
           </button>
-        ))}
+          {overflowOpen ? (
+            <div className="workbench-overflow-menu" role="menu">
+              {secondaryActions.map(({ action, entityId }) => (
+                <button
+                  className="workbench-overflow-item"
+                  data-command-id={`resource.action.${action.id}`}
+                  disabled={!action.enabled}
+                  key={`${entityId}:${action.id}`}
+                  role="menuitem"
+                  title={action.label}
+                  type="button"
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    runResourceAction(action, entityId);
+                  }}
+                >
+                  <PanelsTopLeft aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>{action.label}</span>
+                </button>
+              ))}
+              {toggles.map((toggle) => (
+                <button
+                  className="workbench-overflow-item"
+                  data-command-id={`workbench.toggle.${toggle}`}
+                  key={toggle}
+                  role="menuitem"
+                  title={`Toggle ${toggle}`}
+                  type="button"
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    onCommand({
+                      commandId: `workbench.toggle.${toggle}`,
+                      payload: { type: "action", label: toggle, entityId: root.id },
+                    });
+                  }}
+                >
+                  <ToggleIcon toggle={toggle} />
+                  <span>{toggle}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -2988,7 +3149,7 @@ function WorkbenchActivityBadge({
   // pane reversible/read-only.
   return (
     <button
-      className={`meta-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
+      className={`meta-chip ws-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
       data-command-id="workbench.openActivity"
       data-activity-tone={activity.tone}
       type="button"
@@ -2996,6 +3157,9 @@ function WorkbenchActivityBadge({
       aria-label={`Open WorkRoot Activity: ${activity.title}`}
       onClick={onOpenActivity}
     >
+      <span className="workbench-activity-badge-icon" aria-hidden="true">
+        <Activity size={13} strokeWidth={1.8} />
+      </span>
       <span className="workbench-activity-badge-dot" aria-hidden="true" />
       <span className="workbench-activity-badge-label">{activity.label}</span>
       {activity.summary ? (
@@ -3191,6 +3355,21 @@ function toolbarActions(
   }
 
   return actions;
+}
+
+function workbenchToggleIcon(toggle: WorkbenchToggle): LucideIcon {
+  switch (toggle) {
+    case "viewer":
+      return Eye;
+    case "task":
+      return ListTodo;
+    case "diagnostics":
+      return Stethoscope;
+    case "events":
+      return Activity;
+    case "layout":
+      return LayoutPanelTop;
+  }
 }
 
 function activationForAction(actionId: string): "online" | "offline" | null {
@@ -4074,8 +4253,8 @@ function ReadOnlyTextPane({
   root: WorkRootView;
 }) {
   return (
-    <div className="readonly-text-pane">
-      <div className="readonly-text-pane-header">
+    <div className="readonly-text-pane ws-pane">
+      <div className="readonly-text-pane-header ws-toolbar">
         <div className="readonly-text-pane-title-block">
           <div className="readonly-text-pane-title">{pane.title}</div>
           <div className="readonly-text-pane-path" title={pane.path}>
@@ -4083,21 +4262,21 @@ function ReadOnlyTextPane({
           </div>
         </div>
         <div className="readonly-text-pane-badges">
-          <span className="meta-chip">{pane.mode}</span>
-          <span className="meta-chip">read-only</span>
-          <span className="meta-chip">
+          <span className="meta-chip ws-chip">{pane.mode}</span>
+          <span className="meta-chip ws-chip">read-only</span>
+          <span className="meta-chip ws-chip">
             {pane.languageHint ?? pane.extension ?? "text"}
           </span>
         </div>
       </div>
       {pane.status === "loading" ? (
-        <div className="readonly-text-pane-state">Loading file content</div>
+        <div className="readonly-text-pane-state ws-state-surface">Loading file content</div>
       ) : pane.status === "error" ? (
-        <div className="readonly-text-pane-state readonly-text-pane-error">
+        <div className="readonly-text-pane-state readonly-text-pane-error ws-state-surface">
           {pane.error ?? "file read failed"}
         </div>
       ) : (
-        <pre className="readonly-text-content">
+        <pre className="readonly-text-content ws-doc-surface ws-code-block">
           <code>{pane.content}</code>
         </pre>
       )}
@@ -4162,13 +4341,17 @@ function WorkspaceRows({
         <ResourceRow
           id={compactRoot.id}
           title={compactWorkspaceWorkRootTitle(workspace, compactRoot)}
-          eyebrow="compact workRoot"
+          presentation="compactWorkRoot"
           state={compactRoot.state}
           depth={0}
           selected={selectedId === compactRoot.id}
           actions={workspace.actions}
           actionEntityId={workspace.id}
-          meta={[
+          kind={compactRoot.kind}
+          availability={compactRoot.availability}
+          activation={compactRoot.activation}
+          debugMeta={[
+            "compact workRoot",
             kindLabel(compactRoot.kind),
             `availability: ${compactRoot.availability}`,
             `activation: ${compactRoot.activation}`,
@@ -4184,13 +4367,13 @@ function WorkspaceRows({
       <ResourceRow
         id={workspace.id}
         title={workspace.label}
-        eyebrow="workspace"
+        presentation="workspace"
         state={workspace.state}
         depth={0}
         selected={selectedId === workspace.id}
         actions={workspace.actions}
         actionEntityId={workspace.id}
-        meta={[`${workspace.workRoots.length} roots`]}
+        debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
       />
       {workspace.workRoots.map((root) => (
@@ -4198,13 +4381,17 @@ function WorkspaceRows({
           <ResourceRow
             id={root.id}
             title={root.label}
-            eyebrow="workRoot"
+            presentation="workRoot"
             state={root.state}
             depth={1}
             selected={selectedId === root.id}
             actions={[]}
             actionEntityId={root.id}
-            meta={[
+            kind={root.kind}
+            availability={root.availability}
+            activation={root.activation}
+            debugMeta={[
+              "workRoot",
               kindLabel(root.kind),
               `availability: ${root.availability}`,
               `activation: ${root.activation}`,
@@ -4226,69 +4413,80 @@ function WorkspaceRows({
 function ResourceRow({
   id,
   title,
-  eyebrow,
+  presentation,
   state,
   depth,
   selected,
   actions = [],
   actionEntityId = id,
-  meta,
+  kind,
+  availability,
+  activation,
+  debugMeta,
   onCommand,
 }: {
   id: string;
   title: string;
-  eyebrow: string;
+  presentation: "compactWorkRoot" | "workspace" | "workRoot";
   state: ViewState;
   depth: number;
   selected: boolean;
   actions?: ActionHint[];
   actionEntityId?: string;
-  meta: string[];
+  kind?: WorkRootView["kind"];
+  availability?: WorkRootView["availability"];
+  activation?: WorkRootView["activation"];
+  debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
 }) {
   const visibleActions = actions.filter(
     (action) => action.enabled && action.id === "workspace.remove",
   );
+  const tone = resourceRowTone(state, availability, activation);
+  const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(" · ");
   return (
     <div
-      className={`resource-row${selected ? " resource-row-selected" : ""}`}
+      className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}`}
       data-command-id="resource.select"
+      data-resource-presentation={presentation}
+      data-resource-kind={kind ?? presentation}
+      data-resource-activation={activation ?? ""}
+      data-resource-availability={availability ?? ""}
       style={{ "--depth": depth } as CSSProperties}
+      title={metadataTitle}
     >
       <button
+        aria-label={`Select ${resourcePresentationLabel(presentation)} ${title}`}
         className="resource-row-select"
         data-command-id="resource.select"
+        title={metadataTitle}
         type="button"
         onClick={() =>
           onCommand({ commandId: "resource.select", payload: { type: "select", entityId: id } })
         }
       >
         <span className="resource-row-main">
-          <span className="row-eyebrow">{eyebrow}</span>
+          <ResourceGlyph presentation={presentation} />
           <span className="row-title">{title}</span>
-        </span>
-        <span className="resource-row-meta">
-          {meta.map((value) => (
-            <span className="meta-chip" key={value}>
-              {value}
+          {kind ? (
+            <span className="resource-kind-glyph" title={kindLabel(kind)}>
+              <WorkRootKindIcon kind={kind} />
             </span>
-          ))}
-          <StateBadge state={state} />
+          ) : null}
         </span>
       </button>
       {visibleActions.length > 0 ? (
         <span className="resource-row-actions">
           {visibleActions.map((action) => (
-            <button
+            <ChromeIconButton
               className="resource-row-action"
-              data-command-id="workspace.remove"
+              commandId="workspace.remove"
+              icon={Trash2}
               key={action.id}
-              title={action.label}
-              type="button"
+              label={action.label}
+              tone="danger"
               onClick={() => onCommand(buildWorkspaceRemoveCommand(actionEntityId))}
-            >
-              Remove
-            </button>
+            />
           ))}
         </span>
       ) : null}
@@ -4425,7 +4623,7 @@ function StatusPane({
   action?: ReactNode;
 }) {
   return (
-    <div className="status-pane">
+    <div className="status-pane ws-state-surface">
       <div className="status-title">{title}</div>
       <div className="status-detail">{detail}</div>
       {action ? <div className="status-action">{action}</div> : null}
@@ -4456,7 +4654,7 @@ function StateLine({ state }: { state: ViewState }) {
 function StateBadge({ state }: { state: ViewState }) {
   return (
     <span
-      className={`state-badge ${state.loading ? "state-loading" : ""} ${
+      className={`state-badge ws-badge ${state.loading ? "state-loading" : ""} ${
         state.stale ? "state-stale" : ""
       } ${state.error ? "state-error" : ""}`}
     >
@@ -4469,7 +4667,7 @@ function StateBadge({ state }: { state: ViewState }) {
 function StateDot({ state }: { state: ViewState }) {
   return (
     <span
-      className={`state-dot ${state.loading ? "state-loading" : ""} ${
+      className={`state-dot ws-state-dot ${state.loading ? "state-loading" : ""} ${
         state.stale ? "state-stale" : ""
       } ${state.error ? "state-error" : ""}`}
       aria-hidden="true"
@@ -4573,6 +4771,33 @@ function instanceSummary(instance: InstanceView) {
 
 function closeContractLabel(kind: SurfaceKind) {
   return `close: ${decideSurfaceClose(kind).behavior}`;
+}
+
+function resourcePresentationLabel(
+  presentation: "compactWorkRoot" | "workspace" | "workRoot",
+) {
+  switch (presentation) {
+    case "compactWorkRoot":
+      return "compact workRoot";
+    case "workspace":
+      return "workspace";
+    case "workRoot":
+      return "workRoot";
+  }
+}
+
+function resourceRowTone(
+  state: ViewState,
+  availability?: WorkRootView["availability"],
+  activation?: WorkRootView["activation"],
+) {
+  if (state.error || availability === "inaccessible" || availability === "missing") {
+    return "error";
+  }
+  if (state.stale || availability === "moved" || activation === "offline") {
+    return "muted";
+  }
+  return "ready";
 }
 
 function kindLabel(kind: WorkRootView["kind"]) {

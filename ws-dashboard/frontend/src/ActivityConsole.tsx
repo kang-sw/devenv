@@ -355,7 +355,7 @@ export function ActivityConsole({
     <section className="activity-console" data-activity-console="ready">
       {orderedItems.length === 0 ? (
         <p
-          className="workroot-activity-empty"
+          className="workroot-activity-empty ws-state-surface"
           data-activity-console-state="empty"
         >
           No activity for this workRoot.
@@ -399,7 +399,7 @@ export function ActivityRibbon({
     <div className="activity-ribbon" aria-label="Activity ribbon">
       {items.map((item) => (
         <button
-          className="activity-ribbon-item"
+          className="activity-ribbon-item ws-row"
           data-command-id="activity.selectItem"
           data-activity-id={item.id}
           data-selected={item.id === selectedItemId ? "true" : "false"}
@@ -539,7 +539,7 @@ export function TranscriptBlockViewer({
           <span>{selectedItem?.status ?? "unavailable"}</span>
         </div>
         <button
-          className="activity-console-control"
+          className="activity-console-control ws-control-button"
           data-command-id="activity.refresh"
           disabled={!selectedItem?.transcript.available}
           type="button"
@@ -549,12 +549,12 @@ export function TranscriptBlockViewer({
         </button>
       </div>
       {state.phase === "loading" ? (
-        <div className="workroot-activity-state">Loading transcript</div>
+        <div className="workroot-activity-state ws-state-surface">Loading transcript</div>
       ) : state.phase === "error" ? (
-        <div className="workroot-activity-state workroot-activity-state-error">
+        <div className="workroot-activity-state workroot-activity-state-error ws-state-surface">
           <span>Transcript unavailable</span>
           <button
-            className="activity-console-control"
+            className="activity-console-control ws-control-button"
             data-command-id="activity.refresh"
             type="button"
             onClick={onRefresh}
@@ -597,7 +597,7 @@ export function TranscriptBlockViewer({
         >
           {transcript.hasMore ? (
             <button
-              className="activity-console-control activity-load-more"
+              className="activity-console-control activity-load-more ws-control-button"
               data-command-id="activity.transcript.loadMore"
               disabled={state.loadingMore}
               type="button"
@@ -627,7 +627,7 @@ export function TranscriptBlockViewer({
         </div>
       ) : (
         <div
-          className="workroot-activity-state"
+          className="workroot-activity-state ws-state-surface"
           data-activity-transcript-state="empty"
         >
           Transcript is {selectedItem?.transcript.status ?? "empty"}.
@@ -653,7 +653,7 @@ function ActivityTranscriptBlock({
     view.mode === "expanded" || view.mode === "terminal" || expanded;
   return (
     <article
-      className="activity-transcript-block"
+      className="activity-transcript-block ws-state-surface"
       data-block-mode={view.mode}
       data-block-tone={view.tone}
     >
@@ -661,7 +661,7 @@ function ActivityTranscriptBlock({
         <span>{view.summary}</span>
         {view.mode === "compact" && view.detail ? (
           <button
-            className="activity-detail-toggle"
+            className="activity-detail-toggle ws-control-button"
             data-command-id="activity.detail.toggle"
             type="button"
             onClick={onToggle}
@@ -671,7 +671,7 @@ function ActivityTranscriptBlock({
         ) : null}
       </div>
       {detailVisible && view.detail ? (
-        <pre className="activity-transcript-block-detail">{view.detail}</pre>
+        <pre className="activity-transcript-block-detail ws-code-block">{view.detail}</pre>
       ) : null}
     </article>
   );

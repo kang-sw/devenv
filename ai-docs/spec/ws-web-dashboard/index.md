@@ -554,6 +554,37 @@ geometry, hairline, and component reference rather than as a default light
 palette. Desktop and narrow viewport screenshot checks make the resulting
 shell inspectable before larger workbench surfaces depend on it.
 
+The frontend visual guide also defines a dashboard-local building-block
+vocabulary for frames, panels, panes, toolbars, rows, chips, badges, state
+surfaces, document surfaces, and code blocks. Current high-impact surfaces
+consume that vocabulary while preserving their existing commands and data:
+left navigation, open-workRoot chrome, workbench toolbar and Dockview tabs,
+Activity Console ribbon/transcript blocks, read-only text panes, and common
+empty/loading/error surfaces.
+
+The dashboard chrome presents left navigation, file explorer, and workRoot
+topbar controls with conventional icon-first affordances, accessible names, and
+reduced visible metadata clutter. High-signal status remains visible,
+secondary diagnostics move to low-weight surfaces or overflow menus, and all
+visible or overflowed actions continue to route through the existing dashboard
+command model. Ready navigation rows remain low-height without status chips,
+compact resource glyphs do not overlap, power state reads through symmetric
+icon color rather than filled action backgrounds, topbar chips and overflow
+menu labels preserve readable semantic text, WorkRoot Activity ribbons reserve
+bright text for the primary label, and icon buttons expose most border or
+glass-like treatment only on hover/focus/active states while retaining stable
+dimensions and accessible names. {#260524-dashboard-icon-first-chrome}
+
+The dashboard distinguishes large working context regions through a surface
+hierarchy rather than uniform hairlines. Left navigation, workRoot topbar
+chrome, Dockview split groups, editor/document shells, pane-local ribbons, and
+content bodies use separate semantic surface and divider roles so structural
+boundaries, local dividers, selection states, and hover/focus control chrome do
+not compete visually. Editor/document panes read as one context island whose
+tabbar, internal ribbon, and body belong together, while Dockview split
+boundaries use a stronger structural gutter or surface contrast than local
+tab/body dividers. {#260524-dashboard-context-surface-hierarchy}
+
 ## Browser UI Acceptance Gate {#260516-ws-web-dashboard-browser-ui-acceptance-gate}
 
 Dashboard frontend changes that affect visible browser behavior provide a
