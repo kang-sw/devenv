@@ -138,6 +138,18 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		appendDebugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
 		reqCtx, cancel := context.WithCancel(ctx)
 		id := rawMessageString(req.ID)
+		if isSetupFenceRequest(req) {
+			wg.Wait()
+			requests.Store(id, cancel)
+			resp := s.handle(reqCtx, req)
+			cancel()
+			requests.Delete(id)
+			if err := writeResponse(resp); err != nil {
+				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+				return err
+			}
+			continue
+		}
 		requests.Store(id, cancel)
 		wg.Add(1)
 		go func() {
@@ -152,6 +164,19 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 	err := scanner.Err()
 	wg.Wait()
 	return err
+}
+
+func isSetupFenceRequest(req request) bool {
+	if req.Method != "tools/call" {
+		return false
+	}
+	var params struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return false
+	}
+	return params.Name == "ws.setup" || params.Name == setupToolName()
 }
 
 func (s *Server) handleNotification(req request, requests *sync.Map) {

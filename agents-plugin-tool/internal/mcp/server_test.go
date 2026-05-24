@@ -738,6 +738,32 @@ func TestServeStdioActorSetupBootstrapAndRecovery(t *testing.T) {
 	}
 }
 
+func TestServeStdioSetupFencesFollowingBatchRequest(t *testing.T) {
+	useLeadProfile(t)
+	root := initTicketRepo(t, "260524-feat-actor-batch")
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ws.setup","arguments":{"method":"lead-workflow-bootstrap","root":%q,"format":"json"}}}`, root),
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agents.register","arguments":{"name":"batch-after-setup","model":"light"}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("ServeStdio returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"id":1`) || !strings.Contains(lines[1], `"id":2`) {
+		t.Fatalf("setup fence did not preserve setup-before-register response order:\n%s", out.String())
+	}
+	byID := responseLinesByID(t, lines)
+	if toolIsError(t, byID["2"]) {
+		t.Fatalf("batched agents.register after setup failed: %s", byID["2"])
+	}
+	if _, err := wsagent.NewManager(wsagent.Options{}).Status(root, "batch-after-setup"); err != nil {
+		t.Fatalf("batched register did not use actor-bound root: %v", err)
+	}
+}
+
 func TestServeStdioChildActorPromptInjection(t *testing.T) {
 	useLeadProfile(t)
 	root := initTicketRepo(t, "260524-feat-child-actor")

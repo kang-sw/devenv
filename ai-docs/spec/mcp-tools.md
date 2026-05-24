@@ -20,6 +20,12 @@ Unknown methods and profile-rejected tools return JSON-RPC errors. Tool-level
 runtime failures return MCP text content with `isError: true`, preserving a
 normal MCP response envelope while still making the failure visible to callers.
 
+Setup calls are request-order fences. When `ws.setup` or the advertised setup
+alias appears in the stdio stream, the server completes earlier in-flight
+requests, applies setup synchronously, writes that setup response, and only then
+accepts later requests from the same stream. This preserves batch-safe
+setup-then-call behavior for session and actor state.
+
 Read-only tools whose primary consumer is an LLM prefer compact readable text
 defaults over JSON serialized into text content. Tools that need stable machine
 parsing, launcher compatibility, or structured protocol metadata preserve an

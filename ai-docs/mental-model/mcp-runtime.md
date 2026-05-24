@@ -31,6 +31,7 @@ related:
 ## Module Contracts
 
 - `ServeStdio` handles requests concurrently and serializes only response writes; long-running waits must not block `tools/list`.
+- `ws.setup` and the advertised setup alias are request-order fences: prior in-flight requests complete first, setup is applied synchronously, and later stream requests are not accepted until the setup response is written. This protects batched setup-then-call actor/root state.
 - Cancellation depends on exact JSON-RPC id stringification; changing id formatting breaks `notifications/cancelled`.
 - Tool results are returned as MCP text content, even when the text is JSON. Callers parse text, not structured content arrays.
 - `toolTextResponse` errors are successful JSON-RPC responses with `isError: true`; unknown tools/profile violations are JSON-RPC errors.
