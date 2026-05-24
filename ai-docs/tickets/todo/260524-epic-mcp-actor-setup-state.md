@@ -52,7 +52,7 @@ The epic owns decomposition for:
   agent calls and inject setup recovery instructions into child system prompts.
 - `260524-feat-mcp-state-store-prune` - introduce the SQLite metadata store,
   retention model, and pruning foundation while leaving stream output files on
-  disk.
+  disk. Done in `e7c8868`.
 - Planned: migrate exec and named-agent async metadata to the actor-owned
   SQLite lease model once the state store and setup model are stable.
 - Planned: align model-backed readers such as `exec.ask` with actor-scoped

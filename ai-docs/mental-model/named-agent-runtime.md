@@ -4,6 +4,7 @@ description: "File-backed named agents, async calls, locks, subqueries, and back
 sources:
   - agents-plugin-tool/internal/wsagent/
   - agents-plugin-tool/internal/wsstate/
+  - agents-plugin-tool/internal/wsstore/
 related:
   mcp-runtime: "agents.* MCP and CLI handlers are thin wrappers around wsagent.Manager."
   prompt-bundle: "registration resolves embedded prompts into each agent system prompt."
@@ -15,6 +16,7 @@ related:
 
 - `wsagent.Manager` owns registration, async calls, wait/result/status/tail/cancel/recall compatibility, inbox delivery, and erasure. {#260505-named-agent-registry-state-layout} {#260511-agent-recall-recovery}
 - `wsstate.Manager.Ensure` derives cache, project, worktree, agent, review, lock, and temp paths.
+- `wsstore` is available for future actor-owned metadata, leases, retention, and artifact indexes, but named agents remain file/JSON-backed until a migration ticket rewires `wsagent`.
 - `CodexRunner` invokes `codex exec --json`, captures thread ids, and extracts final agent messages. {#260505-codex-agent-session-jsonl-handling}
 - `ClaudeRunner` invokes `claude -p --output-format json`, manages first-call session ids, resumes stored sessions, and extracts final result text. {#260505-claude-agent-runner}
 - `GeminiRunner` invokes Gemini CLI `stream-json`, tolerates non-JSON stdout notices, and extracts final text from assistant message chunks. {#260512-gemini-agent-runner}
@@ -46,6 +48,7 @@ related:
 - Async worker subprocesses must re-resolve a usable runtime binary or launcher when the parent MCP process was started from a plugin cache path that has since been replaced.
 - `ToolProfile` flows into subprocess env as `WS_MCP_TOOL_PROFILE` when the host preserves it; MCP treats it as an optional profile filter, not an authority boundary.
 - Worktree scoping is shared by agents, generated review paths, and orchestrator locks; changing cache layout affects all three.
+- The SQLite state-store foundation is adjacent to named agents but not yet authoritative for `agent.json`, `current/state.json`, `events.jsonl`, or output files. Future migration must preserve current file-backed diagnostics and result consumption semantics.
 - Prompt registration is static: `system.md` is written at registration time and existing agents do not automatically pick up edited embedded prompts. {#260505-agent-prompt-registration-tier-resolution}
 - Agent status includes the detected harness when one influenced registration plus the resolved effort when an alias mapping supplied one; backend error diagnostics include the harness to make alias misrouting visible.
 - Registered effort is applied at call time through `RunnerRequest`: Codex emits `model_reasoning_effort`, Claude emits `--effort`, and empty/no-override effort emits no backend option. New backends must opt into their own mapping instead of assuming the manager path is sufficient. {#260505-codex-agent-session-jsonl-handling} {#260505-claude-agent-runner}

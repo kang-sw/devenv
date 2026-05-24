@@ -8,7 +8,7 @@ related:
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
-  - plugin-runtime
+completed: 2026-05-24
 ---
 
 # MCP state store and pruning
@@ -93,3 +93,27 @@ database open/close behavior, concurrent short writes, file-backed stream paths,
 prune skipping active state, prune cleanup of completed expired artifacts,
 tombstone retry behavior, and no regression to existing named-agent and exec job
 tests.
+
+### Result (e7c8868) - 2026-05-24
+
+Added `internal/wsstore` as the root/worktree-aware SQLite metadata foundation
+without migrating existing named-agent or exec JSON state. The package creates a
+`state.sqlite` database under the existing wsstate worktree layout, applies
+schema migration records, and establishes metadata tables for actors, MCP
+sessions, named-agent definitions and calls, exec jobs, worker leases, retention
+policies, file-backed artifacts, prune runs, and retryable cleanup tombstones.
+
+The implementation keeps stdout, stderr, prompts, final outputs, runtime logs,
+and other large payloads as files. SQLite stores only control-plane metadata,
+paths, byte counts, lifecycle state, retention data, and cleanup bookkeeping.
+Pruning skips active, running, cancel-requested, leased, and pinned artifacts;
+completed expired artifacts are deleted with tombstones for retryable cleanup
+failures.
+
+Verification:
+
+- `go test ./internal/wsstore ./internal/wsstate ./internal/wsagent ./internal/execjob`
+- `go test ./...` from `agents-plugin-tool`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+- Windows SSH host `ki608@192.168.33.6`:
+  `go test ./internal/wsstore ./internal/wsstate ./internal/wsagent ./internal/execjob`
