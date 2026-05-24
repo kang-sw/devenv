@@ -290,6 +290,9 @@ async function expectContextSurfaceHierarchy(page: Page) {
       tabbarBackground: tabbarStyle.backgroundColor,
       tabbarDivider: tabbarStyle.borderBottomColor,
       paneBodyBackground: paneBodyStyle.backgroundColor,
+      structuralBorderWidth: rootStyle
+        .getPropertyValue("--ws-border-width-structural")
+        .trim(),
       localDivider: rootStyle.getPropertyValue("--ws-color-divider-local").trim(),
       contextDivider: rootStyle.getPropertyValue("--ws-color-divider-context").trim(),
       structuralDivider: rootStyle
@@ -306,7 +309,7 @@ async function expectContextSurfaceHierarchy(page: Page) {
   expect(hierarchy.toolbarDivider).not.toBe(hierarchy.tabbarDivider);
   expect(hierarchy.localDivider).not.toBe(hierarchy.contextDivider);
   expect(hierarchy.contextDivider).not.toBe(hierarchy.structuralDivider);
-  expect(hierarchy.dockviewBorderTopWidth).toBe(hierarchy.splitGutterSize);
+  expect(hierarchy.dockviewBorderTopWidth).toBe(hierarchy.structuralBorderWidth);
   expect(hierarchy.dockviewBackground).not.toBe(hierarchy.paneBodyBackground);
   expect(hierarchy.splitGutter).toBeTruthy();
 }

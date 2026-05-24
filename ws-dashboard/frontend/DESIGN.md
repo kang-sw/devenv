@@ -53,7 +53,7 @@ Components should prefer purpose-based names over raw color names.
 - `--ws-border-width-hairline`: the default `1px` separator width.
 - `--ws-border-width-structural`: hairline width used for application region
   boundaries.
-- `--ws-split-gutter-size`: visible gutter size for major region or Dockview
+- `--ws-split-gutter-size`: subtle gutter size for major region or Dockview
   split separation.
 - `--ws-radius-square`: the default `0` radius. New dashboard UI should stay
   square unless a component has a specific functional need.
@@ -137,13 +137,14 @@ hairline instead of shadows.
 
 ### Context hierarchy
 
-Use surface tone and gutter roles before adding stronger borders. Large
-application boundaries such as `left nav | workRoot workbench` and Dockview
-split groups use structural gutter or structural divider tokens. Sibling
-context units such as nav sections, workRoot topbar, Dockview groups, and
-document/editor shells use context surfaces and context dividers. Internal
-separators such as tabbar-to-body, ribbon-to-body, and section-header lines use
-local dividers so they do not compete with outer region boundaries.
+Use subtle surface tone and divider roles before adding stronger borders.
+Large application boundaries such as `left nav | workRoot workbench` and
+Dockview split groups use structural divider or restrained gutter tokens, not
+wide dark gaps. Sibling context units such as nav sections, workRoot topbar,
+Dockview groups, and document/editor shells use context surfaces and context
+dividers. Internal separators such as tabbar-to-body, ribbon-to-body, and
+section-header lines use local dividers so they do not compete with outer
+region boundaries.
 
 Selection, focus, and hover treatment stay separate from structural hierarchy:
 selected rows and active tabs may use state rails, selected backgrounds, and
