@@ -3049,14 +3049,14 @@ function WorkbenchShell({
     );
   }
 
-  function closeAgentPane(paneId: string) {
-    if (!selectedWorkRootId) {
+  function closeAgentPane(paneId: string, workRootId: string | null | undefined) {
+    if (!workRootId) {
       return;
     }
     setClosedAgentPaneByRoot((current) => ({
       ...current,
-      [selectedWorkRootId]: [
-        ...new Set([...(current[selectedWorkRootId] ?? []), paneId]),
+      [workRootId]: [
+        ...new Set([...(current[workRootId] ?? []), paneId]),
       ],
     }));
   }
@@ -3085,7 +3085,7 @@ function WorkbenchShell({
     } else if (pane.kind === "editor") {
       closeReadOnlyFilePane(pane.id);
     } else if (pane.kind === "agent") {
-      closeAgentPane(pane.id);
+      closeAgentPane(pane.id, request.workRootId ?? selectedWorkRootId);
     } else if (pane.kind === "workRootActivity") {
       closeActivityPane(pane.id);
     }
