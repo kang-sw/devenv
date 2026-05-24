@@ -7,6 +7,7 @@ related:
   260524-feat-ws-dashboard-document-viewer-editor-substrate: later document/editor work should inherit the improved chrome instead of solving global navigation polish
 spec:
   - 260516-ws-web-dashboard-dark-visual-system
+  - 260524-dashboard-icon-first-chrome
   - 260516-ws-web-dashboard-inspectable-navigation-shell
   - 260516-ws-web-dashboard-workroot-file-explorer
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
