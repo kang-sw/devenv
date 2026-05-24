@@ -7,6 +7,8 @@ related:
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
+spec:
+  - 260524-mcp-actor-setup-bootstrap
 ---
 
 # MCP actor setup bootstrap

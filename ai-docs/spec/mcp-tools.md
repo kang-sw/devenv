@@ -67,6 +67,16 @@ default response is compact labeled text; callers can request structured JSON
 for compatibility. Legacy `session.*` root tools may remain callable as hidden
 compatibility dispatch, but they are not advertised as canonical tools.
 
+> [!note] Planned 🚧
+> `ws.setup` will gain cooperative actor bootstrap and recovery semantics.
+> `ws.setup(method: "lead-workflow-bootstrap", root: "<cwd>")`, or the same
+> call with an absolute root path, creates a lead actor for a workflow session
+> and returns an actor id with explicit recovery guidance. `ws.setup(id:
+> "<actor-id>")` restores that actor in a fresh MCP server process. Calls
+> without `method` or `id` report limited setup state but do not mint lead
+> authority. The actor model is a cooperative workflow guard, not a hard
+> security boundary. {#260524-mcp-actor-setup-bootstrap}
+
 When host metadata names multiple workspaces and no higher-priority root exists,
 root-aware tools refuse to guess and return an actionable error asking the caller
 to pass `root` explicitly or call `ws.setup` with the current directory.
