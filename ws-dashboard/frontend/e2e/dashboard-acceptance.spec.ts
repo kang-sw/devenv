@@ -407,8 +407,7 @@ async function openWorkRootInBrowser(page: Page, rootPath: string) {
 
 async function selectWorkRootInBrowser(page: Page, rootPath: string) {
   await page
-    .locator('.resource-row[data-command-id="resource.select"]', {
-      has: page.locator(".row-eyebrow", { hasText: "workRoot" }),
+    .locator('.resource-row[data-command-id="resource.select"][data-resource-presentation="workRoot"], .resource-row[data-command-id="resource.select"][data-resource-presentation="compactWorkRoot"]', {
       hasText: workRootDisplayName(rootPath),
     })
     .click();
@@ -484,14 +483,19 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expect(resourceRows).toHaveCount(1);
     const compactRow = resourceRows.first();
-    await expect(compactRow.locator(".row-eyebrow")).toHaveText(
-      "compact workRoot",
+    await expect(compactRow).toHaveAttribute(
+      "data-resource-presentation",
+      "compactWorkRoot",
     );
     await expect(compactRow).toHaveClass(/resource-row-selected/);
     await expect(compactRow).toContainText(workRootDisplayName(workRoot));
-    await expect(compactRow).toContainText("directory");
-    await expect(compactRow).toContainText("availability: available");
-    await expect(compactRow).toContainText("activation: online");
+    await expect(compactRow.locator(".resource-row-icon-compact")).toBeVisible();
+    await expect(compactRow.locator(".resource-row-icon svg")).toHaveCount(1);
+    await expect(compactRow.locator(".state-badge")).toHaveCount(0);
+    await expect(compactRow.locator(".meta-chip")).toHaveCount(0);
+    await expect(compactRow).toHaveAttribute("title", /directory/);
+    await expect(compactRow).toHaveAttribute("title", /availability: available/);
+    await expect(compactRow).toHaveAttribute("title", /activation: online/);
     note(
       "open workRoot: live opened workRoot is selected, shown in the explorer, " +
         "and rendered as one compact workRoot nav row",
@@ -501,25 +505,57 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
   await test.step("activation controls are command-routed and update visible state", async () => {
     const metaRow = page.locator(".workbench-toolbar-meta");
     const activationButton = page.locator(
-      '.workbench-toolbar-actions [data-command-id="workRoot.activation.set"]',
+      '.workbench-power-button[data-command-id="workRoot.activation.set"]',
     );
-    await expect(metaRow).toContainText("availability: available");
-    await expect(metaRow).toContainText("activation: online");
-    await expect(activationButton).toHaveText("Go offline");
+    await expect(metaRow).toHaveAttribute("title", /availability: available/);
+    await expect(metaRow).toHaveAttribute("title", /activation: online/);
+    await expect(activationButton).toHaveAttribute("title", "Go offline");
+    await expect(activationButton).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
     await activationButton.click();
-    await expect(metaRow).toContainText("activation: offline");
+    await expect(metaRow).toContainText("offline");
     await expect(
-      page.locator(".workbench-toolbar-meta .meta-chip", {
-        hasText: "last: workRoot.activation.set",
-      }),
-    ).toBeVisible();
-    await expect(activationButton).toHaveText("Go online");
+      page.locator('.resource-row[data-command-id="resource.select"]').first().locator(".meta-chip, .state-badge"),
+    ).toHaveCount(0);
+    await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
+      "data-last-command-id",
+      "workRoot.activation.set",
+    );
+    await expect(activationButton).toHaveAttribute("title", "Go online");
+    await expect(activationButton).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
     await activationButton.click();
-    await expect(metaRow).toContainText("activation: online");
-    await expect(activationButton).toHaveText("Go offline");
+    await expect(metaRow).not.toContainText("offline");
+    await expect(activationButton).toHaveAttribute("title", "Go offline");
     note("activation controls dispatch through workRoot.activation.set and refresh visible state");
+  });
+
+  await test.step("topbar overflow keeps placeholder toggles command-routed", async () => {
+    const more = page.getByRole("button", { name: "More workbench actions" });
+    await expect(more).toBeVisible();
+    await more.click();
+    const menu = page.locator(".workbench-overflow-menu");
+    await expect(menu).toBeVisible();
+    for (const toggle of ["viewer", "task", "diagnostics", "events", "layout"]) {
+      await expect(
+        menu.locator(`[data-command-id="workbench.toggle.${toggle}"]`),
+      ).toBeVisible();
+    }
+    await expect
+      .poll(() =>
+        menu.locator(".workbench-overflow-item span").evaluateAll((nodes) =>
+          nodes.every((node) => node.scrollWidth <= node.clientWidth + 1),
+        ),
+      )
+      .toBe(true);
+    await page.screenshot({
+      path: path.join(artifactsDir, "topbar-overflow.png"),
+    });
+    await page.keyboard.press("Escape");
+    await more.click();
+    note(
+      "topbar overflow: low-value workbench toggles remain reachable behind the More icon with their command ids and visible labels do not clip",
+    );
   });
 
   // --- Top-bar WorkRoot Activity badge sits in the existing metadata row --
@@ -1134,8 +1170,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(alphaItem).toHaveAttribute("data-dirty", "true");
     await alphaItem.click();
     await expect(alphaItem).toHaveAttribute("data-dirty", "false");
-    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
-      "last: activity.selectItem",
+    await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
+      "data-last-command-id",
+      "activity.selectItem",
     );
     await expect(populatedBody).toContainText("selected transcript alpha");
     const transcriptScroll = populatedBody.locator(".activity-transcript-scroll");
@@ -1173,8 +1210,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await populatedBody
       .locator('.activity-transcript-head [data-command-id="activity.refresh"]')
       .click();
-    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
-      "last: activity.refresh",
+    await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
+      "data-last-command-id",
+      "activity.refresh",
     );
     await expect
       .poll(() => alphaTranscriptReplaceRequests)
@@ -1205,8 +1243,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expect(detailToggle).toBeVisible();
     await detailToggle.click();
-    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
-      "last: activity.detail.toggle",
+    await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
+      "data-last-command-id",
+      "activity.detail.toggle",
     );
     await expect(populatedBody).toContainText("tool details visible after expansion");
     const loadMore = populatedBody.locator(
@@ -1214,8 +1253,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     await expect(loadMore).toBeVisible();
     await loadMore.click();
-    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
-      "last: activity.transcript.loadMore",
+    await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
+      "data-last-command-id",
+      "activity.transcript.loadMore",
     );
     await expect(populatedBody).toContainText("loaded more transcript");
     const execItem = populatedBody.locator('[data-activity-id="exec:beta"]');
@@ -1395,6 +1435,20 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "data-workbench-tab-category-presentation",
       /dockview-category-chip|pinned-left-badge-fallback/,
     );
+    await expect
+      .poll(() =>
+        previewTab
+          .locator(".workbench-tab-title")
+          .evaluate((node) => getComputedStyle(node).fontStyle),
+      )
+      .toBe("italic");
+    await expect
+      .poll(() =>
+        previewTab
+          .locator("xpath=ancestor::*[contains(@class, 'dv-tab')][1]")
+          .evaluate((node) => getComputedStyle(node).boxShadow),
+      )
+      .toBe("none");
     const previewClose = previewTab.locator(
       '[data-command-id="workbench.tab.close"]',
     );
@@ -1451,6 +1505,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "data-workbench-tab-category-presentation",
       "pinned-left-badge-fallback",
     );
+    await expect
+      .poll(() =>
+        pinnedTab
+          .locator(".workbench-tab-title")
+          .evaluate((node) => getComputedStyle(node).fontStyle),
+      )
+      .toBe("normal");
     note(
       "read-only file: single click opened a replaceable preview, hover-only close immediately removed it, and double click pinned the file in the opened file group",
     );
@@ -1489,8 +1550,9 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       .toBeGreaterThan(0);
     const scrollTopBeforeRefresh = await content.evaluate((node) => node.scrollTop);
     await page.locator('[data-command-id="fileExplorer.refresh"]').click();
-    await expect(page.locator(".workbench-toolbar-meta")).toContainText(
-      "last: fileExplorer.refresh",
+    await expect(page.locator(".workbench-toolbar")).toHaveAttribute(
+      "data-last-command-id",
+      "fileExplorer.refresh",
     );
     await settlePastPollCycle(page);
     await expect
@@ -1596,11 +1658,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       hasText: workRootDisplayName(secondWorkRoot),
     });
     await expect(secondRow).toBeVisible();
+    const removeButton = secondRow.locator('[data-command-id="workspace.remove"]');
+    await expect(removeButton).toHaveCSS("border-color", "rgba(0, 0, 0, 0)");
     page.once("dialog", async (dialog) => {
       expect(dialog.message()).toContain("Files and Git worktrees on disk will not be deleted");
       await dialog.accept();
     });
-    await secondRow.locator('[data-command-id="workspace.remove"]').click();
+    await removeButton.click();
     await expect(secondRow).toHaveCount(0);
     expect(existsSync(secondWorkRoot)).toBe(true);
     await selectWorkRootInBrowser(page, workRoot);

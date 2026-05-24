@@ -562,13 +562,18 @@ left navigation, open-workRoot chrome, workbench toolbar and Dockview tabs,
 Activity Console ribbon/transcript blocks, read-only text panes, and common
 empty/loading/error surfaces.
 
-> [!note] Planned 🚧 {#260524-dashboard-icon-first-chrome}
-> The dashboard chrome will present left navigation, file explorer, and
-> workRoot topbar controls with conventional icon-first affordances, accessible
-> names, and reduced visible metadata clutter. High-signal status remains
-> visible, secondary diagnostics move to low-weight surfaces or overflow menus,
-> and all visible or overflowed actions continue to route through the existing
-> dashboard command model.
+The dashboard chrome presents left navigation, file explorer, and workRoot
+topbar controls with conventional icon-first affordances, accessible names, and
+reduced visible metadata clutter. High-signal status remains visible,
+secondary diagnostics move to low-weight surfaces or overflow menus, and all
+visible or overflowed actions continue to route through the existing dashboard
+command model. Ready navigation rows remain low-height without status chips,
+compact resource glyphs do not overlap, power state reads through symmetric
+icon color rather than filled action backgrounds, topbar chips and overflow
+menu labels preserve readable semantic text, WorkRoot Activity ribbons reserve
+bright text for the primary label, and icon buttons expose most border or
+glass-like treatment only on hover/focus/active states while retaining stable
+dimensions and accessible names. {#260524-dashboard-icon-first-chrome}
 
 ## Browser UI Acceptance Gate {#260516-ws-web-dashboard-browser-ui-acceptance-gate}
 
