@@ -25,6 +25,8 @@
     "src/resourceModel.test.ts",
     "src/resourceRefresh.ts",
     "src/resourceRefresh.test.ts",
+    "src/documentViewer.tsx",
+    "src/documentViewer.test.ts",
     "src/workRootFiles.ts",
     "src/workRootFiles.test.ts",
     "src/workRootActivity.ts",

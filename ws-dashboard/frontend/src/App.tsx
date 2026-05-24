@@ -32,6 +32,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { normalizeServerRouteLocation } from "./routeBasis";
+import { DocumentViewer, isMarkdownDocumentSource } from "./documentViewer";
 import {
   buildDashboardRefreshCommand,
   buildFileExplorerOpenFileCommand,
@@ -4241,8 +4242,47 @@ function readOnlyWorkbenchPane(
     state,
     meta,
     contentRevision: readOnlyFilePaneRevision(pane),
-    body: <ReadOnlyTextPane pane={pane} root={root} />,
+    body: isMarkdownDocumentSource(pane) ? (
+      <ReadOnlyMarkdownPane pane={pane} root={root} />
+    ) : (
+      <ReadOnlyTextPane pane={pane} root={root} />
+    ),
   };
+}
+
+function ReadOnlyMarkdownPane({
+  pane,
+  root,
+}: {
+  pane: ReadOnlyFilePane;
+  root: WorkRootView;
+}) {
+  return (
+    <div className="readonly-text-pane document-pane ws-pane">
+      <div className="readonly-text-pane-header ws-toolbar">
+        <div className="readonly-text-pane-title-block">
+          <div className="readonly-text-pane-title">{pane.title}</div>
+          <div className="readonly-text-pane-path" title={pane.path}>
+            {root.label} / {pane.path}
+          </div>
+        </div>
+        <div className="readonly-text-pane-badges">
+          <span className="meta-chip ws-chip">{pane.mode}</span>
+          <span className="meta-chip ws-chip">read-only</span>
+          <span className="meta-chip ws-chip">markdown</span>
+        </div>
+      </div>
+      {pane.status === "loading" ? (
+        <div className="readonly-text-pane-state ws-state-surface">Loading file content</div>
+      ) : pane.status === "error" ? (
+        <div className="readonly-text-pane-state readonly-text-pane-error ws-state-surface">
+          {pane.error ?? "file read failed"}
+        </div>
+      ) : (
+        <DocumentViewer markdown={pane.content} path={pane.path} />
+      )}
+    </div>
+  );
 }
 
 function ReadOnlyTextPane({

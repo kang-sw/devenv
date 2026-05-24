@@ -68,6 +68,24 @@ test.beforeAll(async () => {
         (_, index) => `readonly scroll containment line ${index + 1}`,
       ).join("\n") + "\n",
     );
+    writeFileSync(
+      path.join(workRoot, "gate-document.md"),
+      [
+        "# Gate Document",
+        "",
+        "Markdown paragraph line",
+        "with soft continuation",
+        "",
+        "- [x] completed task",
+        "",
+        "> [!note] Browser note",
+        "> callout body",
+        "",
+        "| Kind | Value |",
+        "| --- | --- |",
+        "| table | rendered |",
+      ].join("\n") + "\n",
+    );
     mkdirSync(path.join(workRoot, "gate-subdir"));
     writeFileSync(
       path.join(workRoot, "gate-subdir", "nested.txt"),
@@ -511,6 +529,9 @@ async function documentScrolls(page: Page): Promise<boolean> {
 }
 
 test("dashboard workRoot UI browser acceptance", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: daemon.baseUrl,
+  });
   const terminalSocketUrls: string[] = [];
   const terminalSocketFrames: string[] = [];
   let terminalOutputPolls = 0;
@@ -1586,6 +1607,54 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       .toBe("normal");
     note(
       "read-only file: single click opened a replaceable preview, hover-only close immediately removed it, and double click pinned the file in the opened file group",
+    );
+  });
+
+  await test.step("markdown document viewer renders structured blocks and pathrefs", async () => {
+    const markdownRow = page.locator(".file-explorer-row", {
+      hasText: "gate-document.md",
+    });
+    if ((await markdownRow.count()) === 0) {
+      note(
+        "markdown document viewer: skipped because external daemon workRoot did not provide gate-document.md",
+      );
+      return;
+    }
+
+    await markdownRow.click();
+    const pane = page.locator(".document-pane");
+    await expect(pane).toBeVisible();
+    await expect(pane.locator(".document-viewer-segment.is-active")).toContainText("view");
+    await expect(pane.locator(".document-viewer-segment:disabled")).toContainText("edit");
+    await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText("Gate Document");
+    await expect(pane.locator('[data-document-block-kind="taskItem"] input[type="checkbox"]')).toBeChecked();
+    await expect(pane.locator(".document-callout-note")).toContainText("Browser note");
+    await expect(pane.locator("table")).toContainText("rendered");
+
+    const paragraphBlock = pane.locator('[data-document-block-kind="paragraph"]').first();
+    await paragraphBlock.click();
+    await expect(pane.locator(".document-viewer-action-strip")).toBeVisible();
+    await expect(pane.locator(".document-viewer-action-strip")).toContainText("Copy pathref");
+    await pane.locator(".document-viewer-action-strip button", { hasText: "Copy pathref" }).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(
+      "@gate-document.md#L3-L4",
+    );
+
+    await expectDockviewWorkbench(page);
+    const previewTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+    );
+    await expect(previewTab).toBeVisible();
+    await markdownRow.dblclick();
+    const markdownPinnedTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly:"][title="gate-document.md"]',
+    );
+    await expect(markdownPinnedTab).toBeVisible();
+    await markdownPinnedTab.hover();
+    await markdownPinnedTab.locator('[data-command-id="workbench.tab.close"]').click();
+    await expect(markdownPinnedTab).toHaveCount(0);
+    note(
+      "markdown document viewer: daemon-served markdown file rendered heading, task, callout, table, block action strip, and relative pathref copy while preserving preview-to-pinned tabs",
     );
   });
 
