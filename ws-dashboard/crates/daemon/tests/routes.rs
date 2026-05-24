@@ -5980,13 +5980,35 @@ async fn document_translation_translate_validates_blocks_and_reuses_cache() {
         assert!(!String::from_utf8_lossy(&body).contains("translatedContent"));
         assert!(!String::from_utf8_lossy(&body).contains("test-key-redacted"));
     }
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let mut source_locale_request = translation_request_body();
+    source_locale_request["locale"]["source"] = serde_json::json!("en");
+    let source_locale_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(source_locale_request.to_string()))
+                .expect("source locale translate request"),
+        )
+        .await
+        .expect("source locale translate response");
+    assert_eq!(source_locale_response.status(), StatusCode::OK);
+    let source_locale_body = axum::body::to_bytes(source_locale_response.into_body(), 64 * 1024)
+        .await
+        .expect("source locale body");
+    let source_locale_value: serde_json::Value =
+        serde_json::from_slice(&source_locale_body).expect("source locale json");
+    assert_eq!(source_locale_value["cache"]["hit"], false);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
 async fn document_translation_bounds_parse_failures_and_duplicate_request_ids() {
     let (base_url, _calls) = start_fake_openai_provider(
-        r#"{"blocks":[{"blockId":"paragraph-1","translatedContent":"하나"},{"blockId":"unknown","translatedContent":"raw"},{"blockId":"paragraph-1","translatedContent":"둘"}]}"#,
+        r#"{"blocks":[{"blockId":"paragraph-1","translatedContent":"하나"},{"blockId":"RAW_UNKNOWN_BLOCK_ID_SENTINEL","translatedContent":"RAW_TRANSLATION_SENTINEL"},{"blockId":"paragraph-1","translatedContent":"둘"}]}"#,
     )
     .await;
     let state = app_state_with_translation_provider(base_url, Some("fake-model"));
@@ -6053,5 +6075,36 @@ async fn document_translation_bounds_parse_failures_and_duplicate_request_ids() 
             .len()
             >= 2
     );
-    assert!(!String::from_utf8_lossy(&body).contains("raw model"));
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(!body_text.contains("RAW_UNKNOWN_BLOCK_ID_SENTINEL"));
+    assert!(!body_text.contains("RAW_TRANSLATION_SENTINEL"));
+
+    let (parse_base_url, _parse_calls) =
+        start_fake_openai_provider("RAW_PARSE_FAILURE_SENTINEL").await;
+    let parse_state = app_state_with_translation_provider(parse_base_url, Some("fake-model"));
+    let parse_token = parse_state
+        .auth
+        .pairing_token()
+        .expose_for_owner_url()
+        .to_owned();
+    let parse_app = build_router(parse_state);
+    let parse_cookie = pair_and_cookie(parse_app.clone(), &parse_token).await;
+    let parse_response = parse_app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/document-translation/translate")
+                .header(header::COOKIE, parse_cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(translation_request_body().to_string()))
+                .expect("parse failure request"),
+        )
+        .await
+        .expect("parse failure response");
+    assert_eq!(parse_response.status(), StatusCode::OK);
+    let parse_body = axum::body::to_bytes(parse_response.into_body(), 64 * 1024)
+        .await
+        .expect("parse body");
+    let parse_body_text = String::from_utf8_lossy(&parse_body);
+    assert!(!parse_body_text.contains("RAW_PARSE_FAILURE_SENTINEL"));
 }

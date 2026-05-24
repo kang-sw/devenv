@@ -327,6 +327,22 @@ fn cache_key(
     let mut hasher = Sha256::new();
     hasher.update(request.source.content_hash.as_bytes());
     hasher.update(request.locale.target.as_bytes());
+    hasher.update(
+        request
+            .locale
+            .source
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    hasher.update(
+        request
+            .source
+            .title
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     hasher.update(provider.id.as_bytes());
     hasher.update(PROVIDER_KIND.as_bytes());
     hasher.update(model.as_bytes());
@@ -471,7 +487,7 @@ fn parse_translation_content(
             if !known.contains(block_id) {
                 unmatched.push(DocumentTranslationUnmatched {
                     ordinal,
-                    text: block_id.to_owned(),
+                    text: "omitted".to_owned(),
                     reason: "unknown block id".to_owned(),
                 });
                 continue;

@@ -2,6 +2,9 @@ import {
   buildDocumentTranslationRequestPayload,
   buildOverlayKey,
   deriveMarkdownDocumentModel,
+  documentBlocksTranslatedText,
+  documentBlocksVisibleText,
+  canCopyTranslatedBlocks,
   isMarkdownDocumentSource,
   localDocumentContentHash,
   overlayFromTranslationResponse,
@@ -220,4 +223,31 @@ assertEqual(
     ?.translatedMarkdown,
   "번역",
   "daemon translation response maps into content-hash overlay blocks",
+);
+
+const selectedBlocksForCopy = requestPayload.blocks.slice(0, 1);
+assertEqual(
+  canCopyTranslatedBlocks(selectedBlocksForCopy, undefined, requestPayload.source.contentHash),
+  false,
+  "translated copy is unavailable without an ok overlay",
+);
+assertEqual(
+  documentBlocksVisibleText(selectedBlocksForCopy, undefined, requestPayload.source.contentHash),
+  selectedBlocksForCopy[0].plainText,
+  "visible copy uses original text without overlay",
+);
+assertEqual(
+  canCopyTranslatedBlocks(selectedBlocksForCopy, responseOverlay, requestPayload.source.contentHash),
+  true,
+  "translated copy is enabled with an ok overlay",
+);
+assertEqual(
+  documentBlocksVisibleText(selectedBlocksForCopy, responseOverlay, requestPayload.source.contentHash),
+  "번역",
+  "visible copy uses translated text when overlay is active",
+);
+assertEqual(
+  documentBlocksTranslatedText(selectedBlocksForCopy, responseOverlay, requestPayload.source.contentHash),
+  "번역",
+  "translated copy uses overlay text",
 );

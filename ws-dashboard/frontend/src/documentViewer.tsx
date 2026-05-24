@@ -269,6 +269,41 @@ export function translationForBlock(
   return overlay.blocks[blockId] ?? overlay.blocks[buildOverlayKey(contentHash, blockId)];
 }
 
+export function documentBlockVisibleText(
+  block: DocumentBlock,
+  overlay: DocumentTranslationOverlay | undefined,
+  contentHash: string,
+) {
+  const translation = translationForBlock(overlay, contentHash, block.blockId);
+  return translation?.status === "ok" ? translation.translatedMarkdown : block.plainText;
+}
+
+export function documentBlocksVisibleText(
+  blocks: readonly DocumentBlock[],
+  overlay: DocumentTranslationOverlay | undefined,
+  contentHash: string,
+) {
+  return blocks.map((block) => documentBlockVisibleText(block, overlay, contentHash)).join("\n\n");
+}
+
+export function canCopyTranslatedBlocks(
+  blocks: readonly DocumentBlock[],
+  overlay: DocumentTranslationOverlay | undefined,
+  contentHash: string,
+) {
+  return blocks.some((block) => translationForBlock(overlay, contentHash, block.blockId)?.status === "ok");
+}
+
+export function documentBlocksTranslatedText(
+  blocks: readonly DocumentBlock[],
+  overlay: DocumentTranslationOverlay | undefined,
+  contentHash: string,
+) {
+  return blocks
+    .map((block) => translationForBlock(overlay, contentHash, block.blockId)?.translatedMarkdown ?? block.plainText)
+    .join("\n\n");
+}
+
 export function DocumentViewer({
   markdown,
   path,
@@ -281,10 +316,6 @@ export function DocumentViewer({
   const model = useMemo(() => deriveMarkdownDocumentModel(markdown, { path }), [markdown, path]);
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const selectedBlocks = model.blocks.filter((block) => selectedBlockIds.has(block.blockId));
-  const visibleTextForBlock = (block: DocumentBlock) =>
-    translationForBlock(overlay, model.contentHash, block.blockId)?.status === "ok"
-      ? translationForBlock(overlay, model.contentHash, block.blockId)?.translatedMarkdown ?? block.plainText
-      : block.plainText;
 
   const copyText = (text: string) => {
     void navigator.clipboard?.writeText(text);
@@ -306,13 +337,13 @@ export function DocumentViewer({
       {selectedBlocks.length > 0 ? (
         <div className="document-viewer-action-strip" data-selected-block-count={selectedBlocks.length}>
           <span>{selectedBlocks.length} block{selectedBlocks.length === 1 ? "" : "s"} selected</span>
-          <button type="button" onClick={() => copyText(selectedBlocks.map(visibleTextForBlock).join("\n\n"))}>
+          <button type="button" onClick={() => copyText(documentBlocksVisibleText(selectedBlocks, overlay, model.contentHash))}>
             Copy visible
           </button>
           <button
             type="button"
-            disabled={!selectedBlocks.some((block) => translationForBlock(overlay, model.contentHash, block.blockId)?.status === "ok")}
-            onClick={() => copyText(selectedBlocks.map((block) => translationForBlock(overlay, model.contentHash, block.blockId)?.translatedMarkdown ?? block.plainText).join("\n\n"))}
+            disabled={!canCopyTranslatedBlocks(selectedBlocks, overlay, model.contentHash)}
+            onClick={() => copyText(documentBlocksTranslatedText(selectedBlocks, overlay, model.contentHash))}
           >
             Copy translation
           </button>

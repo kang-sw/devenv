@@ -4352,7 +4352,6 @@ function ReadOnlyMarkdownPane({
             <button
               type="button"
               className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
-              data-command-id="document.translation.toggle"
               aria-pressed={translationEnabled}
               onClick={() => {
                 setTranslationEnabled((current) => !current);
