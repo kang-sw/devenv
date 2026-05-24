@@ -29,6 +29,12 @@ complete cross-process IPC contention strategy.
 
 - Treat named-agent and exec metadata migration into SQLite as gated work, not a
   mechanical follow-up to the schema foundation.
+- SQLite is acceptable for this migration only as a local lifecycle metadata
+  catalog, not as an IPC bus, event stream, or high-frequency append log.
+- Prefer SQLite over atomic JSON rewrites for agent and exec lifecycle
+  metadata when the data benefits from transactional updates, indexed lookup,
+  relationship tracking, crash recovery, stale-worker reconciliation, or
+  retention queries.
 - Keep large append-heavy payloads file-backed: stdout, stderr, combined output,
   prompts, transcripts, runtime logs, and final result bodies should remain
   files with SQLite storing only identity, lifecycle, paths, byte counts,
@@ -43,6 +49,15 @@ complete cross-process IPC contention strategy.
 
 - Preserve existing JSON/file-backed compatibility reads until each runtime
   surface has explicit migration and recovery coverage.
+- SQLite-backed state should be limited to metadata such as agent definition
+  rows, current call or exec job lifecycle state, actor/session binding, worker
+  leases, artifact indexes, retention policies, prune runs, and tombstones.
+- Keep append-heavy or large data out of SQLite, including stdout, stderr,
+  combined streams, agent event JSONL, prompt snapshots, final output bodies,
+  runtime logs, transcripts, and backend raw output.
+- Do not use SQLite as the coordination mechanism for every agent event or tool
+  event. If a future design needs frequent multi-process event appends, choose
+  a file-backed log, a single-writer daemon, or another explicit IPC boundary.
 - Do not hold SQLite transactions while subprocesses or model calls are running.
 - Handle `SQLITE_BUSY` and `SQLITE_LOCKED` with bounded retry/backoff or an
   equivalent repo/worktree writer coordination strategy.
@@ -60,10 +75,16 @@ whether `wsstore` gets a shared retry/backoff helper, a repo/worktree file lock
 for migrations and WAL setup, a single writer-owner process model, or a
 combination.
 
+The selected boundary must explicitly state which named-agent and exec fields
+become SQLite metadata and which existing files remain the source of truth for
+streams, prompts, event logs, and result bodies.
+
 The phase should define acceptance tests that spawn independent processes or MCP
 server instances against the same worktree state database and exercise actor
 setup, child actor creation, exec job lifecycle writes, and prune/tombstone
-bookkeeping without persistent `SQLITE_BUSY` failures.
+bookkeeping without persistent `SQLITE_BUSY` failures. It should also include a
+negative design check that rejects moving append-heavy streams or event logs
+into SQLite as a contention workaround.
 
 ### Phase 2: Migrate one runtime surface behind the gate
 
