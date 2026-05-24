@@ -112,3 +112,15 @@ Verification passed:
 - `npm run test:resource-model`
 - `npm run build`
 - `npm run test:browser`
+
+#### Edition (00894be) - 2026-05-24
+
+Follow-up UI tweak deduplicated compact row labels when the workspace and
+workRoot labels are identical. Distinct labels still render as a
+workspace/workRoot pair so users can distinguish the two locations.
+
+Verification passed:
+
+- `ws/spec_index.verify`
+- `npm run test:resource-model`
+- `npm run build`
