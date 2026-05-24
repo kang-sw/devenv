@@ -3065,6 +3065,9 @@ function WorkbenchShell({
     request: DockviewTabCloseRequest & { readonly workRootId?: string },
   ) {
     if (request.workRootId && request.workRootId !== selectedWorkRootId) {
+      if (request.surfaceKind === "agent") {
+        closeAgentPane(request.paneId, request.workRootId);
+      }
       return;
     }
     const pane = editorGroups
@@ -3117,13 +3120,14 @@ function WorkbenchShell({
       clientY: request.clientY,
     });
     if (decision.type === "requestConfirmation") {
-      if (!selectedWorkRootId) {
+      const requestWorkRootId = workbenchModel?.root.id ?? selectedWorkRootId;
+      if (!requestWorkRootId) {
         return;
       }
       setPendingCloseRequest({
         ...request,
         anchor: decision.anchor,
-        workRootId: selectedWorkRootId,
+        workRootId: requestWorkRootId,
       });
       return;
     }
