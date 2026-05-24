@@ -339,20 +339,21 @@ Implementation skills execute code changes and close the documentation loop.
 `lead-implement` is the implementation harness. It routes to direct editing or
 delegated code writing, then runs the shared post-implementation documentation
 pipeline before reporting completion. Existing `implement/*` branches continue
-on the current branch; otherwise delegated implementation creates an
-`implement/<scope>` branch. After verification, `lead-implement` records the
+on the current branch; every other invocation creates an `implement/<scope>`
+branch before source edits. After verification, `lead-implement` records the
 phase result commit, closes spec, mental-model, ticket, and index updates, then
 asks the user to merge, continue, or stop. Follow-up changes after this gate
 route to another implementation slice or sprint and are captured in tickets as
 append-only Result editions for already completed phases.
 
 `lead-implement` is a unified implementation spine with two edit modes.
-Direct-edit mode: the lead edits and verifies inline on the current branch,
-suitable for single-file internal-only changes. Delegated mode: the lead writes
-a brief, optionally populates a plan, spawns an implementer agent, and captures
-the resulting commit range. `judge: needs-delegation` selects the mode at Route
-time; direct-edit escalates to delegated when scope grows beyond single-file
-internal-only.
+Direct-edit mode: the lead edits and verifies inline on the scoped
+implementation branch, suitable for single-file internal-only changes.
+Delegated mode: the lead writes a brief, optionally populates a plan, spawns an
+implementer agent, and captures the resulting commit range. `judge:
+needs-delegation` selects the edit mode at Route time; branch isolation is
+independent of edit mode, and direct-edit escalates to delegated when scope
+grows beyond single-file internal-only.
 
 Review is a single stage for both modes. `judge: review-allocation` picks depth
 (lead-only, single reviewer, or partitioned) and partitions (correctness, fit,
@@ -401,9 +402,13 @@ merge readiness is reported: it inspects only the branch-tip suffix and compacts
 a contiguous run of safe documentation-only closeout commits into one closeout
 commit when metadata synthesis and tree equivalence are unambiguous. Planning,
 ready-promotion, source, test, review-fix, merge, ambiguous-authorship, and
-non-documentation commits remain outside the compaction target; unsafe suffixes,
-suffixes on direct-current branches, and suffixes with fewer than two eligible
-commits are reported as skipped without blocking merge readiness.
+non-documentation commits remain outside the compaction target; unsafe suffixes
+and suffixes with fewer than two eligible commits are reported as skipped
+without blocking merge readiness. At the approved merge step, branch commit
+lists may fast-forward only when every commit is workflow-owned,
+message-clean, and worth preserving directly in target history; otherwise a
+single logical commit squashes and multiple meaningful commits use a
+no-fast-forward merge.
 {#260523-implement-doc-closeout-compaction}
 
 `lead-update-spec` audits recent commits for caller-visible behavior changes. It

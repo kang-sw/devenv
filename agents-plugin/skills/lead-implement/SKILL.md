@@ -14,8 +14,8 @@ Scope
 - Direct-edit escalates to delegated when scope becomes multi-file with new public API or cross-module new pattern.
 
 Branch
-- User approval gates merge or continuation.
-- Merge commits follow CLAUDE.md commit rules and include `## AI Context`.
+- After Final Action Gate, wait for user approval before merging or starting another implementation slice.
+- Merge commits follow repository commit rules and include `## AI Context`.
 
 Execution
 - Create the task list at Prep; every task is mandatory and ordered.
@@ -59,12 +59,12 @@ Review
 [ ] Route - delegation, plan depth, branch mode, review allocation
 [ ] Prep - branch, context, brief/plan (per plan-depth)
 [ ] Edit - direct-edit or spawn implementer; capture commit range
-[ ] Review - reviewer relay per review-allocation
-[ ] Doc pre-pass - update-spec then mental-model-updater; commit each
+[ ] Review - run reviewer relay according to `judge: review-allocation`
+[ ] Doc pre-pass - invoke `ws:lead-update-spec`, then `mental-model-updater`; commit each
 [ ] Doc commit gate - refresh _index.md, ticket status, then commit docs
 [ ] Doc closeout compaction - compact safe documentation-only branch-tip suffix
 [ ] Final action gate - wait for merge, continue, or stop
-[ ] Merge - implementation-branch modes only and only when approved
+[ ] Merge - only when approved
 ```
 
 ### 3. Edit
@@ -82,10 +82,10 @@ Review
 2. If single: register reviewer via `ws/agents.register(name: "reviewer", prompts: ["code-reviewer", "code-review-correctness", "code-review-fit"])`; generate path via `ws/path.generate(kind: "review", stems: ["direct"])`.
 3. If partitioned: choose partition subset from Tier 2; for each, register reviewer from **Reviewer partition table**; generate paths via `ws/path.generate(kind: "review", stems: ["correctness", "fit", "test"])`.
 4. Call reviewer(s) with **Reviewer prompt frame**.
-5. If all `[clean]`: skip to step 8.
+5. If all reviewers return `[clean]`, proceed to Review cleanup.
 6. If non-clean and single: read review path; classify findings (fix: correctness/security/contract/regression; reject: style-only or scope expansion); apply fixes; re-verify; re-call reviewer with rejected list. Repeat until `[clean]` or 2 cycles.
 7. If non-clean and partitioned: relay to implementer with **Review relay prompt**; extract won't-fix list; re-review non-clean partitions with **Re-review prompt**; keep clean partitions accepted unless fix touched their surface. Repeat until all `[clean]` or 3 cycles; lead adjudicates at cycle 2; caller escalation at cycle 3.
-8. Delete all review path files.
+8. Summarize review outcomes and disputes for the final report, then delete all review path files.
 
 ### 5. Doc Pre-Pass
 
@@ -105,7 +105,7 @@ Run mental-model-updater after update-spec so it sees implemented-marker changes
 
 ### 7. Doc Closeout Compaction
 
-1. If `branch-mode` is direct current branch, set `<doc-compaction-status>` to `skipped - direct-current mode` and continue.
+1. Run this gate for every supported branch mode; implementation runs are always on scoped implementation branches.
 2. Inspect commits from `HEAD` backward after Doc Commit Gate; build only the contiguous branch-tip suffix of eligible documentation closeout commits.
 3. An eligible commit is non-merge, workflow-owned, and changes only `ai-docs/spec/`, `ai-docs/mental-model/`, `ai-docs/tickets/`, `ai-docs/_index.md`, or narrowly relevant `ai-docs/ref/` workflow docs.
 4. Stop suffix collection at the first ineligible commit; never cross source, test, skill, runtime, generated, planning, ready-promotion, review-fix, merge, or ambiguous-authorship commits.
@@ -125,20 +125,22 @@ Report:
 - deviations or open items;
 - unresolved disputes from review relay, if any.
 
-Implementation-branch modes stop after reporting and wait for the user to choose
-merge, continue with a new slice, or stop. Direct-current mode exits after
-reporting; no merge stage. If the user wants more changes, route to a new
+Stop after reporting and wait for the user to choose merge, continue with a new
+slice, or stop. If the user wants more changes, route to a new
 implementation slice or `ws:lead-sprint`; completed phases capture follow-up
-through append-only ticket Result editions.
+through append-only ticket Result editions. If the user chooses stop, leave the
+implementation branch unmerged and report the branch name plus merge target.
 
 ### 9. Merge
 
-Implementation-branch modes only. Merge only when the user approves. Merge
-`implement/<scope>` to `<merge-target>` with the repository merge helper or
-equivalent non-interactive git sequence.
+Merge only when the user approves. Merge `implement/<scope>` to
+`<merge-target>` with the repository merge helper or equivalent non-interactive
+git sequence.
 
-Use squash for one commit; use `--no-ff` for two or more commits.
-Write the merge commit per CLAUDE.md.
+Use fast-forward only when every branch commit is workflow-owned, message-clean,
+and worth preserving directly in target history. Otherwise use squash for one
+logical commit or `--no-ff` for multiple meaningful commits.
+For squash or `--no-ff`, write the merge commit per repository commit rules.
 
 ## Judgments
 
@@ -157,8 +159,7 @@ Pick the first matching decision.
 | Decision | When |
 |----------|------|
 | Continue implementation branch | Current branch starts with `implement/` |
-| Create implementation branch | Delegated path outside `implement/` |
-| Direct current branch | Direct-edit path |
+| Create implementation branch | Current branch does not start with `implement/` |
 
 ### judge: plan-depth
 
