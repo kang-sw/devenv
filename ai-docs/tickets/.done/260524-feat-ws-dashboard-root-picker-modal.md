@@ -9,6 +9,7 @@ spec:
   - 260524-ws-dashboard-root-picker-modal
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Replace open workRoot path input with root picker modal
@@ -70,3 +71,29 @@ Verification should include focused frontend route/model tests for picker state
 transitions and browser-level acceptance evidence against the daemon-served
 production frontend. UI evidence must cover opening an existing workRoot
 through the modal and the fallback exact-path field.
+
+### Result (4a1251cd) - 2026-05-24
+
+Implemented Phase 1 root picker modal:
+
+- Replaced the always-visible left-nav open-workRoot path input with an
+  `Open...` entrypoint that opens a local dashboard modal.
+- Added authenticated root picker list/create wrappers and a modal UI with
+  current path context, parent/up navigation, refresh, selectable directory
+  rows, double-click folder navigation, loading/error/empty states, exact-path
+  browse/open fallback, selected-directory footer actions, Escape/backdrop/close
+  behavior, and responsive wrapping for constrained widths.
+- Added logical `rootPicker.*` command ids for visible picker controls while
+  keeping host paths out of command payloads; opening selected or exact paths
+  still routes through `workRoot.open`.
+- Preserved open-workRoot response reconciliation through the
+  `x-ws-dashboard-opened-work-root-id` header and canonical resource refresh
+  coordinator.
+- Kept the only filesystem mutation as the existing single-segment
+  `Create empty folder` action.
+
+Verification:
+
+- `npm run test:commands`
+- `npm run test:root-picker`
+- `npm run test:browser`
