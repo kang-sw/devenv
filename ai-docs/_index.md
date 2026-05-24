@@ -177,9 +177,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260524-feat-ws-dashboard-react-aria-root-picker-pilot` - ready; Phase 1
-  reworks the root picker into a React Aria explorer-style folder picker while
-  preserving command and open-workRoot contracts.
+- `260524-feat-ws-dashboard-react-aria-root-picker-pilot` - ready; Phase 2
+  adds persisted pinned picker directories on top of the implemented React Aria
+  explorer-style picker.
 
 ## Session Notes
 

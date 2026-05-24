@@ -684,25 +684,19 @@ folder deletion operations remain unavailable.
 
 The browser shell opens workRoots through an owner-authenticated root picker
 modal instead of an always-visible path input. The left navigation exposes an
-`Open...` entrypoint; the modal provides directory navigation, parent/up and
-refresh actions, keyboard-friendly selection, loading/error/empty states, a
-selected-directory footer, and a secondary exact-path field for pasted or
-remote paths. Opening a selected or exact directory continues through the
-`workRoot.open` command path, open-workRoot API, daemon-opened workRoot id
-reconciliation, and canonical resource refresh flow. The modal may expose only
-the existing single-segment `Create empty folder` action, not broad file-manager
-operations. {#260524-ws-dashboard-root-picker-modal}
-
-> [!note] Planned 🚧 {#260524-ws-dashboard-react-aria-root-picker-pilot}
-> The modal will be reworked as an explorer-style folder selection dialog using
-> accessible controlled browser primitives. The owner sees a top navigation
-> ribbon with local Back/Forward history, Up, Refresh, and address entry; a
-> platform-aware built-in places sidebar derived from daemon-owned data; a
-> details-style current-folder row list with room for optional metadata columns;
-> and footer controls for selected or typed path open/cancel. The picker remains
-> folder-selection-only, keeps host paths out of loggable command payload
-> fields, restores focus to the opener on close, and preserves the same
-> authenticated root picker and open-workRoot resource refresh contracts.
+`Open...` entrypoint; the modal is an explorer-style folder selection dialog
+with local Back/Forward history, Up and Refresh actions, an address field,
+platform-aware built-in places derived from daemon-owned data, a details-style
+current-folder row list, and footer controls for opening the selected or typed
+path. Directory rows support keyboard-friendly selection and row action, and
+closing the modal restores focus to the opener. Opening a selected or exact
+directory continues through the `workRoot.open` command path, open-workRoot API,
+daemon-opened workRoot id reconciliation, and canonical resource refresh flow.
+The modal may expose only the existing single-segment `Create empty folder`
+action, not broad file-manager operations. Host paths remain authenticated
+picker/open request data rather than loggable command payload fields.
+{#260524-ws-dashboard-root-picker-modal}
+{#260524-ws-dashboard-react-aria-root-picker-pilot}
 
 After an authenticated owner opens a workRoot, the browser-visible resource
 tree refreshes from the canonical dashboard resources endpoint and selects the

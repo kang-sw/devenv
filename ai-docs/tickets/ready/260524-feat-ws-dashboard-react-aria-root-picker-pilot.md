@@ -8,6 +8,7 @@ spec:
   - 260516-ws-web-dashboard-root-picker-empty-directory-creation
   - 260516-ws-web-dashboard-open-workroot-resource-refresh
   - 260524-ws-dashboard-root-picker-modal
+  - 260524-ws-dashboard-react-aria-root-picker-pilot
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -111,6 +112,32 @@ surfaces.
 Deferred scope: persisted pinned directories, file rows, sort UI, destructive
 filesystem actions, generic file manager behavior, and dashboard-wide React Aria
 standardization.
+
+### Result (0eb8525e) - 2026-05-24
+
+Implemented Phase 1 root picker pilot:
+
+- Added `react-aria-components` and replaced the local modal shell/list with a
+  controlled React Aria `ModalOverlay`/`Dialog` plus details-style `GridList`.
+- Reworked the visible picker into an explorer-style layout with Back/Forward
+  local history, Up/Refresh/address navigation, daemon-derived built-in places,
+  current-folder details rows, a selected/typed path footer, Open/Cancel
+  actions, and retained single-segment empty-folder creation.
+- Extended the authenticated root picker view with available known places and
+  optional row metadata while keeping folder-only filtering and history helpers
+  in the frontend model.
+- Preserved `commands.ts` as the loggable command contract: host paths remain
+  local picker keys or authenticated request data and are not included in
+  `rootPicker.*` or `workRoot.open` payload fields.
+- Split production vendor chunks so the React Aria package impact is visible
+  and the Vite build remains warning-free.
+
+Verification:
+
+- `npm run test:commands`
+- `npm run test:root-picker`
+- `cargo test -p ws-dashboard-daemon root_picker`
+- `npm run test:browser`
 
 ### Phase 2: Persist pinned picker directories
 
