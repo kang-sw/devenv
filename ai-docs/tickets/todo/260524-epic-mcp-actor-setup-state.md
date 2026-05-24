@@ -25,6 +25,8 @@ The epic owns decomposition for:
   reader tools;
 - lead workflow manual guidance that makes lead bootstrap explicit and
   recoverable after MCP restarts;
+- automatic retention and pruning so persistent runtime metadata and
+  file-backed artifacts do not grow without bound;
 - gradual migration of async job and agent-call metadata toward actor-owned
   state and worker leases.
 
@@ -48,8 +50,11 @@ The epic owns decomposition for:
   root-aware actor persistence.
 - `260524-feat-mcp-child-actor-bootstrap` - create child actor ids for delegated
   agent calls and inject setup recovery instructions into child system prompts.
-- Planned: migrate exec and named-agent async metadata to an actor-owned SQLite
-  lease model while leaving stream output files on disk.
+- `260524-feat-mcp-state-store-prune` - introduce the SQLite metadata store,
+  retention model, and pruning foundation while leaving stream output files on
+  disk.
+- Planned: migrate exec and named-agent async metadata to the actor-owned
+  SQLite lease model once the state store and setup model are stable.
 - Planned: align model-backed readers such as `exec.ask` with actor-scoped
   context and visibility once the actor setup foundation exists.
 
@@ -81,13 +86,21 @@ The epic owns decomposition for:
 - SQLite, when introduced, owns metadata transactions only. Long-running
   subprocess execution must not hold a database transaction open; workers should
   update status, byte counts, leases, and completion records with short writes.
+- Auto-prune is part of the persistent-state contract. It must preserve active,
+  running, cancel-requested, leased, and pinned state; large file-backed
+  artifacts are removed through retention rules and retryable cleanup records,
+  not by blindly deleting directories.
+- Windows behavior is a first-class regression boundary for this epic because
+  SQLite file access, process liveness, subprocess cleanup, and artifact
+  deletion can diverge across platforms.
 
 ## Completion Criteria
 
 - Done: ws MCP can recover lead and child actor context across MCP restarts,
   root-omitted privileged tool calls are guided through setup recovery, child
-  agent calls receive actor setup instructions, and async metadata has a clear
-  actor-owned persistence path.
+  agent calls receive actor setup instructions, persistent metadata has bounded
+  retention, Windows regression coverage is recorded for the changed runtime
+  paths, and async metadata has a clear actor-owned persistence path.
 - Dropped: the repo chooses to keep process-local setup memory and prompt-only
   delegation conventions as the accepted long-term model.
 - Deferred: hard security isolation, host-specific launch profiles, and full

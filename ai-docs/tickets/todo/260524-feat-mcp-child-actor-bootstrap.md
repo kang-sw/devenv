@@ -3,6 +3,7 @@ title: MCP child actor bootstrap
 parent: 260524-epic-mcp-actor-setup-state
 related:
   260524-feat-mcp-actor-setup-bootstrap: supplies the setup and actor persistence foundation
+  260524-feat-mcp-state-store-prune: supplies child actor and call metadata persistence
   260524-feat-exec-output-ask: model-backed readers should use scoped child actors
 related-mental-model:
   - mcp-runtime
@@ -43,6 +44,8 @@ explicit actor id recovery path that does not rely on launch metadata.
   setup instructions across repeated prompt fragments.
 - Child actor setup should be compatible with later `exec.ask` reader sessions
   and other model-backed reader tools.
+- Windows behavior is in scope for regression testing because child setup
+  instructions must survive nested process launch and MCP restart flows.
 
 ## Phases
 
@@ -54,4 +57,5 @@ subqueries after `260524-feat-mcp-actor-setup-bootstrap` lands.
 Verification should cover persistent named-agent calls, subquery calls,
 restarted nested MCP behavior where the child calls `ws.setup(id: ...)`,
 absence of lead bootstrap instructions from child prompts, and actor cleanup or
-inactive marking for ephemeral subqueries.
+inactive marking for ephemeral subqueries. Include Windows coverage for nested
+agent launch and setup recovery behavior.

@@ -3,6 +3,7 @@ title: MCP actor setup bootstrap
 parent: 260524-epic-mcp-actor-setup-state
 related:
   260524-epic-async-exec-job-surface: exec tools should follow the same setup-gated actor model
+  260524-feat-mcp-state-store-prune: supplies or constrains the persistent actor metadata store
 related-mental-model:
   - mcp-runtime
   - plugin-runtime
@@ -50,6 +51,9 @@ soft authority boundary.
   append streams remain file-backed.
 - Existing compatibility root setup behavior should remain recoverable during
   migration, but new privileged workflows should use actor setup.
+- Windows behavior is in scope for regression testing because setup recovery
+  must work across fresh MCP server processes and platform-specific filesystem
+  behavior.
 
 ## Phases
 
@@ -70,5 +74,6 @@ Implement the lead actor bootstrap foundation:
 
 Verification should cover restart-style recovery with a fresh MCP server
 instance, root guidance that uses absolute paths or `"<cwd>"`, id-less setup not
-minting lead authority, setup-gated calls before setup, and compatibility with
-existing root-omitted tool behavior.
+minting lead authority, setup-gated calls before setup, compatibility with
+existing root-omitted tool behavior, and Windows coverage for the same setup and
+recovery paths.
