@@ -31,4 +31,13 @@ func TestTailReadAndGrep(t *testing.T) {
 	if _, err := Grep([]string{path}, `(`, 0, 0, 10, true); err == nil {
 		t.Fatal("invalid regex returned nil error")
 	}
+	missing := filepath.Join(t.TempDir(), "missing.txt")
+	missingRead, err := Read(missing, 0, 0)
+	if err != nil || !missingRead.EOF {
+		t.Fatalf("missing Read = %#v, %v", missingRead, err)
+	}
+	truncated, err := Grep([]string{path}, "two", 0, 0, 1, false)
+	if err != nil || len(truncated.Matches) != 1 || !truncated.Truncated {
+		t.Fatalf("truncated Grep = %#v, %v", truncated, err)
+	}
 }

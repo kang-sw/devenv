@@ -65,6 +65,9 @@ func TestLaunchResultRawReadersAndWorkingDir(t *testing.T) {
 	if err != nil || len(grep.Matches) != 1 {
 		t.Fatalf("Grep = %#v, %v", grep, err)
 	}
+	if _, err := Launch(LaunchOptions{Root: root, WorkingDir: "../escape", Cmd: "/bin/sh", Args: []string{"-c", "true"}}); err == nil {
+		t.Fatal("relative working_dir escaped worktree root")
+	}
 }
 
 func TestLongLargeAndAbort(t *testing.T) {
@@ -89,8 +92,8 @@ func TestLongLargeAndAbort(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		aborted, _ = Status(root, long.ExecKey)
 	}
-	if !aborted.ResultReady {
-		t.Fatalf("abort did not become terminal: %#v", aborted)
+	if aborted.Status != stateCancelled {
+		t.Fatalf("abort did not become cancelled: %#v", aborted)
 	}
 	partial, err := Tail(root, long.ExecKey, "stdout", 10)
 	if err != nil || !strings.Contains(partial.Text, "start") {
@@ -110,5 +113,38 @@ func TestLongLargeAndAbort(t *testing.T) {
 	}
 	if largeResult.Stdout != "" || !strings.Contains(largeResult.Guidance, "exec.ask") {
 		t.Fatalf("large result = %#v", largeResult)
+	}
+}
+
+func TestReconcileLostRunningWorker(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := gitRoot(t)
+	key := "exec-1-0000000000000001"
+	dir, err := jobDir(root, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stdout"), []byte("partial\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stderr"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "combined"), []byte("partial\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := ts()
+	if err := writeRecord(root, Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateRunning, Root: root, WorkingDir: root, PID: 999999999, StartedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Status(root, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != stateFailed || !strings.Contains(got.Error, "worker is no longer active") || got.StdoutBytes == 0 {
+		t.Fatalf("reconciled status = %#v", got)
 	}
 }

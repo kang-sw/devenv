@@ -207,14 +207,14 @@ func Launch(opts LaunchOptions) (Response, error) {
 }
 
 func Status(root, key string) (Response, error) {
-	rec, err := refreshSizes(root, key)
+	rec, err := reconcile(root, key)
 	if err != nil {
 		return Response{}, err
 	}
 	return responseFor(root, rec, false), nil
 }
 func Result(root, key string) (Response, error) {
-	rec, err := refreshSizes(root, key)
+	rec, err := reconcile(root, key)
 	if err != nil {
 		return Response{}, err
 	}
@@ -321,6 +321,33 @@ func refreshSizes(root, key string) (Record, error) {
 	return rec, nil
 }
 
+func reconcile(root, key string) (Record, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	rec, err := readRecord(root, key)
+	if err != nil {
+		return rec, err
+	}
+	updateSizes(&rec, root, key)
+	if rec.Status == stateRunning || rec.Status == stateCancelRequested {
+		if _, ok := active.Load(activeKey(root, key)); !ok && !processAlive(rec.PID) {
+			if rec.CancelRequested || rec.Status == stateCancelRequested {
+				rec.Status = stateCancelled
+				if rec.Error == "" {
+					rec.Error = "exec job cancelled"
+				}
+			} else {
+				rec.Status = stateFailed
+				rec.Error = "exec job worker is no longer active"
+			}
+			rec.CompletedAt = ts()
+		}
+	}
+	rec.UpdatedAt = ts()
+	_ = writeRecordLocked(root, rec)
+	return rec, nil
+}
+
 func responseFor(root string, rec Record, include bool) Response {
 	r := Response{ExecKey: rec.ExecKey, Status: rec.Status, PID: rec.PID, StartedAt: rec.StartedAt, UpdatedAt: rec.UpdatedAt, CompletedAt: rec.CompletedAt, ExitCode: rec.ExitCode, Error: rec.Error, ResultReady: terminal(rec.Status), StdoutBytes: rec.StdoutBytes, StderrBytes: rec.StderrBytes, CombinedBytes: rec.CombinedBytes}
 	if !include {
@@ -354,10 +381,23 @@ func resolveWorkingDir(root, wd string) (string, error) {
 		wd = filepath.Join(root, wd)
 	}
 	wd = filepath.Clean(wd)
+	rel, err := filepath.Rel(root, wd)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("working_dir %q must resolve inside ws worktree root %q", wd, root)
+	}
 	return wd, nil
 }
 func shellCommand(shell, command string) (string, []string) {
 	if strings.TrimSpace(shell) != "" {
+		if goruntime.GOOS == "windows" {
+			base := strings.ToLower(filepath.Base(shell))
+			switch base {
+			case "cmd", "cmd.exe":
+				return shell, []string{"/C", command}
+			case "powershell", "powershell.exe", "pwsh", "pwsh.exe":
+				return shell, []string{"-Command", command}
+			}
+		}
 		return shell, []string{"-c", command}
 	}
 	if goruntime.GOOS == "windows" {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1676,6 +1677,9 @@ func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
 }
 
 func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix shell snippets")
+	}
 	useLeadProfile(t)
 	root := t.TempDir()
 	mustWrite(t, root, "README.md", "x\n")
@@ -1686,7 +1690,7 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"/bin/sh","args":["-c","pwd; echo err >&2; printf 'alpha\\nbeta42\\n'"],"working_dir":"sub"}}}`,
-		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":"printf shell-shape"}}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":"pwd; printf shell-shape"}}}`,
 	}, "\n") + "\n"
 	var out bytes.Buffer
 	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
@@ -1699,7 +1703,7 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 		}
 	}
 	text := toolText(t, byID["2"])
-	if !strings.Contains(byID["9"], "shell-shape") {
+	if !strings.Contains(byID["9"], "shell-shape") || !strings.Contains(byID["9"], root) {
 		t.Fatalf("shell response = %s", byID["9"])
 	}
 	if !strings.Contains(text, `"status":"succeeded"`) || !strings.Contains(text, filepath.Join(root, "sub")) || !strings.Contains(text, `"stderr":"err`) {
@@ -1742,6 +1746,66 @@ func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
 	}
 	if !strings.Contains(byID["2"], "agentless mode disables") || !strings.Contains(byID["3"], "agentless mode disables") {
 		t.Fatalf("no-agent calls not rejected: %s\n%s", byID["2"], byID["3"])
+	}
+}
+
+func TestExecMCPRunningLargeAndAbort(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix shell snippets")
+	}
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":"echo start; sleep 6; echo done"}}}` + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	text := toolText(t, byID["1"])
+	if !strings.Contains(text, `"status":"running"`) || !strings.Contains(text, "exec.ask") || strings.Contains(text, "done") {
+		t.Fatalf("running launch response = %s", byID["1"])
+	}
+	var running execToolResponse
+	if err := json.Unmarshal([]byte(text), &running); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.abort","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var abortText string
+	for time.Now().Before(deadline) {
+		out.Reset()
+		input = fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
+		if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+			t.Fatal(err)
+		}
+		abortText = toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
+		if strings.Contains(abortText, `"status":"cancelled"`) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !strings.Contains(abortText, `"status":"cancelled"`) {
+		t.Fatalf("abort status = %s", abortText)
+	}
+
+	out.Reset()
+	largeCommand := "i=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done"
+	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":%q}}}`, largeCommand) + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	largeText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["4"])
+	if strings.Contains(largeText, strings.Repeat("x", 100)) || !strings.Contains(largeText, `"combined_bytes":5000`) || !strings.Contains(largeText, "exec.raw.*") {
+		t.Fatalf("large response = %s", largeText)
 	}
 }
 

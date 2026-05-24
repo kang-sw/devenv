@@ -48,24 +48,38 @@ func Tail(path string, lines int) (string, error) {
 	if lines > MaxTailLines {
 		lines = MaxTailLines
 	}
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	parts := strings.Split(string(data), "\n")
-	if len(parts) > 0 && parts[len(parts)-1] == "" {
-		parts = parts[:len(parts)-1]
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	ring := make([]string, lines)
+	count := 0
+	for scanner.Scan() {
+		ring[count%lines] = scanner.Text()
+		count++
 	}
-	if len(parts) > lines {
-		parts = parts[len(parts)-lines:]
+	if err := scanner.Err(); err != nil {
+		return "", err
 	}
-	if len(parts) == 0 {
+	if count == 0 {
 		return "", nil
 	}
-	return strings.Join(parts, "\n") + "\n", nil
+	n := count
+	if n > lines {
+		n = lines
+	}
+	out := make([]string, 0, n)
+	start := count - n
+	for i := 0; i < n; i++ {
+		out = append(out, ring[(start+i)%lines])
+	}
+	return strings.Join(out, "\n") + "\n", nil
 }
 
 func Read(path string, offset, limit int64) (ReadResult, error) {
