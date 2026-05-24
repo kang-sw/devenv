@@ -150,6 +150,7 @@ dropped tickets live in hidden archive dirs and git history.
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
 | `260524-feat-ws-dashboard-document-viewer-editor-substrate` | todo | Add a reusable markdown document viewer, translation-ready block model, panel-local edit mode, and save fan-out contract |
+| `260524-feat-ws-dashboard-context-surface-hierarchy` | ready | Clarify dashboard context surface hierarchy across nav, topbar, Dockview groups, editor/document shells, local dividers, and pane bodies |
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
@@ -178,7 +179,7 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-No ready tickets currently queued.
+- `260524-feat-ws-dashboard-context-surface-hierarchy` - clarify visual hierarchy between large dashboard context regions, split groups, editor/document shells, and local dividers without changing behavior.
 
 ## Session Notes
 

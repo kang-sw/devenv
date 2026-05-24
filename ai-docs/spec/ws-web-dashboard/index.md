@@ -575,6 +575,17 @@ bright text for the primary label, and icon buttons expose most border or
 glass-like treatment only on hover/focus/active states while retaining stable
 dimensions and accessible names. {#260524-dashboard-icon-first-chrome}
 
+> [!note] Planned 🚧
+> The dashboard will distinguish large working context regions through a
+> surface hierarchy rather than uniform hairlines. Left navigation, workRoot
+> topbar chrome, Dockview split groups, editor/document shells, pane-local
+> ribbons, and content bodies will use separate semantic surface and divider
+> roles so structural boundaries, local dividers, selection states, and
+> hover/focus control chrome do not compete visually. Editor/document panes will
+> read as one context island whose tabbar, internal ribbon, and body belong
+> together, while Dockview split boundaries use a stronger structural gutter or
+> surface contrast than local tab/body dividers. {#260524-dashboard-context-surface-hierarchy}
+
 ## Browser UI Acceptance Gate {#260516-ws-web-dashboard-browser-ui-acceptance-gate}
 
 Dashboard frontend changes that affect visible browser behavior provide a

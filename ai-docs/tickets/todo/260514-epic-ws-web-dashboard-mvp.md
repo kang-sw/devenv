@@ -176,6 +176,10 @@ The MVP should cover:
   icon-first chrome pass after screenshot review by fixing compact glyph
   overlap, removing ready chips from nav rows, tuning power/menu/chip state
   treatment, and moving icon buttons toward quiet hover-revealed chrome.
+- `260524-feat-ws-dashboard-context-surface-hierarchy` - ready; clarify the
+  visual hierarchy between navigation, workRoot topbar, Dockview split groups,
+  editor/document shells, local dividers, and pane bodies without changing
+  dashboard behavior or reintroducing heavy boxed controls.
 - `260524-feat-ws-dashboard-document-viewer-editor-substrate` - todo; add a
   reusable markdown document viewer substrate, translation-ready block model,
   panel-local view/edit mode, raw-text editing boundary, and same-document save
