@@ -1697,12 +1697,16 @@ button {
 
 .readonly-text-pane-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--ws-space-08);
+  gap: var(--ws-space-06);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
   background: var(--ws-color-surface-editor-chrome);
-  padding: var(--ws-space-07) var(--ws-space-08);
+  padding: var(--ws-space-04) var(--ws-space-08);
+}
+
+.readonly-text-pane-ribbon {
+  min-height: 38px;
 }
 
 .readonly-text-pane-title-block {
@@ -1736,6 +1740,16 @@ button {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--ws-space-03);
+}
+
+.document-ribbon-controls {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ws-space-04);
 }
 
 .readonly-text-content {
@@ -2902,22 +2916,20 @@ button {
   color: var(--ws-color-text-primary);
 }
 
-.document-translation-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ws-space-05);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
-  background: var(--ws-color-surface-editor-chrome);
-  padding: var(--ws-space-04) var(--ws-space-08);
-}
-
 .document-translation-toggle {
+  display: inline-flex;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
   border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  border-radius: var(--ws-radius-square);
   background: var(--ws-color-panel-raised);
   color: var(--ws-color-text-secondary);
-  padding: var(--ws-space-02) var(--ws-space-06);
+  padding: 0;
   font: inherit;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -2929,6 +2941,7 @@ button {
 .document-translation-status {
   color: var(--ws-color-text-tertiary);
   font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-02);
 }
 
 .document-block-translation:hover::after {
@@ -2940,16 +2953,6 @@ button {
   color: var(--ws-color-text-tertiary);
   padding: var(--ws-space-04);
   white-space: pre-wrap;
-}
-
-.document-edit-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ws-space-05);
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
-  background: var(--ws-color-surface-editor-chrome);
-  padding: var(--ws-space-04) var(--ws-space-08);
 }
 
 .document-edit-actions {

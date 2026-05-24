@@ -10,6 +10,7 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  Languages,
   Plus,
   LayoutPanelTop,
   ListTodo,
@@ -5099,58 +5100,27 @@ function ReadOnlyDocumentPane({
     };
   }, [pane.content, pane.path, pane.status, pane.title, pane.workRootId, renderMarkdown, translationEnabled]);
 
+  const documentFormatLabel = renderMarkdown ? "markdown" : (pane.languageHint ?? pane.extension ?? "text");
+  const translationButtonLabel = translationEnabled
+    ? "Disable Korean translation"
+    : "Enable Korean translation";
+  const translationStatusVisible =
+    translationStatus === "loading" ||
+    translationStatus === "ready" ||
+    translationStatus === "unavailable" ||
+    translationStatus === "error";
+
   return (
     <div className="readonly-text-pane document-pane ws-pane">
-      <div className="readonly-text-pane-header ws-toolbar">
+      <div className="readonly-text-pane-header readonly-text-pane-ribbon ws-toolbar">
         <div className="readonly-text-pane-title-block">
           <div className="readonly-text-pane-title">{pane.title}</div>
           <div className="readonly-text-pane-path" title={pane.path}>
             {root.label} / {pane.path}
           </div>
         </div>
-        <div className="readonly-text-pane-badges">
-          <span className="meta-chip ws-chip">{pane.mode}</span>
-          <span className="meta-chip ws-chip">read-only</span>
-          <span className="meta-chip ws-chip">
-            {renderMarkdown ? "markdown" : (pane.languageHint ?? pane.extension ?? "text")}
-          </span>
-        </div>
-      </div>
-      {pane.status === "loading" ? (
-        <div className="readonly-text-pane-state ws-state-surface">Loading file content</div>
-      ) : pane.status === "error" ? (
-        <div className="readonly-text-pane-state readonly-text-pane-error ws-state-surface">
-          {pane.error ?? "file read failed"}
-        </div>
-      ) : (
-        <>
-          {renderMarkdown ? (
-            <div className="document-translation-toolbar ws-toolbar">
-            <button
-              type="button"
-              className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
-              aria-pressed={translationEnabled}
-              data-command-id="document.translation.toggle"
-              onClick={() => {
-                const command = buildDocumentTranslationToggleCommand(pane.workRootId, pane.path);
-                onCommand(command, {
-                  [command.commandId]: () => {
-                    setTranslationEnabled((current) => !current);
-                    setTranslationOverlay(undefined);
-                    setTranslationStatus("idle");
-                    setTranslationMessage(null);
-                  },
-                });
-              }}
-            >
-              Translate: {translationEnabled ? "on" : "off"}
-            </button>
-            <span className="document-translation-status" data-translation-status={translationStatus}>
-              {translationMessage ?? "Target: Korean"}
-            </span>
-            </div>
-          ) : null}
-          <div className="document-edit-toolbar ws-toolbar">
+        <div className="document-ribbon-controls">
+          {pane.status === "loaded" ? (
             <div className="document-viewer-segmented" role="group" aria-label="Document mode">
               <button
                 type="button"
@@ -5169,18 +5139,60 @@ function ReadOnlyDocumentPane({
                 edit
               </button>
             </div>
-            {documentMode === "edit" ? (
-              <div className="document-edit-actions">
-                <button type="button" data-command-id="document.save" disabled={saveState === "saving" || draft === pane.content} onClick={saveDraft}>
-                  Save
-                </button>
-                <button type="button" data-command-id="document.revert" disabled={saveState === "saving" || draft === pane.content} onClick={revertDraft}>
-                  Revert
-                </button>
-                <span data-document-save-state={saveState}>{saveMessage ?? (draft === pane.content ? "Clean" : "Unsaved changes")}</span>
-              </div>
-            ) : null}
+          ) : null}
+          {pane.status === "loaded" && renderMarkdown && documentMode === "view" ? (
+            <button
+              type="button"
+              className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
+              aria-label={translationButtonLabel}
+              aria-pressed={translationEnabled}
+              title={`${translationButtonLabel}; target: Korean`}
+              data-command-id="document.translation.toggle"
+              onClick={() => {
+                const command = buildDocumentTranslationToggleCommand(pane.workRootId, pane.path);
+                onCommand(command, {
+                  [command.commandId]: () => {
+                    setTranslationEnabled((current) => !current);
+                    setTranslationOverlay(undefined);
+                    setTranslationStatus("idle");
+                    setTranslationMessage(null);
+                  },
+                });
+              }}
+            >
+              <Languages aria-hidden="true" size={13} strokeWidth={1.8} />
+            </button>
+          ) : null}
+          {translationStatusVisible ? (
+            <span className="document-translation-status" data-translation-status={translationStatus}>
+              {translationMessage ?? translationStatus}
+            </span>
+          ) : null}
+          {documentMode === "edit" && pane.status === "loaded" ? (
+            <div className="document-edit-actions">
+              <button type="button" data-command-id="document.save" disabled={saveState === "saving" || draft === pane.content} onClick={saveDraft}>
+                Save
+              </button>
+              <button type="button" data-command-id="document.revert" disabled={saveState === "saving" || draft === pane.content} onClick={revertDraft}>
+                Revert
+              </button>
+              <span data-document-save-state={saveState}>{saveMessage ?? (draft === pane.content ? "Clean" : "Unsaved changes")}</span>
+            </div>
+          ) : null}
+          <div className="readonly-text-pane-badges">
+            <span className="meta-chip ws-chip">{pane.mode}</span>
+            <span className="meta-chip ws-chip">{documentFormatLabel}</span>
           </div>
+        </div>
+      </div>
+      {pane.status === "loading" ? (
+        <div className="readonly-text-pane-state ws-state-surface">Loading file content</div>
+      ) : pane.status === "error" ? (
+        <div className="readonly-text-pane-state readonly-text-pane-error ws-state-surface">
+          {pane.error ?? "file read failed"}
+        </div>
+      ) : (
+        <>
           {documentMode === "edit" ? (
             <textarea
               className="document-raw-editor ws-code-block"
