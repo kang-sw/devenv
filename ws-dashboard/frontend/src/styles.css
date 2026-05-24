@@ -8,13 +8,20 @@
   --ws-color-panel-inset: #0c0f14;
   --ws-color-panel-code: #080a0d;
   --ws-color-surface-app: var(--ws-color-canvas);
-  --ws-color-surface-region-nav: #131820;
+  --ws-color-surface-region-nav: #121820;
   --ws-color-surface-region-workbench: #161a22;
-  --ws-color-surface-context: #151a23;
-  --ws-color-surface-context-raised: #181e27;
-  --ws-color-surface-pane: #151a22;
-  --ws-color-surface-pane-body: #11161d;
-  --ws-color-surface-document-chrome: #141a22;
+  --ws-color-surface-nav-header: #1a202a;
+  --ws-color-surface-nav-body: #10161e;
+  --ws-color-surface-files: #0d1720;
+  --ws-color-surface-files-header: #16212c;
+  --ws-color-surface-workbench-topbar: #1b2230;
+  --ws-color-surface-context: #151b24;
+  --ws-color-surface-context-raised: #18202b;
+  --ws-color-surface-pane: #141a22;
+  --ws-color-surface-pane-body: #10151c;
+  --ws-color-surface-editor-chrome: #19232e;
+  --ws-color-surface-editor-body: #070a0e;
+  --ws-color-surface-document-chrome: var(--ws-color-surface-editor-chrome);
   --ws-color-split-gutter: #121720;
   --ws-color-border-subtle: #252c37;
   --ws-color-border: #333b49;
@@ -325,12 +332,12 @@ button {
 
 .panel-header {
   display: flex;
-  min-height: 48px;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
+  background: var(--ws-color-surface-nav-header);
   padding: 7px 8px 7px 12px;
 }
 
@@ -349,12 +356,17 @@ button {
 }
 
 .state-line {
-  display: flex;
+  display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--ws-space-03);
+  width: fit-content;
+  max-width: 100%;
   overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ws-color-state-success) 12%, var(--ws-color-panel-raised));
   color: var(--ws-color-text-secondary);
+  padding: var(--ws-space-01) var(--ws-space-05);
   font-size: var(--ws-font-size-02);
   line-height: var(--ws-line-height-02);
   text-overflow: ellipsis;
@@ -794,7 +806,7 @@ button {
   min-height: 160px;
   flex: 0 1 46%;
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
+  background: var(--ws-color-surface-nav-body);
 }
 
 .file-explorer {
@@ -802,7 +814,7 @@ button {
   min-height: 180px;
   flex: 1 1 54%;
   flex-direction: column;
-  background: var(--ws-color-panel-subtle);
+  background: var(--ws-color-surface-files);
 }
 
 .file-explorer-header {
@@ -1432,7 +1444,7 @@ button {
   gap: var(--ws-space-04) var(--ws-space-09);
   align-items: center;
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-context);
-  background: var(--ws-color-surface-context-raised);
+  background: var(--ws-color-surface-workbench-topbar);
   padding: var(--ws-space-06) var(--ws-space-08) var(--ws-space-06) var(--ws-space-09);
 }
 
@@ -1658,7 +1670,7 @@ button {
   justify-content: space-between;
   gap: var(--ws-space-08);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
-  background: var(--ws-color-surface-document-chrome);
+  background: var(--ws-color-surface-editor-chrome);
   padding: var(--ws-space-07) var(--ws-space-08);
 }
 
@@ -1700,7 +1712,7 @@ button {
   margin: 0;
   overflow: auto;
   color: var(--ws-color-text-primary);
-  background: var(--ws-color-panel-code);
+  background: var(--ws-color-surface-editor-body);
   padding: var(--ws-space-09);
   font-family: var(--ws-font-family-mono);
   font-size: var(--ws-font-size-02);
@@ -2411,9 +2423,12 @@ button {
 
 /* Phase 1 icon-first nav/topbar polish overrides. */
 .open-work-root,
-.resource-list-region,
+.resource-list-region {
+  background: var(--ws-color-surface-nav-body);
+}
+
 .file-explorer {
-  background: var(--ws-color-surface-pane-body);
+  background: var(--ws-color-surface-files);
 }
 
 .open-work-root,
@@ -2426,7 +2441,7 @@ button {
 }
 
 .file-explorer-header {
-  background: var(--ws-color-surface-context);
+  background: var(--ws-color-surface-files-header);
 }
 
 .file-explorer-icon {
@@ -2525,7 +2540,7 @@ button {
   position: relative;
   grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-rows: minmax(0, auto);
-  min-height: 48px;
+  min-height: 56px;
   gap: var(--ws-space-07);
   padding: var(--ws-space-06) var(--ws-space-08);
 }

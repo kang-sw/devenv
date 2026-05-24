@@ -29,12 +29,20 @@ Components should prefer purpose-based names over raw color names.
 - `--ws-color-surface-app`: app canvas behind all context regions.
 - `--ws-color-surface-region-nav`: left navigation region surface.
 - `--ws-color-surface-region-workbench`: workRoot workbench region surface.
+- `--ws-color-surface-nav-header`: server/navigation top header surface.
+- `--ws-color-surface-nav-body`: workspace navigation section surface.
+- `--ws-color-surface-files`: file explorer body surface.
+- `--ws-color-surface-files-header`: file explorer header surface.
+- `--ws-color-surface-workbench-topbar`: selected workRoot topbar surface.
 - `--ws-color-surface-context`: nested context surface such as a nav section
   or Dockview group.
 - `--ws-color-surface-context-raised`: context chrome such as toolbars and tab
   bars.
 - `--ws-color-surface-pane`: workbench pane shell surface.
 - `--ws-color-surface-pane-body`: pane body surface below pane chrome.
+- `--ws-color-surface-editor-chrome`: editor/document header or ribbon
+  surface.
+- `--ws-color-surface-editor-body`: editor/document content body surface.
 - `--ws-color-surface-document-chrome`: document/editor ribbon or header
   chrome inside a pane.
 - `--ws-color-split-gutter`: structural gutter between large regions or split

@@ -269,7 +269,12 @@ async function expectContextSurfaceHierarchy(page: Page) {
     const workbenchStyle = getComputedStyle(
       document.querySelector(".shell-panel-workbench")!,
     );
+    const panelHeaderStyle = getComputedStyle(document.querySelector(".panel-header")!);
     const toolbarStyle = getComputedStyle(document.querySelector(".workbench-toolbar")!);
+    const fileExplorerStyle = getComputedStyle(document.querySelector(".file-explorer")!);
+    const fileExplorerHeaderStyle = getComputedStyle(
+      document.querySelector(".file-explorer-header")!,
+    );
     const layoutStyle = getComputedStyle(
       document.querySelector(".dockview-workbench-layout")!,
     );
@@ -283,8 +288,13 @@ async function expectContextSurfaceHierarchy(page: Page) {
     return {
       navBackground: navStyle.backgroundColor,
       workbenchBackground: workbenchStyle.backgroundColor,
+      panelHeaderBackground: panelHeaderStyle.backgroundColor,
+      panelHeaderMinHeight: panelHeaderStyle.minHeight,
       toolbarBackground: toolbarStyle.backgroundColor,
+      toolbarMinHeight: toolbarStyle.minHeight,
       toolbarDivider: toolbarStyle.borderBottomColor,
+      fileExplorerBackground: fileExplorerStyle.backgroundColor,
+      fileExplorerHeaderBackground: fileExplorerHeaderStyle.backgroundColor,
       dockviewBorderTopWidth: layoutStyle.borderTopWidth,
       dockviewBackground: layoutStyle.backgroundColor,
       tabbarBackground: tabbarStyle.backgroundColor,
@@ -304,6 +314,12 @@ async function expectContextSurfaceHierarchy(page: Page) {
   });
 
   expect(hierarchy.navBackground).not.toBe(hierarchy.workbenchBackground);
+  expect(hierarchy.panelHeaderBackground).not.toBe(hierarchy.toolbarBackground);
+  expect(hierarchy.panelHeaderMinHeight).toBe(hierarchy.toolbarMinHeight);
+  expect(hierarchy.fileExplorerBackground).not.toBe(hierarchy.navBackground);
+  expect(hierarchy.fileExplorerHeaderBackground).not.toBe(
+    hierarchy.fileExplorerBackground,
+  );
   expect(hierarchy.toolbarBackground).not.toBe(hierarchy.paneBodyBackground);
   expect(hierarchy.tabbarBackground).not.toBe(hierarchy.paneBodyBackground);
   expect(hierarchy.toolbarDivider).not.toBe(hierarchy.tabbarDivider);
