@@ -66,7 +66,7 @@ history.
 | `agents-plugin/skills/lead-skill-authoring/SKILL.md` | Skill/agent/prompt/convention authoring rules |
 | `ai-docs/ref/wsflow-mirroring.md` | Required before editing full ws skills or plugin surfaces that may need wsflow mirrors |
 | `ai-docs/ref/codex-integration.md` | Probed Codex CLI behavior |
-| `ai-docs/ref/ws-mcp.md` | MCP process, tools, CLI fallbacks, verification levels |
+| `ai-docs/ref/ws-mcp.md` | MCP operational runbook, launcher environment, release and verification steps |
 | `ai-docs/ref/ws-agent-runtime.md` | Durable agent runtime contract |
 | `ai-docs/ship/ws.md` | Release process for `ws` |
 | `ws/infra.read("impl-playbook")` | Implementation discipline |
@@ -84,17 +84,20 @@ surface may drift.
 
 ## Runtime Surfaces
 
-MCP contract and current tool inventory live in `ai-docs/ref/ws-mcp.md`; use
-`ws/runtime.info` and `ws/project_tree` for runtime state instead of copying the
-tool list here. Shared `agents-plugin` skill text uses MCP names, not repo-local
-paths. Infra and convention text are bundled into the runtime and read through
+MCP behavior contracts live in `ai-docs/spec/mcp-tools.md`,
+`ai-docs/spec/plugin-runtime.md`, and related mental models. Current tool
+schemas and inventory are runtime-discoverable through `tools/list` and
+`runtime capabilities`; do not copy them into project memory or reference docs.
+Shared `agents-plugin` skill text uses MCP names, not repo-local paths. Infra
+and convention text are bundled into the runtime and read through
 `ws/infra.read` and `ws/convention.read`.
 
 ## MCP Runtime Notes
 
-Runtime and launcher contracts are maintained in `ai-docs/ref/ws-mcp.md`,
-`ai-docs/spec/plugin-runtime.md`, and the source under `agents-plugin-tool/` and
-`agents-plugin/bin/`.
+Runtime and launcher contracts are maintained in `ai-docs/spec/plugin-runtime.md`,
+`ai-docs/spec/mcp-tools.md`, and the source under `agents-plugin-tool/` and
+`agents-plugin/bin/`. `ai-docs/ref/ws-mcp.md` is the operational runbook for
+launcher environment, release, and verification steps.
 
 Windows plugin-managed startup uses the same Python launcher. Native Windows
 needs a working `python3` command; if the Windows Store alias is present without
@@ -158,6 +161,7 @@ dropped tickets live in hidden archive dirs and git history.
 | `260524-epic-async-exec-job-surface` | todo | Coordinate async exec job tools, bounded output readers, and later model-backed output questions |
 | `260524-feat-exec-output-ask` | todo | Add lead-facing model-backed questions over persisted exec job output |
 | `260524-chore-exec-surface-runtime-contract` | todo | Close runtime capabilities, manifests, CLI mirror policy, and wsflow contract for exec tools |
+| `260524-chore-ws-mcp-reference-ownership` | ready | Re-home ws MCP reference content into specs, mental models, and an operations runbook |
 | `260513-feat-runtime-binary-staging-copy` | todo | Stage runtime binaries under deterministic versioned paths |
 | `260521-research-libws-harness-mvp-planning` | todo | Plan the future libws-harness MVP epic and child ticket population from the recovered JSONL run-substrate research |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |

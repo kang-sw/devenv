@@ -44,6 +44,22 @@ Workflow skills read these conventions before editing the matching document
 system. Shared skill text uses this MCP surface instead of hard-coded
 repository-local convention paths.
 
+## Reference Document Ownership {#260524-reference-document-ownership}
+
+Reference documents under `ai-docs/ref/` are operational runbooks, stable
+external notes, or link hubs. They do not own caller-visible behavior contracts,
+current implementation inventory, or source-derived schemas. Specs own
+observable behavior, mental models own non-obvious modification coupling, and
+runtime/source discovery owns facts that can be read directly from code-backed
+surfaces.
+
+A reference may point to runtime-discoverable inventory such as MCP
+`tools/list`, `runtime capabilities`, source registries, or generated metadata,
+but it should not duplicate that inventory unless the duplicate is generated or
+is itself a public artifact. When a reference contains operational commands, the
+commands are examples or runbook steps rather than the behavioral source of
+truth.
+
 ## Spec Document System {#260505-spec-document-system}
 
 Specs describe caller-visible project behavior. They live under

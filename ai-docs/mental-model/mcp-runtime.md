@@ -60,6 +60,7 @@ related:
 - Config tools read/write user-local config through `wsconfig`; compatibility tier names, model aliases, optional effort metadata, and harness-aware defaults must match agent registration behavior and readable `config.show` output. `config.agents_tier` is the public effort-selection surface; exposing effort directly on `agents.register`, `subquery`, or prompt metadata would bypass the alias contract and backend no-override default. {#260505-config-tools} {#260508-model-alias-config-tools}
 - MCP and CLI mirrors share readable formatter contracts through exported `internal/mcp` formatting helpers for workflow discovery and Git summaries. Keep explicit JSON output paths beside text defaults so tests cover both caller types. {#260519-workflow-command-readable-output-defaults}
 - Broad documentation find output has a stricter formatter contract than ordinary list summaries: default text groups by document with `score`/`hits`, bounds document and hit counts, and prints selected line snippets; explicit JSON must keep the wsdoc `matches` evidence for structured consumers. {#260519-tolerant-documentation-lookup-query-evidence}
+- Static reference docs must not copy the MCP tool schema or current tool inventory; live schema belongs to `tools()`/`tools/list`, launcher inventory belongs to `runtime.capabilities`, and durable behavior belongs in specs. {#260524-reference-document-ownership}
 
 ## Extension Points & Change Recipes
 
@@ -87,6 +88,7 @@ related:
 - Letting `WS_MCP_PROJECT_ROOT` shadow an explicit non-dot server startup root makes tests pass in this dogfooding repo while plugin-managed calls target the wrong project.
 - Treating namespace override as a tool rename; wsflow changes user-facing namespace text and advertised setup alias, while generic MCP tool identifiers stay stable.
 - Updating `specs.find` or `mental_models.find` MCP output without the CLI mirror; users dogfood the CLI fallback when MCP host behavior is unclear.
+- Treating `ai-docs/ref/ws-mcp.md` as the MCP contract source of truth instead of an operations runbook; this recreates schema drift with `tools()` and `runtime.capabilities`.
 - Migrating agent or exec state into SQLite while also moving large stream payloads into the database; that defeats raw tail/read/grep and increases lock pressure.
 
 ## Technical Debt

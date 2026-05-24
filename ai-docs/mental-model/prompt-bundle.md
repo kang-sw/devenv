@@ -55,5 +55,5 @@ related:
 
 ## Technical Debt
 
-- `ws-mcp.md` prompt stem lists can drift from `runtime.json`; runtime metadata is the authoritative list.
+- Static docs can drift from `runtime.json`; runtime metadata is the authoritative prompt bundle inventory.
 - Root-relative prompt paths are not implemented.

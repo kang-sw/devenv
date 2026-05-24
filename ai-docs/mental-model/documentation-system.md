@@ -35,6 +35,7 @@ related:
 - Broad `specs.find` and `mental_models.find` query matching is token-scored in shared wsdoc helpers, not per-discovery substring checks; exact selectors (`spec_stem`, `ticket_stem`, `domain`) still filter before query scoring. {#260519-tolerant-documentation-lookup-query-evidence}
 - Query evidence is body-line-only: metadata can raise a document score, but it must not create synthetic line evidence. This prevents text output from pointing callers at non-existent line zero hits. {#260519-tolerant-documentation-lookup-query-evidence}
 - `ai-docs/WORKFLOW.md` is bootstrap-installed explanatory documentation for plugin-less maintenance; wsdoc parsers and MCP tools do not treat it as convention, spec, ticket, or runtime input. {#260506-bootstrap-workflow-guide}
+- `ai-docs/ref/` documents are operational runbooks or stable references; caller-visible behavior belongs in specs, modification coupling belongs in mental models, and code-derived inventories belong in source or runtime discovery. {#260524-reference-document-ownership}
 
 ## Coupling
 
@@ -58,6 +59,7 @@ related:
 - Changing workflow semantics in the downstream workflow guide instead of the canonical plugin/runtime, bundled conventions, or bootstrap templates.
 - Loading mental-model child docs without ancestors and missing inherited Domain Rules.
 - Moving current feature inventory or implementation status from `_index.md` into the project reading map instead of specs, tickets, source, or tests.
+- Duplicating MCP tool schemas or current tool inventory in `ai-docs/ref/`; use `tools/list`, `runtime capabilities`, source registries, or specs for stable behavior instead. {#260524-reference-document-ownership}
 - Replacing tolerant broad-query scoring with exact phrase matching; multi-word user questions should find candidates by shared terms while exact selectors remain exact filters.
 
 ## Technical Debt

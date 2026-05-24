@@ -10,6 +10,12 @@ than host-specific shell commands or repository-local paths. Tool outputs are
 plain MCP text content that callers can use from Codex, Claude, or another
 MCP-capable host.
 
+This spec owns stable caller-visible behavior, not a copied tool schema
+inventory. The runtime-owned MCP registry and `tools/list` response own input
+schemas, and `runtime capabilities` owns the launcher-facing surface inventory.
+When those runtime-discoverable fields change without changing caller-visible
+behavior, update code and tests rather than copying field lists into this spec.
+
 ## MCP Server Protocol Surface {#260505-mcp-server-protocol-surface}
 
 The `ws-mcp serve --stdio` process implements a stdio JSON-RPC MCP server. It

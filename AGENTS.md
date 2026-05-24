@@ -152,7 +152,9 @@ not stage it unless explicitly requested.
 - Static references: `ai-docs/ref/`
 - Skill/agent authoring: `agents-plugin/skills/lead-skill-authoring/SKILL.md`
 - Codex behavior notes: `ai-docs/ref/codex-integration.md`
-- MCP runtime contract: `ai-docs/ref/ws-mcp.md`
+- MCP behavior contracts: `ai-docs/spec/mcp-tools.md` and
+  `ai-docs/spec/plugin-runtime.md`
+- MCP operational runbook: `ai-docs/ref/ws-mcp.md`
 
 Before editing:
 

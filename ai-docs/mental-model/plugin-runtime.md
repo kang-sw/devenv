@@ -36,6 +36,7 @@ related:
 - Version changes are multi-file and should use the bump helper rather than editing manifests manually. {#260505-runtime-version-bump-helper}
 - Runtime install/repair has explicit override env vars: `WS_MCP_RUNTIME_DIR`, release repository/tag/base URL overrides, and bootstrap binary/URL/checksum overrides.
 - The launcher exports `WS_MCP_RUNTIME_BINARY`; named-agent async workers use it to avoid spawning from stale plugin-cache executables after a plugin refresh.
+- `ai-docs/ref/ws-mcp.md` is a launcher and operations runbook, not the plugin runtime contract; update `spec/plugin-runtime.md`, `runtime.json`, and `runtime.capabilities` when caller-visible compatibility behavior changes. {#260524-reference-document-ownership}
 
 ## Coupling
 
