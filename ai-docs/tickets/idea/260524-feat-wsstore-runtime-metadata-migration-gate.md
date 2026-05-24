@@ -35,6 +35,17 @@ complete cross-process IPC contention strategy.
   metadata when the data benefits from transactional updates, indexed lookup,
   relationship tracking, crash recovery, stale-worker reconciliation, or
   retention queries.
+- Actor-bound named-agent metadata should use the actor id as an internal
+  namespace for agent names. Public `agents.*` inputs remain name-based, so
+  `agents.register(name: "implementer")` keeps the same API shape while the
+  stored identity becomes actor-local.
+- Unbound or hidden explicit-root compatibility calls may preserve the existing
+  worktree-global namespace during migration, but actor-bound calls should
+  resolve actor-local agent names first.
+- Agent and exec lifecycle removal should be logical removal plus retention
+  eligibility, not immediate artifact deletion. Cancelled, erased, consumed
+  ephemeral, or otherwise hidden runtime records should leave execution history
+  available until prune policy removes it.
 - Keep large append-heavy payloads file-backed: stdout, stderr, combined output,
   prompts, transcripts, runtime logs, and final result bodies should remain
   files with SQLite storing only identity, lifecycle, paths, byte counts,
@@ -55,6 +66,13 @@ complete cross-process IPC contention strategy.
 - Keep append-heavy or large data out of SQLite, including stdout, stderr,
   combined streams, agent event JSONL, prompt snapshots, final output bodies,
   runtime logs, transcripts, and backend raw output.
+- `agents.cancel`, `agents.erase`, and ephemeral result consumption must not
+  synchronously delete prompt, output, stream, event, or diagnostic artifacts.
+  They should update lifecycle, visibility, tombstone, or retention metadata and
+  let prune perform physical cleanup later.
+- Pruning must skip active/running/cancel-requested/leased/pinned records and
+  retain enough recent diagnostics for failed or cancelled agent and exec runs
+  to be inspected after the public surface no longer lists them.
 - Do not use SQLite as the coordination mechanism for every agent event or tool
   event. If a future design needs frequent multi-process event appends, choose
   a file-backed log, a single-writer daemon, or another explicit IPC boundary.
@@ -79,6 +97,11 @@ The selected boundary must explicitly state which named-agent and exec fields
 become SQLite metadata and which existing files remain the source of truth for
 streams, prompts, event logs, and result bodies.
 
+It must also define the internal namespace rules for actor-bound named agents:
+public `agents.*` names remain unchanged, actor id participates in persisted
+identity for actor-bound registrations and calls, and compatibility behavior is
+explicit for root-explicit or unbound callers.
+
 The phase should define acceptance tests that spawn independent processes or MCP
 server instances against the same worktree state database and exercise actor
 setup, child actor creation, exec job lifecycle writes, and prune/tombstone
@@ -91,4 +114,8 @@ into SQLite as a contention workaround.
 After the gate exists, migrate either exec job metadata or named-agent metadata
 as the first real consumer. Preserve file-backed streams and existing recovery
 semantics, add compatibility reads where needed, and verify macOS/Linux plus
-native Windows behavior.
+native Windows behavior. If named-agent metadata is the first surface, verify
+that two actor-bound sessions can both register `implementer` without colliding
+while legacy unbound behavior remains compatible. If exec metadata is first,
+verify that cancel/result/erase-style cleanup is logical and that physical
+artifact removal happens only through prune.
