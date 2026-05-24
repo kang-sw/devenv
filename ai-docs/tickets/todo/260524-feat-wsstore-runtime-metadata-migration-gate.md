@@ -64,9 +64,10 @@ complete cross-process IPC contention strategy.
 
 - Preserve existing JSON/file-backed compatibility reads until each runtime
   surface has explicit migration and recovery coverage.
-- Existing file-backed agent registrations may be invalidated or discarded by
-  the named-agent metadata migration if preserving them would add compatibility
-  complexity beyond their value as volatile workflow resources.
+- Existing file-backed agent registrations do not require long-lived migration
+  compatibility. If their metadata fits the SQLite metadata boundary above,
+  implement the named-agent metadata path as a SQLite-authoritative path rather
+  than preserving `agent.json` as a parallel source of truth.
 - SQLite-backed state should be limited to metadata such as agent definition
   rows, current call or exec job lifecycle state, actor/session binding, worker
   leases, artifact indexes, retention policies, prune runs, and tombstones.
@@ -108,7 +109,9 @@ For named agents, the phase must include a field-by-field inventory of
 `agent.json`, `current/state.json`, and adjacent agent state files. Classify each
 field as SQLite authoritative metadata, retained file-backed payload, or
 temporary compatibility data. The intended end state is that `agent.json` is not
-required as an authoritative metadata store.
+required as an authoritative metadata store. Metadata that meets the SQLite
+boundary in this ticket should move cleanly to SQLite instead of being left in a
+file-backed compatibility path.
 
 It must also define the internal namespace rules for actor-bound named agents:
 public `agents.*` names remain unchanged, actor id participates in persisted
