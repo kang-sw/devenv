@@ -161,7 +161,6 @@ dropped tickets live in hidden archive dirs and git history.
 | `260523-feat-ws-dashboard-linked-worktree-discovery` | todo | Discover linked Git workRoots through the durable registry |
 | `260524-feat-ws-dashboard-workspace-forget-remove-ui` | todo | Add explicit dashboard workspace forget/remove UI |
 | `260523-feat-ws-dashboard-main-session-activity-source` | idea | Represent direct main-session Codex work in WorkRoot Activity freshness |
-| `260524-bug-ws-dashboard-workroot-activation-source-divergence` | ready | Unify dashboard workRoot activation lookup across opened and discovered roots |
 | `260523-feat-ws-agent-cycled-instance-history` | idea | Add per-instance named-agent storage with cycling for old inactive instances |
 | `260523-research-ws-dashboard-persistable-ui-state-map` | idea | Map persistable ws dashboard UI state |
 | `260512-research-claude-cli-stream-json` | idea | Capture Claude CLI stream-json contract before changing the Claude named-agent runner |
@@ -181,7 +180,6 @@ dropped tickets live in hidden archive dirs and git history.
 ## Ticket Queue
 
 - `260524-feat-ws-dashboard-workspace-root-prune-policy` - implement owner-managed workspace root ownership, disabled/recovery-needed root-unavailable state, and automatic workspace pruning when no active workRoots remain.
-- `260524-bug-ws-dashboard-workroot-activation-source-divergence` - unify dashboard resource projection and route gates around one activation lookup per registered workRoot id.
 
 ## Session Notes
 

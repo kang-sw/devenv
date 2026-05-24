@@ -782,6 +782,75 @@ async fn dashboard_resources_discovers_linked_git_worktrees_from_opened_primary(
 }
 
 #[tokio::test]
+async fn dashboard_resources_uses_registry_activation_for_opened_discovered_duplicates() {
+    if skip_without_git(
+        "dashboard_resources_uses_registry_activation_for_opened_discovered_duplicates",
+    ) {
+        return;
+    }
+    let base = temp_fixture_path("resources-duplicate-activation");
+    let primary = base.join("a-primary");
+    let linked = base.join("z-linked");
+    fs::create_dir_all(&primary).expect("create primary workRoot");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "dashboard\n").expect("write seed file");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    run_git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            linked.to_str().expect("linked path utf-8"),
+        ],
+    );
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let _primary_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let linked_id = open_work_root_for_test(app.clone(), cookie.as_str(), &linked).await;
+
+    let offline_value =
+        set_work_root_activation_for_test(app.clone(), cookie.as_str(), &linked_id, "offline")
+            .await;
+    let offline_root = work_root_by_id(&offline_value, &linked_id);
+    assert_eq!(offline_root["activation"], "offline");
+
+    let refreshed = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let refreshed_root = work_root_by_id(&refreshed, &linked_id);
+    assert_eq!(
+        refreshed_root["activation"], "offline",
+        "the discovered sibling row must reuse the opened registry activation"
+    );
+    assert!(refreshed_root["actions"]
+        .as_array()
+        .expect("actions array")
+        .iter()
+        .any(|action| action["id"] == "workRoot.activation.online" && action["enabled"] == true));
+
+    let activity = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{linked_id}/activity"))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("duplicate offline activity request"),
+        )
+        .await
+        .expect("duplicate offline activity response");
+    assert_eq!(
+        activity.status(),
+        StatusCode::CONFLICT,
+        "route gate and resource projection must agree on offline activation"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
 async fn dashboard_resources_refresh_prunes_workspace_without_available_work_roots() {
     let root = temp_fixture_path("refresh-recompute");
     fs::create_dir_all(&root).expect("create refresh root");
@@ -4307,6 +4376,35 @@ fn work_root_by_id<'a>(value: &'a serde_json::Value, work_root_id: &str) -> &'a 
         })
         .find(|root| root["id"] == work_root_id)
         .expect("workRoot id present")
+}
+
+async fn set_work_root_activation_for_test(
+    app: axum::Router,
+    cookie: &str,
+    work_root_id: &str,
+    activation: &str,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{work_root_id}/activation"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": activation }).to_string(),
+                ))
+                .expect("set workRoot activation request"),
+        )
+        .await
+        .expect("set workRoot activation response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("set workRoot activation body");
+    serde_json::from_slice(&body).expect("set workRoot activation JSON")
 }
 
 async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -> String {
