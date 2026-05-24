@@ -15,6 +15,7 @@ spec:
   - 260524-ws-dashboard-document-edit-save-fanout
 plans:
   phase-1: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate
+  phase-2: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate-phase-2
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -400,6 +401,41 @@ shape, translation toggle behavior, original-on-hover source peek, selected
 block copy actions, and browser-level evidence against a daemon-served markdown
 pane. When local Ollama is available, dogfood evidence should record the
 provider/model used without depending on private prompt or raw model output.
+
+### Result (a4cdbff) - 2026-05-24
+
+Implemented daemon-owned document translation support for Markdown panes. The
+daemon now exposes OpenAI-compatible provider status/model probing and
+whole-document translation routes, uses environment-backed provider
+configuration, validates block-id roundtrips, bounds parse and provider
+failures, avoids raw provider output in browser responses, and caches
+translations with source, provider, model, locale, prompt, and block-model
+dimensions. Frontend Markdown panes now expose a command-routed translation
+toggle, request whole-document translation for the current content hash, render
+translated block overlays, preserve original-on-hover behavior, and keep
+selected current/translated/pathref copy actions.
+
+Review cycle follow-ups `9ac425e` and `51d128a` tightened cache-key dimensions,
+unknown provider block-id handling, raw-output leak tests, selected-copy
+coverage, and dashboard command-dispatch routing for the visible translation
+toggle.
+
+Verification passed:
+
+- `cargo test -p ws-dashboard-daemon`
+- `npm run test:commands`
+- `npm run test:document-viewer`
+- `npm run test:work-root-files`
+- `npm run build`
+- `npm run test:browser`
+
+Browser evidence covered daemon-served Markdown-pane translation toggle behavior
+with configured-unavailable state. Deterministic successful overlay behavior is
+covered by backend fake-provider tests and frontend overlay/copy helper tests.
+
+Deferred scope remains Phase 3 raw edit/save/document events, provider
+configuration UI, non-LLM provider implementation, streaming token UI, Activity
+Console translation, and durable cache persistence.
 
 ### Phase 3: Raw text edit mode, save fan-out, and document events
 
