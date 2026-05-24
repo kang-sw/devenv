@@ -13,6 +13,8 @@ spec:
   - 260524-ws-dashboard-document-viewer-mode
   - 260524-ws-dashboard-document-translation-overlay
   - 260524-ws-dashboard-document-edit-save-fanout
+plans:
+  phase-1: 2026-05/24-260524-feat-ws-dashboard-document-viewer-editor-substrate
 related-mental-model:
   - ws-web-dashboard
 ---
@@ -330,6 +332,32 @@ Verification should include pure markdown block/pathref/selection/overlay model
 tests and browser-level evidence that markdown renders in the daemon-served
 file pane with GFM/task/callout behavior, block actions, preview/pin behavior,
 and scroll containment intact.
+
+### Result (b8fb8cb) - 2026-05-24
+
+Implemented a reusable Markdown document viewer for read-only file panes while
+preserving existing read-only pane identity, preview/pinned behavior,
+workbench placement, descriptor restore compatibility, and scroll containment.
+Markdown files now render through an AST-based viewer with GFM tables/task
+items, Obsidian-style callouts, footnote hover data, block derivation, local
+content hashing, block selection, copy actions, workRoot-relative pathrefs, and
+a declarative translation-overlay shape.
+
+Review cycle follow-up `4173dd6` tightened Markdown link handling and pathref
+generation: unsafe link schemes render inert, relative Markdown links remain
+inactive until a dashboard-safe navigation model exists, and copyable pathrefs
+reject absolute, Windows-drive, backslash, home-relative, empty, or traversal
+inputs before browser exposure.
+
+Verification passed:
+
+- `npm run test:document-viewer`
+- `npm run test:work-root-files`
+- `npm run build`
+- `npm run test:browser`
+
+Deferred scope remains Phase 2 daemon translation providers/cache/prompting
+and Phase 3 raw edit/save/document events.
 
 ### Phase 2: Translation provider MVP and overlay UX
 

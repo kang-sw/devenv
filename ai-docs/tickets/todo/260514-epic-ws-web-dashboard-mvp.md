@@ -86,13 +86,10 @@ Completed follow-up clusters:
 
 Active or planned product tracks:
 
-- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - ready; next
-  implementation track. Add a reusable markdown document viewer, translation-
-  ready block model, panel-local view/edit mode, raw-text editing boundary, and
-  same-document save fan-out contract. This track is expected to proceed as
-  three conservative slices: markdown viewer/block interaction, daemon-backed
-  translation provider MVP, then raw text edit/save fan-out. This track should
-  be polished before the next large management or agent-panel slice.
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - ready; active
+  implementation track. The markdown viewer/block interaction slice is
+  complete. Continue with daemon-backed translation provider MVP, then raw text
+  edit/save fan-out before the next large management or agent-panel slice.
 - WorkRoot management - planned child track. Continue from the completed
   registry/root-picker/workspace policies into practical owner operations for
   managing active, unavailable, linked, remembered, pinned, and recoverable

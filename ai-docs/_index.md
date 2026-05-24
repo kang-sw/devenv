@@ -178,10 +178,10 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - Implement the
-  editor polishing track in conservative slices: markdown viewer/block
-  interaction first, then daemon-backed translation overlay, then raw-text
-  edit/save fan-out.
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - Continue the
+  editor polishing track with Phase 2 daemon-backed translation overlay; Phase
+  1 markdown viewer/block interaction is complete and Phase 3 raw-text
+  edit/save fan-out remains later in the same ticket.
 
 ## Session Notes
 
