@@ -17,6 +17,9 @@ use crate::document_translation::{
     translate_document, translation_providers, DocumentTranslationService,
 };
 use crate::events::instance_events;
+use crate::git_worktree::{
+    git_worktree_add_options, git_worktree_add_preview, git_worktree_add_submit,
+};
 use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
 use crate::root_picker::{
@@ -82,6 +85,18 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/workspaces/{workspace_id}",
             delete(remove_workspace),
+        )
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/options",
+            get(git_worktree_add_options),
+        )
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/preview",
+            post(git_worktree_add_preview),
+        )
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}/git-worktree-add",
+            post(git_worktree_add_submit),
         )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activation",

@@ -4,6 +4,7 @@ pub mod config;
 pub mod discovery;
 pub mod document_translation;
 pub mod events;
+pub mod git_worktree;
 pub mod logging;
 pub mod mock;
 pub mod persistent_state;

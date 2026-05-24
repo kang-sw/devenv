@@ -2949,3 +2949,64 @@ button {
   line-height: var(--ws-line-height-04);
   resize: none;
 }
+.workspace-row-menu-wrap {
+  position: relative;
+}
+
+.workspace-row-menu {
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+}
+
+.workbench-overflow-item-danger {
+  color: var(--danger-foreground, #ffb4ab);
+}
+
+.git-worktree-modal .root-picker-dialog {
+  gap: 14px;
+}
+
+.git-worktree-form,
+.git-worktree-field,
+.git-worktree-fieldset {
+  display: grid;
+  gap: 10px;
+}
+
+.git-worktree-fieldset {
+  border: 1px solid var(--panel-border);
+  padding: 10px;
+}
+
+.git-worktree-branch-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meta-chip-disabled {
+  opacity: 0.55;
+}
+
+.git-worktree-preview {
+  border: 1px solid var(--panel-border);
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.git-worktree-preview-willCreateBranch {
+  border-color: #4ade80;
+  color: #bbf7d0;
+}
+
+.git-worktree-preview-willCheckoutExisting {
+  border-color: #facc15;
+  color: #fef08a;
+}
+
+.git-worktree-preview-blocked {
+  border-color: #f87171;
+  color: #fecaca;
+}

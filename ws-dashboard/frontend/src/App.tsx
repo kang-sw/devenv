@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, Key, ReactNode, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, FormEvent, Key, ReactNode, SetStateAction } from "react";
 import {
   Activity,
   BriefcaseBusiness,
@@ -10,6 +10,7 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  Plus,
   LayoutPanelTop,
   ListTodo,
   MoreHorizontal,
@@ -51,6 +52,9 @@ import {
   buildFileExplorerRefreshCommand,
   buildFileExplorerSelectEntryCommand,
   buildFileExplorerToggleDirectoryCommand,
+  buildGitWorktreeAddCloseCommand,
+  buildGitWorktreeAddOpenCommand,
+  buildGitWorktreeAddSubmitCommand,
   buildRootPickerCloseCommand,
   buildRootPickerCreateDirectoryCommand,
   buildRootPickerNavigateCommand,
@@ -60,6 +64,7 @@ import {
   buildRootPickerUnpinDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
+  buildWorkspaceMenuOpenCommand,
   buildWorkspaceRemoveCommand,
   buildWorkRootActivationCommand,
   buildWorkRootOpenCommand,
@@ -185,6 +190,14 @@ import {
   type RootPickerNavigationHistory,
   type RootPickerView,
 } from "./rootPicker";
+import {
+  fetchGitWorktreeAddOptions,
+  previewGitWorktreeAdd,
+  submitGitWorktreeAdd,
+  type GitWorktreeAddOptions,
+  type GitWorktreeAddPreview,
+  type GitWorktreeAddPreviewRequest,
+} from "./gitWorktreeAdd";
 import { ActivityConsole } from "./ActivityConsole";
 import {
   createResourceRefreshCoordinator,
@@ -268,6 +281,7 @@ export function App() {
     null,
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [gitWorktreeWorkspaceId, setGitWorktreeWorkspaceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [commandLog, setCommandLog] = useState<CommandEntry[]>([]);
@@ -594,6 +608,11 @@ export function App() {
               setError(nextError instanceof Error ? nextError.message : "activation failed");
             });
         };
+      } else if (command.payload.type === "gitWorktreeAdd.open") {
+        const { workspaceId } = command.payload;
+        executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(workspaceId);
+      } else if (command.payload.type === "gitWorktreeAdd.close") {
+        executableHandlers[command.commandId] = () => setGitWorktreeWorkspaceId(null);
       } else if (command.payload.type === "workspace.remove") {
         const { workspaceId } = command.payload;
         executableHandlers[command.commandId] = () => {
@@ -714,6 +733,18 @@ export function App() {
             selectedWorkRoot={workbenchSelection?.root ?? null}
             onCommand={executeCommand}
             onOpenFile={openReadOnlyFile}
+          />
+          <GitWorktreeAddModal
+            workspaceId={gitWorktreeWorkspaceId}
+            onCommand={executeCommand}
+            onClose={() => setGitWorktreeWorkspaceId(null)}
+            onCreated={(response) => {
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(response.resources);
+              if (response.createdWorkRootId) {
+                setSelectedId(response.createdWorkRootId);
+              }
+              setGitWorktreeWorkspaceId(null);
+            }}
           />
         </aside>
 
@@ -1422,6 +1453,168 @@ function OpenWorkRootControl({
         </Modal>
       </ModalOverlay>
     </div>
+  );
+}
+
+
+function GitWorktreeAddModal({
+  workspaceId,
+  onCommand,
+  onClose,
+  onCreated,
+}: {
+  workspaceId: string | null;
+  onCommand: DashboardCommandDispatcher;
+  onClose: () => void;
+  onCreated: (response: { resources: DashboardResourcesView; createdWorkRootId?: string }) => void;
+}) {
+  const [options, setOptions] = useState<GitWorktreeAddOptions | null>(null);
+  const [worktreeName, setWorktreeName] = useState("");
+  const [branchMode, setBranchMode] = useState<"auto" | "manual">("auto");
+  const [manualBranch, setManualBranch] = useState("");
+  const [pathMode, setPathMode] = useState<"auto" | "custom">("auto");
+  const [customPath, setCustomPath] = useState("");
+  const [preview, setPreview] = useState<GitWorktreeAddPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setOptions(null);
+      setPreview(null);
+      setError(null);
+      return;
+    }
+    setWorktreeName("");
+    setBranchMode("auto");
+    setManualBranch("");
+    setPathMode("auto");
+    setCustomPath("");
+    setPreview(null);
+    setError(null);
+    setLoading(true);
+    void fetchGitWorktreeAddOptions(workspaceId)
+      .then(setOptions)
+      .catch((nextError) => setError(nextError instanceof Error ? nextError.message : "worktree options failed"))
+      .finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  const request = useMemo<GitWorktreeAddPreviewRequest | null>(() => {
+    if (!workspaceId) {
+      return null;
+    }
+    return {
+      worktreeName,
+      branch: branchMode === "auto" ? { mode: "auto" } : { mode: "manual", name: manualBranch },
+      path: pathMode === "auto" ? { mode: "auto" } : { mode: "custom", targetPath: customPath },
+    };
+  }, [branchMode, customPath, manualBranch, pathMode, worktreeName, workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId || !request || worktreeName.trim().length === 0) {
+      setPreview(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void previewGitWorktreeAdd(workspaceId, request)
+        .then(setPreview)
+        .catch((nextError) => setError(nextError instanceof Error ? nextError.message : "worktree preview failed"));
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [request, worktreeName, workspaceId]);
+
+  if (!workspaceId) {
+    return null;
+  }
+
+  const close = () => {
+    onCommand(buildGitWorktreeAddCloseCommand(workspaceId), {
+      "gitWorktreeAdd.close": onClose,
+    });
+  };
+  const submitDisabled =
+    submitting ||
+    !request ||
+    worktreeName.trim().length === 0 ||
+    (branchMode === "manual" && manualBranch.trim().length === 0) ||
+    (pathMode === "custom" && customPath.trim().length === 0) ||
+    !preview ||
+    preview.status === "blocked" ||
+    options?.git.available === false;
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!request || submitDisabled) {
+      return;
+    }
+    onCommand(buildGitWorktreeAddSubmitCommand(workspaceId), {
+      "gitWorktreeAdd.submit": () => {
+        setSubmitting(true);
+        setError(null);
+        void submitGitWorktreeAdd(workspaceId, { ...request, activate: true })
+          .then(onCreated)
+          .catch((nextError) => setError(nextError instanceof Error ? nextError.message : "worktree add failed"))
+          .finally(() => setSubmitting(false));
+      },
+    });
+  };
+
+  const severity = preview?.status ?? "blocked";
+  return (
+    <ModalOverlay className="root-picker-backdrop" isDismissable isOpen onOpenChange={(isOpen) => { if (!isOpen) close(); }}>
+      <Modal className="root-picker-modal git-worktree-modal">
+        <Dialog aria-label="Add Git worktree" className="root-picker-dialog">
+          <div className="root-picker-header">
+            <div className="root-picker-title-block">
+              <Heading className="root-picker-title" slot="title">Add worktree</Heading>
+              <div className="root-picker-current">{options?.git.rootLabel ?? "Loading Git workspace"}</div>
+            </div>
+            <button className="action-button" data-command-id="gitWorktreeAdd.close" type="button" onClick={close}>Close</button>
+          </div>
+          <form className="git-worktree-form" onSubmit={submit}>
+            <label className="git-worktree-field">
+              <span className="section-label">Worktree name</span>
+              <input className="root-picker-input" autoComplete="off" value={worktreeName} onChange={(event) => setWorktreeName(event.target.value)} placeholder="feature-name" />
+            </label>
+            <fieldset className="git-worktree-fieldset">
+              <legend className="section-label">Branch</legend>
+              <label><input type="radio" checked={branchMode === "auto"} onChange={() => setBranchMode("auto")} /> Auto from name</label>
+              <label><input type="radio" checked={branchMode === "manual"} onChange={() => setBranchMode("manual")} /> Existing/manual branch</label>
+              <input className="root-picker-input" list="git-worktree-branches" disabled={branchMode !== "manual"} value={manualBranch} onChange={(event) => setManualBranch(event.target.value)} placeholder="branch-name" />
+              <datalist id="git-worktree-branches">
+                {(options?.branches ?? []).filter((branch) => !branch.checkedOut).map((branch) => <option key={branch.name} value={branch.name} />)}
+              </datalist>
+              <div className="git-worktree-branch-list">
+                {(options?.branches ?? []).map((branch) => (
+                  <span className={`meta-chip ws-chip ${branch.checkedOut ? "meta-chip-disabled" : ""}`} key={branch.name}>{branch.name}{branch.current ? " (current)" : ""}{branch.checkedOut ? " — checked out" : ""}</span>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset className="git-worktree-fieldset">
+              <legend className="section-label">Path</legend>
+              <label><input type="radio" checked={pathMode === "auto"} onChange={() => setPathMode("auto")} /> Auto under {options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}</label>
+              <label><input type="radio" checked={pathMode === "custom"} onChange={() => setPathMode("custom")} /> Custom target path</label>
+              <input className="root-picker-input" disabled={pathMode !== "custom"} value={customPath} onChange={(event) => setCustomPath(event.target.value)} placeholder="/path/to/worktree" />
+            </fieldset>
+            {options && !options.git.available ? <InlineNotice tone="error" title="Git unavailable" detail={options.git.reason ?? "workspace is not Git-capable"} /> : null}
+            {preview ? (
+              <div className={`git-worktree-preview git-worktree-preview-${severity}`} role="status">
+                <strong>{preview.message}</strong>
+                <span>{preview.branchName ? `Branch: ${preview.branchName}` : "Branch pending"}</span>
+                <span>{preview.targetPathLabel ? `Target: ${preview.targetPathLabel}` : "Target pending"}</span>
+                {preview.blockers.map((blocker) => <span key={`${blocker.code}:${blocker.field ?? ""}`}>{blocker.message}</span>)}
+              </div>
+            ) : loading ? <InlineNotice tone="info" title="Loading" detail="Git worktree options" /> : null}
+            {error ? <InlineNotice tone="error" title="Add worktree" detail={error} /> : null}
+            <div className="root-picker-footer-actions">
+              <button className="action-button action-button-primary" data-command-id="gitWorktreeAdd.submit" disabled={submitDisabled} type="submit">{submitting ? "Creating" : "Create worktree"}</button>
+              <button className="action-button" data-command-id="gitWorktreeAdd.close" type="button" onClick={close}>Cancel</button>
+            </div>
+          </form>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
   );
 }
 
@@ -4735,6 +4928,7 @@ function WorkspaceRows({
           kind={compactRoot.kind}
           availability={compactRoot.availability}
           activation={compactRoot.activation}
+          canAddWorktree={compactRoot.kind === "gitPrimaryRoot" || compactRoot.kind === "gitLinkedWorktree"}
           debugMeta={[
             "compact workRoot",
             kindLabel(compactRoot.kind),
@@ -4758,6 +4952,7 @@ function WorkspaceRows({
         selected={selectedId === workspace.id}
         actions={workspace.actions}
         actionEntityId={workspace.id}
+        canAddWorktree={workspace.workRoots.some((root) => root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree")}
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
       />
@@ -4807,6 +5002,7 @@ function ResourceRow({
   kind,
   availability,
   activation,
+  canAddWorktree = false,
   debugMeta,
   onCommand,
 }: {
@@ -4821,12 +5017,14 @@ function ResourceRow({
   kind?: WorkRootView["kind"];
   availability?: WorkRootView["availability"];
   activation?: WorkRootView["activation"];
+  canAddWorktree?: boolean;
   debugMeta: string[];
   onCommand: DashboardCommandDispatcher;
 }) {
-  const visibleActions = actions.filter(
+  const hasWorkspaceRemove = actions.some(
     (action) => action.enabled && action.id === "workspace.remove",
   );
+  const [menuOpen, setMenuOpen] = useState(false);
   const tone = resourceRowTone(state, availability, activation);
   const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(" · ");
   return (
@@ -4860,19 +5058,51 @@ function ResourceRow({
           ) : null}
         </span>
       </button>
-      {visibleActions.length > 0 ? (
-        <span className="resource-row-actions">
-          {visibleActions.map((action) => (
-            <ChromeIconButton
-              className="resource-row-action"
-              commandId="workspace.remove"
-              icon={Trash2}
-              key={action.id}
-              label={action.label}
-              tone="danger"
-              onClick={() => onCommand(buildWorkspaceRemoveCommand(actionEntityId))}
-            />
-          ))}
+      {hasWorkspaceRemove ? (
+        <span className="resource-row-actions workspace-row-menu-wrap">
+          <ChromeIconButton
+            className="resource-row-action"
+            commandId="workspace.menu.open"
+            icon={MoreHorizontal}
+            label={`More actions for ${title}`}
+            onClick={() =>
+              onCommand(buildWorkspaceMenuOpenCommand(actionEntityId), {
+                "workspace.menu.open": () => setMenuOpen((current) => !current),
+              })
+            }
+          />
+          {menuOpen ? (
+            <div className="workbench-overflow-menu workspace-row-menu" role="menu">
+              {canAddWorktree ? (
+              <button
+                className="workbench-overflow-item"
+                data-command-id="gitWorktreeAdd.open"
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onCommand(buildGitWorktreeAddOpenCommand(actionEntityId));
+                }}
+              >
+                <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Add worktree...</span>
+              </button>
+              ) : null}
+              <button
+                className="workbench-overflow-item workbench-overflow-item-danger"
+                data-command-id="workspace.remove"
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onCommand(buildWorkspaceRemoveCommand(actionEntityId));
+                }}
+              >
+                <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Remove workspace...</span>
+              </button>
+            </div>
+          ) : null}
         </span>
       ) : null}
     </div>

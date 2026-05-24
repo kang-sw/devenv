@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { startDaemon, type DaemonHandle } from "./daemonHarness.js";
@@ -29,8 +30,10 @@ const artifactsDir = path.join(here, ".artifacts");
 let daemon: DaemonHandle;
 let workRoot: string;
 let secondWorkRoot: string | null = null;
+let gitWorkRoot: string | null = null;
 let ownsWorkRoot = false;
 let ownsSecondWorkRoot = false;
+let ownsGitWorkRoot = false;
 let ownsStateHome = false;
 let stateHome: string | null = null;
 let previousStateHome: string | undefined;
@@ -107,6 +110,13 @@ test.beforeAll(async () => {
       process.env.WS_DASHBOARD_DAEMON_BASE_URL ||
       process.env.WS_DASHBOARD_DAEMON_PAIRING_URL,
   );
+  if (process.env.WS_DASHBOARD_TEST_GIT_WORKROOT) {
+    gitWorkRoot = process.env.WS_DASHBOARD_TEST_GIT_WORKROOT;
+  } else if (!externalDaemon) {
+    gitWorkRoot = mkdtempSync(path.join(os.tmpdir(), "ws-dash-git-gate-"));
+    ownsGitWorkRoot = true;
+    initGitFixture(gitWorkRoot);
+  }
   previousStateHome = process.env.WS_DASHBOARD_STATE_HOME;
   if (!externalDaemon) {
     stateHome = mkdtempSync(path.join(os.tmpdir(), "ws-dash-state-"));
@@ -201,6 +211,9 @@ test.afterAll(async () => {
   if (secondWorkRoot && ownsSecondWorkRoot) {
     rmSync(secondWorkRoot, { recursive: true, force: true });
   }
+  if (gitWorkRoot && ownsGitWorkRoot) {
+    rmSync(gitWorkRoot, { recursive: true, force: true });
+  }
   if (ownsStateHome && stateHome) {
     rmSync(stateHome, { recursive: true, force: true });
   }
@@ -251,6 +264,17 @@ async function expectTerminalInputFocused(page: Page) {
       className: expect.stringContaining("xterm-helper-textarea"),
       tagName: "TEXTAREA",
     });
+}
+
+
+function initGitFixture(rootPath: string) {
+  execFileSync("git", ["init"], { cwd: rootPath, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "ws-dashboard@example.local"], { cwd: rootPath });
+  execFileSync("git", ["config", "user.name", "ws dashboard"], { cwd: rootPath });
+  writeFileSync(path.join(rootPath, "README.md"), "git browser gate fixture\n");
+  execFileSync("git", ["add", "README.md"], { cwd: rootPath });
+  execFileSync("git", ["commit", "-m", "seed"], { cwd: rootPath, stdio: "ignore" });
+  execFileSync("git", ["branch", "existing-browser-branch"], { cwd: rootPath });
 }
 
 function workRootDisplayName(rootPath: string) {
@@ -593,6 +617,40 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     note(
       "visual hierarchy: nav, workbench topbar, Dockview group, tabbar, and pane body use distinct context surface/divider roles",
     );
+  });
+
+
+
+  await test.step("git workspace overflow adds linked worktree", async () => {
+    if (!gitWorkRoot) {
+      note("git worktree add: skipped because no daemon-host Git workRoot is configured");
+      return;
+    }
+    await openWorkRootInBrowser(page, gitWorkRoot);
+    const gitRow = page.locator(".resource-row", { hasText: workRootDisplayName(gitWorkRoot) }).first();
+    await expect(gitRow).toBeVisible();
+    const menuButton = gitRow.locator('[data-command-id="workspace.menu.open"]');
+    await expect(menuButton).toBeVisible();
+    await expect(gitRow.locator('[data-command-id="workspace.remove"]')).toHaveCount(0);
+    await menuButton.click();
+    const menu = page.locator(".workspace-row-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.locator('[data-command-id="workspace.remove"]')).toContainText("Remove workspace...");
+    await menu.locator('[data-command-id="gitWorktreeAdd.open"]').click();
+    const modal = page.locator(".git-worktree-modal");
+    await expect(modal).toBeVisible();
+    await modal.locator('input[placeholder="feature-name"]').fill("Browser Gate Branch");
+    const preview = modal.locator(".git-worktree-preview");
+    await expect(preview).toContainText("new branch will be created");
+    await expect(preview).toHaveClass(/git-worktree-preview-willCreateBranch/);
+    await modal.locator('[data-command-id="gitWorktreeAdd.submit"]').click();
+    await expect(modal).toHaveCount(0);
+    const createdRow = page.locator(".resource-row", { hasText: "Browser-Gate-Branch" }).first();
+    await expect(createdRow).toBeVisible();
+    await expect(createdRow).toHaveClass(/resource-row-selected/);
+    await expect.poll(() => resourceRefreshRequests).toBeGreaterThan(0);
+    await selectWorkRootInBrowser(page, workRoot);
+    note("git worktree add: workspace overflow preserved remove action, previewed new branch, submitted through daemon resources, and selected daemon-created workRoot id");
   });
 
   await test.step("activation controls are command-routed and update visible state", async () => {
@@ -1842,8 +1900,11 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       hasText: workRootDisplayName(secondWorkRoot),
     });
     await expect(secondRow).toBeVisible();
-    const removeButton = secondRow.locator('[data-command-id="workspace.remove"]');
-    await expect(removeButton).toHaveCSS("border-color", "rgba(0, 0, 0, 0)");
+    const menuButton = secondRow.locator('[data-command-id="workspace.menu.open"]');
+    await expect(menuButton).toHaveCSS("border-color", "rgba(0, 0, 0, 0)");
+    await menuButton.click();
+    const removeButton = page.locator(".workspace-row-menu").locator('[data-command-id="workspace.remove"]');
+    await expect(removeButton).toBeVisible();
     page.once("dialog", async (dialog) => {
       expect(dialog.message()).toContain("Files and Git worktrees on disk will not be deleted");
       await dialog.accept();

@@ -1956,6 +1956,314 @@ async fn open_work_root_returns_aggregated_view_of_all_opened_roots() {
 }
 
 #[tokio::test]
+async fn git_worktree_add_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+    for (method, uri) in [
+        (
+            Method::GET,
+            "/api/dashboard/workspaces/workspace-local-missing/git-worktree-add/options",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/workspaces/workspace-local-missing/git-worktree-add/preview",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/workspaces/workspace-local-missing/git-worktree-add",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("unauthenticated git worktree request"),
+            )
+            .await
+            .expect("unauthenticated git worktree response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn git_worktree_add_previews_and_submits_new_branch_with_resource_refresh() {
+    if skip_without_git("git_worktree_add_previews_and_submits_new_branch_with_resource_refresh") {
+        return;
+    }
+    let base = temp_fixture_path("git-worktree-create");
+    let primary = base.join("primary");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let workspace_id = resources["workspaces"][0]["id"]
+        .as_str()
+        .expect("workspace id")
+        .to_owned();
+
+    let options = git_worktree_options_json(app.clone(), cookie.as_str(), &workspace_id).await;
+    assert_eq!(options["git"]["available"], true);
+    assert!(options["branches"]
+        .as_array()
+        .expect("branches")
+        .iter()
+        .any(|branch| branch["checkedOut"] == true));
+
+    let preview = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        serde_json::json!({
+            "worktreeName": "Feature One",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" }
+        }),
+    )
+    .await;
+    assert_eq!(preview["status"], "willCreateBranch");
+    assert_eq!(preview["branchName"], "Feature-One");
+    assert!(preview["targetPathLabel"]
+        .as_str()
+        .expect("target label")
+        .contains("ws-worktree"));
+
+    let submit = git_worktree_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        serde_json::json!({
+            "worktreeName": "Feature One",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" },
+            "activate": true
+        }),
+        StatusCode::OK,
+    )
+    .await;
+    let created = submit["createdWorkRootId"]
+        .as_str()
+        .expect("created workRoot id");
+    assert!(work_root_ids(&submit["resources"]).contains(&created.to_owned()));
+    assert!(submit["resources"]["workspaces"]
+        .as_array()
+        .expect("workspaces")
+        .iter()
+        .any(|workspace| workspace["id"] == workspace_id));
+    let body = serde_json::to_string(&submit).expect("submit JSON string");
+    assert!(
+        !body.contains(primary.to_string_lossy().as_ref()),
+        "submit response must not leak primary path"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_worktree_add_existing_branch_is_yellow_and_submit_checks_out_branch() {
+    if skip_without_git("git_worktree_add_existing_branch_is_yellow_and_submit_checks_out_branch") {
+        return;
+    }
+    let base = temp_fixture_path("git-worktree-existing");
+    let primary = base.join("primary");
+    let target = base.join("manual-existing");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    run_git(&primary, &["branch", "existing-topic"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let workspace_id = resources["workspaces"][0]["id"]
+        .as_str()
+        .expect("workspace id")
+        .to_owned();
+
+    let request = serde_json::json!({
+        "worktreeName": "Existing Topic",
+        "branch": { "mode": "manual", "name": "existing-topic" },
+        "path": { "mode": "custom", "targetPath": target.display().to_string() }
+    });
+    let preview =
+        git_worktree_preview_json(app.clone(), cookie.as_str(), &workspace_id, request.clone())
+            .await;
+    assert_eq!(preview["status"], "willCheckoutExisting");
+    let submit = git_worktree_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        &workspace_id,
+        json_with_activate(request, true),
+        StatusCode::OK,
+    )
+    .await;
+    assert!(target.join("README.md").is_file());
+    assert!(submit["createdWorkRootId"]
+        .as_str()
+        .expect("created id")
+        .starts_with("root-local-"));
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_worktree_add_blocks_checked_out_invalid_conflict_and_non_git_inputs() {
+    if skip_without_git("git_worktree_add_blocks_checked_out_invalid_conflict_and_non_git_inputs") {
+        return;
+    }
+    let base = temp_fixture_path("git-worktree-blocks");
+    let primary = base.join("primary");
+    let conflict = base.join("conflict");
+    let plain = base.join("plain");
+    fs::create_dir_all(&primary).expect("create primary");
+    fs::create_dir_all(&conflict).expect("create conflict");
+    fs::create_dir_all(&plain).expect("create plain");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    open_work_root_for_test(app.clone(), cookie.as_str(), &plain).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let git_workspace_id = resources["workspaces"]
+        .as_array()
+        .expect("workspaces")
+        .iter()
+        .find(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("roots")
+                .iter()
+                .any(|root| root["kind"] == "gitPrimaryRoot")
+        })
+        .and_then(|workspace| workspace["id"].as_str())
+        .expect("git workspace id")
+        .to_owned();
+    let plain_workspace_id = resources["workspaces"]
+        .as_array()
+        .expect("workspaces")
+        .iter()
+        .find(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("roots")
+                .iter()
+                .any(|root| root["kind"] == "plainDirectory")
+        })
+        .and_then(|workspace| workspace["id"].as_str())
+        .expect("plain workspace id")
+        .to_owned();
+
+    let checked_out = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &git_workspace_id,
+        serde_json::json!({
+            "worktreeName": "Main Copy",
+            "branch": { "mode": "manual", "name": current_git_branch(&primary) },
+            "path": { "mode": "custom", "targetPath": base.join("main-copy").display().to_string() }
+        }),
+    )
+    .await;
+    assert_eq!(checked_out["status"], "blocked");
+    assert!(blocker_codes(&checked_out).contains(&"branchAlreadyCheckedOut".to_owned()));
+
+    let invalid = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &git_workspace_id,
+        serde_json::json!({
+            "worktreeName": "..",
+            "branch": { "mode": "manual", "name": "bad branch name" },
+            "path": { "mode": "custom", "targetPath": base.join("invalid").display().to_string() }
+        }),
+    )
+    .await;
+    assert_eq!(invalid["status"], "blocked");
+    assert!(blocker_codes(&invalid).contains(&"invalidWorktreeName".to_owned()));
+    assert!(blocker_codes(&invalid).contains(&"invalidBranchName".to_owned()));
+
+    let target_conflict = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &git_workspace_id,
+        serde_json::json!({
+            "worktreeName": "Conflict Branch",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "custom", "targetPath": conflict.display().to_string() }
+        }),
+    )
+    .await;
+    assert_eq!(target_conflict["status"], "blocked");
+    assert!(blocker_codes(&target_conflict).contains(&"targetExists".to_owned()));
+
+    let missing_parent = git_worktree_preview_json(app.clone(), cookie.as_str(), &git_workspace_id, serde_json::json!({
+        "worktreeName": "Missing Parent",
+        "branch": { "mode": "auto" },
+        "path": { "mode": "custom", "targetPath": base.join("missing-parent").join("child").display().to_string() }
+    })).await;
+    assert_eq!(missing_parent["status"], "blocked");
+    assert!(blocker_codes(&missing_parent).contains(&"targetParentMissing".to_owned()));
+
+    let non_git_options =
+        git_worktree_options_json(app.clone(), cookie.as_str(), &plain_workspace_id).await;
+    assert_eq!(non_git_options["git"]["available"], false);
+    let non_git = git_worktree_preview_json(
+        app.clone(),
+        cookie.as_str(),
+        &plain_workspace_id,
+        serde_json::json!({
+            "worktreeName": "No Git",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" }
+        }),
+    )
+    .await;
+    assert_eq!(non_git["status"], "blocked");
+    assert!(blocker_codes(&non_git).contains(&"notGitWorkspace".to_owned()));
+
+    let unknown = git_worktree_submit_json(
+        app.clone(),
+        cookie.as_str(),
+        "workspace-local-unknown",
+        serde_json::json!({
+            "worktreeName": "Unknown",
+            "branch": { "mode": "auto" },
+            "path": { "mode": "auto" },
+            "activate": true
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        unknown["error"],
+        "workspace is not available for Git worktree creation"
+    );
+
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
 async fn workspace_remove_route_forgets_workspace_without_deleting_files_or_paths() {
     let first = temp_fixture_path("workspace-remove-first");
     let second = temp_fixture_path("workspace-remove-second");
@@ -4473,6 +4781,113 @@ fn body_contains_workspace(value: &serde_json::Value, workspace_id: &str) -> boo
                 .any(|workspace| workspace["id"] == workspace_id)
         })
         .unwrap_or(false)
+}
+
+async fn git_worktree_options_json(
+    app: axum::Router,
+    cookie: &str,
+    workspace_id: &str,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/options"
+                ))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("git worktree options request"),
+        )
+        .await
+        .expect("git worktree options response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git worktree options body");
+    serde_json::from_slice(&body).expect("git worktree options JSON")
+}
+
+async fn git_worktree_preview_json(
+    app: axum::Router,
+    cookie: &str,
+    workspace_id: &str,
+    request: serde_json::Value,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/workspaces/{workspace_id}/git-worktree-add/preview"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .expect("git worktree preview request"),
+        )
+        .await
+        .expect("git worktree preview response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git worktree preview body");
+    serde_json::from_slice(&body).expect("git worktree preview JSON")
+}
+
+async fn git_worktree_submit_json(
+    app: axum::Router,
+    cookie: &str,
+    workspace_id: &str,
+    request: serde_json::Value,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/workspaces/{workspace_id}/git-worktree-add"
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .expect("git worktree submit request"),
+        )
+        .await
+        .expect("git worktree submit response");
+    assert_eq!(response.status(), expected_status);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git worktree submit body");
+    serde_json::from_slice(&body).expect("git worktree submit JSON")
+}
+
+fn json_with_activate(mut value: serde_json::Value, activate: bool) -> serde_json::Value {
+    value
+        .as_object_mut()
+        .expect("request object")
+        .insert("activate".to_owned(), serde_json::Value::Bool(activate));
+    value
+}
+
+fn blocker_codes(value: &serde_json::Value) -> Vec<String> {
+    value["blockers"]
+        .as_array()
+        .expect("blockers")
+        .iter()
+        .filter_map(|blocker| blocker["code"].as_str().map(str::to_owned))
+        .collect()
+}
+
+fn current_git_branch(path: &Path) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .expect("current git branch");
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
 async fn dashboard_resources_json(app: axum::Router, cookie: &str) -> serde_json::Value {

@@ -1,6 +1,10 @@
 export type DashboardCommandId =
   | "dashboard.refresh"
+  | "workspace.menu.open"
   | "workspace.remove"
+  | "gitWorktreeAdd.open"
+  | "gitWorktreeAdd.close"
+  | "gitWorktreeAdd.submit"
   | "workRoot.open"
   | "workRoot.activation.set"
   | "rootPicker.open"
@@ -33,7 +37,11 @@ export type DashboardCommandPayload =
   | { type: "refresh" }
   | { type: "select"; entityId: string }
   | { type: "action"; label: string; entityId: string }
+  | { type: "workspace.menu.open"; workspaceId: string }
   | { type: "workspace.remove"; workspaceId: string }
+  | { type: "gitWorktreeAdd.open"; workspaceId: string }
+  | { type: "gitWorktreeAdd.close"; workspaceId: string }
+  | { type: "gitWorktreeAdd.submit"; workspaceId: string }
   | { type: "workRoot.open" }
   | { type: "workRoot.activation.set"; workRootId: string; activation: "online" | "offline" }
   | { type: "rootPicker.open" }
@@ -137,6 +145,34 @@ export function buildRootPickerUnpinDirectoryCommand(_path: string): DashboardCo
   return {
     commandId: "rootPicker.unpinDirectory",
     payload: { type: "rootPicker.unpinDirectory" },
+  };
+}
+
+export function buildWorkspaceMenuOpenCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "workspace.menu.open",
+    payload: { type: "workspace.menu.open", workspaceId },
+  };
+}
+
+export function buildGitWorktreeAddOpenCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "gitWorktreeAdd.open",
+    payload: { type: "gitWorktreeAdd.open", workspaceId },
+  };
+}
+
+export function buildGitWorktreeAddCloseCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "gitWorktreeAdd.close",
+    payload: { type: "gitWorktreeAdd.close", workspaceId },
+  };
+}
+
+export function buildGitWorktreeAddSubmitCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "gitWorktreeAdd.submit",
+    payload: { type: "gitWorktreeAdd.submit", workspaceId },
   };
 }
 
@@ -299,8 +335,16 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Refresh";
     case "select":
       return "Select";
+    case "workspace.menu.open":
+      return "Open workspace menu";
     case "workspace.remove":
       return "Remove workspace";
+    case "gitWorktreeAdd.open":
+      return "Add worktree";
+    case "gitWorktreeAdd.close":
+      return "Close add worktree";
+    case "gitWorktreeAdd.submit":
+      return "Create worktree";
     case "workRoot.open":
       return "Open workRoot";
     case "workRoot.activation.set":
