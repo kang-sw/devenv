@@ -1296,6 +1296,11 @@ async fn root_picker_routes_are_owner_authenticated() {
             .uri("/api/dashboard/work-roots/root-local-test/activation")
             .body(Body::empty())
             .expect("activate workRoot request"),
+        Request::builder()
+            .method(Method::DELETE)
+            .uri("/api/dashboard/workspaces/workspace-local-test")
+            .body(Body::empty())
+            .expect("remove workspace request"),
     ];
 
     for request in requests {
@@ -1583,6 +1588,70 @@ async fn open_work_root_returns_aggregated_view_of_all_opened_roots() {
 
     remove_static_fixture(&first);
     remove_static_fixture(&second);
+}
+
+#[tokio::test]
+async fn workspace_remove_route_forgets_workspace_without_deleting_files_or_paths() {
+    let first = temp_fixture_path("workspace-remove-first");
+    let second = temp_fixture_path("workspace-remove-second");
+    let state_file_root = temp_fixture_path("workspace-remove-state");
+    fs::create_dir_all(&first).expect("create first workRoot");
+    fs::create_dir_all(&second).expect("create second workRoot");
+    let store = DashboardStateStore::at_path(state_file_root.join("opened-workroots.json"));
+    let state = app_state_with_opened_and_store(OpenedWorkRoots::default(), store.clone());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let first_id = open_work_root_for_test(app.clone(), cookie.as_str(), &first).await;
+    let second_id = open_work_root_for_test(app.clone(), cookie.as_str(), &second).await;
+    let resources = dashboard_resources_json(app.clone(), cookie.as_str()).await;
+    let workspace_id = resources["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .find(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("workRoots array")
+                .iter()
+                .any(|root| root["id"] == first_id)
+        })
+        .and_then(|workspace| workspace["id"].as_str())
+        .expect("workspace id containing first root")
+        .to_owned();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(format!("/api/dashboard/workspaces/{workspace_id}"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("workspace remove request"),
+        )
+        .await
+        .expect("workspace remove response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        first.is_dir(),
+        "workspace removal must not delete files on disk"
+    );
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("workspace remove body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("remove JSON");
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(!body_text.contains(first.to_string_lossy().as_ref()));
+    let ids = work_root_ids(&value);
+    assert!(!ids.contains(&first_id));
+    assert!(ids.contains(&second_id));
+    assert_eq!(store.load_opened_work_roots().await, vec![second.clone()]);
+
+    remove_static_fixture(&first);
+    remove_static_fixture(&second);
+    remove_static_fixture(&state_file_root);
 }
 
 #[tokio::test]

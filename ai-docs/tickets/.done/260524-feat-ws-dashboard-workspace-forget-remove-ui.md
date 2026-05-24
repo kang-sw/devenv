@@ -66,3 +66,27 @@ Verification should cover confirmation flow, unavailable workspace removal,
 active-child deactivation/removal, dependent pane/selection cleanup,
 rediscovery only through explicit open, command-id dispatch, and no host-path
 leakage.
+
+### Result (pending) - 2026-05-24
+
+Implemented Phase 1 workspace-level owner removal:
+
+- Added an owner-authenticated `DELETE /api/dashboard/workspaces/{workspaceId}`
+  route that removes daemon-local workspace membership and persists the updated
+  registry without deleting files or Git worktrees.
+- Added the workspace-level `workspace.remove` dashboard command and exposed it
+  only on workspace/compact-workspace rows, not on child workRoot rows.
+- The frontend requires explicit confirmation copy that states the action is
+  dashboard-only and does not delete files or Git worktrees.
+- Successful removal reconciles the live resource view and clears read-only
+  panes/order plus workbench browser-only group/order state for removed roots.
+- Live terminal sessions for removed workRoots are dropped from the daemon
+  terminal registry after registry persistence succeeds.
+
+Verification:
+
+- `cargo test -p ws-dashboard-daemon --test routes workspace_remove_route_forgets_workspace_without_deleting_files_or_paths --manifest-path ws-dashboard/Cargo.toml`
+- `cargo test -p ws-dashboard-daemon --test routes root_picker_routes_are_owner_authenticated --manifest-path ws-dashboard/Cargo.toml`
+- `npm run test:commands`
+- `npm run build`
+- `npm run test:browser -- dashboard-acceptance.spec.ts`

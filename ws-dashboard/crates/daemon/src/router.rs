@@ -6,7 +6,7 @@ use axum::extract::{Path as AxumPath, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use tokio::fs;
 use tokio::sync::Mutex;
@@ -17,7 +17,8 @@ use crate::events::instance_events;
 use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
 use crate::root_picker::{
-    create_empty_directory, list_root_picker, open_work_root, set_work_root_activation,
+    create_empty_directory, list_root_picker, open_work_root, remove_workspace,
+    set_work_root_activation,
 };
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
@@ -57,6 +58,10 @@ pub fn build_router(state: AppState) -> Router {
             post(create_empty_directory),
         )
         .route("/api/dashboard/work-roots/open", post(open_work_root))
+        .route(
+            "/api/dashboard/workspaces/{workspace_id}",
+            delete(remove_workspace),
+        )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activation",
             post(set_work_root_activation),

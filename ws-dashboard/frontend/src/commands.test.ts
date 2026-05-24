@@ -10,6 +10,7 @@ import {
   buildFileExplorerToggleDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
+  buildWorkspaceRemoveCommand,
   buildWorkRootActivationCommand,
   buildWorkRootOpenCommand,
   dashboardCommandLabel,
@@ -47,6 +48,7 @@ const migratedCommands = [
   buildFileExplorerSelectEntryCommand(workRootId, "README.md"),
   buildWorkbenchOpenActivityCommand(workRootId),
   buildTerminalCreateCommand(workRootId),
+  buildWorkspaceRemoveCommand("workspace-local-abc"),
   buildWorkRootActivationCommand(workRootId, "offline"),
   buildActivitySelectItemCommand("agent:reviewer"),
   buildActivityTranscriptLoadMoreCommand("agent:reviewer"),
@@ -64,6 +66,7 @@ assertDeepEqual(
     "fileExplorer.selectEntry",
     "workbench.openActivity",
     "terminal.create",
+    "workspace.remove",
     "workRoot.activation.set",
     "activity.selectItem",
     "activity.transcript.loadMore",
@@ -83,6 +86,7 @@ assertDeepEqual(
     "fileExplorer.selectEntry",
     "workbench.openActivity",
     "terminal.create",
+    "workspace.remove",
     "workRoot.activation.set",
     "activity.selectItem",
     "activity.transcript.loadMore",
@@ -188,6 +192,23 @@ assertEqual(
   dashboardCommandLabel(buildWorkRootActivationCommand(workRootId, "offline")),
   "Take workRoot offline",
   "activation command label is stable",
+);
+assertEqual(
+  dashboardCommandLabel(buildWorkspaceRemoveCommand("workspace-local-abc")),
+  "Remove workspace",
+  "workspace remove command label is stable",
+);
+const workspaceRemoveCommand = buildWorkspaceRemoveCommand("workspace-local-abc");
+assertEqual(
+  workspaceRemoveCommand.payload.type === "workspace.remove" &&
+    workspaceRemoveCommand.payload.workspaceId,
+  "workspace-local-abc",
+  "workspace remove command carries only the opaque workspace id",
+);
+assertNotContains(
+  JSON.stringify(workspaceRemoveCommand),
+  "/Users/",
+  "workspace remove command omits host paths",
 );
 assertEqual(
   dashboardCommandLabel(buildWorkbenchOpenActivityCommand(workRootId)),

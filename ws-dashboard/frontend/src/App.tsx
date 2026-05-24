@@ -12,6 +12,7 @@ import {
   buildFileExplorerToggleDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
+  buildWorkspaceRemoveCommand,
   buildWorkRootActivationCommand,
   buildWorkRootOpenCommand,
   dashboardCommandLabel,
@@ -155,6 +156,19 @@ async function requestWorkRootActivation(
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ activation }),
     },
+  );
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return (await response.json()) as DashboardResourcesView;
+}
+
+async function requestWorkspaceRemoval(
+  workspaceId: string,
+): Promise<DashboardResourcesView> {
+  const response = await fetch(
+    `/api/dashboard/workspaces/${encodeURIComponent(workspaceId)}`,
+    { method: "DELETE", headers: { Accept: "application/json" } },
   );
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
@@ -504,6 +518,61 @@ export function App() {
               setError(nextError instanceof Error ? nextError.message : "activation failed");
             });
         };
+      } else if (command.payload.type === "workspace.remove") {
+        const { workspaceId } = command.payload;
+        executableHandlers[command.commandId] = () => {
+          const workspace = resources?.workspaces.find(
+            (candidate) => candidate.id === workspaceId,
+          );
+          if (
+            !window.confirm(
+              "Remove this workspace from the dashboard? Files and Git worktrees on disk will not be deleted.",
+            )
+          ) {
+            return;
+          }
+          const removedRootIds = new Set(
+            workspace?.workRoots.map((root) => root.id) ?? [],
+          );
+          void requestWorkspaceRemoval(workspaceId)
+            .then((nextResources) => {
+              resourceRefreshCoordinatorRef.current?.applyExternalResources(nextResources);
+              if (removedRootIds.size > 0) {
+                setReadOnlyFilePanes((current) =>
+                  Object.fromEntries(
+                    Object.entries(current).filter(
+                      ([, pane]) => !removedRootIds.has(pane.workRootId),
+                    ),
+                  ),
+                );
+                setReadOnlyFilePaneOrderByGroup((current) =>
+                  removePanesFromOrder(
+                    current,
+                    Object.values(readOnlyFilePanes)
+                      .filter((pane) => removedRootIds.has(pane.workRootId))
+                      .map((pane) => pane.id),
+                  ),
+                );
+                setPaneOrderByRoot((current) =>
+                  Object.fromEntries(
+                    Object.entries(current).filter(
+                      ([rootId]) => !removedRootIds.has(rootId),
+                    ),
+                  ),
+                );
+                setWorkbenchGroupsByRoot((current) =>
+                  Object.fromEntries(
+                    Object.entries(current).filter(
+                      ([rootId]) => !removedRootIds.has(rootId),
+                    ),
+                  ),
+                );
+              }
+            })
+            .catch((nextError) => {
+              setError(nextError instanceof Error ? nextError.message : "workspace removal failed");
+            });
+        };
       }
 
       dispatchDashboardCommand(command, {
@@ -522,7 +591,7 @@ export function App() {
         },
       });
     },
-    [loadResources],
+    [loadResources, readOnlyFilePanes, resources],
   );
 
   return (
@@ -3373,6 +3442,19 @@ function removePaneFromOrder(
   );
 }
 
+function removePanesFromOrder(
+  orderByGroup: WorkbenchPaneOrder,
+  paneIds: readonly string[],
+): WorkbenchPaneOrder {
+  const paneIdSet = new Set(paneIds);
+  return Object.fromEntries(
+    Object.entries(orderByGroup).map(([groupId, orderedPaneIds]) => [
+      groupId,
+      orderedPaneIds.filter((paneId) => !paneIdSet.has(paneId)),
+    ]),
+  );
+}
+
 function activityPaneGroupIdFromOrder(
   paneId: string,
   orderByGroup: WorkbenchPaneOrder,
@@ -3569,6 +3651,8 @@ function WorkspaceRows({
           state={compactRoot.state}
           depth={0}
           selected={selectedId === compactRoot.id}
+          actions={workspace.actions}
+          actionEntityId={workspace.id}
           meta={[
             kindLabel(compactRoot.kind),
             `availability: ${compactRoot.availability}`,
@@ -3589,6 +3673,8 @@ function WorkspaceRows({
         state={workspace.state}
         depth={0}
         selected={selectedId === workspace.id}
+        actions={workspace.actions}
+        actionEntityId={workspace.id}
         meta={[`${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
       />
@@ -3601,6 +3687,8 @@ function WorkspaceRows({
             state={root.state}
             depth={1}
             selected={selectedId === root.id}
+            actions={[]}
+            actionEntityId={root.id}
             meta={[
               kindLabel(root.kind),
               `availability: ${root.availability}`,
@@ -3627,6 +3715,8 @@ function ResourceRow({
   state,
   depth,
   selected,
+  actions = [],
+  actionEntityId = id,
   meta,
   onCommand,
 }: {
@@ -3636,32 +3726,58 @@ function ResourceRow({
   state: ViewState;
   depth: number;
   selected: boolean;
+  actions?: ActionHint[];
+  actionEntityId?: string;
   meta: string[];
   onCommand: DashboardCommandDispatcher;
 }) {
+  const visibleActions = actions.filter(
+    (action) => action.enabled && action.id === "workspace.remove",
+  );
   return (
-    <button
+    <div
       className={`resource-row${selected ? " resource-row-selected" : ""}`}
       data-command-id="resource.select"
       style={{ "--depth": depth } as CSSProperties}
-      type="button"
-      onClick={() =>
-        onCommand({ commandId: "resource.select", payload: { type: "select", entityId: id } })
-      }
     >
-      <span className="resource-row-main">
-        <span className="row-eyebrow">{eyebrow}</span>
-        <span className="row-title">{title}</span>
-      </span>
-      <span className="resource-row-meta">
-        {meta.map((value) => (
-          <span className="meta-chip" key={value}>
-            {value}
-          </span>
-        ))}
-        <StateBadge state={state} />
-      </span>
-    </button>
+      <button
+        className="resource-row-select"
+        data-command-id="resource.select"
+        type="button"
+        onClick={() =>
+          onCommand({ commandId: "resource.select", payload: { type: "select", entityId: id } })
+        }
+      >
+        <span className="resource-row-main">
+          <span className="row-eyebrow">{eyebrow}</span>
+          <span className="row-title">{title}</span>
+        </span>
+        <span className="resource-row-meta">
+          {meta.map((value) => (
+            <span className="meta-chip" key={value}>
+              {value}
+            </span>
+          ))}
+          <StateBadge state={state} />
+        </span>
+      </button>
+      {visibleActions.length > 0 ? (
+        <span className="resource-row-actions">
+          {visibleActions.map((action) => (
+            <button
+              className="resource-row-action"
+              data-command-id="workspace.remove"
+              key={action.id}
+              title={action.label}
+              type="button"
+              onClick={() => onCommand(buildWorkspaceRemoveCommand(actionEntityId))}
+            >
+              Remove
+            </button>
+          ))}
+        </span>
+      ) : null}
+    </div>
   );
 }
 

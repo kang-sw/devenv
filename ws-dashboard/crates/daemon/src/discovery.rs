@@ -167,11 +167,18 @@ impl WorkspaceBuilder {
             },
             compactable: self.work_roots.len() == 1,
             work_roots: self.work_roots,
-            actions: vec![ActionHint {
-                id: "refreshWorkspace".to_owned(),
-                label: "Refresh workspace".to_owned(),
-                enabled: true,
-            }],
+            actions: vec![
+                ActionHint {
+                    id: "refreshWorkspace".to_owned(),
+                    label: "Refresh workspace".to_owned(),
+                    enabled: true,
+                },
+                ActionHint {
+                    id: "workspace.remove".to_owned(),
+                    label: "Remove workspace".to_owned(),
+                    enabled: true,
+                },
+            ],
         }
     }
 }

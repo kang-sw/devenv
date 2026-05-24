@@ -1,5 +1,6 @@
 export type DashboardCommandId =
   | "dashboard.refresh"
+  | "workspace.remove"
   | "workRoot.open"
   | "workRoot.activation.set"
   | "fileExplorer.refresh"
@@ -21,6 +22,7 @@ export type DashboardCommandPayload =
   | { type: "refresh" }
   | { type: "select"; entityId: string }
   | { type: "action"; label: string; entityId: string }
+  | { type: "workspace.remove"; workspaceId: string }
   | { type: "workRoot.open" }
   | { type: "workRoot.activation.set"; workRootId: string; activation: "online" | "offline" }
   | { type: "fileExplorer.refresh"; workRootId: string }
@@ -68,6 +70,13 @@ export function buildDashboardRefreshCommand(): DashboardCommand {
 
 export function buildWorkRootOpenCommand(_submittedHostPath: string): DashboardCommand {
   return { commandId: "workRoot.open", payload: { type: "workRoot.open" } };
+}
+
+export function buildWorkspaceRemoveCommand(workspaceId: string): DashboardCommand {
+  return {
+    commandId: "workspace.remove",
+    payload: { type: "workspace.remove", workspaceId },
+  };
 }
 
 export function buildWorkRootActivationCommand(
@@ -187,6 +196,8 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Refresh";
     case "select":
       return "Select";
+    case "workspace.remove":
+      return "Remove workspace";
     case "workRoot.open":
       return "Open workRoot";
     case "workRoot.activation.set":

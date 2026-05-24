@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use ws_dashboard_core::{
-    DashboardResourcesView, WorkRootActivation, WorkRootAvailability, WorkRootId,
+    DashboardResourcesView, WorkRootActivation, WorkRootAvailability, WorkRootId, WorkspaceId,
 };
 
 use crate::discovery::{LocalDashboardResourcesProvider, LocalWorkRootCandidate};
@@ -191,6 +191,55 @@ pub async fn set_work_root_activation(
             "persist activation failed",
         );
     }
+    Json::<DashboardResourcesView>(live_dashboard_resources(&state.opened_work_roots))
+        .into_response()
+}
+
+pub async fn remove_workspace(
+    State(state): State<AppState>,
+    axum::extract::Path(workspace_id): axum::extract::Path<String>,
+) -> Response {
+    let workspace_id = WorkspaceId::from(workspace_id);
+    let _persist_guard = state.registry_persist_lock.lock().await;
+    let current = live_dashboard_resources(&state.opened_work_roots);
+    let Some(workspace) = current
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == workspace_id)
+    else {
+        return picker_error(StatusCode::NOT_FOUND, "unknown workspace");
+    };
+    let work_root_ids: BTreeSet<WorkRootId> = workspace
+        .work_roots
+        .iter()
+        .map(|root| root.id.clone())
+        .collect();
+    let removed_entries: Vec<_> = work_root_ids
+        .iter()
+        .filter_map(|work_root_id| {
+            state
+                .opened_work_roots
+                .unregister(work_root_id)
+                .map(|root| (work_root_id.clone(), root))
+        })
+        .collect();
+    if let Err(error) = state
+        .dashboard_state
+        .persist_opened_work_roots(&state.opened_work_roots)
+        .await
+    {
+        for (work_root_id, root) in removed_entries {
+            state
+                .opened_work_roots
+                .register_registry_entry(work_root_id, root);
+        }
+        tracing::warn!(%error, "failed to persist dashboard workspace removal");
+        return picker_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "persist workspace removal failed",
+        );
+    }
+    state.terminals.remove_for_work_roots(&work_root_ids);
     Json::<DashboardResourcesView>(live_dashboard_resources(&state.opened_work_roots))
         .into_response()
 }

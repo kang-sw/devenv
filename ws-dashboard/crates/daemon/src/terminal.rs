@@ -176,6 +176,19 @@ impl TerminalRegistry {
             .expect("terminal registry lock poisoned")
             .remove(terminal_id)
     }
+
+    pub fn remove_for_work_roots(
+        &self,
+        work_root_ids: &std::collections::BTreeSet<WorkRootId>,
+    ) -> usize {
+        let mut sessions = self
+            .sessions
+            .write()
+            .expect("terminal registry lock poisoned");
+        let before = sessions.len();
+        sessions.retain(|_, session| !work_root_ids.contains(&session.work_root_id));
+        before - sessions.len()
+    }
 }
 
 struct TerminalSession {

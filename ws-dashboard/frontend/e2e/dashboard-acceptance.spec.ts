@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { startDaemon, type DaemonHandle } from "./daemonHarness.js";
@@ -1530,6 +1530,30 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
     note(
       "dynamic groups: opened-file group placement stayed scoped per workRoot and did not auto-target user-created groups",
+    );
+  });
+
+  await test.step("workspace remove is explicit and dashboard-only", async () => {
+    if (!secondWorkRoot) {
+      note(
+        "workspace remove: skipped because external daemon mode did not provide WS_DASHBOARD_TEST_SECOND_WORKROOT",
+      );
+      return;
+    }
+    const secondRow = page.locator(".resource-row", {
+      hasText: workRootDisplayName(secondWorkRoot),
+    });
+    await expect(secondRow).toBeVisible();
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toContain("Files and Git worktrees on disk will not be deleted");
+      await dialog.accept();
+    });
+    await secondRow.locator('[data-command-id="workspace.remove"]').click();
+    await expect(secondRow).toHaveCount(0);
+    expect(existsSync(secondWorkRoot)).toBe(true);
+    await selectWorkRootInBrowser(page, workRoot);
+    note(
+      "workspace remove: confirmed dashboard-only removal, no child workRoot remove control or filesystem deletion",
     );
   });
 

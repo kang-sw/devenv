@@ -56,7 +56,7 @@ The sprint scope includes:
   worktrees as child workRoots instead of independent workspaces.
 - `260523-feat-ws-dashboard-tool-output-safe-summary` - done; show bounded
   head/tail tool-output snippets for authenticated owners.
-- `260524-feat-ws-dashboard-workspace-forget-remove-ui` - todo; add explicit
+- `260524-feat-ws-dashboard-workspace-forget-remove-ui` - done; add explicit
   workspace cleanup UX on top of the root-prune policy and linked-worktree
   discovery behavior.
 
