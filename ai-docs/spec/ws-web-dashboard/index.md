@@ -146,10 +146,10 @@ one activation state and the same online/offline behavior across navigation,
 Activity, file, and terminal surfaces.
 {#260524-dashboard-workroot-registry-wide-activation-lookup}
 
-## 🚧 Git Worktree Creation {#260524-ws-dashboard-git-worktree-creation}
+## Git Worktree Creation {#260524-ws-dashboard-git-worktree-creation}
 
-The dashboard will let an authenticated owner add a linked Git worktree from a
-workspace-scoped overflow menu. The existing workspace remove affordance moves
+The dashboard lets an authenticated owner add a linked Git worktree from a
+workspace-scoped overflow menu. The workspace remove affordance appears
 behind the same overflow menu, preserving its dashboard-only confirmation and
 registry behavior while making room for non-destructive workspace operations.
 
