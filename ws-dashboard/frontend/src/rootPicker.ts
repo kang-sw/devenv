@@ -12,14 +12,20 @@ export type RootPickerEntry = {
   size?: number | null;
 };
 
-export type RootPickerPlaceKind = "home" | "root" | "mount" | "drive";
+export type RootPickerPlaceKind = "home" | "root" | "mount" | "drive" | "pin";
+export type RootPickerPlaceSource = "builtIn" | "pin";
 
 export type RootPickerPlace = {
   id: string;
   label: string;
   path: string;
   kind: RootPickerPlaceKind;
+  source: RootPickerPlaceSource;
   available: boolean;
+};
+
+export type RootPickerPlacesView = {
+  places: RootPickerPlace[];
 };
 
 export type RootPickerView = {
@@ -40,6 +46,7 @@ export type RootPickerNavigationHistory = {
 export const rootPickerEndpoint = "/api/dashboard/root-picker";
 export const rootPickerCreateDirectoryEndpoint =
   "/api/dashboard/root-picker/directories";
+export const rootPickerPinsEndpoint = "/api/dashboard/root-picker/pins";
 
 export function rootPickerListEndpoint(path: string | null = null) {
   if (path === null || path.length === 0) {
@@ -82,6 +89,34 @@ export async function createRootPickerDirectory(
   return (await response.json()) as RootPickerEntry;
 }
 
+export async function pinRootPickerDirectory(path: string): Promise<RootPickerPlacesView> {
+  return requestRootPickerPin("POST", path);
+}
+
+export async function unpinRootPickerDirectory(path: string): Promise<RootPickerPlacesView> {
+  return requestRootPickerPin("DELETE", path);
+}
+
+async function requestRootPickerPin(
+  method: "POST" | "DELETE",
+  path: string,
+): Promise<RootPickerPlacesView> {
+  const response = await fetch(rootPickerPinsEndpoint, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ path }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorDetail(response));
+  }
+
+  return (await response.json()) as RootPickerPlacesView;
+}
+
 export function rootPickerEntryLabel(path: string) {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts.at(-1) ?? path;
@@ -98,7 +133,17 @@ export function rootPickerVisibleEntries(
 }
 
 export function rootPickerVisiblePlaces(view: RootPickerView | null): RootPickerPlace[] {
-  return (view?.places ?? []).filter((place) => place.available);
+  return (view?.places ?? []).filter(
+    (place) => place.available || place.source === "pin",
+  );
+}
+
+export function rootPickerPinnedPathSet(view: RootPickerView | null): Set<string> {
+  return new Set(
+    (view?.places ?? [])
+      .filter((place) => place.source === "pin")
+      .map((place) => place.path),
+  );
 }
 
 export function rootPickerModifiedTimeLabel(value: string | null | undefined): string {

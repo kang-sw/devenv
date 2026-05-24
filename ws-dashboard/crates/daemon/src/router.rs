@@ -17,8 +17,8 @@ use crate::events::instance_events;
 use crate::persistent_state::DashboardStateStore;
 use crate::resources::dashboard_resources;
 use crate::root_picker::{
-    create_empty_directory, list_root_picker, open_work_root, remove_workspace,
-    set_work_root_activation,
+    create_empty_directory, list_root_picker, open_work_root, pin_root_picker_directory,
+    remove_workspace, set_work_root_activation, unpin_root_picker_directory,
 };
 use crate::terminal::{
     close_terminal, create_terminal, list_terminals, terminal_input, terminal_output,
@@ -56,6 +56,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/root-picker/directories",
             post(create_empty_directory),
+        )
+        .route(
+            "/api/dashboard/root-picker/pins",
+            post(pin_root_picker_directory).delete(unpin_root_picker_directory),
         )
         .route("/api/dashboard/work-roots/open", post(open_work_root))
         .route(

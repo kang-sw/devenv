@@ -1,6 +1,7 @@
 import {
   createRootPickerDirectory,
   fetchRootPicker,
+  pinRootPickerDirectory,
   rootPickerHistoryBack,
   rootPickerHistoryForward,
   rootPickerHistoryInitial,
@@ -10,8 +11,11 @@ import {
   rootPickerInsertEntry,
   rootPickerListEndpoint,
   rootPickerModifiedTimeLabel,
+  rootPickerPinnedPathSet,
+  rootPickerPinsEndpoint,
   rootPickerVisibleEntries,
   rootPickerVisiblePlaces,
+  unpinRootPickerDirectory,
   type RootPickerEntry,
   type RootPickerView,
 } from "./rootPicker.js";
@@ -82,6 +86,7 @@ const pickerView: RootPickerView = {
       label: "Home",
       path: "/home/tester",
       kind: "home",
+      source: "builtIn",
       available: true,
     },
     {
@@ -89,6 +94,15 @@ const pickerView: RootPickerView = {
       label: "Mounts",
       path: "/mnt",
       kind: "mount",
+      source: "builtIn",
+      available: false,
+    },
+    {
+      id: "pin-missing",
+      label: "missing",
+      path: "/missing",
+      kind: "pin",
+      source: "pin",
       available: false,
     },
   ],
@@ -101,8 +115,13 @@ assertDeepEqual(
 );
 assertDeepEqual(
   rootPickerVisiblePlaces(pickerView).map((place) => place.label),
-  ["Home"],
-  "known places hide unavailable daemon-derived locations",
+  ["Home", "missing"],
+  "known places hide unavailable built-ins but keep unavailable pins",
+);
+assertDeepEqual(
+  Array.from(rootPickerPinnedPathSet(pickerView)),
+  ["/missing"],
+  "pinned path set includes persisted pin places",
 );
 assertEqual(
   rootPickerModifiedTimeLabel(null),
@@ -127,9 +146,17 @@ assertEqual(forward.targetPath, "/tmp/root/zeta", "forward history restores next
 const originalFetch = globalThis.fetch;
 let capturedUrl = "";
 let capturedBody = "";
+let capturedMethod = "";
 globalThis.fetch = (async (input, init) => {
   capturedUrl = String(input);
   capturedBody = String(init?.body ?? "");
+  capturedMethod = String(init?.method ?? "GET");
+  if (capturedUrl === rootPickerPinsEndpoint) {
+    return new Response(JSON.stringify({ places: pickerView.places }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
   if (capturedUrl === rootPickerCreateDirectoryEndpoint) {
     return new Response(JSON.stringify(alpha), {
       status: 200,
@@ -158,5 +185,18 @@ assertDeepEqual(
   "create directory request carries parent and single-segment name",
 );
 assertEqual(created.path, "/tmp/root/alpha", "create directory decodes entry");
+
+await pinRootPickerDirectory("/tmp/root/alpha");
+assertEqual(capturedUrl, rootPickerPinsEndpoint, "pin directory endpoint is stable");
+assertEqual(capturedMethod, "POST", "pin directory uses POST");
+assertDeepEqual(
+  JSON.parse(capturedBody),
+  { path: "/tmp/root/alpha" },
+  "pin directory request carries path as authenticated request data",
+);
+
+await unpinRootPickerDirectory("/tmp/root/alpha");
+assertEqual(capturedUrl, rootPickerPinsEndpoint, "unpin directory endpoint is stable");
+assertEqual(capturedMethod, "DELETE", "unpin directory uses DELETE");
 
 globalThis.fetch = originalFetch;

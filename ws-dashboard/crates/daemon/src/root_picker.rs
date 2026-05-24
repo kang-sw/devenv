@@ -51,6 +51,7 @@ pub struct RootPickerPlace {
     pub label: String,
     pub path: String,
     pub kind: RootPickerPlaceKind,
+    pub source: RootPickerPlaceSource,
     pub available: bool,
 }
 
@@ -61,6 +62,20 @@ pub enum RootPickerPlaceKind {
     Root,
     Mount,
     Drive,
+    Pin,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RootPickerPlaceSource {
+    BuiltIn,
+    Pin,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootPickerPlacesView {
+    pub places: Vec<RootPickerPlace>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -78,6 +93,12 @@ pub struct OpenWorkRootRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct RootPickerPinRequest {
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SetWorkRootActivationRequest {
     pub activation: WorkRootActivation,
 }
@@ -88,13 +109,17 @@ struct RootPickerError {
     error: String,
 }
 
-pub async fn list_root_picker(Query(query): Query<HashMap<String, String>>) -> Response {
+pub async fn list_root_picker(
+    State(state): State<AppState>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
     let path = query
         .get("path")
         .map(PathBuf::from)
         .unwrap_or_else(default_picker_path);
+    let pins = state.dashboard_state.load_root_picker_pins().await;
 
-    match root_picker_view(&path) {
+    match root_picker_view(&path, pins) {
         Ok(view) => Json(view).into_response(),
         Err(error) => picker_error(StatusCode::BAD_REQUEST, error),
     }
@@ -115,6 +140,69 @@ pub async fn create_empty_directory(Json(request): Json<CreateEmptyDirectoryRequ
         Ok(()) => Json(entry_for_directory(&path)).into_response(),
         Err(error) => picker_error(StatusCode::BAD_REQUEST, format!("create failed: {error}")),
     }
+}
+
+pub async fn pin_root_picker_directory(
+    State(state): State<AppState>,
+    Json(request): Json<RootPickerPinRequest>,
+) -> Response {
+    let Some(path) = clean_pin_path(&request.path) else {
+        return picker_error(StatusCode::BAD_REQUEST, "pin path is required");
+    };
+
+    let _persist_guard = state.registry_persist_lock.lock().await;
+    let mut pins = state.dashboard_state.load_root_picker_pins().await;
+    pins.push(path);
+    pins = deduplicate_pin_paths(pins);
+    if let Err(error) = state
+        .dashboard_state
+        .persist_root_picker_pins(pins.clone())
+        .await
+    {
+        tracing::warn!(%error, "failed to persist dashboard root picker pins");
+        return picker_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "persist root picker pins failed",
+        );
+    }
+    Json(RootPickerPlacesView {
+        places: known_picker_places(pins),
+    })
+    .into_response()
+}
+
+pub async fn unpin_root_picker_directory(
+    State(state): State<AppState>,
+    Json(request): Json<RootPickerPinRequest>,
+) -> Response {
+    let Some(path) = clean_pin_path(&request.path) else {
+        return picker_error(StatusCode::BAD_REQUEST, "pin path is required");
+    };
+
+    let target = path.display().to_string();
+    let _persist_guard = state.registry_persist_lock.lock().await;
+    let pins: Vec<PathBuf> = state
+        .dashboard_state
+        .load_root_picker_pins()
+        .await
+        .into_iter()
+        .filter(|pin| pin.display().to_string() != target)
+        .collect();
+    if let Err(error) = state
+        .dashboard_state
+        .persist_root_picker_pins(pins.clone())
+        .await
+    {
+        tracing::warn!(%error, "failed to persist dashboard root picker pins");
+        return picker_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "persist root picker pins failed",
+        );
+    }
+    Json(RootPickerPlacesView {
+        places: known_picker_places(pins),
+    })
+    .into_response()
 }
 
 pub async fn open_work_root(
@@ -268,7 +356,7 @@ pub async fn remove_workspace(
         .into_response()
 }
 
-fn root_picker_view(path: &Path) -> Result<RootPickerView, String> {
+fn root_picker_view(path: &Path, root_picker_pins: Vec<PathBuf>) -> Result<RootPickerView, String> {
     let path = path
         .canonicalize()
         .map_err(|error| format!("path unavailable: {error}"))?;
@@ -294,7 +382,7 @@ fn root_picker_view(path: &Path) -> Result<RootPickerView, String> {
     Ok(RootPickerView {
         current_path: path.display().to_string(),
         parent_path: path.parent().map(|parent| parent.display().to_string()),
-        places: known_picker_places(),
+        places: known_picker_places(root_picker_pins),
         entries,
     })
 }
@@ -320,7 +408,7 @@ fn entry_for_directory(path: &Path) -> RootPickerEntry {
     }
 }
 
-fn known_picker_places() -> Vec<RootPickerPlace> {
+fn known_picker_places(root_picker_pins: Vec<PathBuf>) -> Vec<RootPickerPlace> {
     let mut places = Vec::new();
     let mut seen = BTreeSet::new();
 
@@ -369,6 +457,10 @@ fn known_picker_places() -> Vec<RootPickerPlace> {
         );
     }
 
+    for pin in deduplicate_pin_paths(root_picker_pins) {
+        push_pin_place(&mut places, &mut seen, pin);
+    }
+
     places
 }
 
@@ -395,7 +487,27 @@ fn push_place(
         label: label.to_owned(),
         path: display_path,
         kind,
+        source: RootPickerPlaceSource::BuiltIn,
         available: true,
+    });
+}
+
+fn push_pin_place(places: &mut Vec<RootPickerPlace>, seen: &mut BTreeSet<String>, path: PathBuf) {
+    let (display_path, available) = match path.canonicalize() {
+        Ok(canonical) if canonical.is_dir() => (canonical.display().to_string(), true),
+        _ => (path.display().to_string(), false),
+    };
+    let seen_key = format!("pin:{display_path}");
+    if !seen.insert(seen_key) {
+        return;
+    }
+    places.push(RootPickerPlace {
+        id: format!("pin-{}", place_id_fragment(Path::new(&display_path))),
+        label: root_picker_path_label(Path::new(&display_path)),
+        path: display_path,
+        kind: RootPickerPlaceKind::Pin,
+        source: RootPickerPlaceSource::Pin,
+        available,
     });
 }
 
@@ -451,6 +563,29 @@ fn place_id_fragment(path: &Path) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_owned()
+}
+
+fn root_picker_path_label(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn clean_pin_path(path: &str) -> Option<PathBuf> {
+    let trimmed = path.trim();
+    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+}
+
+fn deduplicate_pin_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut pins: Vec<PathBuf> = paths
+        .into_iter()
+        .filter(|path| !path.as_os_str().is_empty())
+        .collect();
+    pins.sort();
+    pins.dedup();
+    pins
 }
 
 fn safe_child_name(name: &str) -> Option<&str> {

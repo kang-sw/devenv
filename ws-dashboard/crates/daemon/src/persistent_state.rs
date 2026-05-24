@@ -61,7 +61,31 @@ impl DashboardStateStore {
         let Some(path) = self.state_file.as_deref() else {
             return Ok(());
         };
-        write_work_root_registry(path, opened.candidate_roots()).await
+        let pins = read_root_picker_pins(path).await.unwrap_or_default();
+        write_work_root_registry(path, opened.candidate_roots(), pins).await
+    }
+
+    pub async fn load_root_picker_pins(&self) -> Vec<PathBuf> {
+        let Some(path) = self.state_file.as_deref() else {
+            return Vec::new();
+        };
+
+        match read_root_picker_pins(path).await {
+            Ok(pins) => pins,
+            Err(StateReadError::Missing) => Vec::new(),
+            Err(error) => {
+                warn!(%error, path = %path.display(), "ignoring dashboard root picker pins");
+                Vec::new()
+            }
+        }
+    }
+
+    pub async fn persist_root_picker_pins(&self, pins: Vec<PathBuf>) -> Result<(), String> {
+        let Some(path) = self.state_file.as_deref() else {
+            return Ok(());
+        };
+        let registry = read_work_root_registry(path).await.unwrap_or_default();
+        write_work_root_registry_from_entries(path, registry, pins).await
     }
 }
 
@@ -90,6 +114,14 @@ pub struct PersistedRegistryWorkRoot {
 struct WorkRootRegistryState {
     version: u32,
     work_root_registry: Vec<PersistedWorkRootRegistryEntry>,
+    #[serde(default)]
+    root_picker_pins: Vec<PersistedRootPickerPin>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedRootPickerPin {
+    path: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -131,6 +163,23 @@ impl std::fmt::Display for StateReadError {
 async fn read_work_root_registry(
     path: &Path,
 ) -> Result<Vec<PersistedRegistryWorkRoot>, StateReadError> {
+    read_dashboard_state_parts(path)
+        .await
+        .map(|parts| parts.work_root_registry)
+}
+
+async fn read_root_picker_pins(path: &Path) -> Result<Vec<PathBuf>, StateReadError> {
+    read_dashboard_state_parts(path)
+        .await
+        .map(|parts| parts.root_picker_pins)
+}
+
+struct DashboardStateParts {
+    work_root_registry: Vec<PersistedRegistryWorkRoot>,
+    root_picker_pins: Vec<PathBuf>,
+}
+
+async fn read_dashboard_state_parts(path: &Path) -> Result<DashboardStateParts, StateReadError> {
     let raw = match fs::read_to_string(path).await {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -146,69 +195,100 @@ async fn read_work_root_registry(
     if version == OPENED_WORKROOTS_STATE_VERSION {
         let state: OpenedWorkRootsState =
             serde_json::from_value(value).map_err(StateReadError::Parse)?;
-        return Ok(deduplicate_paths(
-            state
-                .opened_work_roots
-                .into_iter()
-                .filter_map(|entry| {
-                    let trimmed = entry.path.trim();
-                    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
-                })
-                .collect(),
-        )
-        .into_iter()
-        .map(|path| PersistedRegistryWorkRoot {
-            path,
-            activation: WorkRootActivation::Online,
-            provenance: WorkRootProvenance::Opened,
-        })
-        .collect());
+        return Ok(DashboardStateParts {
+            work_root_registry: deduplicate_paths(
+                state
+                    .opened_work_roots
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let trimmed = entry.path.trim();
+                        (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+                    })
+                    .collect(),
+            )
+            .into_iter()
+            .map(|path| PersistedRegistryWorkRoot {
+                path,
+                activation: WorkRootActivation::Online,
+                provenance: WorkRootProvenance::Opened,
+            })
+            .collect(),
+            root_picker_pins: Vec::new(),
+        });
     }
     if version != WORKROOT_REGISTRY_STATE_VERSION {
         return Err(StateReadError::UnsupportedVersion(version));
     }
     let state: WorkRootRegistryState =
         serde_json::from_value(value).map_err(StateReadError::Parse)?;
-    Ok(deduplicate_registry_entries(
-        state
-            .work_root_registry
-            .into_iter()
-            .filter_map(|entry| {
-                let trimmed = entry.path.trim();
-                (!trimmed.is_empty()).then(|| PersistedRegistryWorkRoot {
-                    path: PathBuf::from(trimmed),
-                    activation: entry.activation,
-                    provenance: entry.provenance.into(),
+    Ok(DashboardStateParts {
+        work_root_registry: deduplicate_registry_entries(
+            state
+                .work_root_registry
+                .into_iter()
+                .filter_map(|entry| {
+                    let trimmed = entry.path.trim();
+                    (!trimmed.is_empty()).then(|| PersistedRegistryWorkRoot {
+                        path: PathBuf::from(trimmed),
+                        activation: entry.activation,
+                        provenance: entry.provenance.into(),
+                    })
                 })
-            })
-            .collect(),
-    ))
+                .collect(),
+        ),
+        root_picker_pins: deduplicate_paths(
+            state
+                .root_picker_pins
+                .into_iter()
+                .filter_map(|entry| {
+                    let trimmed = entry.path.trim();
+                    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+                })
+                .collect(),
+        ),
+    })
 }
 
 async fn write_work_root_registry(
     path: &Path,
     roots: Vec<crate::work_root_files::RegisteredWorkRoot>,
+    root_picker_pins: Vec<PathBuf>,
+) -> Result<(), String> {
+    let entries = deduplicate_registry_entries(
+        roots
+            .into_iter()
+            .filter(|root| root.provenance == WorkRootProvenance::Opened)
+            .map(|root| PersistedRegistryWorkRoot {
+                path: root.path,
+                activation: root.activation,
+                provenance: root.provenance,
+            })
+            .collect(),
+    );
+    write_work_root_registry_from_entries(path, entries, root_picker_pins).await
+}
+
+async fn write_work_root_registry_from_entries(
+    path: &Path,
+    roots: Vec<PersistedRegistryWorkRoot>,
+    root_picker_pins: Vec<PathBuf>,
 ) -> Result<(), String> {
     let state = WorkRootRegistryState {
         version: WORKROOT_REGISTRY_STATE_VERSION,
-        work_root_registry: deduplicate_registry_entries(
-            roots
-                .into_iter()
-                .filter(|root| root.provenance == WorkRootProvenance::Opened)
-                .map(|root| PersistedRegistryWorkRoot {
-                    path: root.path,
-                    activation: root.activation,
-                    provenance: root.provenance,
-                })
-                .collect(),
-        )
-        .into_iter()
-        .map(|root| PersistedWorkRootRegistryEntry {
-            path: root.path.to_string_lossy().into_owned(),
-            activation: root.activation,
-            provenance: root.provenance.into(),
-        })
-        .collect(),
+        work_root_registry: deduplicate_registry_entries(roots)
+            .into_iter()
+            .map(|root| PersistedWorkRootRegistryEntry {
+                path: root.path.to_string_lossy().into_owned(),
+                activation: root.activation,
+                provenance: root.provenance.into(),
+            })
+            .collect(),
+        root_picker_pins: deduplicate_paths(root_picker_pins)
+            .into_iter()
+            .map(|path| PersistedRootPickerPin {
+                path: path.to_string_lossy().into_owned(),
+            })
+            .collect(),
     };
     write_state_json(path, &state).await
 }
@@ -314,8 +394,41 @@ mod tests {
             .expect("read persisted state");
         assert!(raw.contains("\"version\": 2"));
         assert!(raw.contains("\"workRootRegistry\""));
+        assert!(raw.contains("\"rootPickerPins\""));
         assert!(raw.contains("\"activation\": \"online\""));
         assert!(raw.contains("\"provenance\": \"opened\""));
+        remove_temp(&root);
+    }
+
+    #[tokio::test]
+    async fn state_store_persists_root_picker_pins_without_dropping_registry() {
+        let root = temp_path("pins");
+        let state_file = root.join("opened-workroots.json");
+        let store = DashboardStateStore::at_path(&state_file);
+        let opened = OpenedWorkRoots::from_paths(vec![root.join("work")]);
+        store
+            .persist_opened_work_roots(&opened)
+            .await
+            .expect("persist opened workRoots before pins");
+
+        store
+            .persist_root_picker_pins(vec![root.join("pin-b"), root.join("pin-a")])
+            .await
+            .expect("persist root picker pins");
+
+        let restored_registry = store.load_work_root_registry().await;
+        assert_eq!(restored_registry.len(), 1);
+        assert_eq!(restored_registry[0].path, root.join("work"));
+        assert_eq!(
+            store.load_root_picker_pins().await,
+            vec![root.join("pin-a"), root.join("pin-b")]
+        );
+
+        let raw = fs::read_to_string(&state_file)
+            .await
+            .expect("read pinned state");
+        assert!(raw.contains("\"rootPickerPins\""));
+        assert!(raw.contains("pin-a"));
         remove_temp(&root);
     }
 

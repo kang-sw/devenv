@@ -22,7 +22,9 @@ import {
   buildRootPickerCreateDirectoryCommand,
   buildRootPickerNavigateCommand,
   buildRootPickerOpenCommand,
+  buildRootPickerPinDirectoryCommand,
   buildRootPickerSelectDirectoryCommand,
+  buildRootPickerUnpinDirectoryCommand,
   buildTerminalCreateCommand,
   buildWorkbenchOpenActivityCommand,
   buildWorkspaceRemoveCommand,
@@ -125,6 +127,7 @@ import { requestOpenWorkRoot } from "./openWorkRoot";
 import {
   createRootPickerDirectory,
   fetchRootPicker,
+  pinRootPickerDirectory,
   rootPickerHistoryBack,
   rootPickerHistoryForward,
   rootPickerHistoryInitial,
@@ -132,8 +135,10 @@ import {
   rootPickerEntryLabel,
   rootPickerInsertEntry,
   rootPickerModifiedTimeLabel,
+  rootPickerPinnedPathSet,
   rootPickerVisibleEntries,
   rootPickerVisiblePlaces,
+  unpinRootPickerDirectory,
   type RootPickerNavigationHistory,
   type RootPickerView,
 } from "./rootPicker";
@@ -748,6 +753,7 @@ function OpenWorkRootControl({
   const [loading, setLoading] = useState(false);
   const [pendingOpen, setPendingOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [pinningPath, setPinningPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const wasOpenRef = useRef(false);
@@ -918,10 +924,52 @@ function OpenWorkRootControl({
     });
   };
 
+  const updatePickerPlaces = (places: RootPickerView["places"]) => {
+    setPickerView((current) => (current ? { ...current, places } : current));
+  };
+
+  const pinDirectory = (path: string) => {
+    if (pinningPath) {
+      return;
+    }
+    onCommand(buildRootPickerPinDirectoryCommand(path), {
+      "rootPicker.pinDirectory": () => {
+        setPinningPath(path);
+        setError(null);
+        void pinRootPickerDirectory(path)
+          .then((view) => updatePickerPlaces(view.places))
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "pin failed");
+          })
+          .finally(() => setPinningPath(null));
+      },
+    });
+  };
+
+  const unpinDirectory = (path: string) => {
+    if (pinningPath) {
+      return;
+    }
+    onCommand(buildRootPickerUnpinDirectoryCommand(path), {
+      "rootPicker.unpinDirectory": () => {
+        setPinningPath(path);
+        setError(null);
+        void unpinRootPickerDirectory(path)
+          .then((view) => updatePickerPlaces(view.places))
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "unpin failed");
+          })
+          .finally(() => setPinningPath(null));
+      },
+    });
+  };
+
   const selectedLabel = selectedPath ? rootPickerEntryLabel(selectedPath) : "None";
   const selectedEntry = pickerView?.entries.find((entry) => entry.path === selectedPath);
   const visibleEntries = rootPickerVisibleEntries(pickerView?.entries ?? []);
   const visiblePlaces = rootPickerVisiblePlaces(pickerView);
+  const pinnedPaths = rootPickerPinnedPathSet(pickerView);
+  const selectedPathIsPinned = selectedPath ? pinnedPaths.has(selectedPath) : false;
 
   return (
     <div className="open-work-root" aria-label="Open workRoot">
@@ -1039,25 +1087,70 @@ function OpenWorkRootControl({
 
             <div className="root-picker-content">
               <aside className="root-picker-places" aria-label="Known places">
-                <div className="root-picker-column-label">Places</div>
+                <div className="root-picker-places-header">
+                  <div className="root-picker-column-label">Places</div>
+                  <button
+                    className="action-button action-button-compact"
+                    data-command-id={
+                      selectedPathIsPinned
+                        ? "rootPicker.unpinDirectory"
+                        : "rootPicker.pinDirectory"
+                    }
+                    disabled={!selectedPath || Boolean(pinningPath)}
+                    type="button"
+                    onClick={() => {
+                      if (!selectedPath) {
+                        return;
+                      }
+                      if (selectedPathIsPinned) {
+                        unpinDirectory(selectedPath);
+                      } else {
+                        pinDirectory(selectedPath);
+                      }
+                    }}
+                  >
+                    {selectedPathIsPinned ? "Unpin" : "Pin"}
+                  </button>
+                </div>
                 {visiblePlaces.length === 0 ? (
                   <div className="root-picker-state root-picker-state-compact">
                     No known places
                   </div>
                 ) : (
                   visiblePlaces.map((place) => (
-                    <button
-                      className="root-picker-place"
-                      data-command-id="rootPicker.navigate"
-                      data-root-picker-place-kind={place.kind}
+                    <div
+                      className={`root-picker-place-row ${
+                        place.source === "pin" ? "root-picker-place-row-pinned" : ""
+                      }`}
                       key={place.id}
-                      title={place.path}
-                      type="button"
-                      onClick={() => navigateTo(place.path)}
                     >
-                      <span className="root-picker-place-label">{place.label}</span>
-                      <span className="root-picker-place-path">{place.path}</span>
-                    </button>
+                      <button
+                        className="root-picker-place"
+                        data-command-id="rootPicker.navigate"
+                        data-root-picker-place-kind={place.kind}
+                        disabled={!place.available}
+                        title={place.path}
+                        type="button"
+                        onClick={() => navigateTo(place.path)}
+                      >
+                        <span className="root-picker-place-label">{place.label}</span>
+                        <span className="root-picker-place-path">
+                          {place.available ? place.path : "Unavailable"}
+                        </span>
+                      </button>
+                      {place.source === "pin" ? (
+                        <button
+                          aria-label={`Unpin ${place.label}`}
+                          className="root-picker-place-unpin"
+                          data-command-id="rootPicker.unpinDirectory"
+                          disabled={Boolean(pinningPath)}
+                          type="button"
+                          onClick={() => unpinDirectory(place.path)}
+                        >
+                          x
+                        </button>
+                      ) : null}
+                    </div>
                   ))
                 )}
               </aside>

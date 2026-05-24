@@ -38,6 +38,7 @@ let commandPlan: TerminalCommandPlan;
 let portabilityEvidence: TerminalPortabilityEvidence | undefined;
 let activityFixtureRootId: string | null = null;
 let activityRecentPollRequests = 0;
+let rootPickerPinEvidenceRecorded = false;
 
 const evidence: string[] = [];
 function note(line: string) {
@@ -374,6 +375,24 @@ async function openWorkRootInBrowser(page: Page, rootPath: string) {
   await expect(modal.locator(".root-picker-current")).toContainText(
     workRootDisplayName(rootPath),
   );
+  if (!rootPickerPinEvidenceRecorded) {
+    await modal.locator('[data-command-id="rootPicker.pinDirectory"]').click();
+    await expect(
+      modal.locator(".root-picker-place-row-pinned", {
+        hasText: workRootDisplayName(rootPath),
+      }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(opener).toBeVisible();
+    await opener.click();
+    modal = page.locator(".root-picker-modal");
+    await expect(
+      modal.locator(".root-picker-place-row-pinned", {
+        hasText: workRootDisplayName(rootPath),
+      }),
+    ).toBeVisible();
+    rootPickerPinEvidenceRecorded = true;
+  }
   await modal.locator("#root-picker-exact-path").fill(rootPath);
   await modal.locator('[data-command-id="workRoot.open"]').filter({ hasText: "Open" }).click();
   await expect(page.locator(".file-explorer-title")).toContainText(
@@ -382,7 +401,7 @@ async function openWorkRootInBrowser(page: Page, rootPath: string) {
   await expect(modal).toHaveCount(0);
   await expectDockviewWorkbench(page);
   note(
-    "open workRoot: React Aria picker restored opener focus, navigated by address, selected/actioned a row by keyboard, and opened exact typed path",
+    "open workRoot: React Aria picker restored opener focus, navigated by address, selected/actioned a row by keyboard, persisted a pinned directory across refresh, and opened exact typed path",
   );
 }
 

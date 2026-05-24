@@ -205,6 +205,13 @@ button {
   color: var(--ws-color-action-text);
 }
 
+.action-button-compact {
+  min-height: 24px;
+  padding: var(--ws-space-02) var(--ws-space-04);
+  font-size: var(--ws-font-size-01);
+  line-height: var(--ws-line-height-02);
+}
+
 .resource-list {
   height: calc(100vh - 48px);
   overflow: auto;
@@ -360,8 +367,25 @@ button {
   font-size: var(--ws-font-size-01);
   font-weight: 700;
   line-height: var(--ws-line-height-02);
-  padding: var(--ws-space-03) var(--ws-space-04);
   text-transform: uppercase;
+}
+
+.root-picker-places-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-04);
+  padding: var(--ws-space-03) var(--ws-space-04);
+}
+
+.root-picker-place-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.root-picker-place-row-pinned {
+  grid-template-columns: minmax(0, 1fr) 24px;
 }
 
 .root-picker-place {
@@ -378,11 +402,35 @@ button {
   text-align: left;
 }
 
-.root-picker-place:hover {
+.root-picker-place:hover:not(:disabled) {
   background: var(--ws-color-panel-hover);
 }
 
 .root-picker-place:focus-visible {
+  outline: var(--ws-focus-ring);
+  outline-offset: -1px;
+}
+
+.root-picker-place:disabled {
+  color: var(--ws-color-text-disabled);
+  cursor: default;
+}
+
+.root-picker-place-unpin {
+  align-self: stretch;
+  border: 0;
+  background: transparent;
+  color: var(--ws-color-text-tertiary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.root-picker-place-unpin:hover {
+  background: var(--ws-color-panel-hover);
+  color: var(--ws-color-text-primary);
+}
+
+.root-picker-place-unpin:focus-visible {
   outline: var(--ws-focus-ring);
   outline-offset: -1px;
 }

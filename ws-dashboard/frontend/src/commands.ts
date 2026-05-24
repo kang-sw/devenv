@@ -8,6 +8,8 @@ export type DashboardCommandId =
   | "rootPicker.navigate"
   | "rootPicker.selectDirectory"
   | "rootPicker.createDirectory"
+  | "rootPicker.pinDirectory"
+  | "rootPicker.unpinDirectory"
   | "fileExplorer.refresh"
   | "fileExplorer.toggleDirectory"
   | "fileExplorer.openFile"
@@ -35,6 +37,8 @@ export type DashboardCommandPayload =
   | { type: "rootPicker.navigate" }
   | { type: "rootPicker.selectDirectory" }
   | { type: "rootPicker.createDirectory" }
+  | { type: "rootPicker.pinDirectory" }
+  | { type: "rootPicker.unpinDirectory" }
   | { type: "fileExplorer.refresh"; workRootId: string }
   | { type: "fileExplorer.toggleDirectory"; workRootId: string; path: string }
   | {
@@ -111,6 +115,20 @@ export function buildRootPickerCreateDirectoryCommand(
   return {
     commandId: "rootPicker.createDirectory",
     payload: { type: "rootPicker.createDirectory" },
+  };
+}
+
+export function buildRootPickerPinDirectoryCommand(_path: string): DashboardCommand {
+  return {
+    commandId: "rootPicker.pinDirectory",
+    payload: { type: "rootPicker.pinDirectory" },
+  };
+}
+
+export function buildRootPickerUnpinDirectoryCommand(_path: string): DashboardCommand {
+  return {
+    commandId: "rootPicker.unpinDirectory",
+    payload: { type: "rootPicker.unpinDirectory" },
   };
 }
 
@@ -254,6 +272,10 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Select directory";
     case "rootPicker.createDirectory":
       return "Create directory";
+    case "rootPicker.pinDirectory":
+      return "Pin directory";
+    case "rootPicker.unpinDirectory":
+      return "Unpin directory";
     case "fileExplorer.toggleDirectory":
       return "Toggle directory";
     case "fileExplorer.openFile":
