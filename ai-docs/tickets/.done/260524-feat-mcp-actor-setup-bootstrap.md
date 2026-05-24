@@ -96,3 +96,13 @@ the lead workflow manual, wsflow setup guidance, runtime reference, spec, and
 mental models. Verification covered local `go test ./...`, wsflow package
 tests, spec index validation, `git diff --check`, and Windows remote
 `go test ./internal/wsstore ./internal/wsstate ./internal/mcp`.
+
+#### Edition (c34373e) - 2026-05-24
+
+Added request-order fencing for `ws.setup` and setup aliases after review found
+that same-batch setup/register calls could race under the concurrent stdio
+dispatcher. Setup requests now wait for earlier in-flight requests, apply
+synchronously, write their response, and only then allow later stream requests
+to start. Verification covered local `go test ./...`, wsflow package tests,
+spec index validation, `git diff --check`, and Windows remote
+`go test ./internal/mcp`.
