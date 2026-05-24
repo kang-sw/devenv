@@ -698,6 +698,16 @@ picker/open request data rather than loggable command payload fields.
 {#260524-ws-dashboard-root-picker-modal}
 {#260524-ws-dashboard-react-aria-root-picker-pilot}
 
+Authenticated owners can pin and unpin root picker directories in the picker
+sidebar. Pinned directories are stored in daemon-local dashboard persistence,
+are visually distinguished from built-in places, and remain selection or
+navigation affordances only. Unavailable pinned directories stay visible in a
+degraded state so the owner can remove them without the picker exposing private
+diagnostics or silently creating, opening, deleting, renaming, or moving
+filesystem resources. Pin and unpin controls keep host paths as authenticated
+request data rather than loggable command payload fields.
+{#260524-ws-dashboard-root-picker-pins}
+
 After an authenticated owner opens a workRoot, the browser-visible resource
 tree refreshes from the canonical dashboard resources endpoint and selects the
 real opened workRoot instead of continuing to present mock workspace state.

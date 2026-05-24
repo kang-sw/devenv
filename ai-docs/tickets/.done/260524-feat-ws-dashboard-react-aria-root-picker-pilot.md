@@ -9,8 +9,10 @@ spec:
   - 260516-ws-web-dashboard-open-workroot-resource-refresh
   - 260524-ws-dashboard-root-picker-modal
   - 260524-ws-dashboard-react-aria-root-picker-pilot
+  - 260524-ws-dashboard-root-picker-pins
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Rework root picker as React Aria explorer-style folder picker
@@ -158,3 +160,26 @@ Verification should cover persistence round trips, unavailable pinned
 directories, pin/unpin command identities, no host path leakage in command
 payloads, and browser evidence that pinned directories remain available across
 refresh or daemon restart when persistence supports it.
+
+### Result (f86e46c4) - 2026-05-24
+
+Implemented Phase 2 pinned picker directories:
+
+- Added daemon-local root picker pin persistence in the existing dashboard
+  state file while preserving workRoot registry state on pin writes and pins on
+  registry writes.
+- Added authenticated pin/unpin routes returning refreshed picker places, with
+  available pins navigable and unavailable pins degraded but still removable.
+- Added `rootPicker.pinDirectory` and `rootPicker.unpinDirectory` command
+  builders with path-free payloads, plus sidebar pin/unpin controls in the
+  React Aria picker.
+- Kept pins as navigation/selection affordances only. Pin/unpin does not open,
+  create, delete, rename, move, or otherwise mutate filesystem/workRoot
+  resources.
+
+Verification:
+
+- `npm run test:commands`
+- `npm run test:root-picker`
+- `cargo test -p ws-dashboard-daemon root_picker`
+- `npm run test:browser`
