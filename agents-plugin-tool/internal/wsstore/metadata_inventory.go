@@ -97,8 +97,8 @@ func ValidateRuntimeMetadataInventory() error {
 			return fmt.Errorf("duplicate runtime metadata classification for %s %s", item.Source, item.Field)
 		}
 		seen[key] = true
-		if item.Source == RuntimeSourceAgentJSON && item.WriteAuthority == RuntimeAuthorityFile && item.Storage != RuntimeFieldFileBackedPayload {
-			return fmt.Errorf("agent.json metadata field %s keeps file write authority", item.Field)
+		if item.Source == RuntimeSourceAgentJSON && item.Field != "agent_json_compatibility" && item.WriteAuthority != RuntimeAuthoritySQLite {
+			return fmt.Errorf("agent.json metadata field %s is not sqlite-authoritative", item.Field)
 		}
 	}
 	return nil
@@ -124,15 +124,13 @@ var runtimeMetadataInventory = func() []RuntimeFieldClassification {
 	var out []RuntimeFieldClassification
 	out = append(out, sqliteFields(RuntimeSourceAgentJSON,
 		"schema_version", "name", "backend", "harness", "tier", "model", "effort", "session_id", "status",
-		"created_at", "last_seen_at", "last_call_at", "prompt_refs", "child_actor_id", "child_actor_authority", "capabilities", "ephemeral",
+		"created_at", "last_seen_at", "last_call_at", "prompt_refs", "system_prompt_path", "last_output_path", "child_actor_id", "child_actor_authority", "capabilities", "ephemeral",
 	)...)
-	out = append(out, fileFields(RuntimeSourceAgentJSON, "system_prompt_path", "last_output_path")...)
 	out = append(out, RuntimeFieldClassification{Source: RuntimeSourceAgentJSON, Field: "agent_json_compatibility", Storage: RuntimeFieldTemporaryCompatOnly, WriteAuthority: RuntimeAuthorityNone, Note: "bounded read-only import, tombstone, or diagnostic bridge; not metadata write authority"})
 
 	out = append(out, sqliteFields(RuntimeSourceAgentCurrentJSON,
-		"schema_version", "agent_name", "call_seq", "execution_id", "status", "pid", "started_at", "updated_at", "finished_at", "exit_code", "session_id", "error", "cleanup_needed", "cancel_pid",
+		"schema_version", "agent_name", "call_seq", "execution_id", "status", "pid", "started_at", "updated_at", "finished_at", "prompt_path", "stdout_path", "stderr_path", "exit_code", "session_id", "error", "cleanup_needed", "cancel_pid",
 	)...)
-	out = append(out, fileFields(RuntimeSourceAgentCurrentJSON, "prompt_path", "stdout_path", "stderr_path")...)
 
 	out = append(out, sqliteFields(RuntimeSourceExecJobJSON,
 		"schema_version", "exec_key", "status", "root", "working_dir", "argv", "command", "shell", "pid", "started_at", "updated_at", "completed_at", "exit_code", "error", "cancel_requested", "stdout_bytes", "stderr_bytes", "combined_bytes",

@@ -369,10 +369,10 @@ func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
 		want   RuntimeFieldStorage
 	}{
 		{RuntimeSourceAgentJSON, "backend", RuntimeFieldSQLiteMetadata},
-		{RuntimeSourceAgentJSON, "system_prompt_path", RuntimeFieldFileBackedPayload},
+		{RuntimeSourceAgentJSON, "system_prompt_path", RuntimeFieldSQLiteMetadata},
 		{RuntimeSourceAgentJSON, "agent_json_compatibility", RuntimeFieldTemporaryCompatOnly},
 		{RuntimeSourceAgentCurrentJSON, "execution_id", RuntimeFieldSQLiteMetadata},
-		{RuntimeSourceAgentCurrentJSON, "stdout_path", RuntimeFieldFileBackedPayload},
+		{RuntimeSourceAgentCurrentJSON, "stdout_path", RuntimeFieldSQLiteMetadata},
 		{RuntimeSourceExecJobJSON, "exec_key", RuntimeFieldSQLiteMetadata},
 		{RuntimeSourceExecJobJSON, "stdout", RuntimeFieldFileBackedPayload},
 		{RuntimeSourceExecJobJSON, "combined_bytes", RuntimeFieldSQLiteMetadata},
@@ -388,8 +388,8 @@ func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
 	}
 }
 
-func TestRuntimeMetadataInventoryKeepsAppendHeavyPayloadsFileBacked(t *testing.T) {
-	payloads := []struct {
+func TestRuntimeMetadataInventoryKeepsPathsInSQLiteAndPayloadsFileBacked(t *testing.T) {
+	paths := []struct {
 		source RuntimeStateSource
 		field  string
 	}{
@@ -398,6 +398,21 @@ func TestRuntimeMetadataInventoryKeepsAppendHeavyPayloadsFileBacked(t *testing.T
 		{RuntimeSourceAgentCurrentJSON, "prompt_path"},
 		{RuntimeSourceAgentCurrentJSON, "stdout_path"},
 		{RuntimeSourceAgentCurrentJSON, "stderr_path"},
+	}
+	for _, path := range paths {
+		got, ok := RuntimeField(path.source, path.field)
+		if !ok {
+			t.Fatalf("missing path classification for %s %s", path.source, path.field)
+		}
+		if got.Storage != RuntimeFieldSQLiteMetadata || got.WriteAuthority != RuntimeAuthoritySQLite {
+			t.Fatalf("%s %s = %#v, want sqlite path metadata", path.source, path.field, got)
+		}
+	}
+
+	payloads := []struct {
+		source RuntimeStateSource
+		field  string
+	}{
 		{RuntimeSourceExecJobJSON, "stdout"},
 		{RuntimeSourceExecJobJSON, "stderr"},
 		{RuntimeSourceExecJobJSON, "combined"},
