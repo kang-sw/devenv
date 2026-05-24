@@ -498,10 +498,9 @@ button {
   display: grid;
   height: 100%;
   min-height: 0;
-  grid-template-rows: auto auto minmax(180px, 1fr) auto auto;
+  grid-template-rows: auto auto auto minmax(180px, 1fr) auto auto;
 }
 
-.root-picker-header,
 .root-picker-toolbar,
 .root-picker-footer {
   display: flex;
@@ -510,6 +509,25 @@ button {
   gap: var(--ws-space-06);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
   padding: var(--ws-space-06) var(--ws-space-08);
+}
+
+.root-picker-titlebar {
+  display: flex;
+  min-height: 2.35em;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-06);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: color-mix(in srgb, var(--ws-color-panel-raised) 82%, var(--ws-color-surface-workbench-topbar));
+  box-shadow: 0 1px 0 rgb(255 255 255 / 3%) inset;
+  padding: var(--ws-space-03) var(--ws-space-05) var(--ws-space-03) var(--ws-space-07);
+}
+
+.root-picker-window-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--ws-space-02);
 }
 
 .root-picker-toolbar {
@@ -534,15 +552,16 @@ button {
   gap: var(--ws-space-04);
 }
 
-.root-picker-title-block {
-  min-width: 0;
-}
-
 .root-picker-title {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ws-color-text-primary);
-  font-size: var(--ws-font-size-04);
-  font-weight: 600;
-  line-height: var(--ws-line-height-05);
+  font-size: var(--ws-font-size-03);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .root-picker-current,
@@ -554,6 +573,12 @@ button {
   line-height: var(--ws-line-height-03);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.root-picker-context {
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-divider-local);
+  background: var(--ws-color-panel);
+  padding: var(--ws-space-04) var(--ws-space-08);
 }
 
 .root-picker-content {
@@ -2980,8 +3005,7 @@ button {
   gap: var(--ws-space-05);
   height: auto;
   min-height: 0;
-  grid-template-rows: auto auto;
-  padding: var(--ws-space-07);
+  grid-template-rows: auto auto auto;
 }
 
 .git-worktree-form,
@@ -2993,6 +3017,7 @@ button {
 
 .git-worktree-form {
   gap: var(--ws-space-05);
+  padding: 0 var(--ws-space-07) var(--ws-space-07);
 }
 
 .git-worktree-fieldset {
@@ -3171,6 +3196,20 @@ button.git-status-segment:disabled {
 .git-branch-create-form {
   display: grid;
   gap: 12px;
+  padding: var(--ws-space-07);
+}
+
+.git-branch-modal {
+  height: auto;
+  max-height: min(520px, calc(100vh - 32px));
+  width: min(440px, calc(100vw - 32px));
+  overflow: auto;
+}
+
+.git-branch-modal .root-picker-dialog {
+  height: auto;
+  min-height: 0;
+  grid-template-rows: auto auto;
 }
 
 @keyframes git-spin {

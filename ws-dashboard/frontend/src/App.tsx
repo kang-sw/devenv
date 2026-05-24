@@ -1218,22 +1218,22 @@ function OpenWorkRootControl({
       >
         <Modal className="root-picker-modal">
           <Dialog aria-label="Open workRoot" className="root-picker-dialog">
-            <div className="root-picker-header">
-              <div className="root-picker-title-block">
-                <Heading className="root-picker-title" slot="title">
-                  Open workRoot
-                </Heading>
-                <div className="root-picker-current" title={pickerView?.currentPath ?? ""}>
-                  {pickerView?.currentPath ?? "Loading host directories"}
-                </div>
+            <div className="root-picker-titlebar">
+              <Heading className="root-picker-title" slot="title">
+                Open workRoot
+              </Heading>
+              <div className="root-picker-window-actions">
+                <ChromeIconButton
+                  className="root-picker-close-button"
+                  commandId="rootPicker.close"
+                  icon={X}
+                  label="Close"
+                  onClick={closePicker}
+                />
               </div>
-              <ChromeIconButton
-                className="root-picker-close-button"
-                commandId="rootPicker.close"
-                icon={X}
-                label="Close"
-                onClick={closePicker}
-              />
+            </div>
+            <div className="root-picker-current root-picker-context" title={pickerView?.currentPath ?? ""}>
+              {pickerView?.currentPath ?? "Loading host directories"}
             </div>
 
             <form
@@ -1664,19 +1664,19 @@ function GitWorktreeAddModal({
     <ModalOverlay className="root-picker-backdrop" isDismissable isOpen onOpenChange={(isOpen) => { if (!isOpen) close(); }}>
       <Modal className="root-picker-modal git-worktree-modal">
         <Dialog aria-label="Add Git worktree" className="root-picker-dialog">
-          <div className="root-picker-header">
-            <div className="root-picker-title-block">
-              <Heading className="root-picker-title" slot="title">Add worktree</Heading>
-              <div className="root-picker-current">{options?.git.rootLabel ?? "Loading Git workspace"}</div>
+          <div className="root-picker-titlebar">
+            <Heading className="root-picker-title" slot="title">Add worktree</Heading>
+            <div className="root-picker-window-actions">
+              <ChromeIconButton
+                className="root-picker-close-button"
+                commandId="gitWorktreeAdd.close"
+                icon={X}
+                label="Close"
+                onClick={close}
+              />
             </div>
-            <ChromeIconButton
-              className="root-picker-close-button"
-              commandId="gitWorktreeAdd.close"
-              icon={X}
-              label="Close"
-              onClick={close}
-            />
           </div>
+          <div className="root-picker-current root-picker-context">{options?.git.rootLabel ?? "Loading Git workspace"}</div>
           <form className="git-worktree-form" onSubmit={submit}>
             <label className="git-worktree-field">
               <span className="section-label">Worktree name</span>
@@ -3765,9 +3765,17 @@ function WorkRootGitToolbar({
       <ModalOverlay className="root-picker-backdrop" isDismissable isOpen={modalOpen} onOpenChange={(open) => { if (!open) runBranchCreateCloseCommand(); }}>
         <Modal className="root-picker-modal git-branch-modal">
           <Dialog aria-label="New Git branch" className="root-picker-dialog">
-            <div className="root-picker-header">
+            <div className="root-picker-titlebar">
               <Heading className="root-picker-title" slot="title">New branch</Heading>
-              <button className="action-button" data-command-id="git.branchCreate.close" type="button" onClick={runBranchCreateCloseCommand}>Close</button>
+              <div className="root-picker-window-actions">
+                <ChromeIconButton
+                  className="root-picker-close-button"
+                  commandId="git.branchCreate.close"
+                  icon={X}
+                  label="Close"
+                  onClick={runBranchCreateCloseCommand}
+                />
+              </div>
             </div>
             <form className="git-branch-create-form" onSubmit={(event) => { event.preventDefault(); const branchName = newBranchName.trim(); const baseBranch = selectedBaseBranch.trim(); if (!branchName) return; const targetRootId = root.id; onCommand(buildGitBranchCreateSubmitCommand(root.id, branchName, baseBranch || undefined), { "git.branchCreate.submit": () => { void createWorkRootGitBranch(root.id, branchName, baseBranch || undefined).then((nextStatus) => { if (currentRootId.current !== targetRootId) return; setStatusState({ workRootId: targetRootId, status: nextStatus }); closeBranchModal(); refreshGit("git branch create refresh"); }).catch((nextError) => { if (currentRootId.current !== targetRootId) return; setError(nextError instanceof Error ? nextError.message : "branch create failed"); refreshGit("git branch create failure refresh"); }); } }); }}>
               <label className="git-worktree-field"><span className="section-label">Branch name</span><input className="root-picker-input" value={newBranchName} onChange={(event) => setNewBranchName(event.target.value)} placeholder="feature-name" /></label>
