@@ -91,7 +91,7 @@ const migratedCommands = [
   buildGitBranchMenuOpenCommand(workRootId),
   buildGitBranchSwitchCommand(workRootId, "feature/private"),
   buildGitBranchCreateOpenCommand(workRootId),
-  buildGitBranchCreateSubmitCommand(workRootId, "new-private"),
+  buildGitBranchCreateSubmitCommand(workRootId, "new-private", "main"),
   buildGitBranchCreateCloseCommand(workRootId),
   buildActivitySelectItemCommand("agent:reviewer"),
   buildActivityTranscriptLoadMoreCommand("agent:reviewer"),
@@ -187,6 +187,12 @@ assertDeepEqual(
   ],
   "real command builders emit executable payload variants",
 );
+
+const branchCreateCommand = buildGitBranchCreateSubmitCommand(workRootId, "new-private", "main");
+if (branchCreateCommand.payload.type !== "git.branchCreate.submit") {
+  throw new Error("branch create command payload type mismatch");
+}
+assertEqual(branchCreateCommand.payload.baseBranch, "main", "branch create command records selected base branch");
 
 const observed: string[] = [];
 const executed: string[] = [];

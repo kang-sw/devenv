@@ -6,7 +6,10 @@ import {
   fetchWorkRootGit,
   pushWorkRootGit,
   pullWorkRootGitFfOnly,
+  gitChangeStatusSegments,
+  gitSyncStatusSegments,
   gitStatusSegments,
+  shouldRefreshGitWhileVisible,
 } from "./gitToolbar.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -56,3 +59,7 @@ assertEqual(calls[6].url, "/api/dashboard/work-roots/root-local-private/git/pull
 for (const call of calls) assertNotContains(call.url, privatePath, "git toolbar route URL omits host path");
 assertEqual(JSON.parse(String(calls[2].init?.body)).branchName, "feature/private", "switch body carries branch only");
 assertEqual(gitStatusSegments(status), "+3 -1 *2 ?4 | ↑1 ↓2", "status segment grammar");
+assertEqual(gitChangeStatusSegments(status).map((segment) => segment.tone).join(","), "added,removed,modified,untracked", "change segments keep per-tone styling metadata");
+assertEqual(gitSyncStatusSegments(status).map((segment) => `${segment.commandId}:${segment.label}`).join(","), "git.push:↑1,git.pullFfOnly:↓2", "sync segments carry interactive command ids");
+assertEqual(shouldRefreshGitWhileVisible(false), true, "visible document refreshes Git polling");
+assertEqual(shouldRefreshGitWhileVisible(true), false, "hidden document pauses Git polling");

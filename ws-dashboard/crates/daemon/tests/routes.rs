@@ -2377,11 +2377,10 @@ async fn git_toolbar_status_gates_and_reports_counts_without_paths() {
         app.clone(),
         cookie.as_str(),
         &format!("/api/dashboard/work-roots/{plain_id}/git/status"),
-        StatusCode::OK,
+        StatusCode::BAD_REQUEST,
     )
     .await;
-    assert_eq!(plain_status["available"], false);
-    assert_eq!(plain_status["reason"], "workRoot is not a Git workRoot");
+    assert_eq!(plain_status["error"], "workRoot is not a Git workRoot");
     let offline =
         set_work_root_activation_for_test(app.clone(), cookie.as_str(), &git_id, "offline").await;
     assert!(work_root_by_id(&offline, &git_id)["activation"] == "offline");
@@ -2389,15 +2388,15 @@ async fn git_toolbar_status_gates_and_reports_counts_without_paths() {
         app.clone(),
         cookie.as_str(),
         &format!("/api/dashboard/work-roots/{git_id}/git/status"),
-        StatusCode::OK,
+        StatusCode::CONFLICT,
     )
     .await;
-    assert_eq!(offline_status["available"], false);
+    assert_eq!(offline_status["error"], "workRoot offline");
     let unknown = git_toolbar_get_json(
         app.clone(),
         cookie.as_str(),
         "/api/dashboard/work-roots/root-local-unknown/git/branches",
-        StatusCode::BAD_REQUEST,
+        StatusCode::NOT_FOUND,
     )
     .await;
     assert_eq!(unknown["error"], "unknown workRoot");
@@ -2471,6 +2470,16 @@ async fn git_toolbar_branches_switch_and_create_revalidate_state() {
     )
     .await;
     assert_eq!(created["branch"]["name"], "browser-created");
+    assert_eq!(current_git_branch(&primary), "browser-created");
+    let duplicate_create = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/branches"),
+        serde_json::json!({"branchName":"browser-created","switchTo":true}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(duplicate_create["error"], "branch cannot be created");
     assert_eq!(current_git_branch(&primary), "browser-created");
     fs::write(primary.join("README.md"), "dirty\n").expect("make dirty");
     let dirty = git_toolbar_post_json(
@@ -2613,6 +2622,19 @@ async fn git_toolbar_fetch_push_and_pull_ff_only_use_safe_git_defaults() {
     .await;
     assert_eq!(pull_rejected["error"], "pull --ff-only failed");
     assert_eq!(current_git_branch(&primary), branch);
+    assert!(
+        !primary.join(".git").join("MERGE_HEAD").exists(),
+        "ff-only pull failure must not leave a merge in progress"
+    );
+    assert!(
+        !primary.join(".git").join("rebase-merge").exists()
+            && !primary.join(".git").join("rebase-apply").exists(),
+        "ff-only pull failure must not leave a rebase in progress"
+    );
+    assert!(
+        git_stdout(&primary, &["diff", "--name-only", "--diff-filter=U"]).is_empty(),
+        "ff-only pull failure must not leave conflicted index entries"
+    );
     remove_static_fixture(&base);
 }
 
@@ -5289,6 +5311,21 @@ fn current_git_branch(path: &Path) -> String {
         .output()
         .expect("current git branch");
     assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn git_stdout(path: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .output()
+        .expect("git stdout");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 

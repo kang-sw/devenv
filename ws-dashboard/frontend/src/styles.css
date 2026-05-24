@@ -3033,7 +3033,65 @@ button {
 }
 
 .git-status-pill {
-  border-color: color-mix(in srgb, var(--ws-color-state-success) 42%, transparent);
+  align-items: center;
+  background: color-mix(in srgb, var(--ws-color-panel-raised) 78%, black);
+  border-color: color-mix(in srgb, var(--ws-color-border-strong) 44%, transparent);
+  gap: 5px;
+  padding-right: 7px;
+}
+
+.git-status-refresh,
+.git-status-segment {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: inline-flex;
+  font: inherit;
+  line-height: 1;
+  padding: 0;
+}
+
+.git-status-refresh {
+  color: var(--ws-color-text-muted);
+  cursor: pointer;
+  margin-left: -1px;
+}
+
+.git-status-refresh:hover {
+  color: var(--ws-color-action-text);
+}
+
+button.git-status-segment {
+  cursor: pointer;
+}
+
+button.git-status-segment:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.git-status-segment-added,
+.git-status-segment-push {
+  color: var(--ws-color-state-success);
+}
+
+.git-status-segment-removed {
+  color: var(--ws-color-state-error-text);
+}
+
+.git-status-segment-modified,
+.git-status-segment-pull {
+  color: var(--ws-color-state-warning-text);
+}
+
+.git-status-segment-untracked {
+  color: var(--ws-color-state-info);
+}
+
+.git-status-segment-clean,
+.git-status-separator {
+  color: var(--ws-color-text-muted);
 }
 
 .git-error-chip {

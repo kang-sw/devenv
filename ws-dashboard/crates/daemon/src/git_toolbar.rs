@@ -104,6 +104,33 @@ struct GitContext {
     root_path: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum GitContextError {
+    Unknown,
+    Offline,
+    Unavailable,
+    NonGit,
+}
+
+impl GitContextError {
+    fn message(&self) -> &'static str {
+        match self {
+            GitContextError::Unknown => "unknown workRoot",
+            GitContextError::Offline => "workRoot offline",
+            GitContextError::Unavailable => "workRoot unavailable",
+            GitContextError::NonGit => "workRoot is not a Git workRoot",
+        }
+    }
+
+    fn status_code(&self) -> StatusCode {
+        match self {
+            GitContextError::Unknown => StatusCode::NOT_FOUND,
+            GitContextError::Offline | GitContextError::Unavailable => StatusCode::CONFLICT,
+            GitContextError::NonGit => StatusCode::BAD_REQUEST,
+        }
+    }
+}
+
 pub async fn git_status(
     State(state): State<AppState>,
     AxumPath(work_root_id): AxumPath<String>,
@@ -113,7 +140,7 @@ pub async fn git_status(
     tokio::task::spawn_blocking(
         move || match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => Json(status_for_path(&context.root_path)).into_response(),
-            Err(reason) => Json(unavailable_status(reason)).into_response(),
+            Err(error) => bounded_error(error.status_code(), error.message(), None),
         },
     )
     .await
@@ -129,7 +156,7 @@ pub async fn git_branches(
     tokio::task::spawn_blocking(
         move || match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => Json(branches_for_path(&context.root_path)).into_response(),
-            Err(reason) => bounded_error(StatusCode::BAD_REQUEST, reason, None),
+            Err(error) => bounded_error(error.status_code(), error.message(), None),
         },
     )
     .await
@@ -146,7 +173,7 @@ pub async fn git_switch_branch(
     tokio::task::spawn_blocking(move || {
         let context = match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => context,
-            Err(reason) => return bounded_error(StatusCode::BAD_REQUEST, reason, None),
+            Err(error) => return bounded_error(error.status_code(), error.message(), None),
         };
         let branch = request.branch_name.trim();
         if !branch_exists(&context.root_path, branch) {
@@ -186,7 +213,7 @@ pub async fn git_create_branch(
     tokio::task::spawn_blocking(move || {
         let context = match resolve_git_context(&state_for_task, &work_root_id) {
             Ok(context) => context,
-            Err(reason) => return bounded_error(StatusCode::BAD_REQUEST, reason, None),
+            Err(error) => return bounded_error(error.status_code(), error.message(), None),
         };
         if !request.switch_to {
             return bounded_error(
@@ -283,7 +310,7 @@ async fn mutate_no_body(
     tokio::task::spawn_blocking(move || {
         let context = match resolve_git_context(&state, &work_root_id) {
             Ok(context) => context,
-            Err(reason) => return bounded_error(StatusCode::BAD_REQUEST, reason, None),
+            Err(error) => return bounded_error(error.status_code(), error.message(), None),
         };
         match run_git(&context.root_path, args) {
             Ok(()) => Json(status_for_path(&context.root_path)).into_response(),
@@ -298,29 +325,33 @@ async fn mutate_no_body(
     .expect("git mutation task panicked")
 }
 
-fn resolve_git_context(state: &AppState, work_root_id: &WorkRootId) -> Result<GitContext, String> {
+fn resolve_git_context(
+    state: &AppState,
+    work_root_id: &WorkRootId,
+) -> Result<GitContext, GitContextError> {
     let resources = live_dashboard_resources(&state.opened_work_roots);
     let root = resources
         .workspaces
         .iter()
         .flat_map(|workspace| &workspace.work_roots)
         .find(|root| root.id == *work_root_id)
-        .ok_or_else(|| "unknown workRoot".to_owned())?;
-    if root.activation != WorkRootActivation::Online
-        || root.availability != WorkRootAvailability::Available
-    {
-        return Err("workRoot is unavailable".to_owned());
+        .ok_or(GitContextError::Unknown)?;
+    if root.activation != WorkRootActivation::Online {
+        return Err(GitContextError::Offline);
+    }
+    if root.availability != WorkRootAvailability::Available {
+        return Err(GitContextError::Unavailable);
     }
     if !matches!(
         root.kind,
         WorkRootKind::GitPrimaryRoot | WorkRootKind::GitLinkedWorktree
     ) {
-        return Err("workRoot is not a Git workRoot".to_owned());
+        return Err(GitContextError::NonGit);
     }
     let root_path = state
         .opened_work_roots
         .resolve(work_root_id)
-        .ok_or_else(|| "unknown workRoot".to_owned())?;
+        .ok_or(GitContextError::Unknown)?;
     Ok(GitContext { root_path })
 }
 
@@ -356,18 +387,6 @@ fn status_for_path(root: &Path) -> WorkRootGitStatus {
             can_push: sync.upstream.is_some() && sync.ahead > 0,
             can_pull_ff_only: sync.upstream.is_some() && sync.behind > 0,
         }),
-        refreshed_at_ms: now_ms(),
-    }
-}
-
-fn unavailable_status(reason: String) -> WorkRootGitStatus {
-    WorkRootGitStatus {
-        available: false,
-        reason: Some(reason),
-        branch: None,
-        changes: GitChangeSummary::default(),
-        sync: GitSyncSummary::default(),
-        operations: None,
         refreshed_at_ms: now_ms(),
     }
 }

@@ -58,7 +58,7 @@ export type DashboardCommandPayload =
   | { type: "git.branchMenu.open"; workRootId: string }
   | { type: "git.branch.switch"; workRootId: string; branchName: string }
   | { type: "git.branchCreate.open"; workRootId: string }
-  | { type: "git.branchCreate.submit"; workRootId: string; branchName: string }
+  | { type: "git.branchCreate.submit"; workRootId: string; branchName: string; baseBranch?: string }
   | { type: "git.branchCreate.close"; workRootId: string }
   | { type: "workRoot.open" }
   | { type: "workRoot.activation.set"; workRootId: string; activation: "online" | "offline" }
@@ -215,8 +215,8 @@ export function buildGitBranchSwitchCommand(workRootId: string, branchName: stri
 export function buildGitBranchCreateOpenCommand(workRootId: string): DashboardCommand {
   return { commandId: "git.branchCreate.open", payload: { type: "git.branchCreate.open", workRootId } };
 }
-export function buildGitBranchCreateSubmitCommand(workRootId: string, branchName: string): DashboardCommand {
-  return { commandId: "git.branchCreate.submit", payload: { type: "git.branchCreate.submit", workRootId, branchName } };
+export function buildGitBranchCreateSubmitCommand(workRootId: string, branchName: string, baseBranch?: string): DashboardCommand {
+  return { commandId: "git.branchCreate.submit", payload: { type: "git.branchCreate.submit", workRootId, branchName, baseBranch } };
 }
 export function buildGitBranchCreateCloseCommand(workRootId: string): DashboardCommand {
   return { commandId: "git.branchCreate.close", payload: { type: "git.branchCreate.close", workRootId } };

@@ -27,6 +27,23 @@ export type GitBranchList = {
   }>;
 };
 
+export type GitStatusSegmentTone =
+  | "added"
+  | "removed"
+  | "modified"
+  | "untracked"
+  | "push"
+  | "pull"
+  | "clean";
+
+export type GitStatusSegment = {
+  key: string;
+  label: string;
+  tone: GitStatusSegmentTone;
+  commandId?: "git.push" | "git.pullFfOnly";
+  disabled?: boolean;
+};
+
 const gitBase = (workRootId: string) =>
   `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/git`;
 
@@ -82,15 +99,51 @@ export async function pullWorkRootGitFfOnly(workRootId: string): Promise<WorkRoo
 }
 
 export function gitStatusSegments(status: WorkRootGitStatus): string {
-  const segments = [
-    status.changes.addedLines > 0 ? `+${status.changes.addedLines}` : null,
-    status.changes.removedLines > 0 ? `-${status.changes.removedLines}` : null,
-    status.changes.modifiedFiles > 0 ? `*${status.changes.modifiedFiles}` : null,
-    status.changes.untrackedFiles > 0 ? `?${status.changes.untrackedFiles}` : null,
-  ].filter(Boolean);
-  const sync = [
-    status.sync.ahead > 0 ? `↑${status.sync.ahead}` : null,
-    status.sync.behind > 0 ? `↓${status.sync.behind}` : null,
-  ].filter(Boolean);
+  const segments = gitChangeStatusSegments(status).map((segment) => segment.label);
+  const sync = gitSyncStatusSegments(status).map((segment) => segment.label);
   return `${segments.length ? segments.join(" ") : "clean"}${sync.length ? ` | ${sync.join(" ")}` : ""}`;
+}
+
+export function gitChangeStatusSegments(status: WorkRootGitStatus): GitStatusSegment[] {
+  return [
+    status.changes.addedLines > 0
+      ? { key: "added", label: `+${status.changes.addedLines}`, tone: "added" }
+      : null,
+    status.changes.removedLines > 0
+      ? { key: "removed", label: `-${status.changes.removedLines}`, tone: "removed" }
+      : null,
+    status.changes.modifiedFiles > 0
+      ? { key: "modified", label: `*${status.changes.modifiedFiles}`, tone: "modified" }
+      : null,
+    status.changes.untrackedFiles > 0
+      ? { key: "untracked", label: `?${status.changes.untrackedFiles}`, tone: "untracked" }
+      : null,
+  ].filter((segment): segment is GitStatusSegment => segment !== null);
+}
+
+export function gitSyncStatusSegments(status: WorkRootGitStatus): GitStatusSegment[] {
+  const segments: GitStatusSegment[] = [];
+  if (status.sync.ahead > 0) {
+    segments.push({
+      key: "push",
+      label: `↑${status.sync.ahead}`,
+      tone: "push",
+      commandId: "git.push",
+      disabled: !status.operations?.canPush,
+    });
+  }
+  if (status.sync.behind > 0) {
+    segments.push({
+      key: "pull",
+      label: `↓${status.sync.behind}`,
+      tone: "pull",
+      commandId: "git.pullFfOnly",
+      disabled: !status.operations?.canPullFfOnly,
+    });
+  }
+  return segments;
+}
+
+export function shouldRefreshGitWhileVisible(documentHidden: boolean): boolean {
+  return !documentHidden;
 }
