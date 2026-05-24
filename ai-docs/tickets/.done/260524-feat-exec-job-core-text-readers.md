@@ -11,6 +11,9 @@ related-mental-model:
   - mcp-runtime
   - named-agent-runtime
   - plugin-runtime
+plans:
+  phase-1: 2026-05/24-260524-feat-exec-job-core-text-readers.brief
+completed: 2026-05-24
 ---
 
 # Exec job core and raw text readers
@@ -110,3 +113,36 @@ metadata, wsflow no-agent hiding, and tests for:
 
 Update `mcp-tools`, `plugin-runtime`, and relevant mental-model docs before
 promoting this child to `ready`.
+
+### Result (d8f1865) - 2026-05-24
+
+Implemented the durable exec job core and raw text-reader surface:
+`exec.spawn`, `exec.shell`, `exec.status`, `exec.result`, `exec.abort`,
+`exec.raw.tail`, `exec.raw.read`, and `exec.raw.grep`.
+
+The implementation stores job records and stdout/stderr/combined streams under
+the wsstate worktree layout, keeps launch/result inline output to the fixed
+4096-byte budget, uses a fixed 5-second foreground window, preserves `working_dir`
+as the public command-location parameter, rejects resolved working directories
+outside the worktree root, and reconciles lost running workers to a terminal
+state instead of leaving jobs indefinitely running.
+
+Raw reader helpers live in reusable internal text-reader code, and wsflow
+no-agent mode omits/rejects the entire `exec.*` surface while the full ws
+runtime manifest includes the new MCP tools. CLI mirrors were intentionally not
+added in this child.
+
+Verification:
+
+- `cd agents-plugin-tool && go test ./internal/execjob ./internal/textreader ./internal/mcp ./cmd/ws-mcp`
+- `python3 -m unittest discover agents-plugin-wsflow/tests`
+
+Full `cd agents-plugin-tool && go test ./...` was attempted and failed in the
+pre-existing unrelated `internal/wsagent` Gemini runner test
+`TestGeminiRunnerSessionCallbackErrorCancelsProcess`, which is outside this
+child's changed files.
+
+#### Verification Update - 2026-05-24
+
+A current-head rerun of `cd agents-plugin-tool && go test ./...` passed after
+the earlier unrelated Gemini runner failure did not reproduce.

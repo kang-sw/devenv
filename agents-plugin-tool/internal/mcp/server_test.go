@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1673,4 +1674,141 @@ func TestAPIAskSameDomainCallsSerialize(t *testing.T) {
 	if max != 1 {
 		t.Fatalf("same-domain calls were not serialized; max active = %d", max)
 	}
+}
+
+func TestExecToolsListNoAgentAndMCPFlow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix shell snippets")
+	}
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	mustWrite(t, root, "sub/.keep", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"/bin/sh","args":["-c","pwd; echo err >&2; printf 'alpha\\nbeta42\\n'"],"working_dir":"sub"}}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":"pwd; printf shell-shape"}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for _, name := range []string{"exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
+		if !strings.Contains(byID["1"], name) {
+			t.Fatalf("tools/list missing %s: %s", name, byID["1"])
+		}
+	}
+	text := toolText(t, byID["2"])
+	if !strings.Contains(byID["9"], "shell-shape") || !strings.Contains(byID["9"], root) {
+		t.Fatalf("shell response = %s", byID["9"])
+	}
+	if !strings.Contains(text, `"status":"succeeded"`) || !strings.Contains(text, filepath.Join(root, "sub")) || !strings.Contains(text, `"stderr":"err`) {
+		t.Fatalf("spawn response = %s", byID["2"])
+	}
+	var launch execToolResponse
+	if err := json.Unmarshal([]byte(text), &launch); err != nil {
+		t.Fatal(err)
+	}
+
+	input = strings.Join([]string{
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"exec.result","arguments":{"exec_key":%q}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"exec.raw.tail","arguments":{"exec_key":%q,"stream":"stdout","lines":1}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"exec.raw.read","arguments":{"exec_key":%q,"stream":"stderr","offset":0,"limit":20}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"exec.raw.grep","arguments":{"exec_key":%q,"pattern":"beta42"}}}`, launch.ExecKey),
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"exec.raw.grep","arguments":{"exec_key":%q,"pattern":"beta[0-9]+","regex":true}}}`, launch.ExecKey),
+	}, "\n") + "\n"
+	out.Reset()
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	for id, want := range map[string]string{"3": "result_ready", "4": "beta42", "5": "beta42", "6": "err", "7": "beta42", "8": "beta42"} {
+		if !strings.Contains(byID[id], want) {
+			t.Fatalf("response %s missing %s: %s", id, want, byID[id])
+		}
+	}
+
+	t.Setenv("WS_MCP_NO_AGENT", "1")
+	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
+	out.Reset()
+	input = `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.spawn","arguments":{"cmd":"echo"}}}` + "\n" + `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.raw.tail","arguments":{"exec_key":"exec-1-0000000000000000"}}}` + "\n"
+	if err := NewServer(root, "test").ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID = responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	if strings.Contains(byID["1"], "exec.spawn") || strings.Contains(byID["1"], "exec.raw.tail") {
+		t.Fatalf("no-agent listed exec tools: %s", byID["1"])
+	}
+	if !strings.Contains(byID["2"], "agentless mode disables") || !strings.Contains(byID["3"], "agentless mode disables") {
+		t.Fatalf("no-agent calls not rejected: %s\n%s", byID["2"], byID["3"])
+	}
+}
+
+func TestExecMCPRunningLargeAndAbort(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix shell snippets")
+	}
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "x\n")
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":"echo start; sleep 6; echo done"}}}` + "\n"
+	var out bytes.Buffer
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+	text := toolText(t, byID["1"])
+	if !strings.Contains(text, `"status":"running"`) || !strings.Contains(text, "exec.ask") || strings.Contains(text, "done") {
+		t.Fatalf("running launch response = %s", byID["1"])
+	}
+	var running execToolResponse
+	if err := json.Unmarshal([]byte(text), &running); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec.abort","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var abortText string
+	for time.Now().Before(deadline) {
+		out.Reset()
+		input = fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"exec.status","arguments":{"exec_key":%q}}}`, running.ExecKey) + "\n"
+		if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+			t.Fatal(err)
+		}
+		abortText = toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["3"])
+		if strings.Contains(abortText, `"status":"cancelled"`) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !strings.Contains(abortText, `"status":"cancelled"`) {
+		t.Fatalf("abort status = %s", abortText)
+	}
+
+	out.Reset()
+	largeCommand := "i=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done"
+	input = fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"exec.shell","arguments":{"command":%q}}}`, largeCommand) + "\n"
+	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	largeText := toolText(t, responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["4"])
+	if strings.Contains(largeText, strings.Repeat("x", 100)) || !strings.Contains(largeText, `"combined_bytes":5000`) || !strings.Contains(largeText, "exec.raw.*") {
+		t.Fatalf("large response = %s", largeText)
+	}
+}
+
+type execToolResponse struct {
+	ExecKey string `json:"exec_key"`
 }

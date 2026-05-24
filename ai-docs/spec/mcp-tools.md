@@ -319,15 +319,16 @@ returns an `api_job_key`; `api.status` reports routing and per-domain progress;
 `api.result` returns the final answer when available; and `api.cancel` stops
 active work on a best-effort basis. {#260508-api-documentation-async-mcp-tools}
 
-## 🚧 Exec Job MCP Tools {#260524-exec-job-mcp-tools}
+## Exec Job MCP Tools {#260524-exec-job-mcp-tools}
 
-The `exec.*` tool family will expose durable command execution jobs for trusted
-lead workflows. `exec.spawn` runs structured argv commands with `cmd`, optional
+The `exec.*` tool family exposes durable command execution jobs for trusted lead
+workflows. `exec.spawn` runs structured argv commands with `cmd`, optional
 `args`, optional `working_dir`, optional environment overlays, and optional
 textual stdin. `exec.shell` runs an explicit shell command string with optional
 `working_dir`, environment overlays, textual stdin, and shell selection. Omitted
-`working_dir` resolves to the current ws worktree root; relative values resolve
-beneath that root rather than the plugin cache process cwd.
+`working_dir` resolves to the current ws worktree root. Relative values resolve
+beneath that root rather than the plugin cache process cwd, and resolved working
+directories must stay inside the worktree root.
 
 Launch tools create an `exec_key`, start the process, persist stdout and stderr
 under job-owned files, and wait up to a fixed short foreground window before
@@ -342,6 +343,10 @@ returns terminal job metadata and at most the fixed 4096-byte inline output
 budget; larger results guide callers to the future `exec.ask` path first and
 the raw fallback readers second. `exec.abort` best-effort terminates a running
 job while preserving partial output and terminal state metadata.
+
+If a process-local worker is lost while a persisted job still appears running,
+later status/result calls reconcile the record from process liveness and mark a
+missing worker terminal rather than leaving the job indefinitely running.
 
 Raw fallback readers are named under `exec.raw.*`. `exec.raw.tail` returns a
 bounded tail from a selected stream. `exec.raw.read` reads by byte offset and

@@ -50,13 +50,12 @@ declared plugin patch version, tool list, command list, or prompt bundle hash.
 Development binaries such as `X.Y.Z-dev` are compatible with plugin version
 `X.Y.Z`; older or newer patch releases are not reused from cache.
 
-> [!note] Planned 🚧
-> The full ws runtime contract will include the `exec.*` MCP job surface once it
-> exists, so launcher compatibility checks can reject stale runtimes that lack
-> the accepted command-execution tools. The wsflow no-agent contract will omit
-> those tools from advertised capabilities and reject explicit `exec.*` calls
-> with the same disabled-surface behavior used for other hidden agent-backed
-> surfaces. {#260524-exec-runtime-contract-surface}
+The full ws runtime contract includes the `exec.*` MCP job surface, so launcher
+compatibility checks reject stale runtimes that lack the accepted
+command-execution tools. The wsflow no-agent contract omits those tools from
+advertised capabilities and rejects explicit `exec.*` calls with the same
+disabled-surface behavior used for other hidden agent-backed surfaces.
+{#260524-exec-runtime-contract-surface}
 
 ## wsflow Runtime Contract Mode {#260513-wsflow-runtime-contract-mode}
 

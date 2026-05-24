@@ -107,7 +107,7 @@ func TestRuntimeCapabilitiesCommandReportsNoAgentSurface(t *testing.T) {
 		Commands []string `json:"commands"`
 	}
 	mustUnmarshalCLIJSON(t, out, &got)
-	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup"} {
+	for _, hidden := range []string{"agents.call", "agents.register", "agents.debug.tail", "subquery", "config.agents_tier", "api.ask", "api.ask_async", "api.status", "api.result", "api.cancel", "ws.setup", "exec.spawn", "exec.shell", "exec.status", "exec.result", "exec.abort", "exec.raw.tail", "exec.raw.read", "exec.raw.grep"} {
 		if slices.Contains(got.Tools, hidden) {
 			t.Fatalf("no-agent capabilities exposed hidden tool %s in %v", hidden, got.Tools)
 		}

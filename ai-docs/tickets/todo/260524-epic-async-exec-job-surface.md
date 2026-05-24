@@ -36,7 +36,7 @@ The epic owns decomposition for:
 
 ## Child Tickets
 
-- `260524-feat-exec-job-core-text-readers` - first implementation child for
+- `260524-feat-exec-job-core-text-readers` - done; first implementation child for
   `exec.spawn`, `exec.shell`, `exec.status`, `exec.result`, `exec.abort`, and
   raw fallback text readers over persisted output files.
 - `260524-feat-exec-output-ask` - add lead-facing `exec.ask` questions over

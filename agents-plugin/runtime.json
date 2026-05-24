@@ -78,7 +78,15 @@
     "api.ask_async": ">=0.28.1-dev <0.29.0",
     "api.status": ">=0.28.1-dev <0.29.0",
     "api.result": ">=0.28.1-dev <0.29.0",
-    "api.cancel": ">=0.28.1-dev <0.29.0"
+    "api.cancel": ">=0.28.1-dev <0.29.0",
+    "exec.spawn": ">=0.28.1-dev <0.29.0",
+    "exec.shell": ">=0.28.1-dev <0.29.0",
+    "exec.status": ">=0.28.1-dev <0.29.0",
+    "exec.result": ">=0.28.1-dev <0.29.0",
+    "exec.abort": ">=0.28.1-dev <0.29.0",
+    "exec.raw.tail": ">=0.28.1-dev <0.29.0",
+    "exec.raw.read": ">=0.28.1-dev <0.29.0",
+    "exec.raw.grep": ">=0.28.1-dev <0.29.0"
   },
   "commands": {
     "runtime.info": ">=0.28.1-dev <0.29.0",
