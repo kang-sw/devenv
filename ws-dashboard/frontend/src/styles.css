@@ -2587,7 +2587,7 @@ button {
 .workbench-toolbar-meta {
   grid-column: auto;
   flex-wrap: nowrap;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .workbench-toolbar-meta > .state-badge {
@@ -2963,26 +2963,63 @@ button {
   color: var(--danger-foreground, #ffb4ab);
 }
 
+.git-worktree-modal {
+  width: min(480px, calc(100vw - 32px));
+}
+
 .git-worktree-modal .root-picker-dialog {
-  gap: 14px;
+  gap: var(--ws-space-05);
+  padding: var(--ws-space-07);
 }
 
 .git-worktree-form,
 .git-worktree-field,
 .git-worktree-fieldset {
   display: grid;
-  gap: 10px;
+  gap: var(--ws-space-04);
+}
+
+.git-worktree-form {
+  gap: var(--ws-space-05);
 }
 
 .git-worktree-fieldset {
-  border: 1px solid var(--panel-border);
-  padding: 10px;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  border-radius: var(--ws-radius-square);
+  padding: var(--ws-space-05);
 }
 
-.git-worktree-branch-list {
+.git-worktree-fieldset .section-label,
+.git-worktree-radio-grid label {
+  font-size: var(--ws-font-size-01);
+}
+
+.git-worktree-radio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--ws-space-04);
+}
+
+.git-worktree-radio-grid label,
+.git-worktree-select-wrap {
+  align-items: center;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--ws-space-03);
+  min-width: 0;
+}
+
+.git-worktree-select-wrap {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.git-worktree-select,
+.git-worktree-select option {
+  font-size: var(--ws-font-size-02);
+}
+
+.git-worktree-derived-input {
+  color: var(--ws-color-text-tertiary);
 }
 
 .meta-chip-disabled {
@@ -2990,10 +3027,12 @@ button {
 }
 
 .git-worktree-preview {
-  border: 1px solid var(--panel-border);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  border-radius: var(--ws-radius-square);
   display: grid;
-  gap: 4px;
-  padding: 10px;
+  gap: var(--ws-space-02);
+  padding: var(--ws-space-04);
+  font-size: var(--ws-font-size-02);
 }
 
 .git-worktree-preview-willCreateBranch {
@@ -3023,7 +3062,21 @@ button {
 
 .git-branch-chip,
 .git-status-pill {
+  border-radius: 999px;
   gap: 4px;
+}
+
+.git-branch-chip {
+  flex: 0 0 auto;
+  max-width: min(360px, 42vw);
+}
+
+.git-branch-chip svg {
+  flex: 0 0 auto;
+}
+
+.git-branch-chip span {
+  min-width: max-content;
 }
 
 .git-branch-menu {
@@ -3106,4 +3159,12 @@ button.git-status-segment:disabled {
 .git-branch-create-form {
   display: grid;
   gap: 12px;
+}
+
+@keyframes git-spin {
+  to { transform: rotate(360deg); }
+}
+
+.git-spinner {
+  animation: git-spin 0.85s linear infinite;
 }

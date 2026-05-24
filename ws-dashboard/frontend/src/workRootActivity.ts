@@ -369,6 +369,13 @@ export function mergeWorkRootActivityViews(
   const agents = Array.from(agentsById.values()).sort((left, right) =>
     left.agentId.localeCompare(right.agentId),
   );
+  const itemsById = new Map(
+    current.items.map((item) => [item.id, item] as const),
+  );
+  for (const item of update.items) {
+    itemsById.set(item.id, item);
+  }
+  const items = orderActivityItems(Array.from(itemsById.values()));
   const summary = summarizeWorkRootActivityAgents(agents);
   const degraded =
     current.status === "degraded" ||
@@ -380,9 +387,9 @@ export function mergeWorkRootActivityViews(
       update.status === "unavailable" ? "unavailable" : degraded ? "degraded" : "ok",
     updateMode: update.updateMode,
     feedCursor: update.feedCursor,
-    selectedItemId: update.selectedItemId,
+    selectedItemId: preserveActivitySelection(items, update.selectedItemId ?? current.selectedItemId),
     summary,
-    items: update.items.length > 0 ? update.items : current.items,
+    items,
     agents,
   };
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, FormEvent, Key, ReactNode, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, FormEvent, Key, ReactNode, RefObject, SetStateAction } from "react";
 import {
   Activity,
   BriefcaseBusiness,
@@ -801,6 +801,36 @@ export function App() {
       </div>
     </main>
   );
+}
+
+function useDismissableMenu(
+  open: boolean,
+  containerRef: RefObject<HTMLElement | null>,
+  onDismiss: () => void,
+) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const dismissIfOutside = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || containerRef.current?.contains(target)) {
+        return;
+      }
+      onDismiss();
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onDismiss();
+      }
+    };
+    document.addEventListener("click", dismissIfOutside);
+    document.addEventListener("keydown", dismissOnEscape, true);
+    return () => {
+      document.removeEventListener("click", dismissIfOutside);
+      document.removeEventListener("keydown", dismissOnEscape, true);
+    };
+  }, [containerRef, onDismiss, open]);
 }
 
 function ChromeIconButton({
@@ -1627,6 +1657,9 @@ function GitWorktreeAddModal({
   };
 
   const severity = preview?.status ?? "blocked";
+  const manualBranchOptions = (options?.branches ?? []).filter((branch) => !branch.checkedOut);
+  const autoBranchDisplay = preview?.branchName ?? worktreeName.trim();
+  const autoPathDisplay = preview?.targetPathLabel ?? (worktreeName.trim() ? `${options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}/${worktreeName.trim()}` : "");
   return (
     <ModalOverlay className="root-picker-backdrop" isDismissable isOpen onOpenChange={(isOpen) => { if (!isOpen) close(); }}>
       <Modal className="root-picker-modal git-worktree-modal">
@@ -1645,23 +1678,29 @@ function GitWorktreeAddModal({
             </label>
             <fieldset className="git-worktree-fieldset">
               <legend className="section-label">Branch</legend>
-              <label><input type="radio" checked={branchMode === "auto"} onChange={() => setBranchMode("auto")} /> Auto from name</label>
-              <label><input type="radio" checked={branchMode === "manual"} onChange={() => setBranchMode("manual")} /> Existing/manual branch</label>
-              <input className="root-picker-input" list="git-worktree-branches" disabled={branchMode !== "manual"} value={manualBranch} onChange={(event) => setManualBranch(event.target.value)} placeholder="branch-name" />
-              <datalist id="git-worktree-branches">
-                {(options?.branches ?? []).filter((branch) => !branch.checkedOut).map((branch) => <option key={branch.name} value={branch.name} />)}
-              </datalist>
-              <div className="git-worktree-branch-list">
-                {(options?.branches ?? []).map((branch) => (
-                  <span className={`meta-chip ws-chip ${branch.checkedOut ? "meta-chip-disabled" : ""}`} key={branch.name}>{branch.name}{branch.current ? " (current)" : ""}{branch.checkedOut ? " — checked out" : ""}</span>
-                ))}
+              <div className="git-worktree-radio-grid">
+                <label><input type="radio" checked={branchMode === "auto"} onChange={() => setBranchMode("auto")} /> Auto from name</label>
+                <label><input type="radio" checked={branchMode === "manual"} onChange={() => setBranchMode("manual")} /> Existing/manual</label>
               </div>
+              {branchMode === "auto" ? (
+                <input className="root-picker-input git-worktree-derived-input" readOnly value={autoBranchDisplay} placeholder="derived from worktree name" />
+              ) : (
+                <label className="git-worktree-select-wrap" aria-label="Existing or manual branch">
+                  <select className="root-picker-input git-worktree-select" value={manualBranch} onChange={(event) => setManualBranch(event.target.value)}>
+                    <option value="">Select or type below…</option>
+                    {manualBranchOptions.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}{branch.current ? " (current)" : ""}</option>)}
+                  </select>
+                  <input className="root-picker-input" value={manualBranch} onChange={(event) => setManualBranch(event.target.value)} placeholder="or type branch-name" />
+                </label>
+              )}
             </fieldset>
             <fieldset className="git-worktree-fieldset">
               <legend className="section-label">Path</legend>
-              <label><input type="radio" checked={pathMode === "auto"} onChange={() => setPathMode("auto")} /> Auto under {options?.defaults.worktreeBaseDirLabel ?? ".git/ws-worktree"}</label>
-              <label><input type="radio" checked={pathMode === "custom"} onChange={() => setPathMode("custom")} /> Custom target path</label>
-              <input className="root-picker-input" disabled={pathMode !== "custom"} value={customPath} onChange={(event) => setCustomPath(event.target.value)} placeholder="/path/to/worktree" />
+              <div className="git-worktree-radio-grid">
+                <label><input type="radio" checked={pathMode === "auto"} onChange={() => setPathMode("auto")} /> Auto path</label>
+                <label><input type="radio" checked={pathMode === "custom"} onChange={() => setPathMode("custom")} /> Custom path</label>
+              </div>
+              <input className="root-picker-input" readOnly={pathMode === "auto"} value={pathMode === "auto" ? autoPathDisplay : customPath} onChange={(event) => setCustomPath(event.target.value)} placeholder={pathMode === "auto" ? "derived from worktree name" : "/path/to/worktree"} />
             </fieldset>
             {options && !options.git.available ? <InlineNotice tone="error" title="Git unavailable" detail={options.git.reason ?? "workspace is not Git-capable"} /> : null}
             {preview ? (
@@ -3384,6 +3423,8 @@ function WorkbenchToolbar({
   onCreateTerminal: () => void;
 }) {
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const overflowRef = useRef<HTMLDivElement | null>(null);
+  useDismissableMenu(overflowOpen, overflowRef, () => setOverflowOpen(false));
   const toggles: WorkbenchToggle[] = [
     "viewer",
     "task",
@@ -3496,7 +3537,7 @@ function WorkbenchToolbar({
             );
           }}
         />
-        <div className="workbench-overflow">
+        <div className="workbench-overflow" ref={overflowRef}>
           <button
             aria-expanded={overflowOpen}
             aria-haspopup="menu"
@@ -3571,6 +3612,9 @@ function WorkRootGitToolbar({
   const [statusState, setStatusState] = useState<{ workRootId: string; status: WorkRootGitStatus } | null>(null);
   const [branchesState, setBranchesState] = useState<{ workRootId: string; branches: GitBranchList } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const branchMenuRef = useRef<HTMLDivElement | null>(null);
+  useDismissableMenu(menuOpen, branchMenuRef, () => setMenuOpen(false));
+  const [pendingGitAction, setPendingGitAction] = useState<"fetch" | "push" | "pull" | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
   const [baseBranchName, setBaseBranchName] = useState("");
@@ -3647,10 +3691,11 @@ function WorkRootGitToolbar({
     setNewBranchName("");
     setBaseBranchName("");
   };
-  const mutate = (command: ReturnType<typeof buildGitRefreshCommand>, run: () => Promise<WorkRootGitStatus>) => {
+  const mutate = (command: ReturnType<typeof buildGitRefreshCommand>, run: () => Promise<WorkRootGitStatus>, pendingAction: "fetch" | "push" | "pull" | null = null) => {
     const targetRootId = root.id;
     onCommand(command, {
       [command.commandId]: () => {
+        if (pendingAction) setPendingGitAction(pendingAction);
         void run()
           .then((nextStatus) => {
             if (currentRootId.current !== targetRootId) return;
@@ -3661,6 +3706,9 @@ function WorkRootGitToolbar({
             if (currentRootId.current !== targetRootId) return;
             setError(nextError instanceof Error ? nextError.message : "git action failed");
             refreshGit("git mutation failure refresh");
+          })
+          .finally(() => {
+            if (currentRootId.current === targetRootId && pendingAction) setPendingGitAction(null);
           });
       },
     });
@@ -3673,7 +3721,7 @@ function WorkRootGitToolbar({
 
   return (
     <div className="git-toolbar" aria-label="Git toolbar">
-      <div className="git-branch-menu-wrap">
+      <div className="git-branch-menu-wrap" ref={branchMenuRef}>
         <button
           className="meta-chip ws-chip git-branch-chip"
           data-command-id="git.branchMenu.open"
@@ -3702,9 +3750,10 @@ function WorkRootGitToolbar({
       </div>
       <GitStatusPill
         status={status}
-        onFetch={() => mutate(buildGitFetchCommand(root.id), () => fetchWorkRootGit(root.id))}
-        onPush={() => mutate(buildGitPushCommand(root.id), () => pushWorkRootGit(root.id))}
-        onPull={() => mutate(buildGitPullFfOnlyCommand(root.id), () => pullWorkRootGitFfOnly(root.id))}
+        pendingAction={pendingGitAction}
+        onFetch={() => mutate(buildGitFetchCommand(root.id), () => fetchWorkRootGit(root.id), "fetch")}
+        onPush={() => mutate(buildGitPushCommand(root.id), () => pushWorkRootGit(root.id), "push")}
+        onPull={() => mutate(buildGitPullFfOnlyCommand(root.id), () => pullWorkRootGitFfOnly(root.id), "pull")}
       />
       {error ? <span className="meta-chip ws-chip git-error-chip">{error}</span> : null}
       <ModalOverlay className="root-picker-backdrop" isDismissable isOpen={modalOpen} onOpenChange={(open) => { if (!open) runBranchCreateCloseCommand(); }}>
@@ -3728,11 +3777,13 @@ function WorkRootGitToolbar({
 
 function GitStatusPill({
   status,
+  pendingAction,
   onFetch,
   onPush,
   onPull,
 }: {
   status: WorkRootGitStatus;
+  pendingAction: "fetch" | "push" | "pull" | null;
   onFetch: () => void;
   onPush: () => void;
   onPull: () => void;
@@ -3742,7 +3793,7 @@ function GitStatusPill({
   const renderSegment = (segment: GitStatusSegment) => {
     const className = `git-status-segment git-status-segment-${segment.tone}`;
     if (segment.commandId === "git.push") {
-      return <button key={segment.key} className={className} data-command-id="git.push" type="button" disabled={segment.disabled} onClick={onPush}>{segment.label}</button>;
+      return <button key={segment.key} className={className} data-command-id="git.push" type="button" disabled={segment.disabled || pendingAction === "push"} aria-label={pendingAction === "push" ? "Pushing Git changes" : undefined} onClick={onPush}>{pendingAction === "push" ? <RefreshCw className="git-spinner" aria-hidden="true" size={12} strokeWidth={1.9} /> : segment.label}</button>;
     }
     if (segment.commandId === "git.pullFfOnly") {
       return <button key={segment.key} className={className} data-command-id="git.pullFfOnly" type="button" disabled={segment.disabled} onClick={onPull}>{segment.label}</button>;
@@ -3752,8 +3803,8 @@ function GitStatusPill({
 
   return (
     <span className="meta-chip ws-chip git-status-pill" title={status.branch?.upstream ?? "Git status"} aria-label={`Git status ${gitStatusSegments(status)}`}>
-      <button className="git-status-refresh" data-command-id="git.fetch" type="button" aria-label="Fetch Git status" onClick={onFetch}>
-        <RefreshCw aria-hidden="true" size={12} strokeWidth={1.9} />
+      <button className="git-status-refresh" data-command-id="git.fetch" type="button" aria-label={pendingAction === "fetch" ? "Fetching Git status" : "Fetch Git status"} disabled={pendingAction === "fetch"} onClick={onFetch}>
+        <RefreshCw className={pendingAction === "fetch" ? "git-spinner" : undefined} aria-hidden="true" size={12} strokeWidth={1.9} />
       </button>
       {changeSegments.length ? changeSegments.map(renderSegment) : <span className="git-status-segment git-status-segment-clean">clean</span>}
       {syncSegments.length ? <span className="git-status-separator" aria-hidden="true">|</span> : null}
@@ -5302,6 +5353,8 @@ function ResourceRow({
     (action) => action.enabled && action.id === "workspace.remove",
   );
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLSpanElement | null>(null);
+  useDismissableMenu(menuOpen, menuRef, () => setMenuOpen(false));
   const tone = resourceRowTone(state, availability, activation);
   const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(" · ");
   return (
@@ -5336,7 +5389,7 @@ function ResourceRow({
         </span>
       </button>
       {hasWorkspaceRemove ? (
-        <span className="resource-row-actions workspace-row-menu-wrap">
+        <span className="resource-row-actions workspace-row-menu-wrap" ref={menuRef}>
           <ChromeIconButton
             className="resource-row-action"
             commandId="workspace.menu.open"

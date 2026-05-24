@@ -505,15 +505,15 @@ assertDeepEqual(
   { total: 3, active: 1, blocked: 1, failed: 0, unavailable: 1 },
   "recent activity refresh recomputes the merged summary",
 );
+assertDeepEqual(
+  mergedActivity.items.map((item) => item.id),
+  ["agent:agent-a", "agent:agent-b"],
+  "recent activity refresh preserves older activity rows when a bounded update only returns recent rows",
+);
 assertEqual(
   mergedActivity.status,
   "degraded",
   "recent activity refresh preserves degraded status from merged diagnostics",
-);
-assertDeepEqual(
-  mergedActivity.items.map((item) => item.id),
-  ["agent:agent-b"],
-  "recent activity refresh carries the source-neutral feed items from the latest update",
 );
 assertEqual(
   mergedActivity.feedCursor,
