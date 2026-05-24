@@ -149,6 +149,7 @@ dropped tickets live in hidden archive dirs and git history.
 | Stem | Status | Summary |
 |------|--------|---------|
 | `260514-epic-ws-web-dashboard-mvp` | todo | Coordinate the personal ws-aware web dashboard MVP |
+| `260524-feat-ws-dashboard-git-aware-workroot-toolbar` | ready | Add Git-aware WorkRoot toolbar chips and branch controls |
 | `260524-research-ws-dashboard-react-aria-ui-primitives` | idea | Research broader React Aria primitive adoption for dashboard UI |
 | `260524-research-ws-dashboard-visual-design-system-refresh` | idea | Research a coherent visual design system refresh for ws dashboard surfaces |
 | `260512-feat-gemini-host-harness-detection` | todo | Add Gemini MCP host harness detection after metadata is observed |
@@ -177,7 +178,9 @@ dropped tickets live in hidden archive dirs and git history.
 
 ## Ticket Queue
 
-No ready tickets currently queued.
+- `260524-feat-ws-dashboard-git-aware-workroot-toolbar` - ready; selected
+  WorkRoot Git branch/status toolbar chips and safe fetch/push/ff-only pull
+  controls.
 
 ## Session Notes
 

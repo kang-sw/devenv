@@ -5,6 +5,8 @@ related:
   260523-feat-ws-dashboard-linked-worktree-discovery: toolbar chips apply to Git primary roots and linked worktrees discovered as workRoots
   260524-feat-ws-dashboard-add-git-worktree-ui: branch/worktree creation controls should share Git-aware workspace/workRoot semantics
   260523-feat-ws-dashboard-workroot-registry-activation: Git status is visible only for online available Git-aware workRoots
+spec:
+  - 260524-ws-dashboard-git-aware-workroot-toolbar
 related-mental-model:
   - ws-web-dashboard
 ---
