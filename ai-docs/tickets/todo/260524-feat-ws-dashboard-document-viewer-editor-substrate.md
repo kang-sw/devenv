@@ -47,13 +47,59 @@ read-only and edit presentations.
   metadata, renderer hints, edit capability, and a content hash. Writes use
   optimistic concurrency through a base content hash and return the new content
   hash.
-- Translation is a viewer feature over immutable content hashes, not mutation
-  of source files. The browser can scaffold the block model and overlay state
-  before a daemon or LLM-backed translation provider exists.
-- Translation requests should send the whole document or section as contextual
-  blocks while allowing the caller to request only selected block ids. The
-  provider should translate with full context and return block-id-addressed
-  translated results so the UI can match overlays deterministically.
+- Markdown rendering should use a real parser/render pipeline rather than a
+  hand-rolled parser. Prefer the `unified`/`remark`/`rehype` ecosystem so the
+  renderer and document block model can share one markdown AST. Direct raw HTML
+  rendering is not part of this ticket; safe HTML support remains an
+  implementation gap for a later ticket.
+- Markdown view mode should follow common Obsidian rendering conventions where
+  they fit a first implementation: GFM tables and task lists should render as
+  polished document blocks, and `> [!note]`-style callouts should render as
+  callouts. Footnotes/footer content may be surfaced through hover/tooltip
+  affordances, but a full footer section is deferred.
+- The reusable document model should expose `DocumentBlock`/translation-unit
+  data rather than only rendered React nodes. Soft line breaks inside ordinary
+  text stay one block; each list item is a block; headings, paragraphs,
+  callout body blocks, and similar markdown units retain line ranges when
+  available. Fenced code and other non-prose blocks may be omitted from
+  translation or treated as non-translatable blocks.
+- Block identity is stable within a `contentHash` namespace, not across edits.
+  A block id should be derived from ordinal, kind, line range, and normalized
+  content hash material so overlays can match deterministically without
+  pretending to be an edit-diff algorithm.
+- Path references copy as `@<workRoot-relative-path>#L<line-range>`, using
+  `#L<line>` for a single line and `#L<start>-L<end>` for ranges. Absolute host
+  paths must not appear in copied pathrefs.
+- Translation is a whole-document viewer feature over immutable content hashes,
+  not mutation of source files. The frontend builds document blocks and sends
+  the whole block set to the daemon so LLM providers can preserve translation
+  consistency with full context.
+- Translation providers should be represented as a union. The first working
+  provider is an LLM OpenAI-compatible provider, with local Ollama at
+  `http://localhost:11434/v1` as the dogfood target. The shape should leave room
+  for future non-LLM translation APIs without forcing them into the LLM prompt
+  contract.
+- The daemon owns translation provider configuration, model discovery,
+  prompting, bounded model-output parsing, and SHA256/content-hash-based
+  caching. The frontend does not cache translations as source of truth.
+- LLM prompts must preserve a block-id roundtrip invariant: the request sends
+  `blockId + content` pairs and the model is expected to return
+  `blockId + translatedContent` pairs. Missing, duplicate, unknown, or
+  unparsable block ids become bounded block-level failure states; raw model
+  output is not forwarded to the frontend as-is.
+- Markdown view mode includes a pane-local translation toggle next to the
+  view/edit control. When enabled, opening or focusing the pane requests whole-
+  document translation asynchronously. Completed blocks render translated
+  markdown as an overlay; hovering a translated block temporarily shows the
+  original block text.
+- Document blocks are selectable as block ranges, not arbitrary rich-text
+  selections in the first pass. Selected blocks show a compact action strip with
+  current-visible copy, translated copy when available or pending, and pathref
+  copy actions.
+- Document freshness should use a per-workRoot document event stream rather
+  than one stream per panel. File watching is a freshness optimization; focus
+  or visibility re-read plus content-hash checks remain the correctness
+  fallback.
 - Same-file multi-pane scenarios must route saved-content updates by document
   source identity, not pane identity. A save in one pane should fan out to other
   clean panes for the same `workRootId + path`; dirty edit panes must not be
@@ -113,10 +159,61 @@ type DocumentWriteResponse = {
 };
 ```
 
-Translation requests should carry all contextual blocks but allow partial
-selection:
+Translation providers, status, and requests should be shaped so the daemon owns
+configuration, model discovery, and cache behavior:
 
 ```ts
+type TranslationProviderConfig =
+  | {
+      kind: "llmOpenAICompatible";
+      id: string;
+      label: string;
+      baseUrl: string;
+      apiKey?: string;
+      defaultModel?: string;
+      timeoutMs?: number;
+    }
+  | {
+      kind: "genericTranslationApi";
+      id: string;
+      label: string;
+      endpoint: string;
+      timeoutMs?: number;
+    };
+
+type TranslationProviderStatus = {
+  providers: Array<{
+    id: string;
+    kind: TranslationProviderConfig["kind"];
+    label: string;
+    configured: boolean;
+    reachable: boolean;
+    models?: Array<{ id: string; label?: string }>;
+    defaultModel?: string;
+    error?: string;
+  }>;
+};
+
+type DocumentBlock = {
+  blockId: string;
+  ordinal: number;
+  kind:
+    | "paragraph"
+    | "heading"
+    | "listItem"
+    | "callout"
+    | "code"
+    | "table"
+    | "taskItem"
+    | string;
+  markdown: string;
+  plainText: string;
+  lineStart?: number;
+  lineEnd?: number;
+  pathref?: string;
+  translatable: boolean;
+};
+
 type DocumentTranslationRequest = {
   source: {
     kind: "workRootFile" | "activityTranscript" | "inlineMarkdown";
@@ -126,26 +223,32 @@ type DocumentTranslationRequest = {
     format: "markdown" | "text";
     title?: string;
   };
+  provider: {
+    id: string;
+    model?: string;
+  };
   locale: {
     source?: string | null;
     target: string;
   };
-  blocks: Array<{
-    blockId: string;
-    ordinal: number;
-    kind: "paragraph" | "heading" | "listItem" | "code" | "quote" | string;
-    markdown: string;
-    plainText: string;
-    lineStart?: number;
-    lineEnd?: number;
-  }>;
+  blocks: DocumentBlock[];
   requestedBlockIds?: string[];
+  cachePolicy?: "preferCached" | "refresh";
 };
 
-type DocumentTranslationResult = {
+type DocumentTranslationResponse = {
   sourceContentHash: string;
   targetLocale: string;
   status: "completed" | "partial" | "failed";
+  cache: {
+    hit: boolean;
+    providerId: string;
+    providerKind: string;
+    model: string;
+    providerConfigVersion: string;
+    blockModelVersion: string;
+    promptVersion: string;
+  };
   blocks: Array<{
     blockId: string;
     translatedMarkdown: string;
@@ -161,71 +264,144 @@ type DocumentTranslationResult = {
 };
 ```
 
-Saved-content events should be keyed by document source:
+Document freshness events should be scoped by workRoot and keyed by document
+source:
 
 ```ts
-type DocumentContentEvent = {
-  type: "document.contentChanged";
-  source: {
-    workRootId: string;
-    path: string;
-  };
-  contentHash: string;
-  savedAtMs: number;
-  originPaneId?: string;
-};
+type DocumentEvent =
+  | {
+      type: "document.contentChanged";
+      source: {
+        workRootId: string;
+        path: string;
+      };
+      contentHash: string;
+      changedAtMs: number;
+      originPaneId?: string;
+    }
+  | {
+      type: "document.watchInvalidated";
+      source: {
+        workRootId: string;
+        path?: string;
+      };
+      reason: "watcherError" | "tooManyFiles" | "workRootUnavailable";
+    };
 ```
 
 ## Phases
 
-### Phase 1: Add reusable markdown document viewer substrate
+### Phase 1: Markdown viewer and block interaction
 
-Introduce a reusable document viewer module for read-only markdown rendering
-from workRoot-relative file content. It should derive stable block identities,
-line ranges when available, a source content hash, renderer kind, and
-workRoot-relative pathrefs. Markdown view mode should support paragraph-level
-actions for copying pathrefs and should reserve translation overlay state keyed
-by `contentHash + blockId`, but it does not need to call a real translation
-provider.
+Introduce a reusable markdown document viewer module for read-only rendering
+from workRoot-relative file content. Use a real markdown AST pipeline, derive
+`DocumentBlock` entries with stable-in-content block ids, line ranges, pathrefs,
+translatability flags, and renderer metadata, then render markdown files through
+that viewer instead of the current preformatted text path.
 
-The first viewer should replace the plain preformatted markdown rendering path
-for read-only file panes while preserving preview/pinned pane identity,
-workbench placement policy, restore descriptor behavior, owner-authenticated
-file reads, and scroll containment inside the pane. Activity Console markdown
-may remain plain text unless this phase can reuse the viewer without increasing
-scope.
+The first renderer should support polished GFM table/task-list rendering,
+Obsidian-style callouts for `> [!note]` and adjacent callout kinds, and hover
+footnote/footer affordances without implementing a full footer section. It
+should keep raw HTML disabled or safely ignored, with an explicit implementation
+gap for future sanitized/sandboxed HTML handling.
 
-Deferred scope: saving files, editable CodeMirror integration, real translation
-provider calls, HTML/diagram/image renderers, Activity Console renderer
-migration when it would require transcript-specific UI decisions.
+Markdown view mode should provide block-level selection and a floating action
+strip for current-visible copy, translated copy placeholder state, and
+workRoot-relative pathref copy. The viewer API must accept translation overlay
+data keyed by `contentHash + blockId`, but this phase may use fixture or local
+overlay data rather than a real daemon translation provider.
 
-Verification should include pure block/pathref/translation-overlay model tests
-and browser-level evidence that markdown renders in the daemon-served file pane
-without breaking preview/pin behavior or scroll containment.
+The first viewer should preserve preview/pinned pane identity, workbench
+placement policy, restored read-only pane descriptors, owner-authenticated file
+reads, and scroll containment inside the pane. Activity Console markdown may
+remain plain text unless reusing the viewer does not force transcript-specific
+UI decisions.
 
-### Phase 2: Add panel-local raw text edit mode and save fan-out contract
+Deferred scope: daemon translation provider calls, provider configuration,
+daemon translation cache, raw-text editing, saving files, CodeMirror
+integration, raw HTML rendering, HTML/diagram/image renderers, Activity Console
+renderer migration when it would widen the slice, and arbitrary native text
+selection semantics beyond block-range selection.
+
+Verification should include pure markdown block/pathref/selection/overlay model
+tests and browser-level evidence that markdown renders in the daemon-served
+file pane with GFM/task/callout behavior, block actions, preview/pin behavior,
+and scroll containment intact.
+
+### Phase 2: Translation provider MVP and overlay UX
+
+Add daemon-owned document translation support for markdown view mode. The
+frontend sends whole-document `DocumentBlock` context to the daemon when a pane-
+local translation toggle is enabled; translation is always requested at document
+scope for consistency even when UI actions operate on selected blocks.
+
+Implement the provider union and make `llmOpenAICompatible` the first supported
+provider, dogfooding local Ollama through the OpenAI-compatible
+`http://localhost:11434/v1` shape. The daemon should expose provider status and
+model discovery by probing `/v1/models`; no default model is required when the
+provider cannot report one. Future generic translation APIs should remain type
+room unless their adapter contract is explicitly implemented.
+
+The daemon owns provider configuration, model selection, prompt construction,
+prompt-versioning, bounded model-output parsing, block-id validation, and
+SHA256/content-hash-based translation caching. Cache keys must include source
+content hash, target locale, provider id/kind, model, provider config version,
+block model version, and prompt version. Raw model output must not be sent to
+the browser; JSON parse failures, missing block ids, duplicate block ids,
+unknown block ids, or omitted blocks produce bounded failure states.
+
+The markdown toolbar should show a translation icon toggle next to the
+panel-local view/edit control in markdown view mode. When enabled, a pane opens
+or focuses by requesting translation asynchronously. As block results arrive,
+the overlay replaces each block with translated markdown. Hovering a translated
+block temporarily renders the original block as a local source peek. Selected
+blocks expose current-visible copy, translated copy when available, and pathref
+copy actions.
+
+Deferred scope: provider configuration UI, non-LLM translation API adapters,
+streaming partial LLM tokens, terminology management, user-editable translation
+memory, cross-document translation consistency, and Activity Console translation
+unless it reuses the same viewer without widening the slice.
+
+Verification should cover provider status/model probing, cache-key behavior,
+block-id roundtrip validation, bounded failure handling, whole-document request
+shape, translation toggle behavior, original-on-hover source peek, selected
+block copy actions, and browser-level evidence against a daemon-served markdown
+pane. When local Ollama is available, dogfood evidence should record the
+provider/model used without depending on private prompt or raw model output.
+
+### Phase 3: Raw text edit mode, save fan-out, and document events
 
 Add raw text edit mode as an in-pane view/edit segmented control on document
-panes. Edit mode should use a browser-native text editor foundation, preserve a
-draft, expose dirty/save/revert/error state, and save through a backend write
-route that requires the caller's base content hash. A content-hash mismatch
-returns a conflict state instead of overwriting another writer.
+panes. Edit mode should use CodeMirror 6 or an equivalent browser-native text
+editor foundation, preserve a draft, expose dirty/save/revert/error state, and
+save through a backend write route that requires the caller's base content
+hash. A content-hash mismatch returns a conflict state instead of overwriting
+another writer.
 
-After a successful save, the frontend document store should emit or apply a
-`document.contentChanged` event keyed by `workRootId + path`, then update all
-clean panes for the same document source. Dirty edit panes for that source must
-remain dirty and show that a newer saved version exists rather than silently
-replacing the draft. Translation overlays and block pathref line metadata should
-be marked stale when the source content hash changes.
+After a successful save, document updates should be keyed by
+`workRootId + path`, then update all clean panes for the same source. Dirty
+edit panes for that source must remain dirty and show that a newer saved
+version exists rather than silently replacing the draft. Translation overlays,
+block ids, and pathref line metadata become stale when the source content hash
+changes.
+
+Add a per-workRoot document event stream for freshness. The stream should carry
+source-keyed document events such as `document.contentChanged` and bounded
+watch invalidation. The daemon may use cross-platform file watching for files
+that are currently open or recently read, but watcher delivery is only a
+freshness optimization: pane focus/visibility re-read plus content-hash checks
+remain the correctness fallback, and panel close should remove frontend
+interest without requiring a stream per panel.
 
 Deferred scope: collaborative editing, merge/rebase UI, overwrite workflows,
 rename/delete/move/create operations, provider-specific rich editors for
-Excalidraw/draw.io/HTML, and cross-browser daemon event streaming. The initial
-save fan-out can be browser-local as long as its event shape can later be
-promoted to daemon SSE or WebSocket delivery.
+Excalidraw/draw.io/HTML, broad workspace filesystem watching, and full
+dashboard persistence of translation preferences.
 
 Verification should cover read/write route guards, optimistic-concurrency
 conflict handling, panel-local mode switching, dirty draft preservation,
-same-document clean pane refresh, dirty pane stale marking, and browser-level
+same-document clean pane refresh, dirty pane stale marking, per-workRoot event
+delivery or invalidation behavior, focus re-read fallback, and browser-level
 evidence that view/edit mode switching does not create duplicate tabs or break
 workbench placement.
