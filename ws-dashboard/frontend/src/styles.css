@@ -5,6 +5,8 @@
   --ws-color-panel-subtle: #12161d;
   --ws-color-panel-hover: #202632;
   --ws-color-panel-selected: #102744;
+  --ws-color-panel-inset: #0c0f14;
+  --ws-color-panel-code: #080a0d;
   --ws-color-border-subtle: #252c37;
   --ws-color-border: #333b49;
   --ws-color-border-strong: #596273;
@@ -26,6 +28,8 @@
   --ws-color-focus: var(--ws-color-action-hover);
   --ws-font-family-sans: Inter, "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ws-font-family-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
   --ws-font-size-01: 10px;
   --ws-font-size-02: 11px;
   --ws-font-size-03: 13px;
@@ -82,6 +86,116 @@ body {
 
 button {
   font: inherit;
+}
+
+.ws-panel {
+  min-width: 0;
+  overflow: hidden;
+  border-right: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  background: var(--ws-color-panel);
+}
+
+.ws-pane {
+  min-width: 0;
+  min-height: 0;
+  background: var(--ws-color-panel);
+}
+
+.ws-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-08);
+  border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-subtle);
+}
+
+.ws-control-button {
+  min-height: 26px;
+  max-width: 150px;
+  overflow: hidden;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  border-radius: var(--ws-radius-square);
+  background: var(--ws-color-panel);
+  color: var(--ws-color-action);
+  cursor: pointer;
+  padding: var(--ws-space-03) var(--ws-space-06);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-03);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-control-button:hover:not(:disabled),
+.ws-control-button:focus-visible {
+  border-color: var(--ws-color-action);
+  outline: var(--ws-focus-ring);
+  outline-offset: -2px;
+}
+
+.ws-control-button:disabled {
+  color: var(--ws-color-text-disabled);
+  cursor: default;
+}
+
+.ws-row {
+  border-left: var(--ws-border-width-state-rail) solid transparent;
+  border-radius: var(--ws-radius-square);
+  background: transparent;
+}
+
+.ws-row-selected {
+  border-left-color: var(--ws-color-action);
+  background: var(--ws-color-panel-selected);
+}
+
+.ws-chip,
+.ws-badge {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 128px;
+  align-items: center;
+  gap: var(--ws-space-03);
+  overflow: hidden;
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  border-radius: var(--ws-radius-square);
+  background: var(--ws-color-panel);
+  color: var(--ws-color-text-secondary);
+  padding: var(--ws-space-01) var(--ws-space-04);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-02);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-state-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  background: var(--ws-color-state-success);
+}
+
+.ws-state-surface {
+  border-left: var(--ws-border-width-state-rail) solid var(--ws-color-border);
+  background: var(--ws-color-panel-subtle);
+  color: var(--ws-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ws-doc-surface {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--ws-color-panel);
+  color: var(--ws-color-text-primary);
+}
+
+.ws-code-block {
+  background: var(--ws-color-panel-code);
+  color: var(--ws-color-text-secondary);
+  font-family: var(--ws-font-family-mono);
 }
 
 .app-shell {
@@ -215,7 +329,7 @@ button {
 .resource-list {
   height: calc(100vh - 48px);
   overflow: auto;
-  padding: 8px;
+  padding: var(--ws-space-04);
 }
 
 .nav-stack {
@@ -231,7 +345,7 @@ button {
   flex-direction: column;
   gap: var(--ws-space-04);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel);
+  background: var(--ws-color-panel-subtle);
   padding: var(--ws-space-06) var(--ws-space-06) var(--ws-space-06) var(--ws-space-09);
 }
 
@@ -598,6 +712,7 @@ button {
   min-height: 160px;
   flex: 0 1 46%;
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  background: var(--ws-color-panel-subtle);
 }
 
 .file-explorer {
@@ -781,16 +896,17 @@ button {
 .resource-row {
   display: grid;
   width: 100%;
-  min-height: 52px;
+  min-height: 46px;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px;
+  gap: var(--ws-space-03);
   border: 0;
   border-left: var(--ws-border-width-state-rail) solid transparent;
   border-radius: var(--ws-radius-square);
   background: transparent;
   color: var(--ws-color-text-primary);
   cursor: pointer;
-  padding: 7px 8px 7px calc(8px + (var(--depth) * 16px));
+  padding: var(--ws-space-05) var(--ws-space-06) var(--ws-space-05)
+    calc(var(--ws-space-06) + (var(--depth) * 16px));
   text-align: left;
 }
 
@@ -826,7 +942,15 @@ button {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--ws-space-04);
+}
+
+.resource-row-main {
+  overflow: hidden;
+}
+
+.resource-row-meta {
+  overflow: hidden;
 }
 
 .resource-row-actions {
@@ -835,13 +959,18 @@ button {
 }
 
 .resource-row-action {
-  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
   border-radius: var(--ws-radius-square);
-  background: var(--ws-color-surface-subtle);
-  color: var(--ws-color-text-secondary);
+  background: var(--ws-color-panel-subtle);
+  color: var(--ws-color-action);
   cursor: pointer;
   font: inherit;
-  padding: 4px 6px;
+  padding: var(--ws-space-03) var(--ws-space-05);
+}
+
+.resource-row-action:hover,
+.resource-row-action:focus-visible {
+  border-color: var(--ws-color-action);
 }
 
 .row-eyebrow {
@@ -866,14 +995,14 @@ button {
 .state-badge {
   display: inline-flex;
   min-width: 0;
-  max-width: 128px;
+  max-width: 116px;
   align-items: center;
-  gap: 5px;
+  gap: var(--ws-space-03);
   overflow: hidden;
   border: var(--ws-border-width-hairline) solid var(--ws-color-border);
   background: var(--ws-color-panel);
   color: var(--ws-color-text-secondary);
-  padding: 2px 5px;
+  padding: var(--ws-space-01) var(--ws-space-04);
   font-size: var(--ws-font-size-02);
   line-height: var(--ws-line-height-02);
   text-overflow: ellipsis;
@@ -1190,13 +1319,13 @@ button {
 
 .workbench-toolbar {
   display: grid;
-  min-height: 64px;
+  min-height: 56px;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 12px;
+  gap: var(--ws-space-04) var(--ws-space-09);
   align-items: center;
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
   background: var(--ws-color-panel-subtle);
-  padding: 8px 10px 8px 12px;
+  padding: var(--ws-space-06) var(--ws-space-08) var(--ws-space-06) var(--ws-space-09);
 }
 
 .workbench-breadcrumb {
@@ -1250,7 +1379,8 @@ button {
   grid-column: 2;
   grid-row: 1 / span 2;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .workbench-toggle {
@@ -1277,7 +1407,7 @@ button {
 }
 
 .dockview-workbench-layout .dv-tabs-and-actions-container {
-  background: var(--ws-color-panel-raised);
+  background: var(--ws-color-panel-subtle);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border);
 }
 
@@ -1285,10 +1415,11 @@ button {
   margin: 0;
   padding: 0;
   border-radius: 0;
+  border-right: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
 }
 
 .dockview-workbench-layout .dv-tab:has(.dockview-workbench-tab-active) {
-  background: var(--ws-color-panel-selected);
+  background: var(--ws-color-panel);
   box-shadow: inset 0 -2px 0 var(--ws-color-action);
 }
 
@@ -1299,7 +1430,7 @@ button {
   align-items: center;
   gap: 4px;
   color: var(--ws-color-text-secondary);
-  padding: 0 6px;
+  padding: 0 var(--ws-space-06);
   font-size: var(--ws-font-size-02);
   line-height: var(--ws-line-height-02);
 }
@@ -1331,7 +1462,8 @@ button {
   justify-content: space-between;
   gap: 10px;
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  padding: 10px 12px;
+  background: var(--ws-color-panel-subtle);
+  padding: var(--ws-space-08) var(--ws-space-09);
 }
 
 .workbench-pane-header h2 {
@@ -1354,7 +1486,7 @@ button {
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
+  padding: var(--ws-space-09);
 }
 
 .workbench-pane-body > p,
@@ -1403,7 +1535,7 @@ button {
   justify-content: space-between;
   gap: var(--ws-space-08);
   border-bottom: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
+  background: var(--ws-color-panel-inset);
   padding: var(--ws-space-07) var(--ws-space-08);
 }
 
@@ -1445,9 +1577,9 @@ button {
   margin: 0;
   overflow: auto;
   color: var(--ws-color-text-primary);
-  background: var(--ws-color-panel);
+  background: var(--ws-color-panel-code);
   padding: var(--ws-space-09);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--ws-font-family-mono);
   font-size: var(--ws-font-size-02);
   line-height: var(--ws-line-height-04);
   white-space: pre;
@@ -1790,7 +1922,7 @@ button {
   min-width: 0;
   max-width: 100%;
   flex: 0 0 auto;
-  gap: var(--ws-space-04);
+  gap: var(--ws-space-03);
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: var(--ws-space-03);
@@ -1806,6 +1938,7 @@ button {
   grid-template-rows: repeat(3, minmax(0, 1fr));
   gap: 1px;
   border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  border-left: var(--ws-border-width-state-rail) solid transparent;
   background: var(--ws-color-panel-subtle);
   color: var(--ws-color-text-secondary);
   padding: var(--ws-space-05) var(--ws-space-06);
@@ -1814,6 +1947,7 @@ button {
 
 .activity-ribbon-item[data-selected="true"] {
   border-color: var(--ws-color-border-strong);
+  border-left-color: var(--ws-color-action);
   background: var(--ws-color-panel);
   color: var(--ws-color-text-primary);
 }
@@ -1824,7 +1958,7 @@ button {
   right: var(--ws-space-03);
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--ws-radius-square);
   opacity: 0;
   background: var(--ws-color-state-success);
 }
@@ -1873,7 +2007,7 @@ button {
   flex: 1 1 auto;
   flex-direction: column;
   border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  background: var(--ws-color-panel-subtle);
+  background: var(--ws-color-panel-inset);
 }
 
 .activity-transcript-head {
@@ -1903,11 +2037,24 @@ button {
 
 .activity-console-control,
 .activity-detail-toggle {
-  border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
+  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
   background: var(--ws-color-panel);
-  color: var(--ws-color-text-secondary);
+  color: var(--ws-color-action);
   padding: var(--ws-space-03) var(--ws-space-05);
   font: inherit;
+}
+
+.activity-console-control:hover:not(:disabled),
+.activity-console-control:focus-visible,
+.activity-detail-toggle:hover,
+.activity-detail-toggle:focus-visible {
+  border-color: var(--ws-color-action);
+  outline: var(--ws-focus-ring);
+  outline-offset: -2px;
+}
+
+.activity-console-control:disabled {
+  color: var(--ws-color-text-disabled);
 }
 
 .activity-transcript-scroll {
@@ -1938,7 +2085,7 @@ button {
 
 .activity-transcript-block[data-block-mode="terminal"] {
   border-left-color: var(--ws-color-border-strong);
-  background: #080a0d;
+  background: var(--ws-color-panel-code);
 }
 
 .activity-transcript-block-head {
@@ -1954,11 +2101,14 @@ button {
   margin: var(--ws-space-04) 0 0;
   max-height: 280px;
   overflow: auto;
+  background: var(--ws-color-panel-code);
   color: var(--ws-color-text-secondary);
+  padding: var(--ws-space-05);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
-    monospace;
+  font-family: var(--ws-font-family-mono);
+  font-size: var(--ws-font-size-02);
+  line-height: var(--ws-line-height-04);
 }
 
 .activity-load-more {

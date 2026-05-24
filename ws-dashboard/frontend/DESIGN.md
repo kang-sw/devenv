@@ -75,6 +75,27 @@ hairlines and alignment to separate regions.
 
 ## Component rules
 
+New UI should be composed from these dashboard-local building blocks before it
+adds feature-specific styling. The block names are vocabulary, not a separate
+package boundary; keep them small enough to coexist with feature classes.
+
+- **Frame**: the full viewport workbench shell. It owns global background and
+  region splits, not feature status.
+- **Panel**: a persistent top-level region such as navigation, workbench, or
+  reserved viewer. Panels separate with hairlines and never float as cards.
+- **Pane**: a workbench attachment body. Pane identity belongs to Dockview tabs;
+  pane-local headers exist only when the content needs controls or metadata.
+- **Toolbar**: compact command and metadata row. Toolbars keep stable height,
+  clip secondary metadata, and reserve the right edge for actions.
+- **Row**: the default selectable list unit. Rows use a selected background plus
+  a left rail, with indentation for hierarchy.
+- **Chip/Badge**: bounded inline metadata. Chips are neutral; badges carry
+  state through border color and a small state dot.
+- **State Surface**: empty, loading, stale, notice, and error messages. State
+  surfaces use a left rail and muted fill rather than full-panel alerts.
+- **Document Surface**: scrollable reading/editing body. Raw text and transcript
+  details use a darker code surface and the mono font token.
+
 ### Buttons
 
 Buttons are square, compact, and explicit. Neutral buttons use panel surfaces
@@ -112,6 +133,18 @@ Future terminal, agent, editor, viewer, diagnostics, and task split groups
 should reuse row density, selected rails, hairline separators, and semantic state
 tokens. Split-group UI should not introduce rounded cards, gradient panels, or
 heavy drop shadows.
+
+### Activity and document panes
+
+Activity ribbons are dense horizontal lists, not cards. Selected items use the
+same row selection language as navigation. Transcript blocks are document/code
+surfaces with tone rails; terminal-like blocks use the code surface token rather
+than one-off literal colors.
+
+Read-only and future markdown/document panes should use document surfaces for
+the body, toolbar rules for mode/action controls, and chips for source metadata.
+Markdown rendering, translation overlays, and edit mode may add content-specific
+rules later, but should not redefine pane chrome.
 
 ## Constraints
 

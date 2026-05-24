@@ -630,7 +630,7 @@ export function App() {
   return (
     <main className="app-shell" aria-label="ws dashboard">
       <div className="shell-grid shell-grid-workbench">
-        <aside className="shell-panel shell-panel-nav" aria-label="Resources">
+        <aside className="shell-panel shell-panel-nav ws-panel" aria-label="Resources">
           <PanelHeader
             title={resources?.server.label ?? "ws dashboard"}
             state={resources?.server.state}
@@ -654,7 +654,7 @@ export function App() {
         </aside>
 
         <section
-          className="shell-panel shell-panel-workbench"
+          className="shell-panel shell-panel-workbench ws-panel"
           aria-label="WorkRoot workbench"
         >
           <WorkbenchShell
@@ -695,7 +695,7 @@ function PanelHeader({
   onCommand?: DashboardCommandDispatcher;
 }) {
   return (
-    <div className="panel-header">
+    <div className="panel-header ws-toolbar">
       <div className="panel-title-block">
         <div className="panel-title">{title}</div>
         {state ? <StateLine state={state} /> : null}
@@ -704,7 +704,7 @@ function PanelHeader({
         <div className="action-strip">
           {actions.map((action) => (
             <button
-              className="action-button"
+              className="action-button ws-control-button"
               data-command-id={
                 action.id === "refresh"
                   ? "dashboard.refresh"
@@ -2877,7 +2877,7 @@ function WorkbenchToolbar({
   ] as const;
 
   return (
-    <div className="workbench-toolbar">
+    <div className="workbench-toolbar ws-toolbar">
       <div className="workbench-breadcrumb" aria-label="Workbench breadcrumb">
         <span>{server.label}</span>
         <span>{workspace.label}</span>
@@ -2894,11 +2894,11 @@ function WorkbenchToolbar({
             );
           }}
         />
-        <span className="meta-chip">{kindLabel(root.kind)}</span>
-        <span className="meta-chip">availability: {root.availability}</span>
-        <span className="meta-chip">activation: {root.activation}</span>
+        <span className="meta-chip ws-chip">{kindLabel(root.kind)}</span>
+        <span className="meta-chip ws-chip">availability: {root.availability}</span>
+        <span className="meta-chip ws-chip">activation: {root.activation}</span>
         {commandLog[0] ? (
-          <span className="meta-chip">last: {commandLog[0].commandId}</span>
+          <span className="meta-chip ws-chip">last: {commandLog[0].commandId}</span>
         ) : null}
       </div>
       <div
@@ -2907,7 +2907,7 @@ function WorkbenchToolbar({
       >
         {toolbarActions(root, selectedEntity).map(({ action, entityId }) => (
           <button
-            className="action-button"
+            className="action-button ws-control-button"
             data-command-id={
               activationForAction(action.id)
                 ? "workRoot.activation.set"
@@ -2938,7 +2938,7 @@ function WorkbenchToolbar({
           </button>
         ))}
         <button
-          className="action-button workbench-toggle"
+          className="action-button workbench-toggle ws-control-button"
           disabled={root.activation !== "online" || root.availability !== "available"}
           data-command-id="terminal.create"
           type="button"
@@ -2953,7 +2953,7 @@ function WorkbenchToolbar({
         </button>
         {toggles.map((toggle) => (
           <button
-            className="action-button workbench-toggle"
+            className="action-button workbench-toggle ws-control-button"
             data-command-id={`workbench.toggle.${toggle}`}
             key={toggle}
             type="button"
@@ -2988,7 +2988,7 @@ function WorkbenchActivityBadge({
   // pane reversible/read-only.
   return (
     <button
-      className={`meta-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
+      className={`meta-chip ws-chip workbench-activity-badge workbench-activity-badge-${activity.tone}`}
       data-command-id="workbench.openActivity"
       data-activity-tone={activity.tone}
       type="button"
@@ -4074,8 +4074,8 @@ function ReadOnlyTextPane({
   root: WorkRootView;
 }) {
   return (
-    <div className="readonly-text-pane">
-      <div className="readonly-text-pane-header">
+    <div className="readonly-text-pane ws-pane">
+      <div className="readonly-text-pane-header ws-toolbar">
         <div className="readonly-text-pane-title-block">
           <div className="readonly-text-pane-title">{pane.title}</div>
           <div className="readonly-text-pane-path" title={pane.path}>
@@ -4083,21 +4083,21 @@ function ReadOnlyTextPane({
           </div>
         </div>
         <div className="readonly-text-pane-badges">
-          <span className="meta-chip">{pane.mode}</span>
-          <span className="meta-chip">read-only</span>
-          <span className="meta-chip">
+          <span className="meta-chip ws-chip">{pane.mode}</span>
+          <span className="meta-chip ws-chip">read-only</span>
+          <span className="meta-chip ws-chip">
             {pane.languageHint ?? pane.extension ?? "text"}
           </span>
         </div>
       </div>
       {pane.status === "loading" ? (
-        <div className="readonly-text-pane-state">Loading file content</div>
+        <div className="readonly-text-pane-state ws-state-surface">Loading file content</div>
       ) : pane.status === "error" ? (
-        <div className="readonly-text-pane-state readonly-text-pane-error">
+        <div className="readonly-text-pane-state readonly-text-pane-error ws-state-surface">
           {pane.error ?? "file read failed"}
         </div>
       ) : (
-        <pre className="readonly-text-content">
+        <pre className="readonly-text-content ws-doc-surface ws-code-block">
           <code>{pane.content}</code>
         </pre>
       )}
@@ -4251,7 +4251,7 @@ function ResourceRow({
   );
   return (
     <div
-      className={`resource-row${selected ? " resource-row-selected" : ""}`}
+      className={`resource-row ws-row${selected ? " resource-row-selected ws-row-selected" : ""}`}
       data-command-id="resource.select"
       style={{ "--depth": depth } as CSSProperties}
     >
@@ -4269,7 +4269,7 @@ function ResourceRow({
         </span>
         <span className="resource-row-meta">
           {meta.map((value) => (
-            <span className="meta-chip" key={value}>
+            <span className="meta-chip ws-chip" key={value}>
               {value}
             </span>
           ))}
@@ -4425,7 +4425,7 @@ function StatusPane({
   action?: ReactNode;
 }) {
   return (
-    <div className="status-pane">
+    <div className="status-pane ws-state-surface">
       <div className="status-title">{title}</div>
       <div className="status-detail">{detail}</div>
       {action ? <div className="status-action">{action}</div> : null}
@@ -4456,7 +4456,7 @@ function StateLine({ state }: { state: ViewState }) {
 function StateBadge({ state }: { state: ViewState }) {
   return (
     <span
-      className={`state-badge ${state.loading ? "state-loading" : ""} ${
+      className={`state-badge ws-badge ${state.loading ? "state-loading" : ""} ${
         state.stale ? "state-stale" : ""
       } ${state.error ? "state-error" : ""}`}
     >
@@ -4469,7 +4469,7 @@ function StateBadge({ state }: { state: ViewState }) {
 function StateDot({ state }: { state: ViewState }) {
   return (
     <span
-      className={`state-dot ${state.loading ? "state-loading" : ""} ${
+      className={`state-dot ws-state-dot ${state.loading ? "state-loading" : ""} ${
         state.stale ? "state-stale" : ""
       } ${state.error ? "state-error" : ""}`}
       aria-hidden="true"
