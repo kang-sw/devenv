@@ -42,7 +42,7 @@ The workset covers:
   polishing track. Completed reusable Markdown/document viewing,
   daemon-backed translation overlay, raw-text edit/save fan-out, and document
   events.
-- `260524-feat-ws-dashboard-add-git-worktree-ui` - ready; first WorkRoot
+- `260524-feat-ws-dashboard-add-git-worktree-ui` - done; first WorkRoot
   management slice. Replace the workspace trash affordance with an overflow
   menu, keep remove workspace in that menu, and add Git worktree creation with
   daemon-resolved auto branch/path preview.
