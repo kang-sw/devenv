@@ -21,10 +21,10 @@ template rather than relying on a project-local guide override.
 
 ## `ai-docs/` Layout
 
-- `_index.md` is the session-start memory and active queue. Prune aggressively:
+- `_index.md` is the session-start memory and active focus. Prune aggressively:
   completed work belongs in Git history, not the index.
 - `_index.md` should keep compact orientation: summary, stack, workspace,
-  conventions, build/test commands, operational pitfalls, current queue, and
+  conventions, build/test commands, operational pitfalls, current focus, and
   short session notes.
 - `_index.local.md` is machine-local memory and should be ignored by Git.
 - `tickets/` stores work by status directory: `idea/`, `todo/`, `ready/`,
@@ -43,9 +43,10 @@ template rather than relying on a project-local guide override.
 - Reference tickets by stem, never by path; stems stay stable when tickets move
   between status directories.
 - `idea/` is rough intake, `todo/` is accepted backlog, and `ready/` is the
-  spec-addressed implementation queue.
-- `_index.md` `## Ticket Queue` lists `ready/` work only. Do not list `.done/`
-  or `.dropped/` tickets there.
+  spec-addressed implementation-ready status.
+- `_index.md` `## Ticket Focus` lists selected active attention items. Only
+  `ready/` entries are direct implementation targets; do not list `.done/` or
+  `.dropped/` tickets there.
 - Actionable tickets use `## Phases` with stable `### Phase N: <title>`
   headings. Research tickets may use freeform topic sections.
 - After a phase has a `### Result` section, treat its plan text and existing
@@ -103,7 +104,7 @@ When a maintainer approves `_index.md` cleanup:
 
 1. Preserve the memory-policy comment.
 2. Keep project summary, stack, top-level workspace, build/test commands,
-   read-before-edit pointers, active inventory, `ready/` queue, and compact
+   read-before-edit pointers, active inventory, `Ticket Focus`, and compact
    session notes.
 3. Compact deep sections into links only when a clear owning document already
    exists.
@@ -116,8 +117,9 @@ When a maintainer approves `_index.md` cleanup:
    and duplicated maps to start-here pointers.
 7. Route deeper semantic work through the owning workflow: behavior to
    `wsflow:lead-forge-spec` or `wsflow:lead-write-spec`, modification knowledge
-   to `wsflow:lead-forge-mental-model`, queue ordering to
-   `wsflow:lead-write-ticket`, and ambiguous direction to `wsflow:lead-discuss`.
+   to `wsflow:lead-forge-mental-model`, Ticket Focus membership, ordering, and
+   readiness/status wording to `wsflow:lead-write-ticket`, and ambiguous
+   direction to `wsflow:lead-discuss`.
 
 ## Commit Traceability
 

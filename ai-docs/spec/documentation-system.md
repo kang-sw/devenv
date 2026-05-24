@@ -15,11 +15,11 @@ through MCP discovery tools and convention documents.
 `ai-docs/_index.md` is the project memory and active inventory document. It
 records the repository purpose, plugin topology, read-before-edit references,
 implemented runtime surfaces, prompt and skill inventory, current spec list,
-active ticket list, ticket queue, and compact session notes.
+active ticket list, ticket focus, and compact session notes.
 
 The index is intentionally bounded: completed and dropped ticket history lives
 in the ticket archive directories and Git history, while the index keeps the
-current queue and context a future session should not have to re-derive.
+current focus and context a future session should not have to re-derive.
 
 ## Project Old Archive {#260511-project-old-archive}
 
@@ -69,8 +69,9 @@ status. Active status directories are `ready/`, `todo/`, and `idea/`: `idea/`
 captures rough ideas before triage, `todo/` holds accepted backlog with
 recoverable ticket intent, and `ready/` holds spec-addressed implementation
 work.
-Completed or dropped work moves to `.done/` or `.dropped/`. `## Ticket Queue`
-lists `ready/` work only.
+Completed or dropped work moves to `.done/` or `.dropped/`. `## Ticket Focus`
+lists selected active attention items; only `ready/` entries are direct
+implementation targets.
 
 Ticket stems are stable and are referenced by stem rather than path. Actionable
 tickets use phase sections with `### Result` blocks that freeze completed phase
@@ -120,7 +121,7 @@ The root `ai-docs/mental-model.md` may include a compact project reading map
 that routes common task or discussion topics to relevant specs, mental-model
 documents, stable references, or lookup guidance. The map is routing metadata,
 not project truth: it must not duplicate feature descriptions, active ticket
-queues, implementation status, source paraphrases, or behavioral claims owned by
+focus, implementation status, source paraphrases, or behavioral claims owned by
 specs.
 
 Domain documents may include `## Domain Rules`, which are persistent
@@ -195,12 +196,11 @@ spec changes together.
 `lead-write-ticket` creates or updates tickets. It applies the spec-address gate
 when a non-`epic`, non-`research`, non-`workset` ticket enters `ready/`, reads ticket
 conventions, verifies existing stems or ticket-local `## Spec Impact`, invokes
-`lead-write-spec` only for contract-first planned spec entries, updates queue
-entries for `ready/` work, preserves stable ticket stems, and commits ticket
-changes. Creating or promoting accepted backlog into `todo/` preserves intent
-without requiring immediate spec linkage; optional `todo/` `spec:` links are
-recovery hints and promotion
-candidates.
+`lead-write-spec` only for contract-first planned spec entries, updates
+`## Ticket Focus` for selected active attention items, preserves stable ticket
+stems, and commits ticket changes. Creating or promoting accepted backlog into
+`todo/` preserves intent without requiring immediate spec linkage; optional
+`todo/` `spec:` links are recovery hints and promotion candidates.
 
 ## Documentation Reconstruction Workflows {#260505-documentation-reconstruction-workflows}
 

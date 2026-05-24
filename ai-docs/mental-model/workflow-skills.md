@@ -76,7 +76,7 @@ related:
 
 - Skill text that names prompt stems must match embedded prompt filenames and runtime bundle metadata.
 - Legacy skeleton prompts may remain bundled for compatibility; normal implementation routing does not register skeleton-populator or skeleton-reviewer.
-- Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec-address gate and queue checks.
+- Discuss ready-promotion logic routes through `lead-write-ticket`; direct moves bypass the ready spec-address gate and focus checks.
 - Moving updater dispatch into the Edit stage can double-run documentation updates; implementation doc pre-pass and sprint-edit episode closure own their separate doc pipeline calls.
 - `lead-salvage` routes ticket writes through `lead-write-ticket`; direct ticket graph mutation inside salvage would bypass ticket conventions and commit handling.
 - Bootstrap guide semantics stay host-neutral; root `CLAUDE.md` only delegates to `AGENTS.md`.

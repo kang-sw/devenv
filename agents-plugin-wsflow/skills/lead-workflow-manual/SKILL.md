@@ -81,7 +81,7 @@ shell search. Use native file reads after a discovery tool returns the path to
 inspect or edit.
 
 Prefer:
-- `wsflow/tickets.list(status: "ready")` for implementation queue discovery.
+- `wsflow/tickets.list(status: "ready")` for implementation-ready discovery.
 - `wsflow/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
 - `wsflow/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
 - `wsflow/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.

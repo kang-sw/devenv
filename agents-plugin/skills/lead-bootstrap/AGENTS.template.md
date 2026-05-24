@@ -77,7 +77,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 - Workflow shape and plugin-less maintenance guidance live in `ai-docs/WORKFLOW.md`; it is explanatory and does not override ws runtime or MCP parser behavior.
 - Before creating or editing tickets, load the write-ticket workflow skill for conventions.
 - Reference tickets by stem only, never full path; stems survive status moves.
-- Check `## Ticket Queue` in `ai-docs/_index.md` before starting implementation; it lists `ready/` work only.
+- Check `## Ticket Focus` in `ai-docs/_index.md` before starting implementation; it may include non-ready attention items, but only `ready/` entries are direct implementation targets.
 - To check ticket completion or prior phase results, use `git log --grep=<ticket-stem>` and inspect `## Ticket Updates`.
 - Claude Code compatibility is `CLAUDE.md` containing `@AGENTS.md`.
 - **Language:** AI-authored docs, plans, commits, tickets, and code comments are English. Human-facing UI strings are exempt.
@@ -85,7 +85,7 @@ When a spec heading `{#slug}` changes, include `renamed-spec: <old-stem> -> <new
 <!-- MIGRATION: Set up ai-docs/ for this project, then delete this block.
 
 ai-docs/
-  _index.md          - session-start context and queue
+  _index.md          - session-start context and focus
   _index.local.md    - local memory, .gitignored
   mental-model.md    - overall mental-model index and optional project reading map
   mental-model/      - contracts, coupling, architecture narrative
@@ -100,7 +100,7 @@ CLAUDE.md compatibility shim:
   @AGENTS.md
 
 _index.md should cover project summary, stack, workspace, conventions,
-build/test commands, operational pitfalls, current queue, and 2-5 lines of
+build/test commands, operational pitfalls, current focus, and 2-5 lines of
 session notes. Do not list `.done/` or `.dropped/` tickets; use git history.
 Deep source narratives, behavior inventories, extension recipes, dependency
 notes, stable project reading maps, and completed history are scope-drift
@@ -176,6 +176,15 @@ Adapt structure to the project; this is a starting point, not a schema.
   `ai-docs/mental-model.md ## Project Reading Map` during later
   mental-model work. Bootstrap may report the drift, but must not move mixed
   status or feature inventory automatically.
+- v0041: Replace `_index.md ## Ticket Queue` with `## Ticket Focus`. If both
+  sections exist, preserve `Ticket Focus` and remove `Ticket Queue`; if only
+  `Ticket Queue` exists, move the entries already listed in that section into
+  `Ticket Focus` preserving order, then remove `Ticket Queue`. Update managed
+  AGENTS/WORKFLOW wording to refer to `Ticket Focus`. Preserve entry text
+  during migration; do not add omitted tickets, infer readiness, normalize
+  wording, reorder, or promote ticket status. If any migrated entry still lacks
+  clear status or readiness wording, report that a follow-up `lead-write-ticket`
+  focus cleanup is needed.
 -->
 
-<!-- Template Version: v0040 -->
+<!-- Template Version: v0041 -->

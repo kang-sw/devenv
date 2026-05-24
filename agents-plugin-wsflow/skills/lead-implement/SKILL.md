@@ -55,7 +55,7 @@ Create and maintain this task list:
 ### 5. Doc Commit Gate
 
 1. Call `wsflow/infra.read(name: "executor-wrapup")`.
-2. Refresh `ai-docs/_index.md` for new skills, package surfaces, queue changes, or major patterns.
+2. Refresh `ai-docs/_index.md` for new skills, package surfaces, focus changes, or major patterns.
 3. If ticket-driven, add a `### Result (<result-commit>) - YYYY-MM-DD` section to the completed phase.
 4. Commit ticket and index changes through `wsflow/git.commit`.
 

@@ -175,9 +175,9 @@ dropped tickets live in hidden archive dirs and git history.
 | `260429-research-host-neutral-ws-plugin` | idea | Host-neutral ws plugin architecture research anchor |
 | `260501-research-agents-bootstrap-root-context` | idea | Agents bootstrap root context research |
 
-## Ticket Queue
+## Ticket Focus
 
-- No ready tickets.
+- No selected focus tickets.
 
 ## Session Notes
 

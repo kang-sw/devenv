@@ -74,10 +74,10 @@ Triggers when the user requests a ticket status change - triaging an idea ticket
 1. Read the ticket file. Extract any `spec:` frontmatter field and body references to `{#YYMMDD-slug}` anchors.
 2. **Triage (idea/ -> todo/)**:
    a. Perform native `git mv ai-docs/tickets/idea/<stem>.md ai-docs/tickets/todo/<stem>.md`.
-   b. Do not require spec creation; `todo/` is accepted backlog, not the implementation queue.
+   b. Do not require spec creation; `todo/` is accepted backlog, not implementation-ready status.
 3. **Ready promotion (todo/ -> ready/)**:
    a. Invoke `wsflow:lead-write-ticket` (Edit path) for the `todo/` -> `ready/` promotion.
-   b. `wsflow:lead-write-ticket` owns spec addressing, frontmatter population, the `git mv`, queue update, and commit.
+   b. `wsflow:lead-write-ticket` owns spec addressing, frontmatter population, the `git mv`, focus update, and commit.
    c. Stop this handler after `wsflow:lead-write-ticket` returns.
 4. **Drop (-> .dropped/)**:
    a. For each linked spec stem: check whether any other non-dropped ticket also references it.

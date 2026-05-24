@@ -690,7 +690,7 @@ ws-mcp specs status <spec-stem>
 
 ### `ws/project_tree`
 
-Render the ws project document map, spec inventory, and active ticket queue.
+Render the ws project document map, spec inventory, and active ticket inventory.
 
 Input schema:
 
@@ -713,7 +713,7 @@ Output:
   - `ai-docs/` document tree, excluding `spec/` and `tickets/` from the generic
     tree section.
   - `spec:` inventory with frontmatter title/summary and feature/WIP counts.
-  - `tickets:` active queue for `todo` and `idea` tickets.
+  - `tickets:` active inventory for `todo` and `idea` tickets.
 
 Error behavior:
 

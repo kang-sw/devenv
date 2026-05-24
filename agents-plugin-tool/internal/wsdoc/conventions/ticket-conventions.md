@@ -11,7 +11,8 @@ Canonical reference for ticket structure, naming, and lifecycle.
 ## Status Flow
 
 - Status is directory-based only: `idea/` → `todo/` → `ready/` → `.done/` (or `.dropped/`). Never duplicate status in frontmatter.
-- `idea/` is rough capture before triage; `todo/` is accepted backlog with recoverable intent; `ready/` is the spec-addressed implementation queue.
+- `idea/` is rough capture before triage; `todo/` is accepted backlog with recoverable intent; `ready/` is the spec-addressed implementation-ready status.
+- `ai-docs/_index.md ## Ticket Focus` is the selected active attention list; only `ready/` entries are direct implementation targets.
 - Move tickets with `git mv`; no cross-link updates needed.
 - Add `completed:` date on move to `.done/`.
 - `idea/` tickets may omit `spec:` entries.

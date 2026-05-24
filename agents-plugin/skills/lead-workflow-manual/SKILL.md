@@ -115,7 +115,7 @@ lookup before shell search. Use native file reads after a discovery tool returns
 the path to inspect or edit.
 
 Prefer:
-- `ws/tickets.list(status: "ready")` for implementation queue discovery; use `status: "todo"` for accepted backlog.
+- `ws/tickets.list(status: "ready")` for implementation-ready discovery; use `status: "todo"` for accepted backlog.
 - `ws/tickets.find(ticket_stem: "<stem>")` for ticket lookup by stem.
 - `ws/tickets.find(mentions_ticket_stem: "<stem>")` for parent/related scans.
 - `ws/tickets.status(ticket_stem: "<stem>", include_done: true)` for status checks.
@@ -138,7 +138,7 @@ Prefer:
 Use `ws/git.commit` for workflow commits when available. It stages explicit
 paths, builds the `## AI Context` message, detects ticket moves plus
 `### Result` and `#### Edition` headings, and avoids shell quoting drift.
-For ticket status moves, use native `git mv` between status directories and commit through `ws/git.commit`; `ready/` is the implementation queue and `todo/` is accepted backlog.
+For ticket status moves, use native `git mv` between status directories and commit through `ws/git.commit`; `ready/` is implementation-ready and `todo/` is accepted backlog.
 
 Prefer:
 - `ws/git.status()` for branch, staged state, and changed-file discovery.

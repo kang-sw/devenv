@@ -1837,7 +1837,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "project_tree",
-			"description": "Render the ws project document map, spec inventory, and active ticket queue.",
+			"description": "Render the ws project document map, spec inventory, and active ticket inventory.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

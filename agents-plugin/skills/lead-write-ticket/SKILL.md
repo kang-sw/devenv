@@ -10,13 +10,13 @@ Target: user request
 ## Invariants
 
 - Ticket conventions: call `ws/convention.read(name: "ticket-conventions")` - path format, status flow, phase rules, stem rules, templates.
-- Aside from required conventions and `ai-docs/_index.md` when the queue changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `ws/tickets.*`, `ws/references.trace`, or `ws/subquery` for graph discovery.
+- Aside from required conventions and `ai-docs/_index.md` when focus changes, read only ticket files selected as edit targets or graph tickets needed to identify binding decisions; use `ws/tickets.*`, `ws/references.trace`, or `ws/subquery` for graph discovery.
 - Preserve enough settled detail for a fresh implementation session to recover the intended contract without inventing missing product, workflow, API, or verification decisions.
 - Epic tickets stay lightweight milestone boards; put detailed discussion, implementation phases, and slice-specific decisions in child tickets.
 - Workset tickets stay non-hierarchical operating-context collections; never add, remove, or change `parent:` based on workset inclusion.
 - Review related-ticket decisions by default; use explicit cascade for broader board or multi-ticket editing.
 - Ready tickets require spec addressing, not mandatory planned spec text.
-- Proceed-routed actionable `todo/` tickets move to `ready/` when intent review and spec-address check pass.
+- Ordinary `todo/` edits leave the ticket in `todo/`; proceed-routed actionable `todo/` tickets move to `ready/` only after intent review and spec-address check pass.
 
 ## On: invoke
 
@@ -49,7 +49,7 @@ Target: user request
 ### 6. Commit
 
 1. If no file changed because the requested move was refused, skip commit.
-2. Commit edited paths with `ws/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when the queue changed; separate follow-up invocations own their own commits and outputs.
+2. Commit edited paths with `ws/git.commit(paths: ["<edited-ticket-paths>"], title: "<title>", ai_context: ["<bullet>"])`; include `ai-docs/_index.md` when focus changed; separate follow-up invocations own their own commits and outputs.
 
 ### 7. Handoff
 
@@ -82,7 +82,7 @@ Target: user request
 ### 4. Ready Guard
 
 1. For `workset`, choose `idea/` or `todo/`; do not create or move it into `ready/`.
-2. For `ready/`, defer queue entry until **Spec-address Check** passes.
+2. For `ready/`, defer focus entry until **Spec-address Check** passes.
 
 ## On: Edit Ticket
 
@@ -141,12 +141,13 @@ Target: user request
 
 1. Skip `epic`, `research`, and `workset`.
 2. Treat requested `todo/` -> `ready/` promotion as `ready/` for this check.
-3. Apply `judge: spec-address-gate` before any `ready/` queue entry or commit.
+3. Apply `judge: spec-address-gate` before committing a new `ready/` ticket, a `ready/` promotion, or a `ready/` focus entry.
+4. If Spec-address Check fails, do not move the ticket to `ready/`, do not add a `Ticket Focus` entry, do not commit, and report the blocker.
 
 ### 2. Todo Handling
 
 1. For `todo/`, preserve existing `spec:` links as optional recovery hints.
-2. For `todo/`, do not require spec addressing, do not fire `judge: missing-spec-address`, and do not suppress the proceed prompt.
+2. For `todo/`, leave the ticket in `todo/`; it may be shown as a non-ready attention item, but implementation must still route through proceed.
 
 ### 3. Ready Addressing
 
@@ -158,11 +159,13 @@ Target: user request
 6. After a contract-first spec is listed in `spec:`, remove redundant `## Spec Impact` text or keep only closeout notes not covered by the spec.
 7. If neither confirmed stems nor `## Spec Impact` addresses a phase, apply `judge: missing-spec-address`.
 
-### 4. Ready Queue
+### 4. Ready Focus
 
-1. For `ready/`, remind that implementation commits should include a `## Spec` section for existing stems or the doc closeout should resolve `## Spec Impact`.
-2. For `ready/`, ensure `ai-docs/_index.md ## Ticket Queue` has `` `stem` - one-line purpose and dependency notes ``.
-3. For deferred `todo/` -> `ready/` promotion, perform native `git mv` before commit.
+1. `Ticket Focus` may list selected active attention items; only `ready/` entries are direct implementation targets.
+2. For non-ready focus entries, use `` `stem` (`status`, `<role>`) - one-line purpose and why it is in focus; not implementation-ready ``.
+3. For `ready/`, remind that implementation commits should include a `## Spec` section for existing stems or the doc closeout should resolve `## Spec Impact`.
+4. For `ready/`, ensure `ai-docs/_index.md ## Ticket Focus` has `` `stem` - one-line purpose, readiness, and dependency notes ``.
+5. For deferred `todo/` -> `ready/` promotion, perform native `git mv` before commit.
 
 ## On: Output Handoff
 
@@ -229,7 +232,7 @@ Stop: no stem or `## Spec Impact` can address the behavior, `ws:lead-write-spec`
 
 `idea/`: topic is exploratory or underspecified.
 `todo/`: scope and goal are accepted actionable backlog, or the ticket is a non-actionable coordination artifact.
-`ready/`: spec-addressed implementation queue.
+`ready/`: spec-addressed implementation-ready status.
 `todo/` `spec:` links: optional recovery hints.
 Uncertain: prefer `idea/`.
 

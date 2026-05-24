@@ -154,14 +154,14 @@ Proceed assumes implementation intent, but this judge catches malformed or still
 |----------|------|
 | Yes | User-blocking design choice, scope boundary, acceptance criterion, trade-off, or delegation decision remains open |
 | Yes | Ticket promotion requires a user decision that cannot be inferred from the ticket or conversation |
-| No | Missing spec addressing, frontmatter, queue hygiene, tests, or local implementation details can be resolved autonomously |
+| No | Missing spec addressing, frontmatter, focus hygiene, tests, or local implementation details can be resolved autonomously |
 | No | Ticket promotion is mechanical or can be handled by `lead-write-ticket` from existing context |
 
 ### judge: needs-ticket
 
 | Decision | When |
 |----------|------|
-| Yes | Inline target changes workflow semantics, public contracts, cross-skill routing, queue behavior, branch behavior, or documentation pipeline behavior |
+| Yes | Inline target changes workflow semantics, public contracts, cross-skill routing, focus behavior, branch behavior, or documentation pipeline behavior |
 | Yes | Inline target needs phases, acceptance criteria, explicit traceability, or durable discussion capture |
 | Yes | Caller-visible behavior may need spec addressing before implementation |
 | No | Inline target is narrow, routine, fully scoped, and commit `AI Context` is enough traceability |

@@ -42,7 +42,7 @@ A reading-map entry contains only routing information:
 - lookup guidance for related tickets or references
 
 Do not use the map to record current behavior, implementation status, feature
-lists, source summaries, or active queue state. Those belong in specs, tickets,
+lists, source summaries, or active focus state. Those belong in specs, tickets,
 source/tests, generated surveys, or `_index.md`.
 
 ## Directory Hierarchy

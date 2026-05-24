@@ -179,7 +179,7 @@ or implemented entries according to the current behavior, verifies the spec
 index, and commits the spec update.
 
 `lead-write-ticket` creates or updates workflow tickets. It treats `todo/` as
-accepted backlog and `ready/` as the spec-addressed implementation queue. The
+accepted backlog and `ready/` as the spec-addressed implementation-ready status. The
 spec-address gate runs only when a non-`epic`, non-`research`, non-`workset`
 action creates or moves a ticket into `ready/`; `todo/` tickets may carry
 optional `spec:` links as recovery hints. For `ready/` creation or promotion,
@@ -189,8 +189,9 @@ section naming the target spec area, expected caller-visible change, and whether
 a contract-first planned spec is required. It invokes `lead-write-spec`
 autonomously only for contract-first planned spec entries, and stops when no
 stem or `## Spec Impact` can address the work, spec writing fails, or the
-behavior is too underspecified to spec. Queue entries are maintained for
-`ready/` work only.
+behavior is too underspecified to spec. `Ticket Focus` entries are maintained
+for selected active attention items; only `ready/` entries are direct
+implementation targets.
 
 `lead-write-ticket` preserves epics as lightweight milestone boards. When
 detailed discussion, implementation phases, or phase-specific decisions arise
@@ -217,7 +218,7 @@ and does not let the workset own decomposition, cross-child invariants,
 implementation phases, or spec-ready behavior. When implementation detail or
 settled constraints arise while editing a workset, the skill moves them into
 the relevant included actionable ticket or phase. Worksets normally stay in
-`idea/` or `todo/` rather than the `ready/` implementation queue.
+`idea/` or `todo/` rather than the `ready/` implementation-ready status.
 `lead-proceed` stops on workset paths and asks the user to choose, create,
 promote, or proceed an included actionable ticket instead of treating the
 workset as an implementation target. {#260524-workset-workflow-skill-routing}

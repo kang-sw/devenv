@@ -101,7 +101,7 @@ model aliases rather than workload tiers. {#260508-model-alias-config-tools}
 ## Project Context And Convention Tools {#260505-project-context-convention-tools}
 
 `project_tree` renders the project document map, spec inventory, and active
-ticket queue for the current repository.
+ticket inventory for the current repository.
 
 `infra.read` reads bundled ws infra documents shipped with the runtime by bare
 stem or filename.
