@@ -4,6 +4,7 @@ parent: 260524-epic-async-exec-job-surface
 related:
   260524-feat-exec-job-core-text-readers: supplies durable exec jobs and raw fallback readers
   260513-feat-async-exec-output-reader: original broad ticket absorbed by parent epic
+  260524-epic-mcp-actor-setup-state: model-backed readers should align with actor-scoped setup recovery
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
@@ -50,6 +51,9 @@ large raw streams out of the lead context.
 - `exec.ask` depends on the durable job records and persisted stream files from
   `260524-feat-exec-job-core-text-readers`.
 - `exec.ask` must be hidden in wsflow no-agent mode.
+- If actor-aware setup work lands first, `exec.ask` reader sessions should use
+  the actor-scoped setup model instead of introducing an incompatible
+  process-local reader identity.
 - If the exec job is still running, `exec.ask` may answer from captured partial
   output, but the response must clearly state that the process was not terminal
   at the time of reading.
