@@ -4,6 +4,7 @@ related-mental-model:
   - documentation-system
   - mcp-runtime
   - plugin-runtime
+completed: 2026-05-24
 ---
 
 # ws MCP reference ownership cleanup
@@ -49,3 +50,14 @@ document owns contract, modification, and runbook facts.
 Verification boundary: spec index verification passes, repository status shows
 only the intended documentation/ticket changes before commit, and source-derived
 MCP tool schema or inventory blocks no longer remain in `ref/ws-mcp.md`.
+
+### Result (f4acd06b) - 2026-05-24
+
+Reworked `ai-docs/ref/ws-mcp.md` from a 1570-line mixed contract/reference into
+a 251-line operations runbook and link hub. Added spec ownership language for
+reference documents and MCP tool schema boundaries, moved modification-risk
+guidance into mental models, and updated project/root guidance so future
+sessions treat specs and runtime discovery as the contract sources.
+
+Verification passed with `ws/spec_index.verify` and stale-reference searches
+for removed schema/current-inventory ownership wording.
