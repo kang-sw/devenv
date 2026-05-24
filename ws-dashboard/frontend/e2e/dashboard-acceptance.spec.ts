@@ -516,15 +516,59 @@ async function openWorkRootInBrowser(page: Page, rootPath: string) {
 }
 
 async function selectWorkRootInBrowser(page: Page, rootPath: string) {
-  await page
-    .locator('.resource-row[data-command-id="resource.select"][data-resource-presentation="workRoot"], .resource-row[data-command-id="resource.select"][data-resource-presentation="compactWorkRoot"]', {
-      hasText: workRootDisplayName(rootPath),
-    })
-    .click();
+  const label = workRootDisplayName(rootPath);
+  const ids = await resourceIdsForWorkRootLabel(page, label);
+  const directRow = page.locator('.resource-row[data-command-id="resource.select"][data-resource-presentation="workRoot"], .resource-row[data-command-id="resource.select"][data-resource-presentation="compactWorkRoot"]', {
+    hasText: label,
+  });
+  if (await directRow.count()) {
+    await directRow.first().click();
+  } else if (ids?.workspaceId) {
+    await page
+      .locator(`.resource-row[data-command-id="resource.select"][data-resource-id="${ids.workspaceId}"]`)
+      .first()
+      .click();
+  } else {
+    await page
+      .locator('.resource-row[data-command-id="resource.select"][data-resource-presentation="workspace"]', {
+        hasText: label,
+      })
+      .first()
+      .click();
+  }
   await expect(page.locator(".file-explorer-title")).toContainText(
-    workRootDisplayName(rootPath),
+    label,
   );
   await expectDockviewWorkbench(page);
+}
+
+async function resourceIdsForWorkRootLabel(
+  page: Page,
+  label: string,
+): Promise<{ workRootId: string; workspaceId: string } | null> {
+  return page.evaluate(async (targetLabel) => {
+    const response = await fetch("/api/dashboard/resources");
+    const resources = (await response.json()) as {
+      workspaces?: Array<{
+        id?: string;
+        workRoots?: Array<{
+          id?: string;
+          label?: string;
+          resourcePath?: { workspaceId?: string; workRootId?: string };
+        }>;
+      }>;
+    };
+    for (const workspace of resources.workspaces ?? []) {
+      for (const workRoot of workspace.workRoots ?? []) {
+        if (workRoot.label === targetLabel) {
+          const workspaceId = workRoot.resourcePath?.workspaceId ?? workspace.id ?? null;
+          const workRootId = workRoot.resourcePath?.workRootId ?? workRoot.id ?? null;
+          return workspaceId && workRootId ? { workspaceId, workRootId } : null;
+        }
+      }
+    }
+    return null;
+  }, label);
 }
 
 async function workRootIdForLabel(page: Page, label: string): Promise<string | null> {
@@ -695,6 +739,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     const createdRow = page.locator(".resource-row", { hasText: "Browser-Gate-Branch" }).first();
     await expect(createdRow).toBeVisible();
     await expect(createdRow).toHaveClass(/resource-row-selected/);
+    await selectWorkRootInBrowser(page, gitWorkRoot);
+    const gitPrimaryChildRow = page.locator('.resource-row[data-resource-presentation="workRoot"]', {
+      hasText: workRootDisplayName(gitWorkRoot),
+    });
+    await expect(gitPrimaryChildRow).toHaveCount(0);
+    const gitWorkspaceRow = page.locator('.resource-row[data-resource-presentation="workspace"].resource-row-selected').first();
+    await expect(gitWorkspaceRow).toBeVisible();
     await selectWorkRootInBrowser(page, workRoot);
     note("git worktree add: workspace overflow preserved remove action, previewed new branch, submitted through daemon resources, and selected daemon-created workRoot id");
   });

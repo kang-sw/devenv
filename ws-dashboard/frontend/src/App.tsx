@@ -5254,6 +5254,13 @@ function WorkspaceRows({
   onCommand: DashboardCommandDispatcher;
 }) {
   const compactRoot = compactWorkspaceWorkRoot(workspace);
+  const childWorkRoots = workspace.workRoots.filter(isWorkspaceNavChildWorkRoot);
+  const selectedChildWorkRootIds = new Set(childWorkRoots.map((root) => root.id));
+  const selectedWorkspace =
+    selectedId === workspace.id ||
+    workspace.workRoots.some(
+      (root) => root.id === selectedId && !selectedChildWorkRootIds.has(root.id),
+    );
 
   if (compactRoot) {
     return (
@@ -5291,14 +5298,14 @@ function WorkspaceRows({
         presentation="workspace"
         state={workspace.state}
         depth={0}
-        selected={selectedId === workspace.id}
+        selected={selectedWorkspace}
         actions={workspace.actions}
         actionEntityId={workspace.id}
         canAddWorktree={workspace.workRoots.some((root) => root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree")}
         debugMeta={["workspace", `${workspace.workRoots.length} roots`]}
         onCommand={onCommand}
       />
-      {workspace.workRoots.map((root) => (
+      {childWorkRoots.map((root) => (
         <div key={root.id}>
           <ResourceRow
             id={root.id}
@@ -5330,6 +5337,10 @@ function WorkspaceRows({
       ))}
     </div>
   );
+}
+
+function isWorkspaceNavChildWorkRoot(root: WorkRootView): boolean {
+  return root.kind === "gitLinkedWorktree";
 }
 
 function ResourceRow({
@@ -5375,6 +5386,7 @@ function ResourceRow({
     <div
       className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}`}
       data-command-id="resource.select"
+      data-resource-id={id}
       data-resource-presentation={presentation}
       data-resource-kind={kind ?? presentation}
       data-resource-activation={activation ?? ""}
@@ -5659,6 +5671,20 @@ function resolveWorkbenchSelection(
   let fallback: WorkbenchSelection | null = null;
 
   for (const workspace of resources.workspaces) {
+    const workspaceRoot =
+      workspace.workRoots.find((root) => !isWorkspaceNavChildWorkRoot(root)) ??
+      workspace.workRoots[0] ??
+      null;
+    if (selectedId === workspace.id && workspaceRoot) {
+      const mainInstance = workspaceRoot.mainInstances[0] ?? null;
+      return {
+        workspace,
+        root: workspaceRoot,
+        mainInstance,
+        selectedInstance: mainInstance,
+      };
+    }
+
     for (const root of workspace.workRoots) {
       const mainInstance = root.mainInstances[0] ?? null;
       const rootSelection = {
@@ -5669,7 +5695,7 @@ function resolveWorkbenchSelection(
       };
       fallback ??= rootSelection;
 
-      if (selectedId === workspace.id || selectedId === root.id) {
+      if (selectedId === root.id) {
         return rootSelection;
       }
 

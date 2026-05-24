@@ -2497,6 +2497,12 @@ button {
   padding-bottom: var(--ws-space-04);
 }
 
+.resource-row[data-resource-presentation="workRoot"] {
+  min-height: 34px;
+  padding-top: var(--ws-space-03);
+  padding-bottom: var(--ws-space-03);
+}
+
 .resource-row:hover {
   background: var(--ws-color-panel-hover);
 }
