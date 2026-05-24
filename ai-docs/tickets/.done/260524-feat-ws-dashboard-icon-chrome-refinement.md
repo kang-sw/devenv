@@ -235,3 +235,18 @@ Verification:
 - Manual screenshot review of `desktop-workbench.png` confirmed the selected
   workRoot row is more distinguishable through surface treatment rather than
   text-color emphasis.
+
+#### Edition (1f51d22) - 2026-05-24
+
+Brightened the selected resource row's internal background tone after follow-up
+feedback. The selected row keeps the same inset light border and left rail, but
+uses a stronger action tint and a lighter selected-surface mix for clearer
+visual separation.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png` confirmed the selected
+  row background is slightly brighter while retaining the prior border/rail
+  treatment.
