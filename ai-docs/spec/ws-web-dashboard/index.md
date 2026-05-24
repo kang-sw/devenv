@@ -146,6 +146,29 @@ one activation state and the same online/offline behavior across navigation,
 Activity, file, and terminal surfaces.
 {#260524-dashboard-workroot-registry-wide-activation-lookup}
 
+## 🚧 Git Worktree Creation {#260524-ws-dashboard-git-worktree-creation}
+
+The dashboard will let an authenticated owner add a linked Git worktree from a
+workspace-scoped overflow menu. The existing workspace remove affordance moves
+behind the same overflow menu, preserving its dashboard-only confirmation and
+registry behavior while making room for non-destructive workspace operations.
+
+The add-worktree flow is a Git operation, not a generic filesystem picker. A
+modal collects a worktree name, branch resolution, and target path resolution.
+Automatic branch naming derives a branch-compatible candidate from the
+worktree name, then the daemon previews whether submit will create a new branch,
+check out an existing branch, or block the request. Automatic path naming
+targets the workspace Git root's `.git/ws-worktree/<branch-compatible-name>`
+convention. Custom path selection may reuse the folder picker in target-path
+or parent-directory mode without adding broad file-manager operations.
+
+Submit revalidates the preview, runs the corresponding `git worktree add`
+operation, refreshes canonical dashboard resources, activates the created
+workRoot by default, and selects or focuses the created linked workRoot when
+the daemon can identify it. Checked-out branches, invalid names, unavailable
+Git roots, and path conflicts produce bounded errors without exposing private
+host paths in command payloads, logs, or browser-visible diagnostics.
+
 Authenticated route behavior distinguishes registry membership and current
 operability. Unknown workRoot ids return not-found responses. Known workRoots
 with offline activation return a bounded offline response. Online workRoots
