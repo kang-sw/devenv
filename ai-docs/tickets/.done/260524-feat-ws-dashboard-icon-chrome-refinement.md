@@ -9,8 +9,11 @@ spec:
   - 260524-dashboard-icon-first-chrome
   - 260516-ws-web-dashboard-dark-visual-system
   - 260516-ws-web-dashboard-browser-ui-acceptance-gate
+plans:
+  phase-1: 2026-05/24-260524-feat-ws-dashboard-icon-chrome-refinement.brief
 related-mental-model:
   - ws-web-dashboard
+completed: 2026-05-24
 ---
 
 # Refine dashboard icon chrome density, states, and hover treatment
@@ -118,3 +121,30 @@ Verification should include:
   present in the DOM.
 - Evidence that icon-only controls retain accessible names/titles and stable
   `data-command-id` routing.
+
+### Result (eda93cc) - 2026-05-24
+
+Implemented the Phase 1 refinement over the existing icon-first dashboard
+chrome. Ready resource rows no longer render a ready status chip, compact
+workspace/workRoot glyphs use a non-overlapping fixed lockup, workspace remove
+stays a fixed-size icon-only command, icon buttons default to quiet transparent
+chrome with hover/focus reveal, and the workRoot power button uses color-only
+online/offline state without filled blue backgrounds.
+
+The workRoot topbar preserves high-signal status/activity text more reliably,
+the overflow menu is wider with slightly smaller text and browser-gated
+non-clipping labels, and WorkRoot Activity ribbon items now keep inactive rail
+alpha at zero while muting non-primary metadata lines. The implementation did
+not change daemon routes, resource ids, command payloads, Activity read models,
+terminal behavior, root picker behavior, Dockview layout persistence, or main
+pane bodies.
+
+Verification:
+
+- `cd ws-dashboard/frontend && npm run build`
+- `cd ws-dashboard/frontend && npm run test:browser`
+- Manual screenshot review of `desktop-workbench.png`,
+  `file-explorer.png`, `topbar-overflow.png`, and
+  `narrow-workbench.png`; the overflow menu is visibly rendered, ready rows are
+  one-line, compact glyphs no longer overlap, topbar text remains readable, and
+  icon chrome is quieter by default.

@@ -172,7 +172,7 @@ The MVP should cover:
   chrome clutter by applying icon-first left navigation, file explorer, and
   topbar polish while preserving command behavior and leaving main pane bodies
   alone.
-- `260524-feat-ws-dashboard-icon-chrome-refinement` - ready; refine the
+- `260524-feat-ws-dashboard-icon-chrome-refinement` - done; refine the
   icon-first chrome pass after screenshot review by fixing compact glyph
   overlap, removing ready chips from nav rows, tuning power/menu/chip state
   treatment, and moving icon buttons toward quiet hover-revealed chrome.
