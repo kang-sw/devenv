@@ -1,7 +1,7 @@
 ---
 title: ws dashboard editor and WorkRoot management workset
-parent: 260514-epic-ws-web-dashboard-mvp
 related:
+  260514-epic-ws-web-dashboard-mvp: umbrella dashboard MVP board
   260524-feat-ws-dashboard-document-viewer-editor-substrate: editor and markdown viewer track
   260524-feat-ws-dashboard-add-git-worktree-ui: WorkRoot management Git worktree creation slice
   260524-feat-ws-dashboard-git-aware-workroot-toolbar: WorkRoot toolbar Git status and branch controls
@@ -36,7 +36,7 @@ The workset covers:
 - Full IDE/editor parity, rich markdown editing, collaborative editing,
   Excalidraw/draw.io/HTML renderer support, or general translation-provider UI.
 
-## Child Tickets
+## Included Tickets
 
 - `260524-feat-ws-dashboard-document-viewer-editor-substrate` - done; editor
   polishing track. Completed reusable Markdown/document viewing,
@@ -50,7 +50,7 @@ The workset covers:
   WorkRoot toolbar slice. Add Git-aware branch/status chips for selected Git
   workRoots, including fetch, plain push, and fast-forward-only pull controls.
 
-## Cross-Child Decisions
+## Cross-Ticket Decisions
 
 - Preserve the existing dashboard resource model: workspaces own root
   workRoots, linked Git worktrees remain child workRoots, and public API/routes
@@ -74,8 +74,8 @@ The workset covers:
 
 ## Completion Criteria
 
-- Done: the three child tickets are implemented or split into more precise
-  completed children with equivalent editor/translation and WorkRoot Git UX
+- Done: the three included tickets are implemented or split into more precise
+  completed tickets with equivalent editor/translation and WorkRoot Git UX
   coverage.
 - Dropped: the dashboard direction moves away from browser-native document
   panels or from Git-aware WorkRoot management in the top-level dashboard UI.
