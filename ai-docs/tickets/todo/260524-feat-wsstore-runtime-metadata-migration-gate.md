@@ -68,6 +68,14 @@ complete cross-process IPC contention strategy.
   compatibility. If their metadata fits the SQLite metadata boundary above,
   implement the named-agent metadata path as a SQLite-authoritative path rather
   than preserving `agent.json` as a parallel source of truth.
+- If `agent.json` is retained during migration, it must be read-only
+  compatibility input or a generated diagnostic snapshot. It must not remain a
+  write authority, and the implementation plan must include the condition that
+  removes or disables any temporary compatibility reader.
+- The migration must define the user-visible behavior for pre-existing
+  file-backed agent registrations: ignored, best-effort imported once,
+  tombstoned, or rejected with a bounded re-registration message. They must not
+  disappear silently in a way that looks like state corruption.
 - SQLite-backed state should be limited to metadata such as agent definition
   rows, current call or exec job lifecycle state, actor/session binding, worker
   leases, artifact indexes, retention policies, prune runs, and tombstones.
@@ -78,6 +86,10 @@ complete cross-process IPC contention strategy.
   synchronously delete prompt, output, stream, event, or diagnostic artifacts.
   They should update lifecycle, visibility, tombstone, or retention metadata and
   let prune perform physical cleanup later.
+- SQLite rows that point to file-backed artifacts need explicit consistency and
+  recovery rules for partial failures, including orphaned files, missing
+  payload paths, stale output pointers, partially registered calls, failed
+  cleanup, and prune/tombstone retries.
 - Pruning must skip active/running/cancel-requested/leased/pinned records and
   retain enough recent diagnostics for failed or cancelled agent and exec runs
   to be inspected after the public surface no longer lists them.
@@ -118,12 +130,23 @@ public `agents.*` names remain unchanged, actor id participates in persisted
 identity for actor-bound registrations and calls, and compatibility behavior is
 explicit for root-explicit or unbound callers.
 
+The namespace design must pin down the unique key and lookup path for
+actor-bound sessions, recovered sessions, hidden explicit-root compatibility,
+and prune/retention queries so common public names do not collide across actors
+or reappear as ambiguous records.
+
 The phase should define acceptance tests that spawn independent processes or MCP
 server instances against the same worktree state database and exercise actor
 setup, child actor creation, exec job lifecycle writes, and prune/tombstone
 bookkeeping without persistent `SQLITE_BUSY` failures. It should also include a
 negative design check that rejects moving append-heavy streams or event logs
 into SQLite as a contention workaround.
+
+Named-agent migration tests should cover at least fresh SQLite-backed
+registration, a pre-existing file-backed registration, concurrent mutable status
+updates, actor-bound sessions registering the same public name, a SQLite row
+whose file-backed payload is missing, temporary `agent.json` compatibility
+removal, and native Windows file-locking/cleanup behavior.
 
 ### Phase 2: Migrate one runtime surface behind the gate
 
