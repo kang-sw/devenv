@@ -1020,9 +1020,9 @@ button {
 }
 
 .resource-row-action {
-  border: var(--ws-border-width-hairline) solid var(--ws-color-border);
+  border: var(--ws-border-width-hairline) solid transparent;
   border-radius: var(--ws-radius-square);
-  background: var(--ws-color-panel-subtle);
+  background: transparent;
   color: var(--ws-color-action);
   cursor: pointer;
   font: inherit;
@@ -1031,7 +1031,8 @@ button {
 
 .resource-row-action:hover,
 .resource-row-action:focus-visible {
-  border-color: var(--ws-color-action);
+  border-color: color-mix(in srgb, var(--ws-color-action) 72%, transparent);
+  background: color-mix(in srgb, var(--ws-color-panel-hover) 76%, transparent);
 }
 
 .row-eyebrow {

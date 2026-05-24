@@ -1657,11 +1657,13 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       hasText: workRootDisplayName(secondWorkRoot),
     });
     await expect(secondRow).toBeVisible();
+    const removeButton = secondRow.locator('[data-command-id="workspace.remove"]');
+    await expect(removeButton).toHaveCSS("border-color", "rgba(0, 0, 0, 0)");
     page.once("dialog", async (dialog) => {
       expect(dialog.message()).toContain("Files and Git worktrees on disk will not be deleted");
       await dialog.accept();
     });
-    await secondRow.locator('[data-command-id="workspace.remove"]').click();
+    await removeButton.click();
     await expect(secondRow).toHaveCount(0);
     expect(existsSync(secondWorkRoot)).toBe(true);
     await selectWorkRootInBrowser(page, workRoot);
