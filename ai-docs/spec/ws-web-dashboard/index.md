@@ -190,12 +190,12 @@ boundary. {#260516-ws-web-dashboard-server-scoped-browser-routes}
 The first browser shell renders the resource view-model contract from the
 daemon API. It shows server, workspace, and workRoot location state; loading,
 empty, stale, and error states; compact singleton rows; and a reserved
-right-side viewer region without implementing the deferred viewer feature. A
-single workspace with one workRoot renders as one compact left-nav row selected
-by the concrete workRoot id, without depending on main/sub instance presence.
-Multi-workRoot workspaces continue to show separate workspace and workRoot rows.
-Main/sub instances remain workbench surfaces or projections rather than default
-recursive left-nav rows.
+right-side viewer region without implementing the deferred viewer feature. Each
+workspace with one workRoot renders as one compact left-nav row selected by the
+concrete workRoot id, without depending on main/sub instance presence.
+Workspaces with multiple workRoots continue to show separate workspace and
+workRoot rows. Main/sub instances remain workbench surfaces or projections
+rather than default recursive left-nav rows.
 
 User-visible dashboard controls expose stable command ids so later keyboard
 bindings can target the same behaviors. Representative visible controls route

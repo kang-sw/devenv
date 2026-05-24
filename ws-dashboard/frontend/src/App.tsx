@@ -706,7 +706,6 @@ function ResourceNavigation({
           <WorkspaceRows
             key={workspace.id}
             workspace={workspace}
-            workspaceCount={resources.workspaces.length}
             selectedId={selectedId}
             onCommand={onCommand}
           />
@@ -3485,16 +3484,14 @@ function ResourceSummary({ entity }: { entity: ResourceEntity }) {
 
 function WorkspaceRows({
   workspace,
-  workspaceCount,
   selectedId,
   onCommand,
 }: {
   workspace: WorkspaceView;
-  workspaceCount: number;
   selectedId: string | null;
   onCommand: DashboardCommandDispatcher;
 }) {
-  const compactRoot = compactWorkspaceWorkRoot(workspace, workspaceCount);
+  const compactRoot = compactWorkspaceWorkRoot(workspace);
 
   if (compactRoot) {
     return (

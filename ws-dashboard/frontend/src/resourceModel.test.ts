@@ -208,7 +208,7 @@ assertEqual(
 // hide degraded metadata.
 const singletonNoMainWorkspace = liveView.workspaces[0];
 assertEqual(
-  compactWorkspaceWorkRoot(singletonNoMainWorkspace, liveView.workspaces.length)?.id,
+  compactWorkspaceWorkRoot(singletonNoMainWorkspace)?.id,
   "root-local-abc",
   "single workspace + single workRoot compacts to the workRoot id without main instances",
 );
@@ -230,7 +230,7 @@ const multiRootWorkspace: DashboardResourcesView = {
   ],
 };
 assertEqual(
-  compactWorkspaceWorkRoot(multiRootWorkspace.workspaces[0], multiRootWorkspace.workspaces.length),
+  compactWorkspaceWorkRoot(multiRootWorkspace.workspaces[0]),
   null,
   "multi-workRoot workspace remains expanded instead of compacting",
 );
@@ -258,10 +258,7 @@ const offlineWorkspace: DashboardResourcesView = {
     },
   ],
 };
-const compactOfflineRoot = compactWorkspaceWorkRoot(
-  offlineWorkspace.workspaces[0],
-  offlineWorkspace.workspaces.length,
-);
+const compactOfflineRoot = compactWorkspaceWorkRoot(offlineWorkspace.workspaces[0]);
 assertEqual(compactOfflineRoot?.id, "root-offline", "offline single root still compacts");
 assertEqual(
   compactOfflineRoot?.availability,
@@ -295,7 +292,7 @@ const workspaceWithInstances: DashboardResourcesView = {
   ],
 };
 assertEqual(
-  compactWorkspaceWorkRoot(workspaceWithInstances.workspaces[0], workspaceWithInstances.workspaces.length)?.id,
+  compactWorkspaceWorkRoot(workspaceWithInstances.workspaces[0])?.id,
   "root-main",
   "main/sub instance presence does not block workspace/workRoot compaction",
 );
@@ -319,7 +316,12 @@ const twoWorkspaceView: DashboardResourcesView = {
   ],
 };
 assertEqual(
-  compactWorkspaceWorkRoot(twoWorkspaceView.workspaces[0], twoWorkspaceView.workspaces.length),
-  null,
-  "single-root workspaces only compact when the dashboard has one workspace",
+  compactWorkspaceWorkRoot(twoWorkspaceView.workspaces[0])?.id,
+  "root-local-abc",
+  "single-root workspaces compact independently even when the dashboard has multiple workspaces",
+);
+assertEqual(
+  compactWorkspaceWorkRoot(twoWorkspaceView.workspaces[1])?.id,
+  "root-second",
+  "each single-root workspace gets its own compact workRoot row",
 );
