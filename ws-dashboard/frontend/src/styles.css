@@ -98,40 +98,54 @@ button {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
+  border: var(--ws-border-width-hairline) solid transparent;
   border-radius: var(--ws-radius-square);
-  background: var(--ws-color-panel);
+  background: transparent;
   color: var(--ws-color-action);
   cursor: pointer;
   padding: 0;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .icon-button:hover:not(:disabled),
 .icon-button:focus-visible {
-  border-color: var(--ws-color-action);
+  border-color: color-mix(in srgb, var(--ws-color-action) 72%, transparent);
+  background: color-mix(in srgb, var(--ws-color-panel-hover) 76%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
   color: var(--ws-color-action-hover);
   outline: var(--ws-focus-ring);
   outline-offset: -2px;
 }
 
 .icon-button:disabled {
-  border-color: var(--ws-color-border);
+  border-color: transparent;
+  background: transparent;
   color: var(--ws-color-text-disabled);
   cursor: default;
 }
 
 .icon-button-primary {
-  border-color: var(--ws-color-action);
-  background: var(--ws-color-action);
-  color: var(--ws-color-action-text);
+  border-color: transparent;
+  background: transparent;
+  color: var(--ws-color-action);
 }
 
 .icon-button-primary:hover:not(:disabled),
 .icon-button-primary:focus-visible {
-  color: var(--ws-color-action-text);
+  color: var(--ws-color-action-hover);
 }
 
 .icon-button-danger {
+  color: var(--ws-color-state-error);
+}
+
+.icon-button-danger:hover:not(:disabled),
+.icon-button-danger:focus-visible {
+  border-color: color-mix(in srgb, var(--ws-color-state-error) 70%, transparent);
   color: var(--ws-color-state-error-text);
 }
 
@@ -1096,7 +1110,9 @@ button {
    It reuses the `.meta-chip` base (max-width, ellipsis, nowrap) so it stays a
    bounded single-line summary chip. */
 .workbench-activity-badge {
-  flex: 0 1 auto;
+  flex: 0 1 260px;
+  max-width: 300px;
+  min-width: 132px;
 }
 
 .workbench-activity-badge-dot {
@@ -1110,12 +1126,16 @@ button {
 .workbench-activity-badge-summary {
   min-width: 0;
   overflow: hidden;
-  flex: 0 1 auto;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.workbench-activity-badge-label {
+  flex: 0 0 auto;
+}
+
 .workbench-activity-badge-summary {
+  flex: 1 1 auto;
   color: var(--ws-color-text-tertiary);
 }
 
@@ -1985,18 +2005,32 @@ button {
   grid-template-rows: repeat(3, minmax(0, 1fr));
   gap: 1px;
   border: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
-  border-left: var(--ws-border-width-state-rail) solid transparent;
+  border-left: var(--ws-border-width-hairline) solid var(--ws-color-border-subtle);
   background: var(--ws-color-panel-subtle);
   color: var(--ws-color-text-secondary);
   padding: var(--ws-space-05) var(--ws-space-06);
   text-align: left;
 }
 
+.activity-ribbon-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--ws-border-width-state-rail);
+  opacity: 0;
+  background: var(--ws-color-action);
+}
+
 .activity-ribbon-item[data-selected="true"] {
   border-color: var(--ws-color-border-strong);
-  border-left-color: var(--ws-color-action);
   background: var(--ws-color-panel);
   color: var(--ws-color-text-primary);
+}
+
+.activity-ribbon-item[data-selected="true"]::before {
+  opacity: 1;
 }
 
 .activity-ribbon-cue {
@@ -2044,7 +2078,12 @@ button {
 
 .activity-ribbon-meta,
 .activity-ribbon-status {
+  color: var(--ws-color-text-tertiary);
   font-size: var(--ws-font-size-02);
+}
+
+.activity-ribbon-status {
+  color: var(--ws-color-text-secondary);
 }
 
 .activity-transcript {
@@ -2355,6 +2394,9 @@ button {
   grid-template-columns: minmax(0, 1fr) auto;
   background: var(--ws-color-panel-subtle);
   margin-bottom: var(--ws-space-03);
+  min-height: 38px;
+  padding-top: var(--ws-space-04);
+  padding-bottom: var(--ws-space-04);
 }
 
 .resource-row:hover {
@@ -2362,7 +2404,7 @@ button {
 }
 
 .resource-row-ready {
-  border-left-color: color-mix(in srgb, var(--ws-color-state-success) 44%, transparent);
+  border-left-color: color-mix(in srgb, var(--ws-color-state-success) 46%, transparent);
 }
 
 .resource-row-muted {
@@ -2377,6 +2419,7 @@ button {
 
 .resource-row-select {
   grid-template-columns: minmax(0, 1fr);
+  align-content: center;
 }
 
 .resource-row-main {
@@ -2395,13 +2438,12 @@ button {
 }
 
 .resource-row-icon-paired {
-  position: relative;
   width: 22px;
-  justify-content: flex-start;
+  gap: 1px;
+  justify-content: center;
 }
 
 .resource-row-icon-paired svg + svg {
-  margin-left: -6px;
   color: var(--ws-color-action);
 }
 
@@ -2420,8 +2462,10 @@ button {
 
 .resource-row-action.icon-button {
   width: 26px;
-  height: 100%;
   min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  align-self: center;
   padding: 0;
 }
 
@@ -2436,6 +2480,34 @@ button {
 
 .workbench-power-button {
   grid-column: 1;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workbench-power-button:hover:not(:disabled),
+.workbench-power-button:focus-visible {
+  background: transparent;
+  box-shadow: none;
+}
+
+.workbench-power-button-online {
+  color: var(--ws-color-state-success);
+}
+
+.workbench-power-button-online:hover:not(:disabled),
+.workbench-power-button-online:focus-visible {
+  border-color: color-mix(in srgb, var(--ws-color-state-success) 70%, transparent);
+  color: var(--ws-color-state-success);
+}
+
+.workbench-power-button-offline {
+  color: var(--ws-color-state-error);
+}
+
+.workbench-power-button-offline:hover:not(:disabled),
+.workbench-power-button-offline:focus-visible {
+  border-color: color-mix(in srgb, var(--ws-color-state-error) 70%, transparent);
+  color: var(--ws-color-state-error);
 }
 
 .workbench-toolbar-center {
@@ -2449,6 +2521,11 @@ button {
   grid-column: auto;
   flex-wrap: nowrap;
   overflow: hidden;
+}
+
+.workbench-toolbar-meta > .state-badge {
+  flex: 0 0 auto;
+  max-width: none;
 }
 
 .workbench-toolbar-actions {
@@ -2469,11 +2546,14 @@ button {
   top: calc(100% + var(--ws-space-03));
   right: 0;
   display: grid;
-  min-width: 178px;
+  width: max-content;
+  min-width: 226px;
+  max-width: min(320px, calc(100vw - 24px));
   border: var(--ws-border-width-hairline) solid var(--ws-color-border-strong);
   background: var(--ws-color-panel-raised);
   box-shadow: 0 12px 28px rgb(0 0 0 / 36%);
   padding: var(--ws-space-03);
+  font-size: 10px;
 }
 
 .workbench-overflow-item {
@@ -2505,8 +2585,8 @@ button {
 
 .workbench-overflow-item span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
 }
 

@@ -490,7 +490,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(compactRow).toHaveClass(/resource-row-selected/);
     await expect(compactRow).toContainText(workRootDisplayName(workRoot));
     await expect(compactRow.locator(".resource-row-icon-paired")).toBeVisible();
-    await expect(compactRow.locator(".state-badge")).toBeVisible();
+    await expect(compactRow.locator(".state-badge")).toHaveCount(0);
     await expect(compactRow).toHaveAttribute("title", /directory/);
     await expect(compactRow).toHaveAttribute("title", /availability: available/);
     await expect(compactRow).toHaveAttribute("title", /activation: online/);
@@ -508,6 +508,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await expect(metaRow).toHaveAttribute("title", /availability: available/);
     await expect(metaRow).toHaveAttribute("title", /activation: online/);
     await expect(activationButton).toHaveAttribute("title", "Go offline");
+    await expect(activationButton).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
     await activationButton.click();
     await expect(metaRow).toContainText("offline");
@@ -516,6 +517,7 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       "workRoot.activation.set",
     );
     await expect(activationButton).toHaveAttribute("title", "Go online");
+    await expect(activationButton).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
     await activationButton.click();
     await expect(metaRow).not.toContainText("offline");
@@ -534,13 +536,20 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
         menu.locator(`[data-command-id="workbench.toggle.${toggle}"]`),
       ).toBeVisible();
     }
+    await expect
+      .poll(() =>
+        menu.locator(".workbench-overflow-item span").evaluateAll((nodes) =>
+          nodes.every((node) => node.scrollWidth <= node.clientWidth + 1),
+        ),
+      )
+      .toBe(true);
     await page.screenshot({
       path: path.join(artifactsDir, "topbar-overflow.png"),
     });
     await page.keyboard.press("Escape");
     await more.click();
     note(
-      "topbar overflow: low-value workbench toggles remain reachable behind the More icon with their command ids",
+      "topbar overflow: low-value workbench toggles remain reachable behind the More icon with their command ids and visible labels do not clip",
     );
   });
 

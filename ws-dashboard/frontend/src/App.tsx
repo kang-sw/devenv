@@ -733,6 +733,15 @@ function ChromeIconButton({
   );
 }
 
+function shouldShowResourceStateBadge(state: ViewState) {
+  return (
+    state.status !== "ready" ||
+    state.loading ||
+    state.stale ||
+    Boolean(state.error)
+  );
+}
+
 function ResourceGlyph({
   presentation,
 }: {
@@ -3006,12 +3015,11 @@ function WorkbenchToolbar({
       data-last-command-id={commandLog[0]?.commandId ?? ""}
     >
       <ChromeIconButton
-        className="workbench-power-button"
+        className={`workbench-power-button workbench-power-button-${root.activation}`}
         commandId="workRoot.activation.set"
         disabled={!activationAction || !activationAction.action.enabled || !activation}
         icon={CirclePower}
         label={activationAction?.action.label ?? "Set workRoot activation"}
-        tone={root.activation === "online" ? "default" : "primary"}
         onClick={() => {
           if (!activationAction || !activation) {
             return;
@@ -4446,6 +4454,10 @@ function ResourceRow({
   );
   const tone = resourceRowTone(state, availability, activation);
   const metadataTitle = [title, ...debugMeta, `status: ${state.status}`].join(" · ");
+  const showAvailabilityCue = Boolean(availability && availability !== "available");
+  const showActivationCue = Boolean(activation && activation !== "online");
+  const showStateBadge = shouldShowResourceStateBadge(state);
+  const hasMeta = showAvailabilityCue || showActivationCue || showStateBadge;
   return (
     <div
       className={`resource-row ws-row resource-row-${tone}${selected ? " resource-row-selected ws-row-selected" : ""}`}
@@ -4476,19 +4488,21 @@ function ResourceRow({
             </span>
           ) : null}
         </span>
-        <span className="resource-row-meta">
-          {availability && availability !== "available" ? (
-            <span className="meta-chip ws-chip resource-row-alert-chip">
-              {availability}
-            </span>
-          ) : null}
-          {activation && activation !== "online" ? (
-            <span className="meta-chip ws-chip resource-row-alert-chip">
-              {activation}
-            </span>
-          ) : null}
-          <StateBadge state={state} />
-        </span>
+        {hasMeta ? (
+          <span className="resource-row-meta">
+            {showAvailabilityCue ? (
+              <span className="meta-chip ws-chip resource-row-alert-chip">
+                {availability}
+              </span>
+            ) : null}
+            {showActivationCue ? (
+              <span className="meta-chip ws-chip resource-row-alert-chip">
+                {activation}
+              </span>
+            ) : null}
+            {showStateBadge ? <StateBadge state={state} /> : null}
+          </span>
+        ) : null}
       </button>
       {visibleActions.length > 0 ? (
         <span className="resource-row-actions">
