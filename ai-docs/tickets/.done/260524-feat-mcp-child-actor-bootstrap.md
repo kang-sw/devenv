@@ -8,6 +8,7 @@ related:
 related-mental-model:
   - mcp-runtime
   - named-agent-runtime
+completed: 2026-05-24
 ---
 
 # MCP child actor bootstrap
@@ -75,3 +76,19 @@ restarted nested MCP behavior where the child calls `ws.setup(id: ...)`,
 absence of lead bootstrap instructions from child prompts, and actor cleanup or
 inactive marking for ephemeral subqueries. Include Windows coverage for nested
 agent launch and setup recovery behavior.
+
+### Result (6be3ce8) - 2026-05-24
+
+Implemented child actor setup for actor-bound named-agent and subquery work.
+`agents.register` creates or reuses a delegated child actor for persistent
+named agents and writes the setup recovery instruction into `system.md`.
+`agents.call` backfills the same instruction for existing agents that predate
+child actor metadata. `subquery` creates reader child actors, injects only
+`ws.setup(id: "<child-actor-id>")` recovery guidance, and marks the reader actor
+inactive when successful ephemeral result consumption erases the subquery agent.
+
+The implementation intentionally does not expose the lead bootstrap method in
+child prompts and does not rely on environment propagation. Verification covered
+local `go test ./...`, wsflow package tests, spec index validation,
+`git diff --check`, and Windows remote
+`go test ./internal/wsstore ./internal/wsstate ./internal/wsagent ./internal/mcp`.

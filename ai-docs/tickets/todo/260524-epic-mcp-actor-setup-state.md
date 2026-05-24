@@ -50,6 +50,7 @@ The epic owns decomposition for:
   root-aware actor persistence. Done in `0f605a0`.
 - `260524-feat-mcp-child-actor-bootstrap` - create child actor ids for delegated
   agent calls and inject setup recovery instructions into child system prompts.
+  Done in `6be3ce8`.
 - `260524-feat-mcp-state-store-prune` - introduce the SQLite metadata store,
   retention model, and pruning foundation while leaving stream output files on
   disk. Done in `e7c8868`.
