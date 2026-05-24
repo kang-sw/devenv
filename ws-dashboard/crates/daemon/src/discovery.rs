@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
 use std::io;
@@ -41,14 +41,23 @@ pub struct LocalDashboardResourcesProvider {
     server_id: OpaqueId,
     server_label: String,
     candidates: Vec<LocalWorkRootCandidate>,
+    discovered_activations: HashMap<WorkRootId, WorkRootActivation>,
 }
 
 impl LocalDashboardResourcesProvider {
     pub fn new(candidates: Vec<LocalWorkRootCandidate>) -> Self {
+        Self::with_discovered_activations(candidates, HashMap::new())
+    }
+
+    pub fn with_discovered_activations(
+        candidates: Vec<LocalWorkRootCandidate>,
+        discovered_activations: HashMap<WorkRootId, WorkRootActivation>,
+    ) -> Self {
         Self {
             server_id: OpaqueId::from("server-local"),
             server_label: "Local ws dashboard".to_owned(),
             candidates,
+            discovered_activations,
         }
     }
 
@@ -79,14 +88,19 @@ impl LocalDashboardResourcesProvider {
                 }
                 let mut linked = discover_work_root(&linked_path);
                 linked.workspace_key = workspace_key.clone();
+                let linked_activation = self
+                    .discovered_activations
+                    .get(&linked_id)
+                    .copied()
+                    .unwrap_or(WorkRootActivation::Online);
                 if linked.availability == WorkRootAvailability::Available {
                     discovered_registry_roots.push(RegisteredWorkRoot {
                         path: linked_path,
-                        activation: WorkRootActivation::Online,
+                        activation: linked_activation,
                         provenance: WorkRootProvenance::Discovered,
                     });
                 }
-                workspace.push(linked, WorkRootActivation::Online, false);
+                workspace.push(linked, linked_activation, false);
             }
         }
 

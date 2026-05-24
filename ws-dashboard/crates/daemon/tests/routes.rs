@@ -694,16 +694,89 @@ async fn dashboard_resources_discovers_linked_git_worktrees_from_opened_primary(
     );
 
     let files = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri(format!("/api/dashboard/work-roots/{linked_id}/files"))
-                .header(header::COOKIE, cookie)
+                .header(header::COOKIE, cookie.as_str())
                 .body(Body::empty())
                 .expect("linked files request"),
         )
         .await
         .expect("linked files response");
     assert_eq!(files.status(), StatusCode::OK);
+
+    let offline_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/work-roots/{linked_id}/activation"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": "offline" }).to_string(),
+                ))
+                .expect("linked offline activation request"),
+        )
+        .await
+        .expect("linked offline activation response");
+    assert_eq!(offline_response.status(), StatusCode::OK);
+    let offline_body = axum::body::to_bytes(offline_response.into_body(), 64 * 1024)
+        .await
+        .expect("linked offline activation body");
+    let offline_value: serde_json::Value =
+        serde_json::from_slice(&offline_body).expect("linked offline activation JSON");
+    let offline_root = work_root_by_id(&offline_value, linked_id);
+    assert_eq!(offline_root["activation"], "offline");
+    assert_eq!(offline_root["state"]["status"], "offline");
+    assert!(offline_root["actions"]
+        .as_array()
+        .expect("actions array")
+        .iter()
+        .any(|action| action["id"] == "workRoot.activation.online" && action["enabled"] == true));
+
+    let activity = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/dashboard/work-roots/{linked_id}/activity"))
+                .header(header::COOKIE, cookie.as_str())
+                .body(Body::empty())
+                .expect("linked offline activity request"),
+        )
+        .await
+        .expect("linked offline activity response");
+    assert_eq!(activity.status(), StatusCode::CONFLICT);
+
+    let online_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/dashboard/work-roots/{linked_id}/activation"))
+                .header(header::COOKIE, cookie.as_str())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "activation": "online" }).to_string(),
+                ))
+                .expect("linked online activation request"),
+        )
+        .await
+        .expect("linked online activation response");
+    assert_eq!(online_response.status(), StatusCode::OK);
+    let online_body = axum::body::to_bytes(online_response.into_body(), 64 * 1024)
+        .await
+        .expect("linked online activation body");
+    let online_value: serde_json::Value =
+        serde_json::from_slice(&online_body).expect("linked online activation JSON");
+    let online_root = work_root_by_id(&online_value, linked_id);
+    assert_eq!(online_root["activation"], "online");
+    assert!(online_root["actions"]
+        .as_array()
+        .expect("actions array")
+        .iter()
+        .any(|action| action["id"] == "workRoot.activation.offline" && action["enabled"] == true));
 
     remove_static_fixture(&base);
 }
@@ -4219,6 +4292,21 @@ fn only_work_root(value: &serde_json::Value) -> &serde_json::Value {
         .collect::<Vec<_>>();
     assert_eq!(roots.len(), 1, "expected exactly one known workRoot");
     roots[0]
+}
+
+fn work_root_by_id<'a>(value: &'a serde_json::Value, work_root_id: &str) -> &'a serde_json::Value {
+    value["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .flat_map(|workspace| {
+            workspace["workRoots"]
+                .as_array()
+                .expect("workRoots array")
+                .iter()
+        })
+        .find(|root| root["id"] == work_root_id)
+        .expect("workRoot id present")
 }
 
 async fn open_work_root_for_test(app: axum::Router, cookie: &str, root: &Path) -> String {

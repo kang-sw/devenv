@@ -155,6 +155,16 @@ impl OpenedWorkRoots {
         roots
     }
 
+    pub fn discovered_activations(&self) -> HashMap<WorkRootId, WorkRootActivation> {
+        self.roots
+            .read()
+            .expect("opened workRoots lock poisoned")
+            .iter()
+            .filter(|(_, root)| root.provenance == WorkRootProvenance::Discovered)
+            .map(|(work_root_id, root)| (work_root_id.clone(), root.activation))
+            .collect()
+    }
+
     pub fn sync_discovered_roots(&self, discovered: Vec<RegisteredWorkRoot>) {
         let mut roots = self.roots.write().expect("opened workRoots lock poisoned");
         let discovered_ids: std::collections::BTreeSet<_> = discovered
