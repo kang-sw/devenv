@@ -868,9 +868,9 @@ LLM translation roundtrips preserve block identity. Requests contain
 unparseable block ids become bounded block-level failure states rather than raw
 model output in the browser.
 
-## 🚧 Document Edit And Save Fan-Out {#260524-ws-dashboard-document-edit-save-fanout}
+## Document Edit And Save Fan-Out {#260524-ws-dashboard-document-edit-save-fanout}
 
-The dashboard will add a raw-text edit mode for editable workRoot files while
+The dashboard provides a raw-text edit mode for editable workRoot files while
 keeping formatted view mode read-only. Document reads return source identity,
 content hash, media or renderer hints, edit capability, size, and content.
 Document writes use optimistic concurrency through the read content hash and
