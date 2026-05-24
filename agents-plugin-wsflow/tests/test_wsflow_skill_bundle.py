@@ -21,6 +21,7 @@ EXPECTED_SKILLS = {
     "lead-ship",
     "lead-sprint",
     "lead-update-spec",
+    "lead-verify-design",
     "lead-verify-discussion",
     "lead-workflow-manual",
     "lead-write-spec",
