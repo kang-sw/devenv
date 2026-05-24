@@ -38,7 +38,7 @@ The workset covers:
 
 ## Child Tickets
 
-- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - todo; editor
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - ready; editor
   polishing track. Implement as conservative slices for markdown viewer/block
   interaction, daemon-backed translation provider MVP, then raw text edit/save
   fan-out and document events.

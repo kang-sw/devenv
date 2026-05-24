@@ -86,7 +86,7 @@ Completed follow-up clusters:
 
 Active or planned product tracks:
 
-- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - todo; next
+- `260524-feat-ws-dashboard-document-viewer-editor-substrate` - ready; next
   implementation track. Add a reusable markdown document viewer, translation-
   ready block model, panel-local view/edit mode, raw-text editing boundary, and
   same-document save fan-out contract. This track is expected to proceed as

@@ -10,6 +10,9 @@ spec:
   - 260516-ws-web-dashboard-readonly-text-pane
   - 260516-ws-web-dashboard-file-open-placement-policy
   - 260522-ws-dashboard-activity-console-transcript-expansion
+  - 260524-ws-dashboard-document-viewer-mode
+  - 260524-ws-dashboard-document-translation-overlay
+  - 260524-ws-dashboard-document-edit-save-fanout
 related-mental-model:
   - ws-web-dashboard
 ---
