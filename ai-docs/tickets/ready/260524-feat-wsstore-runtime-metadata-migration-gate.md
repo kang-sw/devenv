@@ -104,6 +104,21 @@ complete cross-process IPC contention strategy.
 - Avoid moving stream contents into SQLite as a workaround; that increases lock
   pressure and weakens raw reader behavior.
 
+## Spec Impact
+
+Target spec areas: `ai-docs/spec/named-agent-runtime.md` and
+`ai-docs/spec/mcp-tools.md`.
+
+Expected caller-visible change: future named-agent and exec runtime metadata
+storage may become SQLite-authoritative while public MCP APIs stay stable,
+actor-scoped named-agent identity prevents common public names from colliding,
+and result/diagnostic readers continue to expose file-backed payloads.
+
+Contract-first spec: no. This ticket defines and implements the migration gate;
+the implementation closeout should update the existing runtime specs once the
+selected contention strategy, metadata field inventory, and first migration
+surface are concrete.
+
 ## Phases
 
 ### Phase 1: Define the SQLite contention and migration gate
