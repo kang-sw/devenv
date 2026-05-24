@@ -17,6 +17,10 @@ use crate::document_translation::{
     translate_document, translation_providers, DocumentTranslationService,
 };
 use crate::events::instance_events;
+use crate::git_toolbar::{
+    git_branches, git_create_branch, git_fetch, git_pull_ff_only, git_push, git_status,
+    git_switch_branch,
+};
 use crate::git_worktree::{
     git_worktree_add_options, git_worktree_add_preview, git_worktree_add_submit,
 };
@@ -101,6 +105,30 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/work-roots/{work_root_id}/activation",
             post(set_work_root_activation),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/status",
+            get(git_status),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/branches",
+            get(git_branches).post(git_create_branch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/switch-branch",
+            post(git_switch_branch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/fetch",
+            post(git_fetch),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/push",
+            post(git_push),
+        )
+        .route(
+            "/api/dashboard/work-roots/{work_root_id}/git/pull-ff-only",
+            post(git_pull_ff_only),
         )
         .route(
             "/api/dashboard/work-roots/{work_root_id}/terminals",

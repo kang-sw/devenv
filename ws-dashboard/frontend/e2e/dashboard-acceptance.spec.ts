@@ -650,6 +650,25 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       return;
     }
     await openWorkRootInBrowser(page, gitWorkRoot);
+    const gitToolbar = page.locator(".git-toolbar");
+    await expect(gitToolbar).toBeVisible();
+    await expect(gitToolbar.locator('[data-command-id="git.branchMenu.open"]')).toBeVisible();
+    await expect(gitToolbar.locator(".git-status-pill")).toContainText("clean");
+    await gitToolbar.locator('[data-command-id="git.fetch"]').click();
+    await expect(gitToolbar.locator('[data-command-id="git.branchMenu.open"]')).toBeVisible();
+    await gitToolbar.locator('[data-command-id="git.branchMenu.open"]').click();
+    await expect(page.locator(".git-branch-menu")).toBeVisible();
+    await page.locator('.git-branch-menu [data-command-id="git.branchCreate.open"]').click();
+    const branchModal = page.locator(".git-branch-modal");
+    await expect(branchModal).toBeVisible();
+    await branchModal.locator('input[placeholder="feature-name"]').fill("browser-toolbar-branch");
+    await branchModal.locator('[data-command-id="git.branchCreate.submit"]').click();
+    await expect(branchModal).toHaveCount(0);
+    await expect(gitToolbar.locator('[data-command-id="git.branchMenu.open"]')).toContainText("browser-toolbar-branch");
+    await selectWorkRootInBrowser(page, workRoot);
+    await expect(page.locator(".git-toolbar")).toHaveCount(0);
+    await selectWorkRootInBrowser(page, gitWorkRoot);
+    await expect(page.locator(".git-toolbar")).toBeVisible();
     const gitRow = page.locator(".resource-row", { hasText: workRootDisplayName(gitWorkRoot) }).first();
     await expect(gitRow).toBeVisible();
     const menuButton = gitRow.locator('[data-command-id="workspace.menu.open"]');

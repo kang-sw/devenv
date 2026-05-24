@@ -54,6 +54,15 @@ import {
   buildFileExplorerToggleDirectoryCommand,
   buildGitWorktreeAddCloseCommand,
   buildGitWorktreeAddOpenCommand,
+  buildGitBranchCreateCloseCommand,
+  buildGitBranchCreateOpenCommand,
+  buildGitBranchCreateSubmitCommand,
+  buildGitBranchMenuOpenCommand,
+  buildGitBranchSwitchCommand,
+  buildGitFetchCommand,
+  buildGitPullFfOnlyCommand,
+  buildGitPushCommand,
+  buildGitRefreshCommand,
   buildGitWorktreeAddSubmitCommand,
   buildRootPickerCloseCommand,
   buildRootPickerCreateDirectoryCommand,
@@ -199,6 +208,18 @@ import {
   type GitWorktreeAddPreview,
   type GitWorktreeAddPreviewRequest,
 } from "./gitWorktreeAdd";
+import {
+  createWorkRootGitBranch,
+  fetchWorkRootGit,
+  fetchWorkRootGitBranches,
+  fetchWorkRootGitStatus,
+  gitStatusSegments,
+  pullWorkRootGitFfOnly,
+  pushWorkRootGit,
+  switchWorkRootGitBranch,
+  type GitBranchList,
+  type WorkRootGitStatus,
+} from "./gitToolbar";
 import { ActivityConsole } from "./ActivityConsole";
 import {
   createResourceRefreshCoordinator,
@@ -3427,6 +3448,7 @@ function WorkbenchToolbar({
               );
             }}
           />
+          <WorkRootGitToolbar root={root} onCommand={onCommand} />
           {root.availability !== "available" ? (
             <span className="meta-chip ws-chip">{root.availability}</span>
           ) : null}
@@ -3522,6 +3544,144 @@ function WorkbenchToolbar({
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+
+function WorkRootGitToolbar({
+  root,
+  onCommand,
+}: {
+  root: WorkRootView;
+  onCommand: DashboardCommandDispatcher;
+}) {
+  const gitCapable =
+    (root.kind === "gitPrimaryRoot" || root.kind === "gitLinkedWorktree") &&
+    root.activation === "online" &&
+    root.availability === "available";
+  const [status, setStatus] = useState<WorkRootGitStatus | null>(null);
+  const [branches, setBranches] = useState<GitBranchList | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const requestSeq = useRef(0);
+
+  const refreshGit = useCallback((reason: string) => {
+    if (!gitCapable) {
+      setStatus(null);
+      setBranches(null);
+      return;
+    }
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
+    void Promise.all([
+      fetchWorkRootGitStatus(root.id),
+      fetchWorkRootGitBranches(root.id),
+    ])
+      .then(([nextStatus, nextBranches]) => {
+        if (requestSeq.current !== seq) return;
+        setStatus(nextStatus.available ? nextStatus : null);
+        setBranches(nextBranches);
+        setError(null);
+      })
+      .catch((nextError) => {
+        if (requestSeq.current !== seq) return;
+        setError(nextError instanceof Error ? nextError.message : `${reason} failed`);
+      });
+  }, [gitCapable, root.id]);
+
+  useEffect(() => {
+    refreshGit("git status");
+  }, [refreshGit]);
+
+  useEffect(() => {
+    if (!gitCapable) return;
+    const onVisible = () => {
+      if (!document.hidden) refreshGit("git visibility refresh");
+    };
+    const onFocus = () => refreshGit("git focus refresh");
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    const interval = window.setInterval(() => {
+      if (!document.hidden) refreshGit("git poll");
+    }, 5000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(interval);
+    };
+  }, [gitCapable, refreshGit]);
+
+  if (!gitCapable || !status) return null;
+
+  const branchLabel = status.branch?.name ?? (status.branch?.detachedOid ? `HEAD ${status.branch.detachedOid}` : "Git");
+  const mutate = (command: ReturnType<typeof buildGitRefreshCommand>, run: () => Promise<WorkRootGitStatus>) => {
+    onCommand(command, {
+      [command.commandId]: () => {
+        void run()
+          .then((nextStatus) => {
+            setStatus(nextStatus.available ? nextStatus : null);
+            refreshGit("git mutation refresh");
+          })
+          .catch((nextError) => {
+            setError(nextError instanceof Error ? nextError.message : "git action failed");
+            refreshGit("git mutation failure refresh");
+          });
+      },
+    });
+  };
+
+  return (
+    <div className="git-toolbar" aria-label="Git toolbar">
+      <div className="git-branch-menu-wrap">
+        <button
+          className="meta-chip ws-chip git-branch-chip"
+          data-command-id="git.branchMenu.open"
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => onCommand(buildGitBranchMenuOpenCommand(root.id), { "git.branchMenu.open": () => setMenuOpen((open) => !open) })}
+        >
+          <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
+          <span>{branchLabel}</span>
+        </button>
+        {menuOpen ? (
+          <div className="workbench-overflow-menu git-branch-menu" role="menu">
+            <button className="workbench-overflow-item" data-command-id="git.branchCreate.open" role="menuitem" type="button" onClick={() => { setMenuOpen(false); onCommand(buildGitBranchCreateOpenCommand(root.id), { "git.branchCreate.open": () => setModalOpen(true) }); }}>
+              <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+              <span>+ New branch...</span>
+            </button>
+            {(branches?.branches ?? []).map((branch) => (
+              <button key={branch.name} className="workbench-overflow-item" data-command-id="git.branch.switch" disabled={branch.current || (branch.checkedOut && !branch.current)} role="menuitem" type="button" title={branch.disabledReason ?? branch.name} onClick={() => { setMenuOpen(false); mutate(buildGitBranchSwitchCommand(root.id, branch.name), () => switchWorkRootGitBranch(root.id, branch.name)); }}>
+                <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>{branch.name}{branch.current ? " ✓" : ""}{branch.checkedOut && !branch.current ? " (checked out)" : ""}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <span className="meta-chip ws-chip git-status-pill" title={status.branch?.upstream ?? "Git status"}>{gitStatusSegments(status)}</span>
+      <ChromeIconButton commandId="git.refresh" icon={RefreshCw} label="Refresh Git status" onClick={() => onCommand(buildGitRefreshCommand(root.id), { "git.refresh": () => refreshGit("git refresh") })} />
+      <ChromeIconButton commandId="git.fetch" icon={RefreshCw} label="Fetch Git" onClick={() => mutate(buildGitFetchCommand(root.id), () => fetchWorkRootGit(root.id))} />
+      {status.operations?.canPush ? <button className="action-button action-button-compact" data-command-id="git.push" type="button" onClick={() => mutate(buildGitPushCommand(root.id), () => pushWorkRootGit(root.id))}>Push ↑{status.sync.ahead}</button> : null}
+      {status.operations?.canPullFfOnly ? <button className="action-button action-button-compact" data-command-id="git.pullFfOnly" type="button" onClick={() => mutate(buildGitPullFfOnlyCommand(root.id), () => pullWorkRootGitFfOnly(root.id))}>Pull ↓{status.sync.behind}</button> : null}
+      {error ? <span className="meta-chip ws-chip git-error-chip">{error}</span> : null}
+      <ModalOverlay className="root-picker-backdrop" isDismissable isOpen={modalOpen} onOpenChange={(open) => { if (!open) setModalOpen(false); }}>
+        <Modal className="root-picker-modal git-branch-modal">
+          <Dialog aria-label="New Git branch" className="root-picker-dialog">
+            <div className="root-picker-header">
+              <Heading className="root-picker-title" slot="title">New branch</Heading>
+              <button className="action-button" data-command-id="git.branchCreate.close" type="button" onClick={() => onCommand(buildGitBranchCreateCloseCommand(root.id), { "git.branchCreate.close": () => setModalOpen(false) })}>Close</button>
+            </div>
+            <form className="git-branch-create-form" onSubmit={(event) => { event.preventDefault(); const branchName = newBranchName.trim(); if (!branchName) return; onCommand(buildGitBranchCreateSubmitCommand(root.id, branchName), { "git.branchCreate.submit": () => { void createWorkRootGitBranch(root.id, branchName, branches?.current).then((nextStatus) => { setStatus(nextStatus); setModalOpen(false); setNewBranchName(""); refreshGit("git branch create refresh"); }).catch((nextError) => { setError(nextError instanceof Error ? nextError.message : "branch create failed"); refreshGit("git branch create failure refresh"); }); } }); }}>
+              <label className="git-worktree-field"><span className="section-label">Branch name</span><input className="root-picker-input" value={newBranchName} onChange={(event) => setNewBranchName(event.target.value)} placeholder="feature-name" /></label>
+              <div className="root-picker-footer-actions"><button className="action-button action-button-primary" data-command-id="git.branchCreate.submit" type="submit" disabled={!newBranchName.trim()}>Create and switch</button><button className="action-button" data-command-id="git.branchCreate.close" type="button" onClick={() => setModalOpen(false)}>Cancel</button></div>
+            </form>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
     </div>
   );
 }

@@ -5,6 +5,15 @@ export type DashboardCommandId =
   | "gitWorktreeAdd.open"
   | "gitWorktreeAdd.close"
   | "gitWorktreeAdd.submit"
+  | "git.refresh"
+  | "git.fetch"
+  | "git.push"
+  | "git.pullFfOnly"
+  | "git.branchMenu.open"
+  | "git.branch.switch"
+  | "git.branchCreate.open"
+  | "git.branchCreate.submit"
+  | "git.branchCreate.close"
   | "workRoot.open"
   | "workRoot.activation.set"
   | "rootPicker.open"
@@ -42,6 +51,15 @@ export type DashboardCommandPayload =
   | { type: "gitWorktreeAdd.open"; workspaceId: string }
   | { type: "gitWorktreeAdd.close"; workspaceId: string }
   | { type: "gitWorktreeAdd.submit"; workspaceId: string }
+  | { type: "git.refresh"; workRootId: string }
+  | { type: "git.fetch"; workRootId: string }
+  | { type: "git.push"; workRootId: string }
+  | { type: "git.pullFfOnly"; workRootId: string }
+  | { type: "git.branchMenu.open"; workRootId: string }
+  | { type: "git.branch.switch"; workRootId: string; branchName: string }
+  | { type: "git.branchCreate.open"; workRootId: string }
+  | { type: "git.branchCreate.submit"; workRootId: string; branchName: string }
+  | { type: "git.branchCreate.close"; workRootId: string }
   | { type: "workRoot.open" }
   | { type: "workRoot.activation.set"; workRootId: string; activation: "online" | "offline" }
   | { type: "rootPicker.open" }
@@ -174,6 +192,34 @@ export function buildGitWorktreeAddSubmitCommand(workspaceId: string): Dashboard
     commandId: "gitWorktreeAdd.submit",
     payload: { type: "gitWorktreeAdd.submit", workspaceId },
   };
+}
+
+export function buildGitRefreshCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.refresh", payload: { type: "git.refresh", workRootId } };
+}
+export function buildGitFetchCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.fetch", payload: { type: "git.fetch", workRootId } };
+}
+export function buildGitPushCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.push", payload: { type: "git.push", workRootId } };
+}
+export function buildGitPullFfOnlyCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.pullFfOnly", payload: { type: "git.pullFfOnly", workRootId } };
+}
+export function buildGitBranchMenuOpenCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.branchMenu.open", payload: { type: "git.branchMenu.open", workRootId } };
+}
+export function buildGitBranchSwitchCommand(workRootId: string, branchName: string): DashboardCommand {
+  return { commandId: "git.branch.switch", payload: { type: "git.branch.switch", workRootId, branchName } };
+}
+export function buildGitBranchCreateOpenCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.branchCreate.open", payload: { type: "git.branchCreate.open", workRootId } };
+}
+export function buildGitBranchCreateSubmitCommand(workRootId: string, branchName: string): DashboardCommand {
+  return { commandId: "git.branchCreate.submit", payload: { type: "git.branchCreate.submit", workRootId, branchName } };
+}
+export function buildGitBranchCreateCloseCommand(workRootId: string): DashboardCommand {
+  return { commandId: "git.branchCreate.close", payload: { type: "git.branchCreate.close", workRootId } };
 }
 
 export function buildWorkspaceRemoveCommand(workspaceId: string): DashboardCommand {
@@ -345,6 +391,24 @@ export function dashboardCommandLabel(command: DashboardCommand): string {
       return "Close add worktree";
     case "gitWorktreeAdd.submit":
       return "Create worktree";
+    case "git.refresh":
+      return "Refresh Git status";
+    case "git.fetch":
+      return "Fetch Git";
+    case "git.push":
+      return "Push Git";
+    case "git.pullFfOnly":
+      return "Pull Git ff-only";
+    case "git.branchMenu.open":
+      return "Open branch menu";
+    case "git.branch.switch":
+      return "Switch branch";
+    case "git.branchCreate.open":
+      return "Open new branch";
+    case "git.branchCreate.submit":
+      return "Create branch";
+    case "git.branchCreate.close":
+      return "Close new branch";
     case "workRoot.open":
       return "Open workRoot";
     case "workRoot.activation.set":

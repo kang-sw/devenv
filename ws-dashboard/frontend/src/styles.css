@@ -3010,3 +3010,42 @@ button {
   border-color: color-mix(in srgb, var(--ws-color-state-error-strong) 78%, transparent);
   color: var(--ws-color-state-error-text);
 }
+.git-toolbar {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.git-branch-menu-wrap {
+  position: relative;
+}
+
+.git-branch-chip,
+.git-status-pill {
+  gap: 4px;
+}
+
+.git-branch-menu {
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 35;
+}
+
+.git-status-pill {
+  border-color: color-mix(in srgb, var(--ws-color-state-success) 42%, transparent);
+}
+
+.git-error-chip {
+  border-color: color-mix(in srgb, var(--ws-color-state-error-strong) 64%, transparent);
+  color: var(--ws-color-state-error-text);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-branch-create-form {
+  display: grid;
+  gap: 12px;
+}

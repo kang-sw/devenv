@@ -2285,6 +2285,338 @@ async fn git_worktree_add_blocks_checked_out_invalid_conflict_and_non_git_inputs
 }
 
 #[tokio::test]
+async fn git_toolbar_routes_are_owner_authenticated() {
+    let app = build_router(app_state());
+    for (method, uri) in [
+        (
+            Method::GET,
+            "/api/dashboard/work-roots/root-local-missing/git/status",
+        ),
+        (
+            Method::GET,
+            "/api/dashboard/work-roots/root-local-missing/git/branches",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/switch-branch",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/branches",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/fetch",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/push",
+        ),
+        (
+            Method::POST,
+            "/api/dashboard/work-roots/root-local-missing/git/pull-ff-only",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method.clone())
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("unauthenticated git toolbar request"),
+            )
+            .await
+            .expect("unauthenticated git toolbar response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn git_toolbar_status_gates_and_reports_counts_without_paths() {
+    if skip_without_git("git_toolbar_status_gates_and_reports_counts_without_paths") {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-status");
+    let primary = base.join("primary");
+    let plain = base.join("plain");
+    fs::create_dir_all(&primary).expect("create primary");
+    fs::create_dir_all(&plain).expect("create plain");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "one\ntwo\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let branch = current_git_branch(&primary);
+    fs::write(primary.join("README.md"), "one\nthree\nfour\n").expect("modify tracked");
+    fs::write(primary.join("new.txt"), "untracked\n").expect("write untracked");
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let plain_id = open_work_root_for_test(app.clone(), cookie.as_str(), &plain).await;
+    let status = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(status["available"], true);
+    assert_eq!(status["branch"]["name"], branch);
+    assert_eq!(status["changes"]["addedLines"], 2);
+    assert_eq!(status["changes"]["removedLines"], 1);
+    assert_eq!(status["changes"]["modifiedFiles"], 1);
+    assert_eq!(status["changes"]["untrackedFiles"], 1);
+    assert_eq!(status["operations"]["canFetch"], true);
+    assert!(!serde_json::to_string(&status)
+        .expect("status JSON")
+        .contains(primary.to_string_lossy().as_ref()));
+    let plain_status = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{plain_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(plain_status["available"], false);
+    assert_eq!(plain_status["reason"], "workRoot is not a Git workRoot");
+    let offline =
+        set_work_root_activation_for_test(app.clone(), cookie.as_str(), &git_id, "offline").await;
+    assert!(work_root_by_id(&offline, &git_id)["activation"] == "offline");
+    let offline_status = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(offline_status["available"], false);
+    let unknown = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        "/api/dashboard/work-roots/root-local-unknown/git/branches",
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(unknown["error"], "unknown workRoot");
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_toolbar_branches_switch_and_create_revalidate_state() {
+    if skip_without_git("git_toolbar_branches_switch_and_create_revalidate_state") {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-branches");
+    let primary = base.join("primary");
+    let linked = base.join("linked-topic");
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let original_branch = current_git_branch(&primary);
+    run_git(&primary, &["checkout", "-b", "conflict-target"]);
+    fs::write(primary.join("README.md"), "conflict target\n").expect("write conflict target");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "conflict target"]);
+    run_git(&primary, &["switch", &original_branch]);
+    run_git(&primary, &["branch", "topic"]);
+    run_git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            linked.to_str().expect("linked path"),
+            "topic",
+        ],
+    );
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    let branches = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/branches"),
+        StatusCode::OK,
+    )
+    .await;
+    let topic = branches["branches"]
+        .as_array()
+        .expect("branches")
+        .iter()
+        .find(|branch| branch["name"] == "topic")
+        .expect("topic branch");
+    assert_eq!(topic["checkedOut"], true);
+    assert_eq!(topic["disabledReason"], "Already checked out");
+    let blocked = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/switch-branch"),
+        serde_json::json!({"branchName":"topic"}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(blocked["error"], "branch is already checked out");
+    let created = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/branches"),
+        serde_json::json!({"branchName":"browser-created","switchTo":true}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(created["branch"]["name"], "browser-created");
+    assert_eq!(current_git_branch(&primary), "browser-created");
+    fs::write(primary.join("README.md"), "dirty\n").expect("make dirty");
+    let dirty = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/switch-branch"),
+        serde_json::json!({"branchName": "conflict-target"}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(dirty["error"], "branch switch failed");
+    assert!(!serde_json::to_string(&dirty)
+        .expect("dirty JSON")
+        .contains(primary.to_string_lossy().as_ref()));
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
+async fn git_toolbar_fetch_push_and_pull_ff_only_use_safe_git_defaults() {
+    if skip_without_git("git_toolbar_fetch_push_and_pull_ff_only_use_safe_git_defaults") {
+        return;
+    }
+    let base = temp_fixture_path("git-toolbar-sync");
+    let remote = base.join("remote.git");
+    let primary = base.join("primary");
+    let other = base.join("other");
+    fs::create_dir_all(&base).expect("create sync base");
+    run_git(&base, &["init", "--bare", remote.to_str().expect("remote")]);
+    fs::create_dir_all(&primary).expect("create primary");
+    init_git_repo(&primary);
+    fs::write(primary.join("README.md"), "seed\n").expect("write seed");
+    run_git(&primary, &["add", "README.md"]);
+    run_git(&primary, &["commit", "-m", "seed"]);
+    let branch = current_git_branch(&primary);
+    run_git(
+        &primary,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    run_git(&primary, &["push", "-u", "origin", &branch]);
+    run_git(
+        &base,
+        &[
+            "clone",
+            remote.to_str().expect("remote path"),
+            other.to_str().expect("other path"),
+        ],
+    );
+    run_git(
+        &other,
+        &["config", "user.email", "ws-dashboard@example.local"],
+    );
+    run_git(&other, &["config", "user.name", "ws dashboard"]);
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let git_id = open_work_root_for_test(app.clone(), cookie.as_str(), &primary).await;
+    fs::write(primary.join("local.txt"), "local\n").expect("write local");
+    run_git(&primary, &["add", "local.txt"]);
+    run_git(&primary, &["commit", "-m", "local"]);
+    let ahead = git_toolbar_get_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/status"),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(ahead["sync"]["ahead"], 1);
+    assert_eq!(ahead["operations"]["canPush"], true);
+    let pushed = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/push"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(pushed["sync"]["ahead"], 0);
+    run_git(&other, &["pull", "--ff-only"]);
+    fs::write(other.join("remote.txt"), "remote\n").expect("write remote");
+    run_git(&other, &["add", "remote.txt"]);
+    run_git(&other, &["commit", "-m", "remote"]);
+    run_git(&other, &["push"]);
+    let fetched = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/fetch"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(fetched["sync"]["behind"], 1);
+    assert_eq!(fetched["operations"]["canPullFfOnly"], true);
+    let pulled = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/pull-ff-only"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(pulled["sync"]["behind"], 0);
+    run_git(&other, &["pull", "--ff-only"]);
+    fs::write(primary.join("local2.txt"), "local2\n").expect("write local2");
+    run_git(&primary, &["add", "local2.txt"]);
+    run_git(&primary, &["commit", "-m", "local2"]);
+    fs::write(other.join("remote2.txt"), "remote2\n").expect("write remote2");
+    run_git(&other, &["add", "remote2.txt"]);
+    run_git(&other, &["commit", "-m", "remote2"]);
+    run_git(&other, &["push"]);
+    let push_rejected = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/push"),
+        serde_json::json!({}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(push_rejected["error"], "push failed");
+    git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/fetch"),
+        serde_json::json!({}),
+        StatusCode::OK,
+    )
+    .await;
+    let pull_rejected = git_toolbar_post_json(
+        app.clone(),
+        cookie.as_str(),
+        &format!("/api/dashboard/work-roots/{git_id}/git/pull-ff-only"),
+        serde_json::json!({}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(pull_rejected["error"], "pull --ff-only failed");
+    assert_eq!(current_git_branch(&primary), branch);
+    remove_static_fixture(&base);
+}
+
+#[tokio::test]
 async fn workspace_remove_route_forgets_workspace_without_deleting_files_or_paths() {
     let first = temp_fixture_path("workspace-remove-first");
     let second = temp_fixture_path("workspace-remove-second");
@@ -4802,6 +5134,55 @@ fn body_contains_workspace(value: &serde_json::Value, workspace_id: &str) -> boo
                 .any(|workspace| workspace["id"] == workspace_id)
         })
         .unwrap_or(false)
+}
+
+async fn git_toolbar_get_json(
+    app: axum::Router,
+    cookie: &str,
+    uri: &str,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("git toolbar GET request"),
+        )
+        .await
+        .expect("git toolbar GET response");
+    assert_eq!(response.status(), expected_status, "{uri}");
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git toolbar GET body");
+    serde_json::from_slice(&body).expect("git toolbar GET JSON")
+}
+
+async fn git_toolbar_post_json(
+    app: axum::Router,
+    cookie: &str,
+    uri: &str,
+    request: serde_json::Value,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .expect("git toolbar POST request"),
+        )
+        .await
+        .expect("git toolbar POST response");
+    assert_eq!(response.status(), expected_status, "{uri}");
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("git toolbar POST body");
+    serde_json::from_slice(&body).expect("git toolbar POST JSON")
 }
 
 async fn git_worktree_options_json(

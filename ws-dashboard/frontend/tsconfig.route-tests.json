@@ -22,6 +22,8 @@
     "src/commands.ts",
     "src/commands.test.ts",
     "src/gitWorktreeAdd.test.ts",
+    "src/gitToolbar.ts",
+    "src/gitToolbar.test.ts",
     "src/gitWorktreeAdd.ts",
     "src/resourceModel.ts",
     "src/resourceModel.test.ts",
