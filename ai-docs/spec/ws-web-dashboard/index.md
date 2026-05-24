@@ -842,9 +842,9 @@ hash and block id so later daemon translation results can reuse the same
 rendering path. Without a real daemon translation result, translated-copy
 actions remain pending or unavailable.
 
-## 🚧 Document Translation Overlay {#260524-ws-dashboard-document-translation-overlay}
+## Document Translation Overlay {#260524-ws-dashboard-document-translation-overlay}
 
-Markdown view mode will expose a pane-local translation toggle next to the
+Markdown view mode exposes a pane-local translation toggle next to the
 view/edit control. When the toggle is enabled, opening or focusing the pane
 requests whole-document translation for the current immutable content hash.
 Translated blocks overlay the viewer by replacing each block's rendered
@@ -857,7 +857,10 @@ document block set and sends it with full document context; the daemon owns
 provider configuration, model discovery, prompting, bounded output parsing, and
 SHA256/content-hash cache behavior. The first provider shape is an
 OpenAI-compatible LLM provider, suitable for a local Ollama endpoint, while the
-provider union leaves room for future non-LLM translation APIs.
+provider union leaves room for future non-LLM translation APIs. Provider
+configuration is daemon-side; the browser can observe bounded configured,
+reachable, model, cache, and per-block status without receiving API keys,
+prompts, raw model output, or daemon cache paths.
 
 LLM translation roundtrips preserve block identity. Requests contain
 `blockId + content` pairs, and successful responses return matching
