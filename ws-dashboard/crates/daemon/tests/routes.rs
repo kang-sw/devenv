@@ -2422,6 +2422,12 @@ async fn git_toolbar_branches_switch_and_create_revalidate_state() {
     run_git(&primary, &["add", "README.md"]);
     run_git(&primary, &["commit", "-m", "conflict target"]);
     run_git(&primary, &["switch", &original_branch]);
+    run_git(&primary, &["checkout", "-b", "base-source"]);
+    fs::write(primary.join("base.txt"), "base source\n").expect("write base source");
+    run_git(&primary, &["add", "base.txt"]);
+    run_git(&primary, &["commit", "-m", "base source"]);
+    let base_source_oid = git_stdout(&primary, &["rev-parse", "HEAD"]);
+    run_git(&primary, &["switch", &original_branch]);
     run_git(&primary, &["branch", "topic"]);
     run_git(
         &primary,
@@ -2465,12 +2471,13 @@ async fn git_toolbar_branches_switch_and_create_revalidate_state() {
         app.clone(),
         cookie.as_str(),
         &format!("/api/dashboard/work-roots/{git_id}/git/branches"),
-        serde_json::json!({"branchName":"browser-created","switchTo":true}),
+        serde_json::json!({"branchName":"browser-created","baseBranch":"base-source","switchTo":true}),
         StatusCode::OK,
     )
     .await;
     assert_eq!(created["branch"]["name"], "browser-created");
     assert_eq!(current_git_branch(&primary), "browser-created");
+    assert_eq!(git_stdout(&primary, &["rev-parse", "HEAD"]), base_source_oid);
     let duplicate_create = git_toolbar_post_json(
         app.clone(),
         cookie.as_str(),

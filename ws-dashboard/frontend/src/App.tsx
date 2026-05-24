@@ -218,7 +218,7 @@ import {
   gitStatusSegments,
   pullWorkRootGitFfOnly,
   pushWorkRootGit,
-  shouldRefreshGitWhileVisible,
+  startGitRefreshScheduler,
   switchWorkRootGitBranch,
   type GitBranchList,
   type GitStatusSegment,
@@ -3600,6 +3600,10 @@ function WorkRootGitToolbar({
       })
       .catch((nextError) => {
         if (requestSeq.current !== seq || currentRootId.current !== requestedRootId) return;
+        setStatusState(null);
+        setBranchesState(null);
+        setMenuOpen(false);
+        setModalOpen(false);
         setError(nextError instanceof Error ? nextError.message : `${reason} failed`);
       });
   }, [gitCapable, root.id]);
@@ -3610,23 +3614,25 @@ function WorkRootGitToolbar({
 
   useEffect(() => {
     if (!gitCapable) return;
-    const onVisible = () => {
-      if (shouldRefreshGitWhileVisible(document.hidden)) refreshGit("git visibility refresh");
-    };
-    const onFocus = () => refreshGit("git focus refresh");
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(() => {
-      if (shouldRefreshGitWhileVisible(document.hidden)) refreshGit("git poll");
-    }, 5000);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onFocus);
-      window.clearInterval(interval);
-    };
+    return startGitRefreshScheduler(refreshGit, {
+      isDocumentHidden: () => document.hidden,
+      addDocumentListener: (event, listener) => document.addEventListener(event, listener),
+      removeDocumentListener: (event, listener) => document.removeEventListener(event, listener),
+      addWindowListener: (event, listener) => window.addEventListener(event, listener),
+      removeWindowListener: (event, listener) => window.removeEventListener(event, listener),
+      setInterval: (listener, ms) => window.setInterval(listener, ms),
+      clearInterval: (handle) => window.clearInterval(handle),
+    });
   }, [gitCapable, refreshGit]);
 
-  if (!gitCapable || !status) return null;
+  if (!gitCapable) return null;
+  if (!status) {
+    return error ? (
+      <div className="git-toolbar" aria-label="Git toolbar">
+        <span className="meta-chip ws-chip git-error-chip">{error}</span>
+      </div>
+    ) : null;
+  }
 
   const branchLabel = status.branch?.name ?? (status.branch?.detachedOid ? `HEAD ${status.branch.detachedOid}` : "Git");
   const branchOptions = branches?.branches ?? [];

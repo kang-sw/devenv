@@ -10,6 +10,7 @@ import {
   gitSyncStatusSegments,
   gitStatusSegments,
   shouldRefreshGitWhileVisible,
+  startGitRefreshScheduler,
 } from "./gitToolbar.js";
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
@@ -63,3 +64,45 @@ assertEqual(gitChangeStatusSegments(status).map((segment) => segment.tone).join(
 assertEqual(gitSyncStatusSegments(status).map((segment) => `${segment.commandId}:${segment.label}`).join(","), "git.push:↑1,git.pullFfOnly:↓2", "sync segments carry interactive command ids");
 assertEqual(shouldRefreshGitWhileVisible(false), true, "visible document refreshes Git polling");
 assertEqual(shouldRefreshGitWhileVisible(true), false, "hidden document pauses Git polling");
+
+let hidden = false;
+const refreshes: string[] = [];
+const documentListeners = new Map<string, () => void>();
+const windowListeners = new Map<string, () => void>();
+let intervalListener: (() => void) | null = null;
+let clearedInterval = 0;
+const cleanupScheduler = startGitRefreshScheduler((reason) => refreshes.push(reason), {
+  isDocumentHidden: () => hidden,
+  addDocumentListener: (event, listener) => documentListeners.set(event, listener),
+  removeDocumentListener: (event, listener) => {
+    if (documentListeners.get(event) === listener) documentListeners.delete(event);
+  },
+  addWindowListener: (event, listener) => windowListeners.set(event, listener),
+  removeWindowListener: (event, listener) => {
+    if (windowListeners.get(event) === listener) windowListeners.delete(event);
+  },
+  setInterval: (listener) => {
+    intervalListener = listener;
+    return 7;
+  },
+  clearInterval: (handle) => {
+    clearedInterval = handle;
+  },
+});
+const runInterval = () => {
+  if (!intervalListener) throw new Error("interval listener was not registered");
+  intervalListener();
+};
+hidden = true;
+documentListeners.get("visibilitychange")?.();
+runInterval();
+assertEqual(refreshes.join(","), "", "hidden document suppresses visibility and polling refreshes");
+hidden = false;
+documentListeners.get("visibilitychange")?.();
+runInterval();
+windowListeners.get("focus")?.();
+assertEqual(refreshes.join(","), "git visibility refresh,git poll,git focus refresh", "visible document resumes Git refresh triggers");
+cleanupScheduler();
+assertEqual(documentListeners.size, 0, "scheduler cleanup removes document listener");
+assertEqual(windowListeners.size, 0, "scheduler cleanup removes window listener");
+assertEqual(clearedInterval, 7, "scheduler cleanup clears poll interval");

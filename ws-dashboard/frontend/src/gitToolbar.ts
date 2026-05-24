@@ -44,6 +44,16 @@ export type GitStatusSegment = {
   disabled?: boolean;
 };
 
+export type GitRefreshSchedulerEnvironment = {
+  isDocumentHidden: () => boolean;
+  addDocumentListener: (event: "visibilitychange", listener: () => void) => void;
+  removeDocumentListener: (event: "visibilitychange", listener: () => void) => void;
+  addWindowListener: (event: "focus", listener: () => void) => void;
+  removeWindowListener: (event: "focus", listener: () => void) => void;
+  setInterval: (listener: () => void, ms: number) => number;
+  clearInterval: (handle: number) => void;
+};
+
 const gitBase = (workRootId: string) =>
   `/api/dashboard/work-roots/${encodeURIComponent(workRootId)}/git`;
 
@@ -146,4 +156,24 @@ export function gitSyncStatusSegments(status: WorkRootGitStatus): GitStatusSegme
 
 export function shouldRefreshGitWhileVisible(documentHidden: boolean): boolean {
   return !documentHidden;
+}
+
+export function startGitRefreshScheduler(
+  refreshGit: (reason: string) => void,
+  env: GitRefreshSchedulerEnvironment,
+  intervalMs = 5000,
+): () => void {
+  const refreshIfVisible = (reason: string) => {
+    if (shouldRefreshGitWhileVisible(env.isDocumentHidden())) refreshGit(reason);
+  };
+  const onVisible = () => refreshIfVisible("git visibility refresh");
+  const onFocus = () => refreshGit("git focus refresh");
+  env.addDocumentListener("visibilitychange", onVisible);
+  env.addWindowListener("focus", onFocus);
+  const interval = env.setInterval(() => refreshIfVisible("git poll"), intervalMs);
+  return () => {
+    env.removeDocumentListener("visibilitychange", onVisible);
+    env.removeWindowListener("focus", onFocus);
+    env.clearInterval(interval);
+  };
 }

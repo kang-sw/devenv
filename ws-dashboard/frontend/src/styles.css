@@ -3053,7 +3053,7 @@ button {
 }
 
 .git-status-refresh {
-  color: var(--ws-color-text-muted);
+  color: var(--ws-color-text-tertiary);
   cursor: pointer;
   margin-left: -1px;
 }
@@ -3082,7 +3082,7 @@ button.git-status-segment:disabled {
 
 .git-status-segment-modified,
 .git-status-segment-pull {
-  color: var(--ws-color-state-warning-text);
+  color: var(--ws-color-state-warning);
 }
 
 .git-status-segment-untracked {
@@ -3091,7 +3091,7 @@ button.git-status-segment:disabled {
 
 .git-status-segment-clean,
 .git-status-separator {
-  color: var(--ws-color-text-muted);
+  color: var(--ws-color-text-tertiary);
 }
 
 .git-error-chip {
