@@ -14,7 +14,7 @@ use futures_util::stream;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::fs;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 use ws_dashboard_core::{WorkRootActivation, WorkRootId};
 
 use crate::discovery::local_work_root_id_for_path;
@@ -59,6 +59,22 @@ impl DocumentEventHub {
 
     pub fn publish_content_changed(&self, event: DocumentEventView) {
         let _ = self.tx.send(event);
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DocumentWriteLocks {
+    locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+}
+
+impl DocumentWriteLocks {
+    pub async fn lock_for(&self, work_root_id: &WorkRootId, path: &str) -> Arc<Mutex<()>> {
+        let key = format!("{}\0{}", work_root_id.as_str(), path);
+        let mut locks = self.locks.lock().await;
+        locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 }
 
@@ -382,6 +398,12 @@ pub async fn write_work_root_file(
     if relative_path.as_os_str().is_empty() {
         return file_error(StatusCode::BAD_REQUEST, "file path is required");
     }
+    let relative_path_string = relative_path_to_string(&relative_path);
+    let write_lock = state
+        .document_write_locks
+        .lock_for(&work_root_id, &relative_path_string)
+        .await;
+    let _write_guard = write_lock.lock().await;
     match write_text_file(
         &root_path,
         &relative_path,
@@ -397,7 +419,7 @@ pub async fn write_work_root_file(
                     event_type: "document.contentChanged".to_owned(),
                     source: DocumentEventSourceView {
                         work_root_id,
-                        path: relative_path_to_string(&relative_path),
+                        path: relative_path_string.clone(),
                     },
                     content_hash: response.content_hash.clone(),
                     changed_at_ms: response.saved_at_ms,

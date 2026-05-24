@@ -60,6 +60,70 @@ export type ReadOnlyFilePaneRestoreSnapshot = {
   orderByGroup: Record<string, string[]>;
 };
 
+export type DocumentSaveState =
+  | "idle"
+  | "dirty"
+  | "saving"
+  | "saved"
+  | "stale"
+  | "conflict"
+  | "error";
+
+export type DocumentDraftContentChangeDecision =
+  | { action: "preserveDraft"; saveState: "stale"; message: string }
+  | { action: "syncDraft" };
+
+export function documentDraftContentChangeDecision(
+  saveState: DocumentSaveState,
+): DocumentDraftContentChangeDecision {
+  if (saveState === "dirty" || saveState === "stale") {
+    return {
+      action: "preserveDraft",
+      saveState: "stale",
+      message: "File changed while this draft has unsaved edits",
+    };
+  }
+  return { action: "syncDraft" };
+}
+
+export function documentSaveStateForError(message: string): "conflict" | "error" {
+  return message.toLowerCase().includes("content hash") ? "conflict" : "error";
+}
+
+export function readOnlyFilePaneSourceKey(workRootId: string, path: string) {
+  return `${workRootId}\0${path}`;
+}
+
+export function applyReadOnlyFilePaneSourceContent(
+  panes: Record<string, ReadOnlyFilePane>,
+  file: WorkRootTextFileView,
+): Record<string, ReadOnlyFilePane> {
+  return Object.fromEntries(
+    Object.entries(panes).map(([key, pane]) => [
+      key,
+      pane.workRootId === file.workRootId && pane.path === file.path
+        ? applyReadOnlyFilePaneContent(pane, file)
+        : pane,
+    ]),
+  );
+}
+
+export function applyReadOnlyFilePaneSourceError(
+  panes: Record<string, ReadOnlyFilePane>,
+  workRootId: string,
+  path: string,
+  message: string,
+): Record<string, ReadOnlyFilePane> {
+  return Object.fromEntries(
+    Object.entries(panes).map(([key, pane]) => [
+      key,
+      pane.workRootId === workRootId && pane.path === path
+        ? applyReadOnlyFilePaneError(pane, message)
+        : pane,
+    ]),
+  );
+}
+
 type ReadOnlyFilePaneDescriptor = {
   workRootId: string;
   path: string;

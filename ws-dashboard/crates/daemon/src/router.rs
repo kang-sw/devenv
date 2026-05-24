@@ -33,7 +33,7 @@ use crate::work_root_activity::{
 };
 use crate::work_root_files::{
     document_events, list_work_root_files, read_work_root_file, write_work_root_file,
-    DocumentEventHub, OpenedWorkRoots,
+    DocumentEventHub, DocumentWriteLocks, OpenedWorkRoots,
 };
 
 #[derive(Clone)]
@@ -46,6 +46,7 @@ pub struct AppState {
     pub terminals: TerminalRegistry,
     pub work_root_activity: WorkRootActivityProjector,
     pub document_events: DocumentEventHub,
+    pub document_write_locks: DocumentWriteLocks,
     pub registry_persist_lock: Arc<Mutex<()>>,
 }
 

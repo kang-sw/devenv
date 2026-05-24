@@ -78,6 +78,7 @@ where
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: crate::work_root_files::DocumentEventHub::default(),
+        document_write_locks: crate::work_root_files::DocumentWriteLocks::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     });
     let (shutdown_tx, shutdown_rx) = watch::channel(false);

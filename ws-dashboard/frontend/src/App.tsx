@@ -93,6 +93,8 @@ import {
   applyReadOnlyFilePaneContent,
   applyReadOnlyFilePaneError,
   applyReadOnlyFilePaneSavedContent,
+  applyReadOnlyFilePaneSourceContent,
+  applyReadOnlyFilePaneSourceError,
   createLoadingReadOnlyFilePane,
   fetchWorkRootFiles,
   fetchWorkRootTextFile,
@@ -104,10 +106,14 @@ import {
   workRootExplorerInitialLoadPath,
   workRootExplorerRefreshPaths,
   workRootExplorerShouldLoadOnExpand,
+  documentDraftContentChangeDecision,
+  documentSaveStateForError,
   parseWorkRootDocumentEvent,
   workRootDocumentEventsEndpoint,
+  readOnlyFilePaneSourceKey,
   writeWorkRootTextFile,
   type DirectoryLoadState,
+  type DocumentSaveState,
   readOnlyFilePaneLogicalKey,
   readOnlyFilePaneModeForOpenGesture,
   type ReadOnlyFileOpenGesture,
@@ -1966,9 +1972,13 @@ function WorkbenchShell({
     : false;
   const readOnlyFilePanesRef = useRef(readOnlyFilePanes);
   readOnlyFilePanesRef.current = readOnlyFilePanes;
+  const documentRefreshSequence = useRef<Record<string, number>>({});
 
   const refreshOpenDocument = useCallback(
     (workRootId: string, path: string, expectedContentHash?: string) => {
+      const sourceKey = readOnlyFilePaneSourceKey(workRootId, path);
+      const requestSequence = (documentRefreshSequence.current[sourceKey] ?? 0) + 1;
+      documentRefreshSequence.current[sourceKey] = requestSequence;
       if (
         !readOnlyFilePanesRef.current.some(
           (pane) =>
@@ -1981,28 +1991,20 @@ function WorkbenchShell({
       }
       void fetchWorkRootTextFile(workRootId, path)
         .then((file) => {
+          if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
+            return;
+          }
           onReadOnlyFilePanesChange((current) =>
-            Object.fromEntries(
-              Object.entries(current).map(([key, pane]) => [
-                key,
-                pane.workRootId === workRootId && pane.path === path
-                  ? applyReadOnlyFilePaneContent(pane, file)
-                  : pane,
-              ]),
-            ),
+            applyReadOnlyFilePaneSourceContent(current, file),
           );
         })
         .catch((error) => {
+          if (documentRefreshSequence.current[sourceKey] !== requestSequence) {
+            return;
+          }
           const message = error instanceof Error ? error.message : "file read failed";
           onReadOnlyFilePanesChange((current) =>
-            Object.fromEntries(
-              Object.entries(current).map(([key, pane]) => [
-                key,
-                pane.workRootId === workRootId && pane.path === path
-                  ? applyReadOnlyFilePaneError(pane, message)
-                  : pane,
-              ]),
-            ),
+            applyReadOnlyFilePaneSourceError(current, workRootId, path, message),
           );
         });
     },
@@ -4405,22 +4407,28 @@ function readOnlyWorkbenchPane(
     state,
     meta,
     contentRevision: readOnlyFilePaneRevision(pane),
-    body: isMarkdownDocumentSource(pane) ? (
-      <ReadOnlyMarkdownPane pane={pane} root={root} onCommand={onCommand} onDocumentSaved={onDocumentSaved} />
-    ) : (
-      <ReadOnlyTextPane pane={pane} root={root} />
+    body: (
+      <ReadOnlyDocumentPane
+        pane={pane}
+        root={root}
+        renderMarkdown={isMarkdownDocumentSource(pane)}
+        onCommand={onCommand}
+        onDocumentSaved={onDocumentSaved}
+      />
     ),
   };
 }
 
-function ReadOnlyMarkdownPane({
+function ReadOnlyDocumentPane({
   pane,
   root,
+  renderMarkdown,
   onCommand,
   onDocumentSaved,
 }: {
   pane: ReadOnlyFilePane;
   root: WorkRootView;
+  renderMarkdown: boolean;
   onCommand: DashboardCommandDispatcher;
   onDocumentSaved: (source: { workRootId: string; path: string; content: string; contentHash: string; sizeBytes: number }) => void;
 }) {
@@ -4433,13 +4441,14 @@ function ReadOnlyMarkdownPane({
   const [documentMode, setDocumentMode] = useState<"view" | "edit">("view");
   const [draft, setDraft] = useState(pane.content);
   const [baseContentHash, setBaseContentHash] = useState(pane.contentHash);
-  const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "stale" | "conflict" | "error">("idle");
+  const [saveState, setSaveState] = useState<DocumentSaveState>("idle");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (saveState === "dirty" || saveState === "stale") {
-      setSaveState("stale");
-      setSaveMessage("File changed while this draft has unsaved edits");
+    const decision = documentDraftContentChangeDecision(saveState);
+    if (decision.action === "preserveDraft") {
+      setSaveState(decision.saveState);
+      setSaveMessage(decision.message);
       return;
     }
     setDraft(pane.content);
@@ -4495,7 +4504,7 @@ function ReadOnlyMarkdownPane({
           })
           .catch((error) => {
             const message = error instanceof Error ? error.message : "Save failed";
-            setSaveState(message.toLowerCase().includes("content hash") ? "conflict" : "error");
+            setSaveState(documentSaveStateForError(message));
             setSaveMessage(message);
           });
       },
@@ -4503,7 +4512,7 @@ function ReadOnlyMarkdownPane({
   };
 
   useEffect(() => {
-    if (!translationEnabled || pane.status !== "loaded") {
+    if (!renderMarkdown || !translationEnabled || pane.status !== "loaded") {
       return;
     }
     let cancelled = false;
@@ -4553,7 +4562,7 @@ function ReadOnlyMarkdownPane({
     return () => {
       cancelled = true;
     };
-  }, [pane.content, pane.path, pane.status, pane.title, pane.workRootId, translationEnabled]);
+  }, [pane.content, pane.path, pane.status, pane.title, pane.workRootId, renderMarkdown, translationEnabled]);
 
   return (
     <div className="readonly-text-pane document-pane ws-pane">
@@ -4567,7 +4576,9 @@ function ReadOnlyMarkdownPane({
         <div className="readonly-text-pane-badges">
           <span className="meta-chip ws-chip">{pane.mode}</span>
           <span className="meta-chip ws-chip">read-only</span>
-          <span className="meta-chip ws-chip">markdown</span>
+          <span className="meta-chip ws-chip">
+            {renderMarkdown ? "markdown" : (pane.languageHint ?? pane.extension ?? "text")}
+          </span>
         </div>
       </div>
       {pane.status === "loading" ? (
@@ -4578,7 +4589,8 @@ function ReadOnlyMarkdownPane({
         </div>
       ) : (
         <>
-          <div className="document-translation-toolbar ws-toolbar">
+          {renderMarkdown ? (
+            <div className="document-translation-toolbar ws-toolbar">
             <button
               type="button"
               className={`document-translation-toggle${translationEnabled ? " is-active" : ""}`}
@@ -4601,7 +4613,8 @@ function ReadOnlyMarkdownPane({
             <span className="document-translation-status" data-translation-status={translationStatus}>
               {translationMessage ?? "Target: Korean"}
             </span>
-          </div>
+            </div>
+          ) : null}
           <div className="document-edit-toolbar ws-toolbar">
             <div className="document-viewer-segmented" role="group" aria-label="Document mode">
               <button
@@ -4643,49 +4656,14 @@ function ReadOnlyMarkdownPane({
                 setSaveMessage("Unsaved changes");
               }}
             />
-          ) : (
+          ) : renderMarkdown ? (
             <DocumentViewer markdown={pane.content} path={pane.path} overlay={translationOverlay} />
+          ) : (
+            <pre className="readonly-text-content ws-doc-surface ws-code-block">
+              <code>{pane.content}</code>
+            </pre>
           )}
         </>
-      )}
-    </div>
-  );
-}
-
-function ReadOnlyTextPane({
-  pane,
-  root,
-}: {
-  pane: ReadOnlyFilePane;
-  root: WorkRootView;
-}) {
-  return (
-    <div className="readonly-text-pane ws-pane">
-      <div className="readonly-text-pane-header ws-toolbar">
-        <div className="readonly-text-pane-title-block">
-          <div className="readonly-text-pane-title">{pane.title}</div>
-          <div className="readonly-text-pane-path" title={pane.path}>
-            {root.label} / {pane.path}
-          </div>
-        </div>
-        <div className="readonly-text-pane-badges">
-          <span className="meta-chip ws-chip">{pane.mode}</span>
-          <span className="meta-chip ws-chip">read-only</span>
-          <span className="meta-chip ws-chip">
-            {pane.languageHint ?? pane.extension ?? "text"}
-          </span>
-        </div>
-      </div>
-      {pane.status === "loading" ? (
-        <div className="readonly-text-pane-state ws-state-surface">Loading file content</div>
-      ) : pane.status === "error" ? (
-        <div className="readonly-text-pane-state readonly-text-pane-error ws-state-surface">
-          {pane.error ?? "file read failed"}
-        </div>
-      ) : (
-        <pre className="readonly-text-content ws-doc-surface ws-code-block">
-          <code>{pane.content}</code>
-        </pre>
       )}
     </div>
   );

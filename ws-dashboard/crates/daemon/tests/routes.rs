@@ -143,6 +143,7 @@ fn app_state_with_opened_and_store(
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -160,6 +161,7 @@ fn app_state_with_static_dir(static_dir: PathBuf) -> AppState {
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -381,6 +383,7 @@ async fn expired_pairing_tokens_do_not_install_sessions() {
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     };
     let expired_token = expired_state
@@ -2197,6 +2200,7 @@ fn app_state_with_activity_cache_and_codex_home(
         document_translation: DocumentTranslationService::default(),
         terminals: TerminalRegistry::default(),
         document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         work_root_activity: WorkRootActivityProjector::new(WorkRootActivityProjectionConfig {
             codex_home,
             cache_home: Some(cache_home),
@@ -5820,6 +5824,7 @@ fn app_state_with_translation_provider(base_url: String, default_model: Option<&
         terminals: TerminalRegistry::default(),
         work_root_activity: WorkRootActivityProjector::default(),
         document_events: DocumentEventHub::default(),
+        document_write_locks: ws_dashboard_daemon::work_root_files::DocumentWriteLocks::default(),
         registry_persist_lock: Arc::new(Mutex::new(())),
     }
 }
@@ -6267,6 +6272,217 @@ async fn work_root_file_write_routes_are_owner_authenticated_and_reject_traversa
         .expect("traversal body");
     assert!(!String::from_utf8_lossy(&traversal_body).contains(root.to_string_lossy().as_ref()));
     remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_write_routes_serialize_same_source_optimistic_saves() {
+    let root = temp_fixture_path("write-concurrent");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/read?path=doc.md",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::empty())
+                .expect("read before concurrent writes"),
+        )
+        .await
+        .expect("read before concurrent writes response");
+    let read_body = axum::body::to_bytes(read.into_body(), 64 * 1024)
+        .await
+        .expect("read body");
+    let read_json: serde_json::Value = serde_json::from_slice(&read_body).expect("read json");
+
+    let write_request = |content: &'static str| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        let work_root_id = work_root_id.clone();
+        let base_content_hash = read_json["contentHash"].clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/api/dashboard/work-roots/{}/files/write",
+                        work_root_id.as_str()
+                    ))
+                    .header(header::COOKIE, cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "path": "doc.md",
+                            "baseContentHash": base_content_hash,
+                            "content": content
+                        })
+                        .to_string(),
+                    ))
+                    .expect("concurrent write"),
+            )
+            .await
+            .expect("concurrent write response")
+            .status()
+        }
+    };
+
+    let (left, right) = tokio::join!(write_request("# Left\n"), write_request("# Right\n"));
+    let mut statuses = [left, right];
+    statuses.sort_by_key(|status| status.as_u16());
+    assert_eq!(statuses, [StatusCode::OK, StatusCode::CONFLICT]);
+    remove_static_fixture(&root);
+}
+
+#[tokio::test]
+async fn work_root_file_write_routes_reject_unknown_unavailable_oversized_and_binary() {
+    let root = temp_fixture_path("write-validation");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(root.join("doc.md"), "# Before\n").expect("write doc");
+    fs::write(root.join("binary.bin"), b"abc\0def").expect("write binary");
+    let opened = OpenedWorkRoots::from_paths(vec![root.clone()]);
+    let work_root_id = opened.register_path(root.clone());
+    let state = app_state_with_opened_and_store(opened, DashboardStateStore::disabled());
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+
+    let unknown = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/dashboard/work-roots/missing-root/files/write")
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": "sha256:none",
+                        "content": "ignored"
+                    })
+                    .to_string(),
+                ))
+                .expect("unknown write"),
+        )
+        .await
+        .expect("unknown write response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let oversized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": "sha256:none",
+                        "content": "x".repeat(1024 * 1024 + 1)
+                    })
+                    .to_string(),
+                ))
+                .expect("oversized write"),
+        )
+        .await
+        .expect("oversized write response");
+    assert_eq!(oversized.status(), StatusCode::BAD_REQUEST);
+
+    let binary = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie.clone())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "binary.bin",
+                        "baseContentHash": "sha256:none",
+                        "content": "text"
+                    })
+                    .to_string(),
+                ))
+                .expect("binary write"),
+        )
+        .await
+        .expect("binary write response");
+    assert_eq!(binary.status(), StatusCode::BAD_REQUEST);
+
+    remove_static_fixture(&root);
+    let unavailable = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!(
+                    "/api/dashboard/work-roots/{}/files/write",
+                    work_root_id.as_str()
+                ))
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "path": "doc.md",
+                        "baseContentHash": "sha256:none",
+                        "content": "ignored"
+                    })
+                    .to_string(),
+                ))
+                .expect("unavailable write"),
+        )
+        .await
+        .expect("unavailable write response");
+    assert_eq!(unavailable.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn work_root_document_events_route_is_authenticated_and_rejects_unknown_work_root() {
+    let state = app_state();
+    let token = state.auth.pairing_token().expose_for_owner_url().to_owned();
+    let app = build_router(state);
+    let unauth = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/missing-root/documents/events")
+                .body(Body::empty())
+                .expect("unauth document events"),
+        )
+        .await
+        .expect("unauth document events response");
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+    let cookie = pair_and_cookie(app.clone(), &token).await;
+    let unknown = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard/work-roots/missing-root/documents/events")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("unknown document events"),
+        )
+        .await
+        .expect("unknown document events response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

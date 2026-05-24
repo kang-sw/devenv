@@ -1,7 +1,11 @@
 import {
   applyReadOnlyFilePaneContent,
   applyReadOnlyFilePaneError,
+  applyReadOnlyFilePaneSourceContent,
+  applyReadOnlyFilePaneSourceError,
   createLoadingReadOnlyFilePane,
+  documentDraftContentChangeDecision,
+  documentSaveStateForError,
   fetchWorkRootFiles,
   fetchWorkRootTextFile,
   parseWorkRootDocumentEvent,
@@ -166,6 +170,110 @@ const pinnedPane = applyReadOnlyFilePaneContent(
 const previewPane = applyReadOnlyFilePaneError(
   createLoadingReadOnlyFilePane("root-local-abc", "README.md", "preview"),
   "stale read failed",
+);
+
+const secondPane = applyReadOnlyFilePaneContent(
+  createLoadingReadOnlyFilePane("root-local-abc", "src/main.ts", "preview"),
+  {
+    workRootId: "root-local-abc",
+    path: "src/main.ts",
+    name: "main.ts",
+    status: "ok",
+    readOnly: true,
+    editable: true,
+    contentHash: "sha256:old-preview",
+    content: "old preview",
+    sizeBytes: 11,
+    languageHint: "typescript",
+    extension: "ts",
+  },
+);
+const unrelatedPane = applyReadOnlyFilePaneContent(
+  createLoadingReadOnlyFilePane("root-local-abc", "README.md", "pinned"),
+  {
+    workRootId: "root-local-abc",
+    path: "README.md",
+    name: "README.md",
+    status: "ok",
+    readOnly: true,
+    editable: true,
+    contentHash: "sha256:readme",
+    content: "readme",
+    sizeBytes: 6,
+    languageHint: "markdown",
+    extension: "md",
+  },
+);
+const fannedOut = applyReadOnlyFilePaneSourceContent(
+  { [pinnedPane.logicalKey]: pinnedPane, [secondPane.logicalKey]: secondPane, [unrelatedPane.logicalKey]: unrelatedPane },
+  {
+    workRootId: "root-local-abc",
+    path: "src/main.ts",
+    name: "main.ts",
+    status: "ok",
+    readOnly: true,
+    editable: true,
+    contentHash: "sha256:new",
+    content: "new content",
+    sizeBytes: 11,
+    languageHint: "typescript",
+    extension: "ts",
+  },
+);
+assertEqual(
+  fannedOut[pinnedPane.logicalKey].content,
+  "new content",
+  "source-key fan-out updates the pinned matching pane",
+);
+assertEqual(
+  fannedOut[secondPane.logicalKey].contentHash,
+  "sha256:new",
+  "source-key fan-out updates the preview matching pane",
+);
+assertEqual(
+  fannedOut[unrelatedPane.logicalKey].content,
+  "readme",
+  "source-key fan-out leaves unrelated panes untouched",
+);
+const erroredFanout = applyReadOnlyFilePaneSourceError(
+  { [pinnedPane.logicalKey]: pinnedPane, [unrelatedPane.logicalKey]: unrelatedPane },
+  "root-local-abc",
+  "src/main.ts",
+  "refresh failed",
+);
+assertEqual(
+  erroredFanout[pinnedPane.logicalKey].error,
+  "refresh failed",
+  "source-key refresh errors mark matching panes only",
+);
+assertEqual(
+  erroredFanout[unrelatedPane.logicalKey].status,
+  "loaded",
+  "source-key refresh errors preserve unrelated panes",
+);
+assertDeepEqual(
+  documentDraftContentChangeDecision("dirty"),
+  {
+    action: "preserveDraft",
+    saveState: "stale",
+    message: "File changed while this draft has unsaved edits",
+  },
+  "dirty drafts become stale and preserve local raw text when source content changes",
+);
+assertDeepEqual(
+  documentDraftContentChangeDecision("saved"),
+  { action: "syncDraft" },
+  "clean or saved drafts sync to source content changes",
+);
+assertEqual(
+  documentSaveStateForError("content hash mismatch"),
+  "conflict",
+  "optimistic write hash errors surface as conflicts",
+);
+assertEqual(
+  documentSaveStateForError("file unavailable"),
+  "error",
+  "non-conflict save errors stay generic errors",
 );
 const restoreSnapshot = readOnlyFilePaneRestoreSnapshot(
   [pinnedPane, previewPane],

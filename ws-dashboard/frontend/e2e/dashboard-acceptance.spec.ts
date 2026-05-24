@@ -1624,6 +1624,15 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     await markdownRow.click();
     const pane = page.locator(".document-pane");
     await expect(pane).toBeVisible();
+    const previewTab = page.locator(
+      '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
+    );
+    await expect(previewTab).toBeVisible();
+    const previewTabIdBeforeEdit = await previewTab.getAttribute("data-workbench-pane-id");
+    if (!previewTabIdBeforeEdit) {
+      throw new Error("document preview tab id missing before edit");
+    }
+    const previewTabCountBeforeEdit = await previewTab.count();
     await expect(pane.locator(".document-viewer-segment.is-active")).toContainText("view");
     await expect(pane.locator('[data-command-id="document.mode.set"]', { hasText: "edit" })).toBeEnabled();
     await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText("Gate Document");
@@ -1661,6 +1670,8 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
       await expect(pane.locator('[data-document-block-kind="heading"]')).toContainText(
         "Gate Document Edited",
       );
+      await expect(previewTab).toHaveCount(previewTabCountBeforeEdit);
+      await expect(previewTab).toHaveAttribute("data-workbench-pane-id", previewTabIdBeforeEdit);
       expect(readFileSync(path.join(workRoot, "gate-document.md"), "utf8")).toContain(
         "# Gate Document Edited",
       );
@@ -1676,9 +1687,6 @@ test("dashboard workRoot UI browser acceptance", async ({ page }) => {
     );
 
     await expectDockviewWorkbench(page);
-    const previewTab = page.locator(
-      '.dockview-workbench-tab[data-workbench-pane-id^="readonly-preview:"]',
-    );
     await expect(previewTab).toBeVisible();
     await markdownRow.dblclick();
     const markdownPinnedTab = page.locator(
