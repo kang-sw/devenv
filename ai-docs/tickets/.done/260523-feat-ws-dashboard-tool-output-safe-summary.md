@@ -55,3 +55,21 @@ Verification should cover short output, long output with omitted-middle
 metadata, empty output, non-text or malformed payload degradation, hidden
 internal storage/session identifiers, and browser rendering that remains bounded
 for large transcript blocks.
+
+### Result (pending) - 2026-05-24
+
+Implemented Phase 1 for native Codex transcript tool-output records:
+
+- `function_call_output` and `custom_tool_call_output` now render bounded owner
+  snippets instead of the placeholder `Tool output captured`.
+- Long outputs are summarized as first 10 lines, an omitted-middle marker, and
+  last 10 lines, with `outputBytes`, `lineCount`, and
+  `omittedMiddleLines` metadata.
+- Empty and non-string outputs degrade into bounded text, while the existing
+  native transcript text redaction still prevents internal paths/session
+  details from leaking into browser-visible blocks.
+
+Verification:
+
+- `cargo test -p ws-dashboard-daemon work_root_activity::tests::codex_session --manifest-path ws-dashboard/Cargo.toml`
+- `cargo test -p ws-dashboard-daemon --test routes work_root_activity_transcript_route_reads_codex_native_session_backfill --manifest-path ws-dashboard/Cargo.toml`

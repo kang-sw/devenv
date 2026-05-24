@@ -26,6 +26,8 @@ use crate::work_root_files::{resolve_online_available_work_root, WorkRootAccessE
 /// Daemon-emitted diagnostics are fixed short constants and need no bounding.
 const MAX_BOUNDED_TEXT: usize = 280;
 const MAX_NATIVE_MESSAGE_TEXT: usize = 8_192;
+const TOOL_OUTPUT_HEAD_LINES: usize = 10;
+const TOOL_OUTPUT_TAIL_LINES: usize = 10;
 
 const DIAG_METADATA_MISSING: &str = "agent metadata missing";
 const DIAG_METADATA_UNREADABLE: &str = "agent metadata unreadable";
@@ -1281,37 +1283,33 @@ fn codex_session_record(envelope: &CodexSessionEnvelope, cursor: String) -> Code
             })
         }
         ("response_item", "function_call_output") => {
-            let output_bytes = envelope
-                .payload
-                .get("output")
-                .map(|value| value.to_string().len())
-                .unwrap_or(0);
+            let output = codex_tool_output_snippet(envelope.payload.get("output"));
             CodexSessionRecord::Block(TranscriptBlock {
                 cursor,
                 timestamp: envelope.timestamp.clone(),
                 render_kind: "toolResult".to_owned(),
                 title: Some("Tool output".to_owned()),
-                text: Some("Tool output captured".to_owned()),
+                text: Some(output.text),
                 data: Some(serde_json::json!({
-                    "outputBytes": output_bytes,
+                    "outputBytes": output.output_bytes,
+                    "lineCount": output.line_count,
+                    "omittedMiddleLines": output.omitted_middle_lines,
                 })),
                 degraded: false,
             })
         }
         ("response_item", "custom_tool_call_output") => {
-            let output_bytes = envelope
-                .payload
-                .get("output")
-                .map(|value| value.to_string().len())
-                .unwrap_or(0);
+            let output = codex_tool_output_snippet(envelope.payload.get("output"));
             CodexSessionRecord::Block(TranscriptBlock {
                 cursor,
                 timestamp: envelope.timestamp.clone(),
                 render_kind: "toolResult".to_owned(),
                 title: Some("Tool output".to_owned()),
-                text: Some("Tool output captured".to_owned()),
+                text: Some(output.text),
                 data: Some(serde_json::json!({
-                    "outputBytes": output_bytes,
+                    "outputBytes": output.output_bytes,
+                    "lineCount": output.line_count,
+                    "omittedMiddleLines": output.omitted_middle_lines,
                 })),
                 degraded: false,
             })
@@ -1472,6 +1470,51 @@ fn codex_message_content_text(value: Option<&serde_json::Value>) -> Option<Strin
         None
     } else {
         Some(bounded_native_text(&parts.join("\n")))
+    }
+}
+
+struct CodexToolOutputSnippet {
+    text: String,
+    output_bytes: usize,
+    line_count: usize,
+    omitted_middle_lines: usize,
+}
+
+fn codex_tool_output_snippet(value: Option<&serde_json::Value>) -> CodexToolOutputSnippet {
+    let raw = match value {
+        Some(serde_json::Value::String(text)) => text.clone(),
+        Some(value) => value.to_string(),
+        None => String::new(),
+    };
+    let output_bytes = raw.len();
+    if raw.is_empty() {
+        return CodexToolOutputSnippet {
+            text: "Tool output empty".to_owned(),
+            output_bytes,
+            line_count: 0,
+            omitted_middle_lines: 0,
+        };
+    }
+
+    let lines: Vec<&str> = raw.lines().collect();
+    let line_count = lines.len();
+    let inline_line_budget = TOOL_OUTPUT_HEAD_LINES + TOOL_OUTPUT_TAIL_LINES;
+    let (text, omitted_middle_lines) = if line_count > inline_line_budget {
+        let omitted = line_count - inline_line_budget;
+        let mut selected = Vec::with_capacity(inline_line_budget + 1);
+        selected.extend_from_slice(&lines[..TOOL_OUTPUT_HEAD_LINES]);
+        selected.push("... omitted middle lines ...");
+        selected.extend_from_slice(&lines[line_count - TOOL_OUTPUT_TAIL_LINES..]);
+        (selected.join("\n"), omitted)
+    } else {
+        (raw, 0)
+    };
+
+    CodexToolOutputSnippet {
+        text: bounded_native_text(&text),
+        output_bytes,
+        line_count,
+        omitted_middle_lines,
     }
 }
 
@@ -2205,11 +2248,16 @@ mod tests {
         assert_eq!(parsed.blocks[2].title.as_deref(), Some("Tool call"));
         assert_eq!(parsed.blocks[2].data.as_ref().unwrap()["name"], "shell");
         assert_eq!(parsed.blocks[3].title.as_deref(), Some("Tool output"));
-        assert_eq!(parsed.blocks[3].data.as_ref().unwrap()["outputBytes"], 15);
+        assert_eq!(parsed.blocks[3].data.as_ref().unwrap()["outputBytes"], 13);
+        assert_eq!(parsed.blocks[3].data.as_ref().unwrap()["lineCount"], 1);
+        assert_eq!(
+            parsed.blocks[3].data.as_ref().unwrap()["omittedMiddleLines"],
+            0
+        );
+        assert_eq!(parsed.blocks[3].text.as_deref(), Some("secret output"));
         assert_eq!(parsed.blocks[4].title.as_deref(), Some("Task complete"));
         let encoded = serde_json::to_string(&parsed.blocks).expect("serialize parser blocks");
         assert!(!encoded.contains("/private/path"));
-        assert!(!encoded.contains("secret output"));
         assert!(!encoded.contains("turn-private"));
     }
 
@@ -2315,7 +2363,6 @@ mod tests {
             "/private",
             "/host/path",
             "secret stdout",
-            "private /host/path output",
             "thread-secret",
             "cat ",
         ] {
@@ -2324,6 +2371,34 @@ mod tests {
                 "native transcript block must not leak {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn codex_session_tool_output_uses_bounded_head_tail_snippet() {
+        let long_output = (0..25)
+            .map(|index| format!("line-{index:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let raw = format!(
+            r#"{{"timestamp":"2026-05-22T00:00:03Z","type":"response_item","payload":{{"type":"function_call_output","output":{}}}}}"#,
+            serde_json::to_string(&long_output).expect("encode long output")
+        );
+
+        let parsed = parse_codex_session_transcript(&raw);
+
+        assert_eq!(parsed.blocks.len(), 1);
+        let block = &parsed.blocks[0];
+        assert_eq!(block.render_kind, "toolResult");
+        let text = block.text.as_deref().expect("tool output text");
+        assert!(text.contains("line-00"));
+        assert!(text.contains("line-09"));
+        assert!(text.contains("... omitted middle lines ..."));
+        assert!(text.contains("line-15"));
+        assert!(text.contains("line-24"));
+        assert!(!text.contains("line-10\n"));
+        assert!(!text.contains("line-14\n"));
+        assert_eq!(block.data.as_ref().unwrap()["lineCount"], 25);
+        assert_eq!(block.data.as_ref().unwrap()["omittedMiddleLines"], 5);
     }
 
     #[test]

@@ -3224,7 +3224,6 @@ async fn work_root_activity_transcript_route_reads_codex_native_session_backfill
         "custom_tool_call_output".to_owned(),
         "cat ".to_owned(),
         "private stdout".to_owned(),
-        "private custom output".to_owned(),
         "mcp-result".to_owned(),
     ] {
         assert!(

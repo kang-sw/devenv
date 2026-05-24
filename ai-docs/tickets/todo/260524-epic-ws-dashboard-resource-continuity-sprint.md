@@ -54,7 +54,7 @@ The sprint scope includes:
   persisting file contents or absolute host paths.
 - `260523-feat-ws-dashboard-linked-worktree-discovery` - todo; add Git linked
   worktrees as child workRoots instead of independent workspaces.
-- `260523-feat-ws-dashboard-tool-output-safe-summary` - todo; show bounded
+- `260523-feat-ws-dashboard-tool-output-safe-summary` - done; show bounded
   head/tail tool-output snippets for authenticated owners.
 - `260524-feat-ws-dashboard-workspace-forget-remove-ui` - todo; add explicit
   workspace cleanup UX on top of the root-prune policy and linked-worktree
