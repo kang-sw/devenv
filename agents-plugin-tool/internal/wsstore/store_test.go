@@ -7,10 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/execjob"
+	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
 var testNow = time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
@@ -338,11 +342,27 @@ func TestIndependentHandleContentionRetriesShortWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	busySeen := make(chan struct{}, 1)
+	previousHook := sqliteRetryBusyHook
+	sqliteRetryBusyHook = func(error) {
+		select {
+		case busySeen <- struct{}{}:
+		default:
+		}
+	}
+	defer func() { sqliteRetryBusyHook = previousHook }()
+
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- store.UpsertActor(ctx, Actor{ActorID: "contended", Authority: "lead", RootPath: root, WorktreeKey: store.Layout().WorktreeKey, Status: "active"})
 	}()
-	time.Sleep(60 * time.Millisecond)
+	select {
+	case <-busySeen:
+	case err := <-errCh:
+		t.Fatalf("contended write finished before observing busy retry: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for busy retry")
+	}
 	if _, err := holder.ExecContext(ctx, `COMMIT`); err != nil {
 		t.Fatal(err)
 	}
@@ -388,6 +408,29 @@ func TestRuntimeMetadataInventoryClassifiesKnownStateFiles(t *testing.T) {
 	}
 }
 
+func TestRuntimeMetadataInventoryCoversCurrentJSONFields(t *testing.T) {
+	expected := map[RuntimeStateSource]map[string]bool{
+		RuntimeSourceAgentJSON:        jsonFieldSet(reflect.TypeOf(wsagent.Agent{}), "agent_json_compatibility"),
+		RuntimeSourceAgentCurrentJSON: jsonFieldSet(reflect.TypeOf(wsagent.CurrentCall{})),
+		RuntimeSourceExecJobJSON:      jsonFieldSet(reflect.TypeOf(execjob.Record{}), "stdout", "stderr", "combined"),
+	}
+	for _, item := range RuntimeMetadataInventory() {
+		fields := expected[item.Source]
+		if fields == nil {
+			t.Fatalf("unexpected inventory source %q", item.Source)
+		}
+		if !fields[item.Field] {
+			t.Fatalf("unexpected field classification for %s %s", item.Source, item.Field)
+		}
+		delete(fields, item.Field)
+	}
+	for source, fields := range expected {
+		for field := range fields {
+			t.Fatalf("missing inventory classification for %s %s", source, field)
+		}
+	}
+}
+
 func TestRuntimeMetadataInventoryKeepsPathsInSQLiteAndPayloadsFileBacked(t *testing.T) {
 	paths := []struct {
 		source RuntimeStateSource
@@ -426,6 +469,24 @@ func TestRuntimeMetadataInventoryKeepsPathsInSQLiteAndPayloadsFileBacked(t *test
 			t.Fatalf("%s %s = %#v, want file-backed payload", payload.source, payload.field, got)
 		}
 	}
+}
+
+func jsonFieldSet(typ reflect.Type, extras ...string) map[string]bool {
+	fields := map[string]bool{}
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name != "" {
+			fields[name] = true
+		}
+	}
+	for _, extra := range extras {
+		fields[extra] = true
+	}
+	return fields
 }
 
 func TestAgentInternalKeyScopesPublicNamesByActor(t *testing.T) {

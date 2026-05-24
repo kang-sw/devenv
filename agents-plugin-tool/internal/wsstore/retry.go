@@ -17,6 +17,8 @@ const (
 	sqliteRetryMaxDelay  = 120 * time.Millisecond
 )
 
+var sqliteRetryBusyHook func(error)
+
 func withSQLiteRetry(ctx context.Context, fn func() error) error {
 	var err error
 	delay := sqliteRetryBaseDelay
@@ -24,6 +26,9 @@ func withSQLiteRetry(ctx context.Context, fn func() error) error {
 		err = fn()
 		if !isSQLiteBusyOrLocked(err) {
 			return err
+		}
+		if sqliteRetryBusyHook != nil {
+			sqliteRetryBusyHook(err)
 		}
 		if attempt == sqliteRetryAttempts-1 {
 			break

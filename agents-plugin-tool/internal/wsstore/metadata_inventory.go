@@ -20,7 +20,7 @@ type RuntimeFieldStorage string
 
 const (
 	RuntimeFieldSQLiteMetadata      RuntimeFieldStorage = "sqlite_metadata"
-	RuntimeFieldFileBackedPayload   RuntimeFieldStorage = "file_backed_payload_or_path_index"
+	RuntimeFieldFileBackedPayload   RuntimeFieldStorage = "file_backed_payload"
 	RuntimeFieldTemporaryCompatOnly RuntimeFieldStorage = "temporary_compatibility_only"
 )
 
